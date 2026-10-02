@@ -16,6 +16,7 @@ import {
   shouldRetry,
 } from '../lib/sensorFailure';
 import { hasDayRolledOver, localDayKey } from '../lib/stepDay';
+import { isInsideGeofence, shouldUploadFix } from '../lib/locationSync';
 
 export type SensorId = 'location' | 'steps';
 type NoticeOwner = 'service' | 'read';
@@ -65,7 +66,6 @@ interface LocationContextValue extends LocationState {
 export const LocationContext = createContext<LocationContextValue | null>(null);
 
 const SPEED_THRESHOLD_MPH = 15;
-const GEOFENCE_RADIUS_M = 200; // ~1/8 mile — don't log routes under this when stationary
 const DAILY_STEPS_SYNC_INTERVAL_MS = 30000; // sync steps at least every 30s when stationary
 const KEY_LOCATION_ENABLED = 'jarvis_sensor_location_enabled';
 const KEY_STEPS_ENABLED = 'jarvis_sensor_steps_enabled';
@@ -98,6 +98,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   });
 
   const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
+  /** When this device last uploaded a location, for the stationary heartbeat. */
+  const lastLocationUploadRef = useRef<number | null>(null);
   const lastFixRef = useRef<{ lat: number; lng: number; t: number } | null>(null);
   const watchIdRef = useRef<string | number | null>(null);
   const startingRef = useRef(false);
@@ -602,15 +604,35 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     patchSensor('location', { permission: 'granted', message: null });
 
     if (lastLocationRef.current) {
-      const distance = calculateDistance(lastLocationRef.current.lat, lastLocationRef.current.lng, latitude, longitude);
-      if (distance < GEOFENCE_RADIUS_M && newInterval === 'stationary') {
-        // Stationary under threshold — don't log a breadcrumb, but keep syncing steps
+      const insideGeofence = isInsideGeofence(
+        lastLocationRef.current,
+        latitude,
+        longitude,
+        calculateDistance,
+      );
+      // Stationary inside the geofence: don't log a breadcrumb trail, but do
+      // send a slow heartbeat. Skipping the upload entirely -- which is what
+      // this used to do -- meant the one state a family tracker exists to
+      // report ("she's still home") was the one state never sent, so the map
+      // aged a stationary person's pin into staleness.
+      if (insideGeofence && newInterval === 'stationary') {
         void syncDailySteps();
+        if (!shouldUploadFix({
+          insideGeofence,
+          moving: false,
+          lastUploadAt: lastLocationUploadRef.current,
+          now: Date.now(),
+        })) {
+          return;
+        }
+        lastLocationUploadRef.current = Date.now();
+        await syncToGateway(latitude, longitude, accuracy ?? null, speedMps);
         return;
       }
     }
 
     lastLocationRef.current = { lat: latitude, lng: longitude };
+    lastLocationUploadRef.current = Date.now();
     await syncToGateway(latitude, longitude, accuracy ?? null, speedMps);
   }, [calculateDistance, syncToGateway, syncDailySteps]);
 

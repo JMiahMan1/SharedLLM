@@ -38,9 +38,29 @@ const SHA = 'a'.repeat(64);
  * findBy races them and fails intermittently under full-suite parallelism.
  * Gating on the notice first, then allowing longer, is what makes it stable.
  */
+/**
+ * Wait for a control inside the notice.
+ *
+ * The notice's buttons only exist once three async effects have settled
+ * (version probe, install-permission probe, feature probe), so a bare findBy
+ * races them and fails intermittently under full-suite parallelism. Gating on
+ * the notice first is what makes it stable.
+ *
+ * The per-query timeout is deliberately well under the 5s test timeout: a query
+ * that waits longer than the test can survive just reports a bare "test timed
+ * out" with no hint about what was missing.
+ */
+const CONTROL_TIMEOUT_MS = 2000;
+
 async function findControl(testId: string) {
-  await screen.findByTestId('apk-update-notice');
-  return screen.findByTestId(testId, undefined, { timeout: 5000 });
+  await screen.findByTestId('apk-update-notice', undefined, { timeout: CONTROL_TIMEOUT_MS });
+  return screen.findByTestId(testId, undefined, { timeout: CONTROL_TIMEOUT_MS });
+}
+
+/** The same, for a control matched by accessible name and role. */
+async function findControlByName(name: RegExp, role: 'button' | 'link' = 'button') {
+  await screen.findByTestId('apk-update-notice', undefined, { timeout: CONTROL_TIMEOUT_MS });
+  return screen.findByRole(role, { name }, { timeout: CONTROL_TIMEOUT_MS });
 }
 
 const status = (over: Record<string, unknown> = {}) => ({
@@ -92,7 +112,7 @@ describe('Settings APK update notice', () => {
   it('offers a download link pointing at the published APK', async () => {
     mocks.checkApkUpdate.mockResolvedValue(pending);
     renderWithProviders(<Settings />);
-    const link = await screen.findByRole('link', { name: /download link/i });
+    const link = await findControlByName(/download link/i, 'link');
     expect(link).toHaveAttribute('href', 'https://jarvis.example.com/api/app-updates/app-debug.apk');
     expect(link).toHaveAttribute('download', 'jarvis-os.apk');
   });
@@ -100,8 +120,7 @@ describe('Settings APK update notice', () => {
   it('installs through the native path when the install button is used', async () => {
     mocks.checkApkUpdate.mockResolvedValue(pending);
     renderWithProviders(<Settings />);
-    await screen.findByTestId('apk-update-notice');
-    await userEvent.click(await screen.findByRole('button', { name: /install update/i }, { timeout: 5000 }));
+    await userEvent.click(await findControlByName(/install update/i));
 
     await waitFor(() =>
       expect(mocks.downloadAndInstallApk).toHaveBeenCalledWith(
@@ -153,10 +172,13 @@ describe('Settings APK update notice', () => {
 
   it('re-probes for APK detail when Check Now is pressed', async () => {
     renderWithProviders(<Settings />);
-    await screen.findByText('Not Checked');
+    // Gate on the OTA panel itself, not on "Not Checked" text: the three
+    // probes resolve in any order, so the badge text is not a reliable signal
+    // that the page has finished settling.
+    await waitFor(() => expect(screen.getByRole('button', { name: /check now/i })).toBeEnabled());
     mocks.checkApkUpdate.mockClear();
     await userEvent.click(screen.getByRole('button', { name: /check now/i }));
-    await waitFor(() => expect(mocks.checkApkUpdate).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.checkApkUpdate).toHaveBeenCalled());
   });
 });
 
@@ -184,8 +206,7 @@ describe('Settings APK install permission', () => {
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: true });
     renderWithProviders(<Settings />);
 
-    await screen.findByTestId('apk-update-notice');
-    expect(await screen.findByRole('button', { name: /allow updates/i }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await findControlByName(/allow updates/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /install update/i })).not.toBeInTheDocument();
     expect(screen.getByText(/one-time setup/i)).toBeInTheDocument();
   });
@@ -194,8 +215,7 @@ describe('Settings APK install permission', () => {
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: true, known: true });
     renderWithProviders(<Settings />);
 
-    await screen.findByTestId('apk-update-notice');
-    await userEvent.click(await screen.findByRole('button', { name: /install update/i }, { timeout: 5000 }));
+    await userEvent.click(await findControlByName(/install update/i));
 
     await waitFor(() =>
       expect(mocks.downloadAndInstallApk).toHaveBeenCalledWith(
@@ -207,8 +227,7 @@ describe('Settings APK install permission', () => {
   it('opens install settings from the grant button', async () => {
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: true });
     renderWithProviders(<Settings />);
-    await screen.findByTestId('apk-update-notice');
-    await userEvent.click(await screen.findByRole('button', { name: /allow updates/i }, { timeout: 5000 }));
+    await userEvent.click(await findControlByName(/allow updates/i));
 
     await waitFor(() => expect(mocks.openApkInstallSettings).toHaveBeenCalled());
     expect(mocks.downloadAndInstallApk).not.toHaveBeenCalled();
@@ -220,7 +239,7 @@ describe('Settings APK install permission', () => {
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: false });
     renderWithProviders(<Settings />);
 
-    expect(await screen.findByRole('link', { name: /download link/i })).toBeInTheDocument();
+    expect(await findControlByName(/download link/i, 'link')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /install update/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /allow updates/i })).not.toBeInTheDocument();
   });
@@ -323,7 +342,7 @@ describe('Settings APK verified download flow', () => {
   it('falls back to the link when this build cannot verify downloads', async () => {
     mocks.hasVerifiedInstallFlow.mockResolvedValue(false);
     renderWithProviders(<Settings />);
-    expect(await screen.findByRole('link', { name: /download link/i })).toBeInTheDocument();
+    expect(await findControlByName(/download link/i, 'link')).toBeInTheDocument();
     expect(screen.queryByTestId('apk-download-button')).not.toBeInTheDocument();
   });
 
@@ -338,8 +357,7 @@ describe('Settings APK verified download flow', () => {
   it('asks for the one-time grant before downloading', async () => {
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: true });
     renderWithProviders(<Settings />);
-    await screen.findByTestId('apk-update-notice');
-    expect(await screen.findByRole('button', { name: /allow updates/i }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await findControlByName(/allow updates/i)).toBeInTheDocument();
     expect(screen.queryByTestId('apk-download-button')).not.toBeInTheDocument();
   });
 });

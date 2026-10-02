@@ -1036,7 +1036,55 @@ export interface StepRangeResponse {
   /** True when the window is too short for `baseline` to be meaningful. */
   thin: boolean;
   has_gaps: boolean;
+  /** Null when no day in the window was actually measured. */
   best: { label: string; steps: number } | null;
+}
+
+/**
+ * One bucket of an event metric's history (workouts, distance, minutes).
+ *
+ * Deliberately has no `days_missing`/`has_gaps`: a day with no workout is a
+ * real zero, unlike a day a pedometer did not report. Absence of data and a
+ * zero are different facts for steps and the same fact here, so the type
+ * itself does not let them be confused.
+ */
+export interface MetricRangeBucket {
+  label: string;
+  start: string;
+  end: string;
+  value: number;
+  /** Days in this bucket where something actually happened. */
+  active_days: number;
+  quiet: boolean;
+}
+
+export interface MetricRangeResponse {
+  user_id: string;
+  metric: string;
+  label: string;
+  unit: string;
+  format: string;
+  range: StepRange;
+  range_label: string;
+  buckets: MetricRangeBucket[];
+  total: number;
+  /** Average across days that were active, not across the calendar. */
+  per_active_day: number;
+  active_days: number;
+  /** True when nothing at all happened in the window. */
+  empty: boolean;
+  best: { label: string; value: number } | null;
+}
+
+export interface MetricCatalogResponse {
+  available: string[];
+  /**
+   * Metrics a person would expect to see, with the reason each is absent.
+   *
+   * Surfacing the reason is the point: calories looks like a missing feature
+   * when it is actually a field nothing ever writes.
+   */
+  unavailable: Record<string, string>;
 }
 
 export interface ActivityTrendsResponse {

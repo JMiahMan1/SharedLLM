@@ -191,6 +191,20 @@ class TestPayload:
         p = to_payload(build_series(history(d0=100, d1=9000), TODAY, "W"))
         assert p["best"]["steps"] == 9000
 
+    def test_no_best_day_when_nothing_was_measured(self):
+        # A window where the phone never reported has no best day. max() over
+        # all-zero buckets would name an arbitrary one, implying we measured it
+        # and it happened to be a slow one.
+        p = to_payload(build_series({}, TODAY, "W"))
+        assert p["best"] is None
+
+    def test_a_measured_zero_is_still_a_real_day(self):
+        # The opposite of the above: a reported zero is a fact, so it can be
+        # the best day of a very quiet week.
+        p = to_payload(build_series(history(d0=0, d1=0, d2=0), TODAY, "W"))
+        assert p["best"] is not None
+        assert p["best"]["steps"] == 0
+
     def test_buckets_are_json_shaped(self):
         p = to_payload(build_series(history(d0=100), TODAY, "W"))
         for b in p["buckets"]:

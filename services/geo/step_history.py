@@ -228,7 +228,12 @@ def build_series(daily: dict[str, int], today: date, rng: str, goal: Optional[in
     baseline = personal_baseline(all_values)
     thin = len(all_values) < BASELINE_MIN_DAYS
 
-    best = max(buckets, key=lambda b: b.steps) if buckets else None
+    # "Best day" must mean a day we actually measured. max() over buckets that
+    # are all zero would otherwise name an arbitrary day -- and a day with no
+    # reading at all is not a slow day, it is an absence. Same rule as
+    # metric_history: a window with no recorded steps has no best day.
+    recorded = [b for b in buckets if b.days_recorded > 0]
+    best = max(recorded, key=lambda b: b.steps) if recorded else None
     gaps = any(b.days_missing > 0 for b in buckets)
 
     return Series(
