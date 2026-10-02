@@ -312,3 +312,100 @@ async def test_collect_status_counts_due_and_failed(rc, timer):
     assert status["due_now"] == 1
     assert status["failed_timers"] == 1
     assert status["next_due_at"] is not None
+
+
+# ── The scheduler loop itself ────────────────────────────────────────────────
+#
+# Every other test in this file calls _fire_timer directly, so none of them
+# execute the loop that calls it. That is how `for key in _iter_timer_keys(...)`
+# survived: _iter_timer_keys is an async generator, a plain `for` over it raises
+# 'async_generator' object is not iterable on the first pass, and the loop body
+# was skipped entirely -- the scheduler never fired a single timer, it just
+# logged once a second and retried. Testing the units is not testing the loop.
+#
+# These drive the real loop body by cancelling it after one pass.
+
+
+class _StopAfterOnePass(Exception):
+    """Raised from the patched sleep to break out of `while True`."""
+
+
+async def _run_one_scheduler_pass(rc, monkeypatch):
+    """Run scheduler_loop until its first sleep, and return what it did."""
+    monkeypatch.setattr(automation.redis, "from_url", lambda *a, **k: rc)
+
+    async def _resolve():
+        return {}
+
+    monkeypatch.setattr(
+        "services.config.resolve_runtime_config", _resolve, raising=False
+    )
+
+    sleeps: list[float] = []
+
+    async def _fake_sleep(seconds):
+        sleeps.append(seconds)
+        raise _StopAfterOnePass
+
+    monkeypatch.setattr(automation.asyncio, "sleep", _fake_sleep)
+
+    fired: list[str] = []
+
+    async def _record_fire(client, key, t, duration_ms=None):
+        fired.append(key)
+        await rc.delete(key)
+
+    monkeypatch.setattr(automation, "_fire_timer", _record_fire)
+
+    with pytest.raises(_StopAfterOnePass):
+        await automation.scheduler_loop()
+    return fired, sleeps
+
+
+async def test_scheduler_loop_actually_fires_a_due_timer(rc, timer, monkeypatch):
+    for t in (timer,):
+        await rc.set(f"timer:jeremiah:{t['id']}", json.dumps(t))
+
+    fired, _sleeps = await _run_one_scheduler_pass(rc, monkeypatch)
+
+    assert fired == [f"timer:jeremiah:{timer['id']}"]
+
+
+async def test_scheduler_loop_leaves_a_future_timer_alone(rc, timer, monkeypatch):
+    future = dict(timer)
+    future["expires_at"] = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
+    await rc.set(f"timer:jeremiah:{future['id']}", json.dumps(future))
+
+    fired, _sleeps = await _run_one_scheduler_pass(rc, monkeypatch)
+
+    assert fired == []
+
+
+async def test_scheduler_loop_sleeps_until_the_next_due_timer(rc, timer, monkeypatch):
+    """A future timer must shorten the sleep, or the loop polls at the cap."""
+    soon = dict(timer)
+    soon["expires_at"] = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
+    await rc.set(f"timer:jeremiah:{soon['id']}", json.dumps(soon))
+
+    _fired, sleeps = await _run_one_scheduler_pass(rc, monkeypatch)
+
+    assert len(sleeps) == 1
+    assert sleeps[0] < automation.SCHEDULER_INTERVAL_MAX
+
+
+async def test_scheduler_loop_iterates_timer_keys_asynchronously(rc, timer, monkeypatch):
+    """Pins the bug directly: _iter_timer_keys is an async generator, so the
+    loop must use `async for`. A plain `for` raised on the first pass and the
+    loop silently never ran."""
+    import inspect
+    import re
+
+    assert inspect.isasyncgenfunction(automation._iter_timer_keys)
+    src = inspect.getsource(automation.scheduler_loop)
+    # "async for key in ..." contains "for key in ..." as a substring, so a
+    # plain `not in` check is wrong in the other direction -- it can never
+    # distinguish the two forms. Look for a `for` with no `async` before it.
+    assert not re.search(r"(?<!async )\bfor key in _iter_timer_keys\(", src), (
+        "plain `for` over an async generator -- the scheduler body would be skipped"
+    )
+    assert "async for key in _iter_timer_keys(" in src

@@ -445,7 +445,12 @@ async def scheduler_loop():
             now = datetime.now(UTC)
             next_due: datetime | None = None
 
-            for key in _iter_timer_keys(redis_client):
+            # `async for`, not `for`: _iter_timer_keys is an async generator
+            # (it uses `async for` over scan_iter internally). A plain `for`
+            # raised 'async_generator' object is not iterable on the very first
+            # pass, so the whole loop body was skipped and the scheduler never
+            # fired a single timer -- it just logged and retried forever.
+            async for key in _iter_timer_keys(redis_client):
                 timer_data = await redis_client.get(key)
                 if not timer_data:
                     continue
