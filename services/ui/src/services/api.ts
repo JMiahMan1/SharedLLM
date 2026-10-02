@@ -95,6 +95,7 @@ import type {
   StepRangeResponse,
   MetricRangeResponse,
   MetricCatalogResponse,
+  TimelineResponse,
   ActivityTrendsResponse,
   ActivityFeedResponse,
   ActivitySummaryResponse,
@@ -213,6 +214,23 @@ const normalizeWorkspaces = (data: WorkspaceListResponse): Workspace[] => {
   }
   return [];
 };
+
+/**
+ * "all" is the UI's stand-in for "let the server work out who is asking", so it
+ * must never be sent through as a literal username -- that would look up a user
+ * named "all". This check was previously repeated at a dozen call sites, which
+ * is a dozen chances to forget it on the next one.
+ */
+export function resolveUserId(userId?: string): string | undefined {
+  if (!userId || userId === 'all') return undefined;
+  return userId;
+}
+
+/** Adds `user_id` to a query/param bag only when we actually have a user. */
+function withUserParam(target: URLSearchParams, userId?: string): void {
+  const resolved = resolveUserId(userId);
+  if (resolved) target.set('user_id', resolved);
+}
 
 export const apiClient = axios.create({
   baseURL: getBaseUrl(),
@@ -867,7 +885,8 @@ export const api = {
 
   // Family Circle & Vehicle Trips
   async getTrips(userId?: string): Promise<TripsResponse> {
-    const query = userId && userId !== 'all' ? `?user_id=${encodeURIComponent(userId)}` : '';
+    const resolved = resolveUserId(userId);
+    const query = resolved ? `?user_id=${encodeURIComponent(resolved)}` : '';
     const resp = await apiClient.get(`/api/geo/trips${query}`);
     return resp.data;
   },
@@ -940,7 +959,7 @@ export const api = {
 
   async getWorkouts(userId?: string, limit = 20): Promise<WorkoutsResponse> {
     const params = new URLSearchParams({ limit: String(limit) });
-    if (userId && userId !== 'all') params.set('user_id', userId);
+    withUserParam(params, userId);
     const resp = await apiClient.get(`/api/geo/workouts?${params.toString()}`);
     return resp.data;
   },
@@ -953,13 +972,14 @@ export const api = {
   // Daily steps (hardware pedometer)
   async getDailySteps(userId?: string, days = 7): Promise<StepsResponse> {
     const query = new URLSearchParams({ days: String(days) });
-    if (userId && userId !== 'all') query.set('user_id', userId);
+    withUserParam(query, userId);
     const resp = await apiClient.get(`/api/geo/steps?${query.toString()}`);
     return resp.data;
   },
 
   async getStepGoal(userId?: string): Promise<{ user_id: string; goal: number }> {
-    const query = userId && userId !== 'all' ? `?user_id=${encodeURIComponent(userId)}` : '';
+    const resolved = resolveUserId(userId);
+    const query = resolved ? `?user_id=${encodeURIComponent(resolved)}` : '';
     const resp = await apiClient.get(`/api/geo/steps/goal${query}`);
     return resp.data;
   },
@@ -976,7 +996,7 @@ export const api = {
    */
   async getMetricRanges(metric: string, userId?: string, range: StepRange = 'W'): Promise<MetricRangeResponse> {
     const query = new URLSearchParams({ metric, range });
-    if (userId && userId !== 'all') query.set('user_id', userId);
+    withUserParam(query, userId);
     const resp = await apiClient.get(`/api/geo/metrics/ranges?${query.toString()}`);
     return resp.data;
   },
@@ -984,6 +1004,17 @@ export const api = {
   /** Which metrics this install records, and why the others are absent. */
   async getMetricCatalog(): Promise<MetricCatalogResponse> {
     const resp = await apiClient.get('/api/geo/metrics/catalog');
+    return resp.data;
+  },
+
+  /**
+   * The caller's personal event timeline, newest first and grouped by day.
+   * Steps are deliberately not here: a day bucket is not an event.
+   */
+  async getTimeline(userId?: string, days = 30, limit = 60): Promise<TimelineResponse> {
+    const query = new URLSearchParams({ days: String(days), limit: String(limit) });
+    withUserParam(query, userId);
+    const resp = await apiClient.get(`/api/geo/events?${query.toString()}`);
     return resp.data;
   },
 
@@ -997,7 +1028,7 @@ export const api = {
    */
   async getStepRanges(userId?: string, range: StepRange = 'W'): Promise<StepRangeResponse> {
     const query = new URLSearchParams({ range });
-    if (userId && userId !== 'all') query.set('user_id', userId);
+    withUserParam(query, userId);
     const resp = await apiClient.get(`/api/geo/steps/ranges?${query.toString()}`);
     return resp.data;
   },
@@ -1008,7 +1039,8 @@ export const api = {
   },
 
   async getGoals(userId?: string): Promise<{ user_id: string; goals: ActivityGoals }> {
-    const query = userId && userId !== 'all' ? `?user_id=${encodeURIComponent(userId)}` : '';
+    const resolved = resolveUserId(userId);
+    const query = resolved ? `?user_id=${encodeURIComponent(resolved)}` : '';
     const resp = await apiClient.get(`/api/geo/goals${query}`);
     return resp.data;
   },
@@ -1043,7 +1075,7 @@ export const api = {
 
   async getStars(userId?: string): Promise<StarsResponse> {
     const query = new URLSearchParams();
-    if (userId && userId !== 'all') query.set('user_id', userId);
+    withUserParam(query, userId);
     const resp = await apiClient.get(`/api/geo/stars?${query.toString()}`);
     return resp.data;
   },
@@ -1060,7 +1092,7 @@ export const api = {
 
   async getAchievements(userId?: string, days = 30): Promise<AchievementsResponse> {
     const query = new URLSearchParams({ days: String(days) });
-    if (userId && userId !== 'all') query.set('user_id', userId);
+    withUserParam(query, userId);
     const resp = await apiClient.get(`/api/geo/achievements?${query.toString()}`);
     return resp.data;
   },
@@ -1068,7 +1100,7 @@ export const api = {
   // Activity trends — reading data never generates an analysis.
   async getActivityTrends(userId?: string, days = 7, refresh = false): Promise<ActivityTrendsResponse> {
     const params = new URLSearchParams({ days: String(days) });
-    if (userId && userId !== 'all') params.set('user_id', userId);
+    withUserParam(params, userId);
     if (refresh) params.set('refresh', 'true');
     const resp = await apiClient.get(`/api/geo/trends/activity?${params.toString()}`);
     return resp.data;
@@ -1077,7 +1109,7 @@ export const api = {
   // Explicit opt-in analysis. Only call this when the user asks for it.
   async analyzeActivityTrends(userId?: string, days = 7, refresh = false): Promise<ActivityTrendsResponse> {
     const params = new URLSearchParams({ days: String(days) });
-    if (userId && userId !== 'all') params.set('user_id', userId);
+    withUserParam(params, userId);
     if (refresh) params.set('refresh', 'true');
     const resp = await apiClient.post(`/api/geo/trends/activity/analyze?${params.toString()}`);
     return resp.data;

@@ -1076,6 +1076,37 @@ export interface MetricRangeResponse {
   best: { label: string; value: number } | null;
 }
 
+/** One entry in the personal event timeline (a workout, an earned badge). */
+export interface TimelineEvent {
+  kind: 'workout' | 'achievement' | 'goal' | 'drive' | 'personal_best';
+  at: number;
+  title: string;
+  detail: string;
+  meta: Record<string, unknown>;
+  days_ago: number;
+  /** Server-computed so the client never re-derives "3 days ago" differently. */
+  label: string;
+  icon: string;
+}
+
+export interface TimelineDay {
+  day: string;
+  relative: string;
+  events: TimelineEvent[];
+}
+
+export interface TimelineResponse {
+  user_id: string;
+  /** The window that was requested. */
+  window_days: number;
+  /** How many day groups came back — NOT the same as window_days. */
+  day_count: number;
+  groups: TimelineDay[];
+  total_events: number;
+  /** Explicit, so the UI says "nothing recorded yet" rather than showing a blank list. */
+  empty: boolean;
+}
+
 export interface MetricCatalogResponse {
   available: string[];
   /**
