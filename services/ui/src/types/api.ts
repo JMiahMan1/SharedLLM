@@ -996,6 +996,49 @@ export interface StepsResponse {
   last_synced?: number | null;
 }
 
+/**
+ * Ranges the step-history endpoint understands. Mirrors the server's
+ * `step_history.RANGE_DAYS`; the server 422s on anything else.
+ */
+export type StepRange = 'D' | 'W' | 'M' | '3M' | 'Y';
+
+export interface StepRangeBucket {
+  label: string;
+  /** ISO date, inclusive. */
+  start: string;
+  end: string;
+  steps: number;
+  /**
+   * Days in this window with no reading at all. Kept apart from `steps` so a
+   * gap is never drawn as a genuine zero.
+   */
+  days_missing: number;
+  days_recorded: number;
+  complete: boolean;
+}
+
+export interface StepRangeResponse {
+  user_id: string;
+  range: StepRange;
+  label: string;
+  buckets: StepRangeBucket[];
+  total: number;
+  daily_average: number;
+  days_recorded: number;
+  goal: number | null;
+  /**
+   * The user's own median daily steps, or null when there is not enough
+   * history for it to mean anything. Never a population average.
+   */
+  baseline: number | null;
+  /** How many days a baseline needs before it is worth comparing against. */
+  baseline_min_days: number;
+  /** True when the window is too short for `baseline` to be meaningful. */
+  thin: boolean;
+  has_gaps: boolean;
+  best: { label: string; steps: number } | null;
+}
+
 export interface ActivityTrendsResponse {
   user_id: string;
   days: number;

@@ -91,6 +91,8 @@ import type {
   Workout,
   WorkoutsResponse,
   StepsResponse,
+  StepRange,
+  StepRangeResponse,
   ActivityTrendsResponse,
   ActivityFeedResponse,
   ActivitySummaryResponse,
@@ -147,6 +149,8 @@ export type {
   Workout,
   WorkoutsResponse,
   StepsResponse,
+  StepRange,
+  StepRangeResponse,
   ActivityTrendsResponse,
   ActivityFeedResponse,
   ActivitySummaryResponse,
@@ -925,6 +929,21 @@ export const api = {
   async getStepGoal(userId?: string): Promise<{ user_id: string; goal: number }> {
     const query = userId && userId !== 'all' ? `?user_id=${encodeURIComponent(userId)}` : '';
     const resp = await apiClient.get(`/api/geo/steps/goal${query}`);
+    return resp.data;
+  },
+
+  /**
+   * Pre-aggregated step history for one range.
+   *
+   * The server folds the daily buckets so a month, quarter or year does not
+   * mean shipping 365 days to the browser and aggregating per surface.
+   * `range` is validated server-side; an unknown value is a 422 naming the
+   * valid set, not a silent fallback.
+   */
+  async getStepRanges(userId?: string, range: StepRange = 'W'): Promise<StepRangeResponse> {
+    const query = new URLSearchParams({ range });
+    if (userId && userId !== 'all') query.set('user_id', userId);
+    const resp = await apiClient.get(`/api/geo/steps/ranges?${query.toString()}`);
     return resp.data;
   },
 
