@@ -232,8 +232,21 @@ if ssh $SSH_OPTS "$HOST" << EOF
         let CONTAINER_WAIT=CONTAINER_WAIT+2
     done
 
+    # Poll the gateway's own HTTP health endpoint, not its logs.
+    #
+    # Grepping \`docker logs --tail 200\` for "Application startup complete"
+    # only works if the gateway was just created: the banner is printed once at
+    # boot and scrolls out of the tail after a few hundred lines of request
+    # logging. Now that the recreate is scoped to \$SERVICES, a gateway-only
+    # change is the common case and the banner may be long gone -- so the gate
+    # could never pass. Port 11435 is published on the host, so /health is
+    # answerable whether or not the gateway was recreated in this deploy.
+    GATEWAY_HEALTH_URL="http://127.0.0.1:11435/health"
+
     while [ \$ELAPSED -lt \$TIMEOUT ]; do
-        if docker logs --tail 200 "\$GATEWAY_CONTAINER" 2>&1 | grep -q "Application startup complete"; then
+        # 000 means the port is not accepting yet, which is exactly the
+        # "still starting" case -- keep waiting rather than failing.
+        if [ "\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \$GATEWAY_HEALTH_URL 2>/dev/null)" = "200" ]; then
             echo "[OK] Application started successfully!"
             SUCCESS=1
             break
@@ -253,7 +266,7 @@ if ssh $SSH_OPTS "$HOST" << EOF
 
     echo ""
     if [ \$SUCCESS -eq 0 ]; then
-        echo "[FAIL] Timeout waiting for application startup."
+        echo "[FAIL] Timeout waiting for application startup at \$GATEWAY_HEALTH_URL."
         echo "Last 20 lines of logs:"
         docker logs --tail 20 \$GATEWAY_CONTAINER 2>&1 || echo "(no logs available for \$GATEWAY_CONTAINER)"
         exit 1

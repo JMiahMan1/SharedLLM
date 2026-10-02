@@ -91,6 +91,26 @@ for path in SCRIPTS:
     check(f"{label}: no empty SERVICES fallback that would recreate everything",
           fallback_all is None, fallback_all.group(0).strip() if fallback_all else "")
 
+    # 6. Readiness must not depend on a log line that only exists at boot.
+    #
+    # Regression: the gate grepped `docker logs --tail 200` for "Application
+    # startup complete". That only passes when the gateway was *just* created,
+    # because the banner is printed once and scrolls out of the tail after a
+    # few hundred lines of request logging. Check 2's fix (scoping the
+    # recreate) stopped recreating the gateway, which is what had been keeping
+    # the banner inside the tail -- so every non-gateway deploy then timed out.
+    # A bug fixed can unmask the bug it was hiding.
+    startup_grep = re.search(r'docker logs --tail \d+[^\n]*grep -q "Application startup complete"', code)
+    check(f"{label}: readiness does not grep a boot-only log line", startup_grep is None,
+          startup_grep.group(0).strip() if startup_grep else "")
+
+    # 7. Readiness must poll something that answers while running.
+    if "Waiting for application startup" in code:
+        health_url = re.search(r'GATEWAY_HEALTH_URL="([^"]+)"', code)
+        check(f"{label}: readiness polls the gateway health endpoint",
+              health_url is not None and "/health" in health_url.group(1),
+              health_url.group(1) if health_url else "no GATEWAY_HEALTH_URL")
+
     check(f"{label}: syntax is valid", subprocess.run(["bash", "-n", str(path)]).returncode == 0)
 
 print()

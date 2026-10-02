@@ -142,9 +142,22 @@ ssh $SSH_OPTS "$HOST" << EOF
     ELAPSED=0
     SUCCESS=0
 
+    # Poll the gateway's own HTTP health endpoint, not its logs.
+    #
+    # This used to grep for "Application startup complete" in
+    # \`docker logs --tail 200\`, which only works if the gateway was just
+    # created: the banner is printed once at boot, and after a few hundred
+    # lines of request logging it has scrolled out of the tail. Before the
+    # recreate was scoped to \$SERVICES, every deploy recreated the whole
+    # stack, so the log was always fresh and the check always passed -- it was
+    # masking itself. Scoping the recreate exposed it, and every non-gateway
+    # deploy then failed its readiness gate.
+    GATEWAY_HEALTH_URL="http://127.0.0.1:11435/health"
     GATEWAY_CONTAINER=\$(docker ps --filter 'name=sharedllm_gateway' --format '{{.Names}}' | head -1 || echo "sharedllm_gateway")
     while [ \$ELAPSED -lt \$TIMEOUT ]; do
-        if docker logs --tail 200 \$GATEWAY_CONTAINER 2>&1 | grep -q "Application startup complete"; then
+        # 000 means the port is not accepting yet, which is exactly the
+        # "still starting" case -- keep waiting rather than failing.
+        if [ "\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \$GATEWAY_HEALTH_URL 2>/dev/null)" = "200" ]; then
             echo "[OK] Application started successfully!"
             SUCCESS=1
             break
@@ -163,7 +176,7 @@ ssh $SSH_OPTS "$HOST" << EOF
 
     echo ""
     if [ \$SUCCESS -eq 0 ]; then
-        echo "[FAIL] Timeout waiting for application startup."
+        echo "[FAIL] Timeout waiting for application startup at \$GATEWAY_HEALTH_URL."
         echo "Last 20 lines of logs:"
         docker logs --tail 20 \$GATEWAY_CONTAINER
         exit 1
