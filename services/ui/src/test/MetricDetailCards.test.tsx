@@ -62,7 +62,22 @@ describe('MetricDetailCards', () => {
     expect(await screen.findByTestId('metric-card-workouts')).toBeInTheDocument();
     expect(screen.getByTestId('metric-card-workout_minutes')).toBeInTheDocument();
     expect(screen.getByTestId('metric-card-workout_miles')).toBeInTheDocument();
-    expect(screen.getByTestId('metric-card-drive_miles')).toBeInTheDocument();
+  });
+
+  // Driving distance moved to Wander, next to fuel and cost. Showing the same
+  // miles in two places made it read as two different quantities.
+  it('does not show driving distance, which belongs to Wander', async () => {
+    renderWithProviders(<MetricDetailCards range="W" />);
+    await screen.findByTestId('metric-card-workouts');
+    expect(screen.queryByTestId('metric-card-drive_miles')).not.toBeInTheDocument();
+  });
+
+  it('still explains a metric the server records but this panel omits', async () => {
+    // Silently dropping it would look like the data is gone, so the card is
+    // removed but the reader is told where it went.
+    renderWithProviders(<MetricDetailCards range="W" />);
+    await screen.findByTestId('metric-card-workouts');
+    expect(screen.getByText(/driving distance/i)).toBeInTheDocument();
   });
 
   it('does not render a card for a metric the server does not record', async () => {
@@ -108,10 +123,13 @@ describe('MetricDetailCards', () => {
   });
 
   it('formats a distance metric in miles', async () => {
+    // Distance formatting is still covered, on a metric that remains here.
+    // Previously this used drive_miles, which asserted the very card we just
+    // moved to Wander.
     mocks.getMetricRanges.mockResolvedValue(
       series({
-        metric: 'drive_miles',
-        label: 'Driving distance',
+        metric: 'workout_miles',
+        label: 'Workout distance',
         format: 'distance',
         total: 39.28,
         per_active_day: 9.82,
@@ -120,7 +138,7 @@ describe('MetricDetailCards', () => {
       }),
     );
     renderWithProviders(<MetricDetailCards range="W" />);
-    expect(await screen.findByTestId('metric-total-drive_miles')).toHaveTextContent('39.3 mi');
+    expect(await screen.findByTestId('metric-total-workout_miles')).toHaveTextContent('39.3 mi');
   });
 
   it('requests the range it is given', async () => {
