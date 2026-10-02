@@ -9,20 +9,7 @@ import type {
   WidgetInstance,
 } from '../types/widget';
 import { api } from '../services/api';
-import {
-  Zap,
-  Timer,
-  StickyNote,
-  Music,
-  ListChecks,
-  CalendarDays,
-  Sparkles,
-  LayoutGrid,
-  LayoutDashboard,
-  Activity,
-  Thermometer,
-  Compass,
-} from 'lucide-react';
+import { Activity, CalendarDays, Compass, Footprints, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap } from 'lucide-react';
 
 export interface WidgetStateItem {
   id: string;
@@ -43,6 +30,7 @@ const defaultSizes: Record<WidgetKey, WidgetSize> = {
   device_control: 'tall',
   workspaces: 'medium',
   health_activity: 'medium',
+  health_hero: 'wide',
   climate: 'medium',
   presence: 'medium',
 };
@@ -62,6 +50,7 @@ function createDefaultSettings(key: WidgetKey, order: number): UserWidgetSetting
 }
 
 export const defaultWidgetDefs: WidgetDef[] = [
+  { key: 'health_hero', label: 'Today', icon: Footprints, minSize: 'medium', defaultSize: 'wide' },
   { key: 'energy_insights', label: 'Energy Insights', icon: Zap, minSize: 'small', defaultSize: 'medium' },
   { key: 'ambient_timer', label: 'Ambient Timer', icon: Timer, minSize: 'small', defaultSize: 'small' },
   { key: 'quick_notes', label: 'Quick Notes', icon: StickyNote, minSize: 'small', defaultSize: 'medium' },
