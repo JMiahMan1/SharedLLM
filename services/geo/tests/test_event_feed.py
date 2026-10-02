@@ -8,6 +8,9 @@ from datetime import datetime, timezone
 import pytest
 
 from services.geo.event_feed import (
+    EVENT_KINDS,
+    TIMELINE_DOMAINS,
+    events_for_domain,
     Event,
     build_timeline,
     dedupe,
@@ -295,3 +298,42 @@ class TestPayload:
         events = [Event("workout", at("2026-10-01"), "X")]
         payload = timeline_payload(build_timeline(events, NOW, TZ), NOW)
         assert payload["groups"][0]["relative"] == "Today"
+
+
+class TestEventsForDomain:
+    """Health and Wander show different things from the same stored events."""
+
+    def _mixed(self):
+        return [
+            Event(kind="workout", at=200, title="Run", detail="", meta={}),
+            Event(kind="drive", at=100, title="Drive", detail="", meta={}),
+            Event(kind="achievement", at=300, title="Badge", detail="", meta={}),
+        ]
+
+    def test_health_excludes_drives(self):
+        kinds = [e.kind for e in events_for_domain(self._mixed(), "health")]
+        assert "drive" not in kinds
+
+    def test_health_keeps_workouts_and_achievements(self):
+        kinds = [e.kind for e in events_for_domain(self._mixed(), "health")]
+        assert kinds == ["workout", "achievement"]
+
+    def test_wander_is_drives_only(self):
+        assert [e.kind for e in events_for_domain(self._mixed(), "wander")] == ["drive"]
+
+    def test_the_two_domains_partition_the_kinds(self):
+        # Every kind must land somewhere, or an event would silently vanish
+        # from both pages when the vocabulary grows.
+        assert set(TIMELINE_DOMAINS["health"]) | set(TIMELINE_DOMAINS["wander"]) == set(
+            EVENT_KINDS
+        )
+        assert not set(TIMELINE_DOMAINS["health"]) & set(TIMELINE_DOMAINS["wander"])
+
+    def test_an_unknown_domain_raises_rather_than_defaulting(self):
+        # A typo must not quietly return the other page's content.
+        with pytest.raises(ValueError) as exc:
+            events_for_domain(self._mixed(), "heath")
+        assert "domain must be one of" in str(exc.value)
+
+    def test_no_events_in_a_domain_yields_an_empty_list(self):
+        assert events_for_domain([Event(kind="drive", at=1, title="D", detail="", meta={})], "health") == []

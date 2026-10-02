@@ -5,6 +5,7 @@ consent-gated, or that it degrades to an empty timeline rather than an error.
 Those are all here.
 """
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -152,3 +153,71 @@ class TestEventsConsent:
         """The permissive internal path must not leak to a named viewer."""
         _patch_redis(monkeypatch)
         assert client.get("/events?viewer=jeremiah&user_id=nobody").status_code == 404
+
+
+def _trip(start, **extra):
+    return {
+        "activity_type": "driving",
+        "start_time": start,
+        "duration_seconds": 900,
+        "distance_miles": 3.1,
+        **extra,
+    }
+
+
+class TestEventsDomainRoute:
+    """Health and Wander are separate views of the same stored events."""
+
+    def _kinds(self, client, **params):
+        r = client.get("/events", params={"viewer": "jeremiah", "user_id": "jeremiah", **params})
+        assert r.status_code == 200, r.text
+        return {e["kind"] for g in r.json()["groups"] for e in g["events"]}
+
+    def test_health_omits_drives_even_when_there_are_some(
+        self, client, monkeypatch
+    ):
+        _patch_redis(
+            monkeypatch,
+            workouts=[_workout(time.time() - 3600)],
+            trips=[_trip(time.time() - 7200)],
+        )
+        assert self._kinds(client) == {"workout"}
+
+    def test_wander_returns_the_drives(self, client, monkeypatch):
+        _patch_redis(
+            monkeypatch,
+            workouts=[_workout(time.time() - 3600)],
+            trips=[_trip(time.time() - 7200)],
+        )
+        assert self._kinds(client, domain="wander") == {"drive"}
+
+    def test_the_default_domain_is_health_not_the_old_blend(self, client, monkeypatch):
+        # Regression: drives used to appear under Health by default.
+        _patch_redis(monkeypatch, trips=[_trip(time.time() - 7200)])
+        assert "drive" not in self._kinds(client)
+
+    def test_echoes_the_domain_it_served(self, client, monkeypatch):
+        _patch_redis(monkeypatch, trips=[_trip(time.time() - 7200)])
+        r = client.get(
+            "/events", params={"viewer": "jeremiah", "user_id": "jeremiah", "domain": "wander"}
+        )
+        assert r.json()["domain"] == "wander"
+
+    def test_an_unknown_domain_is_422_naming_the_valid_set(self, client, monkeypatch):
+        _patch_redis(monkeypatch)
+        r = client.get(
+            "/events", params={"viewer": "jeremiah", "user_id": "jeremiah", "domain": "heath"}
+        )
+        assert r.status_code == 422
+        assert "health" in r.json()["detail"] and "wander" in r.json()["detail"]
+
+    def test_the_domain_is_validated_before_any_redis_work(self, client, monkeypatch):
+        # A bad request must not depend on whether the user has data.
+        async def boom():
+            raise AssertionError("Redis was touched for an invalid domain")
+
+        monkeypatch.setattr(geo_main, "get_redis", boom)
+        r = client.get(
+            "/events", params={"viewer": "jeremiah", "user_id": "jeremiah", "domain": "nope"}
+        )
+        assert r.status_code == 422

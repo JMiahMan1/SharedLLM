@@ -56,6 +56,32 @@ KIND_ICONS = {
     "personal_best": "⭐",
 }
 
+#: Which kinds belong on which page's timeline.
+#:
+#: A drive is a movement, not a fitness event. Showing one under Health made the
+#: page answer a question the reader did not ask and buried the workouts it
+#: should have been about, so the two pages now have separate views of the same
+#: events rather than one blended list. Wander's existing Total Distance tile
+#: already treats driving as its own quantity, which is the same distinction.
+TIMELINE_DOMAINS: dict[str, frozenset] = {
+    "health": frozenset({"workout", "achievement", "goal", "personal_best"}),
+    "wander": frozenset({"drive"}),
+}
+
+
+def events_for_domain(events: Iterable[Event], domain: str) -> list[Event]:
+    """Narrow events to one page's domain.
+
+    Raises ValueError for an unknown domain rather than defaulting, so a typo
+    cannot quietly return the wrong page's content.
+    """
+    if domain not in TIMELINE_DOMAINS:
+        raise ValueError(
+            f"domain must be one of {', '.join(sorted(TIMELINE_DOMAINS))}"
+        )
+    allowed = TIMELINE_DOMAINS[domain]
+    return [e for e in events if e.kind in allowed]
+
 DAY_SECONDS = 86400.0
 
 

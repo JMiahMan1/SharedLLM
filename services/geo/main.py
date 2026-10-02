@@ -2624,22 +2624,34 @@ async def get_events(
     user_id: str | None = None,
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(60, ge=1, le=200),
+    domain: str = Query("health"),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
-    """A dated timeline of things that actually happened: workouts, drives,
-    achievements.
+    """A dated timeline of things that actually happened.
 
     Deliberately not another chart. The aggregates answer "how much"; this
     answers "what did I do last week", which is the question a person actually
     has of their own history.
 
+    ``domain`` picks which page's view you get -- "health" (workouts,
+    achievements, goals, personal bests) or "wander" (drives). Both are drawn
+    from the same stored events; only the mix differs. A drive is not a fitness
+    event, so it has no business appearing under Health.
+
     Reads only events geo already stores -- no new writes, so nothing here can
     invent a fact. An event with no usable timestamp is dropped rather than
     dated as now, which would float it to the top of the list.
     """
+    # Validate the domain before any Redis work, so a bad request never depends
+    # on whether the user happens to have data.
+    try:
+        event_feed.events_for_domain([], domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
     clean = await _require_may_view(viewer, user_id, is_admin)
     r = await get_redis()
     if not r:
@@ -2658,9 +2670,11 @@ async def get_events(
         + event_feed.events_from_achievements(ledger, definitions)
     )
     events = event_feed.dedupe(events)
+    events = event_feed.events_for_domain(events, domain)
     groups = event_feed.build_timeline(events, now, ZoneInfo(APP_TIMEZONE), limit=limit)
     return {
         "user_id": clean,
+        "domain": domain,
         # Named window_days, not days: the payload's day_count is how many
         # day groups came back, and one key cannot mean both.
         "window_days": days,

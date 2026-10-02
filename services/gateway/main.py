@@ -8030,8 +8030,13 @@ async def get_geo_events(
     user_id: str | None = None,
     days: int = 30,
     limit: int = 60,
+    domain: str = "health",
 ):
-    """A dated timeline of what actually happened: workouts, drives, badges.
+    """A dated timeline of what actually happened.
+
+    `domain` chooses the page's view: "health" (workouts, badges, goals) or
+    "wander" (drives). Forwarded so the two pages never have to fetch and
+    filter client-side.
 
     Declared before the metrics siblings so a literal path is never captured as
     a parameter, and it uses the same reader identity path as every other geo
@@ -8041,6 +8046,7 @@ async def get_geo_events(
     params = {
         "days": days,
         "limit": limit,
+        "domain": domain,
         "viewer": viewer or "",
         "is_admin": is_admin or "",
     }
