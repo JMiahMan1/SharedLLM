@@ -20,6 +20,13 @@ public class TokenBridgePlugin extends Plugin {
     public static final String KEY_API_KEY = "jarvis_api_key";
     public static final String KEY_SERVER_URL = "jarvis_server_url";
     public static final String KEY_INTERNAL_SECRET = "internal_secret";
+    /**
+     * Who this device is. Mirrored here so LocationTrackingService can attribute
+     * an upload after the WebView is gone -- without it, background location
+     * could authenticate but not say whose position it was.
+     */
+    public static final String KEY_USERNAME = "jarvis_username";
+    public static final String KEY_USER_ID = "jarvis_user_id";
     public static final String KEY_LAST_LAT = "last_lat";
     public static final String KEY_LAST_LNG = "last_lng";
     public static final String KEY_LAST_TS = "last_ts";
@@ -59,6 +66,29 @@ public class TokenBridgePlugin extends Plugin {
                 ed.remove(KEY_INTERNAL_SECRET);
             } else {
                 ed.putString(KEY_INTERNAL_SECRET, internalSecret);
+            }
+        }
+        ed.apply();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void setIdentity(PluginCall call) {
+        String username = call.getString("username");
+        String userId = call.getString("userId");
+        SharedPreferences.Editor ed = prefs(getContext()).edit();
+        if (username != null) {
+            if (username.isEmpty()) {
+                ed.remove(KEY_USERNAME);
+            } else {
+                ed.putString(KEY_USERNAME, username);
+            }
+        }
+        if (userId != null) {
+            if (userId.isEmpty()) {
+                ed.remove(KEY_USER_ID);
+            } else {
+                ed.putString(KEY_USER_ID, userId);
             }
         }
         ed.apply();

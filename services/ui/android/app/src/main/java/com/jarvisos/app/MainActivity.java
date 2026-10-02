@@ -27,6 +27,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(StepCounterPlugin.class);
         registerPlugin(TokenBridgePlugin.class);
         registerPlugin(ApkInstallPlugin.class);
+        registerPlugin(LocationTrackingPlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
