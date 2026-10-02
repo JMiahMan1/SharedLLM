@@ -223,6 +223,37 @@ class TestBuildTimeline:
         events = [Event("workout", NOW + 3 * 86400, "From the future")]
         assert build_timeline(events, NOW, TZ)[0].events[0].days_ago == 0
 
+    def test_attaches_a_time_label_in_the_bucketing_zone(self):
+        # The client must not format `at` itself: on a device in another zone
+        # it would file the event on a different day than the group it is
+        # listed under.
+        events = [Event("workout", at("2026-10-01", 8), "This morning")]
+        got = build_timeline(events, NOW, TZ)[0].events[0]
+        assert got.time_label.endswith("AM") or got.time_label.endswith("PM")
+        assert ":" in got.time_label
+
+    def test_drops_an_epoch_it_cannot_place_on_a_day(self):
+        # A wildly out-of-range epoch must not take down the whole timeline,
+        # and must not be filed under a made-up day either.
+        events = [
+            Event("workout", 1e18, "Broken clock"),
+            Event("workout", at("2026-10-01", 8), "This morning"),
+        ]
+        groups = build_timeline(events, NOW, TZ)
+        assert len(groups) == 1
+        assert [e.title for e in groups[0].events] == ["This morning"]
+
+    def test_time_label_is_blank_when_never_bucketed(self):
+        # Defence in depth: to_dict can be called on an event that never went
+        # through build_timeline.
+        assert Event("workout", at("2026-10-01", 8), "x").to_dict()["time_label"] == ""
+
+    def test_serialises_both_labels(self):
+        events = [Event("workout", at("2026-10-01", 8), "This morning")]
+        payload = build_timeline(events, NOW, TZ)[0].events[0].to_dict()
+        assert payload["label"] == "Workout"  # the kind's name
+        assert payload["time_label"] != ""  # the time of day
+
     def test_caps_the_total_across_days(self):
         events = [Event("workout", at("2026-09-30", h), f"w{h}") for h in range(20)]
         groups = build_timeline(events, NOW, TZ, limit=5)

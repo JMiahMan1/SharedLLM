@@ -56,9 +56,12 @@ function EventRow({ event }: { event: TimelineEvent }) {
           <span className="block text-[11px] text-slate-400">{event.detail}</span>
         )}
       </span>
-      {/* The server computes the label so a future-dated or skewed clock
-          cannot render as a negative age here. */}
-      <span className="shrink-0 text-[10px] text-slate-500 font-mono">{event.label}</span>
+      {/* The server sends the time of day it used when it bucketed the day, in
+          the same zone. Formatting `at` here would use the device's zone and
+          could file the event on a different day than the group above it. */}
+      <span className="shrink-0 text-[10px] text-slate-500 font-mono">
+        {event.time_label || event.label}
+      </span>
     </li>
   );
 }

@@ -1084,8 +1084,15 @@ export interface TimelineEvent {
   detail: string;
   meta: Record<string, unknown>;
   days_ago: number;
-  /** Server-computed so the client never re-derives "3 days ago" differently. */
+  /** The kind's name ("Workout", "Drive") -- a fallback if no time is known. */
   label: string;
+  /**
+   * Time of day ("8:05 AM") as the server computed it, in the zone it used to
+   * bucket the day. Must be shown rather than formatting `at` locally: the
+   * device's own zone could file the event on a different day than the group
+   * it is listed under. "" when unknown.
+   */
+  time_label: string;
   icon: string;
 }
 
