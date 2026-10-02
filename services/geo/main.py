@@ -445,6 +445,7 @@ async def _record_daily_steps(
     steps: int,
     timestamp: float | None = None,
     source: str = "phone",
+    user_timezone: str | None = None,
 ):
     """Record a pedometer reading for one source (cumulative daily counter).
 
@@ -455,6 +456,11 @@ async def _record_daily_steps(
     The day comes from the reading's own timestamp, never the arrival time, and
     each bucket keeps the max seen — the Android TYPE_STEP_COUNTER resets on
     reboot and can arrive late, neither of which may reduce a recorded day.
+
+    The day is computed in the *phone's* zone (`user_timezone`), not the
+    server's. The zone is stored per day so that a reading which lands on a
+    different day than a previous upload can correct the old bucketing; without
+    it, a user who travelled would keep a permanently wrong history.
     """
     try:
         steps = int(steps)
@@ -465,8 +471,8 @@ async def _record_daily_steps(
     if source not in STEP_SOURCES:
         source = "phone"
     ts = timestamp or time.time()
-    tz = ZoneInfo(APP_TIMEZONE)
-    day = datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d")
+    tz_name = _resolve_reporting_tz(user_timezone)
+    day = datetime.fromtimestamp(ts, ZoneInfo(tz_name)).strftime("%Y-%m-%d")
     try:
         src_key = f"geo:steps_src:{clean_id}:{source}"
         existing_raw = await r.hget(src_key, day)
@@ -474,8 +480,11 @@ async def _record_daily_steps(
             existing = int(existing_raw) if existing_raw else 0
         except (TypeError, ValueError):
             existing = 0
-        if steps >= existing:
+        if steps >= existing or await _stored_day_differs(r, clean_id, source, day, tz_name):
             await r.hset(src_key, day, steps)
+            # Remember which zone this day was filed under, so a corrected
+            # reading can overwrite a day that was bucketed in the wrong one.
+            await r.hset(f"geo:steps_tz:{clean_id}:{source}", day, tz_name)
         await r.hset(f"geo:steps:{clean_id}", day, await _fuse_day(r, clean_id, day))
         await r.hset(f"geo:steps_meta:{clean_id}", "updated_at", str(ts))
     except Exception as e:
@@ -600,7 +609,14 @@ async def post_see(
 
     r_steps = await get_redis()
     if update.daily_steps is not None and r_steps:
-        await _record_daily_steps(r_steps, entity_id.split(".")[-1].lower(), update.daily_steps, update.timestamp, source="phone")
+        await _record_daily_steps(
+            r_steps,
+            entity_id.split(".")[-1].lower(),
+            update.daily_steps,
+            update.timestamp,
+            source="phone",
+            user_timezone=getattr(update, "timezone", None),
+        )
 
     await record_point(
         entity_id=entity_id,
@@ -648,7 +664,14 @@ async def post_record(
         raise HTTPException(status_code=403, detail="Forbidden")
     r_steps = await get_redis()
     if update.daily_steps is not None and r_steps:
-        await _record_daily_steps(r_steps, entity_id.split(".")[-1].lower(), update.daily_steps, update.timestamp, source="phone")
+        await _record_daily_steps(
+            r_steps,
+            entity_id.split(".")[-1].lower(),
+            update.daily_steps,
+            update.timestamp,
+            source="phone",
+            user_timezone=getattr(update, "timezone", None),
+        )
     await record_point(
         entity_id=entity_id,
         lat=update.latitude,
@@ -2358,6 +2381,43 @@ def _estimate_steps_from_gps(activity_type: str, points: list[dict]) -> int | No
     return max(0, steps)
 
 
+def _resolve_reporting_tz(reported: str | None) -> str:
+    """The zone a step reading should be filed under.
+
+    The phone knows its own zone and the app sends it. Filing every user's steps
+    in the server's zone is wrong for anyone travelling or living elsewhere:
+    their 11pm walk lands on the wrong day, and because stored days keep the
+    maximum, a later correction is silently discarded.
+
+    Falls back to APP_TIMEZONE only when nothing valid was reported, rather
+    than trusting an arbitrary string (which would raise from ZoneInfo).
+    """
+    if reported:
+        name = str(reported).strip()
+        if name:
+            try:
+                ZoneInfo(name)
+                return name
+            except Exception:
+                log.warning("[Steps] Ignoring unusable timezone %r; using %s", name, APP_TIMEZONE)
+    return APP_TIMEZONE
+
+
+async def _stored_day_differs(r, clean_id: str, source: str, day: str, tz_name: str) -> bool:
+    """True when a day was previously filed under a different zone.
+
+    The per-day max means a corrected reading cannot lower a stored total, which
+    is the right guard against a stale upload but also means a day bucketed in
+    the wrong zone can never be corrected. Recording the zone per day lets a
+    genuine re-bucketing overwrite, while a same-zone duplicate still cannot.
+    """
+    try:
+        previous = await r.hget(f"geo:steps_tz:{clean_id}:{source}", day)
+    except Exception:
+        return False
+    return bool(previous) and str(previous) != tz_name
+
+
 @app.post("/steps")
 async def post_daily_steps(
     update: dict,
@@ -2367,7 +2427,8 @@ async def post_daily_steps(
 ):
     """Ingest a hardware pedometer reading (cumulative daily step counter).
 
-    Body: {"user_id": "...", "steps": 12345, "timestamp": 1690000000 (optional)}
+    Body: {"user_id": "...", "steps": 12345, "timestamp": 1690000000 (optional),
+           "timezone": "America/Phoenix" (optional; the phone's own zone)}
     Also accepted via location updates (`daily_steps` field) so the phone can
     piggyback on breadcrumb posts.
     """
@@ -2383,7 +2444,14 @@ async def post_daily_steps(
     if not r:
         raise HTTPException(status_code=503, detail="Redis unavailable")
     source = str(update.get("source") or "phone").lower()
-    await _record_daily_steps(r, user, steps, update.get("timestamp"), source=source)
+    await _record_daily_steps(
+        r,
+        user,
+        steps,
+        update.get("timestamp"),
+        source=source,
+        user_timezone=update.get("timezone"),
+    )
     return {"status": "ok", "user_id": user, "steps": int(steps), "source": source}
 
 

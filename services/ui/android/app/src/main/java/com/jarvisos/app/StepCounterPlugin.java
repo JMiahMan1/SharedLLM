@@ -53,13 +53,6 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
      * silently became yesterday_total + today_so_far.
      */
     private static final int PREFS_VERSION = 2;
-    /**
-     * Only credit the across-midnight delta to the new day when the previous
-     * reading was this recent. A longer gap can contain an entire unrecorded
-     * day, and attributing it to today would inflate today's count.
-     */
-    private static final long MIDNIGHT_CREDIT_WINDOW_MS = 60L * 60L * 1000L;
-
     private SensorManager sensorManager;
     private Sensor stepSensor;
     private boolean listening = false;
@@ -329,17 +322,15 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
     private int computeTodaySteps(float cumulative) {
         SharedPreferences prefs = bridge.getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String today = java.time.LocalDate.now().toString();
-        String baselineDate = prefs.getString(KEY_BASELINE_DATE, "");
-        boolean hasBaseline = prefs.getBoolean(KEY_HAS_BASELINE, false);
-        long baseline = prefs.getLong(KEY_BASELINE, 0L);
-        long daySteps = prefs.getLong("day_steps", 0L);
-        long lastReadAt = prefs.getLong(KEY_LAST_READ_AT, 0L);
         long now = System.currentTimeMillis();
-
-        // Counter reset (reboot) invalidates the baseline; keep the day's total.
-        if (hasBaseline && (long) cumulative < baseline) {
-            hasBaseline = false;
-        }
+        // The reboot / midnight / delta rules live in StepDayAccumulator so they
+        // can be tested on a desktop JVM. This method owns only persistence.
+        StepDayAccumulator.State state = new StepDayAccumulator.State(
+                prefs.getLong(KEY_BASELINE, 0L),
+                prefs.getString(KEY_BASELINE_DATE, ""),
+                prefs.getBoolean(KEY_HAS_BASELINE, false),
+                prefs.getLong("day_steps", 0L),
+                prefs.getLong(KEY_LAST_READ_AT, 0L));
 
         // One-time repair for installs that ran the midnight-carry bug
         // (prefs_version < 2): day_steps kept yesterday's total and the rollover
@@ -352,59 +343,24 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         if (prefsVersion < PREFS_VERSION) {
             String yesterday = java.time.LocalDate.now().minusDays(1).toString();
             int prevDay = ledger.daySteps(yesterday, StepLedger.SOURCE_PHONE);
-            if (prevDay > 0 && daySteps >= prevDay && daySteps - prevDay < 1000) {
-                daySteps -= prevDay;
-                if (daySteps < 0) daySteps = 0;
-                ledger.replaceDay(today, (int) Math.min(Integer.MAX_VALUE, daySteps), StepLedger.SOURCE_PHONE);
+            if (prevDay > 0 && state.daySteps >= prevDay && state.daySteps - prevDay < 1000) {
+                state.daySteps -= prevDay;
+                if (state.daySteps < 0) state.daySteps = 0;
             }
-            prefs.edit().putLong("day_steps", daySteps).putInt(KEY_PREFS_VERSION, PREFS_VERSION).apply();
+            prefs.edit().putLong("day_steps", state.daySteps).putInt(KEY_PREFS_VERSION, PREFS_VERSION).apply();
         }
 
-        if (!hasBaseline || !today.equals(baselineDate)) {
-            // Midnight rollover. The sensor only gives a cumulative count, so we
-            // can credit the delta to the new day — but ONLY when the gap is
-            // short (the classic case: a reading just before midnight and one
-            // just after, e.g. while asleep). Across a whole day with no reads,
-            // that delta contains an entire lost day of walking; attributing it
-            // to today would inflate today's count, which is exactly the bug
-            // users saw after the app went a day without syncing.
-            boolean recentReading = lastReadAt > 0 && (now - lastReadAt) <= MIDNIGHT_CREDIT_WINDOW_MS;
-            if (hasBaseline && !today.equals(baselineDate) && recentReading && (long) cumulative >= baseline) {
-                // Only the across-midnight delta — never yesterday's accumulated
-                // total. (+= here was the bug that carried 10,000 steps into a
-                // new morning.)
-                daySteps = (long) cumulative - baseline;
-            } else {
-                daySteps = 0;
-            }
-            baseline = (long) cumulative;
-            baselineDate = today;
-            hasBaseline = true;
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putLong(KEY_BASELINE, baseline);
-            editor.putString(KEY_BASELINE_DATE, baselineDate);
-            editor.putBoolean(KEY_HAS_BASELINE, hasBaseline);
-            editor.putLong("day_steps", daySteps);
-            editor.putLong(KEY_LAST_CUMULATIVE, (long) cumulative);
-            editor.putLong(KEY_LAST_READ_AT, now);
-            editor.apply();
-            // Persist the day rollup: history survives reboots and app kills.
-            ledger.recordDay(today, (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps)), StepLedger.SOURCE_PHONE);
-            return (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps));
-        }
+        long daySteps = StepDayAccumulator.accumulate(state, (long) cumulative, today, now);
 
-        long delta = (long) cumulative - baseline;
-        if (delta < 0) {
-            delta = 0;
-        }
-        daySteps += delta;
-        baseline = (long) cumulative;
-        SharedPreferences.Editor editor = prefs.edit();
-        editor.putLong(KEY_BASELINE, baseline);
-        editor.putLong("day_steps", daySteps);
-        editor.putLong(KEY_LAST_CUMULATIVE, (long) cumulative);
-        editor.putLong(KEY_LAST_READ_AT, now);
-        editor.apply();
+        prefs.edit()
+                .putLong(KEY_BASELINE, state.baseline)
+                .putString(KEY_BASELINE_DATE, state.baselineDate)
+                .putBoolean(KEY_HAS_BASELINE, state.hasBaseline)
+                .putLong("day_steps", daySteps)
+                .putLong(KEY_LAST_CUMULATIVE, (long) cumulative)
+                .putLong(KEY_LAST_READ_AT, now)
+                .apply();
+        // Persist the day rollup: history survives reboots and app kills.
         ledger.recordDay(today, (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps)), StepLedger.SOURCE_PHONE);
         return (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps));
     }

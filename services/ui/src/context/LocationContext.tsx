@@ -346,7 +346,13 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         const resp = await fetch(`${serverUrl}/api/geo/steps`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ user_id: user, steps: entry.steps, timestamp: ts, source: entry.source || 'phone' }),
+          body: JSON.stringify({
+            user_id: user,
+            steps: entry.steps,
+            timestamp: ts,
+            source: entry.source || 'phone',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          }),
         });
         if (!resp.ok) {
           logSensor('steps', `backfill for ${entry.day} failed HTTP ${resp.status}`);
@@ -383,7 +389,13 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       const resp = await fetch(`${serverUrl}/api/geo/steps`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ user_id: user, steps: dailyStepsRef.current, timestamp: Date.now() / 1000, source: 'phone' }),
+        body: JSON.stringify({
+        user_id: user,
+        steps: dailyStepsRef.current,
+        timestamp: Date.now() / 1000,
+        source: 'phone',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => '');
