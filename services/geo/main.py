@@ -29,7 +29,7 @@ import aiohttp
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from services.geo import achievements, step_history
+from services.geo import achievements, metric_history, step_history
 from pydantic import BaseModel
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -2554,6 +2554,129 @@ def _today_date():
     single place rather than being inlined at each call site.
     """
     return datetime.now(ZoneInfo(APP_TIMEZONE)).date()
+
+
+@app.get("/metrics/ranges")
+async def get_metric_ranges(
+    metric: str = Query("workouts"),
+    range: str = Query("W", alias="range"),
+    user_id: str | None = None,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
+):
+    """Pre-aggregated history for an event metric (workouts, distances).
+
+    Same shape and same consent gate as /steps/ranges, but a different rule
+    about empty days: steps are a daily sensor reading, so a missing day and a
+    zero day are different facts, whereas a day with no workout is simply a day
+    with no workout. The response therefore carries ``active_days`` and
+    ``empty`` rather than ``days_missing`` and ``has_gaps``.
+
+    A metric nobody records is refused by name with the reason, rather than
+    answered with a confident zero -- ``calories_burned`` is written as a
+    hardcoded None, so a calories card would be drawing a number from nothing.
+    """
+    if range not in step_history.RANGE_DAYS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"range must be one of {', '.join(step_history.RANGE_DAYS)}",
+        )
+    if metric in metric_history.UNAVAILABLE_METRICS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{metric} is not tracked: {metric_history.UNAVAILABLE_METRICS[metric]}",
+        )
+    if metric not in metric_history.AVAILABLE_METRICS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"metric must be one of {', '.join(metric_history.AVAILABLE_METRICS)}",
+        )
+
+    r = await get_redis()
+    if not r:
+        return {
+            "user_id": user_id,
+            **metric_history.to_payload(
+                metric_history.build_metric_series({}, _today_date(), range, metric)
+            ),
+        }
+    clean = await _require_may_view(viewer, user_id, is_admin)
+    tz = ZoneInfo(APP_TIMEZONE)
+    span = max(step_history.RANGE_DAYS.values())
+    since = time.time() - span * 86400
+
+    workouts, trips = await _load_events_for_window(r, clean, since)
+    daily = _daily_for_metric(metric, workouts, trips, tz)
+    series = metric_history.build_metric_series(daily, _today_date(), range, metric)
+    return {"user_id": clean, **metric_history.to_payload(series)}
+
+
+@app.get("/metrics/catalog")
+async def get_metric_catalog():
+    """Which metrics the panel can show, and why the others are absent."""
+    return metric_history.metric_catalog()
+
+
+async def _load_events_for_window(r, clean_user: str, since: float):
+    """Workouts and driving trips for a user since `since`.
+
+    The workout list is windowed by score rather than by a fixed ``limit``, so a
+    year of activity is not silently truncated to the most recent N rows.
+    """
+    workouts = []
+    try:
+        workout_ids = await r.zrevrangebyscore(f"geo:workouts:user:{clean_user}", "+inf", since)
+    except AttributeError:  # fake/limited clients without the scored variant
+        workout_ids = await r.zrevrange(f"geo:workouts:user:{clean_user}", 0, 499)
+    for wid in workout_ids or []:
+        raw = await r.get(f"geo:workout:{wid}")
+        if not raw:
+            continue
+        try:
+            w = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if float(w.get("start_time") or 0) >= since:
+            workouts.append(w)
+
+    trips = []
+    try:
+        trip_ids = await r.zrevrangebyscore(f"geo:trips:user:{clean_user}", "+inf", since)
+    except AttributeError:
+        trip_ids = await r.zrevrange(f"geo:trips:user:{clean_user}", 0, 499)
+    for tid in trip_ids or []:
+        raw = await r.get(f"geo:trip:{tid}")
+        if not raw:
+            continue
+        try:
+            t = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if float(t.get("start_time") or 0) >= since and t.get("activity_type", "driving") == "driving":
+            trips.append(t)
+    return workouts, trips
+
+
+def _daily_for_metric(metric: str, workouts: list, trips: list, tz) -> dict:
+    """Per-day values for one metric name, from the loaded events."""
+    if metric == "workouts":
+        return metric_history.count_workouts_by_day(workouts, tz)
+    if metric == "workout_minutes":
+        folded = metric_history.daily_from_workouts(
+            workouts, tz, fields={"workout_minutes": "duration_seconds"}
+        )
+        # Stored in seconds; minutes is what a person reads.
+        return {day: secs / 60.0 for day, secs in folded["workout_minutes"].items()}
+    if metric == "workout_miles":
+        folded = metric_history.daily_from_workouts(
+            workouts, tz, fields={"workout_miles": "distance_miles"}
+        )
+        return folded["workout_miles"]
+    if metric == "drive_miles":
+        return metric_history.daily_from_trips(trips, tz)
+    return {}
 
 
 DEFAULT_STEP_GOAL = 10000

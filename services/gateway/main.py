@@ -7932,6 +7932,50 @@ async def get_geo_step_ranges(request: Request, range: str = "W", user_id: str |
         return await _proxy_json_response(resp)
 
 
+@app.get("/api/geo/metrics/catalog")
+async def get_geo_metric_catalog(request: Request):
+    """Which health metrics the panel can show, and why the rest are absent.
+
+    Public within the app: it names no data about anyone, only what is
+    recorded, so the UI can say "calories aren't tracked" instead of drawing
+    an empty card.
+    """
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/metrics/catalog",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=8.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.get("/api/geo/metrics/ranges")
+async def get_geo_metric_ranges(
+    request: Request, metric: str = "workouts", range: str = "W", user_id: str | None = None
+):
+    """Pre-aggregated workout/distance history, same shape as the steps route.
+
+    Declared before any sibling under /api/geo/metrics so a literal path is
+    never captured as a parameter.
+    """
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    params = {
+        "metric": metric,
+        "range": range,
+        "user_id": target,
+        "viewer": viewer,
+        "is_admin": is_admin,
+    }
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/metrics/ranges",
+            params=params,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=8.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.get("/api/geo/steps")
 async def get_geo_steps(request: Request, user_id: str | None = None, days: int = 7):
     target, viewer, is_admin = await _geo_read_target(request, user_id)
