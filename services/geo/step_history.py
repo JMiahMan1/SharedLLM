@@ -124,51 +124,31 @@ def _add_months(d: date, n: int) -> date:
     return date(year, month, min(d.day, last))
 
 
-def build_buckets(days_map: dict[date, int], today: date, rng: str) -> list[Bucket]:
-    """Roll raw daily history into the bars for `rng`, oldest first."""
+def bucket_windows(today: date, rng: str) -> list[tuple[str, date, date]]:
+    """`(label, start, end)` for each bar of `rng`, oldest first, inclusive.
+
+    Pure calendar arithmetic, deliberately separated from the arithmetic of
+    *filling* a bar. The date rules here are where the awkward bugs live (month
+    ends, Monday alignment), and step and workout history want the same
+    calendar while disagreeing completely about what an empty day means -- so
+    the calendar is written once and shared.
+    """
     span = RANGE_DAYS.get(rng, 7)
     n_buckets = RANGE_BUCKETS.get(rng, 7)
-
-    if rng == "D":
-        d = today
-        recorded = days_map.get(d)
-        return [Bucket(label=_iso(d), start=_iso(d), end=_iso(d),
-                       steps=int(recorded or 0), days_missing=0 if recorded is not None else 1,
-                       days_recorded=1 if recorded is not None else 0)]
-
     window_start = today - timedelta(days=span - 1)
 
-    if rng == "W":
-        # Weeks start on Monday, matching how people describe "this week".
-        start = window_start
+    if rng == "D":
+        return [(_iso(today), today, today)]
+
+    if rng in ("W", "M"):
+        # One bar per day, labelled the way a person would name that day.
+        fmt = "%a" if rng == "W" else "%-d %b"
         out = []
-        for i in range(n_buckets):
-            day = start + timedelta(days=i)
-            recorded = days_map.get(day)
-            out.append(Bucket(
-                label=day.strftime("%a"),
-                start=_iso(day), end=_iso(day),
-                steps=int(recorded or 0),
-                days_missing=0 if recorded is not None else 1,
-                days_recorded=1 if recorded is not None else 0,
-            ))
+        for i in range(span):
+            day = window_start + timedelta(days=i)
+            out.append((day.strftime(fmt), day, day))
         return out
 
-    if rng == "M":
-        out = []
-        for i in range(span - 1, -1, -1):
-            day = today - timedelta(days=i)
-            recorded = days_map.get(day)
-            out.append(Bucket(
-                label=day.strftime("%-d %b"),
-                start=_iso(day), end=_iso(day),
-                steps=int(recorded or 0),
-                days_missing=0 if recorded is not None else 1,
-                days_recorded=1 if recorded is not None else 0,
-            ))
-        return out
-
-    # 3M -> weekly buckets, Y -> monthly buckets.
     if rng == "3M":
         out = []
         cursor = window_start
@@ -176,48 +156,45 @@ def build_buckets(days_map: dict[date, int], today: date, rng: str) -> list[Buck
         cursor -= timedelta(days=cursor.weekday())
         while cursor <= today:
             end = min(cursor + timedelta(days=6), today)
-            total = 0
-            recorded = 0
-            cursor_d = cursor
-            while cursor_d <= end:
-                val = days_map.get(cursor_d)
-                if val is not None:
-                    total += int(val)
-                    recorded += 1
-                cursor_d += timedelta(days=1)
-            missing = (end - cursor).days + 1 - recorded
-            out.append(Bucket(
-                label=cursor.strftime("%-d %b"),
-                start=_iso(cursor), end=_iso(end),
-                steps=total, days_missing=missing, days_recorded=recorded,
-            ))
+            out.append((cursor.strftime("%-d %b"), cursor, end))
             cursor += timedelta(days=7)
         return out[-n_buckets:]
 
     # Y -> one bucket per calendar month, most recent last.
     out = []
-    first = _month_start(window_start)
-    cursor = first
+    cursor = _month_start(window_start)
     while cursor <= today:
         next_month = _add_months(cursor, 1)
         last_day = min(next_month - timedelta(days=1), today)
+        out.append((cursor.strftime("%b"), cursor, last_day))
+        cursor = next_month
+    return out[-n_buckets:]
+
+
+def build_buckets(days_map: dict[date, int], today: date, rng: str) -> list[Bucket]:
+    """Roll raw daily history into the bars for `rng`, oldest first.
+
+    Step-specific in one deliberate way: a day with no reading is counted as
+    *missing*, not as zero. See metric_history for the opposite convention.
+    """
+    out = []
+    for label, start, end in bucket_windows(today, rng):
         total = 0
         recorded = 0
-        d = cursor
-        while d <= last_day:
+        d = start
+        while d <= end:
             val = days_map.get(d)
             if val is not None:
                 total += int(val)
                 recorded += 1
             d += timedelta(days=1)
-        missing = (last_day - cursor).days + 1 - recorded
+        span_days = (end - start).days + 1
         out.append(Bucket(
-            label=cursor.strftime("%b"),
-            start=_iso(cursor), end=_iso(last_day),
-            steps=total, days_missing=missing, days_recorded=recorded,
+            label=label,
+            start=_iso(start), end=_iso(end),
+            steps=total, days_missing=span_days - recorded, days_recorded=recorded,
         ))
-        cursor = next_month
-    return out[-n_buckets:]
+    return out
 
 
 def personal_baseline(values: Iterable[int]) -> Optional[int]:
