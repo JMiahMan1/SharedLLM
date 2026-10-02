@@ -30,6 +30,19 @@ vi.mock('../lib/appUpdater', () => ({
 
 const SHA = 'a'.repeat(64);
 
+/**
+ * Wait for the notice, then for the verified-download controls.
+ *
+ * The notice's buttons only exist once three async effects have settled
+ * (version probe, install-permission probe, feature probe), so a bare
+ * findBy races them and fails intermittently under full-suite parallelism.
+ * Gating on the notice first, then allowing longer, is what makes it stable.
+ */
+async function findControl(testId: string) {
+  await screen.findByTestId('apk-update-notice');
+  return screen.findByTestId(testId, undefined, { timeout: 5000 });
+}
+
 const status = (over: Record<string, unknown> = {}) => ({
   updateAvailable: false,
   indeterminate: false,
@@ -244,7 +257,7 @@ describe('Settings APK verified download flow', () => {
   // The whole point: tap Download in the app, never hand off to a browser.
   it('downloads in-app with the published digest rather than opening a link', async () => {
     renderWithProviders(<Settings />);
-    await userEvent.click(await screen.findByTestId('apk-download-button'));
+    await userEvent.click(await findControl('apk-download-button'));
 
     await waitFor(() =>
       expect(mocks.downloadApkWithProgress).toHaveBeenCalledWith(
@@ -268,7 +281,7 @@ describe('Settings APK verified download flow', () => {
     });
 
     renderWithProviders(<Settings />);
-    await userEvent.click(await screen.findByTestId('apk-download-button'));
+    await userEvent.click(await findControl('apk-download-button'));
 
     const bar = await screen.findByTestId('apk-download-bar');
     expect(bar).toHaveStyle({ width: '50%' });
@@ -280,14 +293,14 @@ describe('Settings APK verified download flow', () => {
       settle!();
     });
 
-    expect(await screen.findByTestId('apk-install-button')).toBeInTheDocument();
+    expect(await findControl('apk-install-button')).toBeInTheDocument();
     expect(screen.getByText(/checksum verified/i)).toBeInTheDocument();
   });
 
   it('installs the verified file through the system installer', async () => {
     renderWithProviders(<Settings />);
-    await userEvent.click(await screen.findByTestId('apk-download-button'));
-    await userEvent.click(await screen.findByTestId('apk-install-button'));
+    await userEvent.click(await findControl('apk-download-button'));
+    await userEvent.click(await findControl('apk-install-button'));
     await waitFor(() => expect(mocks.installVerifiedApk).toHaveBeenCalled());
   });
 
@@ -297,12 +310,12 @@ describe('Settings APK verified download flow', () => {
       new Error('Checksum mismatch: expected ' + SHA + ' but got ' + 'b'.repeat(64)),
     );
     renderWithProviders(<Settings />);
-    await userEvent.click(await screen.findByTestId('apk-download-button'));
+    await userEvent.click(await findControl('apk-download-button'));
 
     expect(await screen.findByTestId('apk-download-error')).toHaveTextContent(/checksum mismatch/i);
     expect(screen.queryByTestId('apk-install-button')).not.toBeInTheDocument();
     // And it can be retried.
-    expect(await screen.findByTestId('apk-download-button')).toBeInTheDocument();
+    expect(await findControl('apk-download-button')).toBeInTheDocument();
   });
 
   // The web bundle can be newer than the installed APK, so the verified flow
