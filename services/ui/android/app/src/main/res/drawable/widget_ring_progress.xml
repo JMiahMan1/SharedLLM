@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Circular progress ring for the health widget.
+
+  A RemoteViews widget cannot host a custom drawing View, so the ring is the
+  standard shape-based trick: a ring shape rotated -90 degrees so it starts at
+  twelve o'clock. innerRadiusRatio/thicknessRatio are fractions of the view, so
+  the ring scales with whatever size the launcher gives it.
+
+  The track sits behind the progress layer so an unfinished goal still reads as
+  a goal rather than as missing data.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Unfilled track. -->
+    <item>
+        <rotate
+            android:fromDegrees="-90"
+            android:pivotX="50%"
+            android:pivotY="50%">
+            <shape
+                android:shape="ring"
+                android:innerRadiusRatio="3.4"
+                android:thicknessRatio="0.16">
+                <solid android:color="#1E293B" />
+            </shape>
+        </rotate>
+    </item>
+
+    <!-- Filled progress; tinted in code from the active theme pack. -->
+    <item android:id="@android:id/progress">
+        <rotate
+            android:fromDegrees="-90"
+            android:pivotX="50%"
+            android:pivotY="50%">
+            <shape
+                android:shape="ring"
+                android:innerRadiusRatio="3.4"
+                android:thicknessRatio="0.16">
+                <solid android:color="#863BFF" />
+                <corners android:radius="50%" />
+            </shape>
+        </rotate>
+    </item>
+
+</layer-list>

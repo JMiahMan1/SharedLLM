@@ -57,24 +57,57 @@
             android:textSize="11sp" />
     </LinearLayout>
 
-    <ProgressBar
-        android:id="@+id/health_progress"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="6dp"
-        android:layout_marginTop="6dp"
-        android:max="100"
-        android:progress="0"
-        android:progressTint="#863BFF" />
-
-    <TextView
-        android:id="@+id/health_goal"
+    <!--
+      The ring sits beside the number rather than replacing the bar: the bar
+      answers "how far" precisely and stays readable at small launcher sizes,
+      while the ring answers "how far" at a glance. Both describe the same
+      percentage, computed once in HealthRingCalc.
+    -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text=""
-        android:textColor="#64748B"
-        android:textSize="11sp" />
+        android:baselineAligned="true"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <ProgressBar
+                android:id="@+id/health_progress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="6dp"
+                android:max="100"
+                android:progress="0"
+                android:progressTint="#863BFF" />
+
+            <TextView
+                android:id="@+id/health_goal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text=""
+                android:textColor="#64748B"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/health_ring"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:layout_marginStart="8dp"
+            android:contentDescription="@string/health_ring_description"
+            android:indeterminateOnly="false"
+            android:max="100"
+            android:progress="0"
+            android:progressDrawable="@drawable/widget_ring_progress" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/health_sub"

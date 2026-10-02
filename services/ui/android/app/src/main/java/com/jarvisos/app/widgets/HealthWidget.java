@@ -4,7 +4,10 @@ import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.os.Build;
+import android.view.View;
 import android.widget.RemoteViews;
 import com.jarvisos.app.R;
 import java.text.NumberFormat;
@@ -76,6 +79,9 @@ public class HealthWidget extends AppWidgetProvider {
 
         int accent = color(DEFAULT_ACCENT, Color.parseColor(DEFAULT_ACCENT));
         int textColor = Color.parseColor(DEFAULT_TEXT);
+        // Until a ring has something to say it is hidden rather than drawn
+        // empty, which would read as "you are at 0% of your goal".
+        views.setViewVisibility(R.id.health_ring, View.GONE);
 
         try {
             if (WidgetApi.apiKey(context) == null) {
@@ -97,8 +103,13 @@ public class HealthWidget extends AppWidgetProvider {
             JSONObject daily = steps.optJSONObject("daily_steps");
             int days = daily == null ? 0 : daily.length();
             if (days == 0) {
+                // Through HealthRingCalc, so "never recorded" and "no goal" stay
+                // the distinct states they are rather than collapsing into one
+                // caption on one path and not the other.
+                HealthRingCalc.Ring ring =
+                    HealthRingCalc.build(0, steps.optInt("goal", 0), "—", false);
                 views.setTextViewText(R.id.health_steps, "—");
-                views.setTextViewText(R.id.health_goal, "No steps recorded yet");
+                views.setTextViewText(R.id.health_goal, ring.caption);
                 views.setTextViewText(R.id.health_sub, "Open the app to start tracking");
                 views.setProgressBar(R.id.health_progress, 100, 0, false);
                 return views;
@@ -119,16 +130,26 @@ public class HealthWidget extends AppWidgetProvider {
                 fmt.format(avg) + " avg over " + days + (days == 1 ? " day" : " days")
             );
 
-            if (goal > 0) {
-                int pct = Math.min(100, (int) Math.round((today * 100.0) / goal));
-                views.setProgressBar(R.id.health_progress, 100, pct, false);
-                views.setTextViewText(
-                    R.id.health_goal,
-                    fmt.format(today) + " of " + fmt.format(goal) + " steps (" + pct + "%)"
-                );
-            } else {
+            // The ring and the bar come from one calculation, so they can never
+            // disagree about what today's number means.
+            HealthRingCalc.Ring ring = HealthRingCalc.build(today, goal, fmt.format(today), true);
+            views.setTextViewText(R.id.health_goal, ring.caption);
+            if (ring.percent < 0) {
+                views.setViewVisibility(R.id.health_ring, View.GONE);
                 views.setProgressBar(R.id.health_progress, 100, 0, false);
-                views.setTextViewText(R.id.health_goal, "No step goal set");
+            } else {
+                views.setViewVisibility(R.id.health_ring, View.VISIBLE);
+                views.setProgressBar(R.id.health_ring, 100, ring.percent, false);
+                // setColorStateList, not setInt: the method takes a
+                // ColorStateList and an int argument would be ignored.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    views.setColorStateList(
+                        R.id.health_ring,
+                        "setProgressTintList",
+                        ColorStateList.valueOf(accent)
+                    );
+                }
+                views.setProgressBar(R.id.health_progress, 100, ring.percent, false);
             }
         } catch (Exception ex) {
             views.setTextViewText(R.id.health_steps, "—");
@@ -137,6 +158,7 @@ public class HealthWidget extends AppWidgetProvider {
                 R.id.health_sub,
                 ex.getMessage() != null ? ex.getMessage() : "offline"
             );
+            views.setViewVisibility(R.id.health_ring, View.GONE);
         }
         return views;
     }
