@@ -244,6 +244,29 @@ apiClient.interceptors.request.use((config) => {
 
 let isLoggingOut = false;
 let lastConnectivityToast = 0;
+// "Reconnected successfully!" needs the same throttle as the error toast. On a
+// page with several polling queries, each request retries independently, so
+// without this the same recovery is announced once per in-flight request.
+let lastReconnectToast = 0;
+
+/** How long a recovery announcement stays suppressed after the first one. */
+export const RECONNECT_TOAST_WINDOW_MS = 15000;
+
+/**
+ * Whether a recovered connection is worth announcing.
+ *
+ * Extracted so the throttle can be tested directly. Driving it through axios's
+ * interceptor machinery would mean mocking a callable default export, a
+ * captured rejection handler and fake backoff timers -- a lot of harness to
+ * assert one comparison.
+ */
+export function shouldAnnounceReconnect(
+  now: number,
+  lastAnnounced: number,
+  windowMs: number = RECONNECT_TOAST_WINDOW_MS,
+): boolean {
+  return now - lastAnnounced > windowMs;
+}
 let lastFailedTarget = 'Jarvis server';
 
 // Derive a human-friendly description of which service/endpoint failed so the
@@ -323,16 +346,23 @@ apiClient.interceptors.response.use(
         try {
           const res = await apiClient(config);
           t.dismiss(toastId);
-          t.success('Reconnected successfully!', {
-            id: toastId,
-            duration: 2000,
-            style: {
-              background: 'rgba(16, 185, 129, 0.2)',
-              color: '#a7f3d0',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              fontSize: '12px',
-            },
-          });
+          // Announce recovery once per outage, not once per request. A page
+          // with several polling queries has many in flight, and they all
+          // succeed within the same second.
+          const now = Date.now();
+          if (shouldAnnounceReconnect(now, lastReconnectToast)) {
+            lastReconnectToast = now;
+            t.success('Reconnected successfully!', {
+              id: toastId,
+              duration: 2000,
+              style: {
+                background: 'rgba(16, 185, 129, 0.2)',
+                color: '#a7f3d0',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                fontSize: '12px',
+              },
+            });
+          }
           return res;
         } catch (retryErr) {
           // Pass the error down to the next retry or final error handler
