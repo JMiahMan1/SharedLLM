@@ -29,7 +29,7 @@ import aiohttp
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from services.geo import achievements, metric_history, step_history
+from services.geo import achievements, event_feed, metric_history, step_history
 from pydantic import BaseModel
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -2617,6 +2617,55 @@ async def get_metric_ranges(
 async def get_metric_catalog():
     """Which metrics the panel can show, and why the others are absent."""
     return metric_history.metric_catalog()
+
+
+@app.get("/events")
+async def get_events(
+    user_id: str | None = None,
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(60, ge=1, le=200),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
+):
+    """A dated timeline of things that actually happened: workouts, drives,
+    achievements.
+
+    Deliberately not another chart. The aggregates answer "how much"; this
+    answers "what did I do last week", which is the question a person actually
+    has of their own history.
+
+    Reads only events geo already stores -- no new writes, so nothing here can
+    invent a fact. An event with no usable timestamp is dropped rather than
+    dated as now, which would float it to the top of the list.
+    """
+    clean = await _require_may_view(viewer, user_id, is_admin)
+    r = await get_redis()
+    if not r:
+        return {"user_id": clean, **event_feed.timeline_payload([], time.time())}
+
+    now = time.time()
+    since = now - days * 86400
+    workouts, trips = await _load_events_for_window(r, clean, since)
+
+    ledger = await achievements.load_points_ledger(r, clean)
+    definitions = {d.id: d for d in achievements.load_definitions()}
+
+    events = (
+        event_feed.events_from_workouts(workouts, ZoneInfo(APP_TIMEZONE))
+        + event_feed.events_from_trips(trips, ZoneInfo(APP_TIMEZONE))
+        + event_feed.events_from_achievements(ledger, definitions)
+    )
+    events = event_feed.dedupe(events)
+    groups = event_feed.build_timeline(events, now, ZoneInfo(APP_TIMEZONE), limit=limit)
+    return {
+        "user_id": clean,
+        # Named window_days, not days: the payload's day_count is how many
+        # day groups came back, and one key cannot mean both.
+        "window_days": days,
+        **event_feed.timeline_payload(groups, now),
+    }
 
 
 async def _load_events_for_window(r, clean_user: str, since: float):

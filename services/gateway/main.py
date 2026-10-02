@@ -8024,6 +8024,38 @@ async def get_geo_step_ranges(request: Request, range: str = "W", user_id: str |
         return await _proxy_json_response(resp)
 
 
+@app.get("/api/geo/events")
+async def get_geo_events(
+    request: Request,
+    user_id: str | None = None,
+    days: int = 30,
+    limit: int = 60,
+):
+    """A dated timeline of what actually happened: workouts, drives, badges.
+
+    Declared before the metrics siblings so a literal path is never captured as
+    a parameter, and it uses the same reader identity path as every other geo
+    read so a caller-supplied `viewer` cannot widen consent.
+    """
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    params = {
+        "days": days,
+        "limit": limit,
+        "viewer": viewer or "",
+        "is_admin": is_admin or "",
+    }
+    if target:
+        params["user_id"] = target
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/events",
+            params=params,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.get("/api/geo/metrics/catalog")
 async def get_geo_metric_catalog(request: Request):
     """Which health metrics the panel can show, and why the rest are absent.

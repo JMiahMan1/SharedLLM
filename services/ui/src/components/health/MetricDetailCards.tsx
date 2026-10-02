@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Dumbbell, Car, Clock, Route } from 'lucide-react';
+import { AlertTriangle, Dumbbell, Clock, Route } from 'lucide-react';
 import { api } from '../../services/api';
 import {
   formatMetricValue,
@@ -25,8 +25,15 @@ const CARDS: {
   { key: 'workouts', title: 'Workouts', icon: Dumbbell, accent: 'text-emerald-300' },
   { key: 'workout_minutes', title: 'Workout time', icon: Clock, accent: 'text-purple-300' },
   { key: 'workout_miles', title: 'Workout distance', icon: Route, accent: 'text-sky-300' },
-  { key: 'drive_miles', title: 'Driving distance', icon: Car, accent: 'text-amber-300' },
 ];
+
+/**
+ * Metrics the server records but this panel does not show, because they belong
+ * to another surface. Driving distance moved to Wander, next to fuel and cost,
+ * which is where a person looks for miles-per-gallon -- showing the same number
+ * in two places made it read as two different quantities.
+ */
+const SHOWN_ELSEWHERE = new Set(['drive_miles']);
 
 /**
  * One card per recorded event metric, each with its own chart.
@@ -49,24 +56,35 @@ export default function MetricDetailCards({ range, userId }: Props) {
 
   return (
     <section data-testid="metric-detail-cards" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-      {(catalog.data?.available ?? []).map((key: string) => {
-        const card = CARDS.find((c) => c.key === key);
-        if (!card) return null;
-        return (
-          <MetricCard
-            key={key}
-            metricKey={key}
-            title={card.title}
-            icon={card.icon}
-            accent={card.accent}
-            range={range}
-            userId={target}
-          />
-        );
-      })}
+      {(catalog.data?.available ?? [])
+        .filter((key: string) => !SHOWN_ELSEWHERE.has(key))
+        .map((key: string) => {
+          const card = CARDS.find((c) => c.key === key);
+          if (!card) return null;
+          return (
+            <MetricCard
+              key={key}
+              metricKey={key}
+              title={card.title}
+              icon={card.icon}
+              accent={card.accent}
+              range={range}
+              userId={target}
+            />
+          );
+        })}
 
       {catalog.data?.unavailable && Object.keys(catalog.data.unavailable).length > 0 && (
         <UnavailableMetrics reasons={catalog.data.unavailable} />
+      )}
+
+      {SHOWN_ELSEWHERE.size > 0 && (
+        <p
+          data-testid="metric-moved-note"
+          className="sm:col-span-2 xl:col-span-4 text-[11px] text-slate-500"
+        >
+          Driving distance is on the Wander page, next to fuel and cost.
+        </p>
       )}
     </section>
   );
