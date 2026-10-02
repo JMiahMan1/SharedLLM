@@ -196,11 +196,18 @@ export default function LiveFamilyMap({
 
   const freshCount = members.filter((m) => m.freshness !== 'stale').length;
   const staleCount = members.length - freshCount;
+  // Deliberately does not claim *why* a member is stale. A stale position
+  // means one of two very different things -- they turned sharing off, or their
+  // app simply stopped reporting (phone off, app killed, no network) -- and a
+  // timestamp cannot tell us which. This map reports on other people's devices,
+  // so it has no way to know, and asserting "sharing is off" is a guess that
+  // was demonstrably wrong: sharing can be on and the app still silent. Say
+  // what we observe and let the per-pin "last seen N hrs ago" carry the rest.
   const countText =
     members.length === 0
       ? 'No one is sharing location right now'
       : freshCount === 0
-        ? `${staleCount} last seen (sharing is off)`
+        ? `${staleCount} last seen`
         : staleCount > 0
           ? `${freshCount} sharing location · ${staleCount} last seen`
           : `${freshCount} sharing location`;

@@ -46,7 +46,7 @@ describe('classifyLocation', () => {
     expect(m?.freshness).toBe('recent');
   });
 
-  it('marks an old fix as stale (tracking turned off)', () => {
+  it('marks an old fix as stale without claiming a cause', () => {
     const m = classifyLocation(
       'jeremiah',
       { latitude: 33.4, longitude: -112.0, updated_at: nowSec - 3600 },
@@ -183,10 +183,34 @@ describe('LiveFamilyMap', () => {
     );
     renderMap();
     await waitFor(() => {
-      expect(screen.getByTestId('live-map-count')).toHaveTextContent(
-        '1 last seen (sharing is off)'
-      );
+      expect(screen.getByTestId('live-map-count')).toHaveTextContent('1 last seen');
     });
+  });
+
+  it('does not claim sharing is off, because a stale fix has two causes', async () => {
+    // A stale position means either the user turned sharing off OR their app
+    // stopped reporting. This map only ever sees other people's devices, so it
+    // cannot tell -- and it was wrong in production: sharing was demonstrably
+    // on while the footer said otherwise.
+    server.use(
+      http.get('/api/users/location/all', () =>
+        HttpResponse.json({
+          offline_user: {
+            latitude: 33.4,
+            longitude: -112.0,
+            updated_at: nowSec - 60 * 60,
+          },
+        })
+      )
+    );
+    renderMap();
+    // Gate on the text, not the element: live-map-count renders immediately
+    // with "No one is sharing" before the query settles, so findByTestId alone
+    // reads the pre-data state.
+    await waitFor(() =>
+      expect(screen.getByTestId('live-map-count')).toHaveTextContent('1 last seen')
+    );
+    expect(screen.getByTestId('live-map-count')).not.toHaveTextContent(/sharing is off/i);
   });
 
   it('counts sharing and last-seen members separately', async () => {
