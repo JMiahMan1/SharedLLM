@@ -683,7 +683,7 @@ const Admin = () => {
 
               <div className="space-y-3">
                 {users.map((user) => (
-                  <div key={user.username} className="glass-card flex items-center justify-between p-4 gap-4 overflow-hidden">
+                  <div key={user.username} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3 sm:gap-4 overflow-hidden">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-3">
                         <p className="font-semibold text-white">{user.full_name || user.username}</p>
@@ -698,24 +698,24 @@ const Admin = () => {
                         HA: {user.ha_url || 'Not configured'} | Nextcloud: {user.nextcloud_url || 'Not configured'}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <button
                         onClick={() => openEditUser(user)}
-                        className="rounded-xl p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
+                        className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-white/5 hover:text-white"
                         aria-label={`Edit ${user.username}`}
                       >
                         <Edit3 size={16} />
                       </button>
                       <button
                         onClick={() => setPasswordModalUser(user.username)}
-                        className="rounded-xl p-2 text-slate-400 transition hover:bg-indigo-500/10 hover:text-indigo-300"
+                        className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-indigo-500/10 hover:text-indigo-300"
                         aria-label={`Change password for ${user.username}`}
                       >
                         <KeyRound size={16} />
                       </button>
                       <button
                         onClick={() => setSharesUser(user.username)}
-                        className="rounded-xl p-2 text-slate-400 transition hover:bg-purple-500/10 hover:text-purple-300"
+                        className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-purple-500/10 hover:text-purple-300"
                         aria-label={`Shared service access for ${user.username}`}
                       >
                         <Users size={16} />
@@ -723,7 +723,7 @@ const Admin = () => {
                       {!user.is_system_default && (
                         <button
                           onClick={() => deleteUserMutation.mutate(user.username)}
-                          className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                          className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
                           aria-label={`Delete ${user.username}`}
                         >
                           <Trash2 size={16} />
@@ -748,14 +748,14 @@ const Admin = () => {
                   <button 
                     onClick={() => importNcMutation.mutate()}
                     disabled={importNcMutation.isPending}
-                    className="rounded-xl p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
+                    className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-white/5 hover:text-white"
                     title="Sync users from Nextcloud OCS"
                   >
                     <Cloud size={16} className={importNcMutation.isPending ? 'animate-pulse' : ''} />
                   </button>
                   <button
                     onClick={() => refetchDiscoveredUsers()}
-                    className="rounded-xl p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
+                    className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-white/5 hover:text-white"
                     aria-label="Refresh discovered users"
                   >
                     <RefreshCcw size={16} className={isDiscovering ? 'animate-spin' : ''} />
@@ -795,7 +795,7 @@ const Admin = () => {
 
               <div className="space-y-3">
                 {filteredDiscoveredUsers.map((user) => (
-                  <div key={`${user.source}-${user.username}`} className="glass-card flex items-center justify-between p-4">
+                  <div key={`${user.source}-${user.username}`} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold text-white truncate">{user.display_name || user.username}</p>
                       <p className="text-xs text-slate-400 truncate">@{user.username}</p>
@@ -872,14 +872,14 @@ const Admin = () => {
 
             <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-2">
               {devices.map((device) => (
-                <div key={device.device_id} className="glass-card flex items-center justify-between p-4">
+                <div key={device.device_id} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-mono text-sm text-white truncate">{device.device_id}</p>
                     <p className="mt-1 text-xs text-slate-400">Assigned to @{device.username}</p>
                   </div>
                   <button
                     onClick={() => removeDeviceMutation.mutate(device.device_id)}
-                    className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                    className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
                     aria-label={`Remove ${device.device_id}`}
                   >
                     <Trash2 size={16} />
@@ -960,7 +960,7 @@ const Admin = () => {
                 </h3>
                 <div className="space-y-3">
                   {mediaGroups.map((group) => (
-                    <div key={group.name} className="glass-card flex items-center justify-between p-4">
+                    <div key={group.name} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-white">{group.name}</p>
                         <p className="mt-1 text-xs text-slate-400 truncate">
@@ -969,7 +969,7 @@ const Admin = () => {
                       </div>
                       <button
                         onClick={() => deleteMediaGroupMutation.mutate(group.name)}
-                        className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                        className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
                         aria-label={`Delete ${group.name}`}
                       >
                         <Trash2 size={16} />
@@ -1034,7 +1034,7 @@ const Admin = () => {
                 </h3>
                 <div className="space-y-3">
                   {lightClusters.map((cluster) => (
-                    <div key={cluster.name} className="glass-card flex items-center justify-between p-4">
+                    <div key={cluster.name} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-white">{cluster.name}</p>
                         <p className="mt-1 text-xs text-slate-400 truncate">
@@ -1043,7 +1043,7 @@ const Admin = () => {
                       </div>
                       <button
                         onClick={() => deleteLightClusterMutation.mutate(cluster.name)}
-                        className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                        className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
                         aria-label={`Delete ${cluster.name}`}
                       >
                         <Trash2 size={16} />
@@ -1163,7 +1163,7 @@ const Admin = () => {
                 </h3>
                 <div className="space-y-3">
                   {lightPatterns.map((pattern) => (
-                    <div key={pattern.name} className="glass-card flex items-center justify-between p-4">
+                    <div key={pattern.name} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-white">{pattern.name}</p>
                         <p className="mt-1 text-xs text-slate-400">
@@ -1172,7 +1172,7 @@ const Admin = () => {
                       </div>
                       <button
                         onClick={() => deleteLightPatternMutation.mutate(pattern.name)}
-                        className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                        className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
                         aria-label={`Delete ${pattern.name}`}
                       >
                         <Trash2 size={16} />
@@ -1264,7 +1264,7 @@ const Admin = () => {
                 </h3>
                 <div className="space-y-3">
                   {intercomSessions.filter((s: IntercomSessionItem) => s.status === 'active').map((session: IntercomSessionItem) => (
-                    <div key={session.session_id} className="glass-card flex items-center justify-between p-4">
+                    <div key={session.session_id} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-white">Session: {session.session_id}</p>
                         <p className="mt-1 text-xs text-slate-400">
@@ -1273,7 +1273,7 @@ const Admin = () => {
                       </div>
                       <button
                         onClick={() => endIntercomMutation.mutate(session.session_id)}
-                        className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                        className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
                         aria-label={`End session ${session.session_id}`}
                       >
                         <Trash2 size={16} />

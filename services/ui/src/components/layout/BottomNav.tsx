@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Brain, Calendar, Compass, HeartPulse, Home, Music, Settings, StickyNote, Users, X } from 'lucide-react';
+import { Brain, Calendar, Compass, HeartPulse, Home, Music, Settings, Shield, StickyNote, Users, X } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -30,6 +30,10 @@ const BottomNav = () => {
     { icon: Calendar, label: 'Calendar', path: '/calendar', adminOnly: false },
     { icon: StickyNote, label: 'Notes', path: '/notes', adminOnly: false },
     { icon: Brain, label: 'Lab', path: '/lab', adminOnly: true },
+    // Admin-only. Without this, an admin on a phone can reach the control
+    // panel only by digging through the profile menu, which is not
+    // discoverable — the panel is where user management lives.
+    { icon: Shield, label: 'Admin', path: '/admin', adminOnly: true },
     { icon: Settings, label: 'Settings', path: '/settings', adminOnly: false },
   ].filter((item) => !item.adminOnly || isAdmin);
 
