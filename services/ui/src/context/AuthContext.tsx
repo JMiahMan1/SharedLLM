@@ -42,6 +42,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setToken(storedToken);
             setUser(profile);
             await storageSet('jarvis_user', JSON.stringify(profile));
+            // Register here too, not only on an explicit login. Registering
+            // only in login() meant a user who installed an update and simply
+            // kept using the app was never registered at all -- which is
+            // exactly why nobody's phone showed up in the panel. Fire-and-forget
+            // for the same reason as below: it must never block the session.
+            void registerThisDevice();
           } catch {
             setInitError('Session expired. Please log in again.');
             setToken(null);
