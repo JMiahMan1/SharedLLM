@@ -7,6 +7,11 @@
   twelve o'clock. innerRadiusRatio/thicknessRatio are fractions of the view, so
   the ring scales with whatever size the launcher gives it.
 
+  Both ratios are kept below 1 deliberately: the platform does not document
+  whether they scale against the radius or the width, and any value above 1
+  would place the inner edge outside the view under one of those readings,
+  which means an invisible ring.
+
   The track sits behind the progress layer so an unfinished goal still reads as
   a goal rather than as missing data.
 -->
@@ -20,7 +25,7 @@
             android:pivotY="50%">
             <shape
                 android:shape="ring"
-                android:innerRadiusRatio="3.4"
+                android:innerRadiusRatio="0.62"
                 android:thicknessRatio="0.16">
                 <solid android:color="#1E293B" />
             </shape>
@@ -35,10 +40,9 @@
             android:pivotY="50%">
             <shape
                 android:shape="ring"
-                android:innerRadiusRatio="3.4"
+                android:innerRadiusRatio="0.62"
                 android:thicknessRatio="0.16">
                 <solid android:color="#863BFF" />
-                <corners android:radius="50%" />
             </shape>
         </rotate>
     </item>
