@@ -7,6 +7,7 @@ import ActivityRings from '../components/health/ActivityRings';
 import StepHistoryChart from '../components/health/StepHistoryChart';
 import StepRangeSelector from '../components/health/StepRangeSelector';
 import MetricDetailCards from '../components/health/MetricDetailCards';
+import EventTimeline from '../components/health/EventTimeline';
 import { heroInsight } from '../lib/healthRanges';
 import type { StepRange, Workout } from '../types/api';
 import AchievementsPanel from '../components/wander/AchievementsPanel';
@@ -277,6 +278,11 @@ const Health = () => {
           two always describe the same window. Outside that grid on purpose:
           the cards lay themselves out. */}
       <MetricDetailCards range={range} userId={currentUsername} />
+
+      {/* The timeline is a fixed 30-day window, not the step/metric range
+          selector's: a day bucket and an event are different units, and
+          re-labelling "last 7 days" over a 30-day timeline would be a lie. */}
+      <EventTimeline userId={currentUsername} />
 
       <TrendsPanel currentUsername={currentUsername} />
 
