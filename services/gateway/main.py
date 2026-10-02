@@ -8219,6 +8219,72 @@ async def proxy_get_stars(request: Request, user_id: str | None = None):
         return await _proxy_json_response(resp)
 
 
+@app.post("/api/admin/users/{user_id}/stars")
+async def admin_grant_stars_with_mirror(user_id: str, request: Request):
+    """Grant a user stars and mirror them into their Skylight account.
+
+    Per ``docs/ACHIEVEMENTS.md``: "Everything is recorded in the points ledger
+    first, then mirrored to Skylight, so a Skylight outage cannot lose the
+    award." So the two outcomes are reported separately rather than collapsed:
+
+    * If the ledger write fails, nothing is mirrored and the failure is
+      returned -- mirroring an award that was never recorded would be a lie.
+    * If the ledger write succeeds but Skylight is down or unconfigured, the
+      grant still stands and ``skylight.status`` says so. Retrying the mirror
+      later is safe; re-running the grant would double-count it.
+    """
+    if not await _caller_is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required to grant stars")
+
+    target = (user_id or "").strip().lower()
+    if not target:
+        raise HTTPException(status_code=422, detail="user_id is required")
+    body = await request.json()
+
+    async with shared_http_client() as client:
+        grant = await client.post(
+            f"{GEO_SVC}/api/geo/stars",
+            json={**body, "user_id": target},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if grant.status >= 400:
+            # Surface geo's own message (a refused negative balance, a bad
+            # reason) rather than a generic 500 from this hop.
+            return await _proxy_json_response(grant)
+
+        result: dict = {"user_id": target, "ledger": await grant.json()}
+
+        if body.get("mirror_to_skylight", True):
+            # `user` selects the *target's* Skylight credentials, not the
+            # admin's -- the stars belong to them.
+            mirror = await client.post(
+                f"{EXECUTION_SVC}/api/integrations/skylight/stars",
+                json={
+                    "member": target,
+                    "stars": body.get("stars"),
+                    "reason": body.get("reason"),
+                    "note": body.get("note"),
+                    "user": target,
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=30.0),
+            )
+            try:
+                result["skylight"] = await mirror.json()
+            except Exception:
+                result["skylight"] = {
+                    "status": "FAILURE",
+                    "message": f"Skylight mirror returned HTTP {mirror.status}",
+                }
+            if mirror.status >= 400:
+                result["skylight"]["status"] = "FAILURE"
+        else:
+            result["skylight"] = {"status": "SKIPPED", "message": "mirror_to_skylight was false"}
+
+        return JSONResponse(status_code=200, content=result)
+
+
 @app.post("/api/geo/stars")
 async def proxy_grant_stars(request: Request):
     """Grant bonus stars. Admin only.
