@@ -31,7 +31,13 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
 echo "[OK] Branch: $BRANCH"
 
 # Sync non-git files so config matches local (same as deploy_remote.sh)
-for NON_GIT_FILE in ".env" "prompts/"; do
+#
+# .env is EXCLUDED on purpose. It is untracked and gitignored, so the host's
+# copy is the only record of anything set on the host -- LAN addresses, the
+# internal secret, host-only overrides. Copying the local file over it silently
+# destroyed those on every deploy, and `cat >` cannot merge: it truncates.
+# Deploy .env deliberately, by hand, when you actually mean to.
+for NON_GIT_FILE in "prompts/"; do
     if [ -e "$NON_GIT_FILE" ]; then
         echo "Syncing $NON_GIT_FILE to remote..."
         if [ -d "$NON_GIT_FILE" ]; then
@@ -42,6 +48,11 @@ for NON_GIT_FILE in ".env" "prompts/"; do
         fi
     fi
 done
+
+if [ -e ".env" ]; then
+    # Not fatal: the host keeps running on whatever .env it already has.
+    echo "[SKIP] .env not synced -- host settings are preserved. Copy it by hand if it must change."
+fi
 
 echo "Deploying to $HOST:$DIR"
 
@@ -118,7 +129,13 @@ ssh $SSH_OPTS "$HOST" << EOF
     done
 
     echo "Starting containers (no GHCR pull)..."
-    docker compose up -d --force-recreate --remove-orphans --pull never
+    # Only the services that were rebuilt. With no service names,
+    # \`docker compose up --force-recreate\` recreates every container in the
+    # project -- including unrelated wsbox-* ones -- so each deploy briefly
+    # took the whole stack down and dumped a burst of connection errors across
+    # services that had not changed at all.
+    # shellcheck disable=SC2086
+    docker compose up -d --force-recreate --remove-orphans --pull never $SERVICES
 
     echo "Waiting for application startup..."
     TIMEOUT=180

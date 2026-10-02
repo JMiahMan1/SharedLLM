@@ -13,6 +13,28 @@ fi
 HOST="$ARG_HOST"
 DIR="${2:-/home/jeremiah/SharedLLM}"
 
+# Which services this deploy is for. Accepts them as extra args; otherwise
+# derives them from the last two commits, same as deploy_local_build.sh.
+#
+# This matters for more than tidiness: `docker compose up --force-recreate`
+# with no service names recreates every container in the project, including
+# unrelated wsbox-* ones, so each deploy briefly takes the whole stack down.
+shift $(( $# > 2 ? 2 : $# ))
+if [ $# -ge 1 ]; then
+    SERVICES="$@"
+else
+    SERVICES=$(git diff --name-only HEAD~2..HEAD -- 'services/*/*.py' 2>/dev/null \
+        | sed -n 's|^services/\([^/]*\)/.*|\1|p' | sort -u | tr '\n' ' ')
+fi
+if [ -z "$SERVICES" ]; then
+    # Never fall back to "recreate everything" -- that is the behaviour this
+    # variable exists to prevent.
+    echo "[FAIL] Could not determine which services to deploy. Pass them explicitly:"
+    echo "       $0 <host> <path> <service> [service...]"
+    exit 1
+fi
+echo "[OK] Services to deploy on ${HOST}: $SERVICES"
+
 # Function to wait ONLY for the image build (Build & Push Images) to finish.
 # It does NOT wait for E2E/test pipelines — those run independently and do not
 # block deployment.
@@ -56,7 +78,11 @@ SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout
 wait_for_build
 
 # Sync non-git files to remote to ensure config match
-for NON_GIT_FILE in ".env" "prompts/"; do
+#
+# .env is EXCLUDED on purpose. It is untracked and gitignored, so the host's
+# copy is the only record of anything set on the host, and `cat >` truncates
+# rather than merges. Copy it by hand when you actually mean to change it.
+for NON_GIT_FILE in "prompts/"; do
     if [ -e "$NON_GIT_FILE" ]; then
         echo "Syncing $NON_GIT_FILE to remote..."
         if [ -d "$NON_GIT_FILE" ]; then
@@ -67,6 +93,10 @@ for NON_GIT_FILE in ".env" "prompts/"; do
         fi
     fi
 done
+
+if [ -e ".env" ]; then
+    echo "[SKIP] .env not synced -- host settings are preserved. Copy it by hand if it must change."
+fi
 
 echo "Deploying to $HOST:$DIR"
 
@@ -165,8 +195,14 @@ if ssh $SSH_OPTS "$HOST" << EOF
     echo "Server now at commit: \$DEPLOYED_SHA"
 
     echo "Pulling latest images from GHCR and starting Docker containers..."
-    docker compose pull
-    docker compose up -d --force-recreate --remove-orphans
+    # Scoped to the services this deploy rebuilt. With no service names this
+    # recreates every container in the project, including unrelated wsbox-*
+    # ones, so each deploy briefly takes the whole stack down and services that
+    # had not changed at all throw connection errors while they restart.
+    # shellcheck disable=SC2086
+    docker compose pull $SERVICES
+    # shellcheck disable=SC2086
+    docker compose up -d --force-recreate --remove-orphans $SERVICES
 
     echo "Waiting for application startup..."
     # Monitor logs for success or failure
