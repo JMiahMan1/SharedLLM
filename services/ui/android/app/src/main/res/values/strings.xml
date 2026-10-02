@@ -5,4 +5,10 @@
     <string name="package_name">com.jarvisos.app</string>
     <string name="custom_url_scheme">com.jarvisos.app</string>
     <string name="action_button_widget_desc">Single action button with Material icon (e.g. open garage)</string>
+    <!--
+      Spoken by TalkBack in place of the ring, which is a purely visual shape.
+      The number it names is the same one the widget prints, so a screen-reader
+      user is not left with a progress bar and no value.
+    -->
+    <string name="health_ring_description">Progress toward your daily step goal</string>
 </resources>
