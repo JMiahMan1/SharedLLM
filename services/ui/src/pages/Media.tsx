@@ -729,7 +729,7 @@ const MediaExplorerModal = ({
       trigger('heavy');
       setItemLoading(id);
       try {
-        if (type === 'audiobook') playAudiobook(id);
+        if (type === 'audiobook') playAudiobook(id, title);
         else if (type === 'playlist') playPlaylist(id);
         else playMedia(id, 'music');
       } finally { setItemLoading(null); }
@@ -1702,14 +1702,18 @@ const Media = () => {
     }
   }, [selectedTarget, trigger, fetchMediaStatus, maPlayer, localVolume, localMuted]);
 
-  const playAudiobook = useCallback(async (bookId: string) => {
+  const playAudiobook = useCallback(async (bookId: string, bookTitle = '') => {
+    const idClean = bookId.replace('abs-', '').replace('ma-', '');
     if (!selectedTarget) {
       trigger('heavy');
       setLoading('play');
       setError(null);
-      const idClean = bookId.replace('abs-', '').replace('ma-', '');
-      const mediaUri = `audiobookshelf://${idClean}`;
       try {
+        // The web player is an MA player, so it needs an MA library URI. An
+        // `audiobookshelf://` id is not one: MA has no media controller for that
+        // media type and the request is rejected, leaving silence. Resolve it
+        // server-side instead of guessing the URI shape here.
+        const { ma_uri: mediaUri } = await api.resolveMALibraryUri(idClean, bookTitle);
         if (!maPlayer.isConnected) {
           console.log('[Media] Connecting MA WebPlayer before play...');
           await maPlayer.connect();
@@ -1729,14 +1733,14 @@ const Media = () => {
     }
     if (selectedTarget.startsWith('ma:')) {
       const pid = selectedTarget.slice(3);
-      const idClean = bookId.replace('abs-', '').replace('ma-', '');
-      const mediaUri = `audiobookshelf://${idClean}`;
       trigger('heavy');
       setLoading('play');
       setError(null);
       try {
+        // Same reason as the web player branch above.
+        const { ma_uri: mediaUri } = await api.resolveMALibraryUri(idClean, bookTitle);
         if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('player_queues/play_media', { queue_id: pid, media: mediaUri, option: 'replace' });
+        await maPlayer.maCommand('player_queues/play_media', { queue_id: pid, media: [mediaUri], option: 'replace' });
       } catch (err) {
         console.error('[Media] MA player audiobook play failed:', err);
         setError(err instanceof Error ? err.message : 'Playback failed');
@@ -1750,7 +1754,7 @@ const Media = () => {
     setLoading('play');
     setError(null);
     try {
-      const resp = await api.playAudiobook({ book_id: bookId, entity_id: selectedTarget, resume: true });
+      const resp = await api.playAudiobook({ book_id: idClean, entity_id: selectedTarget, resume: true });
       if (resp.status === 'FAILURE') setError(resp.message || 'Playback failed');
       else await fetchMediaStatus();
     } catch (err) {
@@ -2203,7 +2207,7 @@ const Media = () => {
                       playLocal(item.id.replace('abs-', ''), item.title, item.subtitle, 'audiobook', 'abs');
                       return;
                     }
-                    playAudiobook(item.id.replace('abs-', ''));
+                    playAudiobook(item.id.replace('abs-', ''), item.title);
                   }
                 : () => {
                     if (localMode) {

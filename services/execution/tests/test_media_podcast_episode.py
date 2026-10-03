@@ -67,7 +67,16 @@ class TestPlayPodcastEpisodeAction:
                 "services.execution.abs_client.start_playback_session",
                 new=AsyncMock(return_value={"id": "sess-1"}),
             ) as mock_session,
-            patch("services.execution.ha_client.get_state", new=AsyncMock(return_value=None)),
+            patch(
+                "services.execution.ha_client.get_state",
+                new=AsyncMock(
+                    return_value={
+                        "state": "playing",
+                        "attributes": {"media_title": "New Episode"},
+                    }
+                ),
+            ),
+            patch("services.execution.handlers.audiobookshelf.PLAYBACK_VERIFY_INTERVAL", 0),
             patch("services.execution.handlers.roku.is_roku_device", new=AsyncMock(return_value=False)),
             patch(
                 "services.execution.ha_client.call_service",
@@ -105,7 +114,16 @@ class TestPlayPodcastEpisodeAction:
                 "services.execution.abs_client.start_playback_session",
                 new=AsyncMock(return_value={"id": "sess-2"}),
             ) as mock_session,
-            patch("services.execution.ha_client.get_state", new=AsyncMock(return_value=None)),
+            patch(
+                "services.execution.ha_client.get_state",
+                new=AsyncMock(
+                    return_value={
+                        "state": "playing",
+                        "attributes": {"media_title": "New Episode"},
+                    }
+                ),
+            ),
+            patch("services.execution.handlers.audiobookshelf.PLAYBACK_VERIFY_INTERVAL", 0),
             patch("services.execution.handlers.roku.is_roku_device", new=AsyncMock(return_value=False)),
             patch("services.execution.ha_client.call_service", new=AsyncMock(return_value={"ok": True})),
         ):
@@ -133,7 +151,16 @@ class TestPlayPodcastEpisodeAction:
                 "services.execution.abs_client.start_playback_session",
                 new=AsyncMock(return_value={"id": "sess-3"}),
             ) as mock_session,
-            patch("services.execution.ha_client.get_state", new=AsyncMock(return_value=None)),
+            patch(
+                "services.execution.ha_client.get_state",
+                new=AsyncMock(
+                    return_value={
+                        "state": "playing",
+                        "attributes": {"media_title": "New Episode"},
+                    }
+                ),
+            ),
+            patch("services.execution.handlers.audiobookshelf.PLAYBACK_VERIFY_INTERVAL", 0),
             patch("services.execution.handlers.roku.is_roku_device", new=AsyncMock(return_value=False)),
             patch("services.execution.ha_client.call_service", new=AsyncMock(return_value={"ok": True})),
         ):
