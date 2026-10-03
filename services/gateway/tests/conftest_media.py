@@ -132,7 +132,22 @@ def client(fake_identity, monkeypatch):
     async def _key_is_valid(api_key: str) -> bool:
         return bool(api_key)
 
+    async def _strict(api_key: str):
+        """Strict identity: the gate used by ``_acting_identity``.
+
+        Routes that must reject anonymous callers (``_require_authenticated``)
+        resolve through ``_resolve_strict_identity``, which asks Identity over
+        HTTP and has no default-user fallback. This fixture models an
+        *authenticated* caller, so any presented key resolves to the test user.
+        Rejection paths build their own client without this stub and so still hit
+        the real lookup (e.g. ``TestMaLibraryUriEndpointRequiresAuth``).
+        """
+        if not api_key:
+            return None
+        return {"user": TEST_USER, "is_admin": True}
+
     monkeypatch.setattr(main, "_api_key_is_valid", _key_is_valid)
+    monkeypatch.setattr(main, "_resolve_strict_identity", _strict)
 
     return TestClient(
         app,

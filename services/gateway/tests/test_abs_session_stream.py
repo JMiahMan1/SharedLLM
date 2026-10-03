@@ -495,3 +495,76 @@ class TestMaLibraryUriEndpoint:
         self._resolver(monkeypatch)
         resp = client.post("/api/media/ma-library-uri", json={"abs_item_id": "book-1"})
         assert resp.status_code == 200
+
+
+class TestMaLibraryUriEndpointRequiresAuth:
+    """An anonymous caller must not reach MA's library index.
+
+    Regression guard. `_resolve_ma_credentials` resolves through
+    `resolve_identity`, which **falls back to the system default user for any
+    string** — so before the strict gate this endpoint answered 200 for a request
+    with no Authorization header at all, and for `Bearer sk-not-a-real-key`. That
+    handed an unauthenticated caller a window onto the whole ABS library index
+    (titles, covers, item ids). The gate must be `_require_authenticated`, which
+    uses `_acting_identity` → `_resolve_strict_identity` and has no fallback.
+    """
+
+    def _resolver(self, monkeypatch):
+        from services.shared import ma_library as ma_lib
+        from services.shared.ma_library import ResolvedAudiobook
+
+        async def _resolve(mass_url, mass_token, abs_item_id, title, **kw):
+            return ResolvedAudiobook(abs_item_id=abs_item_id, ma_uri="library://audiobook/260", title=title)
+
+        monkeypatch.setattr(ma_lib, "resolve_audiobook_uri", _resolve)
+
+    def test_anonymous_is_401(self, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from services.gateway import main
+
+        self._resolver(monkeypatch)
+        resp = TestClient(main.app).post(
+            "/api/media/ma-library-uri", json={"abs_item_id": "book-1", "title": "Narnia"}
+        )
+        assert resp.status_code == 401
+
+    def test_bogus_api_key_is_401(self, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from services.gateway import main
+
+        self._resolver(monkeypatch)
+        resp = TestClient(main.app, headers={"Authorization": "Bearer sk-not-a-real-key"}).post(
+            "/api/media/ma-library-uri", json={"abs_item_id": "book-1", "title": "Narnia"}
+        )
+        assert resp.status_code == 401
+
+    def test_a_valid_key_still_works(self, client, monkeypatch):
+        self._resolver(monkeypatch)
+        resp = client.post("/api/media/ma-library-uri", json={"abs_item_id": "book-1", "title": "Narnia"})
+        assert resp.status_code == 200
+
+    def test_anonymous_never_reaches_the_ma_resolver(self, monkeypatch):
+        """The gate must run before MA is contacted at all.
+
+        Stronger than asserting call order in the source: it observes that the
+        resolver is not invoked, so no amount of reordering can leak the lookup.
+        """
+        from fastapi.testclient import TestClient
+
+        from services.gateway import main
+        from services.shared import ma_library as ma_lib
+
+        calls: list[str] = []
+
+        async def _resolve(*a, **kw):
+            calls.append("called")
+            raise AssertionError("MA was contacted for an anonymous caller")
+
+        monkeypatch.setattr(ma_lib, "resolve_audiobook_uri", _resolve)
+        resp = TestClient(main.app).post(
+            "/api/media/ma-library-uri", json={"abs_item_id": "book-1", "title": "Narnia"}
+        )
+        assert resp.status_code == 401
+        assert calls == []

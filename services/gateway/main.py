@@ -10909,6 +10909,12 @@ async def resolve_ma_library_uri(req: MALibraryURIRequest, request: Request):
     abs_item_id = (req.abs_item_id or "").strip()
     if not abs_item_id:
         raise HTTPException(status_code=422, detail="abs_item_id is required")
+    # Authenticate strictly before touching MA. `_resolve_ma_credentials` goes
+    # through `resolve_identity`, which falls back to the system default user for
+    # *any* string — measured: an anonymous request and `Bearer sk-not-a-real-key`
+    # both got a 200 here, i.e. an open MA lookup. This endpoint reaches MA's
+    # library index, so an unauthenticated caller must be refused outright.
+    await _require_authenticated(request)
     mass_url, mass_token = await _resolve_ma_credentials(request)
     log.info(
         f"[media/ma-library-uri] Resolving MA URI for abs_item_id={abs_item_id} title={req.title!r}"
