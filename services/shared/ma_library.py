@@ -157,10 +157,13 @@ def _iter_candidates(payload) -> list[dict]:
 def _match_by_abs_id(items: list[dict], abs_item_id: str) -> dict | None:
     """The first item MA reports as backed by *this* Audiobookshelf item.
 
-    A blank ``abs_item_id`` (podcast episode) matches the first available
-    audiobookshelf-backed item, so MA's availability check still applies.
+    Matches books and podcasts alike; both carry the ABS id in
+    ``provider_mappings``. An empty ``abs_item_id`` matches nothing — guessing the
+    first available item would hand MA a URI for the wrong media.
     """
     target = (abs_item_id or "").strip().lower()
+    if not target:
+        return None
     for item in items:
         mappings = item.get("provider_mappings")
         if not isinstance(mappings, list):
@@ -170,12 +173,7 @@ def _match_by_abs_id(items: list[dict], abs_item_id: str) -> dict | None:
                 continue
             if str(mapping.get("provider_domain", "")).strip().lower() != "audiobookshelf":
                 continue
-            if target:
-                if str(mapping.get("item_id", "")).strip().lower() != target:
-                    continue
-            elif mapping.get("available") is not True:
-                # No id to match on, so only take an item MA confirms it can
-                # actually fetch rather than whichever result sorted first.
+            if str(mapping.get("item_id", "")).strip().lower() != target:
                 continue
             if mapping.get("available") is False:
                 # Present in MA's index but not currently playable. Skip so a
@@ -192,7 +190,6 @@ async def _resolve_once(
     abs_item_id: str,
     title: str,
     limit: int,
-    allow_idless: bool,
 ) -> ResolvedAudiobook:
     from websockets.asyncio.client import connect
 
@@ -221,10 +218,9 @@ async def _resolve_once(
     items = _iter_candidates(result)
     match = _match_by_abs_id(items, abs_item_id)
     if match is None:
-        subject = f"audiobookshelf item {abs_item_id}" if abs_item_id else f"'{title}'"
         raise MALibraryLookupError(
-            f"Music Assistant does not have {subject} in its library "
-            f"(searched {title!r}, {len(items)} result(s)). "
+            f"Music Assistant does not have Audiobookshelf item {abs_item_id} "
+            f"in its library (searched {title!r}, {len(items)} result(s)). "
             "Add the library to Music Assistant, or pick the book from the "
             "Media Assistant library list so the right item is used.",
             reason="not_in_ma_library",
@@ -250,14 +246,15 @@ async def resolve_audiobook_uri(
     title: str,
     *,
     limit: int = 10,
-    allow_idless: bool = False,
 ) -> ResolvedAudiobook:
-    """Map an Audiobookshelf item id to MA's ``library://audiobook/<n>`` URI.
+    """Map an Audiobookshelf item id to the MA library URI that plays it.
 
-    ``allow_idless=True`` handles podcast episodes, which have no ABS *library
-    item* id (the episode id is not an item id) so there is nothing to match on;
-    it then takes the first result MA reports for the search, still requiring MA
-    to confirm it is backed by an available audiobookshelf item.
+    Works for books (``library://audiobook/<n>``) and podcasts
+    (``library://podcast/<n>``) alike — MA carries the ABS id in each item's
+    ``provider_mappings``, so the id is the reliable key for both. MA does *not*
+    index individual podcast episodes (a search for an episode title returns
+    nothing, and ``library://podcast/<n>?episode=<i>`` is rejected), so an episode
+    resolves to its parent podcast and MA picks the episode.
 
     Raises MALibraryLookupError when MA is unreachable, not configured, or does
     not know the item. Never returns a guessed or raw-URL fallback.
@@ -268,7 +265,7 @@ async def resolve_audiobook_uri(
             reason="no_mass_token",
         )
     abs_item_id = (abs_item_id or "").strip()
-    if not abs_item_id and not allow_idless:
+    if not abs_item_id:
         raise MALibraryLookupError(
             "An Audiobookshelf item id is required to resolve a Music Assistant URI.",
             reason="no_abs_item_id",
@@ -285,9 +282,7 @@ async def resolve_audiobook_uri(
     last_error: Exception | None = None
     for attempt in range(1, CONNECT_ATTEMPTS + 1):
         try:
-            return await _resolve_once(
-                mass_url, mass_token, abs_item_id, query, limit, allow_idless
-            )
+            return await _resolve_once(mass_url, mass_token, abs_item_id, query, limit)
         except MALibraryLookupError:
             # A *lookup* miss will not fix itself on retry. Only transport-level
             # failures are worth a second attempt.

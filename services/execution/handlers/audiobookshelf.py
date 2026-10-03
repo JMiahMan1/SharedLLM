@@ -384,6 +384,8 @@ async def _dispatch_stream(
     req,
     title: str,
     abs_item_id: str | None = None,
+    search_title: str | None = None,
+    ma_media_kind: str = "audiobook",
 ) -> ExecutionResult:
     """Send media to a player (power-on, Roku, MA, or direct) and confirm it plays."""
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
@@ -410,7 +412,7 @@ async def _dispatch_stream(
         )
 
     if is_ma:
-        media_id, ma_note = await _ma_media_id(req, abs_item_id, title)
+        media_id, ma_note = await _ma_media_id(req, abs_item_id, search_title or title, ma_media_kind)
         if media_id is None:
             return ExecutionResult(
                 status="FAILURE",
@@ -450,37 +452,41 @@ async def _dispatch_stream(
     return ExecutionResult(status="SUCCESS", message=f"Now playing: {title}", service="audiobookshelf")
 
 
-async def _ma_media_id(req, abs_item_id: str | None, title: str) -> tuple[str | None, str]:
-    """Get the media_id Music Assistant can actually resolve for this book.
+async def _ma_media_id(
+    req, abs_item_id: str | None, title: str, kind: str = "audiobook"
+) -> tuple[str | None, str]:
+    """Get the media_id Music Assistant can actually resolve for this media.
 
     Returns ``(media_id, note)``; ``media_id`` is None when MA cannot be asked or
-    does not know the item, and ``note`` explains why. ``media_id`` may be a
-    ``library://audiobook/<n>`` URI when the ABS item id is known, or a bare
-    ``library://`` URI for a podcast episode (podcast episodes have no ABS
-    library item id to map from).
+    does not know the item, and ``note`` explains why.
+
+    MA only resolves *library items* — a book (``library://audiobook/<n>``) or a
+    podcast (``library://podcast/<n>``) — and both carry the ABS item id in their
+    ``provider_mappings``, so the lookup is by id for both. What MA cannot do is
+    address an individual podcast *episode*: a search for any episode title
+    returns nothing, and ``library://podcast/<n>?episode=<i>`` is rejected. So a
+    podcast resolves to its show and MA chooses the episode.
     """
     mass_url = ctx_mass_url(req)
     mass_token = ctx_mass_token(req)
 
-    if abs_item_id:
-        try:
-            resolved = await ma_library.resolve_audiobook_uri(
-                mass_url, mass_token, abs_item_id, title
-            )
-        except ma_library.MALibraryLookupError as exc:
-            return None, str(exc)
-        return resolved.ma_uri, ""
-
-    # Podcast episode: MA streams the podcast from its own provider too, but there
-    # is no ABS item id to map from, so MA's own search is the only route.
     if not mass_token:
         return None, (
             "Music Assistant credentials are not configured, so its library cannot be "
-            "resolved. Set MA_URL and MA_TOKEN."
+            "resolved. Set MA_URL and MA_TOKEN, or pick a player that is not a "
+            "Music Assistant player."
+        )
+    if not abs_item_id:
+        # Only reachable if a caller forgets the id; say so rather than falling
+        # back to a title search that would match the wrong thing.
+        what = "podcast" if kind == "podcast" else "book"
+        return None, (
+            f"No Audiobookshelf id was given for this {what}, so Music Assistant's "
+            "library cannot be resolved. This is a bug, not a configuration problem."
         )
     try:
         resolved = await ma_library.resolve_audiobook_uri(
-            mass_url, mass_token, "", title, limit=5, allow_idless=True
+            mass_url, mass_token, abs_item_id, title
         )
     except ma_library.MALibraryLookupError as exc:
         return None, str(exc)
@@ -546,10 +552,24 @@ async def _handle_play_podcast_episode(abs_url: str, abs_key: str, req) -> Execu
 
     stream_url = abs_client.get_session_track_url(session["id"], ctx_user(req))
     log.info(f"[abs] Podcast episode session started: item={req.book_id} episode={episode['id']} session={session['id']}")
-    # A podcast episode id is not an ABS library item id, so `abs_item_id` is
-    # deliberately omitted: _ma_media_id then resolves MA's own search result for
-    # the episode title instead of trying to map a non-existent item.
-    return await _dispatch_stream(stream_url, "application/x-mpegurl", req, episode.get("title") or "Podcast episode")
+    # MA maps the *podcast*, not the episode. Verified live: music/search returns
+    # 0 results for any episode title, but searching the podcast's own title
+    # returns library://podcast/N whose provider_mappings carries this exact ABS
+    # podcast item id. So resolve by the podcast id + podcast title.
+    #
+    # MA has no episode-level URI — `library://podcast/16?episode=0` errors 999 —
+    # so this starts the show; MA picks the episode. Callers that need a specific
+    # episode should use a player that can fetch a URL.
+    podcast_title = ((item.get("media") or {}).get("metadata") or {}).get("title")
+    return await _dispatch_stream(
+        stream_url,
+        "application/x-mpegurl",
+        req,
+        episode.get("title") or "Podcast episode",
+        abs_item_id=req.book_id,
+        search_title=podcast_title,
+        ma_media_kind="podcast",
+    )
 
 
 async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:
