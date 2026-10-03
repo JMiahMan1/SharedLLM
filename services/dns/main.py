@@ -32,6 +32,21 @@ DNS_HEALTH_TIMEOUT = float(os.environ.get("DNS_HEALTH_TIMEOUT", "1.0"))
 DNS_HEALTH_TTL = float(os.environ.get("DNS_HEALTH_TTL", "15.0"))
 DNS_REFRESH_INTERVAL = float(os.environ.get("DNS_REFRESH_INTERVAL", "30.0"))
 
+# How long to wait for an upstream resolver before giving up.
+#
+# This was a hardcoded 2s socket timeout, which silently dropped every lookup
+# whenever the upstream was slower than that — the upstream on this LAN has been
+# measured answering anywhere from 0.6s to 8.7s. A dropped lookup is not reported
+# as a failure to the caller: this resolver returns nothing, Docker's embedded
+# resolver turns that into SERVFAIL, and the service using it just sees
+# "Temporary failure in name resolution". That is how ABS and Music Assistant came
+# to look "down" from inside containers while both were running fine.
+#
+# Overridable so a slow or remote upstream can be tuned without a code change,
+# matching the other knobs above. Raising this cannot break resolution — it only
+# stops giving up before a slow-but-valid answer arrives.
+DNS_UPSTREAM_TIMEOUT = float(os.environ.get("DNS_UPSTREAM_TIMEOUT", "5.0"))
+
 
 class ContainerRegistry:
     """Manages container-to-IP mappings"""
@@ -370,7 +385,7 @@ class _DNSClient:
     def _send_query(self, packet: bytes) -> list | None:
         """Send DNS query and parse response"""
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.settimeout(2)
+            sock.settimeout(DNS_UPSTREAM_TIMEOUT)
             sock.sendto(packet, (self.server, self.port))
 
             response, _ = sock.recvfrom(512)
