@@ -45,6 +45,15 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
     private static final String KEY_LAST_CUMULATIVE = "last_cumulative";
     private static final String KEY_HAS_BASELINE = "has_baseline";
     private static final String KEY_LAST_READ_AT = "last_read_at";
+    /**
+     * Counter anchor for the hourly split. Separate from the day anchor: the day
+     * total deliberately survives a reboot by keeping its running sum, while
+     * hourly credit needs the previous raw reading to measure a delta from, and
+     * overwriting it at midnight would lose the last hour of the day.
+     */
+    private static final String KEY_HOUR_BASELINE = "hour_baseline";
+    private static final String KEY_HOUR_LAST_READ_AT = "hour_baseline_at";
+    private static final String KEY_HOUR_HAS_BASELINE = "hour_has_baseline";
     private static final String KEY_PREFS_VERSION = "prefs_version";
     /**
      * Bumped to 2 by the midnight-carry fix. Installs that stored version < 2
@@ -362,6 +371,69 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
                 .apply();
         // Persist the day rollup: history survives reboots and app kills.
         ledger.recordDay(today, (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps)), StepLedger.SOURCE_PHONE);
+        recordCurrentHour((long) cumulative, now);
         return (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps));
+    }
+
+    /**
+     * Add this reading's steps to the hour it happened in.
+     *
+     * The delta rules live in StepHourAccumulator (testable on a desktop JVM);
+     * this only decides which bucket the credit belongs to and persists it. The
+     * day total is unaffected either way -- an unattributable delta is dropped
+     * from the hourly view, never from the day's count.
+     */
+    private void recordCurrentHour(long cumulative, long now) {
+        SharedPreferences prefs = bridge.getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        StepHourAccumulator.State state = new StepHourAccumulator.State(
+                prefs.getLong(KEY_HOUR_BASELINE, 0L),
+                prefs.getLong(KEY_HOUR_LAST_READ_AT, 0L),
+                prefs.getBoolean(KEY_HOUR_HAS_BASELINE, false));
+
+        int credited = StepHourAccumulator.credit(state, cumulative, now);
+        prefs.edit()
+                .putLong(KEY_HOUR_BASELINE, state.baseline)
+                .putLong(KEY_HOUR_LAST_READ_AT, state.lastReadAt)
+                .putBoolean(KEY_HOUR_HAS_BASELINE, state.hasBaseline)
+                .apply();
+        if (credited > 0) {
+            java.time.LocalDateTime nowLocal = java.time.LocalDateTime.now();
+            ledger.addHour(
+                    nowLocal.toLocalDate().toString(),
+                    nowLocal.getHour(),
+                    credited,
+                    StepLedger.SOURCE_PHONE);
+        }
+    }
+
+    /**
+     * The hour-by-hour split for one local day (today unless asked otherwise).
+     *
+     * Empty `hours` means the ledger has no hourly detail for that day -- the
+     * app was not running, or the phone predates this feature. It is reported
+     * as empty rather than as 24 zero buckets, so the UI can say "no hourly
+     * detail" instead of drawing a day of someone sitting still.
+     */
+    @PluginMethod
+    public void getHourlySteps(PluginCall call) {
+        String day = call.getString("day");
+        if (day == null || day.isEmpty()) {
+            day = java.time.LocalDate.now().toString();
+        }
+        JSArray hours = new JSArray();
+        for (StepLedger.HourEntry entry : ledger.hoursFor(day, StepLedger.SOURCE_PHONE)) {
+            JSObject row = new JSObject();
+            row.put("day", entry.day);
+            row.put("hour", entry.hour);
+            row.put("steps", entry.steps);
+            row.put("source", entry.source);
+            row.put("updatedAt", entry.updatedAt / 1000.0);
+            hours.put(row);
+        }
+        JSObject ret = new JSObject();
+        ret.put("day", day);
+        ret.put("hours", hours);
+        ret.put("source", StepLedger.SOURCE_PHONE);
+        call.resolve(ret);
     }
 }

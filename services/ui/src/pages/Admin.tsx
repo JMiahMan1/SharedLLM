@@ -32,6 +32,7 @@ import {
   PowerOff,
   RefreshCw,
   Users,
+  Sparkles,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
@@ -56,6 +57,7 @@ import HardwarePanel from '../components/settings/HardwarePanel';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 import DnsManagementPanel from '../components/settings/DnsManagementPanel';
 import TelemetryAdminPanel from '../components/settings/TelemetryAdminPanel';
+import StarBalance from '../components/wander/StarBalance';
 
 type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database' | 'services';
 
@@ -194,6 +196,7 @@ const Admin = () => {
   const [intercomSessionTarget, setIntercomSessionTarget] = useState('');
   const [intercomSessionType, setIntercomSessionType] = useState<'twoway' | 'broadcast' | 'announcement'>('twoway');
   const [activePullService, setActivePullService] = useState<string | null>(null);
+  const [starUser, setStarUser] = useState('');
 
   const { data: users = [] } = useQuery<UserProfile[]>({
     queryKey: ['users'],
@@ -822,6 +825,43 @@ const Admin = () => {
               </div>
             </section>
           </div>
+
+          <section className="glass-panel p-6 min-w-0 overflow-hidden" data-testid="admin-stars">
+            <div className="mb-6 flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <h3 className="flex items-center gap-3 text-xl font-bold text-white">
+                  <Sparkles size={20} className="text-amber-300" />
+                  Bonus Stars
+                </h3>
+                <p className="mt-1 text-sm text-slate-400">
+                  Stars are recorded in the ledger first, then mirrored to that
+                  person&rsquo;s Skylight account — so a Skylight outage cannot lose
+                  the award, and a failed mirror is reported rather than hidden.
+                </p>
+              </div>
+              <select
+                value={starUser}
+                onChange={(event) => setStarUser(event.target.value)}
+                aria-label="Star recipient"
+                className="glass-input px-3 py-2 text-sm min-h-11 pointer-coarse:min-h-11"
+              >
+                <option value="">Choose a person…</option>
+                {users.map((user) => (
+                  <option key={user.username} value={user.username}>
+                    {user.full_name || user.username} (@{user.username})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {starUser ? (
+              <StarBalance userId={starUser} admin />
+            ) : (
+              <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
+                Pick who the stars are for. Nothing is granted until someone is chosen.
+              </p>
+            )}
+          </section>
 
           <section className="glass-panel p-6 min-w-0 overflow-hidden">
             <div className="mb-6 flex items-center justify-between">

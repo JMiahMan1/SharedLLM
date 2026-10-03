@@ -31,6 +31,26 @@ export interface StepLedgerHistory {
   source: string;
 }
 
+/** One recorded hour bucket of the on-device ledger. */
+export interface StepLedgerHour {
+  day: string;
+  hour: number;
+  steps: number;
+  source: string;
+  updatedAt?: number;
+}
+
+/**
+ * Hours recorded for `day` (defaults to today). Empty when the phone has
+ * never reported hourly steps — that absence is meaningful, so it is not
+ * padded out to 24 zero buckets.
+ */
+export interface StepLedgerHours {
+  day: string;
+  hours: StepLedgerHour[];
+  source: string;
+}
+
 export interface StepCounterPluginInterface {
   isAvailable(): Promise<StepCounterAvailability>;
   requestPermission(): Promise<StepPermissionResult>;
@@ -39,6 +59,8 @@ export interface StepCounterPluginInterface {
   getDayHistory(options?: { days?: number }): Promise<StepLedgerHistory>;
   /** Days recorded after `since` (exclusive), oldest first — used for backfill. */
   getDaysSince(options: { since?: string; max?: number }): Promise<StepLedgerHistory>;
+  /** Hour-by-hour breakdown for one local day (the phone's own timezone). */
+  getHourlySteps(options?: { day?: string }): Promise<StepLedgerHours>;
   startPolling(): Promise<void>;
   stopPolling(): Promise<void>;
   /** Open this app's system settings page (for permanently denied permissions). */
@@ -57,6 +79,7 @@ const webFallback: StepCounterPluginInterface = {
   getTodaySteps: async () => ({ available: false }),
   getDayHistory: async () => ({ days: [], source: "phone" }),
   getDaysSince: async () => ({ days: [], source: "phone" }),
+  getHourlySteps: async () => ({ day: "", hours: [], source: "phone" }),
   startPolling: async () => undefined,
   stopPolling: async () => undefined,
   openSettings: async () => undefined,

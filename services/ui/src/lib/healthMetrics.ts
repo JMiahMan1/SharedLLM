@@ -171,6 +171,21 @@ export function formatCount(value: number): string {
   return finite(value, 0).toLocaleString();
 }
 
+/**
+ * A 0-23 hour as a person says it: "9am", "12pm", "11pm".
+ *
+ * Hours are the *phone's* local hours, so the caller must not re-derive them
+ * from the browser's clock — that mismatch is what makes a traveller's chart
+ * disagree with the rest of their day. Midnight is 12am, not 0am.
+ */
+export function hourOfDay(hour: number): string {
+  const h = Math.round(finite(hour, 0));
+  const clamped = h < 0 ? 0 : h > 23 ? 23 : h;
+  const suffix = clamped < 12 ? 'am' : 'pm';
+  const twelve = clamped % 12 === 0 ? 12 : clamped % 12;
+  return `${twelve}${suffix}`;
+}
+
 /** A running workout's elapsed time, floored at zero so a clock skew or a
  * server timestamp slightly in the future cannot render `-0:04`. */
 export function elapsedLabel(startTimeSeconds: number, nowSeconds: number): string {

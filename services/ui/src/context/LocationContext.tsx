@@ -317,6 +317,27 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
+   * The phone's local hour buckets for `day` (defaults to today).
+   *
+   * Browsers and pre-hourly builds have no hourly ledger, and a day the phone
+   * never recorded has no buckets at all. Both return `[]` so the caller sends
+   * no `hourly` key — an absent measurement, never 24 fabricated zeros.
+   */
+  const readHourlySteps = useCallback(async (day?: string): Promise<Array<{ hour: number; steps: number }>> => {
+    if (!Capacitor.isNativePlatform()) return [];
+    try {
+      const res = await StepCounter.getHourlySteps(day ? { day } : undefined);
+      return (res?.hours ?? [])
+        .map((h) => ({ hour: h.hour, steps: h.steps }))
+        .filter((h) => Number.isInteger(h.hour) && h.hour >= 0 && h.hour <= 23 && h.steps > 0)
+        .sort((a, b) => a.hour - b.hour);
+    } catch (err) {
+      logSensor('steps', 'hourly step read failed', err);
+      return [];
+    }
+  }, []);
+
+  /**
    * Reconcile missed days from the on-device ledger.
    *
    * The ledger is the source of truth for days the app never got to sync (app
@@ -343,9 +364,14 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       }
 
       let newest = since ?? '';
+      const today = new Date().toLocaleDateString('en-CA');
       for (const entry of history.days) {
         // Noon local keeps the reading clearly inside its own day.
         const ts = new Date(`${entry.day}T12:00:00`).getTime() / 1000;
+        // Hours are only ever charted for today, so ask the ledger for them
+        // once. Days before the hourly ledger existed have no hour rows and
+        // would only cost a pointless plugin call each.
+        const hourly = entry.day === today ? await readHourlySteps(entry.day) : [];
         const resp = await fetch(`${serverUrl}/api/geo/steps`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -355,6 +381,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
             timestamp: ts,
             source: entry.source || 'phone',
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            ...(hourly.length ? { hourly } : {}),
           }),
         });
         if (!resp.ok) {
@@ -368,7 +395,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       logSensor('steps', 'ledger backfill failed', err);
     }
-  }, [ resolveSyncUsername ]);
+  }, [ readHourlySteps, resolveSyncUsername ]);
 
   const syncDailySteps = useCallback(async () => {
     if (!sensorsRef.current.steps.enabled) return;
@@ -389,16 +416,21 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // Hours only ever gain a bucket when a pedometer delta was credited, and
+      // that same delta is what moved the day total — so the unchanged-total
+      // early return above cannot leave new hour data stranded.
+      const hourly = await readHourlySteps();
       const resp = await fetch(`${serverUrl}/api/geo/steps`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-        user_id: user,
-        steps: dailyStepsRef.current,
-        timestamp: Date.now() / 1000,
-        source: 'phone',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      }),
+          user_id: user,
+          steps: dailyStepsRef.current,
+          timestamp: Date.now() / 1000,
+          source: 'phone',
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          ...(hourly.length ? { hourly } : {}),
+        }),
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => '');
@@ -412,7 +444,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       logSensor('steps', 'sync failed', err);
       markRecovering('steps', 'read', true, sensorErrorMessage(err, 'Step sync failed'));
     }
-  }, [ patchSensor, resolveSyncUsername ]);
+  }, [ patchSensor, readHourlySteps, resolveSyncUsername ]);
 
   /**
    * Single 30 s step-sync cadence.

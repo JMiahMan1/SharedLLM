@@ -5,11 +5,13 @@ import { useHaptics } from '../hooks/useHaptics';
 import { api } from '../services/api';
 import ActivityRings from '../components/health/ActivityRings';
 import StepHistoryChart from '../components/health/StepHistoryChart';
+import StepHourChart from '../components/health/StepHourChart';
 import StepRangeSelector from '../components/health/StepRangeSelector';
 import MetricDetailCards from '../components/health/MetricDetailCards';
 import EventTimeline from '../components/health/EventTimeline';
 import { heroInsight } from '../lib/healthRanges';
-import type { StepRange, Workout } from '../types/api';
+import { hourOfDay } from '../lib/healthMetrics';
+import type { StepRange, StepRangeResponse, Workout } from '../types/api';
 import AchievementsPanel from '../components/wander/AchievementsPanel';
 import FamilyActivityCard from '../components/health/FamilyActivityCard';
 import RoutePreview from '../components/geo/RoutePreview';
@@ -43,16 +45,13 @@ import {
   workoutsQueryKey,
 } from '../lib/healthQueries';
 import {
-  dailyStepSeries,
   elapsedLabel,
   formatCount,
   paceLabel,
-  stepDayLabel,
   stepSourcesLabel,
   stepsSummary,
   syncAdvice,
   syncStatus,
-  type DailyStepPoint,
   type StepsSummary,
 } from '../lib/healthMetrics';
 
@@ -125,8 +124,6 @@ const Health = () => {
   const rangeData = rangeQuery.data ?? null;
 
   const summary = stepsSummary(steps);
-  const series = useMemo(() => dailyStepSeries(steps?.daily_steps, 7), [steps?.daily_steps]);
-  const seriesMax = useMemo(() => Math.max(1, ...series.map((p) => p.steps)), [series]);
   // A number with no age is a number you cannot trust; geo exposes
   // `last_synced` precisely so a frozen reading is distinguishable from a
   // live one.
@@ -236,8 +233,6 @@ const Health = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
         <StepsCard
           summary={summary}
-          series={series}
-          seriesMax={seriesMax}
           sources={stepSourcesLabel(steps?.sources)}
           sync={sync}
           syncHint={syncHint}
@@ -256,22 +251,15 @@ const Health = () => {
           baseline={rangeData?.baseline ?? null}
           thin={rangeData?.thin ?? false}
           baselineMinDays={rangeData?.baseline_min_days ?? null}
+          range={range}
+          onRangeChange={setRange}
+          rangeData={rangeData}
+          rangeLoading={rangeQuery.isLoading}
+          rangeError={rangeQuery.isError}
         />
 
         <AchievementsPanel userId={currentUsername} />
         <FamilyActivityCard />
-
-        <div className="lg:col-span-3">
-          <StepHistorySection
-            today={summary.today}
-            goal={summary.goal}
-            range={range}
-            onRangeChange={setRange}
-            data={rangeData}
-            isLoading={rangeQuery.isLoading}
-            isError={rangeQuery.isError}
-          />
-        </div>
       </div>
 
       {/* Shares the range selector's state with the step history above, so the
@@ -366,8 +354,6 @@ const Health = () => {
 
 interface StepsCardProps {
   summary: StepsSummary;
-  series: DailyStepPoint[];
-  seriesMax: number;
   sources: string | null;
   sync: ReturnType<typeof syncStatus>;
   syncHint: string | null;
@@ -384,6 +370,11 @@ interface StepsCardProps {
   /** True when the baseline is not yet trustworthy. */
   thin?: boolean;
   baselineMinDays?: number | null;
+  range: StepRange;
+  onRangeChange: (r: StepRange) => void;
+  rangeData: StepRangeResponse | null;
+  rangeLoading: boolean;
+  rangeError: boolean;
 }
 
 function StepsCard({
@@ -391,8 +382,6 @@ function StepsCard({
   thin,
   baselineMinDays,
   summary,
-  series,
-  seriesMax,
   sources,
   sync,
   syncHint,
@@ -404,23 +393,39 @@ function StepsCard({
   onGoalDraft,
   onCancelGoal,
   onSaveGoal,
+  range,
+  onRangeChange,
+  rangeData,
+  rangeLoading,
+  rangeError,
 }: StepsCardProps) {
+  const insight = useMemo(
+    () => heroInsight(rangeData, summary.today, summary.goal),
+    [rangeData, summary.today, summary.goal],
+  );
+
   return (
     <section
       className="glass-panel p-4 rounded-2xl border border-white/5 flex flex-col gap-3"
       aria-labelledby="steps-heading"
       data-testid="steps-card"
     >
-      <div className="flex items-center gap-4">
-        <ActivityRings
-          rings={[{ id: 'steps', label: 'Steps Today', actual: summary.today, goal: summary.goal, unit: 'steps' }]}
-          baseline={baseline}
-          defaultGoal={summary.goal}
-          thin={thin}
-          baselineMinDays={baselineMinDays}
-        />
+      <div className="flex items-center gap-4 flex-wrap">
+        {/* The ring is fixed-size and its "needs more history" caption sets the
+            width, so on a phone it claimed almost the whole row and squeezed the
+            number into 6px of clipped text. The text drops to its own line
+            instead of being cropped. */}
+        <div className="shrink-0">
+          <ActivityRings
+            rings={[{ id: 'steps', label: 'Steps Today', actual: summary.today, goal: summary.goal, unit: 'steps' }]}
+            baseline={baseline}
+            defaultGoal={summary.goal}
+            thin={thin}
+            baselineMinDays={baselineMinDays}
+          />
+        </div>
 
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-[10rem]">
           <h3
             id="steps-heading"
             className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold"
@@ -487,24 +492,94 @@ function StepsCard({
         </div>
       )}
 
-      {/* Sorted oldest-first; the previous version trusted Redis hash field
-          order, so a bucket could be labelled with the wrong weekday. */}
-      {summary.hasData && series.length > 0 && (
-        <div className="flex items-end gap-1.5 h-14" data-testid="steps-sparkline">
-          {series.map((point) => (
-            <div key={point.date} className="flex-1 flex flex-col items-center gap-1 min-w-0">
-              <div
-                className="w-full rounded-t bg-purple-500/50"
-                style={{ height: `${Math.max(6, (point.steps / seriesMax) * 100)}%` }}
-                title={`${stepDayLabel(point.date)}: ${formatCount(point.steps)} steps`}
-              />
-              <span className="text-[9px] text-slate-500 truncate w-full text-center">
-                {point.weekday}
-              </span>
-            </div>
-          ))}
+      {/* The history lives *inside* this card rather than in a second one: it
+          is the same quantity, and a "Step History" panel stacked under a
+          "Steps Today" panel reads as two competing answers to one question.
+          The 7-day sparkline it replaces is what this chart supersedes. */}
+      <div className="border-t border-white/5 pt-3 flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
+            <TrendingUp size={13} className="text-purple-400" />
+            <h4 id="steps-history-heading">Step History</h4>
+          </div>
+          <StepRangeSelector value={range} onChange={onRangeChange} />
         </div>
-      )}
+
+        {rangeLoading ? (
+          <div className="h-24 skeleton rounded-xl" aria-hidden />
+        ) : rangeError ? (
+          <p data-testid="history-error" className="text-xs text-red-300">
+            Could not load step history.
+          </p>
+        ) : !rangeData ? null : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-4 text-center">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">Total</p>
+                <p data-testid="history-total" className="text-lg font-bold text-white tabular-nums">
+                  {formatCount(rangeData.total)}
+                </p>
+              </div>
+              {/* On the day view a "daily average" and a "best day" are both
+                  just today's total again — the one number worth pairing with
+                  it is when the day happened. */}
+              {range === 'D' ? (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500">Busiest hour</p>
+                  <p data-testid="history-peak-hour" className="text-lg font-bold text-white tabular-nums">
+                    {rangeData.peak ? hourOfDay(rangeData.peak.hour) : '—'}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500">Daily avg</p>
+                    <p data-testid="history-average" className="text-lg font-bold text-white tabular-nums">
+                      {formatCount(Math.round(rangeData.daily_average))}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500">Best</p>
+                    <p className="text-lg font-bold text-white tabular-nums">
+                      {rangeData.best ? formatCount(rangeData.best.steps) : '—'}
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {insight && (
+              <div
+                data-testid="history-insight"
+                className="text-xs text-purple-200 bg-purple-500/10 border border-purple-500/20 rounded-lg p-2.5"
+              >
+                <p className="font-semibold">{insight.headline}</p>
+                {insight.detail && <p className="mt-0.5 text-purple-200/70">{insight.detail}</p>}
+              </div>
+            )}
+
+            <StepHistoryChart buckets={rangeData.buckets} partial={range === 'D' ? summary.today : 0} />
+
+            {/* A day is one bar wide, so the day view charts the hours inside
+                it instead. The phone's own clock decides which hours are
+                "ahead" — the day is not over. */}
+            {range === 'D' && (
+              <>
+                <h4 className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
+                  By the Hour
+                </h4>
+                <StepHourChart hours={rangeData.hourly} />
+              </>
+            )}
+
+            {!rangeData.thin && rangeData.baseline ? (
+              <p className="text-[10px] text-slate-500">
+                Your usual day is about {formatCount(rangeData.baseline)} steps (median of your history).
+              </p>
+            ) : null}
+          </div>
+        )}
+      </div>
 
       {(sources || sync.label || syncHint) && (
         <div className="text-[11px] text-slate-500 space-y-0.5">
@@ -722,108 +797,6 @@ function Stat({ label, value }: { label: string; value: string }) {
       <span className="text-[10px] text-slate-400 uppercase font-semibold">{label}</span>
       <p className="text-base font-bold text-purple-300 mt-0.5">{value}</p>
     </div>
-  );
-}
-
-/**
- * Range-aware step history: the Oura/Fitbit pattern, on top of the
- * server-aggregated /steps/ranges payload.
- *
- * The 7-Day Activity Trends section below is left exactly as it was. It is
- * wired to the existing integrations, and replacing it would have traded a
- * working feature for a new one; this sits alongside it instead.
- */
-function StepHistorySection({
-  today,
-  goal,
-  range,
-  onRangeChange,
-  data,
-  isLoading,
-  isError,
-  narrow,
-}: {
-  today: number;
-  goal: number;
-  range: StepRange;
-  onRangeChange: (r: StepRange) => void;
-  data: import('../types/api').StepRangeResponse | null;
-  isLoading: boolean;
-  isError: boolean;
-  narrow?: boolean;
-}) {
-  const insight = useMemo(
-    () => heroInsight(data, today, goal),
-    [data, today, goal],
-  );
-
-  return (
-    <section
-      className="glass-panel p-4 rounded-2xl border border-white/5"
-      aria-labelledby="history-heading"
-      data-testid="step-history-section"
-    >
-      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-        <div className="flex items-center gap-1.5 text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
-          <TrendingUp size={13} className="text-purple-400" />
-          <h2 id="history-heading">Step History</h2>
-        </div>
-        <StepRangeSelector value={range} narrow={narrow} onChange={onRangeChange} />
-      </div>
-
-      {isLoading ? (
-        <div className="h-24 skeleton rounded-xl" aria-hidden />
-      ) : isError ? (
-        <p data-testid="history-error" className="text-xs text-red-300">
-          Could not load step history.
-        </p>
-      ) : !data ? null : (
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-4 text-center">
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">Total</p>
-              <p data-testid="history-total" className="text-lg font-bold text-white tabular-nums">
-                {formatCount(data.total)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">Daily avg</p>
-              <p data-testid="history-average" className="text-lg font-bold text-white tabular-nums">
-                {formatCount(Math.round(data.daily_average))}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">Best</p>
-              <p className="text-lg font-bold text-white tabular-nums">
-                {data.best ? formatCount(data.best.steps) : '—'}
-              </p>
-            </div>
-          </div>
-
-          {insight && (
-            <div
-              data-testid="history-insight"
-              className="text-xs text-purple-200 bg-purple-500/10 border border-purple-500/20 rounded-lg p-2.5"
-            >
-              <p className="font-semibold">{insight.headline}</p>
-              {insight.detail && <p className="mt-0.5 text-purple-200/70">{insight.detail}</p>}
-            </div>
-          )}
-
-          <StepHistoryChart
-            buckets={data.buckets}
-            partial={range === 'D' ? today : 0}
-            className="pt-1"
-          />
-
-          {!data.thin && data.baseline ? (
-            <p className="text-[10px] text-slate-500">
-              Your usual day is about {formatCount(data.baseline)} steps (median of your history).
-            </p>
-          ) : null}
-        </div>
-      )}
-    </section>
   );
 }
 

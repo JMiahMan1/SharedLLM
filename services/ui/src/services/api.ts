@@ -104,6 +104,7 @@ import type {
   ActivityGoals,
   StarsResponse,
   StarGrant,
+  AdminStarGrantResponse,
   TelemetryNotification,
   TelemetryReport,
   TelemetryReportPeriod,
@@ -1087,6 +1088,30 @@ export const api = {
     note?: string;
   }): Promise<StarGrant> {
     const resp = await apiClient.post('/api/geo/stars', payload);
+    return resp.data;
+  },
+
+  /**
+   * Admin grant that mirrors into the target's Skylight account.
+   *
+   * The target is the path, never a body field: a body `user_id` could disagree
+   * with the URL and there would be no way to tell which one the stars went to.
+   * The ledger write and the mirror are reported apart, so an admin surface can
+   * say "recorded, mirror failed" instead of guessing.
+   */
+  async grantStarsForUser(
+    userId: string,
+    payload: {
+      stars: number;
+      reason?: string;
+      note?: string;
+      mirror_to_skylight?: boolean;
+    },
+  ): Promise<AdminStarGrantResponse> {
+    const resp = await apiClient.post(
+      `/api/admin/users/${encodeURIComponent(userId)}/stars`,
+      payload,
+    );
     return resp.data;
   },
 
