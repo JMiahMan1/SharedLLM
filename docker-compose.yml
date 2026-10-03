@@ -141,7 +141,11 @@ services:
       - WORKSPACE_RUNTIME_SVC_URL=${HOST_WORKSPACE_RUNTIME_SVC_URL}
       - REDIS_URL=${HOST_REDIS_URL}
       - SEARXNG_URL=${HOST_SEARXNG_URL}
-       - EXECUTION_EXTERNAL_HOST=192.168.2.205
+      # Execution runs on the host network, so the address it hands to TVs,
+      # speakers and phones must be the host's own external/LAN address —
+      # never a docker service alias. Sourced from .env (untracked, per install)
+      # instead of baking one private address into this shared file.
+      - EXECUTION_EXTERNAL_HOST=${EXECUTION_EXTERNAL_HOST}
       - TEMP_MEDIA_DIR=/workspaces
       - MODELS_DIR=/workspaces/models
       - TZ=America/Phoenix

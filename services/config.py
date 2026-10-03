@@ -74,7 +74,7 @@ LOGGING_SVC_URL = _net_url("LOGGING", "http://logging:8006")
 WORKSPACE_RUNTIME_SVC_URL = _net_url("WORKSPACE_RUNTIME", "http://workspace_runtime:8007")
 GEO_SVC_URL = _net_url("GEO", "http://geo:8009")
 CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
-SEARXNG_URL = os.getenv(f"{NETWORK_MODE}_SEARXNG_URL") or os.getenv("SEARXNG_URL", "")
+SEARXNG_URL = os.getenv(f"{NETWORK_MODE.upper()}_SEARXNG_URL") or os.getenv("SEARXNG_URL", "")
 HA_URL = os.getenv("HA_URL")
 HA_TOKEN = os.getenv("HA_TOKEN")
 NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
@@ -83,7 +83,7 @@ NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
 GIT_URL = os.getenv("GIT_URL")
 GIT_USER = os.getenv("GIT_USER")
 GIT_TOKEN = os.getenv("GIT_TOKEN")
-REDIS_URL = os.getenv(f"{NETWORK_MODE}_REDIS_URL") or os.getenv("REDIS_URL", "redis://redis:6379/0")
+REDIS_URL = os.getenv(f"{NETWORK_MODE.upper()}_REDIS_URL") or os.getenv("REDIS_URL", "redis://redis:6379/0")
 LOG_RETENTION_DAYS = 30
 LOG_MAX_ENTRIES = 10000
 # Hard wall-clock cap for one Raven mission. Must stay in sync with the
@@ -184,6 +184,12 @@ async def resolve_runtime_config():
     # by host-network services.
     settings_map = {
         "llm_local_url": "OLLAMA_URL",
+        # These are Identity *setting keys*, which are lowercase by convention
+        # (host_searxng_url, bridge_searxng_url — see services/identity/seed.py),
+        # so NETWORK_MODE is interpolated lowercased here on purpose. Do NOT
+        # "fix" these to .upper(): the env-var lookups above use uppercase
+        # because that is how .env spells them (HOST_SEARXNG_URL), and the two
+        # namespaces genuinely differ.
         f"{NETWORK_MODE}_execution_svc_url": "EXECUTION_SVC_URL",
         f"{NETWORK_MODE}_rag_svc_url": "RAG_SVC_URL",
         f"{NETWORK_MODE}_storage_svc_url": "STORAGE_SVC_URL",
