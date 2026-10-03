@@ -9645,16 +9645,24 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
     # Not a playlist (direct audio on some deployments): stream bytes through.
     async def stream_generator(cli, r):
         bytes_sent = 0
-        async for chunk in r.content.iter_chunked(64 * 1024):
-            try:
-                if await request.is_disconnected():
-                    log.info(f"[stream/abs-session/generator] Client disconnected after {bytes_sent} bytes")
-                    break
-            except Exception:
-                pass
-            yield chunk
-            bytes_sent += len(chunk)
-        log.info(f"[stream/abs-session/generator] Finished streaming {bytes_sent} bytes")
+        try:
+            async for chunk in r.content.iter_chunked(64 * 1024):
+                try:
+                    if await request.is_disconnected():
+                        log.info(f"[stream/abs-session/generator] Client disconnected after {bytes_sent} bytes")
+                        break
+                except Exception:
+                    pass
+                yield chunk
+                bytes_sent += len(chunk)
+            log.info(f"[stream/abs-session/generator] Finished streaming {bytes_sent} bytes")
+        finally:
+            # The session outlives this request unless it is closed here. An
+            # unclosed ClientSession keeps its connector (and its pool) alive
+            # until the event loop is garbage collected, so a device pulling HLS
+            # segments leaks one pool per segment for the life of the track.
+            await r.release()
+            await cli.close()
 
     response_headers = {"Accept-Ranges": "bytes", "Cache-Control": "no-cache"}
     for key in ("Content-Range", "Content-Length", "Content-Type"):
@@ -9695,15 +9703,21 @@ async def stream_abs_session_segment(session_id: str, track_index: int, segment:
 
     async def stream_generator(cli, r):
         bytes_sent = 0
-        async for chunk in r.content.iter_chunked(64 * 1024):
-            try:
-                if await request.is_disconnected():
-                    break
-            except Exception:
-                pass
-            yield chunk
-            bytes_sent += len(chunk)
-        log.info(f"[stream/abs-session/segment] Finished streaming {bytes_sent} bytes for {segment}")
+        try:
+            async for chunk in r.content.iter_chunked(64 * 1024):
+                try:
+                    if await request.is_disconnected():
+                        break
+                except Exception:
+                    pass
+                yield chunk
+                bytes_sent += len(chunk)
+            log.info(f"[stream/abs-session/segment] Finished streaming {bytes_sent} bytes for {segment}")
+        finally:
+            # One of these runs per HLS segment; without the close each one
+            # strands a ClientSession and its connector for the whole track.
+            await r.release()
+            await cli.close()
 
     response_headers = {"Accept-Ranges": "bytes", "Cache-Control": "no-cache"}
     for key in ("Content-Range", "Content-Length", "Content-Type"):
