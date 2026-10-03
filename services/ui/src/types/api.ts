@@ -1038,6 +1038,22 @@ export interface StepRangeResponse {
   has_gaps: boolean;
   /** Null when no day in the window was actually measured. */
   best: { label: string; steps: number } | null;
+  /**
+   * Hour-by-hour breakdown, sent only for `range: 'D'` and only once the
+   * phone has actually reported hours. Deliberately optional rather than an
+   * empty array: an unrecorded day must not look like 24 hours of zero.
+   */
+  hourly?: StepHourBucket[];
+  /** The busiest recorded hour of today, or absent along with `hourly`. */
+  peak?: StepHourBucket;
+}
+
+export interface StepHourBucket {
+  /** 0-23, the phone's own local hour. */
+  hour: number;
+  /** Server-formatted `HH:00` label. */
+  label: string;
+  steps: number;
 }
 
 /**
@@ -1190,6 +1206,24 @@ export interface StarsResponse {
   user_id: string;
   stars: number;
   grants: StarGrant[];
+}
+
+/**
+ * The Skylight half of an admin grant.
+ *
+ * Reported separately from the ledger write on purpose: the ledger is the source
+ * of truth and a mirror failure must not undo a grant, so the UI says "recorded,
+ * mirror failed" rather than pretending either both or neither happened.
+ */
+export interface StarMirrorOutcome {
+  status: 'SUCCESS' | 'FAILURE' | 'SKIPPED';
+  message?: string;
+}
+
+export interface AdminStarGrantResponse {
+  user_id: string;
+  ledger: StarGrant;
+  skylight: StarMirrorOutcome;
 }
 
 export interface ActivityGoals {

@@ -491,6 +491,91 @@ async def _record_daily_steps(
         log.warning(f"[Geo] Failed to record daily steps for {clean_id}: {e}")
 
 
+async def _record_hourly_steps(
+    r,
+    clean_id: str,
+    hourly,
+    day: str,
+    source: str,
+):
+    """Record the phone's hour-by-hour breakdown for `day`.
+
+    The phone owns the hour arithmetic: it accumulates deltas from the
+    cumulative pedometer into `hours(day, hour, source)` and uploads the running
+    hour totals. So each bucket here keeps the **max** seen, exactly like a day
+    bucket -- a re-upload of the same hour is idempotent and can never lower an
+    hour that was already credited.
+
+    Hours are the phone's *local* hours and belong to the same day the phone
+    computed it under, so `day` is passed in rather than re-derived here from a
+    timestamp that would silently disagree with the phone's own midnight.
+    """
+    if not isinstance(hourly, (list, tuple)):
+        log.warning("[Steps] Ignoring hourly steps for %s: not a list", clean_id)
+        return 0
+    key = f"geo:steps_hourly:{clean_id}:{source}"
+    written = 0
+    for entry in hourly:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            hour = int(entry["hour"])
+            steps = int(entry["steps"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if hour < 0 or hour > 23 or steps <= 0 or steps > 200000:
+            continue
+        field = f"{day}:{hour:02d}"
+        try:
+            existing_raw = await r.hget(key, field)
+            try:
+                existing = int(existing_raw) if existing_raw else 0
+            except (TypeError, ValueError):
+                existing = 0
+            if steps > existing:
+                await r.hset(key, field, steps)
+            written += 1
+        except Exception as e:
+            log.warning(f"[Geo] Failed to record hourly steps {clean_id} {field}: {e}")
+    if written:
+        await r.hset(f"geo:steps_hourly_meta:{clean_id}", "updated_at", str(time.time()))
+    return written
+
+
+async def _get_hourly_steps(r, clean_id: str, day: str, source: str = "phone") -> list[dict]:
+    """Recorded hour buckets for one day, oldest hour first.
+
+    Returns ``[]`` when the day has never been reported -- an honest absence,
+    never a list of 24 zeros, because "your phone hasn't reported hourly steps
+    yet" and "you sat still for 24 hours" are completely different facts.
+    """
+    try:
+        raw = await r.hgetall(f"geo:steps_hourly:{clean_id}:{source}")
+    except Exception as e:
+        log.warning(f"[Geo] Failed to read hourly steps for {clean_id}: {e}")
+        return []
+    prefix = f"{day}:"
+    buckets: list[dict] = []
+    for field, value in raw.items():
+        name = field.decode() if isinstance(field, bytes) else str(field)
+        if not name.startswith(prefix):
+            continue
+        try:
+            hour = int(name[len(prefix):])
+            steps = int(value)
+        except (TypeError, ValueError):
+            continue
+        if hour < 0 or hour > 23 or steps < 0:
+            continue
+        buckets.append({
+            "hour": hour,
+            "label": f"{hour:02d}:00",
+            "steps": steps,
+        })
+    buckets.sort(key=lambda b: b["hour"])
+    return buckets
+
+
 async def _get_daily_steps(r, clean_id: str, days: int = 30) -> dict:
     """Daily step history: {date: steps} for the last N days (oldest first).
 
@@ -2428,9 +2513,16 @@ async def post_daily_steps(
     """Ingest a hardware pedometer reading (cumulative daily step counter).
 
     Body: {"user_id": "...", "steps": 12345, "timestamp": 1690000000 (optional),
-           "timezone": "America/Phoenix" (optional; the phone's own zone)}
+           "timezone": "America/Phoenix" (optional; the phone's own zone),
+           "hourly": [{"hour": 9, "steps": 840}, ...] (optional)}
     Also accepted via location updates (`daily_steps` field) so the phone can
     piggyback on breadcrumb posts.
+
+    `hourly` is the phone's own hour-by-hour breakdown for the day that
+    `timestamp` resolves to in `timezone` -- the day the phone itself filed the
+    reading under, so the hours land in the same bucket the total does. Builds
+    that predate the hourly ledger simply omit it, and a day with no hourly
+    detail stays absent rather than becoming 24 fabricated zeros.
     """
     if not _verify_internal_secret(x_internal_secret, query_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -2452,7 +2544,22 @@ async def post_daily_steps(
         source=source,
         user_timezone=update.get("timezone"),
     )
-    return {"status": "ok", "user_id": user, "steps": int(steps), "source": source}
+    hours_written = 0
+    if update.get("hourly") is not None:
+        tz_name = _resolve_reporting_tz(update.get("timezone"))
+        day = datetime.fromtimestamp(
+            update.get("timestamp") or time.time(), ZoneInfo(tz_name)
+        ).strftime("%Y-%m-%d")
+        hours_written = await _record_hourly_steps(
+            r, user, update.get("hourly"), day, source if source in STEP_SOURCES else "phone"
+        )
+    return {
+        "status": "ok",
+        "user_id": user,
+        "steps": int(steps),
+        "source": source,
+        "hours_recorded": hours_written,
+    }
 
 
 @app.get("/steps")
@@ -2544,7 +2651,18 @@ async def get_step_ranges(
     history = await _get_daily_steps(r, clean, span)
     goal = await _get_step_goal(r, clean)
     series = step_history.build_series(history, _today_date(), range, goal=goal)
-    return {"user_id": clean, **step_history.to_payload(series, goal=goal)}
+    payload = {"user_id": clean, **step_history.to_payload(series, goal=goal)}
+    if range == "D":
+        # A day view is the one range where the hourly shape is the point, so
+        # it rides along with the same response rather than becoming a second
+        # round trip the dashboard has to coordinate. `hourly` stays absent
+        # until the phone actually reports hours -- never an empty list that
+        # reads as "24 hours, all zero".
+        buckets = await _get_hourly_steps(r, clean, _today_date().strftime("%Y-%m-%d"))
+        if buckets:
+            payload["hourly"] = buckets
+            payload["peak"] = max(buckets, key=lambda b: b["steps"])
+    return payload
 
 
 def _today_date():
