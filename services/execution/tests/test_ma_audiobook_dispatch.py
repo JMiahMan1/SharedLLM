@@ -403,3 +403,144 @@ class TestStructuralGuards:
         assert "ma_library.resolve_audiobook_uri" in source
         # The old broken shape must be gone from the play path.
         assert "audiobookshelf://" not in source
+
+class TestPodcastDispatch:
+    """A podcast episode on an MA player must resolve the *podcast*, not the episode.
+
+    Measured live: `music/search` returns 0 results for any episode title, but the
+    podcast's own title returns `library://podcast/N` whose provider_mappings
+    carries the ABS podcast item id. Searching the episode title therefore always
+    missed and reported "not in library" for a podcast MA actually has.
+    """
+
+    POD_ID = "ff781fed-af45-48e2-a62e-d3a91056afc5"
+    EP_ID = "fef3ddd5-0a12-44bc-8f0e-9484d537be49"
+    EP_TITLE = "2026 New Christendom Press Conference Recap"
+    POD_TITLE = "The King's Hall"
+
+    PODCAST_ITEM = {
+        "id": POD_ID,
+        "media": {
+            "metadata": {"title": POD_TITLE},
+            "episodes": [
+                {"id": EP_ID, "title": EP_TITLE, "publishedAt": 2000},
+                {"id": "ep-old", "title": "An Older Episode", "publishedAt": 1000},
+            ],
+        },
+    }
+
+    def _stack(self, state=MA_STATE, resolver_error=None):
+        resolver = (
+            AsyncMock(return_value=RESOLVED) if resolver_error is None
+            else AsyncMock(side_effect=resolver_error)
+        )
+        return {
+            "get_book": patch(
+                "services.execution.abs_client.get_book",
+                new=AsyncMock(return_value=self.PODCAST_ITEM),
+            ),
+            "session": patch(
+                "services.execution.abs_client.start_playback_session",
+                new=AsyncMock(return_value={"id": "sess-pod"}),
+            ),
+            "state": patch("services.execution.ha_client.get_state", new=AsyncMock(return_value=state)),
+            "roku": patch(
+                "services.execution.handlers.roku.is_roku_device", new=AsyncMock(return_value=False)
+            ),
+            "call": patch(
+                "services.execution.ha_client.call_service", new=AsyncMock(return_value={"ok": True})
+            ),
+            "resolve": patch(
+                "services.execution.handlers.audiobookshelf.ma_library.resolve_audiobook_uri",
+                new=resolver,
+            ),
+            "interval": patch(
+                "services.execution.handlers.audiobookshelf.PLAYBACK_VERIFY_INTERVAL", 0
+            ),
+        }
+
+    def _req(self):
+        return AudiobookshelfRequest(
+            action="play_podcast_episode",
+            book_id=self.POD_ID,
+            episode_id=self.EP_ID,
+            entity_id="media_player.tv",
+            user_context=_ctx(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_resolves_the_podcast_by_its_abs_id(self):
+        from contextlib import ExitStack
+
+        with ExitStack() as st:
+            mocks = {n: st.enter_context(c) for n, c in self._stack().items()}
+            result = await handle_audiobookshelf(self._req())
+
+        assert result.status == "SUCCESS", result.message
+        resolver = mocks["resolve"]
+        resolver.assert_awaited_once()
+        args = resolver.await_args.args
+        assert args[2] == self.POD_ID, "must resolve by the podcast item id"
+
+    @pytest.mark.asyncio
+    async def test_searches_the_podcast_title_not_the_episode_title(self):
+        from contextlib import ExitStack
+
+        with ExitStack() as st:
+            mocks = {n: st.enter_context(c) for n, c in self._stack().items()}
+            await handle_audiobookshelf(self._req())
+        # An episode title matches nothing in MA; this was the actual bug.
+        assert mocks["resolve"].await_args.args[3] == self.POD_TITLE
+
+    @pytest.mark.asyncio
+    async def test_ma_receives_the_resolved_uri(self):
+        from contextlib import ExitStack
+
+        with ExitStack() as st:
+            mocks = {n: st.enter_context(c) for n, c in self._stack().items()}
+            await handle_audiobookshelf(self._req())
+        call = mocks["call"].call_args
+        assert call.args[2] == "music_assistant"
+        assert call.args[5]["media_id"] == "library://audiobook/260"
+        assert "audiobookshelf://" not in str(call.args[5])
+
+    @pytest.mark.asyncio
+    async def test_non_ma_player_still_gets_the_hls_url(self):
+        from contextlib import ExitStack
+
+        plain = {"state": "playing", "attributes": {"media_title": "Ep"}}
+        with ExitStack() as st:
+            mocks = {n: st.enter_context(c) for n, c in self._stack(state=plain).items()}
+            result = await handle_audiobookshelf(self._req())
+
+        assert result.status == "SUCCESS", result.message
+        data = mocks["call"].call_args.args[5]
+        assert "abs-session/sess-pod/0" in data["media_content_id"]
+        mocks["resolve"].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_an_unresolvable_podcast_fails_loudly(self):
+        from contextlib import ExitStack
+        from services.shared.ma_library import MALibraryLookupError
+
+        err = MALibraryLookupError(
+            f"Music Assistant does not have Audiobookshelf item {self.POD_ID}",
+            reason="not_in_ma_library",
+        )
+        with ExitStack() as st:
+            mocks = {n: st.enter_context(c) for n, c in self._stack(resolver_error=err).items()}
+            result = await handle_audiobookshelf(self._req())
+
+        assert result.status == "FAILURE"
+        assert self.POD_ID in result.message
+        mocks["call"].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_requested_episode_is_the_one_started(self):
+        from contextlib import ExitStack
+
+        with ExitStack() as st:
+            mocks = {n: st.enter_context(c) for n, c in self._stack().items()}
+            await handle_audiobookshelf(self._req())
+        # The episode id reaches ABS for the session...
+        assert mocks["session"].await_args.args[3] == self.EP_ID

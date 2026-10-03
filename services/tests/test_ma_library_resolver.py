@@ -327,19 +327,21 @@ class TestFailuresAreLoud:
             await _resolve(mass_url="ftp://ma.local")
         assert exc.value.reason == "bad_mass_url"
 
-    async def test_missing_item_id_fails_unless_idless_allowed(self, fake_connect):
+    async def test_missing_item_id_fails(self, fake_connect):
+        """No id means nothing to match on; guessing would pick the wrong media."""
+        opened, connect_kwargs = fake_connect(
+            {"auth": {"authenticated": True}, "music/search": _search_result()}
+        )
         with pytest.raises(MALibraryLookupError) as exc:
             await _resolve(abs_item_id="")
         assert exc.value.reason == "no_abs_item_id"
+        assert connect_kwargs == []
 
-    async def test_no_title_and_no_id_fails(self, fake_connect):
-        # Idless is allowed (podcast case) but there is still nothing to search
-        # for, so it must not send MA an empty search_query.
-        with pytest.raises(MALibraryLookupError) as exc:
-            await ma_library.resolve_audiobook_uri(
-                MASS_URL, MASS_TOKEN, "", "", allow_idless=True
-            )
-        assert exc.value.reason == "no_search_query"
+    async def test_idless_matching_is_gone(self, fake_connect):
+        """`_match_by_abs_id` must never fall back to 'first available item'."""
+        assert ma_library._match_by_abs_id(
+            [_search_result()["audiobooks"][0]], ""
+        ) is None
 
     async def test_unreachable_ma_is_reported_as_unreachable(self, fake_connect, monkeypatch):
         fake_connect({}, raise_on_connect=OSError("connection refused"))
@@ -375,37 +377,121 @@ class TestFailuresAreLoud:
         assert len(connect_kwargs) == 1
 
 
-class TestIdlessLookup:
-    """Podcast episodes have no ABS library item id to map from."""
+class TestPodcastLookup:
+    """A podcast resolves by its ABS id, exactly like a book.
 
-    async def test_takes_first_available_audiobookshelf_item(self, fake_connect):
-        result = _search_result(abs_id="whatever", uri="library://podcast_episode/77", name="Ep 1")
-        result["podcast_episodes"] = result.pop("audiobooks")
-        fake_connect({"auth": {"authenticated": True}, "music/search": result})
-        resolved = await ma_library.resolve_audiobook_uri(
-            MASS_URL, MASS_TOKEN, "", "Culture Apothecary", limit=5, allow_idless=True
+    Measured live: `music/search` returns 0 results for any *episode* title, but
+    searching the podcast's own title returns `library://podcast/N` whose
+    provider_mappings carries the ABS podcast item id. So podcasts are matched by
+    id too. MA has no episode-level URI (`library://podcast/N?episode=0` is
+    rejected), so an episode resolves to its show.
+    """
+
+    POD_ID = "ff781fed-af45-48e2-a62e-d3a91056afc5"
+
+    def _podcast_payload(self, *, abs_id: str, uri: str, available: bool, name: str) -> dict:
+        return {
+            "podcasts": [
+                {
+                    "item_id": uri.rsplit("/", 1)[-1],
+                    "provider": "library",
+                    "media_type": "podcast",
+                    "uri": uri,
+                    "name": name,
+                    "is_playable": True,
+                    "total_episodes": 162,
+                    "provider_mappings": [
+                        {
+                            "item_id": abs_id,
+                            "provider_domain": "audiobookshelf",
+                            "available": available,
+                            "in_library": True,
+                        }
+                    ],
+                }
+            ]
+        }
+
+    async def test_podcast_resolves_by_its_abs_item_id(self, fake_connect):
+        fake_connect(
+            {
+                "auth": {"authenticated": True},
+                "music/search": self._podcast_payload(
+                    abs_id=self.POD_ID, uri="library://podcast/16",
+                    available=True, name="The King's Hall",
+                ),
+            }
         )
-        assert resolved.ma_uri == "library://podcast_episode/77"
-
-    async def test_skips_items_ma_cannot_fetch(self, fake_connect):
-        dead = _search_result(uri="library://podcast_episode/1", available=False)
-        live = _search_result(uri="library://podcast_episode/2")
-        dead["podcast_episodes"] = dead.pop("audiobooks")
-        live["podcast_episodes"] = live.pop("audiobooks")
-        fake_connect({"auth": {"authenticated": True}, "music/search": {"podcast_episodes": [
-            dead["podcast_episodes"][0], live["podcast_episodes"][0]]}})
         resolved = await ma_library.resolve_audiobook_uri(
-            MASS_URL, MASS_TOKEN, "", "Culture Apothecary", limit=5, allow_idless=True
+            MASS_URL, MASS_TOKEN, self.POD_ID, "The King's Hall"
         )
-        assert resolved.ma_uri == "library://podcast_episode/2"
+        assert resolved.ma_uri == "library://podcast/16"
+        assert resolved.title == "The King's Hall"
 
-    async def test_no_results_fails(self, fake_connect):
-        fake_connect({"auth": {"authenticated": True}, "music/search": {}})
+    async def test_searches_the_podcast_title_not_the_episode_title(self, fake_connect):
+        opened, _ = fake_connect(
+            {
+                "auth": {"authenticated": True},
+                "music/search": self._podcast_payload(
+                    abs_id=self.POD_ID, uri="library://podcast/16",
+                    available=True, name="The King's Hall",
+                ),
+            }
+        )
+        await ma_library.resolve_audiobook_uri(
+            MASS_URL, MASS_TOKEN, self.POD_ID, "The King's Hall"
+        )
+        # An episode title matches nothing in MA, so the podcast title is what
+        # must be searched.
+        assert opened[0].sent[1]["args"]["search_query"] == "The King's Hall"
+
+    async def test_a_podcast_ma_cannot_fetch_is_refused(self, fake_connect):
+        fake_connect(
+            {
+                "auth": {"authenticated": True},
+                "music/search": self._podcast_payload(
+                    abs_id=self.POD_ID, uri="library://podcast/16",
+                    available=False, name="The King's Hall",
+                ),
+            }
+        )
         with pytest.raises(MALibraryLookupError) as exc:
             await ma_library.resolve_audiobook_uri(
-                MASS_URL, MASS_TOKEN, "", "Nothing", allow_idless=True
+                MASS_URL, MASS_TOKEN, self.POD_ID, "The King's Hall"
             )
         assert exc.value.reason == "not_in_ma_library"
+
+    async def test_podcasts_group_is_walked_like_any_other(self, fake_connect):
+        """MA returns podcasts under `podcasts`, not `audiobooks`."""
+        fake_connect(
+            {
+                "auth": {"authenticated": True},
+                "music/search": self._podcast_payload(
+                    abs_id=self.POD_ID, uri="library://podcast/24",
+                    available=True, name="Culture Apothecary",
+                ),
+            }
+        )
+        resolved = await ma_library.resolve_audiobook_uri(
+            MASS_URL, MASS_TOKEN, self.POD_ID, "Culture Apothecary"
+        )
+        assert resolved.ma_uri == "library://podcast/24"
+
+    async def test_a_book_id_never_matches_a_podcast(self, fake_connect):
+        """Cross-kind matching would hand MA a URI for different media."""
+        fake_connect(
+            {
+                "auth": {"authenticated": True},
+                "music/search": self._podcast_payload(
+                    abs_id=self.POD_ID, uri="library://podcast/16",
+                    available=True, name="The King's Hall",
+                ),
+            }
+        )
+        with pytest.raises(MALibraryLookupError):
+            await ma_library.resolve_audiobook_uri(
+                MASS_URL, MASS_TOKEN, NARNIA_ABS_ID, "The Chronicles of Narnia"
+            )
 
 
 class TestPayloadWalking:
