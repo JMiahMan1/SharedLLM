@@ -2652,6 +2652,15 @@ async def execute_llm_info(req: LLMInfoRequest):
 async def execute_audiobookshelf(req: AudiobookshelfRequest):
     ctx = req.user_context
     log.info(f"[abs] user={ctx.user} action={req.action} query={req.query}")
+    # Any action that names a player must be authorised against it, exactly as
+    # execute_media_play does. Without this, any resolved user could name an
+    # arbitrary media_player.* and make the house play audio on it.
+    is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
+    if req.entity_id and not is_local:
+        if not await verify_entity_access(ctx, ha_client.sanitize_entity_id("media_player", req.entity_id)):
+            raise HTTPException(status_code=403, detail="Access denied to this device")
+    if not is_local:
+        _ensure_ha_creds(ctx)
     return await audiobookshelf.handle_audiobookshelf(req)
 
 @app.post("/execute/composite/broadcast", response_model=ExecutionResult)

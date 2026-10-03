@@ -81,6 +81,9 @@ async def abs_login(abs_url: str, username: str, password: str, force: bool = Fa
         cached = _cache_get(abs_url, cache_key)
         if cached:
             return cached
+    # This ABS is served behind a Caddy prefix, so login lives at the *root*
+    # `/login`, not under `/api` (verified live: /login → 200 + token,
+    # /api/login → 401). Do not "fix" this to /api/login.
     url = f"{abs_url.rstrip('/')}/login"
     async with _abs_session(abs_url) as client:
         try:
@@ -394,7 +397,12 @@ async def get_libraries(abs_url: str, abs_api_key: str) -> dict:
 
 
 async def authorize_token(abs_url: str, abs_api_key: str) -> dict:
-    """Validate API token and get user/server info."""
+    """Validate API token and get user/server info.
+
+    Unused. Verified live against ABS 2.x with a working key: both ``/authorize``
+    and ``/api/authorize`` return 404, so there is no path here to fix. Left as
+    found rather than "corrected" to a route that also does not exist.
+    """
     return await abs_get(abs_url, abs_api_key, "/authorize")
 
 
@@ -485,12 +493,23 @@ async def get_library_series(abs_url: str, abs_api_key: str, library_id: str) ->
 
 
 async def get_user_playlists(abs_url: str, abs_api_key: str, library_id: str) -> dict:
-    """Get user's playlists for a library."""
-    return await abs_get(abs_url, abs_api_key, f"/libraries/{library_id}/playlists")
+    """Get user's playlists for a library.
+
+    ABS mounts this router under ``/api``; verified live — with a working key,
+    ``/api/libraries/{id}/playlists`` returns 200 and the bare path 404s.
+    """
+    return await abs_get(abs_url, abs_api_key, f"/api/libraries/{library_id}/playlists")
 
 
 async def get_podcast_episode(
     abs_url: str, abs_api_key: str, item_id: str, episode_id: str
 ) -> dict:
-    """Get details for a specific podcast episode."""
+    """Get details for a specific podcast episode.
+
+    Unused, and ABS 2.x does not expose episodes as standalone items
+    (``GET /api/items/{episodeId}`` is a 404 — see
+    ``docs/MEDIA_UPSTREAM_API_NOTES.md``); episodes come from the expanded
+    podcast's ``media.episodes``. Left as found rather than pointed at a route
+    that would still not work.
+    """
     return await abs_get(abs_url, abs_api_key, f"/items/{item_id}/episodes/{episode_id}")

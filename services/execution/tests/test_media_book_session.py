@@ -57,19 +57,27 @@ def _play_req(**kw) -> AudiobookshelfRequest:
     return AudiobookshelfRequest(**fields)
 
 
-def _patches(book=BOOK_ITEM, session=None, call_result=None):
+PLAYING_STATE = {
+    "state": "playing",
+    "attributes": {"media_title": "God's Smuggler (Unabridged)", "media_content_type": "audiobook"},
+}
+IDLE_STATE = {"state": "idle", "attributes": {}}
+
+
+def _patches(book=BOOK_ITEM, session=None, call_result=None, state=PLAYING_STATE):
     return (
         patch("services.execution.abs_client.get_book", new=AsyncMock(return_value=book)),
         patch(
             "services.execution.abs_client.start_playback_session",
             new=AsyncMock(return_value=session if session is not None else {"id": "sess-b1"}),
         ),
-        patch("services.execution.ha_client.get_state", new=AsyncMock(return_value=None)),
+        patch("services.execution.ha_client.get_state", new=AsyncMock(return_value=state)),
         patch("services.execution.handlers.roku.is_roku_device", new=AsyncMock(return_value=False)),
         patch(
             "services.execution.ha_client.call_service",
             new=AsyncMock(return_value=call_result or {"ok": True}),
         ),
+        patch("services.execution.handlers.audiobookshelf.PLAYBACK_VERIFY_INTERVAL", 0),
     )
 
 
@@ -77,7 +85,7 @@ class TestBookPlaybackSession:
     @pytest.mark.asyncio
     async def test_play_book_starts_session_and_streams_hls(self):
         p = _patches()
-        with p[0], p[1] as mock_session, p[2], p[3], p[4] as mock_call:
+        with p[0], p[1] as mock_session, p[2], p[3], p[4] as mock_call, p[5]:
             result = await handle_audiobookshelf(_play_req())
 
         assert result.status == "SUCCESS"
@@ -94,7 +102,7 @@ class TestBookPlaybackSession:
     @pytest.mark.asyncio
     async def test_play_book_reports_the_real_title(self):
         p = _patches()
-        with p[0], p[1], p[2], p[3], p[4]:
+        with p[0], p[1], p[2], p[3], p[4], p[5]:
             result = await handle_audiobookshelf(_play_req())
         assert "God's Smuggler (Unabridged)" in result.message
         assert "book-1" not in result.message
@@ -102,7 +110,7 @@ class TestBookPlaybackSession:
     @pytest.mark.asyncio
     async def test_track_index_comes_from_the_expanded_item(self):
         p = _patches(book=MULTIFILE_BOOK)
-        with p[0], p[1], p[2], p[3], p[4] as mock_call:
+        with p[0], p[1], p[2], p[3], p[4] as mock_call, p[5]:
             result = await handle_audiobookshelf(_play_req(book_id="book-2"))
         assert result.status == "SUCCESS"
         assert "/api/media/stream/abs-session/sess-b1/1" in mock_call.call_args.args[5]["media_content_id"]
@@ -111,7 +119,7 @@ class TestBookPlaybackSession:
     async def test_multifile_book_with_first_track_missing_fails_loudly(self):
         book = {"id": "book-3", "media": {"metadata": {"title": "No Tracks"}, "tracks": []}}
         p = _patches(book=book)
-        with p[0], p[1] as mock_session, p[2], p[3], p[4] as mock_call:
+        with p[0], p[1] as mock_session, p[2], p[3], p[4] as mock_call, p[5]:
             result = await handle_audiobookshelf(_play_req(book_id="book-3"))
         assert result.status == "FAILURE"
         assert "track" in result.message.lower()
@@ -121,7 +129,7 @@ class TestBookPlaybackSession:
     @pytest.mark.asyncio
     async def test_item_lookup_error_fails_loudly(self):
         p = _patches(book={"error": "boom"})
-        with p[0], p[1] as mock_session, p[2], p[3], p[4]:
+        with p[0], p[1] as mock_session, p[2], p[3], p[4], p[5]:
             result = await handle_audiobookshelf(_play_req())
         assert result.status == "FAILURE"
         assert "boom" in result.message
@@ -130,7 +138,7 @@ class TestBookPlaybackSession:
     @pytest.mark.asyncio
     async def test_session_error_fails_loudly(self):
         p = _patches(session={"error": "nope"})
-        with p[0], p[1], p[2], p[3], p[4] as mock_call:
+        with p[0], p[1], p[2], p[3], p[4] as mock_call, p[5]:
             result = await handle_audiobookshelf(_play_req())
         assert result.status == "FAILURE"
         assert "nope" in result.message
@@ -149,6 +157,7 @@ class TestBookPlaybackSession:
             p[2],
             p[3],
             p[4] as mock_call,
+            p[5],
         ):
             result = await handle_audiobookshelf(
                 AudiobookshelfRequest(

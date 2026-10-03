@@ -28,8 +28,14 @@ M3U8 = (
 )
 
 
-def _mock_track(upstream, session_id: str = "sess1", track: int = 0):
-    """Session track redirects to the ABS HLS playlist, which is served."""
+def _mock_track(upstream, session_id: str = "sess1", track: int = 0, *, segment_ready: bool = True):
+    """Session track redirects to the ABS HLS playlist, which is served.
+
+    The first HLS segment is mocked too: the gateway now waits for segment 0
+    before handing the playlist to the device, because a device that gets a 200
+    playlist and then a 404 on its first segment treats the stream as fatally
+    broken.
+    """
     mock_upstream(
         upstream,
         "GET",
@@ -45,6 +51,15 @@ def _mock_track(upstream, session_id: str = "sess1", track: int = 0):
         status=200,
         content_type="application/vnd.apple.mpegurl",
     )
+    if segment_ready:
+        mock_upstream(
+            upstream,
+            "GET",
+            f"http://abs.local:13378/hls/{session_id}/output-0.ts",
+            body=b"\x00" * 32,
+            status=206,
+            content_type="video/mp2t",
+        )
 
 
 class TestAbsSessionTrackEndpoint:
@@ -132,6 +147,17 @@ class TestAbsSessionPlaylistReadiness:
         monkeypatch.setattr(main, "ABS_PLAYLIST_MAX_ATTEMPTS", attempts)
         monkeypatch.setattr(main, "ABS_PLAYLIST_POLL_INTERVAL", 0.0)
         monkeypatch.setattr(main, "ABS_PLAYLIST_READY_TIMEOUT", 5.0)
+        # The first-segment wait is a second, independent poll; keep it instant
+        # and bounded so the suite does not sit through real retry delays.
+        monkeypatch.setattr(main, "ABS_FIRST_SEGMENT_POLL_INTERVAL", 0.0)
+        monkeypatch.setattr(main, "ABS_FIRST_SEGMENT_MAX_ATTEMPTS", 2)
+
+    def _mock_segment_ready(self, upstream, session_id: str = "sess1"):
+        """The playlist is only served once segment 0 exists."""
+        mock_upstream(
+            upstream, "GET", f"http://abs.local:13378/hls/{session_id}/output-0.ts",
+            body=b"\x00" * 32, status=206, content_type="video/mp2t", repeat=5,
+        )
 
     def test_polls_until_the_playlist_appears(self, client, upstream, monkeypatch):
         self._fast_poll(monkeypatch)
@@ -152,6 +178,7 @@ class TestAbsSessionPlaylistReadiness:
             upstream, "GET", "http://abs.local:13378/hls/sess1/output.m3u8",
             body=M3U8, status=200, content_type="application/vnd.apple.mpegurl",
         )
+        self._mock_segment_ready(upstream)
         mt, _exp = sign("testuser")
         resp = client.get(
             "/api/media/stream/abs-session/sess1/0",
@@ -203,6 +230,11 @@ class TestAbsSessionPlaylistReadiness:
         mock_upstream(
             upstream, "GET", "https://abs.example.com/hls/sess1/output.m3u8",
             body=M3U8, status=200, content_type="application/vnd.apple.mpegurl", repeat=3,
+        )
+        # The first segment resolves at the origin too — not under the base path.
+        mock_upstream(
+            upstream, "GET", "https://abs.example.com/hls/sess1/output-0.ts",
+            body=b"\x00" * 32, status=206, content_type="video/mp2t", repeat=3,
         )
         mt, _exp = sign("testuser")
         resp = client.get(
@@ -256,3 +288,210 @@ class TestAbsSessionSegmentEndpoint:
             params={"user": "testuser", "mt": mt},
         )
         assert resp.status_code == 400
+
+
+class TestAbsFirstSegmentReadiness:
+    """The playlist appears before segment 0 does, and a 404 there is fatal.
+
+    Live: ABS served the playlist (200) while ffmpeg was still writing
+    ``output-0.ts``, so a device fetched a perfectly good playlist and then got a
+    404 on its very first segment request — which TVs, speakers and cast devices
+    treat as a dead stream. They do not retry. So the gateway must not return the
+    playlist until the first segment resolves.
+    """
+
+    def _fast(self, monkeypatch, attempts: int = 3):
+        from services.gateway import main
+
+        monkeypatch.setattr(main, "ABS_PLAYLIST_POLL_INTERVAL", 0.0)
+        monkeypatch.setattr(main, "ABS_FIRST_SEGMENT_POLL_INTERVAL", 0.0)
+        monkeypatch.setattr(main, "ABS_FIRST_SEGMENT_MAX_ATTEMPTS", attempts)
+
+    def test_waits_for_the_first_segment_before_returning_the_playlist(
+        self, client, upstream, monkeypatch
+    ):
+        self._fast(monkeypatch)
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/public/session/sess1/track/0",
+            status=302, headers={"Location": "http://abs.local:13378/hls/sess1/output.m3u8"},
+        )
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output.m3u8",
+            body=M3U8, status=200, content_type="application/vnd.apple.mpegurl",
+        )
+        # Two 404s while ffmpeg catches up, then the segment lands.
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output-0.ts",
+            body="not yet", status=404, content_type="text/plain", repeat=2,
+        )
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output-0.ts",
+            body=b"\x00" * 32, status=206, content_type="video/mp2t",
+        )
+
+        mt, _exp = sign("testuser")
+        resp = client.get(
+            "/api/media/stream/abs-session/sess1/0",
+            params={"user": "testuser", "mt": mt},
+        )
+        assert resp.status_code == 200, resp.text
+        assert "mpegurl" in resp.headers.get("content-type", "")
+        assert "output-0.ts" in resp.text
+
+    def test_gives_up_with_504_when_the_first_segment_never_arrives(
+        self, client, upstream, monkeypatch
+    ):
+        self._fast(monkeypatch, attempts=2)
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/public/session/sess1/track/0",
+            status=302, headers={"Location": "http://abs.local:13378/hls/sess1/output.m3u8"},
+        )
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output.m3u8",
+            body=M3U8, status=200, content_type="application/vnd.apple.mpegurl",
+        )
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output-0.ts",
+            body="still transcoding", status=404, content_type="text/plain", repeat=10,
+        )
+
+        mt, _exp = sign("testuser")
+        resp = client.get(
+            "/api/media/stream/abs-session/sess1/0",
+            params={"user": "testuser", "mt": mt},
+        )
+        assert resp.status_code == 504
+        # A device must be told the truth rather than handed a playlist it
+        # cannot start.
+        assert "transcoding" in resp.text
+        assert "output-0.ts" not in resp.text
+
+    def test_probe_asks_for_a_single_byte_range(self, client, upstream, monkeypatch):
+        """Probing must not pull a multi-megabyte segment on every attempt."""
+        self._fast(monkeypatch)
+        _mock_track(upstream)
+        mt, _exp = sign("testuser")
+        resp = client.get(
+            "/api/media/stream/abs-session/sess1/0",
+            params={"user": "testuser", "mt": mt},
+        )
+        assert resp.status_code == 200
+        # The mock answers 206 regardless of the Range header, so a dropped Range
+        # would still pass above; assert on the request the probe actually makes.
+        import inspect
+
+        from services.gateway import main
+
+        assert 'bytes=0-0' in inspect.getsource(main._await_abs_first_segment)
+
+    def test_a_playlist_with_no_segments_is_not_served(self, client, upstream, monkeypatch):
+        self._fast(monkeypatch)
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/public/session/sess1/track/0",
+            status=302, headers={"Location": "http://abs.local:13378/hls/sess1/output.m3u8"},
+        )
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output.m3u8",
+            body="#EXTM3U\n#EXT-X-ENDLIST\n",
+            status=200, content_type="application/vnd.apple.mpegurl",
+        )
+        mt, _exp = sign("testuser")
+        resp = client.get(
+            "/api/media/stream/abs-session/sess1/0",
+            params={"user": "testuser", "mt": mt},
+        )
+        # Nothing to wait for, so the (empty) playlist is served rather than 504.
+        assert resp.status_code == 200
+        assert "#EXT-X-ENDLIST" in resp.text
+
+    def test_upstream_5xx_on_the_segment_is_retried_not_served(self, client, upstream, monkeypatch):
+        self._fast(monkeypatch, attempts=2)
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/public/session/sess1/track/0",
+            status=302, headers={"Location": "http://abs.local:13378/hls/sess1/output.m3u8"},
+        )
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output.m3u8",
+            body=M3U8, status=200, content_type="application/vnd.apple.mpegurl",
+        )
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output-0.ts",
+            body="boom", status=500, content_type="text/plain", repeat=10,
+        )
+        mt, _exp = sign("testuser")
+        resp = client.get(
+            "/api/media/stream/abs-session/sess1/0",
+            params={"user": "testuser", "mt": mt},
+        )
+        assert resp.status_code == 504
+
+
+class TestMaLibraryUriEndpoint:
+    """POST /api/media/ma-library-uri — the ABS id -> MA library URI mapping.
+
+    The browser used to send MA a hand-built ``audiobookshelf://<uuid>``, which MA
+    rejects (no media controller for that media type) so the player stays silent.
+    MA's numeric library id is only obtainable from MA itself, so the gateway owns
+    the lookup.
+    """
+
+    def _resolver(self, monkeypatch, *, result=None, error=None):
+        from services.shared import ma_library as ma_lib
+        from services.shared.ma_library import ResolvedAudiobook
+
+        calls: list[dict] = []
+
+        async def _resolve(mass_url, mass_token, abs_item_id, title, **kw):
+            calls.append(
+                {"url": mass_url, "token": mass_token, "id": abs_item_id, "title": title}
+            )
+            if error is not None:
+                raise error
+            return result or ResolvedAudiobook(
+                abs_item_id=abs_item_id, ma_uri="library://audiobook/260", title=title
+            )
+
+        monkeypatch.setattr(ma_lib, "resolve_audiobook_uri", _resolve)
+        return calls
+
+    def test_returns_the_resolved_uri(self, client, monkeypatch):
+        self._resolver(monkeypatch)
+        resp = client.post(
+            "/api/media/ma-library-uri",
+            json={"abs_item_id": "08d24fad-32a7-422d-8374-8501fdbe55d5", "title": "Narnia"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ma_uri"] == "library://audiobook/260"
+        assert resp.json()["status"] == "SUCCESS"
+
+    def test_uses_the_callers_ma_credentials(self, client, monkeypatch):
+        calls = self._resolver(monkeypatch)
+        client.post(
+            "/api/media/ma-library-uri",
+            json={"abs_item_id": "book-1", "title": "Narnia"},
+        )
+        assert calls[0]["url"] == "http://ma.local:8095"
+        assert calls[0]["token"] == "test-mass-token"
+
+    def test_missing_item_id_is_422(self, client, monkeypatch):
+        self._resolver(monkeypatch)
+        resp = client.post("/api/media/ma-library-uri", json={"abs_item_id": "", "title": "x"})
+        assert resp.status_code == 422
+
+    def test_lookup_miss_is_404_with_the_reason(self, client, monkeypatch):
+        from services.shared.ma_library import MALibraryLookupError
+
+        self._resolver(
+            monkeypatch,
+            error=MALibraryLookupError("MA does not have that book", reason="not_in_ma_library"),
+        )
+        resp = client.post("/api/media/ma-library-uri", json={"abs_item_id": "book-1", "title": "Nope"})
+        assert resp.status_code == 404
+        # The UI must be able to say *why*, not just "failed".
+        assert "does not have that book" in resp.json()["detail"]
+
+    def test_does_not_require_an_entity(self, client, monkeypatch):
+        """This is a library lookup, not a device command."""
+        self._resolver(monkeypatch)
+        resp = client.post("/api/media/ma-library-uri", json={"abs_item_id": "book-1"})
+        assert resp.status_code == 200

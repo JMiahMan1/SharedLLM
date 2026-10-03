@@ -9,6 +9,7 @@ from datetime import datetime
 
 from services.execution import abs_client, ha_client
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult
+from services.shared import ma_library
 from services.shared.ma_player import is_music_assistant_player
 
 log = logging.getLogger("execution.audiobookshelf")
@@ -24,10 +25,18 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
             service="audiobookshelf",
         )
     if username and password:
-        # Always obtain a fresh token via login; the stored API key may be stale/expired.
+        # Prefer a fresh token; the stored API key may be stale/expired. If the
+        # login does not come back we still have the stored key, but say so —
+        # silently continuing hides a broken login route behind a working cache.
         fresh = await abs_client.abs_login(abs_url, username, password)
         if fresh:
             abs_key = fresh
+        else:
+            log.warning(
+                "[abs] Could not log in to Audiobookshelf as %s; continuing with the stored API key. "
+                "If requests start failing with 401, check the ABS username/password.",
+                username,
+            )
     if not abs_key:
         return ExecutionResult(
             status="FAILURE",
@@ -255,12 +264,25 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
 
 
 async def _play_book_session(abs_url: str, abs_key: str, req, book_id: str) -> ExecutionResult:
-    """Start an ABS 2.x playback session for a book and stream its first track.
+    """Start an ABS 2.x playback session for a book and play its first track.
 
     Live ABS removed /api/items/:id/stream; book audio is now served through a
     session (POST /api/items/{bookId}/play) whose tracks are 1-based, so the
-    index comes from the expanded item rather than a guess. The device gets a
-    gateway-routed, mt-token-signed HLS URL (§7.4) — never the ABS API key.
+    index comes from the expanded item rather than a guess.
+
+    There are two genuinely different delivery routes, and picking the wrong one
+    is why audiobooks appeared to "play" while nothing came out:
+
+    * **Music Assistant players** stream the book themselves, from MA's own
+      Audiobookshelf provider. MA is not a URL player — hand it the gateway HLS
+      URL and it files the URL as the track *title*, leaving the player idle. It
+      needs MA's own ``library://audiobook/<n>`` URI, so this resolves that first.
+    * **Everything else** (Roku, Chromecast, DLNA, TVs) can only be handed a URL,
+      so it gets the gateway-routed, mt-token-signed HLS URL (§7.4). The ABS API
+      key is never exposed to the device.
+
+    The ABS session is started either way, because the non-MA route needs it and
+    starting it also makes MA's provider warm up.
     """
     item = await abs_client.get_book(abs_url, abs_key, book_id)
     if "error" in item:
@@ -291,11 +313,79 @@ async def _play_book_session(abs_url: str, abs_key: str, req, book_id: str) -> E
 
     stream_url = abs_client.get_session_track_url(session["id"], ctx_user(req), track_index=track_index)
     log.info(f"[abs] Book session started: item={book_id} track={track_index} session={session['id']}")
-    return await _dispatch_stream(stream_url, "application/x-mpegurl", req, title)
+    return await _dispatch_stream(
+        stream_url, "application/x-mpegurl", req, title, abs_item_id=book_id
+    )
 
 
-async def _dispatch_stream(stream_url: str, content_type: str, req, title: str) -> ExecutionResult:
-    """Send a stream URL to a media player (power-on, Roku, MA, or direct)."""
+# How long to wait for a player to actually start moving before calling the
+# play a failure. HA service calls return as soon as the *call* is accepted, and
+# the accepted call is not the same as playback — an MA player handed an
+# unresolvable URL accepts the call and then sits idle forever.
+PLAYBACK_VERIFY_ATTEMPTS = 6
+PLAYBACK_VERIFY_INTERVAL = 2.0
+# States in which a player is doing something with the media we handed it.
+PLAYING_STATES = {"playing", "buffering"}
+# A title that is really our stream URL means the player treated the URL as
+# metadata — the exact MA failure this module works around. Used to explain a
+# failed verify instead of reporting a bare "did not start".
+_URL_TITLE_MARKERS = ("http://", "https://", "?user=", "&mt=", "abs-session")
+
+
+def _looks_like_stream_url(value: str | None) -> bool:
+    if not value:
+        return False
+    low = value.lower()
+    return any(marker in low for marker in _URL_TITLE_MARKERS)
+
+
+async def _verify_playback(
+    ha_url: str, ha_token: str, entity_id: str, attempts: int | None = None
+) -> tuple[bool, str]:
+    """Poll a player until it is playing something, and describe why not.
+
+    Returns ``(ok, detail)``. ``detail`` is a short operator-facing explanation
+    used in the FAILURE message, so a silent non-start is never reported as
+    success.
+    """
+    # Resolved here rather than as a default argument so the constant stays
+    # overridable at call time.
+    attempts = PLAYBACK_VERIFY_ATTEMPTS if attempts is None else attempts
+    last_state = "unknown"
+    last_title = ""
+    for attempt in range(attempts):
+        state = await ha_client.get_state(ha_url, ha_token, entity_id)
+        if state:
+            last_state = state.get("state") or "unknown"
+            attrs = state.get("attributes") or {}
+            last_title = (attrs.get("media_title") or "") if isinstance(attrs, dict) else ""
+            if last_state in PLAYING_STATES:
+                if _looks_like_stream_url(last_title):
+                    # Playing, but of our URL treated as a title: the player has
+                    # no media controller for this. Report it rather than pass.
+                    return False, (
+                        f"player reported playing '{last_title}', which is our stream URL being "
+                        "used as the track title — it cannot resolve this media"
+                    )
+                return True, last_title
+        if attempt < attempts - 1:
+            await asyncio.sleep(PLAYBACK_VERIFY_INTERVAL)
+    if _looks_like_stream_url(last_title):
+        return False, (
+            f"player never started ({last_state}) and stored our stream URL as its title "
+            f"('{last_title}') — it has no media controller for this media"
+        )
+    return False, f"player never started playing (state stayed '{last_state}')"
+
+
+async def _dispatch_stream(
+    stream_url: str,
+    content_type: str,
+    req,
+    title: str,
+    abs_item_id: str | None = None,
+) -> ExecutionResult:
+    """Send media to a player (power-on, Roku, MA, or direct) and confirm it plays."""
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
     ha_url = ctx_ha_url(req)
     ha_token = ctx_ha_token(req)
@@ -320,12 +410,19 @@ async def _dispatch_stream(stream_url: str, content_type: str, req, title: str) 
         )
 
     if is_ma:
-        log.info(f"[abs] Playing on MA player '{full_entity_id}' using music_assistant.play_media")
+        media_id, ma_note = await _ma_media_id(req, abs_item_id, title)
+        if media_id is None:
+            return ExecutionResult(
+                status="FAILURE",
+                message=f"Could not play '{title}' on Music Assistant: {ma_note}",
+                service="audiobookshelf",
+            )
+        log.info(f"[abs] Playing on MA player '{full_entity_id}' via music_assistant.play_media: {media_id}")
         result = await ha_client.call_service(
             ha_url, ha_token,
             "music_assistant", "play_media",
             full_entity_id,
-            {"media_id": stream_url, "media_type": "track", "enqueue": "play"},
+            {"media_id": media_id, "enqueue": "play"},
         )
     else:
         result = await ha_client.call_service(
@@ -335,9 +432,59 @@ async def _dispatch_stream(stream_url: str, content_type: str, req, title: str) 
             {"media_content_id": stream_url, "media_content_type": content_type},
         )
 
-    if result.get("ok"):
-        return ExecutionResult(status="SUCCESS", message=f"Now playing: {title}", service="audiobookshelf")
-    return ExecutionResult(status="FAILURE", message=f"Playback failed: {result.get('error')}", service="audiobookshelf")
+    if not result.get("ok"):
+        return ExecutionResult(
+            status="FAILURE", message=f"Playback failed: {result.get('error')}", service="audiobookshelf"
+        )
+
+    # A 200 from HA only means the service call was accepted. Verify the player
+    # actually engaged, so a no-op is reported as a failure with a real reason.
+    ok, detail = await _verify_playback(ha_url, ha_token, full_entity_id)
+    if not ok:
+        log.warning(f"[abs] Playback did not start on '{full_entity_id}': {detail}")
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"'{title}' was accepted by {full_entity_id} but did not start: {detail}",
+            service="audiobookshelf",
+        )
+    return ExecutionResult(status="SUCCESS", message=f"Now playing: {title}", service="audiobookshelf")
+
+
+async def _ma_media_id(req, abs_item_id: str | None, title: str) -> tuple[str | None, str]:
+    """Get the media_id Music Assistant can actually resolve for this book.
+
+    Returns ``(media_id, note)``; ``media_id`` is None when MA cannot be asked or
+    does not know the item, and ``note`` explains why. ``media_id`` may be a
+    ``library://audiobook/<n>`` URI when the ABS item id is known, or a bare
+    ``library://`` URI for a podcast episode (podcast episodes have no ABS
+    library item id to map from).
+    """
+    mass_url = ctx_mass_url(req)
+    mass_token = ctx_mass_token(req)
+
+    if abs_item_id:
+        try:
+            resolved = await ma_library.resolve_audiobook_uri(
+                mass_url, mass_token, abs_item_id, title
+            )
+        except ma_library.MALibraryLookupError as exc:
+            return None, str(exc)
+        return resolved.ma_uri, ""
+
+    # Podcast episode: MA streams the podcast from its own provider too, but there
+    # is no ABS item id to map from, so MA's own search is the only route.
+    if not mass_token:
+        return None, (
+            "Music Assistant credentials are not configured, so its library cannot be "
+            "resolved. Set MA_URL and MA_TOKEN."
+        )
+    try:
+        resolved = await ma_library.resolve_audiobook_uri(
+            mass_url, mass_token, "", title, limit=5, allow_idless=True
+        )
+    except ma_library.MALibraryLookupError as exc:
+        return None, str(exc)
+    return resolved.ma_uri, ""
 
 
 def _pick_episode(episodes: list[dict], query: str | None) -> dict:
@@ -399,6 +546,9 @@ async def _handle_play_podcast_episode(abs_url: str, abs_key: str, req) -> Execu
 
     stream_url = abs_client.get_session_track_url(session["id"], ctx_user(req))
     log.info(f"[abs] Podcast episode session started: item={req.book_id} episode={episode['id']} session={session['id']}")
+    # A podcast episode id is not an ABS library item id, so `abs_item_id` is
+    # deliberately omitted: _ma_media_id then resolves MA's own search result for
+    # the episode title instead of trying to map a non-existent item.
     return await _dispatch_stream(stream_url, "application/x-mpegurl", req, episode.get("title") or "Podcast episode")
 
 
@@ -718,6 +868,14 @@ def ctx_ha_url(req) -> str:
 
 def ctx_ha_token(req) -> str:
     return getattr(req.user_context, "ha_token", "")
+
+
+def ctx_mass_url(req) -> str:
+    return getattr(req.user_context, "mass_url", "") or ""
+
+
+def ctx_mass_token(req) -> str:
+    return getattr(req.user_context, "mass_token", "") or ""
 
 
 def ctx_user(req) -> str:

@@ -1821,6 +1821,25 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * Resolve an Audiobookshelf item id to the URI Music Assistant can play.
+   *
+   * MA is not a URL player: it only accepts its own `library://audiobook/<n>`
+   * URI, where `<n>` is an MA-internal id. Sending an `audiobookshelf://` or a
+   * stream URL instead leaves the player idle with the URI as its track title.
+   * The gateway owns that mapping, so the browser never guesses one.
+   *
+   * Rejects when MA does not have the book — callers must surface that rather
+   * than falling back to an unplayable URI.
+   */
+  async resolveMALibraryUri(absItemId: string, title = ''): Promise<{ ma_uri: string; title: string }> {
+    const resp = await apiClient.post('/api/media/ma-library-uri', {
+      abs_item_id: absItemId,
+      title,
+    });
+    return resp.data;
+  },
+
   async setMediaFavorite(uri: string, favorite: boolean): Promise<{ status: string; favorite: boolean }> {
     const resp = await apiClient.post('/api/media/favorite', { uri, favorite });
     return resp.data;

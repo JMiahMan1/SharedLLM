@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlsplit
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -80,6 +80,7 @@ from services.gateway.redact import redact_url
 from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, StorageListRequest
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas
 from services.gateway.external_agent import run_external_agent
+from services.shared import ma_library
 from services.shared.info_endpoint import info_router
 from services.shared.media_token import sign, verify
 
@@ -9399,6 +9400,80 @@ ABS_PLAYLIST_POLL_INTERVAL = float(os.getenv("ABS_PLAYLIST_POLL_INTERVAL", "2.0"
 ABS_PLAYLIST_MAX_ATTEMPTS = int(os.getenv("ABS_PLAYLIST_MAX_ATTEMPTS", "45"))
 ABS_PLAYLIST_READY_TIMEOUT = float(os.getenv("ABS_PLAYLIST_READY_TIMEOUT", "90"))
 
+# The playlist itself appears *before* the first segment does. A TV, speaker or
+# cast device that gets a 200 playlist and then a 404 on its very first segment
+# treats the stream as fatally broken and gives up — no retry, no audio. So the
+# first segment is polled too. A 1-byte Range keeps the probe cheap.
+ABS_FIRST_SEGMENT_POLL_INTERVAL = float(os.getenv("ABS_FIRST_SEGMENT_POLL_INTERVAL", "1.0"))
+ABS_FIRST_SEGMENT_MAX_ATTEMPTS = int(os.getenv("ABS_FIRST_SEGMENT_MAX_ATTEMPTS", "30"))
+
+
+def _first_segment_uri(playlist: str) -> str | None:
+    """The first media segment URI in an m3u8 playlist, or None.
+
+    Comment lines (``#EXTINF``, ``#EXT-X-…``) carry the timing, not the media, so
+    the first non-empty non-comment line is the segment players fetch first.
+    """
+    for line in playlist.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return stripped
+    return None
+
+
+async def _await_abs_first_segment(client: aiohttp.ClientSession, playlist_url: str, playlist: str) -> bool:
+    """Poll the playlist's first segment until ABS has written it.
+
+    Returns True when the device can safely be handed this playlist, False when
+    the first segment never appeared. A device is only ever served a playlist
+    whose first segment already resolves, so it cannot die on its initial
+    request.
+
+    Segments are host-relative to the playlist, so the URL is joined against the
+    playlist URL rather than the configured ABS base — ABS serves HLS off the
+    server origin, not under a router base path (see ``_abs_playlist_url``).
+    """
+    segment = _first_segment_uri(playlist)
+    if not segment:
+        # A playlist with no media segments has nothing to wait for. Serving it
+        # is honest; reporting "still transcoding" would not be.
+        log.warning("[stream/abs-session] Playlist contains no media segments; serving as-is")
+        return True
+    segment_url = urljoin(playlist_url, segment)
+    headers = {
+        # Ask for a single byte: enough to prove the segment exists without
+        # pulling a multi-megabyte transcode segment per probe.
+        "Range": "bytes=0-0",
+        "User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)",
+    }
+    for attempt in range(1, ABS_FIRST_SEGMENT_MAX_ATTEMPTS + 1):
+        try:
+            resp = await client.get(segment_url, headers=headers)
+        except Exception as e:
+            log.warning(
+                f"[stream/abs-session] First-segment probe {attempt}/{ABS_FIRST_SEGMENT_MAX_ATTEMPTS} failed: {e}"
+            )
+        else:
+            # 200/206 both mean ABS has the segment. Anything else (404 = still
+            # transcoding, 5xx = upstream trouble) is worth another look.
+            if resp.status in (200, 206):
+                await resp.release()
+                log.info(f"[stream/abs-session] First segment ready: {segment_url}")
+                return True
+            await resp.release()
+            if resp.status != 404:
+                log.warning(
+                    f"[stream/abs-session] First segment {segment_url} returned {resp.status}; "
+                    "treating as not ready"
+                )
+        if attempt < ABS_FIRST_SEGMENT_MAX_ATTEMPTS:
+            await asyncio.sleep(ABS_FIRST_SEGMENT_POLL_INTERVAL)
+    log.error(
+        f"[stream/abs-session] First segment {segment_url} was still not ready after "
+        f"{ABS_FIRST_SEGMENT_MAX_ATTEMPTS} attempts"
+    )
+    return False
+
 
 def _rewrite_m3u8_segments(playlist: str, base: str, session_id: str, track_index: int, user: str, mt: str) -> str:
     """Rewrite ABS-host-relative segment URIs to this gateway's segment route.
@@ -9478,6 +9553,7 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
     mt = request.query_params.get("mt") or (sign(user)[0] if user else None)
 
     track_url = f"{abs_url}/public/session/{session_id}/track/{track_index}"
+    playlist_url: str | None = None
     client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0, connect=15.0))
     try:
         resp = await client.get(
@@ -9535,6 +9611,28 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
     if "mpegurl" in ctype.lower():
         body = await resp.text()
         await resp.release()
+        # Wait for segment 0 *before* closing the session — returning the playlist
+        # earlier only moves the 404 to the device, which treats it as fatal.
+        if playlist_url is None:
+            # ABS served the playlist without redirecting, so we never learned its
+            # URL and cannot join segments against it. Serve what we have rather
+            # than guessing a base — a wrong guess would rewrite the segments to
+            # a URL that 404s.
+            log.warning(
+                f"[stream/abs-session] Session {session_id} track {track_index} returned a "
+                "playlist without a redirect; skipping the first-segment readiness check"
+            )
+        else:
+            if not await _await_abs_first_segment(client, playlist_url, body):
+                await client.close()
+                return Response(
+                    content=(
+                        f"Audiobookshelf is still transcoding session {session_id}; the first "
+                        "audio segment does not exist yet. Try again shortly."
+                    ),
+                    status_code=504,
+                    media_type="text/plain",
+                )
         await client.close()
         base = str(request.base_url)
         rewritten = _rewrite_m3u8_segments(body, base, session_id, track_index, user, mt)
@@ -10785,6 +10883,50 @@ async def get_media_detail(uri: str, request: Request):
     if not mass_url:
         raise HTTPException(status_code=400, detail="Music Assistant URL not configured")
     return await _ma_rpc(mass_url, mass_token, "music/item_by_uri", {"uri": uri})
+
+
+class MALibraryURIRequest(BaseModel):
+    """Ask for the Music Assistant URI that plays an Audiobookshelf item."""
+
+    abs_item_id: str
+    title: str = ""
+
+
+@app.post("/api/media/ma-library-uri")
+async def resolve_ma_library_uri(req: MALibraryURIRequest, request: Request):
+    """Map an Audiobookshelf item id to the URI Music Assistant can actually play.
+
+    MA streams an audiobook from its own Audiobookshelf provider and only accepts
+    its own ``library://audiobook/<n>`` URI — it is not a URL player, and handing
+    it a stream URL leaves the player idle with the URL as its track title. The
+    numeric ``<n>`` is MA-internal, so only MA can produce it: this endpoint owns
+    that lookup (``services/shared/ma_library.py``) so the browser and the
+    execution service never diverge.
+
+    Returns 404 when MA does not know the item, and the caller must surface that
+    rather than falling back to the stream URL.
+    """
+    abs_item_id = (req.abs_item_id or "").strip()
+    if not abs_item_id:
+        raise HTTPException(status_code=422, detail="abs_item_id is required")
+    mass_url, mass_token = await _resolve_ma_credentials(request)
+    log.info(
+        f"[media/ma-library-uri] Resolving MA URI for abs_item_id={abs_item_id} title={req.title!r}"
+    )
+    try:
+        resolved = await ma_library.resolve_audiobook_uri(
+            mass_url, mass_token, abs_item_id, req.title
+        )
+    except ma_library.MALibraryLookupError as e:
+        # The reason travels with the response so the UI can distinguish "MA is
+        # not configured" from "MA does not have this book".
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return {
+        "status": "SUCCESS",
+        "abs_item_id": resolved.abs_item_id,
+        "ma_uri": resolved.ma_uri,
+        "title": resolved.title,
+    }
 
 
 class FavoriteRequest(BaseModel):
