@@ -568,3 +568,46 @@ class TestMaLibraryUriEndpointRequiresAuth:
         )
         assert resp.status_code == 401
         assert calls == []
+
+
+class TestAbsStreamClientsAreClosed:
+    """Each HLS segment creates an aiohttp session; it must be released.
+
+    Both byte-streaming generators used to finish without closing their
+    ClientSession, so an unclosed connector was logged per segment and each one
+    held its pool until the loop was collected. A 33-hour audiobook pulls
+    thousands of segments, so this is a leak proportional to playback length.
+    """
+
+    def test_segment_route_closes_its_session(self, client, upstream):
+        import inspect
+
+        from services.gateway import main
+
+        src = inspect.getsource(main.stream_abs_session_segment)
+        gen = src.split("async def stream_generator")[1]
+        assert "await cli.close()" in gen
+        assert "finally:" in gen
+
+    def test_playlist_byte_stream_closes_its_session(self, client, upstream):
+        import inspect
+
+        from services.gateway import main
+
+        src = inspect.getsource(main.stream_abs_session)
+        gen = src.split("async def stream_generator")[1]
+        assert "await cli.close()" in gen
+
+    def test_segment_bytes_still_stream(self, client, upstream):
+        """The close must not break delivery."""
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output-0.ts",
+            body=b"ts-bytes", status=200, content_type="video/mp2t",
+        )
+        mt, _exp = sign("testuser")
+        resp = client.get(
+            "/api/media/stream/abs-session/sess1/0/output-0.ts",
+            params={"user": "testuser", "mt": mt},
+        )
+        assert resp.status_code == 200
+        assert resp.content == b"ts-bytes"
