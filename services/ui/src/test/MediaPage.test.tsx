@@ -143,3 +143,50 @@ describe('Media page — long-form tracks', () => {
     expect(screen.queryByText('66:40')).not.toBeInTheDocument();
   });
 });
+
+describe('Media page — poisoned device names', () => {
+  /** The exact string Music Assistant still holds for the old web player. */
+  const PROFILE_BLOB =
+    '{"id":1,"username":"default","display_name":"Shared/Default User","is_admin":true,' +
+    '"nextcloud_user":"summers","ha_url":"https://ha.sumemail.com","skylight_email":"someone@example.com",' +
+    '"audiobookshelf_api_key":null,"api_key":null}' +
+    "'s Web Player (Desktop)";
+
+  beforeEach(() => {
+    server.use(
+      http.post('/execute/media/status', () => HttpResponse.json(ACTIVE_REMOTE)),
+      http.get('/api/entities', () =>
+        HttpResponse.json({
+          entities: [
+            {
+              entity_id: 'media_player.id_1_username_default_display_name_shared_default_user',
+              domain: 'media_player',
+              // Home Assistant inherited the registered client name as friendly_name.
+              friendly_name: PROFILE_BLOB,
+              state: 'idle',
+            },
+            {
+              entity_id: 'media_player.loft',
+              domain: 'media_player',
+              friendly_name: 'Loft TV',
+              state: 'idle',
+            },
+          ],
+        })
+      ),
+    );
+  });
+
+  it('shows a readable label instead of 800 characters of profile', async () => {
+    renderWithProviders(<Media />);
+
+    expect(await screen.findByText("Shared/Default User's Web Player (Desktop)")).toBeInTheDocument();
+    // A real name is untouched.
+    expect(screen.getByText('Loft TV')).toBeInTheDocument();
+    // And nothing from the profile reaches the page.
+    const body = document.body.textContent || '';
+    expect(body).not.toContain('audiobookshelf_api_key');
+    expect(body).not.toContain('nextcloud_user');
+    expect(body).not.toContain('someone@example.com');
+  });
+});

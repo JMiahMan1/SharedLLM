@@ -20,6 +20,7 @@ import {
 import { useMAWebPlayer } from '../lib/maWebPlayer';
 import { getServerOrigin } from '../lib/serverUrl';
 import { formatClock } from '../lib/utils';
+import { formatDeviceLabel } from '../lib/deviceLabels';
 
 interface MediaStatus {
   entity_id?: string;
@@ -94,7 +95,9 @@ const DeviceSelector = ({
     () =>
       entities.map((e) => ({
         id: e.entity_id,
-        name: e.friendly_name || e.entity_id,
+        // A poisoned friendly_name (see deviceLabels) must not reach the picker;
+        // the entity id is always something a person could read.
+        name: formatDeviceLabel(e.friendly_name, e.entity_id),
         room: e.entity_id.split('.')[1]?.replace(/_/g, ' ') || 'Unknown',
         online: e.state !== 'unavailable' && e.state !== 'unknown',
       })),

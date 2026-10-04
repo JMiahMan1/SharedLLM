@@ -1,5 +1,5 @@
 /**
- * Human-readable labels for Music Assistant players.
+ * Human-readable labels for devices, whatever shape upstream reports them in.
  *
  * Music Assistant keeps whatever name a client registered under, forever. An
  * older build of the web player registered its client name straight from the
@@ -75,13 +75,18 @@ function nameFromProfileBlob(value: string): { name: string; suffix: string } | 
 }
 
 /**
- * The label to show for a Music Assistant player.
+ * The label to show for a device or player.
+ *
+ * Home Assistant carries the same poisoned name: Music Assistant registered the
+ * client under it, so the HA media_player inherited it as `friendly_name` and the
+ * picker printed all 800 characters there too. Everything that renders a device
+ * name goes through this, whatever the upstream called it.
  *
  * Tries each candidate in order, salvaging a name out of a serialized profile
  * when that is all there is, and finally falls back to the player id so the
  * device is always selectable.
  */
-export function formatMaPlayerName(...candidates: unknown[]): string {
+export function formatDeviceLabel(...candidates: unknown[]): string {
   for (const candidate of candidates) {
     if (typeof candidate === 'string') {
       const fromBlob = nameFromProfileBlob(candidate);
@@ -135,7 +140,7 @@ export function parseMaPlayerList(raw: unknown): MaPlayerListEntry[] {
         player_id: typeof pl.player_id === 'string' ? pl.player_id : String(pl.player_id ?? ''),
         // `name` is whatever the client registered with Music Assistant, which
         // has included a whole serialized user profile. Never render it raw.
-        name: formatMaPlayerName(pl.name, pl.display_name, pl.player_id),
+        name: formatDeviceLabel(pl.name, pl.display_name, pl.player_id),
         available: Boolean(pl.available ?? true),
         state: typeof pl.state === 'string' ? pl.state : String(pl.state ?? 'idle'),
         powered: Boolean(pl.powered ?? true),

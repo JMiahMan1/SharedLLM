@@ -15,7 +15,7 @@ import { SendspinPlayer } from '@sendspin/sendspin-js';
 import type { ConnectionState } from './wsManager';
 import { getServerOrigin, getWsProtocolFor } from './serverUrl';
 import { storageGetSync } from './storage';
-import { parseMaPlayerList, type MaPlayerListEntry } from './maPlayerNames';
+import { parseMaPlayerList, type MaPlayerListEntry } from './deviceLabels';
 
 const STORAGE_KEY = 'sendspin_webplayer_id';
 
