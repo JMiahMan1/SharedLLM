@@ -26,7 +26,6 @@ const LazyWidgets: Record<WidgetKey, React.LazyExoticComponent<React.ComponentTy
   device_control:    lazy(() => import('../widgets/DeviceControlWidget')),
   workspaces:        lazy(() => import('../widgets/WorkspacesWidget')),
   health_activity:   lazy(() => import('../widgets/HealthActivityWidget')),
-  health_hero:       lazy(() => import('../widgets/HealthHeroWidget')),
   climate:           lazy(() => import('../widgets/ClimateWidget')),
   presence:          lazy(() => import('../widgets/PresenceWidget')),
 };

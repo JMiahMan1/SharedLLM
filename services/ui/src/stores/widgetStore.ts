@@ -9,7 +9,7 @@ import type {
   WidgetInstance,
 } from '../types/widget';
 import { api } from '../services/api';
-import { Activity, CalendarDays, Compass, Footprints, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap } from 'lucide-react';
+import { Activity, CalendarDays, Compass, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap } from 'lucide-react';
 
 export interface WidgetStateItem {
   id: string;
@@ -30,7 +30,6 @@ const defaultSizes: Record<WidgetKey, WidgetSize> = {
   device_control: 'tall',
   workspaces: 'medium',
   health_activity: 'medium',
-  health_hero: 'wide',
   climate: 'medium',
   presence: 'medium',
 };
@@ -50,7 +49,12 @@ function createDefaultSettings(key: WidgetKey, order: number): UserWidgetSetting
 }
 
 export const defaultWidgetDefs: WidgetDef[] = [
-  { key: 'health_hero', label: 'Today', icon: Footprints, minSize: 'medium', defaultSize: 'wide' },
+  // One health widget, not two. `health_hero` (labelled "Today") was added
+  // alongside `health_activity` ("Health") and both drew steps and a ring, so the
+  // dashboard showed the same numbers twice under two different names. The
+  // Health widget is the one to keep: it also carries data freshness, the 7-day
+  // average, best day and distance. The hero's baseline-relative insight is not
+  // lost — the Health page renders the same `heroInsight` and `ActivityRings`.
   { key: 'energy_insights', label: 'Energy Insights', icon: Zap, minSize: 'small', defaultSize: 'medium' },
   { key: 'ambient_timer', label: 'Ambient Timer', icon: Timer, minSize: 'small', defaultSize: 'small' },
   { key: 'quick_notes', label: 'Quick Notes', icon: StickyNote, minSize: 'small', defaultSize: 'medium' },
