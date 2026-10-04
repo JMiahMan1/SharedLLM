@@ -127,9 +127,24 @@ test.describe('dashboard: one health widget, phone width', () => {
 
     const overflow = await card.evaluate((el) => {
       const e = el as HTMLElement;
-      return { scrollW: e.scrollWidth, clientW: e.clientWidth };
+      // Name the widest descendant, so a failure says *what* is too wide rather
+      // than just that something is.
+      const limit = e.clientWidth;
+      const culprits = Array.from(e.querySelectorAll<HTMLElement>('*'))
+        .filter((n) => n.getBoundingClientRect().right > e.getBoundingClientRect().right + 1)
+        .slice(0, 5)
+        .map((n) => ({
+          tag: n.tagName.toLowerCase(),
+          cls: (n.className || '').toString().slice(0, 70),
+          testid: n.getAttribute('data-testid'),
+          right: Math.round(n.getBoundingClientRect().right),
+        }));
+      return { scrollW: e.scrollWidth, clientW: e.clientWidth, culprits };
     });
-    expect(overflow.scrollW).toBeLessThanOrEqual(overflow.clientW + 1);
+    expect(
+      overflow.scrollW,
+      `card too wide; widest offenders: ${JSON.stringify(overflow.culprits)}`
+    ).toBeLessThanOrEqual(overflow.clientW + 1);
   });
 
   test('the Health card is tappable at phone size', async ({ page }) => {
