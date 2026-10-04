@@ -19,6 +19,7 @@ import {
 } from '../lib/webPlayer';
 import { useMAWebPlayer } from '../lib/maWebPlayer';
 import { getServerOrigin } from '../lib/serverUrl';
+import { formatClock } from '../lib/utils';
 
 interface MediaStatus {
   entity_id?: string;
@@ -285,13 +286,6 @@ const NowPlayingCard = ({
   const nowPlaying = mediaStatus?.state === 'playing' || mediaStatus?.state === 'paused';
   const isWebPlayer = !selectedTarget;
 
-  const formatTime = (seconds: number) => {
-    if (!seconds || isNaN(seconds)) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   const coverRaw = isWebPlayer ? maPlayer?.mediaImage : mediaStatus?.entity_picture;
   const coverUrl = useMemo(() => {
     if (!coverRaw) return null;
@@ -518,8 +512,8 @@ const NowPlayingCard = ({
             )}
           </div>
           <div className="flex justify-between mt-1 text-[10px] text-slate-500 font-mono">
-            <span>{formatTime(dragTime !== null ? dragTime : currentTime)}</span>
-            <span>{formatTime(duration)}</span>
+            <span>{formatClock(dragTime !== null ? dragTime : currentTime)}</span>
+            <span>{formatClock(duration)}</span>
           </div>
           </div>
         )}
@@ -529,7 +523,7 @@ const NowPlayingCard = ({
               <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse" aria-hidden />
               <span className="text-[11px] font-semibold uppercase tracking-wider text-rose-300">Live</span>
               <div className="flex-1 h-1.5 rounded-full bg-gradient-to-r from-rose-500/40 via-rose-400/20 to-transparent" />
-              <span className="text-[10px] text-slate-500 font-mono">{formatTime(currentTime)}</span>
+              <span className="text-[10px] text-slate-500 font-mono">{formatClock(currentTime)}</span>
             </div>
           </div>
         )}

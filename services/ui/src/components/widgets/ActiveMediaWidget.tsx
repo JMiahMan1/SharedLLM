@@ -2,14 +2,8 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { Music, Play, Pause, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import type { IActiveMediaWidgetProps, MediaState } from '../../types/widget';
 import { api } from '../../services/api';
+import { formatClock } from '../../lib/utils';
 import toast from 'react-hot-toast';
-
-function formatTime(seconds: number): string {
-  const totalSec = Math.max(0, Math.floor(seconds));
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
 
 const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsButton }: IActiveMediaWidgetProps) => {
   const [media, setMedia] = useState<MediaState | null>(null);
@@ -272,7 +266,7 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
               aria-valuemin={0}
               aria-valuemax={Math.round(duration)}
               aria-valuenow={Math.round(position)}
-              aria-valuetext={`${formatTime(position)} of ${formatTime(duration)}`}
+              aria-valuetext={`${formatClock(position)} of ${formatClock(duration)}`}
               className="relative py-4 sm:py-2 select-none touch-none cursor-pointer group"
             >
               <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative pointer-events-none">
@@ -289,7 +283,7 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
           )}
           {duration > 0 && (
             <p className="text-[10px] text-slate-500 font-mono text-center -mt-2">
-              {formatTime(position)} / {formatTime(duration)}
+              {formatClock(position)} / {formatClock(duration)}
             </p>
           )}
 
