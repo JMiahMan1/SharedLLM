@@ -146,6 +146,12 @@ services:
       # never a docker service alias. Sourced from .env (untracked, per install)
       # instead of baking one private address into this shared file.
       - EXECUTION_EXTERNAL_HOST=${EXECUTION_EXTERNAL_HOST}
+      # Device discovery. SCAN_SUBNET/LOCAL_SUBNET are only needed when the host
+      # network cannot be read (bridge mode); ROUTER_IP enables the SNMP ARP
+      # lookup, which declines without it rather than probing a default router.
+      - SCAN_SUBNET=${SCAN_SUBNET:-}
+      - LOCAL_SUBNET=${LOCAL_SUBNET:-}
+      - ROUTER_IP=${ROUTER_IP:-}
       - TEMP_MEDIA_DIR=/workspaces
       - MODELS_DIR=/workspaces/models
       - TZ=America/Phoenix
@@ -485,6 +491,9 @@ services:
       # Host path that /workspaces maps to, so the sandbox can mount the real
       # workspace data (the Docker daemon resolves mount sources on the host).
       - WORKSPACE_HOST_PATH=${WORKSPACE_HOST_PATH:?WORKSPACE_HOST_PATH must name the host directory to mount at /workspaces (see .env.example)}
+      # The LAN address a device uses to reach a forwarded workspace port. The
+      # sandbox refuses to open a forward without it rather than guessing.
+      - EXECUTION_EXTERNAL_HOST=${EXECUTION_EXTERNAL_HOST:?EXECUTION_EXTERNAL_HOST must be this host's LAN address (see .env.example)}
     volumes:
       - ${WORKSPACE_HOST_PATH:?WORKSPACE_HOST_PATH must name the host directory to mount at /workspaces (see .env.example)}:/workspaces
       - ${REPO_HOST_PATH:?REPO_HOST_PATH must name this checkout on the host (see .env.example)}:/host-repo
