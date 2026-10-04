@@ -34,6 +34,10 @@ def _make_session(resolve_data, storage_post_data=None, storage_post_status=200,
         return _aio_resp(200, {})
 
     async def get_side_effect(url, **kwargs):
+        # The gateway validates a presented API key against Identity's strict,
+        # no-fallback endpoint before it will serve a route. Model a real key.
+        if "validate-api-key" in url:
+            return _aio_resp(200, {"user": "testuser", "user_id": 1, "is_admin": False})
         if "rag/stats" in url:
             return _aio_resp(200, rag_stats or {"total_chunks": 100, "total_documents": 10})
         return _aio_resp(200, {})
@@ -85,12 +89,23 @@ def test_storage_index_proxy(auth_headers, monkeypatch):
     assert response.json()["status"] == "ACCEPTED"
 
 
-def test_storage_stats_proxy(monkeypatch):
+def test_storage_stats_proxy(monkeypatch, auth_headers):
     sess = _make_session(
         resolve_data={"user": "testuser", "nextcloud_user": "ncuser"},
         rag_stats={"total_chunks": 100, "total_documents": 10},
     )
     monkeypatch.setattr(gateway_main, "get_http_client", lambda: sess)
-    response = client.get("/api/storage/stats")
+    response = client.get("/api/storage/stats", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["total_chunks"] == 100
+
+
+def test_storage_stats_needs_a_real_key(monkeypatch):
+    """No key, no stats: this route used to answer with the admin's counts."""
+    sess = _make_session(
+        resolve_data={"user": "default", "nextcloud_user": "ncuser"},
+        rag_stats={"total_chunks": 100, "total_documents": 10},
+    )
+    monkeypatch.setattr(gateway_main, "get_http_client", lambda: sess)
+    response = client.get("/api/storage/stats")
+    assert response.status_code == 401
