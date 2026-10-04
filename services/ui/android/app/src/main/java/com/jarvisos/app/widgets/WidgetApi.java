@@ -296,11 +296,7 @@ public final class WidgetApi {
     }
 
     public static String friendlyName(JSONObject entity) {
-        String fn = entity.optString("friendly_name");
-        if (fn != null && !fn.isEmpty()) return fn;
-        String id = entity.optString("entity_id", "");
-        int dot = id.indexOf('.');
-        return dot >= 0 ? id.substring(dot + 1).replace('_', ' ') : id;
+        return EntityNames.friendlyName(entity);
     }
 
     public static boolean isActiveState(String state) {
