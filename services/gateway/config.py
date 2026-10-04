@@ -111,7 +111,12 @@ RAVEN_CHECK_INTERVAL = _safe_int("RAVEN_CHECK_INTERVAL", 300)
 RAVEN_ERROR_THRESHOLD = _safe_int("RAVEN_ERROR_THRESHOLD", 5)
 
 # --- ABS / media timeouts ---
-ABS_TIMEOUT = _safe_int("ABS_TIMEOUT", 5)
+# Audiobookshelf is a separate host reached over the network, so the first call
+# pays DNS + TLS + its own request time: measured cold at 5.26s, which the old
+# 5s budget cut off and reported as "ABS unavailable" even though ABS answers in
+# ~0.2s once warm. 12s leaves room for a cold call and still lands below the
+# browser's 15s axios timeout, so the server answers first with a real notice.
+ABS_TIMEOUT = _safe_int("ABS_TIMEOUT", 12)
 
 # --- Phase 2: env-configurable poll intervals (capped backoff / fallback) ---
 # /api/ps has no push/event API, so the Ollama slot wait still polls — but with

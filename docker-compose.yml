@@ -153,15 +153,15 @@ services:
       - WORKSPACE_ROOT=/workspaces
       # Host path that /workspaces maps to, so the sandbox can mount the real
       # workspace data (the Docker daemon resolves mount sources on the host).
-      - WORKSPACE_HOST_PATH=${WORKSPACE_HOST_PATH:-/home/jeremiah/workspaces}
+      - WORKSPACE_HOST_PATH=${WORKSPACE_HOST_PATH:?WORKSPACE_HOST_PATH must name the host directory to mount at /workspaces (see .env.example)}
     security_opt:
       - label=disable
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/run/docker.sock:/var/run/docker.sock
-      - /home/jeremiah/.ssh:/home/sharedllm/.ssh:ro
+      - ${HOST_SSH_DIR:?HOST_SSH_DIR must name the host .ssh directory (see .env.example)}:/home/sharedllm/.ssh:ro
       - kokoro_models:/app/models
-      - ${WORKSPACE_HOST_PATH:-/home/jeremiah/workspaces}:/workspaces
+      - ${WORKSPACE_HOST_PATH:?WORKSPACE_HOST_PATH must name the host directory to mount at /workspaces (see .env.example)}:/workspaces
       - execution_data:/data
       # DNS via the gateway's dnsmasq so .local hostnames (synced by the DNS
       # sync service) resolve inside this host-networked container; resolv.conf
@@ -484,10 +484,10 @@ services:
       - HOME=/home/raven
       # Host path that /workspaces maps to, so the sandbox can mount the real
       # workspace data (the Docker daemon resolves mount sources on the host).
-      - WORKSPACE_HOST_PATH=${WORKSPACE_HOST_PATH:-/home/jeremiah/workspaces}
+      - WORKSPACE_HOST_PATH=${WORKSPACE_HOST_PATH:?WORKSPACE_HOST_PATH must name the host directory to mount at /workspaces (see .env.example)}
     volumes:
-      - ${WORKSPACE_HOST_PATH:-/home/jeremiah/workspaces}:/workspaces
-      - /home/jeremiah/SharedLLM:/host-repo
+      - ${WORKSPACE_HOST_PATH:?WORKSPACE_HOST_PATH must name the host directory to mount at /workspaces (see .env.example)}:/workspaces
+      - ${REPO_HOST_PATH:?REPO_HOST_PATH must name this checkout on the host (see .env.example)}:/host-repo
       - workspace_runtime_data:/data
       - ./config/workspaces.json:/app/config/workspaces.json:ro
       - /etc/localtime:/etc/localtime:ro
