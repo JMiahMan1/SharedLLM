@@ -72,7 +72,13 @@ def get_local_subnet() -> str:
         network = ipaddress.IPv4Network(f"{local_ip}/24", strict=False)
         return str(network)
     except Exception:
-        return "192.168.1.0/24"
+        # Guessing here scanned a network that is usually not this one, so the
+        # scan silently found nothing. Say what is missing instead.
+        raise RuntimeError(
+            "Could not determine this host's subnet, so device discovery has "
+            "nothing to scan. Set SCAN_SUBNET (or LOCAL_SUBNET) to the /24 to "
+            "scan, e.g. 192.168.2.0/24, or fix the host's networking."
+        ) from None
 
 
 DEFAULT_SUBNET = get_local_subnet()
@@ -551,9 +557,26 @@ async def _discover_via_arp_scan(
 
 
 async def _discover_via_snmp(
-    entity_id: str, ha_url: str, ha_token: str, router_ip: str = "192.168.2.1", community: str = "public"
+    entity_id: str,
+    ha_url: str,
+    ha_token: str,
+    router_ip: str | None = None,
+    community: str = "public",
 ) -> dict | None:
-    """Get MAC/IP from router ARP table via SNMP walk."""
+    """Get MAC/IP from router ARP table via SNMP walk.
+
+    The router used to default to one install's gateway (192.168.2.1), so on any
+    other network the walk targeted a host that is not a router. ROUTER_IP is the
+    configured answer; without it this strategy declines rather than walking a
+    stranger's router, and the other discovery paths still run.
+    """
+    router_ip = (router_ip or os.environ.get("ROUTER_IP") or "").strip()
+    if not router_ip:
+        log.info(
+            "[discovery] SNMP router lookup skipped: ROUTER_IP is not set "
+            "(the other discovery paths still run)."
+        )
+        return None
     try:
         import subprocess
         state = await ha_client.get_state(ha_url, ha_token, entity_id)

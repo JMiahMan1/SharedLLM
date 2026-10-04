@@ -850,12 +850,39 @@ def _run_tcp_proxy(host_port: int, target_ip: str, target_port: int, stop_event:
     log.info(f"[Sandbox Port Forward] Stopped forwarding on host port {host_port}")
 
 
+def _forward_host() -> str:
+    """The LAN address devices use to reach a forwarded workspace port.
+
+    This used to be hardcoded to one machine's address (192.168.2.205), so on
+    any other host the URL handed to the UI pointed somewhere that does not
+    exist. EXECUTION_EXTERNAL_HOST is already the configured answer -- the
+    execution service builds its stream URLs from the same value -- and when it
+    is unset we say so instead of guessing.
+    """
+    host = (os.environ.get("EXECUTION_EXTERNAL_HOST") or "").strip()
+    if not host:
+        raise RuntimeError(
+            "EXECUTION_EXTERNAL_HOST is not set, so a workspace port cannot be "
+            "given a reachable URL. Set it to this host's LAN address (see "
+            ".env.example) and retry."
+        )
+    return host
+
+
+def _host_forward_url(port: int) -> str:
+    """The LAN URL for a forwarded workspace port."""
+    return f"http://{_forward_host()}:{port}"
+
+
 def expose_workspace_port(
     workspace_id: str,
     container_port: int,
     host_port: int | None = None,
 ) -> dict[str, Any]:
     """Expose a container port running inside a sandbox workspace to the host IP."""
+    # Resolve the host first: raising after the forward thread is running would
+    # leave a listener nobody can reach.
+    host = _forward_host()
     client = _get_client()
     cname = _container_name(workspace_id)
     net_name = _network_name(workspace_id)
@@ -903,7 +930,7 @@ def expose_workspace_port(
         "container_ip": container_ip,
         "host_port": host_port,
         "status": "active",
-        "url": f"http://192.168.2.205:{host_port}",
+        "url": f"http://{host}:{host_port}",
     }
 
 
@@ -928,6 +955,6 @@ def list_workspace_ports(workspace_id: str) -> list[dict[str, Any]]:
                     "container_port": c_port,
                     "container_ip": c_ip,
                     "host_port": h_port,
-                    "url": f"http://192.168.2.205:{h_port}",
+                    "url": _host_forward_url(h_port),
                 })
     return result
