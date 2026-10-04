@@ -182,23 +182,68 @@ def test_skylight_chore_complete_failure():
 
 
 def test_skylight_chore_uncomplete():
-    """Uncompleting resets the chore status to pending."""
+    """Uncompleting must aim at the same per-instance endpoint as completing.
+
+    The mock used to return success for *any* call, so aiming at the series
+    definition (`PUT /chores/{series}`) instead of the instance's completions
+    passed this test while doing nothing in production. The call is recorded now.
+    """
+    calls = []
+
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
+        calls.append((method, suffix, json_body))
         return {"success": True}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
         with patch("services.execution.main._skylight_request", new=mock_skylight_request):
             resp = client.post(
-                "/api/integrations/skylight/chores/1/uncomplete",
+                "/api/integrations/skylight/chores/52409380-2026-10-04/uncomplete",
                 headers={"X-Internal-Secret": "test-secret"}
             )
             assert resp.status_code == 200
             data = resp.json()
             assert data["status"] == "SUCCESS"
             assert "Chore uncompleted" in data["message"]
+
+    assert calls == [
+        (
+            "PUT",
+            "/chores/52409380/completions",
+            {"id": "52409380", "instance_date": "2026-10-04", "status": "pending"},
+        )
+    ], f"uncomplete aimed somewhere else: {calls}"
+
+
+def test_skylight_chore_complete_and_uncomplete_are_inverses():
+    """Both directions hit the instance's completions, differing only in status."""
+    calls = []
+
+    async def mock_get_session(*args, **kwargs):
+        return _mock_session()
+
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
+        calls.append((method, suffix, json_body))
+        return {"ok": True}
+
+    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
+        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
+            client.post(
+                "/api/integrations/skylight/chores/42-2026-05-29/complete",
+                headers={"X-Internal-Secret": "test-secret"},
+            )
+            client.post(
+                "/api/integrations/skylight/chores/42-2026-05-29/uncomplete",
+                headers={"X-Internal-Secret": "test-secret"},
+            )
+
+    assert len(calls) == 2
+    assert calls[0][1] == calls[1][1] == "/chores/42/completions"
+    assert calls[0][2]["status"] == "complete"
+    assert calls[1][2]["status"] == "pending"
+    assert calls[0][2]["instance_date"] == calls[1][2]["instance_date"] == "2026-05-29"
 
 
 def test_skylight_rewards():
