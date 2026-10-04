@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Check, Star, Sun, Moon, User } from 'lucide-react';
+import { Check, Star, Sun, Moon, User, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useWidgetData } from '../../hooks/useWidgetData';
 import { useDarkModeSync } from '../../hooks/useDarkModeSync';
+import { useHaptics } from '../../hooks/useHaptics';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
+import { hasChoresFor, type ChoreScope } from '../../lib/choreScope';
 import type { ChoreItem, IWidgetProps } from '../../types/widget';
 import toast from 'react-hot-toast';
 
@@ -104,15 +106,23 @@ function StarBadge({ count }: { count: number }) {
 const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
   const { user } = useAuth();
   const { isDark } = useDarkModeSync();
+  const { trigger } = useHaptics();
   const [completedOverrides, setCompletedOverrides] = useState<Record<string, boolean>>({});
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
+  // An admin is a family member first: they get the whole frame by default and
+  // can narrow to their own chores. Everyone else only ever sees their own.
+  const [scope, setScope] = useState<ChoreScope>('all');
+  // Remembered from the unfiltered fetch so the "my chores" toggle stays put
+  // while it is showing the narrowed list -- otherwise switching to "me" would
+  // hide the only control that switches back.
+  const [familyChores, setFamilyChores] = useState<ChoreItem[]>([]);
 
   const fetchChores = async (): Promise<ChoresPayload> => {
     if (!user?.username) {
       throw new Error('No user logged in');
     }
 
-    const resp = (await api.getSkylightChores(user.username, 'today')) as {
+    const resp = (await api.getSkylightChores('today', scope === 'me' ? 'me' : undefined)) as {
       status: string;
       message?: string;
       chores?: ChoreItem[];
@@ -125,13 +135,24 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
 
     // Each chore carries its assignee (the Skylight `category` label, i.e. the
     // family member's name) and that category's color. The gateway scopes the
-    // result to the logged-in user (admins get the whole family frame), and any
-    // member can toggle.
-    return { chores: resp.chores || [], assignee_meta: resp.assignee_meta || {} };
+    // result to the logged-in user (admins get the whole family frame unless
+    // they ask for their own), and any member can toggle.
+    const chores = resp.chores || [];
+    if (scope === 'all') setFamilyChores(chores);
+    return { chores, assignee_meta: resp.assignee_meta || {} };
   };
 
   const { data = { chores: [], assignee_meta: {} }, isLoading, error, refetch } =
-    useWidgetData<ChoresPayload>(['skylight-chores', user?.username || ''], fetchChores, 300000);
+    useWidgetData<ChoresPayload>(
+      ['skylight-chores', user?.username || '', scope],
+      fetchChores,
+      300000,
+    );
+
+  // The toggle is only worth offering to an admin who actually has chores of
+  // their own on the board; "my chores" would otherwise be a dead end.
+  const knownChores = scope === 'me' ? familyChores : data.chores;
+  const showScopeToggle = Boolean(user?.is_admin) && hasChoresFor(knownChores, user?.username ?? '');
 
   const assigneeMeta = data.assignee_meta ?? {};
 
@@ -342,8 +363,11 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
                 Today&apos;s Chores
               </div>
             </div>
-            <div className="text-sm font-bold" style={{ color: 'var(--osk-ink-faint)' }}>
-              {completedCount}/{totalCount} done
+            <div className="flex items-center gap-3">
+              <div className="text-sm font-bold" style={{ color: 'var(--osk-ink-faint)' }}>
+                {completedCount}/{totalCount} done
+              </div>
+              {renderScopeToggle()}
             </div>
           </div>
           <div className="flex min-h-0 flex-1 flex-wrap content-start items-start gap-4 overflow-y-auto pb-2">
@@ -392,6 +416,56 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
     </button>
   );
 
+  const renderScopeToggle = () => {
+    if (!showScopeToggle) return null;
+    const options: Array<{ id: ChoreScope; label: string; sr: string; Icon: typeof Users }> = [
+      { id: 'all', label: 'Everyone', sr: "everyone's chores", Icon: Users },
+      { id: 'me', label: 'Me', sr: 'my chores', Icon: User },
+    ];
+    return (
+      <div
+        data-testid="chores-scope-toggle"
+        role="group"
+        aria-label="Whose chores to show"
+        className="flex items-center justify-end gap-1 mb-1 shrink-0"
+      >
+        {options.map((o) => {
+          const active = o.id === scope;
+          return (
+            <button
+              key={o.id}
+              type="button"
+              aria-pressed={active}
+              data-testid={`chores-scope-${o.id}`}
+              onClick={() => {
+                trigger('light');
+                setScope(o.id);
+              }}
+              className={
+                active
+                  ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold border pointer-coarse:min-h-11'
+                  : 'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold hover:bg-white/5 pointer-coarse:min-h-11'
+              }
+              style={
+                active
+                  ? {
+                      background: 'var(--osk-ember-soft)',
+                      borderColor: 'var(--osk-ember)',
+                      color: 'var(--osk-ember-deep)',
+                    }
+                  : { color: 'var(--osk-ink-faint)', borderColor: 'transparent' }
+              }
+            >
+              <o.Icon size={12} aria-hidden />
+              <span aria-hidden="true">{o.label}</span>
+              <span className="sr-only">{o.sr}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
   const renderCompact = () =>
     totalCount === 0 ? (
       <div className="flex flex-col items-center justify-center text-center h-full">
@@ -400,6 +474,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       </div>
     ) : (
       <div className="flex flex-col h-full justify-between">
+        {renderScopeToggle()}
         <div className="relative w-20 h-20 mx-auto mb-5 shrink-0">
           <svg className="w-20 h-20 -rotate-90" viewBox="0 0 36 36">
             <path
