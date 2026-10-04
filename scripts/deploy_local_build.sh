@@ -182,6 +182,19 @@ ssh $SSH_OPTS "$HOST" << EOF
         exit 1
     fi
 
+    # Reclaim space from the images this deploy just superseded.
+    #
+    # Every build on the server leaves the previous image behind as an untagged
+    # layer, and on the production host that accumulated to 484 images / 529 GB:
+    # the disk hit 100% and a build failed with "No space left on device". Only
+    # *dangling* images are removed, so every image a running container uses is
+    # untouched. The build cache is pruned the same way, but only once it is a
+    # day old so a follow-up deploy can still reuse recent layers.
+    echo "Pruning dangling images and stale build cache..."
+    docker image prune -f
+    docker builder prune -f --filter until=24h || true
+    df -h / | tail -1
+
     # Stage OTA web update bundle and version info for in-app mobile updates.
     #
     # The advertised git_sha MUST be the SHA baked into the bundle we publish.
