@@ -248,3 +248,90 @@ async def test_status_and_transport_guard_none_entity_id(mocker):
     )
     assert trans_res.status == "SUCCESS"
 
+
+
+@pytest.mark.asyncio
+async def test_idle_browser_player_is_not_reported_as_playing(mocker):
+    """A target that is registered but idle must not read as now playing.
+
+    This is the "Unknown / Unknown Artist / Web Player" header: the chosen target
+    was the browser, the tab was long gone, and the stored row had no title, so
+    the placeholder strings were rendered as if they were a real track.
+    """
+    mocker.patch("services.execution.ha_client.get_states", return_value=mock_ha_states)
+    with contextlib.suppress(ModuleNotFoundError):
+        mocker.patch("ha_client.get_states", return_value=mock_ha_states)
+
+    idle_req = MediaStateSyncRequest(
+        user_context=mock_context,
+        entity_id="local",
+        state="idle",
+        media_type="music",
+        media_content_id="",
+        position=0.0,
+        duration=0.0,
+        volume_level=0.5,
+        is_volume_muted=False,
+        media_title="",
+        media_artist="",
+        media_album="",
+    )
+    assert (await MediaPlaybackService.sync_local(idle_req)).status == "SUCCESS"
+
+    res = await MediaPlaybackService.status(MediaStatusRequest(user_context=mock_context))
+
+    detail = res.detail or {}
+    active = detail.get("active")
+    # Nothing is playing anywhere, so nothing is active -- not the browser.
+    assert active is None, f"an idle browser player was reported as active: {active}"
+    assert "Unknown" not in res.message
+    assert res.message == "No media players are currently active."
+
+    # ...but it is still offered as a target, so it can be picked again.
+    ids = [p.get("entity_id") for p in detail.get("available") or []]
+    assert "web_player" in ids
+    assert "web_player" in [p.get("entity_id") for p in detail.get("all_players") or []]
+
+
+@pytest.mark.asyncio
+async def test_idle_browser_player_does_not_hide_a_real_ha_player(mocker):
+    """With music on a speaker, that speaker is what "now playing" must report."""
+    playing_states = [
+        {
+            "entity_id": "media_player.kitchen",
+            "state": "playing",
+            "attributes": {
+                "friendly_name": "Kitchen Speaker",
+                "volume_level": 0.5,
+                "is_volume_muted": False,
+                "media_title": "Real Song",
+                "media_artist": "Real Artist",
+            },
+        }
+    ]
+    mocker.patch("services.execution.ha_client.get_states", return_value=playing_states)
+    with contextlib.suppress(ModuleNotFoundError):
+        mocker.patch("ha_client.get_states", return_value=playing_states)
+
+    idle_req = MediaStateSyncRequest(
+        user_context=mock_context,
+        entity_id="local",
+        state="idle",
+        media_type="music",
+        media_content_id="",
+        position=0.0,
+        duration=0.0,
+        volume_level=0.5,
+        is_volume_muted=False,
+        media_title="",
+        media_artist="",
+        media_album="",
+    )
+    assert (await MediaPlaybackService.sync_local(idle_req)).status == "SUCCESS"
+
+    res = await MediaPlaybackService.status(MediaStatusRequest(user_context=mock_context))
+    active = (res.detail or {}).get("active")
+    assert active is not None
+    assert active["entity_id"] == "media_player.kitchen"
+    assert active["media_title"] == "Real Song"
+    assert "Real Song" in res.message

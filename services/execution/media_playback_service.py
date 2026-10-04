@@ -177,12 +177,17 @@ class MediaPlaybackService:
 
         # If the active target choice is local, override the 'active' player with local state
         if is_local and db_state:
+            stored_state = (db_state.get("state") or "idle").lower()
+            stored_title = (db_state.get("media_title") or "").strip()
+            stored_artist = (db_state.get("media_artist") or "").strip()
             web_player = {
                 "entity_id": "web_player",
                 "friendly_name": "Web Player",
-                "state": db_state.get("state", "idle"),
-                "media_title": db_state.get("media_title", "Unknown Title"),
-                "media_artist": db_state.get("media_artist", "Unknown Artist"),
+                "state": stored_state,
+                # No placeholder text: "Unknown Title" is what the app's headers
+                # then rendered verbatim once the browser tab was long gone.
+                "media_title": stored_title,
+                "media_artist": stored_artist,
                 "media_album": db_state.get("media_album", ""),
                 "source": "local",
                 "volume_level": db_state.get("volume_level", 0.7),
@@ -193,25 +198,48 @@ class MediaPlaybackService:
                 "media_type": db_state.get("media_type", "music")
             }
 
-            # Inject local player as active, move other HA active players to available list
             detail = ha_res.detail or {}
             ha_active = detail.get("active")
             ha_available = detail.get("available") or []
             if ha_active:
                 ha_available.insert(0, ha_active)
 
-            detail["active"] = web_player
-            detail["available"] = ha_available
-            detail["all_players"] = [web_player, *ha_available]
+            # A registered-but-idle browser player is a *target*, not now playing.
+            # Reporting it as active is what put "Unknown / Unknown Artist / Web
+            # Player" on the dashboard and in the voice summary for every user
+            # whose chosen target is the browser and whose tab had closed.
+            is_now_playing = stored_state in ("playing", "paused", "buffering") and bool(stored_title)
+            if is_now_playing:
+                detail["active"] = web_player
+                detail["available"] = ha_available
+                detail["all_players"] = [web_player, *ha_available]
+                vol_pct = int(web_player["volume_level"] * 100)
+                ha_res.message = (
+                    f"**Currently Playing (Local):**\n"
+                    f"- **Web Player**: {web_player['media_title']} - {web_player['media_artist']} ({web_player['state']}) | Vol: {vol_pct}%"
+                )
+            else:
+                # Keep the browser player selectable, but do not claim it is
+                # playing: fall back to whatever Home Assistant really has active.
+                if web_player["entity_id"] not in [p.get("entity_id") for p in ha_available]:
+                    ha_available.insert(0, web_player)
+                detail["active"] = ha_active
+                detail["available"] = ha_available
+                detail["all_players"] = ha_available
+                if ha_active:
+                    vol_str = (
+                        f" | Vol: {round(ha_active['volume_level'] * 100)}%"
+                        if ha_active.get("volume_level") is not None
+                        else ""
+                    )
+                    ha_res.message = (
+                        f"**Currently Playing:**\n- **{ha_active['friendly_name']}**: "
+                        f"{ha_active['media_title'] or ha_active['source'] or ha_active['state']}{vol_str}"
+                    )
+                else:
+                    ha_res.message = "No media players are currently active."
 
             ha_res.detail = detail
-
-            # Format high-level status message
-            vol_pct = int(web_player["volume_level"] * 100)
-            ha_res.message = (
-                f"**Currently Playing (Local):**\n"
-                f"- **Web Player**: {web_player['media_title']} - {web_player['media_artist']} ({web_player['state']}) | Vol: {vol_pct}%"
-            )
         elif active_target and ha_res.detail:
             # If target is specific HA player, make sure it is selected as the 'active' one in response
             detail = ha_res.detail
