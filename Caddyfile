@@ -21,8 +21,10 @@
         format filter {
             wrap json
             fields {
-                request>uri>query>token replace REDACTED
-                request>uri>query>mt replace REDACTED
+                request>uri query {
+                    replace token REDACTED
+                    replace mt REDACTED
+                }
                 request>headers>Authorization delete
             }
         }
@@ -86,8 +88,10 @@
         format filter {
             wrap json
             fields {
-                request>uri>query>token replace REDACTED
-                request>uri>query>mt replace REDACTED
+                request>uri query {
+                    replace token REDACTED
+                    replace mt REDACTED
+                }
                 request>headers>Authorization delete
             }
         }
