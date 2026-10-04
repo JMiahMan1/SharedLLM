@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, Footprints, Flame, Mountain } from 'lucide-react';
+import { Activity, Flame, Mountain } from 'lucide-react';
 import type { IWidgetProps } from '../../types/widget';
 import { useWidgetStore } from '../../stores/widgetStore';
 import { themeRegistry } from '../../themes';
@@ -12,6 +12,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useHaptics } from '../../hooks/useHaptics';
 import { syncAdvice, syncStatus } from '../../lib/healthMetrics';
 import { pedometerQueryOptions, stepsQueryKey } from '../../lib/healthQueries';
+import ActivityRings, { type RingInput } from '../health/ActivityRings';
+import { heroInsight } from '../../lib/healthRanges';
 
 export interface HealthActivityConfig {
   themeId?: string;
@@ -32,43 +34,15 @@ const DEFAULT_CONFIG: Required<Pick<HealthActivityConfig, 'stepGoal'>> = {
   stepGoal: 10000,
 };
 
-function Ring({
-  pct,
-  stroke,
-  track,
-  size = 96,
-  children,
-}: {
-  pct: number;
-  stroke: string;
-  track: string;
-  size?: number;
-  children: React.ReactNode;
-}) {
-  const r = (size - 10) / 2;
-  const c = 2 * Math.PI * r;
-  const clamped = Math.max(0, Math.min(1, pct));
-  return (
-    <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90" aria-hidden>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={track} strokeWidth="8" />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke={stroke}
-          strokeWidth="8"
-          strokeLinecap="round"
-          strokeDasharray={c}
-          strokeDashoffset={c * (1 - clamped)}
-          style={{ transition: 'stroke-dashoffset 0.4s ease' }}
-        />
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center">{children}</div>
-    </div>
-  );
-}
+/**
+ * Ring diameter in the widget cell. The Health page keeps the page-sized ring;
+ * this is the compact form of the same component, not a second implementation.
+ *
+ * Measured, not guessed: a widget cell is a ~280px column, and the ring plus its
+ * zone label has to sit beside the step count without pushing the card wider
+ * than its own clientWidth. 84px overflowed by 24px; 72 fits.
+ */
+const WIDGET_RING_SIZE = 72;
 
 /**
  * Health / Steps / Workout dashboard widget.
@@ -101,7 +75,29 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
   const steps = hasStepData ? (stepsData?.today ?? 0) : null;
   const stepsGoal = stepsData?.goal || config.stepGoal || DEFAULT_CONFIG.stepGoal;
 
-  const stepPct = steps == null ? 0 : steps / Math.max(1, stepsGoal);
+  // The user's own median, so the ring can say "on your usual pace" rather than
+  // just how far through an arbitrary goal the day is. Shares one cache entry with
+  // the Health page, so the widget and the page cannot disagree.
+  const weekQuery = useQuery({
+    queryKey: ['step-ranges', 'W', currentUsername],
+    queryFn: () => api.getStepRanges(currentUsername, 'W'),
+    staleTime: 60_000,
+  });
+  const baseline = weekQuery.data?.baseline ?? null;
+  const insight = heroInsight(weekQuery.data ?? null, steps ?? 0, stepsGoal);
+  const rings: RingInput[] = [
+    {
+      id: 'steps',
+      label: 'Steps',
+      actual: steps ?? 0,
+      goal: stepsGoal,
+      unit: 'steps',
+      // `tone` is deliberately not set. It overrides the zone outright, so
+      // pinning it to 'on' would paint every day as "On your usual pace" — a
+      // confident, wrong claim. The zone colours are the shared ones the Health
+      // page uses, and matching the site theme is worth less than being right.
+    },
+  ];
 
   // Real derived metrics — no data source is invented to fill a tile.
   const weekValues = useMemo(
@@ -195,7 +191,7 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
         )}
 
         <div className="flex items-center justify-between gap-2">
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="text-xs uppercase tracking-wider" style={{ color: cssVars['--ht-text-muted'] }}>
               Today
             </div>
@@ -223,14 +219,21 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
               </div>
             )}
           </div>
-          <Ring
-            pct={stepPct}
-            stroke={cssVars['--ht-ring'] ?? cssVars['--ht-progress']}
-            track={track}
-            size={88}
-          >
-            <Footprints size={22} style={{ color: cssVars['--ht-accent'] }} aria-hidden />
-          </Ring>
+          {/* Not `shrink-0`: ActivityRings carries a full-width note when the
+              baseline is thin, and a wrapper that refuses to shrink makes the
+              card overflow its own column on a phone. */}
+          <div className="min-w-0 shrink">
+            <ActivityRings
+              rings={rings}
+              baseline={baseline}
+              thin={weekQuery.data?.thin}
+              baselineMinDays={weekQuery.data?.baseline_min_days}
+              size={WIDGET_RING_SIZE}
+              // The insight line below already explains a thin baseline, so the
+              // ring does not repeat it.
+              showThinNote={false}
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-2">
@@ -303,14 +306,29 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
         </div>
 
         <div
-          className="text-[11px] text-center"
+          className="text-[11px] text-center leading-tight"
           style={{ color: cssVars['--ht-text-muted'] }}
         >
-          Theme: <strong style={{ color: cssVars['--ht-accent'] }}>{theme.name}</strong>
-          {' · '}
-          <span title="Themes are Jarvis-wide — change it in Settings → Website theme">
-            set in Settings
-          </span>
+          {insight ? (
+            <>
+              <span
+                data-testid="health-activity-insight"
+                className="font-semibold"
+                style={{ color: cssVars['--ht-accent'] }}
+              >
+                {insight.headline}
+              </span>
+              <span className="block">{insight.detail}</span>
+            </>
+          ) : (
+            /* No insight is not an empty box: say what is missing and why, rather
+               than rendering a panel that just looks broken. */
+            <span data-testid="health-activity-no-insight">
+              {steps == null || steps === 0
+                ? 'Nothing recorded yet. Walk a little and this fills in.'
+                : 'Not enough history yet for a fair comparison.'}
+            </span>
+          )}
         </div>
       </div>
     </WidgetCard>
