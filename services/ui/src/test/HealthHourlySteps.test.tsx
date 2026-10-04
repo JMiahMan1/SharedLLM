@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -85,7 +85,9 @@ function useGeoHandlers(opts: { hourly: boolean }) {
       const range = new URL(request.url).searchParams.get('range') || 'W';
       const payload = rangesPayload(range);
       if (range === 'D' && !opts.hourly) {
-        const { hourly: _h, peak: _p, ...rest } = payload as Record<string, unknown>;
+        const rest = { ...(payload as Record<string, unknown>) };
+        delete rest.hourly;
+        delete rest.peak;
         return HttpResponse.json(rest);
       }
       return HttpResponse.json(payload);
@@ -161,7 +163,6 @@ describe('the day view charts activity by the hour', () => {
 
   it('does not put hours on the week view, where they would be 168 columns', async () => {
     useGeoHandlers({ hourly: true });
-    const user = userEvent.setup();
     renderWithProviders(<Health />);
 
     await screen.findByTestId('step-range-selector');
