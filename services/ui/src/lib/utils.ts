@@ -28,3 +28,23 @@ export function formatDateTime(value?: string | null): string | null {
     minute: '2-digit',
   });
 }
+
+/**
+ * Media elapsed/duration clock. Audiobooks and podcast episodes run past an
+ * hour, so anything an hour or longer grows an hours field: `1:06:40`, never
+ * `66:40`. Matches the convention AmbientTimerWidget already used.
+ *
+ * One implementation for every media surface: the Media page, the local audio
+ * player and the dashboard's active-media widget previously each carried their
+ * own copy, two of which rolled 90 minutes into `90:00`.
+ */
+export function formatClock(seconds?: number | string | null): string {
+  const n = Number(seconds);
+  if (!Number.isFinite(n)) return '0:00';
+  const total = Math.max(0, Math.floor(n));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}

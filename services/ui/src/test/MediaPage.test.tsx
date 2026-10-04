@@ -91,3 +91,55 @@ describe('Media page — active remote player', () => {
     expect(screen.queryByText(/Player connection failed/i)).not.toBeInTheDocument();
   });
 });
+
+describe('Media page — long-form tracks', () => {
+  // An audiobook: 1h 06m 40s long, 1h 02m 05s in.
+  const LONG_TRACK = {
+    status: 'SUCCESS',
+    detail: {
+      active: {
+        entity_id: 'media_player.kitchen',
+        friendly_name: 'Kitchen Speaker',
+        state: 'playing',
+        media_title: 'The Way of Kings',
+        media_artist: 'Brandon Sanderson',
+        volume_level: 0.3,
+        is_volume_muted: false,
+        position: 3725,
+        duration: 4000,
+      },
+      available: [],
+      all_players: [
+        { entity_id: 'media_player.kitchen', friendly_name: 'Kitchen Speaker', state: 'playing' },
+      ],
+    },
+  };
+
+  beforeEach(() => {
+    server.use(
+      http.post('/execute/media/status', () => HttpResponse.json(LONG_TRACK)),
+      http.get('/api/entities', () =>
+        HttpResponse.json({
+          entities: [
+            {
+              entity_id: 'media_player.kitchen',
+              domain: 'media_player',
+              friendly_name: 'Kitchen Speaker',
+              state: 'playing',
+            },
+          ],
+        })
+      ),
+    );
+  });
+
+  it('shows elapsed and total time with hours, not minutes counted past 60', async () => {
+    renderWithProviders(<Media />);
+
+    await screen.findByText('The Way of Kings');
+    // 3725s and 4000s used to read "62:05" and "66:40".
+    expect(screen.getByText('1:02:05')).toBeInTheDocument();
+    expect(screen.getByText('1:06:40')).toBeInTheDocument();
+    expect(screen.queryByText('66:40')).not.toBeInTheDocument();
+  });
+});

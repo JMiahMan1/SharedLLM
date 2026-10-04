@@ -159,6 +159,9 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
   await page.route('**/api/groups/media', json('groups-media'));
   await page.route('**/api/groups/media/**', json('groups-media'));
   await page.route('**/api/entities', json('entities'));
+  // The shell header polls this for its notification bell on every page; without
+  // a mock the catch-all aborts it and the spec fails on an unmocked call.
+  await page.route('**/api/logs**', (route) => route.fulfill({ json: [] }));
 
   await page.route('**/api/raven/missions', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/admin/services/updates', (route) =>

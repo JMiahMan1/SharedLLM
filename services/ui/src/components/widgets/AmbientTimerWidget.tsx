@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Timer, X, Plus, Loader2, Bell, BellOff, Play, Pause, RotateCcw } from 'lucide-react';
 import type { IWidgetProps } from '../../types/widget';
 import { api } from '../../services/api';
+import { formatClock } from '../../lib/utils';
 import toast from 'react-hot-toast';
 
 interface ActiveTimer {
@@ -179,14 +180,7 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
     setTimers((prev) => prev.map((t) => t.id === id ? { ...t, remainingMs: t.durationMs, paused: false } : t));
   }, []);
 
-  const formatTime = (ms: number) => {
-    const seconds = Math.max(0, Math.floor(ms / 1000));
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    return `${m}:${String(s).padStart(2, '0')}`;
-  };
+  const formatTime = (ms: number) => formatClock(Math.max(0, ms) / 1000);
 
   const totalProgress = useMemo(() => {
     if (timers.length === 0) return 0;

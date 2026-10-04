@@ -4,6 +4,7 @@ import {
   Loader2, SkipBack, SkipForward, BookOpen, Music,
   ChevronDown,
 } from 'lucide-react';
+import { formatClock } from '../lib/utils';
 
 export interface LocalTrack {
   id: string;
@@ -52,13 +53,6 @@ export const LocalAudioPlayer = ({
   const [isExpanded, setIsExpanded] = useState(false);
 
   if (!track) return null;
-
-  const formatTime = (seconds: number) => {
-    if (!seconds || isNaN(seconds)) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
 
   const formatHours = (seconds: number) => {
     if (!seconds || isNaN(seconds)) return '0m';
@@ -144,7 +138,7 @@ export const LocalAudioPlayer = ({
                 </div>
               </div>
               <div className="flex justify-between mt-2 text-xs text-slate-500">
-                <span>{formatTime(currentTime)}</span>
+                <span>{formatClock(currentTime)}</span>
                 <span>{formatHours(duration)}</span>
               </div>
             </div>
