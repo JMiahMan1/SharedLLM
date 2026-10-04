@@ -1034,7 +1034,12 @@ async def delete_api_logs():
       return await resp.json()
 
 @app.get("/api/admin/logs")
-async def get_api_admin_logs(limit: int = 50, service: str | None = None):
+async def get_api_admin_logs(request: Request, limit: int = 50, service: str | None = None):
+    # This route had no authentication at all -- it took no request, so it could
+    # not even look at a caller -- and forwarded straight to the logging service
+    # with the internal secret. Anyone who could reach the gateway could read the
+    # whole system's logs. Admin-only, verified like every other read.
+    await _require_admin(request)
     async with shared_http_client() as client:
       params: dict[str, object] = {"limit": limit}
       if service:
@@ -1047,7 +1052,9 @@ async def get_api_admin_logs(limit: int = 50, service: str | None = None):
       return await resp.json()
 
 @app.delete("/api/admin/logs")
-async def delete_api_admin_logs():
+async def delete_api_admin_logs(request: Request):
+    # Same hole as the GET: an unauthenticated DELETE of the system log.
+    await _require_admin(request)
     async with shared_http_client() as client:
       resp = await client.delete(
         f"{LOGGING_SVC}/api/admin/logs",
@@ -2008,7 +2015,99 @@ def _normalize_ma_url(mass_url: str) -> tuple[str, str, int]:
 
 
 async def _resolve_identity_from_request(request: Request, body: dict | None = None) -> Any:
+    """The identity behind a request that must present a real API key.
+
+    Strict by default. Every route that reads or writes family data goes through
+    here, and Identity's resolver upgrades *anything* it does not recognise to
+    the system default user -- an administrator. Verified live before this was
+    tightened, all with no credentials at all:
+
+        GET /api/integrations/skylight/chores   -> 200, 55 family chores
+        GET /api/search?q=...                   -> 200, an answer from the RAG index
+        GET /api/workspaces                     -> 200, workspace paths and owners
+        GET /api/admin/services                 -> 200, the container inventory
+        GET /api/admin/logs                     -> 200, system logs
+        GET /api/raven/missions                 -> 200, the family's missions
+        GET /api/ma-jsonrpc/debug/players       -> 200, every speaker's state
+        GET /api/entities                       -> 200, every HA entity
+
+    Those routes check ``is_admin`` afterwards, which the fallback makes
+    unconditionally true, so the check was decoration. Now a missing or unknown
+    key is a 401 and nothing is served.
+
+    A route that genuinely has no API key -- a voice request, a registered
+    device, a media stream URL -- must say so by calling
+    ``_resolve_identity_allow_anonymous`` instead.
+    """
+    return await _require_identity_from_request(request, body)
+
+
+async def _resolve_identity_allow_anonymous(request: Request, body: dict | None = None) -> Any:
+    """Identity with Identity's own fallback rules, including anonymous.
+
+    Identity's ``POST /api/resolve`` tries user_id -> api_key -> rag_user ->
+    voice_id -> device_id and then **falls back to the system default user,
+    which is an administrator**. That is what lets a voice request, a registered
+    device or a stream URL resolve with no API key at all -- which is also why it
+    must never guard a route that reads real family data (see
+    ``_require_identity_from_request``).
+
+    Only use this where "who is calling" is genuinely not the question.
+    """
     return await resolve_identity(_auth_body_from_request(request, body))
+
+
+def _presented_api_key(request: Request) -> str:
+    """The API key this request presents, from the header or the query string."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        return auth_header.split(" ", 1)[1].strip()
+    # HTMLAudioElement cannot set headers, so local media streaming passes the
+    # key as ?token=. Same secret, same handling: it must still be a real key.
+    return (request.query_params.get("token") or "").strip()
+
+
+async def _require_identity_from_request(request: Request, body: dict | None = None) -> Any:
+    """Identity for a route that serves real family data. 401 unless proven.
+
+    ``_resolve_identity_from_request`` is permissive on purpose: Identity's
+    ``POST /api/resolve`` falls back to the system default user -- an admin --
+    when nothing matches, which is what lets a media player, a voice request or
+    a stream URL resolve without an API key at all.
+
+    That fallback is exactly wrong for a route that reads somebody's chores,
+    books or playlists. Used there, it hands the whole family's data to any
+    anonymous caller, and to any caller with a made-up key. Verified live before
+    this helper existed::
+
+        GET /api/integrations/skylight/chores          (no auth)      -> 200, 55 chores
+        GET /api/integrations/skylight/chores          (bogus key)   -> 200, 55 chores
+        GET /api/media/audiobookshelf/last-played      (no auth)      -> 200, books
+
+    So the key is validated with the strict, no-fallback Identity endpoint
+    first; only then are the full credentials fetched. A missing or unknown key
+    is a 401, never a silent upgrade to the administrator.
+    """
+    api_key = _presented_api_key(request)
+    if not api_key:
+        # Service-to-service callers (the automation and agent loops, another
+        # container on the bridge network) authenticate with the internal secret
+        # rather than a user's API key. They are already inside the trust
+        # boundary, so they keep Identity's own resolution rules.
+        if request.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
+            return await _resolve_identity_allow_anonymous(request, body)
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API Key. Sign in and send 'Authorization: Bearer <api_key>'.",
+        )
+    ident = await _resolve_strict_identity(api_key)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+    # The key is proven real, so the permissive resolve can no longer fall back:
+    # it will find this key's owner and return that user's credentials. It is the
+    # *allow anonymous* resolver on purpose -- going back through
+    # _resolve_identity_from_request would validate a second time and recurse.
+    return await _resolve_identity_allow_anonymous(request, body)
 
 
 async def _resolve_identity_from_media_token(request: Request) -> Any | None:
@@ -2122,6 +2221,16 @@ async def _require_authenticated(request: Request) -> str:
     ident = await _acting_identity(request)
     if not ident:
         raise HTTPException(status_code=401, detail="Authentication required")
+    return ident["user"]
+
+
+async def _require_admin(request: Request) -> str:
+    """403 unless the caller is an authenticated administrator; returns their username."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not ident.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
     return ident["user"]
 
 
@@ -4675,15 +4784,11 @@ async def global_search(q: str, request: Request):
     if not q or not q.strip():
         return {"status": "SUCCESS", "answer": "No query provided.", "files": []}
 
-    # Resolve user(s) for multi-tenancy — mirror /api/storage/stats.
-    try:
-        creds = await _resolve_identity_from_request(request)
-        jarvis_user = creds.get("user") or ""
-        nc_user = creds.get("nextcloud_user") or jarvis_user
-    except Exception:
-        first = await resolve_first_user()
-        jarvis_user = first.get("user") or "admin"
-        nc_user = jarvis_user
+    # Resolve user(s) for multi-tenancy — mirror /api/storage/stats. No fallback
+    # to the admin: an unproven caller is a 401, not the owner's index.
+    creds = await _resolve_identity_from_request(request)
+    jarvis_user = creds.get("user") or ""
+    nc_user = creds.get("nextcloud_user") or jarvis_user
 
     # Preserve order, de-dupe identical users.
     users = list(dict.fromkeys([jarvis_user, nc_user]))
@@ -5306,15 +5411,12 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
 
 @app.get("/api/storage/stats")
 async def get_storage_stats(request: Request):
-    # Resolve user and nextcloud IDs from request
-    try:
-        creds_data = await _resolve_identity_from_request(request)
-        jarvis_user = creds_data.get("user") or ""
-        nc_user = creds_data.get("nextcloud_user")
-    except Exception:
-        first_user = await resolve_first_user()
-        jarvis_user = first_user.get("user") or ""
-        nc_user = None
+    # Resolve user and nextcloud IDs from request. An unproven caller is a 401:
+    # this used to fall back to the first (admin) user's stats, which published
+    # the whole family's document counts to anyone who asked.
+    creds_data = await _resolve_identity_from_request(request)
+    jarvis_user = creds_data.get("user") or ""
+    nc_user = creds_data.get("nextcloud_user")
 
     # Helper to merge stats from multiple users
     def merge_stats(base, extra):
@@ -8997,11 +9099,9 @@ async def execute_voice_command(request: Request):
 @app.get("/api/media/music-assistant/playlists")
 async def get_ma_playlists(request: Request):
     """Get Music Assistant playlists (per-user credentials)."""
-    try:
-        creds = await _resolve_identity_from_request(request)
-    except HTTPException as e:
-        log.error(f"[media/playlists] identity resolution failed: {e.detail}")
-        return {"status": "SUCCESS", "playlists": []}
+    # An unproven caller is a 401, never an empty 200: swallowing the auth
+    # failure here is what let an anonymous caller read this data.
+    creds = await _resolve_identity_from_request(request)  # [media/playlists]
     # BUG-21: an unreachable execution service is a gateway upstream failure,
     # not a 500 — report it explicitly so the UI can distinguish it from empty.
     try:
@@ -9023,11 +9123,9 @@ async def get_ma_playlists(request: Request):
 @app.get("/api/media/music-assistant/recent")
 async def get_ma_recent(request: Request):
     """Get Music Assistant recently played items (per-user credentials)."""
-    try:
-        creds = await _resolve_identity_from_request(request)
-    except HTTPException as e:
-        log.error(f"[media/recent] identity resolution failed: {e.detail}")
-        return {"status": "SUCCESS", "recent": []}
+    # An unproven caller is a 401, never an empty 200: swallowing the auth
+    # failure here is what let an anonymous caller read this data.
+    creds = await _resolve_identity_from_request(request)  # [media/recent]
     # BUG-21: unreachable execution service → 502 {status:ERROR}, not a 500.
     try:
         async with shared_http_client() as client:
@@ -9048,11 +9146,9 @@ async def get_ma_recent(request: Request):
 @app.get("/api/media/music-assistant/browse")
 async def get_ma_browse(request: Request, media_type: str = "TRACKS", offset: int = 0, limit: int = 50, search: str = "", order_by: str = ""):
     """Browse MA library (tracks, albums, artists, playlists, radio) via HA."""
-    try:
-        creds = await _resolve_identity_from_request(request)
-    except HTTPException as e:
-        log.error(f"[ma/browse] identity resolution failed: {e.detail}")
-        return {"status": "SUCCESS", "items": []}
+    # An unproven caller is a 401, never an empty 200: swallowing the auth
+    # failure here is what let an anonymous caller read this data.
+    creds = await _resolve_identity_from_request(request)  # [ma/browse]
     # BUG-21: unreachable execution service → 502 {status:ERROR}, not a 500.
     try:
         async with shared_http_client() as client:
@@ -9073,11 +9169,9 @@ async def get_ma_browse(request: Request, media_type: str = "TRACKS", offset: in
 @app.get("/api/media/music-assistant/search")
 async def search_ma(request: Request, query: str = "", media_type: str = "", limit: int = 20, artist: str = "", album: str = "", library_only: bool = True):
     """Search MA for media items via HA."""
-    try:
-        creds = await _resolve_identity_from_request(request)
-    except HTTPException as e:
-        log.error(f"[ma/search] identity resolution failed: {e.detail}")
-        return {"status": "SUCCESS", "results": []}
+    # An unproven caller is a 401, never an empty 200: swallowing the auth
+    # failure here is what let an anonymous caller read this data.
+    creds = await _resolve_identity_from_request(request)  # [ma/search]
     try:
         async with shared_http_client() as client:
             resp = await client.get(
@@ -9097,11 +9191,9 @@ async def search_ma(request: Request, query: str = "", media_type: str = "", lim
 @app.get("/api/media/audiobookshelf/libraries")
 async def get_abs_libraries(request: Request):
     """Get Audiobookshelf libraries (per-user credentials)."""
-    try:
-        creds = await _resolve_identity_from_request(request)
-    except HTTPException as e:
-        log.error(f"[abs/libraries] identity resolution failed: {e.detail}")
-        return {"status": "SUCCESS", "libraries": []}
+    # An unproven caller is a 401, never an empty 200: swallowing the auth
+    # failure here is what let an anonymous caller read this data.
+    creds = await _resolve_identity_from_request(request)  # [abs/libraries]
     try:
         async with shared_http_client() as client:
             resp = await client.get(
@@ -9134,11 +9226,9 @@ async def get_abs_libraries(request: Request):
 @app.get("/api/media/audiobookshelf/last-played")
 async def get_abs_last_played(request: Request):
     """Get Audiobookshelf last played books (per-user credentials)."""
-    try:
-        creds = await _resolve_identity_from_request(request)
-    except HTTPException as e:
-        log.error(f"[abs/last-played] identity resolution failed: {e.detail}")
-        return {"status": "SUCCESS", "books": []}
+    # An unproven caller is a 401, never an empty 200: swallowing the auth
+    # failure here is what let an anonymous caller read this data.
+    creds = await _resolve_identity_from_request(request)  # [abs/last-played]
     try:
         async with shared_http_client() as client:
             resp = await client.get(
@@ -9163,11 +9253,9 @@ async def get_abs_last_played(request: Request):
 @app.get("/api/media/audiobookshelf/library/{library_id}")
 async def get_abs_library_items(library_id: str, request: Request, limit: int = 50):
     """Get audiobooks from a specific Audiobookshelf library (per-user credentials)."""
-    try:
-        creds = await _resolve_identity_from_request(request)
-    except HTTPException as e:
-        log.error(f"[abs/library] identity resolution failed: {e.detail}")
-        return {"status": "SUCCESS", "books": []}
+    # An unproven caller is a 401, never an empty 200: swallowing the auth
+    # failure here is what let an anonymous caller read this data.
+    creds = await _resolve_identity_from_request(request)  # [abs/library]
     try:
         async with shared_http_client() as client:
             resp = await client.get(
@@ -9192,11 +9280,9 @@ async def get_abs_library_items(library_id: str, request: Request, limit: int = 
 @app.get("/api/media/audiobookshelf/search")
 async def search_abs(q: str, request: Request, limit: int = 20):
     """Search Audiobookshelf for books, podcasts, and authors (per-user credentials)."""
-    try:
-        creds = await _resolve_identity_from_request(request)
-    except HTTPException as e:
-        log.error(f"[abs/search] identity resolution failed: {e.detail}")
-        return {"status": "SUCCESS", "books": [], "podcasts": [], "authors": [], "total": 0}
+    # An unproven caller is a 401, never an empty 200: swallowing the auth
+    # failure here is what let an anonymous caller read this data.
+    creds = await _resolve_identity_from_request(request)  # [abs/search]
     try:
         async with shared_http_client() as client:
             resp = await client.get(

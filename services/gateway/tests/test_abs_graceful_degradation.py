@@ -242,8 +242,16 @@ async def test_abs_libraries_normalizes_media_type(client):
 
 
 @pytest.mark.asyncio
-async def test_abs_libraries_identity_failure(client):
-    """ABS libraries returns empty when identity resolution fails."""
+async def test_abs_libraries_refuses_an_unproven_caller(client):
+    """An auth failure is a 401, not an empty 200.
+
+    This endpoint used to swallow identity failures and answer 200 with no
+    libraries -- which is indistinguishable from "you have no audiobooks" and,
+    because Identity resolves unknown callers to the admin, was one of the ways
+    anonymous callers read this family's data. Graceful degradation still
+    applies to an unreachable Audiobookshelf (see the tests above); it must not
+    apply to "we could not prove who you are".
+    """
     from fastapi import HTTPException
 
     from services.gateway import main as gateway_main
@@ -251,10 +259,7 @@ async def test_abs_libraries_identity_failure(client):
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(side_effect=HTTPException(401, "unauthorized"))):
         resp = client.get("/api/media/audiobookshelf/libraries")
 
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "SUCCESS"
-        assert data["libraries"] == []
+        assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
