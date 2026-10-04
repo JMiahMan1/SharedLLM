@@ -1,9 +1,12 @@
-@import "tailwindcss";
-
 /* ──────────────────────────────────────────────────────────────
    Fonts
+   Must stay the FIRST rule in this file: @import is only valid ahead
+   of every other rule, and "@import \"tailwindcss\"" expands into
+   hundreds of rules, so any @import after it is dropped by the build.
 ────────────────────────────────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@import "tailwindcss";
 
 body {
   font-family: 'Outfit', 'Inter', system-ui, sans-serif;
