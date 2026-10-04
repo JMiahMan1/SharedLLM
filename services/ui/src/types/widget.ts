@@ -9,7 +9,6 @@ export type WidgetKey =
   | 'device_control'
   | 'workspaces'
   | 'health_activity'
-  | 'health_hero'
   | 'climate'
   | 'presence';
 
