@@ -1,9 +1,23 @@
+import os
 import sys
 import time
 
+# Which Chromecast to drive. This used to be one install's TV address baked in
+# ("Found via scan_cast_ips.py"), so on any other network the script talked to
+# whatever answered there -- or nothing, with no hint why. Pass it in, or set
+# CAST_TARGET_IP; there is no default.
+TARGET_IP = (sys.argv[1] if len(sys.argv) > 1 else os.environ.get("CAST_TARGET_IP", "")).strip()
+if not TARGET_IP:
+    sys.exit(
+        "Which Chromecast should this drive? Pass its IP as the first argument, "
+        "e.g. `python3 tools/verify/verify_cast_playback.py 192.168.2.240`, or "
+        "set CAST_TARGET_IP. (tools/verify/scan_cast_ips.py finds candidates.)"
+    )
+
+# Imported after the argument check so a missing argument is reported as such,
+# rather than as a missing dependency.
 import pychromecast  # pyright: ignore[reportMissingImports]
 
-TARGET_IP = "192.168.2.240"  # Found via scan_cast_ips.py
 VIDEO_URL = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
 MIME_TYPE = "video/mp4"
 
