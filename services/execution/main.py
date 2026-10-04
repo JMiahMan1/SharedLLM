@@ -3643,15 +3643,24 @@ async def uncomplete_skylight_chore(
 ):
     """Mark a Skylight chore as incomplete by resetting its status to pending.
 
-    Setting the chore's status back to "pending" clears the completed state (the
-    private API has no dedicated completion-undo endpoint).
+    The completion state lives on the *instance*, under the same
+    ``/chores/{series}/completions`` endpoint that marks it done -- so this is
+    the exact inverse of `complete_skylight_chore`, with the instance date in the
+    body. It used to ``PUT /chores/{series} {"status": "pending"}`` instead, which
+    Skylight accepted and silently ignored: the series definition changed while
+    the chore stayed checked off, so ticking it back on did nothing. Verified
+    live against the family account: complete then uncomplete left
+    ``completed: true``.
     """
     session = await _get_skylight_session(user)
     if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    series_id, _ = _skylight_chore_ids(chore_id)
-    result = await _skylight_request(session, "PUT", f"/chores/{series_id}", {"status": "pending"})
+    series_id, instance_date = _skylight_chore_ids(chore_id)
+    result = await _skylight_request(
+        session, "PUT", f"/chores/{series_id}/completions",
+        {"id": series_id, "instance_date": instance_date, "status": "pending"},
+    )
     if result is not None:
         return {"status": "SUCCESS", "message": "Chore uncompleted"}
     return {"status": "FAILURE", "message": "Failed to uncomplete chore"}
