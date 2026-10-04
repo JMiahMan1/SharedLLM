@@ -2050,7 +2050,13 @@ export const api = {
     return resp.data;
   },
 
-  async getSkylightChores(username?: string, date?: string): Promise<{
+  /**
+   * @param date  `today`, or an explicit YYYY-MM-DD.
+   * @param scope Whose chores to fetch. Omitted keeps the server default: an
+   *   admin sees the whole family frame, anyone else sees only their own. `me`
+   *   narrows even an admin to their own login name.
+   */
+  async getSkylightChores(date?: string, scope?: string): Promise<{
     status: string;
     message?: string;
     chores?: Array<{
@@ -2068,8 +2074,8 @@ export const api = {
     assignee_meta?: Record<string, string>;
   }> {
     const params = new URLSearchParams();
-    if (username) params.set('user', username);
     if (date) params.set('date', date);
+    if (scope) params.set('scope', scope);
     const query = params.toString();
     const resp = await apiClient.get(`/api/integrations/skylight/chores${query ? `?${query}` : ''}`);
     return resp.data;

@@ -78,6 +78,7 @@ from services.gateway.prompts import (
 )
 from services.gateway.redact import redact_url
 from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, StorageListRequest
+from services.gateway.skylight_scope import ChoreScopeError, resolve_chore_scope
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas
 from services.gateway.external_agent import run_external_agent
 from services.shared import ma_library
@@ -4322,15 +4323,31 @@ async def proxy_sync_notes_rag(request: Request):
 
 
 @app.get("/api/integrations/skylight/chores")
-async def proxy_get_skylight_chores(request: Request, user: str | None = None, date: str | None = None):
+async def proxy_get_skylight_chores(
+    request: Request,
+    date: str | None = None,
+    scope: str | None = None,
+):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("skylight_enabled", True):
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
 
+    # The Skylight login is one shared household credential, so it says nothing
+    # about whose chores to show -- the caller decides. `scope` lets an admin
+    # narrow the view to their own chores ("me") or to one member by login name;
+    # without it an admin still gets the whole frame and everyone else still gets
+    # only their own, filtered by the Skylight category label.
+    try:
+        scope_user = resolve_chore_scope(
+            scope=scope,
+            caller_user=creds.get("user") or "",
+            is_admin=bool(creds.get("is_admin")),
+        )
+    except ChoreScopeError as e:
+        return JSONResponse(status_code=403, content={"status": "FAILURE", "message": str(e)})
+
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
-    # Admins see the whole family frame (blank user); a regular member is
-    # scoped to just their own chores via the Skylight category label.
-    params = {"user": "" if creds.get("is_admin") else (creds.get("user") or ""), "date": date or ""}
+    params = {"user": scope_user, "date": date or ""}
     async with shared_http_client() as client:
         resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/chores", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
     return await _proxy_json_response(resp)
