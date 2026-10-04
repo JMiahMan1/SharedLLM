@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatMaPlayerName, parseMaPlayerList } from './maPlayerNames';
+import { formatDeviceLabel, parseMaPlayerList } from './deviceLabels';
 
 /**
  * The exact name Music Assistant still holds for the web player, captured from
@@ -15,17 +15,17 @@ const BLOB_NAME =
   '"api_key":null,"role":"admin","voice_id":null}' +
   "'s Web Player (Desktop)";
 
-describe('formatMaPlayerName', () => {
+describe('formatDeviceLabel', () => {
   it('returns an ordinary player name unchanged', () => {
-    expect(formatMaPlayerName('Loft TV', 'loft-tv-2')).toBe('Loft TV');
+    expect(formatDeviceLabel('Loft TV', 'loft-tv-2')).toBe('Loft TV');
   });
 
   it('recovers the display name out of a serialized profile blob', () => {
-    expect(formatMaPlayerName(BLOB_NAME, 'wsp-9')).toBe("Shared/Default User's Web Player (Desktop)");
+    expect(formatDeviceLabel(BLOB_NAME, 'wsp-9')).toBe("Shared/Default User's Web Player (Desktop)");
   });
 
   it('never leaks the rest of the profile the blob carried', () => {
-    const label = formatMaPlayerName(BLOB_NAME, 'wsp-9');
+    const label = formatDeviceLabel(BLOB_NAME, 'wsp-9');
     expect(label).not.toContain('api_key');
     expect(label).not.toContain('nextcloud');
     expect(label).not.toContain('someone@example.com');
@@ -34,46 +34,46 @@ describe('formatMaPlayerName', () => {
   });
 
   it('falls back through username when a blob has no display name', () => {
-    expect(formatMaPlayerName('{"username":"jeremiah"}' + "'s Web Player (Mobile)", 'wsp-1')).toBe(
+    expect(formatDeviceLabel('{"username":"jeremiah"}' + "'s Web Player (Mobile)", 'wsp-1')).toBe(
       "jeremiah's Web Player (Mobile)"
     );
   });
 
   it('ignores an empty blob name and uses the next candidate', () => {
-    expect(formatMaPlayerName('{"role":"admin"}', 'Loft TV', 'loft-tv-2')).toBe('Loft TV');
+    expect(formatDeviceLabel('{"role":"admin"}', 'Loft TV', 'loft-tv-2')).toBe('Loft TV');
   });
 
   it('skips a blob that is not parseable instead of rendering it', () => {
-    const label = formatMaPlayerName('{"username":"jeremiah", oops', 'wsp-2');
+    const label = formatDeviceLabel('{"username":"jeremiah", oops', 'wsp-2');
     expect(label).toBe('wsp-2');
     expect(label).not.toContain('{');
   });
 
   it('handles a whole-blob name with nothing appended to it', () => {
-    expect(formatMaPlayerName('{"display_name":"Shared/Default User"}', 'wsp-3')).toBe(
+    expect(formatDeviceLabel('{"display_name":"Shared/Default User"}', 'wsp-3')).toBe(
       'Shared/Default User'
     );
   });
 
   it('is not fooled by an apostrophe inside a JSON value', () => {
     const blob = '{"display_name":"Jeremiah\'s Speaker"}' + "'s Web Player (Mobile)";
-    expect(formatMaPlayerName(blob, 'wsp-4')).toBe("Jeremiah's Speaker's Web Player (Mobile)");
+    expect(formatDeviceLabel(blob, 'wsp-4')).toBe("Jeremiah's Speaker's Web Player (Mobile)");
   });
 
   it('reads a name out of a structured value rather than stringifying it', () => {
-    expect(formatMaPlayerName({ display_name: 'Loft TV' }, 'loft-tv-2')).toBe('Loft TV');
-    expect(formatMaPlayerName({ name: 'Kitchen Speaker' }, 'kitchen')).toBe('Kitchen Speaker');
+    expect(formatDeviceLabel({ display_name: 'Loft TV' }, 'loft-tv-2')).toBe('Loft TV');
+    expect(formatDeviceLabel({ name: 'Kitchen Speaker' }, 'kitchen')).toBe('Kitchen Speaker');
   });
 
   it('never renders "[object Object]"', () => {
-    expect(formatMaPlayerName({ player_id: 'x' }, 'unknown-id')).toBe('unknown-id');
-    expect(formatMaPlayerName(undefined, null, '')).toBe('Unknown Player');
+    expect(formatDeviceLabel({ player_id: 'x' }, 'unknown-id')).toBe('unknown-id');
+    expect(formatDeviceLabel(undefined, null, '')).toBe('Unknown Player');
   });
 
   it('collapses whitespace and clamps an unreasonably long label', () => {
-    expect(formatMaPlayerName('  Loft   TV  ', 'loft')).toBe('Loft TV');
+    expect(formatDeviceLabel('  Loft   TV  ', 'loft')).toBe('Loft TV');
     const long = 'x'.repeat(200);
-    const label = formatMaPlayerName(long, 'loft');
+    const label = formatDeviceLabel(long, 'loft');
     expect(label.length).toBeLessThanOrEqual(60);
     expect(label.endsWith('…')).toBe(true);
   });
