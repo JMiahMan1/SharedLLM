@@ -473,7 +473,11 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
         <p className="text-xs text-slate-500">All clear for today!</p>
       </div>
     ) : (
-      <div className="flex flex-col h-full justify-between">
+      // justify-between pushed the ring to the top and the list to the bottom,
+      // leaving ~600px of dead space in the middle of a tall card. Stack from the
+      // top and let the list take what is left, so the two stay together at any
+      // card height.
+      <div className="flex flex-col h-full">
         {renderScopeToggle()}
         <div className="relative w-20 h-20 mx-auto mb-5 shrink-0">
           <svg className="w-20 h-20 -rotate-90" viewBox="0 0 36 36">
@@ -511,7 +515,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
           </div>
         )}
 
-        <div className="space-y-2 pr-1 flex-1 min-h-0 max-h-48 overflow-y-auto">
+        <div className="space-y-2 pr-1 flex-1 min-h-0 overflow-y-auto">
           {localChores.map(renderCompactChore)}
         </div>
       </div>
