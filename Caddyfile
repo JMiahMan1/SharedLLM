@@ -11,6 +11,21 @@
     log {
         output stdout
         level INFO
+        # Two secrets legitimately travel in a query string here: the git-pull
+        # webhook's token, and the browser's ?token= on the Sendspin / JSON-RPC
+        # WebSockets (a WebSocket handshake cannot carry an Authorization
+        # header). Caddy's access log records the whole URI, so both were being
+        # written to stdout in plain text -- confirmed live:
+        #   /api/webhook/git-pull/sharedllm_system?token=s...
+        # Redact them at the log, keep the rest of the URI for debugging.
+        format filter {
+            wrap json
+            fields {
+                request>uri>query>token replace REDACTED
+                request>uri>query>mt replace REDACTED
+                request>headers>Authorization delete
+            }
+        }
     }
     handle /v1/* {
         reverse_proxy gateway:11435
@@ -61,6 +76,21 @@
     log {
         output stdout
         level INFO
+        # Two secrets legitimately travel in a query string here: the git-pull
+        # webhook's token, and the browser's ?token= on the Sendspin / JSON-RPC
+        # WebSockets (a WebSocket handshake cannot carry an Authorization
+        # header). Caddy's access log records the whole URI, so both were being
+        # written to stdout in plain text -- confirmed live:
+        #   /api/webhook/git-pull/sharedllm_system?token=s...
+        # Redact them at the log, keep the rest of the URI for debugging.
+        format filter {
+            wrap json
+            fields {
+                request>uri>query>token replace REDACTED
+                request>uri>query>mt replace REDACTED
+                request>headers>Authorization delete
+            }
+        }
     }
 
     # 2. Route Chat/Gateway API traffic
