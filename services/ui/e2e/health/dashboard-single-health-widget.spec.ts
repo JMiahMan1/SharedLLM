@@ -129,7 +129,6 @@ test.describe('dashboard: one health widget, phone width', () => {
       const e = el as HTMLElement;
       // Name the widest descendant, so a failure says *what* is too wide rather
       // than just that something is.
-      const limit = e.clientWidth;
       const culprits = Array.from(e.querySelectorAll<HTMLElement>('*'))
         .filter((n) => n.getBoundingClientRect().right > e.getBoundingClientRect().right + 1)
         .slice(0, 5)
