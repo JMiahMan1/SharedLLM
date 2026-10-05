@@ -1,6 +1,7 @@
 # services/gateway/main.py
 import asyncio
 import hashlib
+import base64
 import json
 import logging
 import os
@@ -4953,6 +4954,73 @@ async def write_workspace_file_proxy(request: Request):
 @app.post("/api/workspaces/files/delete")
 async def delete_workspace_file_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/files/delete", request)
+
+@app.post("/api/workspaces/files/move")
+async def move_workspace_file_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/files/move", request)
+
+
+async def _proxy_workspace_runtime_authed(path: str, request: Request, timeout: aiohttp.ClientTimeout):
+    """JSON proxy that ALWAYS resolves the caller (never trusts a client user_context)."""
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Expected a JSON object")
+    body["user_context"] = await _resolve_user_context(request, body)
+    resp = await get_http_client().post(
+        f"{WORKSPACE_RUNTIME_SVC}{path}",
+        json=body,
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+        timeout=timeout,
+    )
+    return await _proxy_json_response(resp)
+
+
+# A first two-way sync of a large Nextcloud folder downloads everything, so it
+# gets far longer than the shared client's 300 s.
+_WORKSPACE_SYNC_TIMEOUT = aiohttp.ClientTimeout(total=3600, sock_connect=30)
+
+
+@app.post("/api/workspaces/sync")
+async def sync_workspace_proxy(request: Request):
+    """Sync a workspace with its Nextcloud folder (direction: both | push | pull)."""
+    return await _proxy_workspace_runtime_authed("/provider/sync/workspace", request, _WORKSPACE_SYNC_TIMEOUT)
+
+
+@app.post("/api/workspaces/sync/reset")
+async def reset_workspace_sync_proxy(request: Request):
+    return await _proxy_workspace_runtime_authed(
+        "/provider/sync/workspace/reset", request, aiohttp.ClientTimeout(total=60)
+    )
+
+
+@app.post("/api/workspaces/files/upload")
+async def upload_workspace_files_proxy(request: Request):
+    """Stream a multipart upload (many files / a folder) to the workspace runtime.
+
+    The body is passed through untouched - never buffered or re-encoded here -
+    and the caller's identity travels in a header the browser cannot set.
+    """
+    content_type = request.headers.get("content-type", "")
+    if not content_type.startswith("multipart/form-data"):
+        raise HTTPException(status_code=415, detail="Uploads must be multipart/form-data")
+    length = request.headers.get("content-length")
+    if length is None:
+        raise HTTPException(status_code=411, detail="Uploads must send Content-Length")
+    user_context = await _resolve_user_context(request, {})
+    encoded_context = base64.b64encode(json.dumps(user_context).encode("utf-8")).decode("ascii")
+    resp = await get_http_client().post(
+        f"{WORKSPACE_RUNTIME_SVC}/files/upload",
+        data=request.stream(),
+        headers={
+            "X-Internal-Secret": INTERNAL_SECRET,
+            "X-Workspace-User-Context": encoded_context,
+            "Content-Type": content_type,
+            "Content-Length": length,
+        },
+        timeout=aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=600),
+    )
+    return await _proxy_json_response(resp)
+
 
 @app.post("/api/workspaces/files/raw")
 async def read_workspace_file_raw_proxy(request: Request):

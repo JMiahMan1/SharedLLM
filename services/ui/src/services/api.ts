@@ -111,6 +111,9 @@ import type {
   TelemetryReportType,
   TelemetrySchedule,
   UserLiveLocation,
+  WorkspaceSyncDirection,
+  WorkspaceSyncResponse,
+  WorkspaceUploadResponse,
 } from '../types/api';
 
 // Re-export domain types so consumers can import them from the api module.
@@ -2454,6 +2457,50 @@ export const api = {
   // Workspace -> NextCloud sync (mirror local_path -> nextcloud remote_path)
   async syncWorkspaceNextcloud(payload: { remote_path: string; local_path: string; excludes?: string[] }): Promise<StorageMirrorResponse> {
     const resp = await apiClient.post('/api/storage/mirror', payload);
+    return resp.data;
+  },
+
+  // Two-way (or one-way) sync between a workspace and its Nextcloud folder.
+  // Omit direction for the workspace default: two-way for Nextcloud-backed
+  // workspaces, push (backup) for git-only ones. A first sync of a large
+  // folder can take minutes, so no client timeout.
+  async syncWorkspace(workspaceId: string, opts: { direction?: WorkspaceSyncDirection; dry_run?: boolean } = {}): Promise<WorkspaceSyncResponse> {
+    const resp = await apiClient.post('/api/workspaces/sync', { workspace_id: workspaceId, ...opts }, { timeout: 0 });
+    return resp.data;
+  },
+
+  // Forget a workspace's sync history (after pointing it at another folder by hand).
+  async resetWorkspaceSync(workspaceId: string): Promise<{ status: string }> {
+    const resp = await apiClient.post('/api/workspaces/sync/reset', { workspace_id: workspaceId, confirm: true });
+    return resp.data;
+  },
+
+  // Upload many files and/or folder trees in one multipart request. `paths`
+  // are relative to `relative_path`; `dirs` are folders to create even when
+  // empty. Callers batch large selections (see lib/workspaceUpload.ts).
+  async uploadWorkspaceFiles(
+    workspaceId: string,
+    relative_path: string,
+    items: { file: File; path: string }[],
+    dirs: string[] = [],
+    opts: { overwrite?: boolean; onUploadBytes?: (sent: number) => void } = {},
+  ): Promise<WorkspaceUploadResponse> {
+    const form = new FormData();
+    form.append('workspace_id', workspaceId);
+    form.append('relative_path', relative_path);
+    form.append('overwrite', opts.overwrite === false ? 'false' : 'true');
+    for (const d of dirs) form.append('dirs', d);
+    for (const item of items) {
+      form.append('files', item.file, item.file.name);
+      form.append('paths', item.path);
+    }
+    const resp = await apiClient.post('/api/workspaces/files/upload', form, {
+      // The instance default is JSON, which would make axios serialise the
+      // FormData as JSON; multipart lets the browser add the boundary.
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 0,
+      onUploadProgress: (e) => opts.onUploadBytes?.(e.loaded),
+    });
     return resp.data;
   },
 

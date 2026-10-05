@@ -53,6 +53,49 @@ export interface Workspace {
   last_raven_mission_id?: number | null;
   excludes?: string[];
   created_at?: string | null;
+  /** Identity user whose Nextcloud account backs the sync (set on first sync). */
+  sync_owner?: string | null;
+  last_sync_at?: string | null;
+  last_sync_status?: 'ok' | 'conflicts' | 'error' | null;
+  last_sync_error?: string | null;
+}
+
+/** Where a workspace's files live. "git" is a legacy alias of local_git_authoritative. */
+export type WorkspaceSyncMode = 'local_git_authoritative' | 'git' | 'nextcloud' | 'git_and_nextcloud';
+export type WorkspaceSyncDirection = 'both' | 'push' | 'pull';
+
+export interface WorkspaceSyncResult {
+  direction: WorkspaceSyncDirection;
+  remote_root: string;
+  dry_run: boolean;
+  uploaded: string[];
+  downloaded: string[];
+  deleted_local: string[];
+  deleted_remote: string[];
+  created_local_dirs: string[];
+  created_remote_dirs: string[];
+  conflicts: { path: string; remote_copy: string }[];
+  errors: { path: string; error: string }[];
+  bytes_uploaded: number;
+  bytes_downloaded: number;
+  changed: boolean;
+}
+
+export interface WorkspaceSyncResponse {
+  status: string;
+  workspace_id: string;
+  result: WorkspaceSyncResult;
+}
+
+export interface WorkspaceUploadResponse {
+  status: 'SUCCESS' | 'PARTIAL';
+  workspace_id: string;
+  relative_path: string;
+  uploaded: { relative_path: string; size: number; sha256: string; created: boolean }[];
+  skipped: { relative_path: string; skipped: true; reason: string }[];
+  created_dirs: string[];
+  errors: { relative_path: string; error: string }[];
+  bytes_written: number;
 }
 
 export type WorkspaceListResponse =

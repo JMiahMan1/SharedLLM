@@ -67,6 +67,14 @@ def _migrate_workspace_table():
             conn.execute(text("ALTER TABLE workspace ADD COLUMN excludes TEXT"))
         if "is_default" not in columns:
             conn.execute(text("ALTER TABLE workspace ADD COLUMN is_default BOOLEAN DEFAULT 0"))
+        for column, ddl in (
+            ("sync_owner", "VARCHAR"),
+            ("last_sync_at", "TIMESTAMP"),
+            ("last_sync_status", "VARCHAR"),
+            ("last_sync_error", "VARCHAR"),
+        ):
+            if column not in columns:
+                conn.execute(text(f"ALTER TABLE workspace ADD COLUMN {column} {ddl}"))
         if "created_at" not in columns:
             # Add the column WITHOUT a server default: some SQLite builds / legacy
             # file formats reject ADD COLUMN ... DEFAULT CURRENT_TIMESTAMP ("Cannot

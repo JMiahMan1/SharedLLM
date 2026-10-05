@@ -564,6 +564,7 @@ def _workspace_to_dict(item: Workspace) -> dict[str, Any]:
     # Emit created_at as an offset-aware ISO string in the configured timezone
     # so the UI "Created" label renders in the operator's local time.
     data["created_at"] = _created_at_in_config_tz(getattr(item, "created_at", None))
+    data["last_sync_at"] = _created_at_in_config_tz(getattr(item, "last_sync_at", None))
     data["webhook_token"] = decrypt(item.webhook_token_enc) if item.webhook_token_enc else item.webhook_token
     data.pop("webhook_token_enc", None)
 
@@ -707,9 +708,14 @@ async def lifespan(app: FastAPI):
         log.warning(f"Toolchain sync startup failed (non-fatal): {_e}")
         _toolchain_task = None
 
+    _sync_task = asyncio.create_task(periodic_sync_loop())
+
     yield
 
     # Shutdown logic
+    _sync_task.cancel()
+    with suppress(BaseException):
+        await _sync_task
     if _toolchain_task is not None:
         _toolchain_task.cancel()
         with suppress(Exception):
@@ -1986,6 +1992,8 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
     if slug in RESERVED_WORKSPACE_NAMES:
         raise HTTPException(status_code=400, detail=f"Workspace ID '{ws.id}' is reserved. Cannot use: {', '.join(sorted(RESERVED_WORKSPACE_NAMES))}")
 
+    validate_sync_settings(ws.sync_mode, ws.nextcloud_path)
+
     # Derive local_path if not provided (required by the NOT NULL column)
     if not ws.local_path:
         ws.local_path = _derive_workspace_container_path(ws.id, ws.scope, ws.owner_user)
@@ -2073,11 +2081,20 @@ def update_workspace(workspace_id: str, updates: dict, x_internal_secret: str | 
         if not ws:
             raise HTTPException(status_code=404, detail="Workspace not found")
 
+        previous_nextcloud_path = ws.nextcloud_path
         for key, value in updates.items():
-            if key in {"id", "created_at"}:
+            if key in {"id", "created_at", "sync_owner", "last_sync_at", "last_sync_status", "last_sync_error"}:
                 continue
             if hasattr(ws, key):
                 setattr(ws, key, value)
+        validate_sync_settings(ws.sync_mode, ws.nextcloud_path)
+        if (ws.nextcloud_path or "") != (previous_nextcloud_path or ""):
+            # The sync history describes the OLD folder; against a new one it
+            # would read every file as "deleted there" and remove it here.
+            clear_sync_records(ws.id)
+            ws.sync_owner = None
+            ws.last_sync_status = None
+            ws.last_sync_error = None
 
         # Merge per-workspace env/secret overrides. `env` (dict) adds/overwrites
         # keys; `env_delete` (list of keys) removes them. Keys not mentioned are
@@ -2133,6 +2150,7 @@ def delete_workspace(workspace_id: str, x_internal_secret: str | None = Header(d
         real_id = ws.id
         session.delete(ws)
         session.commit()
+    clear_sync_records(real_id)
     # Tear down the sandbox container + private network so deletion does not leak
     # a wsbox-* container (and its wsnet-* subnet) that would otherwise exhaust
     # Docker's predefined address pools over time. Best-effort: a missing
@@ -2349,6 +2367,7 @@ def write_file(req: FileWriteRequest, x_internal_secret: str | None = Header(def
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Write failed for {req.relative_path}: {exc}") from None
+        schedule_sync_after_write(workspace)
         return {
             "status": "SUCCESS",
             "workspace": workspace,
@@ -2408,6 +2427,7 @@ def move_file(req: FileMoveRequest, x_internal_secret: str | None = Header(defau
                 detail=f"Move verification failed for {req.relative_path}: source still present.",
             )
 
+        schedule_sync_after_write(workspace)
         return {
             "status": "SUCCESS",
             "workspace": workspace,
@@ -2448,6 +2468,7 @@ def delete_file(req: FileDeleteRequest, x_internal_secret: str | None = Header(d
                 detail=f"Delete verification failed for {req.relative_path}: path still exists after deletion.",
             )
 
+        schedule_sync_after_write(workspace)
         return {
             "status": "SUCCESS",
             "workspace": workspace,
@@ -2542,21 +2563,26 @@ async def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_
         raise HTTPException(status_code=400, detail=f"Path is not a directory: {req.relative_path}")
 
     identity = workspace.get("resolved_identity") or {}
-    provider_kind, provider_settings, provider_root = _workspace_provider_binding(workspace, identity)
+    # Validates the binding (credentials + nextcloud_path) up front.
+    provider_kind, _provider_settings, provider_root = _workspace_provider_binding(workspace, identity)
     provider_path = _provider_child_path(provider_root, req.relative_path)
 
-    # In this SOA, storage service might not have access to the same mount.
-    # If storage and workspace_runtime share /workspace, we can use /providers/mirror.
-    # Otherwise we'd have to stream files.
-    # Assuming they share /workspace mount as per typical dev setups or we can use the absolute path.
-
-    payload = {
-        "provider": {"kind": provider_kind, "settings": provider_settings},
-        "remote_path": provider_path,
-        "local_path": str(target_dir),
-    }
-
-    data = await _storage_post(f"{STORAGE_SVC_URL}/providers/mirror", payload)
+    # Upload in-process: the Storage service does not mount the workspaces,
+    # so its /providers/mirror cannot read these files. A one-off push with no
+    # sync history uploads everything and deletes nothing remotely.
+    try:
+        engine_ = SyncEngine(
+            local_root=target_dir,
+            remote=_nextcloud_client(identity),
+            remote_root=provider_path,
+            records={},
+            excludes=workspace.get("excludes") or [],
+        )
+        # Off the event loop: a folder push is many blocking WebDAV requests.
+        report = await asyncio.to_thread(engine_.run, "push")
+        data = {"result": report.as_dict()}
+    except NextcloudSyncError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
     return {
         "status": "SUCCESS",
         "workspace": workspace,
@@ -2950,9 +2976,9 @@ async def git_pull_webhook(
         args = ["git", "pull", _git_webhook_pull_remote(remote_url, remote_name), default_branch]
         result = _run_command(workspace_path, args)
 
-        if result["returncode"] == 0 and match.auto_backup_enabled and match.nextcloud_path:
+        if result["returncode"] == 0 and match.nextcloud_path and (match.auto_backup_enabled or match.sync_mode in ("nextcloud", "git_and_nextcloud")):
             log.info(f"Triggering automatic Nextcloud backup for {workspace_id} to {match.nextcloud_path}")
-            background_tasks.add_task(_trigger_nextcloud_sync, workspace_id, match.owner_user or "default", str(workspace_path), match.nextcloud_path, match.excludes)
+            background_tasks.add_task(_trigger_nextcloud_sync, workspace_id)
 
         if result["returncode"] != 0:
             log.error(f"Git pull failed: {result['stderr']}")
@@ -2974,65 +3000,13 @@ async def git_pull_webhook(
         raise HTTPException(status_code=500, detail=str(e)) from None
 
 
-async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path: str, remote_path: str, excludes: list[str] | None = None):
+async def _trigger_nextcloud_sync(workspace_id: str) -> None:
+    """Background task after a git pull: bring Nextcloud up to date.
+
+    Git-only workspaces get a one-way push (a backup); Nextcloud-mode
+    workspaces get their normal two-way sync.
     """
-    Background task to mirror a local workspace directory to Nextcloud.
-    Resolves credentials via Identity service and calls Storage mirror endpoint.
-    """
-    lock = get_async_sync_lock(workspace_id)
-    async with lock:
-        try:
-            log.info(f"Starting Nextcloud sync for {workspace_id} (owner: {owner_user})")
-            # 1. Resolve credentials from Identity
-            async with get_client() as client:
-                resp = await client.post(
-                    f"{IDENTITY_SVC_URL}/api/resolve",
-                    json={"rag_user": owner_user},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=aiohttp.ClientTimeout(total=10.0),
-                )
-                if resp.status != 200:
-                    text = await resp.text()
-                    log.error(f"Failed to resolve identity for {owner_user}: {text}")
-                    return
-
-                creds = await resp.json()
-                nc_url = creds.get("nextcloud_url")
-                nc_user = creds.get("nextcloud_user")
-                nc_pass = creds.get("nextcloud_pass")
-
-                if not all([nc_url, nc_user, nc_pass]):
-                    log.warning(f"Nextcloud credentials missing for {owner_user}. Skipping sync.")
-                    return
-
-                # 2. Trigger mirror via Storage Service
-                mirror_req = {
-                    "provider": {
-                        "kind": "nextcloud",
-                        "settings": {
-                            "url": nc_url,
-                            "username": nc_user,
-                            "password": nc_pass
-                        }
-                    },
-                    "remote_path": remote_path,
-                    "local_path": local_path,
-                    "excludes": excludes or []
-                }
-
-                resp = await client.post(
-                    f"{STORAGE_SVC_URL}/providers/mirror",
-                    json=mirror_req,
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                )
-                if resp.status == 200:
-                    log.info(f"Successfully triggered Nextcloud mirror for {workspace_id}")
-                else:
-                    text = await resp.text()
-                    log.error(f"Failed to trigger Nextcloud mirror: {text}")
-
-        except Exception as e:
-            log.error(f"Error in _trigger_nextcloud_sync: {e}")
+    await asyncio.to_thread(background_sync, workspace_id)
 
 
 # Git endpoints are served from the modularized, sandbox-backed router so that
@@ -3046,6 +3020,21 @@ from services.workspace_runtime.git_ops import (  # noqa: E402
 )
 
 app.include_router(git_router)
+
+from services.workspace_runtime.nextcloud_sync import NextcloudSyncError, SyncEngine  # noqa: E402
+from services.workspace_runtime.sync_ops import (  # noqa: E402
+    _nextcloud_client,
+    background_sync,
+    clear_sync_records,
+    periodic_sync_loop,
+    schedule_sync_after_write,
+    sync_router,
+    validate_sync_settings,
+)
+from services.workspace_runtime.upload_ops import upload_router  # noqa: E402
+
+app.include_router(sync_router)
+app.include_router(upload_router)
 
 
 # =============================================================================
