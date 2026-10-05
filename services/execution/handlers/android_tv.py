@@ -2,9 +2,8 @@
 """
 Android TV media transport commands via Home Assistant's androidtv_remote integration.
 
-Services:
-  - androidtv_remote.send_command: Send remote key (home, back, sleep, etc.)
-  - media_player.*: Standard media controls (play, pause, stop, etc.)
+The integration exposes a remote entity; keys are sent through
+remote.send_command on remote.<object_id> (e.g. HOME, MEDIA_PLAY, DPAD_UP).
 """
 import logging
 
@@ -20,14 +19,16 @@ from services.execution.media_links import media_file_url
 log = logging.getLogger("execution.android_tv")
 
 ANDROID_TV_COMMANDS = {
-    "home": "home", "back": "back", "sleep": "sleep",
-    "power_off": "sleep", "turn_off": "sleep",
-    "power_on": "wake", "turn_on": "wake",
-    "up": "up", "down": "down", "left": "left", "right": "right",
-    "enter": "enter", "select": "enter", "ok": "enter",
-    "play": "media_play", "pause": "media_pause", "stop": "media_stop",
-    "fast_forward": "fast_forward", "rewind": "rewind",
-    "volume_up": "volume_up", "volume_down": "volume_down", "mute": "volume_mute",
+    "home": "HOME", "back": "BACK",
+    "up": "DPAD_UP", "down": "DPAD_DOWN", "left": "DPAD_LEFT", "right": "DPAD_RIGHT",
+    "enter": "DPAD_CENTER", "select": "DPAD_CENTER", "ok": "DPAD_CENTER",
+    "play": "MEDIA_PLAY", "resume": "MEDIA_PLAY", "pause": "MEDIA_PAUSE",
+    "stop": "MEDIA_STOP", "next": "MEDIA_NEXT", "previous": "MEDIA_PREVIOUS",
+    "fast_forward": "MEDIA_FAST_FORWARD", "rewind": "MEDIA_REWIND",
+    "volume_up": "VOLUME_UP", "volume_down": "VOLUME_DOWN",
+    "mute": "VOLUME_MUTE", "volume_mute": "VOLUME_MUTE",
+    "power": "POWER", "power_on": "POWER", "power_off": "POWER",
+    "turn_on": "POWER", "turn_off": "POWER", "sleep": "POWER",
 }
 
 
@@ -63,12 +64,19 @@ async def is_android_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
 
 
 async def send_command(ha_url: str, ha_token: str, entity_id: str, command: str) -> ExecutionResult:
-    """Send a remote command to an Android TV device."""
-    atv_cmd = ANDROID_TV_COMMANDS.get(command.lower(), command.lower())
-    log.info(f"[android_tv] Sending command '{atv_cmd}' to {entity_id}")
+    """Send a remote key to an Android TV device via remote.send_command."""
+    atv_cmd = ANDROID_TV_COMMANDS.get(command.lower())
+    if not atv_cmd:
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Unsupported Android TV command '{command}'.",
+            service="android_tv_transport",
+        )
+    remote_entity = entity_id.replace("media_player.", "remote.")
+    log.info(f"[android_tv] Sending {atv_cmd} to {remote_entity}")
     result = await ha_client.call_service(
-        ha_url, ha_token, "androidtv_remote", "send_command", entity_id,
-        {"command": atv_cmd}
+        ha_url, ha_token, "remote", "send_command", remote_entity,
+        {"command": [atv_cmd]}
     )
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Sent '{command}' to {entity_id} (Android TV).", service="android_tv_transport")
@@ -96,7 +104,7 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
     Multiple integrations control the same physical device, each with their own entity.
     Uses capability-based detection from HA state attributes:
     1. Exclude MA wrappers (app_id, mass_player_type)
-    2. Require play_media capability (supported_features & 8424)
+    2. Require play_media capability (supported_features & 512)
     3. Require Cast signals (entity_id hints, friendly name, cast_type)
     4. Single candidate = confident match
     """
@@ -138,7 +146,7 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
 
         # Capability checks - must support play_media
         supported_features = int(s_attrs.get("supported_features", 0))
-        has_play_media = bool(supported_features & 8424)
+        has_play_media = bool(supported_features & 512)
         if not has_play_media:
             continue
 
