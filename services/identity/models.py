@@ -248,11 +248,11 @@ class UserActivitySharing(SQLModel, table=True):  # type: ignore
 # asserts that.
 # ---------------------------------------------------------------------------
 
-DEVICE_KINDS = ("phone", "assistant", "light")
+DEVICE_KINDS = ("phone", "assistant", "light", "watch")
 
 #: Kinds that get the advanced panel. ``light`` is deliberately minimal: a
 #: light has no screen, no app, and nothing to install.
-ADVANCED_DEVICE_KINDS = ("phone", "assistant")
+ADVANCED_DEVICE_KINDS = ("phone", "assistant", "watch")
 
 NO_OPT_IN_EVENTS = frozenset(
     {
@@ -292,7 +292,9 @@ class Device(SQLModel, table=True):  # type: ignore
     kind: str = Field(default="phone", index=True)  # phone | assistant | light
     label: str = Field(default="")  # "Jeremiah's Pixel"
     owner_username: str | None = Field(default=None, index=True, foreign_key="user.username")
-    registered_by: str = Field(default="self")  # self | admin
+    #: self (a phone, on login) | admin | paired (claimed with the code the
+    #: device showed) | adopted (claimed without one: the device has no screen)
+    registered_by: str = Field(default="self")
     revoked: bool = Field(default=False)
     #: Link into execution.device_registry for assistants/lights. A phone has
     #: no HA entity, so this stays null for kind="phone".

@@ -52,6 +52,7 @@ from services.identity.schemas import (
     CredentialSharesUpdate,
     DeviceAdminCreate,
     DeviceAssign,
+    DeviceClaim,
     DeviceAssignmentCreate,
     DeviceAssignmentRead,
     DeviceRead,
@@ -4357,6 +4358,58 @@ def create_device(
         last_seen_at=now,
         first_seen_at=now,
     )
+    session.add(device)
+    session.commit()
+    session.refresh(device)
+    return _device_to_read(device)
+
+
+@app.post("/api/internal/devices/claim", response_model=DeviceRead)
+def claim_device(
+    body: DeviceClaim,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_internal),
+):
+    """Link a companion device (watch, assistant, light) to the user who added it.
+
+    Internal only: the execution service calls this after it has paired with
+    the device (``verified``: the user typed the code the device showed) or
+    adopted one that has no screen. A device already linked to someone else
+    moves only on a verified pairing, which needs the device in hand; an
+    unverified adoption of someone else's device is refused, so holding a
+    device's address is not enough to take it.
+    """
+    kind = (body.kind or "").strip().lower()
+    if kind not in DEVICE_KINDS or kind == "phone":
+        raise HTTPException(status_code=422, detail=f"kind must be one of {', '.join(k for k in DEVICE_KINDS if k != 'phone')}")
+    owner_name = body.owner_username.strip().lower()
+    owner = session.exec(select(User).where(User.username == owner_name)).first()
+    if owner is None:
+        raise HTTPException(status_code=404, detail=f"No such user: {owner_name}")
+    key = body.device_key.strip()
+    now = datetime.now().isoformat()
+    device = session.exec(select(Device).where(Device.device_key == key)).first()
+    if device is not None:
+        if device.kind == "phone":
+            raise HTTPException(status_code=409, detail="This device key belongs to a phone")
+        if device.owner_username and device.owner_username != owner_name and not body.verified:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Already linked to {device.owner_username}. Pair it with the code it shows, or ask an admin.",
+            )
+    else:
+        device = Device(device_key=key, kind=kind, first_seen_at=now)
+    device.kind = kind
+    device.label = body.label or device.label or ""
+    device.owner_username = owner_name
+    device.registered_by = "paired" if body.verified else "adopted"
+    device.revoked = False
+    device.esphome_version = body.esphome_version or device.esphome_version
+    device.hardware = body.hardware or device.hardware
+    if body.capabilities:
+        device.capabilities = json.dumps(body.capabilities)
+    device.last_ip_address = body.ip_address or device.last_ip_address
+    device.last_seen_at = now
     session.add(device)
     session.commit()
     session.refresh(device)

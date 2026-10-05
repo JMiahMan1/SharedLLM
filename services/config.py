@@ -134,6 +134,10 @@ CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR")
 IDENTITY_DATABASE_URL = os.getenv("IDENTITY_DATABASE_URL")
 COMPOSE_PROJECT_DIR = os.getenv("COMPOSE_PROJECT_DIR")
 EXECUTION_EXTERNAL_HOST = os.getenv("EXECUTION_EXTERNAL_HOST")
+# Jarvis's own public address (e.g. https://jarvis.example.com). Companion
+# devices paired from Jarvis (the watch) are given this URL to call it on.
+# Unset, they get whatever address the user reached Jarvis at while pairing.
+JARVIS_HOST = os.getenv("JARVIS_HOST")
 OLLAMA_TIMEOUT = _safe_int("OLLAMA_TIMEOUT", 600)
 PHRASEBOOK_PATH = os.getenv("PHRASEBOOK_PATH")
 GATEWAY_INTERNAL_URL = os.getenv("GATEWAY_INTERNAL_URL")

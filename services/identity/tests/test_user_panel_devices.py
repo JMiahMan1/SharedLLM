@@ -331,3 +331,61 @@ class TestCapabilities:
         client.post(REGISTER, json=_phone_payload())
         resp = client.post("/api/user-panel/devices/phone-abc12345/capabilities", json={"capabilities": "lots"})
         assert resp.status_code == 422
+
+
+CLAIM = "/api/internal/devices/claim"
+
+
+def _claim(**over):
+    body = {"device_key": "esphome:744dbd2c9728", "kind": "watch", "label": "Jarvis Watch",
+            "owner_username": "michele", "verified": True, "esphome_version": "2026.9.0",
+            "hardware": "esp32s3", "ip_address": "192.168.2.105"}
+    body.update(over)
+    return body
+
+
+class TestCompanionClaim:
+    """A user adds a companion device through Jarvis; execution calls claim."""
+
+    def test_pairing_links_the_device_to_the_user_who_added_it(self, client: TestClient, session: Session):
+        body = client.post(CLAIM, json=_claim()).json()
+        assert body["kind"] == "watch"
+        assert body["owner_username"] == "michele"
+        assert body["registered_by"] == "paired"
+        assert body["last_ip_address"] == "192.168.2.105"
+        # ...and it shows up in that user's own device list.
+        mine = client.get("/api/user-panel/devices").json()
+        assert [d["device_key"] for d in mine] == ["esphome:744dbd2c9728"]
+
+    def test_a_screenless_device_is_adopted_not_paired(self, client: TestClient):
+        body = client.post(CLAIM, json=_claim(device_key="esphome:aa", kind="assistant", verified=False)).json()
+        assert body["registered_by"] == "adopted"
+
+    def test_someone_elses_device_moves_only_with_the_code(self, client: TestClient):
+        client.post(CLAIM, json=_claim(owner_username="kate"))
+        refused = client.post(CLAIM, json=_claim(owner_username="michele", verified=False))
+        assert refused.status_code == 409
+        assert "kate" in refused.json()["detail"]
+        moved = client.post(CLAIM, json=_claim(owner_username="michele", verified=True))
+        assert moved.status_code == 200
+        assert moved.json()["owner_username"] == "michele"
+
+    def test_a_phone_cannot_be_claimed(self, client: TestClient):
+        assert client.post(REGISTER, json=_phone_payload()).status_code == 200
+        resp = client.post(CLAIM, json=_claim(device_key="phone-abc12345"))
+        assert resp.status_code == 409
+
+    def test_kind_phone_is_not_claimable(self, client: TestClient):
+        assert client.post(CLAIM, json=_claim(kind="phone")).status_code == 422
+
+    def test_unknown_owner_is_an_error(self, client: TestClient):
+        assert client.post(CLAIM, json=_claim(owner_username="nobody")).status_code == 404
+
+    def test_claim_requires_the_internal_secret(self, session: Session):
+        client = _client(session, "michele")
+        app.dependency_overrides.pop(require_internal, None)
+        try:
+            resp = client.post(CLAIM, json=_claim())
+            assert resp.status_code in (401, 403)
+        finally:
+            app.dependency_overrides = {}

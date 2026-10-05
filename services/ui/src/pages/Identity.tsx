@@ -22,7 +22,8 @@ import {
   Zap,
   Calendar,
   Shield,
-  ListMusic
+  ListMusic,
+  Watch
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -32,6 +33,7 @@ import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
+import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
 
 interface ModalProps {
   isOpen: boolean;
@@ -669,6 +671,19 @@ const Identity = () => {
             <div className="max-w-3xl">
                <VoiceEnrollmentCard enrolled={!!fullUser?.voice_id} />
             </div>
+          </section>
+
+          <section>
+            <div className="flex items-center gap-4 mb-8">
+              <div className="p-3 rounded-2xl bg-sky-500/20 text-sky-400">
+                <Watch size={24} />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white">Devices</h3>
+                <p className="text-sm text-slate-400">Your phone, watch and assistants. Devices you add are linked to you.</p>
+              </div>
+            </div>
+            <CompanionDevicesPanel />
           </section>
 
           <section>

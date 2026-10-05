@@ -21,6 +21,8 @@ import type {
   GlobalSetting,
   GatewayConfig,
   EsphomeDevice,
+  CompanionDevice,
+  PairDeviceRequest,
   ExecutionResponse,
   ArcadeGamesResponse,
   TimerRecord,
@@ -122,6 +124,9 @@ export type {
   GlobalSetting,
   HealthStatus,
   EsphomeDevice,
+  CompanionDevice,
+  PairDeviceRequest,
+  DiscoveredDevice,
   LogEntry,
   RavenMission,
   RavenConfig,
@@ -2170,6 +2175,18 @@ export const api = {
       entity_id: entityId,
       service_data: serviceData ?? null,
     });
+    return resp.data;
+  },
+
+  // Companion devices: the signed-in user's own (phones register themselves
+  // on login; watches and assistants are added with pairDevice).
+  async getCompanionDevices(): Promise<CompanionDevice[]> {
+    const resp = await apiClient.get('/api/user-panel/devices');
+    return resp.data;
+  },
+
+  async pairDevice(body: PairDeviceRequest): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/devices/pair', body, { timeout: 60000 });
     return resp.data;
   },
 

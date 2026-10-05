@@ -404,7 +404,7 @@ class UserWidgetUpdate(BaseModel):
 # User Panel: device registry
 # ---------------------------------------------------------------------------
 
-DEVICE_KINDS = ("phone", "assistant", "light")
+DEVICE_KINDS = ("phone", "assistant", "light", "watch")
 
 
 class DeviceSelfRegister(BaseModel):
@@ -434,6 +434,22 @@ class DeviceAdminCreate(BaseModel):
     esphome_version: str | None = None
     hardware: str | None = None
     capabilities: dict = Field(default_factory=dict)
+
+
+class DeviceClaim(BaseModel):
+    """A user claiming a companion device through Jarvis (internal: sent by
+    the execution service once pairing or adoption has succeeded)."""
+
+    device_key: str = Field(min_length=1, max_length=128)
+    kind: str
+    label: str = ""
+    owner_username: str = Field(min_length=1)
+    #: True when the user proved possession with the code the device showed.
+    verified: bool = False
+    esphome_version: str | None = None
+    hardware: str | None = None
+    capabilities: dict = Field(default_factory=dict)
+    ip_address: str | None = None
 
 
 class DeviceAssign(BaseModel):

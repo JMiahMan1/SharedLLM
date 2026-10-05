@@ -192,3 +192,312 @@ def test_route_wired_via_testclient(one_device):
     assert body["status"] == "SUCCESS"
     assert body["service"] == "esphome"
     instance.light_command.assert_called_once_with(3, state=True, brightness=None, rgb=None)
+
+
+# ─── configure_jarvis: Jarvis hands a device its own endpoint ──────────────────
+
+def _configure_service(args=("url", "api_key")):
+    return aioesphomeapi.UserService(
+        name="configure_jarvis",
+        key=42,
+        args=[aioesphomeapi.UserServiceArg(name=a, type=aioesphomeapi.UserServiceArgType.STRING) for a in args],
+    )
+
+
+def _mock_api_with_services(services):
+    instance = MagicMock()
+    instance.connect = AsyncMock()
+    instance.disconnect = AsyncMock()
+    instance.list_entities_services = AsyncMock(return_value=([], services))
+    instance.execute_service = AsyncMock()
+    return MagicMock(return_value=instance), instance
+
+
+def _configure_req(api_key="sk-user"):
+    from services.execution.schemas import EsphomeRequest, UserContext
+
+    return EsphomeRequest(
+        user_context=UserContext(user="jeremiah", api_key=api_key),
+        action="configure_jarvis",
+        device="office-light",
+    )
+
+
+@pytest.mark.asyncio
+async def test_configure_jarvis_unset_url_fails_fast(one_device):
+    """No JARVIS_HOST and no address seen -> FAILURE naming it; nothing minted or sent."""
+    from services.execution.handlers.esphome import handle_esphome
+
+    mint = AsyncMock(return_value="sk-device")
+    api_cls, _ = _mock_api_with_services([_configure_service()])
+    with patch.object(one_device, "JARVIS_HOST", None), \
+         patch.object(one_device, "mint_device_api_key", mint), \
+         patch.object(one_device.aioesphomeapi, "APIClient", api_cls):
+        result = await handle_esphome(_configure_req())
+    assert result.status == "FAILURE"
+    assert "JARVIS_HOST" in result.message
+    mint.assert_not_called()
+    api_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_configure_jarvis_requires_user_api_key(one_device):
+    from services.execution.handlers.esphome import handle_esphome
+
+    api_cls, _ = _mock_api_with_services([_configure_service()])
+    with patch.object(one_device, "JARVIS_HOST", "http://10.0.0.9:11435"), \
+         patch.object(one_device.aioesphomeapi, "APIClient", api_cls):
+        result = await handle_esphome(_configure_req(api_key=None))
+    assert result.status == "FAILURE"
+    assert "API key" in result.message
+    api_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_configure_jarvis_device_without_action_mints_nothing(one_device):
+    """A device lacking the action fails clearly and no key is left behind."""
+    from services.execution.handlers.esphome import handle_esphome
+
+    mint = AsyncMock(return_value="sk-device")
+    api_cls, instance = _mock_api_with_services([])
+    with patch.object(one_device, "JARVIS_HOST", "http://10.0.0.9:11435"), \
+         patch.object(one_device, "mint_device_api_key", mint), \
+         patch.object(one_device.aioesphomeapi, "APIClient", api_cls):
+        result = await handle_esphome(_configure_req())
+    assert result.status == "FAILURE"
+    assert "configure_jarvis" in result.message
+    mint.assert_not_called()
+    instance.execute_service.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_configure_jarvis_pushes_url_and_minted_key(one_device):
+    from services.execution.handlers.esphome import handle_esphome
+
+    mint = AsyncMock(return_value="sk-device")
+    service = _configure_service()
+    api_cls, instance = _mock_api_with_services([service])
+    with patch.object(one_device, "JARVIS_HOST", "http://10.0.0.9:11435/"), \
+         patch.object(one_device, "mint_device_api_key", mint), \
+         patch.object(one_device.aioesphomeapi, "APIClient", api_cls):
+        result = await handle_esphome(_configure_req())
+    assert result.status == "SUCCESS", result.message
+    mint.assert_awaited_once_with("sk-user", "office-light")
+    # return_response: the device's own refusal (e.g. "pair first") is surfaced
+    instance.execute_service.assert_awaited_once_with(
+        service, {"url": "http://10.0.0.9:11435", "api_key": "sk-device"}, return_response=True
+    )
+    assert "sk-device" not in result.message  # the key is never echoed back
+
+
+@pytest.mark.asyncio
+async def test_jarvis_host_must_be_http(one_device):
+    with patch.object(one_device, "JARVIS_HOST", "10.0.0.9:11435"), \
+         pytest.raises(one_device.EsphomeConfigError) as exc:
+        await one_device.get_jarvis_device_url()
+    assert "http://" in str(exc.value)
+
+
+# ─── Companion pairing ─────────────────────────────────────────────────────────
+
+def _svc(name, *args):
+    return aioesphomeapi.UserService(
+        name=name, key=hash(name) & 0xFFFF,
+        args=[aioesphomeapi.UserServiceArg(name=a, type=aioesphomeapi.UserServiceArgType.STRING) for a in args],
+    )
+
+
+WATCH_SERVICES = [_svc("pair_begin"), _svc("pair_confirm", "code", "owner"), _svc("configure_jarvis", "url", "api_key")]
+
+
+def _device_api(services, confirm_ok=True, requires_encryption=False):
+    """APIClient stand-in recording connects (with their psk) and actions."""
+    calls = {"connects": [], "actions": [], "keys": []}
+    info = MagicMock(friendly_name="Jarvis Watch", mac_address="74:4D:BD:2C:97:28",
+                     model="esp32-s3-devkitc-1", esphome_version="2026.9.0")
+    info.name = "jarvis-watch"
+
+    def make(host, port, password, noise_psk=None):
+        inst = MagicMock()
+
+        async def connect(login=True):
+            if requires_encryption:
+                raise aioesphomeapi.RequiresEncryptionAPIError("needs key")
+            calls["connects"].append(noise_psk)
+        inst.connect = connect
+        inst.disconnect = AsyncMock()
+        inst.device_info = AsyncMock(return_value=info)
+        inst.list_entities_services = AsyncMock(return_value=([], services))
+
+        async def set_key(k):
+            calls["keys"].append(k)
+            return True
+        inst.noise_encryption_set_key = set_key
+
+        async def execute(service, data, return_response=None):
+            calls["actions"].append((service.name, data))
+            ok = confirm_ok if service.name == "pair_confirm" else True
+            return MagicMock(success=ok, error_message="" if ok else "Wrong code.")
+        inst.execute_service = execute
+        return inst
+    return make, calls
+
+
+def _pair_req(step, **kw):
+    from services.execution.schemas import EsphomePairRequest, UserContext
+    return EsphomePairRequest(user_context=UserContext(user="jeremiah", api_key="sk-user"), step=step, **kw)
+
+
+@pytest.fixture()
+def pairing_env(one_device, monkeypatch):
+    ec = one_device
+    saved, removed, claims = [], [], []
+    monkeypatch.setattr(ec, "JARVIS_HOST", "http://10.0.0.9:11435")
+
+    async def save(name, entry):
+        saved.append((name, entry))
+
+    async def remove(name):
+        removed.append(name)
+
+    async def claim(body):
+        claims.append(body)
+        return {"device_key": body["device_key"], "owner_username": body["owner_username"]}
+    monkeypatch.setattr(ec, "_save_device", save)
+    monkeypatch.setattr(ec, "_remove_device", remove)
+    monkeypatch.setattr(ec, "_claim", claim)
+    monkeypatch.setattr(ec, "mint_device_api_key", AsyncMock(return_value="sk-device"))
+    return ec, saved, removed, claims
+
+
+@pytest.mark.asyncio
+async def test_pair_start_asks_a_screen_device_for_its_code(pairing_env):
+    from services.execution.handlers.esphome import handle_esphome_pair
+    ec = pairing_env[0]
+    make, calls = _device_api(WATCH_SERVICES)
+    with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
+        res = await handle_esphome_pair(_pair_req("start", host="192.168.2.105"))
+    assert res.status == "SUCCESS", res.message
+    assert res.detail["method"] == "code"
+    assert calls["actions"] == [("pair_begin", {})]
+    assert "code shown on Jarvis Watch" in res.message
+
+
+@pytest.mark.asyncio
+async def test_pair_start_on_a_screenless_device_adopts(pairing_env):
+    from services.execution.handlers.esphome import handle_esphome_pair
+    ec = pairing_env[0]
+    make, calls = _device_api([_svc("announce", "text")])
+    with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
+        res = await handle_esphome_pair(_pair_req("start", host="10.0.0.40"))
+    assert res.detail["method"] == "adopt"
+    assert calls["actions"] == []  # nothing to show a code on
+
+
+@pytest.mark.asyncio
+async def test_pair_finish_with_the_right_code_links_the_device(pairing_env):
+    from services.execution.handlers.esphome import handle_esphome_pair
+    ec, saved, removed, claims = pairing_env
+    make, calls = _device_api(WATCH_SERVICES)
+    with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
+        res = await handle_esphome_pair(_pair_req("finish", host="192.168.2.105", code="123456"))
+    assert res.status == "SUCCESS", res.message
+    psk = calls["keys"][0].decode()
+    assert calls["connects"] == [None, psk]  # plain, then encrypted with the new key
+    assert ("pair_confirm", {"code": "123456", "owner": "jeremiah"}) in calls["actions"]
+    assert ("configure_jarvis", {"url": "http://10.0.0.9:11435", "api_key": "sk-device"}) in calls["actions"]
+    assert saved == [("jarvis-watch", {"host": "192.168.2.105", "port": 6053, "noise_psk": psk, "owner": "jeremiah",
+                                       "jarvis_url": "http://10.0.0.9:11435"})]
+    assert claims[0]["verified"] is True and claims[0]["kind"] == "watch"
+    assert claims[0]["device_key"] == "esphome:744dbd2c9728"
+    assert removed == []
+
+
+@pytest.mark.asyncio
+async def test_pair_finish_with_a_wrong_code_undoes_everything(pairing_env):
+    from services.execution.handlers.esphome import handle_esphome_pair
+    ec, saved, removed, claims = pairing_env
+    make, calls = _device_api(WATCH_SERVICES, confirm_ok=False)
+    with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
+        res = await handle_esphome_pair(_pair_req("finish", host="192.168.2.105", code="000000"))
+    assert res.status == "FAILURE"
+    assert res.message == "Wrong code."
+    assert calls["keys"][-1] == b""  # key cleared on the device
+    assert [name for name, _ in saved] == ["jarvis-watch"]  # recorded as soon as it was set...
+    assert removed == ["jarvis-watch"]  # ...and dropped again
+    assert claims == []
+    ec.mint_device_api_key.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pair_finish_adopts_a_screenless_device_unverified(pairing_env):
+    from services.execution.handlers.esphome import handle_esphome_pair
+    ec, _saved, _removed, claims = pairing_env
+    make, _calls = _device_api([_svc("announce", "text")])
+    with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
+        res = await handle_esphome_pair(_pair_req("finish", host="10.0.0.40"))
+    assert res.status == "SUCCESS", res.message
+    assert claims[0]["verified"] is False and claims[0]["kind"] == "assistant"
+    assert "no key or address was sent" in res.message  # it never calls Jarvis
+    ec.mint_device_api_key.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_code_device_without_a_code_is_asked_for_one(pairing_env):
+    from services.execution.handlers.esphome import handle_esphome_pair
+    ec, saved = pairing_env[0], pairing_env[1]
+    make, calls = _device_api(WATCH_SERVICES)
+    with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
+        res = await handle_esphome_pair(_pair_req("finish", host="192.168.2.105"))
+    assert res.status == "FAILURE" and "Enter the code" in res.message
+    assert calls["keys"] == [] and saved == []  # nothing changed on the device
+
+
+@pytest.mark.asyncio
+async def test_an_already_keyed_device_says_how_to_proceed(pairing_env):
+    from services.execution.handlers.esphome import handle_esphome_pair
+    ec = pairing_env[0]
+    make, _ = _device_api(WATCH_SERVICES, requires_encryption=True)
+    with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
+        res = await handle_esphome_pair(_pair_req("start", host="192.168.2.105"))
+    assert res.status == "FAILURE" and "already has an encryption key" in res.message
+
+
+@pytest.mark.asyncio
+async def test_pairing_without_any_address_fails_before_touching_the_device(pairing_env, monkeypatch):
+    from services.execution.handlers.esphome import handle_esphome_pair
+    ec = pairing_env[0]
+    monkeypatch.setattr(ec, "JARVIS_HOST", None)
+    make, calls = _device_api(WATCH_SERVICES)
+    with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
+        res = await handle_esphome_pair(_pair_req("finish", host="192.168.2.105", code="123456"))
+    assert res.status == "FAILURE" and "JARVIS_HOST" in res.message
+    assert calls["connects"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_paired_device_obeys_only_its_owner(one_device, monkeypatch):
+    from services.execution.handlers.esphome import handle_esphome
+    from services.execution.schemas import EsphomeRequest, UserContext
+    one_device._device_cache["office-light"]["owner"] = "kate"
+    api_cls, _ = _mock_api_class([aioesphomeapi.LightInfo(key=1, name="Office Light", object_id="office_light")])
+    with patch.object(one_device.aioesphomeapi, "APIClient", api_cls):
+        mine = await handle_esphome(EsphomeRequest(user_context=UserContext(user="jeremiah"), action="list", device="office-light"))
+        admin = await handle_esphome(EsphomeRequest(user_context=UserContext(user="jeremiah", is_admin=True), action="list", device="office-light"))
+        owner = await handle_esphome(EsphomeRequest(user_context=UserContext(user="Kate"), action="list", device="office-light"))
+    assert mine.status == "FAILURE" and "another user" in mine.message
+    assert admin.status == "SUCCESS" and owner.status == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_pairing_gives_the_device_the_address_jarvis_was_reached_at(pairing_env, monkeypatch):
+    """JARVIS_HOST unset: the gateway passes the address the user is on."""
+    from services.execution.handlers.esphome import handle_esphome_pair
+    ec = pairing_env[0]
+    monkeypatch.setattr(ec, "JARVIS_HOST", None)
+    make, calls = _device_api(WATCH_SERVICES)
+    with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
+        res = await handle_esphome_pair(_pair_req("finish", host="192.168.2.105", code="123456",
+                                                  jarvis_url="https://jarvis.sumemail.com/"))
+    assert res.status == "SUCCESS", res.message
+    assert ("configure_jarvis", {"url": "https://jarvis.sumemail.com", "api_key": "sk-device"}) in calls["actions"]

@@ -269,10 +269,27 @@ class EsphomeRequest(BaseRequest):
     Devices are configured in Identity GlobalSetting 'esphome_devices'.
     """
     user_context: UserContext
-    action: Literal["list", "call"]
+    action: Literal["list", "call", "configure_jarvis"]
     device: str = Field(..., description="Device name from esphome_devices setting")
     entity: str | None = Field(None, description="Entity name/object_id on the device")
     params: dict | None = Field(None, description="Command parameters (state, brightness_pct, mode, ...)")
+
+
+class EsphomePairRequest(BaseRequest):
+    """Add a companion device as the calling user (see esphome_client pairing).
+
+    step: discover (devices on the LAN), start (the device shows its code, if
+    it has a screen), finish (confirm the code, or adopt a screenless device).
+    """
+    user_context: UserContext
+    step: Literal["discover", "start", "finish"]
+    host: str | None = Field(None, description="Device address (IP or name.local)")
+    port: int = Field(6053, description="ESPHome native API port")
+    code: str | None = Field(None, description="The code the device shows (code pairing)")
+    kind: str | None = Field(None, description="watch | assistant | light (defaults from the method)")
+    jarvis_url: str | None = Field(
+        None, description="Set by the gateway: the address the user reached Jarvis at, handed to the device"
+    )
 
 
 # ─── Generic HA Service Call ────────────────────────────────────────────────────
