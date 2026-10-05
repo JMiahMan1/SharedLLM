@@ -49,3 +49,17 @@ substitute a hardcoded constant and keep going.
   operator must see, not a `None` that quietly becomes "default".
 - Tests must cover the unconfigured case explicitly, so a missing value fails the test
   rather than passing on a baked-in constant.
+
+## Build & Deploy Rule (ABSOLUTE — NO EXCEPTIONS)
+
+Image builds are GitHub Actions' job. Never run `docker build` for a service image
+locally or on the production server.
+
+- Pushing to `microservices` triggers the "Build & Push Images" workflow, which builds
+  and pushes every changed service to GHCR. Wait for that run to succeed.
+- Deploy only by pulling the CI-built image: `scripts/deploy_remote.sh <host> <path> <service...>`.
+  It waits for the workflow, syncs the server checkout, runs `docker compose pull` +
+  `up -d --force-recreate` for the named services, and health-gates the gateway.
+- A server-side rebuild duplicates CI work, hammers production CPU/disk for ~20 minutes,
+  and can silently drift from the pushed commit. If CI is genuinely unavailable, say so
+  and ask before building anywhere.
