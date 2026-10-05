@@ -1,0 +1,986 @@
+{
+  "AbsProgressRequest": {
+    "description": "Playback progress push (POST /api/media/abs/progress).",
+    "properties": {
+      "current_time": {
+        "minimum": 0,
+        "title": "Current Time",
+        "type": "number"
+      },
+      "duration": {
+        "exclusiveMinimum": 0,
+        "title": "Duration",
+        "type": "number"
+      },
+      "episode_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Episode Id"
+      },
+      "is_finished": {
+        "default": false,
+        "title": "Is Finished",
+        "type": "boolean"
+      },
+      "item_id": {
+        "title": "Item Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "item_id",
+      "current_time",
+      "duration"
+    ],
+    "title": "AbsProgressRequest",
+    "type": "object"
+  },
+  "AbsProgressResponse": {
+    "description": "Result of a progress push.",
+    "properties": {
+      "episode_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Episode Id"
+      },
+      "item_id": {
+        "default": "",
+        "title": "Item Id",
+        "type": "string"
+      },
+      "message": {
+        "default": "",
+        "title": "Message",
+        "type": "string"
+      },
+      "status": {
+        "default": "SUCCESS",
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "title": "AbsProgressResponse",
+    "type": "object"
+  },
+  "MediaErrorInfo": {
+    "description": "Per-service failure notes for a partial response (\u00a74.5).",
+    "properties": {
+      "abs": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Abs"
+      },
+      "ma": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Ma"
+      }
+    },
+    "title": "MediaErrorInfo",
+    "type": "object"
+  },
+  "MediaFavoritesResponse": {
+    "$defs": {
+      "MediaErrorInfo": {
+        "description": "Per-service failure notes for a partial response (\u00a74.5).",
+        "properties": {
+          "abs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Abs"
+          },
+          "ma": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ma"
+          }
+        },
+        "title": "MediaErrorInfo",
+        "type": "object"
+      },
+      "MediaItem": {
+        "description": "A normalized playable item from either Music Assistant or ABS.",
+        "properties": {
+          "album": {
+            "default": "",
+            "title": "Album",
+            "type": "string"
+          },
+          "artist": {
+            "default": "",
+            "title": "Artist",
+            "type": "string"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration"
+          },
+          "favorite": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Favorite"
+          },
+          "image": {
+            "default": "",
+            "title": "Image",
+            "type": "string"
+          },
+          "media_type": {
+            "default": "",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "uri": {
+            "default": "",
+            "title": "Uri",
+            "type": "string"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "title": "MediaItem",
+        "type": "object"
+      }
+    },
+    "description": "Favorite items (GET /api/media/favorites).",
+    "properties": {
+      "errors": {
+        "$ref": "#/$defs/MediaErrorInfo"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Items",
+        "type": "array"
+      }
+    },
+    "title": "MediaFavoritesResponse",
+    "type": "object"
+  },
+  "MediaHomeResponse": {
+    "$defs": {
+      "MediaErrorInfo": {
+        "description": "Per-service failure notes for a partial response (\u00a74.5).",
+        "properties": {
+          "abs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Abs"
+          },
+          "ma": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ma"
+          }
+        },
+        "title": "MediaErrorInfo",
+        "type": "object"
+      },
+      "MediaItem": {
+        "description": "A normalized playable item from either Music Assistant or ABS.",
+        "properties": {
+          "album": {
+            "default": "",
+            "title": "Album",
+            "type": "string"
+          },
+          "artist": {
+            "default": "",
+            "title": "Artist",
+            "type": "string"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration"
+          },
+          "favorite": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Favorite"
+          },
+          "image": {
+            "default": "",
+            "title": "Image",
+            "type": "string"
+          },
+          "media_type": {
+            "default": "",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "uri": {
+            "default": "",
+            "title": "Uri",
+            "type": "string"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "title": "MediaItem",
+        "type": "object"
+      }
+    },
+    "description": "One call for Listen Now (GET /api/media/home).",
+    "properties": {
+      "continue": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Continue",
+        "type": "array"
+      },
+      "errors": {
+        "$ref": "#/$defs/MediaErrorInfo"
+      },
+      "favorites": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Favorites",
+        "type": "array"
+      },
+      "playlists": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Playlists",
+        "type": "array"
+      },
+      "radio": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Radio",
+        "type": "array"
+      },
+      "recent": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Recent",
+        "type": "array"
+      }
+    },
+    "title": "MediaHomeResponse",
+    "type": "object"
+  },
+  "MediaItem": {
+    "description": "A normalized playable item from either Music Assistant or ABS.",
+    "properties": {
+      "album": {
+        "default": "",
+        "title": "Album",
+        "type": "string"
+      },
+      "artist": {
+        "default": "",
+        "title": "Artist",
+        "type": "string"
+      },
+      "duration": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Duration"
+      },
+      "favorite": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Favorite"
+      },
+      "image": {
+        "default": "",
+        "title": "Image",
+        "type": "string"
+      },
+      "media_type": {
+        "default": "",
+        "title": "Media Type",
+        "type": "string"
+      },
+      "name": {
+        "default": "",
+        "title": "Name",
+        "type": "string"
+      },
+      "uri": {
+        "default": "",
+        "title": "Uri",
+        "type": "string"
+      },
+      "version": {
+        "default": "",
+        "title": "Version",
+        "type": "string"
+      }
+    },
+    "title": "MediaItem",
+    "type": "object"
+  },
+  "MediaItemChild": {
+    "description": "A track, chapter, album or episode under a media item detail.",
+    "properties": {
+      "duration": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Duration"
+      },
+      "image": {
+        "default": "",
+        "title": "Image",
+        "type": "string"
+      },
+      "index": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Index"
+      },
+      "media_type": {
+        "default": "",
+        "title": "Media Type",
+        "type": "string"
+      },
+      "name": {
+        "default": "",
+        "title": "Name",
+        "type": "string"
+      },
+      "uri": {
+        "default": "",
+        "title": "Uri",
+        "type": "string"
+      }
+    },
+    "title": "MediaItemChild",
+    "type": "object"
+  },
+  "MediaItemDetail": {
+    "$defs": {
+      "MediaErrorInfo": {
+        "description": "Per-service failure notes for a partial response (\u00a74.5).",
+        "properties": {
+          "abs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Abs"
+          },
+          "ma": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ma"
+          }
+        },
+        "title": "MediaErrorInfo",
+        "type": "object"
+      },
+      "MediaItemChild": {
+        "description": "A track, chapter, album or episode under a media item detail.",
+        "properties": {
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration"
+          },
+          "image": {
+            "default": "",
+            "title": "Image",
+            "type": "string"
+          },
+          "index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Index"
+          },
+          "media_type": {
+            "default": "",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "uri": {
+            "default": "",
+            "title": "Uri",
+            "type": "string"
+          }
+        },
+        "title": "MediaItemChild",
+        "type": "object"
+      }
+    },
+    "description": "Album/artist/playlist/book/podcast detail with children (GET /api/media/item).",
+    "properties": {
+      "album": {
+        "default": "",
+        "title": "Album",
+        "type": "string"
+      },
+      "artist": {
+        "default": "",
+        "title": "Artist",
+        "type": "string"
+      },
+      "children": {
+        "items": {
+          "$ref": "#/$defs/MediaItemChild"
+        },
+        "title": "Children",
+        "type": "array"
+      },
+      "description": {
+        "default": "",
+        "title": "Description",
+        "type": "string"
+      },
+      "duration": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Duration"
+      },
+      "errors": {
+        "$ref": "#/$defs/MediaErrorInfo"
+      },
+      "image": {
+        "default": "",
+        "title": "Image",
+        "type": "string"
+      },
+      "media_type": {
+        "default": "",
+        "title": "Media Type",
+        "type": "string"
+      },
+      "name": {
+        "default": "",
+        "title": "Name",
+        "type": "string"
+      },
+      "uri": {
+        "default": "",
+        "title": "Uri",
+        "type": "string"
+      }
+    },
+    "title": "MediaItemDetail",
+    "type": "object"
+  },
+  "MediaLibrary": {
+    "description": "An Audiobookshelf library (the ``audiobooks`` library tab).",
+    "properties": {
+      "id": {
+        "default": "",
+        "title": "Id",
+        "type": "string"
+      },
+      "media_type": {
+        "default": "audiobook",
+        "title": "Media Type",
+        "type": "string"
+      },
+      "name": {
+        "default": "",
+        "title": "Name",
+        "type": "string"
+      }
+    },
+    "title": "MediaLibrary",
+    "type": "object"
+  },
+  "MediaLibraryResponse": {
+    "$defs": {
+      "MediaErrorInfo": {
+        "description": "Per-service failure notes for a partial response (\u00a74.5).",
+        "properties": {
+          "abs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Abs"
+          },
+          "ma": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ma"
+          }
+        },
+        "title": "MediaErrorInfo",
+        "type": "object"
+      },
+      "MediaItem": {
+        "description": "A normalized playable item from either Music Assistant or ABS.",
+        "properties": {
+          "album": {
+            "default": "",
+            "title": "Album",
+            "type": "string"
+          },
+          "artist": {
+            "default": "",
+            "title": "Artist",
+            "type": "string"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration"
+          },
+          "favorite": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Favorite"
+          },
+          "image": {
+            "default": "",
+            "title": "Image",
+            "type": "string"
+          },
+          "media_type": {
+            "default": "",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "uri": {
+            "default": "",
+            "title": "Uri",
+            "type": "string"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "title": "MediaItem",
+        "type": "object"
+      },
+      "MediaLibrary": {
+        "description": "An Audiobookshelf library (the ``audiobooks`` library tab).",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "media_type": {
+            "default": "audiobook",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "MediaLibrary",
+        "type": "object"
+      }
+    },
+    "description": "A paginated library tab (GET /api/media/library/{tab}).",
+    "properties": {
+      "errors": {
+        "$ref": "#/$defs/MediaErrorInfo"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Items",
+        "type": "array"
+      },
+      "libraries": {
+        "items": {
+          "$ref": "#/$defs/MediaLibrary"
+        },
+        "title": "Libraries",
+        "type": "array"
+      },
+      "limit": {
+        "default": 50,
+        "title": "Limit",
+        "type": "integer"
+      },
+      "offset": {
+        "default": 0,
+        "title": "Offset",
+        "type": "integer"
+      },
+      "tab": {
+        "default": "",
+        "title": "Tab",
+        "type": "string"
+      }
+    },
+    "title": "MediaLibraryResponse",
+    "type": "object"
+  },
+  "MediaSearchResponse": {
+    "$defs": {
+      "MediaErrorInfo": {
+        "description": "Per-service failure notes for a partial response (\u00a74.5).",
+        "properties": {
+          "abs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Abs"
+          },
+          "ma": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ma"
+          }
+        },
+        "title": "MediaErrorInfo",
+        "type": "object"
+      },
+      "MediaItem": {
+        "description": "A normalized playable item from either Music Assistant or ABS.",
+        "properties": {
+          "album": {
+            "default": "",
+            "title": "Album",
+            "type": "string"
+          },
+          "artist": {
+            "default": "",
+            "title": "Artist",
+            "type": "string"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration"
+          },
+          "favorite": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Favorite"
+          },
+          "image": {
+            "default": "",
+            "title": "Image",
+            "type": "string"
+          },
+          "media_type": {
+            "default": "",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "uri": {
+            "default": "",
+            "title": "Uri",
+            "type": "string"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "title": "MediaItem",
+        "type": "object"
+      }
+    },
+    "description": "Unified search results (GET /api/media/search).",
+    "properties": {
+      "albums": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Albums",
+        "type": "array"
+      },
+      "artists": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Artists",
+        "type": "array"
+      },
+      "audiobooks": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Audiobooks",
+        "type": "array"
+      },
+      "authors": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Authors",
+        "type": "array"
+      },
+      "errors": {
+        "$ref": "#/$defs/MediaErrorInfo"
+      },
+      "playlists": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Playlists",
+        "type": "array"
+      },
+      "podcasts": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Podcasts",
+        "type": "array"
+      },
+      "top": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MediaItem"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "tracks": {
+        "items": {
+          "$ref": "#/$defs/MediaItem"
+        },
+        "title": "Tracks",
+        "type": "array"
+      }
+    },
+    "title": "MediaSearchResponse",
+    "type": "object"
+  }
+}
