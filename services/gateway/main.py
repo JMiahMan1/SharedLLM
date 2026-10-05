@@ -4881,11 +4881,34 @@ async def get_workspaces_proxy(request: Request):
         log.error(f"Workspaces proxy failed: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
+async def _caller_context_or_none(request: Request, body: dict) -> dict | None:
+    """The authenticated caller's identity, or None for an anonymous request.
+
+    Anonymous requests still reach the runtime, which refuses any workspace
+    that needs a user; this only decides WHO the user is.
+    """
+    with suppress(HTTPException):
+        return await _resolve_user_context(request, dict(body))
+    return None
+
+
+def _with_caller_context(body: dict, context: dict | None) -> dict:
+    """Replace any client-supplied user_context with the resolved caller.
+
+    A browser-supplied user_context used to pass straight through when present,
+    letting a caller act as another user (or as an admin) in the workspace
+    runtime.
+    """
+    body = {k: v for k, v in body.items() if k != "user_context"}
+    if context is not None:
+        body["user_context"] = context
+    return body
+
+
 async def _proxy_workspace_runtime_json(method: str, path: str, request = None):
     body = await request.json() if request is not None else None
-    if isinstance(body, dict) and not body.get("user_context"):
-        with suppress(Exception):
-            body = {**body, "user_context": await _resolve_user_context(request, body)}
+    if isinstance(body, dict):
+        body = _with_caller_context(body, await _caller_context_or_none(request, body))
     resp = await get_http_client().request(
         method,
         f"{WORKSPACE_RUNTIME_SVC}{path}",
@@ -4934,9 +4957,8 @@ async def delete_workspace_file_proxy(request: Request):
 @app.post("/api/workspaces/files/raw")
 async def read_workspace_file_raw_proxy(request: Request):
     body = await request.json()
-    if isinstance(body, dict) and not body.get("user_context"):
-        with suppress(Exception):
-            body = {**body, "user_context": await _resolve_user_context(request, body)}
+    if isinstance(body, dict):
+        body = _with_caller_context(body, await _caller_context_or_none(request, body))
     resp = await get_http_client().post(
         f"{WORKSPACE_RUNTIME_SVC}/files/raw",
         json=body,
@@ -4953,9 +4975,8 @@ async def read_workspace_file_raw_proxy(request: Request):
 @app.post("/api/workspaces/files/zip")
 async def zip_workspace_files_proxy(request: Request):
     body = await request.json()
-    if isinstance(body, dict) and not body.get("user_context"):
-        with suppress(Exception):
-            body = {**body, "user_context": await _resolve_user_context(request, body)}
+    if isinstance(body, dict):
+        body = _with_caller_context(body, await _caller_context_or_none(request, body))
     resp = await get_http_client().post(
         f"{WORKSPACE_RUNTIME_SVC}/files/zip",
         json=body,
