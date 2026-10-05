@@ -371,6 +371,9 @@ async def lifespan(app: FastAPI):
     # Background telemetry ingestion (live Energy Insights usage)
     telemetry_task = asyncio.create_task(telemetry_ingestion_loop())
 
+    # Periodically delete generated videos / stale TTS files (BUG-32)
+    prune_task = asyncio.create_task(temp_media_prune_loop())
+
     # Start ESPresense BLE presence pipeline (E7: was never invoked)
     from services.config import REDIS_URL as _PRESENCE_REDIS_URL
     from services.execution.presence import init_presence_tracker
@@ -434,6 +437,9 @@ async def lifespan(app: FastAPI):
     telemetry_task.cancel()
     with suppress(Exception):
         await telemetry_task
+    prune_task.cancel()
+    with suppress(Exception):
+        await prune_task
     with suppress(Exception):
         from services.execution.presence import get_presence_tracker
         await get_presence_tracker().stop()
@@ -476,6 +482,83 @@ TEMP_AUDIO_DIR = os.path.join(TEMP_MEDIA_DIR, "tts")
 os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 os.makedirs(TEMP_MEDIA_DIR, exist_ok=True)
 
+# TTS clips are served straight from this map, so an unbounded dict slowly ate
+# the container's memory. Keep the most recent clips only (BUG-32).
+TEMP_AUDIO_CACHE_MAX_ENTRIES = 32
+TEMP_AUDIO_CACHE_MAX_BYTES = 128 * 1024 * 1024
+_TEMP_AUDIO_CACHE_BYTES = 0
+
+
+def cache_temp_audio(media_id: str, audio_bytes: bytes) -> None:
+    """Insert TTS audio into the in-memory cache, evicting the oldest clips."""
+    global _TEMP_AUDIO_CACHE_BYTES
+    previous = TEMP_AUDIO_CACHE.pop(media_id, None)
+    if previous is not None:
+        _TEMP_AUDIO_CACHE_BYTES -= len(previous)
+    TEMP_AUDIO_CACHE[media_id] = audio_bytes
+    _TEMP_AUDIO_CACHE_BYTES += len(audio_bytes)
+    while len(TEMP_AUDIO_CACHE) > 1 and (
+        len(TEMP_AUDIO_CACHE) > TEMP_AUDIO_CACHE_MAX_ENTRIES
+        or _TEMP_AUDIO_CACHE_BYTES > TEMP_AUDIO_CACHE_MAX_BYTES
+    ):
+        oldest_id = next(iter(TEMP_AUDIO_CACHE))
+        evicted = TEMP_AUDIO_CACHE.pop(oldest_id)
+        _TEMP_AUDIO_CACHE_BYTES -= len(evicted)
+
+
+def get_temp_audio(media_id: str) -> bytes | None:
+    """Return cached TTS audio, refreshing its place in the eviction order."""
+    data = TEMP_AUDIO_CACHE.get(media_id)
+    if data is not None:
+        TEMP_AUDIO_CACHE.pop(media_id, None)
+        TEMP_AUDIO_CACHE[media_id] = data
+    return data
+
+
+TEMP_MEDIA_MAX_AGE_SECONDS = 24 * 3600
+TEMP_MEDIA_PRUNE_INTERVAL_SECONDS = 3600
+
+
+def prune_temp_media(
+    max_age_seconds: float = TEMP_MEDIA_MAX_AGE_SECONDS,
+    now: float | None = None,
+) -> list[str]:
+    """Delete generated media older than ``max_age_seconds``.
+
+    Downloaded videos and their stale partials pile up in TEMP_MEDIA_DIR; left
+    alone they fill the disk (BUG-32). Only media suffixes are considered, so
+    the yt-dlp cookie jar that lives in the same directory survives.
+    """
+    cutoff = (time.time() if now is None else now) - max_age_seconds
+    removed: list[str] = []
+    for directory in (TEMP_MEDIA_DIR, TEMP_AUDIO_DIR):
+        try:
+            names = os.listdir(directory)
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith((".mp4", ".mp4.part", ".wav")):
+                continue
+            path = os.path.join(directory, name)
+            try:
+                if os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+                    removed.append(path)
+            except OSError as exc:
+                log.warning(f"[prune] Could not remove {path}: {exc}")
+    return removed
+
+
+async def temp_media_prune_loop() -> None:
+    while True:
+        try:
+            removed = await asyncio.to_thread(prune_temp_media)
+            if removed:
+                log.info(f"[prune] Removed {len(removed)} stale temp media file(s)")
+        except Exception as exc:
+            log.warning(f"[prune] Temp media cleanup failed: {exc}")
+        await asyncio.sleep(TEMP_MEDIA_PRUNE_INTERVAL_SECONDS)
+
 
 def create_media_server_app():
     """Build the FastAPI app for the media file server (port 8888).
@@ -504,9 +587,10 @@ def create_media_server_app():
             raise HTTPException(status_code=404, detail="Media not found")
 
         # TTS audio from memory cache
-        if media_id in TEMP_AUDIO_CACHE:
+        cached_audio = get_temp_audio(media_id)
+        if cached_audio is not None:
             return Response(
-                content=TEMP_AUDIO_CACHE[media_id],
+                content=cached_audio,
                 media_type="audio/wav",
                 headers={"Accept-Ranges": "bytes"},
             )
@@ -632,8 +716,9 @@ async def get_temp_media(media_id: str):
     from fastapi.responses import FileResponse, Response
 
     # Check audio cache first
-    if media_id in TEMP_AUDIO_CACHE:
-        return Response(content=TEMP_AUDIO_CACHE[media_id], media_type="audio/wav")
+    cached_audio = get_temp_audio(media_id)
+    if cached_audio is not None:
+        return Response(content=cached_audio, media_type="audio/wav")
 
     # Check video files on disk
     video_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
@@ -945,7 +1030,7 @@ async def execute_trigger(payload: dict[str, Any]):
 
             from uuid import uuid4
             audio_key = f"tts-timer-{uuid4().hex[:8]}"
-            TEMP_AUDIO_CACHE[audio_key] = audio_bytes
+            cache_temp_audio(audio_key, audio_bytes)
 
             from services.config import EXECUTION_EXTERNAL_HOST
             media_url = media_file_url(audio_key, creds.get("user") or str(user_id), EXECUTION_EXTERNAL_HOST)
@@ -1594,7 +1679,7 @@ async def execute_announce(req: AnnouncementRequest):
 
             log.info(f"[announce] TTS generated: {len(audio_bytes)} bytes")
             media_id = f"tts-{uuid4().hex[:8]}"
-            TEMP_AUDIO_CACHE[media_id] = audio_bytes
+            cache_temp_audio(media_id, audio_bytes)
             log.info(f"[announce] Audio cached: media_id={media_id}, cache_size={len(TEMP_AUDIO_CACHE)}")
 
             public_host = get_public_host()
