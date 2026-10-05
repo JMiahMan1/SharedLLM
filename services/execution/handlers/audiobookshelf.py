@@ -75,6 +75,9 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
         elif action == "last_played":
             return await _handle_last_played(abs_url, abs_key)
 
+        elif action == "update_progress":
+            return await _handle_update_progress(abs_url, abs_key, req)
+
         return ExecutionResult(
             status="FAILURE",
             message=f"Action '{action}' not supported.",
@@ -88,6 +91,41 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
             message=f"Audiobookshelf error: {e}",
             service="audiobookshelf",
         )
+
+
+async def _handle_update_progress(abs_url: str, abs_key: str, req) -> ExecutionResult:
+    """PATCH playback progress for an item or one of its podcast episodes."""
+    if not req.item_id:
+        return ExecutionResult(status="FAILURE", message="item_id is required for update_progress.", service="audiobookshelf")
+    if req.current_time is None or req.duration is None:
+        return ExecutionResult(status="FAILURE", message="current_time and duration are required for update_progress.", service="audiobookshelf")
+    result = await abs_client.update_progress(
+        abs_url,
+        abs_key,
+        req.item_id,
+        req.current_time,
+        req.duration,
+        is_complete=bool(req.is_finished),
+        episode_id=req.episode_id,
+    )
+    if isinstance(result, dict) and result.get("error"):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Failed to save progress: {result['error']}",
+            service="audiobookshelf",
+        )
+    return ExecutionResult(
+        status="SUCCESS",
+        message="Progress saved",
+        service="audiobookshelf",
+        detail={
+            "item_id": req.item_id,
+            "episode_id": req.episode_id,
+            "current_time": req.current_time,
+            "duration": req.duration,
+            "is_finished": bool(req.is_finished),
+        },
+    )
 
 
 async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:

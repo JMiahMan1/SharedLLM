@@ -24,6 +24,11 @@ LEAKED = [
     ("GET", "/api/media/music-assistant/playlists", None),
     ("GET", "/api/media/music-assistant/recent", None),
     ("GET", "/api/media/music-assistant/browse", None),
+    ("GET", "/api/media/home", None),
+    ("GET", "/api/media/search?q=x", None),
+    ("GET", "/api/media/item?uri=library://track/1", None),
+    ("GET", "/api/media/library/tracks", None),
+    ("GET", "/api/media/favorites", None),
     ("GET", "/api/media/audiobookshelf/libraries", None),
     ("GET", "/api/media/audiobookshelf/last-played", None),
     ("GET", "/api/media/audiobookshelf/status", None),
@@ -43,6 +48,7 @@ LEAKED = [
 LEAKED_POST = [
     ("POST", "/api/storage/list", {"path": "/"}),
     ("POST", "/api/storage/index", {"path": "/"}),
+    ("POST", "/api/media/abs/progress", {"item_id": "b1", "current_time": 1, "duration": 10}),
 ]
 
 
