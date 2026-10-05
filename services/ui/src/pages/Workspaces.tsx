@@ -26,11 +26,13 @@ import {
   RefreshCcw,
   Download,
   Eye,
-  Archive
+  Archive,
+  Cloud
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ARTIFACT_RE, artifactKind, downloadBlobUrl } from '../lib/artifactKinds';
 import { api, type Workspace } from '../services/api';
+import type { WorkspaceSyncMode } from '../types/api';
 import { formatDateTime } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import WorkspaceIDE from '../components/workspace/WorkspaceIDE';
@@ -260,6 +262,17 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
   );
 }
 
+const STORAGE_OPTIONS: { value: WorkspaceSyncMode; label: string; hint: string }[] = [
+  { value: 'local_git_authoritative', label: 'Git', hint: 'Files live in a git checkout. A Nextcloud folder, if set, can receive backups.' },
+  { value: 'nextcloud', label: 'Nextcloud', hint: 'No git. The workspace is a two-way synced copy of a Nextcloud folder.' },
+  { value: 'git_and_nextcloud', label: 'Git + Nextcloud', hint: 'A git checkout that is also two-way synced with a Nextcloud folder (.git itself never syncs).' },
+];
+
+const usesNextcloud = (mode?: string | null) => mode === 'nextcloud' || mode === 'git_and_nextcloud';
+// "git" is the legacy spelling of a git-only workspace.
+const storageValue = (mode?: string | null): WorkspaceSyncMode =>
+  !mode || mode === 'git' ? 'local_git_authoritative' : (mode as WorkspaceSyncMode);
+
 const Workspaces = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -311,11 +324,24 @@ const Workspaces = () => {
       }
       return api.createWorkspace(data as Partial<Workspace> & { id: string });
     },
-    onSuccess: () => {
+    onSuccess: (_res, data) => {
       queryClient.invalidateQueries({ queryKey: ['workspaces'] });
       setIsModalOpen(false);
       setEditingWs(null);
       toast.success(editingWs ? 'Workspace updated' : 'Workspace created');
+      // A new Nextcloud-backed workspace starts empty: pull its folder now
+      // instead of waiting for the background sync.
+      if (!editingWs && data.id && usesNextcloud(data.sync_mode)) {
+        const id = data.id;
+        toast.promise(
+          api.syncWorkspace(id).then(() => queryClient.invalidateQueries({ queryKey: ['workspaces'] })),
+          {
+            loading: `Syncing ${id} with Nextcloud…`,
+            success: `${id} synced with Nextcloud`,
+            error: (e: Error) => `First Nextcloud sync failed: ${e.message}`,
+          },
+        );
+      }
     },
     onError: (err: Error) => toast.error(err.message || 'Failed to save workspace'),
   });
@@ -776,6 +802,53 @@ const Workspaces = () => {
             </label>
           </div>
 
+          <div className="space-y-2">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Storage</span>
+            <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Workspace storage">
+              {STORAGE_OPTIONS.map((opt) => {
+                const selected = storageValue(form.sync_mode) === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setForm({ ...form, sync_mode: opt.value })}
+                    className={`rounded-xl border px-2 py-2 text-xs font-semibold transition-colors pointer-coarse:min-h-11 ${
+                      selected ? 'border-indigo-400/60 bg-indigo-500/20 text-indigo-200' : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-slate-600 italic">
+              {STORAGE_OPTIONS.find((o) => o.value === storageValue(form.sync_mode))?.hint}
+            </p>
+          </div>
+
+          <label className="space-y-2">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+              Nextcloud Folder{usesNextcloud(form.sync_mode) ? '' : ' (optional backup target)'}
+            </span>
+            <div className="relative">
+              <Cloud size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
+              <input
+                type="text"
+                value={form.nextcloud_path || ''}
+                onChange={(e) => setForm({ ...form, nextcloud_path: e.target.value })}
+                placeholder="/Documents/My Project"
+                className="glass-input w-full pl-10"
+                aria-label="Nextcloud folder"
+              />
+            </div>
+            <p className="text-[10px] text-slate-600 italic">
+              Path inside your Nextcloud account (set up under your integrations). Changing it later starts a fresh sync history.
+            </p>
+          </label>
+
+          {form.sync_mode !== 'nextcloud' && (
           <label className="space-y-2">
             <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Repository URL (GitHub/GitLab)</span>
             <div className="relative">
@@ -790,6 +863,7 @@ const Workspaces = () => {
             </div>
             <p className="text-[10px] text-slate-600 italic">Required for autonomous bootstrapping and fresh pulls.</p>
           </label>
+          )}
 
           <label className="space-y-2">
             <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Path</span>
@@ -815,6 +889,7 @@ const Workspaces = () => {
             {pathError && <p className="text-[10px] text-red-400 italic mt-1">{pathError}</p>}
           </label>
 
+          {form.sync_mode !== 'nextcloud' && (
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Git Remote</span>
@@ -837,6 +912,7 @@ const Workspaces = () => {
               />
             </label>
           </div>
+          )}
 
           <div className="p-4 rounded-2xl bg-indigo-500/5 border border-indigo-500/10 space-y-4">
              <div className="flex items-center justify-between">
@@ -1025,6 +1101,10 @@ const Workspaces = () => {
                 }
                 if (form.scope === 'user' && /^\//.test(form.local_path)) {
                   toast.error('User workspaces must use relative paths (e.g. "my-project"), not absolute paths');
+                  return;
+                }
+                if (usesNextcloud(form.sync_mode) && !form.nextcloud_path?.trim()) {
+                  toast.error('Nextcloud storage needs a Nextcloud folder');
                   return;
                 }
                 saveMutation.mutate(form);

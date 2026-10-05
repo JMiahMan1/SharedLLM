@@ -526,14 +526,8 @@ async def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_int
     if result["returncode"] == 0:
         with Session(main_mod.engine) as session:
             match = session.get(Workspace, workspace["id"])
-            if match and match.auto_backup_enabled and match.nextcloud_path:
-                background_tasks.add_task(
-                    _trigger_nextcloud_sync,
-                    match.id,
-                    match.owner_user or "default",
-                    str(workspace_path),
-                    match.nextcloud_path,
-                )
+            if match and match.nextcloud_path and (match.auto_backup_enabled or match.sync_mode in ("nextcloud", "git_and_nextcloud")):
+                background_tasks.add_task(_trigger_nextcloud_sync, match.id)
 
         return {
             "status": "SUCCESS",

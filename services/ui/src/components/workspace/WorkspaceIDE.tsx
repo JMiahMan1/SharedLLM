@@ -38,6 +38,7 @@ import {
   Brush,
   UserRound,
   ScanText,
+  FolderUp,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -62,6 +63,14 @@ import { ExcelViewer } from './viewers/ExcelViewer';
 import { TerminalPane } from './viewers/TerminalPane';
 import { WorkspaceSecrets } from './WorkspaceSecrets';
 import { cn } from '../../lib/utils';
+import { Capacitor } from '@capacitor/core';
+import {
+  selectionFromDataTransfer,
+  selectionFromFileList,
+  uploadSelection,
+  type UploadSelection,
+} from '../../lib/workspaceUpload';
+import type { WorkspaceSyncDirection } from '../../types/api';
 
 interface WorkspaceIDEProps {
   workspace: Workspace;
@@ -307,6 +316,24 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
   const [chatBusy, setChatBusy] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ sent: number; total: number } | null>(null);
+  const [dropActive, setDropActive] = useState(false);
+  const dragDepth = useRef(0);
+  // Folder picking needs webkitdirectory, which native WebViews do not honour
+  // (they open the plain file picker); there, multi-file upload is the path.
+  const canPickFolders = useMemo(
+    () => !Capacitor.isNativePlatform() && typeof document !== 'undefined' && 'webkitdirectory' in document.createElement('input'),
+    [],
+  );
+  const usesNextcloud = workspace.sync_mode === 'nextcloud' || workspace.sync_mode === 'git_and_nextcloud';
+  // The outcome of a sync run from this pane; until then, what the server last recorded.
+  const [localSync, setSyncInfo] = useState<{ at: string; status: string; error: string | null } | null>(null);
+  const syncInfo = localSync ?? {
+    at: workspace.last_sync_at ?? null,
+    status: workspace.last_sync_status ?? null,
+    error: workspace.last_sync_error ?? null,
+  };
 
   useEffect(() => {
     void (async () => {
@@ -786,7 +813,8 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
         if (kind === 'file') {
           await api.writeWorkspaceFile(workspace.id, rel, '');
         } else {
-          await api.writeWorkspaceFile(workspace.id, `${rel}/.gitkeep`, '');
+          const res = await api.uploadWorkspaceFiles(workspace.id, currentPath, [], [name]);
+          if (res.errors.length) throw new Error(res.errors[0].error);
         }
         toast.success(`Created ${rel}`);
         await loadDir(currentPath);
@@ -847,33 +875,81 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
     [workspace.id, currentPath, loadDir, removeTab, closeCtxMenu],
   );
 
-  const onUpload = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      e.target.value = '';
-      if (!file) return;
-      const rel = currentPath === '.' ? file.name : `${currentPath}/${file.name}`;
-      const isText = /\.(txt|md|markdown|json|yaml|yml|toml|ini|cfg|conf|py|js|ts|tsx|jsx|css|html|htm|xml|sh|bash|zsh|fish|c|h|cpp|hpp|java|go|rs|rb|php|sql|gitignore|env|log|csv|tsv)$/i.test(file.name);
+  // Upload any number of files and whole folder trees (recursively, empty
+  // folders included when dropped) into the folder being viewed.
+  const runUpload = useCallback(
+    async (sel: UploadSelection) => {
+      if (sel.items.length === 0 && sel.dirs.length === 0) {
+        if (sel.ignored) toast.error(`Nothing to upload: ${sel.ignored} file(s) inside .git are never uploaded`);
+        return;
+      }
+      const target = currentPath;
+      setUploadProgress({ sent: 0, total: sel.items.reduce((n, i) => n + i.file.size, 0) });
       try {
-        if (isText) {
-          await api.writeWorkspaceFile(workspace.id, rel, await file.text());
+        const out = await uploadSelection(
+          sel,
+          (batch, onBytes) =>
+            api.uploadWorkspaceFiles(workspace.id, target, batch.items, batch.dirs, { onUploadBytes: onBytes }),
+          (sent, total) => setUploadProgress({ sent, total }),
+        );
+        const parts = [`${out.uploaded} file(s)`];
+        if (out.createdDirs) parts.push(`${out.createdDirs} folder(s)`);
+        if (out.skipped) parts.push(`${out.skipped} skipped`);
+        if (sel.ignored) parts.push(`${sel.ignored} .git file(s) left out`);
+        if (out.errors.length) {
+          toast.error(`Uploaded ${parts.join(', ')}; ${out.errors.length} failed: ${out.errors[0].relative_path}: ${out.errors[0].error}`);
+          setToolOutput(out.errors.map((e) => `${e.relative_path}: ${e.error}`).join('\n'));
         } else {
-          const buf = await file.arrayBuffer();
-          const bytes = new Uint8Array(buf);
-          let binary = '';
-          const chunk = 0x8000;
-          for (let i = 0; i < bytes.length; i += chunk) {
-            binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-          }
-          await api.writeWorkspaceFileBase64(workspace.id, rel, btoa(binary));
+          toast.success(`Uploaded ${parts.join(', ')}`);
         }
-        toast.success(`Uploaded ${rel}`);
-        await loadDir(currentPath);
       } catch (err: unknown) {
         toast.error(`Upload failed: ${apiErr(err)}`);
+      } finally {
+        setUploadProgress(null);
+        await loadDir(target);
       }
     },
     [workspace.id, currentPath, loadDir],
+  );
+
+  const onUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files ? Array.from(e.target.files) : [];
+      e.target.value = '';
+      if (files.length) void runUpload(selectionFromFileList(files));
+    },
+    [runUpload],
+  );
+
+  const dropHandlers = useMemo(
+    () => ({
+      onDragEnter: (e: React.DragEvent) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+        e.preventDefault();
+        dragDepth.current += 1;
+        setDropActive(true);
+      },
+      onDragOver: (e: React.DragEvent) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      },
+      onDragLeave: () => {
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setDropActive(false);
+      },
+      onDrop: (e: React.DragEvent) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+        e.preventDefault();
+        dragDepth.current = 0;
+        setDropActive(false);
+        // Must start reading the DataTransfer before this handler returns.
+        void selectionFromDataTransfer(e.dataTransfer).then(runUpload, (err: unknown) =>
+          toast.error(`Could not read the dropped items: ${apiErr(err)}`),
+        );
+      },
+    }),
+    [runUpload],
   );
 
   const gitDiffView = useCallback(async () => {
@@ -947,27 +1023,41 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
     }
   }, [workspace.id, activeTab]);
 
-  const syncNextcloud = useCallback(async () => {
-    if (!workspace.nextcloud_path) {
-      toast.error('This workspace has no NextCloud path configured');
-      return;
-    }
-    setToolBusy(true);
-    setToolOutput('Syncing to NextCloud...');
-    try {
-      const res = await api.syncWorkspaceNextcloud({
-        remote_path: workspace.nextcloud_path,
-        local_path: workspace.resolved_path ?? workspace.local_path,
-        excludes: workspace.excludes ?? [],
-      });
-      setToolOutput(JSON.stringify(res, null, 2));
-      toast.success('NextCloud sync complete');
-    } catch (e: unknown) {
-      setToolOutput(`Sync failed: ${apiErr(e)}`);
-    } finally {
-      setToolBusy(false);
-    }
-  }, [workspace]);
+  const syncNextcloud = useCallback(
+    async (direction?: WorkspaceSyncDirection) => {
+      if (!workspace.nextcloud_path) {
+        toast.error('This workspace has no Nextcloud folder configured');
+        return;
+      }
+      setToolBusy(true);
+      setToolOutput(`Syncing with Nextcloud ${workspace.nextcloud_path}…`);
+      try {
+        const { result } = await api.syncWorkspace(workspace.id, direction ? { direction } : {});
+        const lines = [
+          `Direction: ${result.direction}  ⇄  ${result.remote_root}`,
+          `Uploaded ${result.uploaded.length}, downloaded ${result.downloaded.length}, ` +
+            `deleted here ${result.deleted_local.length}, deleted in Nextcloud ${result.deleted_remote.length}`,
+          ...result.conflicts.map((c) => `CONFLICT ${c.path}: Nextcloud version saved as ${c.remote_copy}`),
+          ...result.errors.map((e) => `ERROR ${e.path}: ${e.error}`),
+        ];
+        setToolOutput(lines.join('\n'));
+        const status = result.errors.length ? 'error' : result.conflicts.length ? 'conflicts' : 'ok';
+        setSyncInfo({ at: new Date().toISOString(), status, error: result.errors[0]?.error ?? null });
+        if (result.errors.length) toast.error(`Sync finished with ${result.errors.length} error(s)`);
+        else if (result.conflicts.length) toast(`Sync finished: ${result.conflicts.length} conflict(s) kept as copies`);
+        else toast.success(result.changed ? 'Nextcloud sync complete' : 'Already in sync');
+        if (result.changed) await loadDir(currentPath);
+      } catch (e: unknown) {
+        const msg = apiErr(e);
+        setSyncInfo({ at: new Date().toISOString(), status: 'error', error: msg });
+        setToolOutput(`Sync failed: ${msg}`);
+        toast.error(`Sync failed: ${msg}`);
+      } finally {
+        setToolBusy(false);
+      }
+    },
+    [workspace.id, workspace.nextcloud_path, currentPath, loadDir],
+  );
 
   const loadMissions = useCallback(async () => {
     setMissionsLoading(true);
@@ -1338,10 +1428,39 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                 <button onClick={() => createNew('folder')} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded" title="New folder">
                   <FolderPlus size={15} />
                 </button>
-                <button onClick={() => fileInputRef.current?.click()} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded" title="Upload">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!!uploadProgress}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-40 pointer-coarse:min-h-11 pointer-coarse:min-w-11 flex items-center justify-center"
+                  title="Upload files"
+                  aria-label="Upload files"
+                >
                   <Upload size={15} />
                 </button>
-                <input ref={fileInputRef} type="file" className="hidden" onChange={onUpload} />
+                {canPickFolders && (
+                  <button
+                    onClick={() => folderInputRef.current?.click()}
+                    disabled={!!uploadProgress}
+                    className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-40 pointer-coarse:min-h-11 pointer-coarse:min-w-11 flex items-center justify-center"
+                    title="Upload a folder (with all its subfolders)"
+                    aria-label="Upload folder"
+                  >
+                    <FolderUp size={15} />
+                  </button>
+                )}
+                <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onUpload} data-testid="ws-upload-files" />
+                <input
+                  ref={(el) => {
+                    folderInputRef.current = el;
+                    // React does not type webkitdirectory; set it on the element.
+                    if (el) el.setAttribute('webkitdirectory', '');
+                  }}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={onUpload}
+                  data-testid="ws-upload-folder"
+                />
                 {currentPath !== '.' && (
                   <button
                     onClick={() => {
@@ -1357,13 +1476,39 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                   </button>
                 )}
               </div>
+              {uploadProgress && (
+                <div className="px-2 py-1.5 border-b border-white/5 text-[11px] text-slate-400" role="status">
+                  <div className="flex justify-between mb-1">
+                    <span>Uploading…</span>
+                    <span>
+                      {uploadProgress.total ? Math.round((uploadProgress.sent / uploadProgress.total) * 100) : 100}%
+                    </span>
+                  </div>
+                  <div className="h-1 rounded bg-white/10 overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-500 transition-[width]"
+                      style={{ width: `${uploadProgress.total ? (uploadProgress.sent / uploadProgress.total) * 100 : 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
               <div
-                className="flex-1 overflow-y-auto custom-scrollbar py-1"
+                className={cn(
+                  'relative flex-1 overflow-y-auto custom-scrollbar py-1',
+                  dropActive && 'outline-2 outline-dashed outline-indigo-400 -outline-offset-4 bg-indigo-500/5',
+                )}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setCtxMenu({ x: e.clientX, y: e.clientY, entry: null });
                 }}
+                {...dropHandlers}
+                data-testid="ws-drop-zone"
               >
+                {dropActive && (
+                  <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-xs text-indigo-200">
+                    Drop files or folders to upload into {currentPath === '.' ? 'the workspace root' : currentPath}
+                  </div>
+                )}
                 {loadingFiles && entries.length === 0 ? (
                   <div className="flex items-center justify-center py-8 text-slate-500 text-sm">
                     <Loader2 size={16} className="animate-spin mr-2" /> Loading…
@@ -1511,9 +1656,55 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                 {toolBusy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
                 Lint {activeTab ? 'file' : 'workspace'}
               </button>
-              <button onClick={syncNextcloud} disabled={toolBusy || !workspace.nextcloud_path} className="flex items-center justify-center gap-1.5 py-2 text-sm rounded bg-white/5 hover:bg-white/10 disabled:opacity-40" title={workspace.nextcloud_path ? `→ ${workspace.nextcloud_path}` : 'No NextCloud path'}>
-                <CloudUpload size={14} /> Sync to NextCloud
+              <button
+                onClick={() => void syncNextcloud()}
+                disabled={toolBusy || !workspace.nextcloud_path}
+                className="flex items-center justify-center gap-1.5 py-2 text-sm rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 pointer-coarse:min-h-11"
+                title={workspace.nextcloud_path ? `⇄ ${workspace.nextcloud_path}` : 'No Nextcloud folder configured'}
+              >
+                <CloudUpload size={14} /> {usesNextcloud ? 'Sync with Nextcloud' : 'Back up to Nextcloud'}
               </button>
+              {workspace.nextcloud_path && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => void syncNextcloud('push')}
+                    disabled={toolBusy}
+                    className="py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 pointer-coarse:min-h-11"
+                    title="Make Nextcloud match this workspace (never downloads)"
+                  >
+                    Push only
+                  </button>
+                  <button
+                    onClick={() => void syncNextcloud('pull')}
+                    disabled={toolBusy}
+                    className="py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 pointer-coarse:min-h-11"
+                    title="Make this workspace match Nextcloud (never uploads)"
+                  >
+                    Pull only
+                  </button>
+                </div>
+              )}
+              {workspace.nextcloud_path && (
+                <div className="text-[11px] text-slate-500" data-testid="ws-sync-status">
+                  {syncInfo.at ? (
+                    <>
+                      Last sync {new Date(syncInfo.at).toLocaleString()}:{' '}
+                      <span
+                        className={cn(
+                          syncInfo.status === 'ok' && 'text-emerald-400',
+                          syncInfo.status === 'conflicts' && 'text-amber-400',
+                          syncInfo.status === 'error' && 'text-red-400',
+                        )}
+                      >
+                        {syncInfo.status}
+                      </span>
+                      {syncInfo.error && <div className="text-red-400/80 break-words">{syncInfo.error}</div>}
+                    </>
+                  ) : (
+                    'Never synced'
+                  )}
+                </div>
+              )}
               {toolOutput && (
                 <pre className="text-[11px] font-mono bg-black/40 rounded p-2 max-h-[60vh] overflow-y-auto custom-scrollbar whitespace-pre-wrap text-slate-300">
                   {toolOutput}
@@ -2206,12 +2397,22 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                 />
                 <FileCtxMenuItem
                   icon={<Upload size={14} />}
-                  label="Upload here"
+                  label="Upload files here"
                   onClick={() => {
                     closeCtxMenu();
                     fileInputRef.current?.click();
                   }}
                 />
+                {canPickFolders && (
+                  <FileCtxMenuItem
+                    icon={<FolderUp size={14} />}
+                    label="Upload folder here"
+                    onClick={() => {
+                      closeCtxMenu();
+                      folderInputRef.current?.click();
+                    }}
+                  />
+                )}
                 <div className="my-1 h-px bg-white/10" />
                 <FileCtxMenuItem
                   icon={<RefreshCw size={14} />}

@@ -77,7 +77,7 @@ Each workspace entry can currently define:
 - `nextcloud_path`: discovery path used by storage-side tooling
 - `git_remote`: expected Git remote name
 - `default_branch`: default branch for future Git lifecycle actions
-- `sync_mode`: current authority model
+- `sync_mode`: where the files live (see "Storage modes" below)
 - `access_policy`: `authenticated` or `admin_only`
 - `scope`: `user` or `system`
 - `capabilities`: optional override list for allowed operations
@@ -98,8 +98,90 @@ Each workspace entry can currently define:
 - `POST /git/push`
 - `POST /provider/scan`
 - `POST /provider/sync/file`
+- `POST /provider/sync/directory`
+- `POST /provider/sync/workspace` (two-way or one-way Nextcloud sync)
+- `POST /provider/sync/workspace/reset` (forget the sync history)
+- `POST /files/upload` (multipart: many files and whole folder trees)
+- `POST /files/move`
 - `POST /workflow/write-sync-commit`
 - `POST /tests/pytest`
+
+## Storage modes (git, Nextcloud, or both)
+
+`sync_mode` decides where a workspace's files live:
+
+| `sync_mode` | Files live in | Nextcloud sync |
+|---|---|---|
+| `local_git_authoritative` (or legacy `git`) | a git checkout | optional one-way **push** to `nextcloud_path` (manual, or after each git pull when `auto_backup_enabled`) |
+| `nextcloud` | Nextcloud only, no git | **two-way** with `nextcloud_path` |
+| `git_and_nextcloud` | a git checkout | **two-way** with `nextcloud_path`; `.git` itself never syncs |
+
+The Nextcloud modes require `nextcloud_path`; create/update returns 400
+without it. Credentials are the caller's Identity integration
+(`nextcloud_url`, `nextcloud_user`, `nextcloud_pass`). A missing credential is
+an error naming the missing key, never a silent skip.
+
+The sync runs inside this service (`nextcloud_sync.py`, WebDAV), because this
+is the only service that mounts the workspace files. The Storage service's
+`/providers/mirror` cannot see them.
+
+**How two-way sync decides.** Every synced path is recorded in the
+`workspacesyncentry` table: size, mtime, sha256 and the Nextcloud etag. On the
+next run:
+
+- changed on one side → copied to the other
+- changed on both → the local file is kept and the Nextcloud version is saved
+  beside it as `name (conflicted copy YYYY-MM-DD HHMMSS).ext`; both are
+  uploaded, so nothing is lost
+- deleted on one side and unchanged on the other → deleted on the other
+- deleted on one side but edited on the other → the edit wins
+- new on both sides with identical bytes → just recorded
+
+`push` and `pull` make one side authoritative. They only ever delete paths an
+earlier sync recorded. The workspace's `excludes` are shell globs, and `.git`
+is always excluded. Safety stops:
+
+- a listing error aborts the sync instead of reading as "empty folder"
+- a previously synced Nextcloud folder that has vanished stops the sync
+  instead of deleting every local file
+- a folder is only deleted remotely when it holds nothing, including excluded
+  files we never synced
+
+Changing `nextcloud_path` clears the history and the linked account.
+
+**When it runs.**
+
+- On demand: `POST /provider/sync/workspace {workspace_id, direction?: both|push|pull, dry_run?}`
+- About 5 s after any write, upload, move or delete in a Nextcloud-mode
+  workspace (debounced)
+- After git pulls
+- Every `WORKSPACE_NEXTCLOUD_SYNC_INTERVAL_SECONDS` (default 300; 0 turns the
+  loop off) for every Nextcloud-mode workspace
+
+Unattended runs use the account of `sync_owner`, the first user who synced,
+falling back to `owner_user`. The outcome is stored in `last_sync_at`,
+`last_sync_status` (`ok` / `conflicts` / `error`) and `last_sync_error`. Each
+WebDAV request times out after `WORKSPACE_NEXTCLOUD_TIMEOUT_SECONDS`
+(default 120).
+
+## Uploads (many files, whole folders)
+
+`POST /files/upload` is `multipart/form-data` and works in every `sync_mode`.
+Its form fields:
+
+- `workspace_id`
+- `relative_path`: the target folder
+- `overwrite`: default true
+- repeated `files` + `paths` pairs: each path is relative to the target, e.g.
+  `photos/2024/a.jpg`, so a folder imports recursively at any depth
+- repeated `dirs`: folders to create even when empty
+
+Files stream to disk and replace any existing file atomically. Paths with `..`
+or a `.git` segment are refused per file, with the reason in `errors`. A
+request over `WORKSPACE_UPLOAD_MAX_BYTES` (default 1 GiB) gets a 413. The
+Gateway (`/api/workspaces/files/upload`) streams the body through unbuffered
+and passes the caller's identity in `X-Workspace-User-Context`. The UI batches
+large selections: at most 200 files or 64 MB per request.
 
 ## Access Model
 
@@ -188,15 +270,12 @@ Not yet implemented:
 - workspace registry mutation APIs
 - direct Gateway orchestration against these endpoints
 - document or note mutation APIs
-- provider writeback after local authoritative changes
-  only text file sync is implemented today, not broader folder mirroring
 
 ## Remaining Work
 
 - move workspace definitions from static JSON into a DB-backed registry
 - extend file mutation support beyond direct text writes
 - add Git fetch/pull/rebase operations with remote-auth controls
-- expand provider sync from single-file text writeback into broader workspace mirroring where needed
 - let the Gateway orchestrate this service directly for agentic tasks
 - add note, document, metadata, and transcription operations under the same
   workspace policy model
