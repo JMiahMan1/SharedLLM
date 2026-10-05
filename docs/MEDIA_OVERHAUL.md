@@ -633,7 +633,7 @@ One task per bug, in ID order: **P1-T1 = BUG-01 … P1-T9 = BUG-09**. BUG-07/08 
 
 ### Phase 2: Backend correctness (BUG-10…32) + new endpoints
 - P2-T1 … P2-T23: one task per bug BUG-10 … BUG-32.
-- P2-T24: status enrichment (§7.1).
+- P2-T24: status enrichment (§7.1). **DONE 2026-10-05**: every `/execute/media/status` player now carries `media_position_updated_at`, `media_content_id`, `shuffle`, `repeat`, `group_members`, `app_name`, `icon_kind` ("tv" via `device_class == "tv"` or a TV-kind `detect_tv_type`, else "speaker") and `ma_player_id` (new `services/shared/ma_player.py::ma_player_id` — explicit `mass_player_id`, else `active_queue`, only for MA players); transport accepts `shuffle_set`/`repeat_set`/`join`/`unjoin` → unconditional `media_player.shuffle_set`/`repeat_set`/`join`/`unjoin` (required-value failures, never brand-routed); `MediaStateSyncRequest` mirrors the new fields | pytest: `test_media_status_enrichment.py` (3) + `test_media_transport_routing.py` (16); execution 620 passed, same 10 pre-existing failures
 - P2-T25: `MediaEventHub` + `/api/media/events` (§7.2) with tests:
   - HA and MA fake event → a normalized SSE message
   - snapshot is sent first

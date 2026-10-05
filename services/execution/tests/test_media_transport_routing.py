@@ -177,3 +177,115 @@ async def test_find_cast_sibling_returns_play_media_candidate(monkeypatch):
     monkeypatch.setattr(android_tv.ha_client, "get_states", fake_get_states)
 
     assert await android_tv._find_cast_sibling("http://ha.test", "token", "media_player.office_tv") == "media_player.office_tv_chrome"
+
+
+def _patch_ha_standard(monkeypatch, calls):
+    async def fake_get_state(ha_url, ha_token, entity_id):
+        return _state(entity_id, {"friendly_name": "Office TV", "supported_features": 0})
+
+    async def fake_call_service(ha_url, ha_token, domain, service, entity_id, data=None):
+        calls.append({
+            "domain": domain,
+            "service": service,
+            "entity_id": entity_id,
+            "data": data,
+        })
+        return {"ok": True}
+
+    monkeypatch.setattr(media.ha_client, "get_state", fake_get_state)
+    monkeypatch.setattr(media.ha_client, "call_service", fake_call_service)
+
+
+async def test_shuffle_set_uses_media_player_service(monkeypatch):
+    calls = []
+    _patch_ha_standard(monkeypatch, calls)
+
+    result = await media.handle_media_transport(_request("office_tv", "shuffle_set", shuffle=True))
+
+    assert result.status == "SUCCESS"
+    assert calls == [{
+        "domain": "media_player",
+        "service": "shuffle_set",
+        "entity_id": "media_player.office_tv",
+        "data": {"shuffle": True},
+    }]
+
+
+async def test_shuffle_set_requires_shuffle_value(monkeypatch):
+    calls = []
+    _patch_ha_standard(monkeypatch, calls)
+
+    result = await media.handle_media_transport(_request("office_tv", "shuffle_set"))
+
+    assert result.status == "FAILURE"
+    assert "shuffle_set requires shuffle" in result.message
+    assert calls == []
+
+
+async def test_repeat_set_uses_media_player_service(monkeypatch):
+    calls = []
+    _patch_ha_standard(monkeypatch, calls)
+
+    result = await media.handle_media_transport(_request("office_tv", "repeat_set", repeat="all"))
+
+    assert result.status == "SUCCESS"
+    assert calls == [{
+        "domain": "media_player",
+        "service": "repeat_set",
+        "entity_id": "media_player.office_tv",
+        "data": {"repeat": "all"},
+    }]
+
+
+async def test_repeat_set_requires_repeat_value(monkeypatch):
+    calls = []
+    _patch_ha_standard(monkeypatch, calls)
+
+    result = await media.handle_media_transport(_request("office_tv", "repeat_set"))
+
+    assert result.status == "FAILURE"
+    assert "repeat_set requires repeat" in result.message
+    assert calls == []
+
+
+async def test_join_uses_media_player_service(monkeypatch):
+    calls = []
+    _patch_ha_standard(monkeypatch, calls)
+
+    result = await media.handle_media_transport(
+        _request("office_tv", "join", group_members=["media_player.kitchen"]),
+    )
+
+    assert result.status == "SUCCESS"
+    assert calls == [{
+        "domain": "media_player",
+        "service": "join",
+        "entity_id": "media_player.office_tv",
+        "data": {"group_members": ["media_player.kitchen"]},
+    }]
+
+
+async def test_join_requires_group_members(monkeypatch):
+    calls = []
+    _patch_ha_standard(monkeypatch, calls)
+
+    result = await media.handle_media_transport(_request("office_tv", "join"))
+
+    assert result.status == "FAILURE"
+    assert "join requires group_members" in result.message
+    assert calls == []
+
+
+async def test_unjoin_uses_media_player_service(monkeypatch):
+    calls = []
+    _patch_ha_standard(monkeypatch, calls)
+
+    result = await media.handle_media_transport(_request("office_tv", "unjoin"))
+
+    assert result.status == "SUCCESS"
+    assert calls == [{
+        "domain": "media_player",
+        "service": "unjoin",
+        "entity_id": "media_player.office_tv",
+        "data": None,
+    }]

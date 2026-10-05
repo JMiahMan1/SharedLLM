@@ -8,13 +8,18 @@ except ImportError:
     from .. import ha_client
     from ..schemas import ExecutionResult, MediaStatusRequest
 
-from services.shared.ma_player import is_music_assistant_player
+from services.shared.ma_player import is_music_assistant_player, ma_player_id
 
 log = logging.getLogger("execution.media_status")
+
+_TV_ICON_KINDS = frozenset({
+    "android_tv", "webos", "samsung", "roku", "bravia", "generic_tv",
+})
 
 async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
     ctx = req.user_context
     assert ctx.ha_url is not None and ctx.ha_token is not None
+    from ..announce_handlers import detect_tv_type
 
     all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
     if not all_states:
@@ -40,6 +45,12 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         media_position = attrs.get("media_position")
         media_duration = attrs.get("media_duration")
         entity_picture = attrs.get("entity_picture")
+        media_position_updated_at = attrs.get("media_position_updated_at")
+        media_content_id = attrs.get("media_content_id")
+        shuffle = attrs.get("shuffle")
+        repeat = attrs.get("repeat")
+        group_members = attrs.get("group_members") or []
+        app_name = attrs.get("app_name")
 
         # Music Assistant players are preferred for the "active" slot, but we
         # must not drop cast/Chrome/HA players that carry real now-playing
@@ -49,6 +60,9 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         has_metadata = bool(media_title or media_artist or media_album or entity_picture)
         is_active_state = st in ("playing", "paused", "buffering")
         is_selectable = st not in ("unavailable", "unknown")
+        tv_kind = detect_tv_type(entity_id, st, attrs)
+        icon_kind = "tv" if attrs.get("device_class") == "tv" or tv_kind in _TV_ICON_KINDS else "speaker"
+        ma_id = ma_player_id(attrs, entity_id) if is_ma else None
 
         # Keep: MA players, anything actively rendering, anything with now-playing
         # metadata, and live selectable targets. Drop dead non-MA entities only.
@@ -71,6 +85,14 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
             "available": is_selectable,
             "supported_features": attrs.get("supported_features", 0),
             "is_ma": is_ma,
+            "media_position_updated_at": media_position_updated_at,
+            "media_content_id": media_content_id,
+            "shuffle": shuffle,
+            "repeat": repeat,
+            "group_members": group_members,
+            "app_name": app_name,
+            "icon_kind": icon_kind,
+            "ma_player_id": ma_id,
         }
 
         # Anything actively rendering media is "active"; everything else is a
