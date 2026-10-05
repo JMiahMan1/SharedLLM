@@ -306,7 +306,9 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
     """
     Resolve a human-readable device name to an HA entity_id.
     Searches all states for entities matching the device_name in their friendly_name or entity_id.
-    Prefers exact matches over partial matches.
+    Prefers exact matches over partial matches. Name-match score always dominates:
+    capability bonuses only break ties between candidates with the same name-match
+    score, so a well-named entity is never beaten by an unrelated capable one.
 
     When media_type is provided:
     - "music": prefers entities with Music Assistant Queue (active_queue attribute)
@@ -330,68 +332,70 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
         friendly_name = state.get("attributes", {}).get("friendly_name", "").lower()
         eid_base = entity_id.lower().replace(f"{domain}.", "")
 
-        # Score: exact match gets highest priority
-        score = 0
+        # Name-match score. This always outranks capability bonuses so an
+        # unrelated but capable entity can never beat a well-named one.
+        name_score = 0
 
         # Exact friendly name match (highest priority)
         if friendly_name == search:
-            score += 100
+            name_score += 100
         # Exact entity_id base match (e.g., "office_tv" matches "media_player.office_tv")
         elif eid_base == search.replace(" ", "_"):
-            score += 90
+            name_score += 90
         # Starts with search (e.g., "office tv" matches "office tv chrome")
         elif friendly_name.startswith(search):
-            score += 50
+            name_score += 50
         elif eid_base.startswith(search.replace(" ", "_")):
-            score += 40
+            name_score += 40
         # Contains search (fallback)
         elif search in friendly_name:
-            score += 10
+            name_score += 10
         elif search.replace(" ", "_") in eid_base:
-            score += 5
+            name_score += 5
 
         # Bonus for word-level matches
         for word in search.split():
             if word in friendly_name:
-                score += 3
+                name_score += 3
             if word in eid_base:
-                score += 2
+                name_score += 2
 
-        # Bonus for device_class match (prefer actual TVs over speakers when searching for TV)
+        # Penalty for numeric suffixes (e.g., "office_tv_3" when searching "office tv")
+        if search.replace(" ", "_") in eid_base and eid_base != search.replace(" ", "_"):
+            if any(c.isdigit() for c in eid_base.split("_")[-1:]):
+                name_score -= 5
+
+        # Capability bonuses break ties between equal name scores only.
+        bonus = 0
         attrs = state.get("attributes", {})
         device_class = attrs.get("device_class", "")
         if device_class == "tv":
-            score += 200
+            bonus += 200
         elif device_class == "speaker":
-            score += 50
+            bonus += 50
 
         # Context-aware bonuses based on media_type
         if media_type == "music":
             # Prefer Music Assistant Queue entities for music playback
             if attrs.get("active_queue"):
-                score += 500
+                bonus += 500
             if attrs.get("mass_player_type"):
-                score += 200
+                bonus += 200
         elif media_type == "video":
             # Prefer Cast-capable or Android TV entities for video
             if attrs.get("app_name") == "Default Media Receiver":
-                score += 500
+                bonus += 500
             if attrs.get("app_name") == "com.google.android.apps.mediashell":
-                score += 400
+                bonus += 400
             if device_class == "tv":
-                score += 300
+                bonus += 300
 
-        # Penalty for numeric suffixes (e.g., "office_tv_3" when searching "office tv")
-        if search.replace(" ", "_") in eid_base and eid_base != search.replace(" ", "_"):
-            if any(c.isdigit() for c in eid_base.split("_")[-1:]):
-                score -= 5
-
-        if score > 0:
-            candidates.append((score, entity_id))
+        if name_score > 0 or bonus > 0:
+            candidates.append((name_score, bonus, entity_id))
 
     if not candidates:
         return None
 
-    # Return highest scoring candidate
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return candidates[0][1]
+    # Name match dominates; capability bonuses only break ties.
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return candidates[0][2]
