@@ -7,9 +7,9 @@ Roku uses a two-part approach for music:
   2. Music Assistant service call on the MA player sibling for actual audio
 
 For transport:
+  - remote.send_command on the remote.<object_id> entity (the roku integration
+    only registers roku.search; there is no roku.press service)
   - roku.launch: Launch an app by app_id
-  - roku.press: Send a key press (HOME, BACK, PLAY, etc.)
-  - remote.send_command: Alternative transport via remote entity
 """
 import asyncio
 import logging
@@ -28,16 +28,20 @@ from services.shared.ma_player import is_music_assistant_player
 log = logging.getLogger("execution.roku")
 
 ROKU_KEYS = {
-    "home": "Home", "back": "Back", "enter": "Select", "select": "Select",
-    "up": "Up", "down": "Down", "left": "Left", "right": "Right",
-    "play": "Play", "pause": "Play", "stop": "Stop",
-    "fast_forward": "Fwd", "rewind": "Rev",
-    "info": "Info", "backspace": "Backspace",
-    "volume_up": "VolumeUp", "volume_down": "VolumeDown", "mute": "VolumeMute",
-    "power_off": "PowerOff", "power_on": "PowerOn",
-    "input_av1": "InputAV1", "input_hdmi1": "InputHDMI1",
-    "input_hdmi2": "InputHDMI2", "input_hdmi3": "InputHDMI3",
-    "input_hdmi4": "InputHDMI4", "input_tuner": "InputTuner",
+    "home": "home", "back": "back", "backspace": "backspace",
+    "enter": "select", "select": "select", "ok": "select",
+    "up": "up", "down": "down", "left": "left", "right": "right",
+    "play": "play", "pause": "play", "resume": "play",
+    "fast_forward": "forward", "rewind": "reverse",
+    "replay": "replay", "info": "info", "search": "search",
+    "find_remote": "find_remote",
+    "volume_up": "volume_up", "volume_down": "volume_down",
+    "mute": "volume_mute", "volume_mute": "volume_mute",
+    "power": "power", "power_on": "power", "power_off": "power",
+    "turn_on": "power", "turn_off": "power", "sleep": "power",
+    "input_av1": "input_av1", "input_hdmi1": "input_hdmi1",
+    "input_hdmi2": "input_hdmi2", "input_hdmi3": "input_hdmi3",
+    "input_hdmi4": "input_hdmi4", "input_tuner": "input_tuner",
 }
 
 ROKU_APPS = {
@@ -323,12 +327,19 @@ async def roku_play_video(ha_url: str, ha_token: str, roku_entity: str, video_ur
 
 
 async def roku_press(ha_url: str, ha_token: str, entity_id: str, key: str) -> ExecutionResult:
-    """Send a key press to a Roku device."""
-    roku_key = ROKU_KEYS.get(key.lower(), key)
-    log.info(f"[roku] Pressing '{roku_key}' on {entity_id}")
+    """Send a key press to a Roku device via remote.send_command."""
+    roku_key = ROKU_KEYS.get(key.lower())
+    if not roku_key:
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Unsupported Roku command '{key}'.",
+            service="roku_transport",
+        )
+    remote_entity = entity_id.replace("media_player.", "remote.")
+    log.info(f"[roku] Pressing '{roku_key}' on {remote_entity}")
     result = await ha_client.call_service(
-        ha_url, ha_token, "roku", "press", entity_id,
-        {"key": roku_key}
+        ha_url, ha_token, "remote", "send_command", remote_entity,
+        {"command": [roku_key]}
     )
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Sent '{key}' to {entity_id} (Roku).", service="roku_transport")

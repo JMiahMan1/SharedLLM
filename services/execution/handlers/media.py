@@ -656,15 +656,28 @@ async def handle_media_transport(req) -> ExecutionResult:
 
     log.info(f"[media/transport] Platform: {tv_type} for {full_entity_id}")
 
-    # Route to brand-specific handler
-    if tv_type == "android_tv":
-        return await android_tv.send_command(ha_url, ha_token, full_entity_id, command)
-    elif tv_type == "webos":
-        return await webos.send_command(ha_url, ha_token, full_entity_id, command)
-    elif tv_type == "samsung":
-        return await samsung.send_key(ha_url, ha_token, full_entity_id, command)
-    elif tv_type == "roku":
-        return await roku.roku_press(ha_url, ha_token, full_entity_id, command)
+    # Prefer HA's media_player.* services whenever the entity advertises the
+    # matching supported_features bit; brand handlers are the fallback for
+    # devices whose media_player entity cannot serve the command (and for
+    # remote-only actions like home/back/power).
+    feature_bits = {
+        "pause": 1, "seek": 2, "volume_set": 4, "volume_mute": 8, "mute": 8,
+        "previous": 16, "next": 32, "stop": 4096, "volume_up": 1024,
+        "volume_down": 1024, "play": 16384, "resume": 16384,
+    }
+    supported_features = int(attrs.get("supported_features", 0) or 0)
+    feature_bit = feature_bits.get(command)
+    standard_supported = feature_bit is not None and bool(supported_features & feature_bit)
+
+    if not standard_supported:
+        if tv_type == "android_tv":
+            return await android_tv.send_command(ha_url, ha_token, full_entity_id, command)
+        elif tv_type == "webos":
+            return await webos.send_command(ha_url, ha_token, full_entity_id, command)
+        elif tv_type == "samsung":
+            return await samsung.send_key(ha_url, ha_token, full_entity_id, command)
+        elif tv_type == "roku":
+            return await roku.roku_press(ha_url, ha_token, full_entity_id, command)
 
     # Standard media transport commands (all devices)
     button_map = {
