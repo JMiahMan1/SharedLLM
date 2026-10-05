@@ -27,20 +27,16 @@ os.makedirs(_TEST_WS_ROOT, exist_ok=True)
 
 
 @pytest.fixture(name="client")
-def client_fixture(session):
+def client_fixture(session, monkeypatch):
     from services.workspace_runtime.main import app
 
-    original_engine = main.engine
-    original_ws_root = main.WORKSPACE_ROOT
-    main.engine = session.bind
-    main.WORKSPACE_ROOT = main.Path(_TEST_WS_ROOT)
+    monkeypatch.setattr(main, "engine", session.bind)
+    monkeypatch.setattr(main, "WORKSPACE_ROOT", main.Path(_TEST_WS_ROOT))
     main._WORKSPACE_ROOT_CACHE["ts"] = 0.0
-    # The identity service is unavailable in unit tests; act as admin.
-    main._resolve_identity_context = lambda ref: {"user": "test", "is_admin": True}
-    client = TestClient(app)
-    yield client
-    main.engine = original_engine
-    main.WORKSPACE_ROOT = original_ws_root
+    # The identity service is unavailable in unit tests; act as admin. Patched
+    # through monkeypatch so later test modules get the real resolver back.
+    monkeypatch.setattr(main, "_resolve_identity_context", lambda ref: {"user": "test", "is_admin": True})
+    yield TestClient(app)
 
 
 def _git(cwd: str, *args: str) -> None:
