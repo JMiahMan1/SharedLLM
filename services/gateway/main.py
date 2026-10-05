@@ -67,6 +67,7 @@ from services.gateway.llm_providers import (
 )
 from services.gateway.ma_ws_client import MAWebSocketClient
 from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
+from services.gateway.ma_scope import check_ma_frame_scope, record_web_player_id
 from services.gateway.media_events import acquire_media_hub, stop_all_media_hubs
 from services.gateway.messaging import InferenceJobQueue, JobStatus
 from services.gateway.orchestrator import _get, call_ollama, get_all_settings, get_llm_settings
@@ -9969,6 +9970,8 @@ async def sendspin_proxy(websocket: WebSocket):
     first_msg = json.loads(first_data)
     client_id = first_msg.get("payload", {}).get("client_id", "") if first_msg.get("type") == "client/hello" else "unknown"
     log.info(f"[sendspin] STEP 2: Received {first_msg.get('type', 'unknown')} from browser (client_id={client_id}, full_msg={first_data[:500]})")
+    if first_msg.get("type") == "client/hello" and client_id and client_id != "unknown":
+        record_web_player_id(str(creds.get("user") or ""), str(client_id))
 
     ma_ws = None
     try:
@@ -10320,6 +10323,17 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                                 f"[ma-jsonrpc] Proxy: rejected non-allowlisted frame ({len(text_data)} chars)"
                             )
                             await websocket.send_text(forbidden)
+                            continue
+                        scope_error = await check_ma_frame_scope(
+                            text_data,
+                            user=str(creds.get("user") or ""),
+                            is_admin=bool(creds.get("is_admin")),
+                        )
+                        if scope_error is not None:
+                            log.warning(
+                                f"[ma-jsonrpc] Proxy: rejected frame outside the caller's player scope ({len(text_data)} chars)"
+                            )
+                            await websocket.send_text(scope_error)
                             continue
                         log.info(f"[ma-jsonrpc] Proxy: browser→MA ({len(text_data)} chars)")
                         await ma_ws.send(text_data)

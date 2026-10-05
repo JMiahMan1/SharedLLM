@@ -17,10 +17,20 @@ service.
     with MA answering `{message_id, result|error_code}` — error frame shape
     `{"error_code": "forbidden", "message_id": <same id>}` matches what
     `sendJsonRpc` in `maWebPlayer.ts` already parses.
-- **Still (VERIFY):** each command name against a live MA `/api-docs`
-  (MA 2.x serves it at `http://<mass_url>/api-docs`). Requires a running
-  Music Assistant instance; do this before Phase 2 ships (P2-T26 re-checks the
-  list). Any name MA does not recognize gets recorded here with the date.
+- **Live verification 2026-10-05:** fetched
+  `http://<mass_url>/api-docs/commands.json` from the running MA instance
+  (reachable at `http://ha.sumemail.com:8095`). It lists 310 commands. All 47
+  allowlisted names exist upstream (`missing upstream: []`), every one is
+  `authenticated: true`, and MA marks them with the expected scopes
+  (`players.read|control`, `queues.read|control`, `library.read|write`).
+  Parameter names captured for the per-user player scope: `player_id`,
+  `queue_id`, `target_player`, `target_queue_id`, `source_queue_id`,
+  `child_player_ids` (list).
+- **Still (VERIFY):** none for the allowlist itself. New commands the UI starts
+  sending must be added to §7.3 and re-checked against
+  `/api-docs/commands.json` (Swagger UI at `/api-docs/swagger`, spec at
+  `/api-docs/openapi.json` — the OpenAPI spec only carries examples, the
+  full command list is `commands.json`).
 
 ## Signed media tokens (P1-T0 / §7.4)
 
