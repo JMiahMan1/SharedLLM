@@ -73,6 +73,7 @@ STORAGE_SVC_URL = _net_url("STORAGE", "http://storage:8005")
 LOGGING_SVC_URL = _net_url("LOGGING", "http://logging:8006")
 WORKSPACE_RUNTIME_SVC_URL = _net_url("WORKSPACE_RUNTIME", "http://workspace_runtime:8007")
 GEO_SVC_URL = _net_url("GEO", "http://geo:8009")
+BIBLE_SVC_URL = _net_url("BIBLE", "http://bible:8010")
 CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
 SEARXNG_URL = os.getenv(f"{NETWORK_MODE.upper()}_SEARXNG_URL") or os.getenv("SEARXNG_URL", "")
 HA_URL = os.getenv("HA_URL")
@@ -132,6 +133,29 @@ SCRIPTS_DIR = os.getenv("SCRIPTS_DIR")
 LEGACY_ENV_PATH = os.getenv("LEGACY_ENV_PATH")
 CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR")
 IDENTITY_DATABASE_URL = os.getenv("IDENTITY_DATABASE_URL")
+BIBLE_DATABASE_URL = os.getenv("BIBLE_DATABASE_URL")
+# Bible study settings. Deliberately no code defaults: an unset BLB base URL
+# must produce a visible "configure this" state in the devotional card, not a
+# deep link guessed at some host that may not be blb.org's.
+BLB_BASE_URL = os.getenv("BLB_BASE_URL")
+BIBLE_DEVOTIONAL_DIR = os.getenv("BIBLE_DEVOTIONAL_DIR")
+# Where uploaded Bibles and fetched provider text are staged. No code default:
+# the admin import page refuses to accept a file until an operator says where
+# they want it kept, rather than scattering copies across the container.
+BIBLE_IMPORT_DIR = os.getenv("BIBLE_IMPORT_DIR")
+# Key for the online translation providers declared in corpus_manifest.json.
+# Deliberately no default: without it the provider reports that it is
+# unconfigured and the admin page says which setting to set.
+BIBLE_API_KEY = os.getenv("BIBLE_API_KEY")
+# Where a translation provider's fetched chapters are kept between runs. Left
+# unset it is derived from BIBLE_DATABASE_URL so a chapter is fetched once and
+# never again; set it to put the cache somewhere else (a volume that survives a
+# database rebuild is the point).
+BIBLE_PROVIDER_CACHE = os.getenv("BIBLE_PROVIDER_CACHE")
+# The most *new* HTTP calls one provider import may make, counted against the
+# chapters that are not already cached. No code default: an operator on a metered
+# plan decides their own ceiling, and an unset value means no ceiling.
+BIBLE_PROVIDER_CALL_BUDGET = os.getenv("BIBLE_PROVIDER_CALL_BUDGET")
 COMPOSE_PROJECT_DIR = os.getenv("COMPOSE_PROJECT_DIR")
 EXECUTION_EXTERNAL_HOST = os.getenv("EXECUTION_EXTERNAL_HOST")
 # Jarvis's own public address (e.g. https://jarvis.example.com). Companion
@@ -208,6 +232,12 @@ async def resolve_runtime_config():
         f"{NETWORK_MODE}_workspace_runtime_svc_url": "WORKSPACE_RUNTIME_SVC_URL",
         f"{NETWORK_MODE}_searxng_url": "SEARXNG_URL",
         "geo_svc_url": "GEO_SVC_URL",
+        "bible_svc_url": "BIBLE_SVC_URL",
+        "blb_base_url": "BLB_BASE_URL",
+        "bible_devotional_dir": "BIBLE_DEVOTIONAL_DIR",
+        "bible_import_dir": "BIBLE_IMPORT_DIR",
+        "bible_provider_cache": "BIBLE_PROVIDER_CACHE",
+        "bible_provider_call_budget": "BIBLE_PROVIDER_CALL_BUDGET",
         "control_plane_url": "CONTROL_PLANE_URL",
         "ha_url": "HA_URL",
         "ha_token": "HA_TOKEN",
@@ -288,6 +318,7 @@ async def resolve_runtime_config():
                 globals()["LOGGING_SVC"] = globals()["LOGGING_SVC_URL"]
                 globals()["WORKSPACE_RUNTIME_SVC"] = globals()["WORKSPACE_RUNTIME_SVC_URL"]
                 globals()["GEO_SVC"] = globals()["GEO_SVC_URL"]
+                globals()["BIBLE_SVC"] = globals()["BIBLE_SVC_URL"]
 
                 # Check if special variables were updated in UI and sync to .env
                 _sync_special_vars_to_env()

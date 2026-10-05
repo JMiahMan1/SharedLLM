@@ -38,6 +38,7 @@ from services.gateway.apk_manifest import read_apk_digest, read_apk_version
 from services.gateway.background_worker import worker as raven_worker
 from services.gateway.config import (
     ABS_TIMEOUT,
+    BIBLE_SVC,
     ALPACA_ARCADE_PUBLIC_URL,
     ALPACA_ARCADE_URL,
     ALPACA_AUDIO_URL,
@@ -2251,8 +2252,8 @@ async def _require_admin(request: Request) -> str:
     return ident["user"]
 
 
-async def _geo_read_target(request: Request, requested: str | None) -> tuple[str, str, str]:
-    """Resolve whose data a geo read may return, the viewer, and the admin flag.
+async def _read_target(request: Request, requested: str | None) -> tuple[str, str, str]:
+    """Resolve whose data a read may return, the viewer, and the admin flag.
 
     These routes used to do::
 
@@ -2262,9 +2263,9 @@ async def _geo_read_target(request: Request, requested: str | None) -> tuple[str
     and an anonymous caller silently fell through to the ``"all"`` bucket --
     which geo serves from an index containing *every* user's rows.
 
-    Returns ``(target, viewer, is_admin)``. The viewer is forwarded so that GEO
-    can apply the opt-in consent check in one place (``geo._viewer_may_see``);
-    consent is deliberately not reimplemented here, because two copies of a
+    Shared by geo and bible so there is exactly one copy of this policy: the
+    consent check itself lives upstream (``geo._viewer_may_see`` /
+    ``bible._consent``) and is never reimplemented here, because two copies of a
     privacy policy is how they drift apart.
 
     ``is_admin`` has to be forwarded explicitly or geo cannot honour the admin
@@ -7821,7 +7822,7 @@ async def get_geo_assigned_vehicle(user_id: str):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Geo service unavailable")
+    await _raise_scoped_failure(resp, "Geo service unavailable")
 
 
 @app.post("/api/geo/vehicles/assign")
@@ -7869,7 +7870,7 @@ async def vehicle_lookup_years():
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Vehicle lookup failed")
+    await _raise_scoped_failure(resp, "Vehicle lookup failed")
 
 
 @app.get("/api/geo/vehicle-lookup/makes")
@@ -7882,7 +7883,7 @@ async def vehicle_lookup_makes(year: int = 0):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Vehicle lookup failed")
+    await _raise_scoped_failure(resp, "Vehicle lookup failed")
 
 
 @app.get("/api/geo/vehicle-lookup/models")
@@ -7895,7 +7896,7 @@ async def vehicle_lookup_models(year: int = 0, make: str = ""):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Vehicle lookup failed")
+    await _raise_scoped_failure(resp, "Vehicle lookup failed")
 
 
 @app.get("/api/geo/vehicle-lookup/options")
@@ -7908,7 +7909,7 @@ async def vehicle_lookup_options(year: int = 0, make: str = "", model: str = "")
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Vehicle lookup failed")
+    await _raise_scoped_failure(resp, "Vehicle lookup failed")
 
 
 @app.get("/api/geo/vehicle-lookup/vin/{vin}")
@@ -7920,7 +7921,7 @@ async def vehicle_lookup_vin(vin: str):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "VIN lookup failed")
+    await _raise_scoped_failure(resp, "VIN lookup failed")
 
 
 @app.get("/api/geo/vehicle-lookup/{vehicle_id}")
@@ -7932,13 +7933,13 @@ async def vehicle_lookup_detail(vehicle_id: str):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Vehicle lookup failed")
+    await _raise_scoped_failure(resp, "Vehicle lookup failed")
 
 
 @app.get("/api/geo/telemetry/{user_id}")
 async def get_geo_telemetry(request: Request, user_id: str, hours: float = 24.0):
     """Fine-grained GPS telemetry for one person — own, admin, or opted-in only."""
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/people/{target}/telemetry",
@@ -7971,13 +7972,13 @@ async def get_geo_people(request: Request, viewer: str | None = None):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Geo people unavailable")
+    await _raise_scoped_failure(resp, "Geo people unavailable")
 
 
 @app.get("/api/geo/android_auto")
 async def get_geo_android_auto(request: Request, user_id: str | None = None):
     """Android auto-reporting configuration — own data only unless admin."""
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     params = {"user_id": target, "viewer": viewer, "is_admin": is_admin}
     async with shared_http_client() as client:
         resp = await client.get(
@@ -7988,7 +7989,7 @@ async def get_geo_android_auto(request: Request, user_id: str | None = None):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Geo android_auto unavailable")
+    await _raise_scoped_failure(resp, "Geo android_auto unavailable")
 
 
 @app.get("/api/geo/zones")
@@ -8001,11 +8002,14 @@ async def get_geo_zones():
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Geo zones unavailable")
+    await _raise_scoped_failure(resp, "Geo zones unavailable")
 
 
-async def _raise_geo_failure(resp, label: str) -> None:
-    """Translate a non-200 from geo into the right answer for the client.
+async def _raise_scoped_failure(resp, label: str) -> None:
+    """Translate a non-200 from a consent-checked service into the client answer.
+
+    Used by geo and bible, whose upstreams both answer 404 for a read the
+    caller may not have.
 
     geo deliberately answers **404** when a caller may not read another's
     activity, so a probe cannot tell "no such user" from "not shared with
@@ -8022,14 +8026,26 @@ async def _raise_geo_failure(resp, label: str) -> None:
     """
     if resp.status in (400, 401, 403, 404, 422):
         detail: Any = None
-        try:
-            body = await resp.json()
-            if isinstance(body, dict):
-                detail = body.get("detail")
-        except Exception:  # noqa: BLE001 - a non-JSON error body is not fatal
-            detail = None
+        detail = await _upstream_detail(resp)
         raise HTTPException(status_code=resp.status, detail=detail or label)
     raise HTTPException(status_code=502, detail=label)
+
+
+async def _upstream_detail(resp) -> Any:
+    """FastAPI's ``detail`` from an upstream error body, or ``None``.
+
+    Shared by every proxy block so an upstream that names its own
+    misconfiguration ("blb_base_url is not configured", "run
+    import_corpus") reaches the client instead of being replaced by a
+    generic "service unavailable".
+    """
+    try:
+        body = await resp.json()
+    except Exception:  # noqa: BLE001 - a non-JSON error body is not fatal
+        return None
+    if isinstance(body, dict):
+        return body.get("detail")
+    return None
 
 
 @app.get("/api/geo/trips")
@@ -8041,7 +8057,7 @@ async def get_geo_trips(request: Request, user_id: str | None = None, limit: int
     a non-admin received 7 trips, all belonging to the admin). The viewer is
     now forwarded and geo applies the opt-in consent check.
     """
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     params = {"limit": limit, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     async with shared_http_client() as client:
         resp = await client.get(
@@ -8052,7 +8068,7 @@ async def get_geo_trips(request: Request, user_id: str | None = None, limit: int
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to fetch trips")
+    await _raise_scoped_failure(resp, "Failed to fetch trips")
 
 
 @app.get("/api/geo/trips/{trip_id}")
@@ -8107,7 +8123,7 @@ async def update_geo_trip(trip_id: str, request: Request):
             raise HTTPException(status_code=403, detail=err.get("detail", "Forbidden"))
         elif resp.status == 404:
             raise HTTPException(status_code=404, detail="Trip not found")
-    await _raise_geo_failure(resp, "Failed to update trip")
+    await _raise_scoped_failure(resp, "Failed to update trip")
 
 
 @app.get("/api/geo/trips/{trip_id}/route")
@@ -8121,7 +8137,7 @@ async def get_geo_trip_route(request: Request, trip_id: str):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to fetch trip route")
+    await _raise_scoped_failure(resp, "Failed to fetch trip route")
 
 
 @app.get("/api/geo/locations/suggestions")
@@ -8139,7 +8155,7 @@ async def get_geo_location_suggestions(lat: float, lon: float):
         if resp.status == 422:
             err = await resp.json()
             raise HTTPException(status_code=422, detail=err.get("detail", "Invalid coordinates"))
-    await _raise_geo_failure(resp, "Failed to fetch location suggestions")
+    await _raise_scoped_failure(resp, "Failed to fetch location suggestions")
 
 
 @app.patch("/api/geo/trips/{trip_id}/share")
@@ -8167,7 +8183,7 @@ async def share_geo_trip(trip_id: str, request: Request):
             raise HTTPException(status_code=403, detail=err.get("detail", "Forbidden"))
         elif resp.status == 404:
             raise HTTPException(status_code=404, detail="Trip not found")
-    await _raise_geo_failure(resp, "Failed to share trip")
+    await _raise_scoped_failure(resp, "Failed to share trip")
 
 
 @app.get("/api/geo/workouts")
@@ -8177,7 +8193,7 @@ async def get_geo_workouts(request: Request, user_id: str | None = None, limit: 
     Identical defect to /api/geo/trips: no identity was forwarded, so geo served
     ``geo:workouts:all`` -- every user's workouts to any authenticated caller.
     """
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     params = {"limit": limit, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     async with shared_http_client() as client:
         resp = await client.get(
@@ -8188,7 +8204,7 @@ async def get_geo_workouts(request: Request, user_id: str | None = None, limit: 
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to fetch workouts")
+    await _raise_scoped_failure(resp, "Failed to fetch workouts")
 
 
 @app.get("/api/geo/workouts/active")
@@ -8199,7 +8215,7 @@ async def get_geo_active_workout(request: Request, user_id: str | None = None):
     history, and there is no "all" bucket to request. 404 is passed through as
     "nothing running" rather than an error.
     """
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/workouts/active",
@@ -8211,7 +8227,7 @@ async def get_geo_active_workout(request: Request, user_id: str | None = None):
             return await resp.json()
         if resp.status == 404:
             return {"workout": None}
-    await _raise_geo_failure(resp, "Failed to fetch active workout")
+    await _raise_scoped_failure(resp, "Failed to fetch active workout")
 
 
 @app.post("/api/geo/workouts/start")
@@ -8245,7 +8261,7 @@ async def start_geo_workout(request: Request):
             return await resp.json()
         elif resp.status == 409:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to start workout")
+    await _raise_scoped_failure(resp, "Failed to start workout")
 
 
 @app.post("/api/geo/workouts/stop")
@@ -8276,7 +8292,7 @@ async def stop_geo_workout(request: Request):
         elif resp.status == 404:
             err = await resp.json()
             raise HTTPException(status_code=404, detail=err.get("detail", "No active workout"))
-    await _raise_geo_failure(resp, "Failed to stop workout")
+    await _raise_scoped_failure(resp, "Failed to stop workout")
 
 
 @app.get("/api/geo/workouts/{workout_id}/route")
@@ -8290,7 +8306,7 @@ async def get_geo_workout_route(request: Request, workout_id: str):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to fetch workout route")
+    await _raise_scoped_failure(resp, "Failed to fetch workout route")
 
 
 @app.get("/api/geo/steps/ranges")
@@ -8301,7 +8317,7 @@ async def get_geo_step_ranges(request: Request, range: str = "W", user_id: str |
     captured as something else. The 30-day cap on the daily route stays where
     it is: this is the way to look further back, not a widened version of it.
     """
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     params = {"range": range, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     async with shared_http_client() as client:
         resp = await client.get(
@@ -8331,7 +8347,7 @@ async def get_geo_events(
     a parameter, and it uses the same reader identity path as every other geo
     read so a caller-supplied `viewer` cannot widen consent.
     """
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     params = {
         "days": days,
         "limit": limit,
@@ -8377,7 +8393,7 @@ async def get_geo_metric_ranges(
     Declared before any sibling under /api/geo/metrics so a literal path is
     never captured as a parameter.
     """
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     params = {
         "metric": metric,
         "range": range,
@@ -8397,7 +8413,7 @@ async def get_geo_metric_ranges(
 
 @app.get("/api/geo/steps")
 async def get_geo_steps(request: Request, user_id: str | None = None, days: int = 7):
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     # Always pass user_id -- geo GET /steps 400s when it's omitted.
     params = {"days": days, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     async with shared_http_client() as client:
@@ -8409,7 +8425,7 @@ async def get_geo_steps(request: Request, user_id: str | None = None, days: int 
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to fetch steps")
+    await _raise_scoped_failure(resp, "Failed to fetch steps")
 
 
 @app.post("/api/geo/steps")
@@ -8441,12 +8457,12 @@ async def proxy_geo_steps(request: Request):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to record steps")
+    await _raise_scoped_failure(resp, "Failed to record steps")
 
 
 @app.get("/api/geo/goals")
 async def proxy_get_goals(request: Request, user_id: str | None = None):
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/goals",
@@ -8456,7 +8472,7 @@ async def proxy_get_goals(request: Request, user_id: str | None = None):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to read goals")
+    await _raise_scoped_failure(resp, "Failed to read goals")
 
 
 @app.put("/api/geo/goals")
@@ -8602,7 +8618,7 @@ async def proxy_grant_stars(request: Request):
 async def proxy_get_achievements(
     request: Request, user_id: str | None = None, days: int = 30
 ):
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/achievements",
@@ -8612,12 +8628,12 @@ async def proxy_get_achievements(
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to read achievements")
+    await _raise_scoped_failure(resp, "Failed to read achievements")
 
 
 @app.get("/api/geo/points")
 async def proxy_get_points(request: Request, user_id: str | None = None):
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/points",
@@ -8627,7 +8643,7 @@ async def proxy_get_points(request: Request, user_id: str | None = None):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to read points")
+    await _raise_scoped_failure(resp, "Failed to read points")
 
 
 @app.get("/api/geo/activity/summary")
@@ -8635,7 +8651,7 @@ async def proxy_activity_summary(
     request: Request, user_id: str | None = None, window: str = "week"
 ):
     """Running totals — own data always; anyone else's only with opt-in."""
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/activity/summary",
@@ -8664,12 +8680,12 @@ async def proxy_activity_feed(request: Request, window: str = "week"):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to read activity feed")
+    await _raise_scoped_failure(resp, "Failed to read activity feed")
 
 
 @app.get("/api/geo/steps/goal")
 async def proxy_get_step_goal(request: Request, user_id: str | None = None):
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/steps/goal",
@@ -8679,7 +8695,7 @@ async def proxy_get_step_goal(request: Request, user_id: str | None = None):
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to read step goal")
+    await _raise_scoped_failure(resp, "Failed to read step goal")
 
 
 @app.put("/api/geo/steps/goal")
@@ -8715,7 +8731,7 @@ async def proxy_set_step_goal(request: Request):
 @app.get("/api/geo/trends/activity")
 async def get_geo_activity_trends(request: Request, user_id: str | None = None, days: int = 7, refresh: bool = False):
     if not user_id:
-        target, viewer, is_admin = await _geo_read_target(request, user_id)
+        target, viewer, is_admin = await _read_target(request, user_id)
     params = {"days": days, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     if refresh:
         params["refresh"] = "true"
@@ -8728,7 +8744,7 @@ async def get_geo_activity_trends(request: Request, user_id: str | None = None, 
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to fetch activity trends")
+    await _raise_scoped_failure(resp, "Failed to fetch activity trends")
 
 
 @app.post("/api/geo/trends/activity/analyze")
@@ -8736,7 +8752,7 @@ async def post_geo_activity_trends_analyze(
     request: Request, user_id: str | None = None, days: int = 7, refresh: bool = False
 ):
     """Explicitly generate the activity narrative (never triggered by a page load)."""
-    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    target, viewer, is_admin = await _read_target(request, user_id)
     params = {"days": days, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     if refresh:
         params["refresh"] = "true"
@@ -8749,7 +8765,509 @@ async def post_geo_activity_trends_analyze(
         )
         if resp.status == 200:
             return await resp.json()
-    await _raise_geo_failure(resp, "Failed to analyze activity trends")
+    await _raise_scoped_failure(resp, "Failed to analyze activity trends")
+
+
+# --- Bible (reading app) ----------------------------------------------------
+# The gateway is the only thing the UI and the Android widgets talk to. Every
+# route resolves the caller first and forwards that username to the bible
+# service, which owns the per-user reading state and the consent checks. A
+# client-supplied username is honoured only for reads the bible service itself
+# gates on sharing consent (activity/summary) and never for writes.
+
+_BIBLE_TIMEOUT = aiohttp.ClientTimeout(total=10.0)
+
+
+async def _bible_call(method: str, path: str, *, params=None, json=None, timeout=None):
+    # yarl (under aiohttp) raises on a None query value, so an unset optional
+    # parameter has to be dropped rather than forwarded.
+    query = {k: v for k, v in (params or {}).items() if v is not None}
+    async with shared_http_client() as client:
+        return await client.request(
+            method,
+            f"{BIBLE_SVC}{path}",
+            params=query,
+            json=json,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=timeout or _BIBLE_TIMEOUT,
+        )
+
+
+async def _bible_json(method: str, path: str, *, label: str, params=None, json=None, timeout=None):
+    """Forward the upstream answer, keeping its own diagnosis for the client.
+
+    503 is passed through on purpose. "No Bible text is imported" and
+    "blb_base_url is not configured" are operator problems with a known fix;
+    reporting them as "service unavailable" hides the fix. The 4xx family is
+    geo's translator, reused rather than copied so the consent 404 keeps
+    meaning the same thing in both blocks.
+    """
+    resp = await _bible_call(method, path, params=params, json=json, timeout=timeout)
+    if resp.status < 400:
+        return await resp.json()
+    if resp.status == 503:
+        raise HTTPException(status_code=503, detail=await _upstream_detail(resp) or label)
+    await _raise_scoped_failure(resp, label)
+
+
+async def _bible_caller(request: Request) -> str:
+    """The authenticated username every personal bible route is scoped to."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return ident["user"]
+
+
+@app.get("/api/bible/health")
+async def proxy_bible_health():
+    return await _bible_json("GET", "/health", label="Bible service unavailable")
+
+
+@app.get("/api/bible/versions")
+async def proxy_bible_versions(request: Request):
+    await _bible_caller(request)
+    return await _bible_json("GET", "/versions", label="Bible service unavailable")
+
+
+@app.get("/api/bible/books")
+async def proxy_bible_books(request: Request, version: str | None = None):
+    await _bible_caller(request)
+    return await _bible_json("GET", "/books", label="Bible service unavailable", params={"version": version})
+
+
+@app.get("/api/bible/passages")
+async def proxy_bible_passages(request: Request, ref: str, version: str | None = None):
+    """Read a passage. Missing translation in the corpus is a 503 naming the fix."""
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/passages", label="Bible service unavailable", params={"ref": ref, "version": version}
+    )
+
+
+@app.get("/api/bible/search")
+async def proxy_bible_search(
+    request: Request, q: str, version: str | None = None, book: str | None = None, limit: int = 50
+):
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        "/search",
+        label="Bible search unavailable",
+        params={"q": q, "version": version, "book": book, "limit": limit},
+    )
+
+
+@app.get("/api/bible/verse-of-day")
+async def proxy_bible_verse_of_day(
+    request: Request, day: str | None = None, version: str | None = None, scope: str = "all"
+):
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        "/verse-of-day",
+        label="Verse of the day unavailable",
+        params={"day": day, "version": version, "scope": scope},
+    )
+
+
+@app.get("/api/bible/devotional")
+async def proxy_bible_devotional(request: Request, day: str | None = None, work: str | None = None):
+    """Today's devotional. Unconfigured sources come back as a named warning."""
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/devotional", label="Devotional unavailable", params={"day": day, "work": work}
+    )
+
+
+@app.get("/api/bible/devotional/sources")
+async def proxy_bible_devotional_sources(request: Request):
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/devotional/sources", label="Devotional sources unavailable"
+    )
+
+
+@app.get("/api/bible/daily")
+async def proxy_bible_daily(request: Request):
+    """One call for the dashboard widget and the Android home screen.
+
+    The Android widget can only issue a bearer-authenticated GET, so this route
+    has to fill the whole card by itself: verse, devotional, streaks, badges.
+    """
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/daily", label="Daily Bible unavailable", params={"username": username}
+    )
+
+
+@app.get("/api/bible/editions")
+async def proxy_bible_editions(request: Request, version: str | None = None):
+    """Study Bibles installed for a translation, plus which other translations
+    carry notes of their own.
+
+    No username travels with this: which study Bibles exist is server state, not
+    anything a user owns.
+    """
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/editions", label="Study editions unavailable", params={"version": version}
+    )
+
+
+@app.get("/api/bible/study/notes")
+async def proxy_bible_study_notes(
+    request: Request,
+    ref: str | None = None,
+    version: str | None = None,
+    kind: str | None = None,
+    edition: str | None = None,
+    cross_version: bool = False,
+):
+    """Study notes for a passage: commentary, footnotes, introductions.
+
+    Read-only reference material, so no username is taken. Which notes come back
+    is the reader's choice of study Bible (``edition``) and, deliberately opt-in,
+    whether commentary written for another translation may join in
+    (``cross_version``) -- a note on the NIV wording is not a note on the NKJV
+    wording, and the response labels every note with its translation so the
+    client can keep them apart. ``available_kinds`` comes back too, because "no
+    notes here" is an answer the UI has to be able to give.
+    """
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        "/study/notes",
+        label="Study notes unavailable",
+        params={
+            "ref": ref,
+            "version": version,
+            "kind": kind,
+            "edition": edition,
+            "cross_version": "true" if cross_version else None,
+        },
+    )
+
+
+@app.get("/api/bible/marks")
+async def proxy_bible_marks(request: Request, osis: str | None = None):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/marks", label="Failed to read marks", params={"username": username, "osis": osis}
+    )
+
+
+@app.put("/api/bible/marks")
+async def proxy_bible_put_mark(request: Request):
+    """Create or update a highlight/bookmark. Always the caller's own."""
+    username = await _bible_caller(request)
+    body = await request.json()
+    return await _bible_json(
+        "PUT",
+        "/marks",
+        label="Failed to save mark",
+        params={"username": username},
+        json=body,
+    )
+
+
+@app.delete("/api/bible/marks/{mark_id}")
+async def proxy_bible_delete_mark(request: Request, mark_id: int):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "DELETE",
+        f"/marks/{mark_id}",
+        label="Failed to delete mark",
+        params={"username": username},
+    )
+
+
+@app.get("/api/bible/state")
+async def proxy_bible_state(request: Request):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/state", label="Failed to read reading position", params={"username": username}
+    )
+
+
+@app.put("/api/bible/state")
+async def proxy_bible_put_state(request: Request):
+    """Remember where the reader is and how they like their text."""
+    username = await _bible_caller(request)
+    body = await request.json()
+    body.pop("username", None)
+    return await _bible_json(
+        "PUT",
+        "/state",
+        label="Failed to save reading position",
+        params={"username": username},
+        json=body,
+    )
+
+
+@app.post("/api/bible/events")
+async def proxy_bible_event(request: Request):
+    """Record one reading event. Metadata only, never verse text or notes."""
+    username = await _bible_caller(request)
+    body = await request.json()
+    return await _bible_json(
+        "POST",
+        "/events",
+        label="Failed to record reading event",
+        params={"username": username},
+        json={"kind": body.get("kind", ""), "ref": body.get("ref", ""), "value": int(body.get("value") or 0)},
+    )
+
+
+@app.get("/api/bible/stats")
+async def proxy_bible_stats(request: Request, days: int = 30):
+    """Reading totals for the caller only.
+
+    No ``user_id`` parameter on purpose: the bible service's /stats, /streaks,
+    /achievements and /marks answer for whoever they are asked about, so a
+    forwarded client username would hand one reader another's totals with no
+    consent check anywhere. Family sharing has exactly one door --
+    /activity/summary, which the bible service gates on the `bible` scope.
+    """
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        "/stats",
+        label="Failed to read reading stats",
+        params={"username": username, "days": days},
+    )
+
+
+@app.get("/api/bible/streaks")
+async def proxy_bible_streaks(request: Request):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/streaks", label="Failed to read streaks", params={"username": username}
+    )
+
+
+@app.get("/api/bible/achievements")
+async def proxy_bible_achievements(request: Request):
+    """Own badges. Shared badges for another reader come from /activity/summary."""
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        "/achievements",
+        label="Failed to read achievements",
+        params={"username": username},
+    )
+
+
+@app.get("/api/bible/activity/summary")
+async def proxy_bible_activity_summary(request: Request, user_id: str | None = None):
+    """Bible-specific reading summary; cross-user reads need the bible scope."""
+    target, viewer, is_admin = await _read_target(request, user_id)
+    return await _bible_json(
+        "GET",
+        "/activity/summary",
+        label="Failed to read Bible activity",
+        params={"username": target, "target": viewer},
+    )
+
+
+
+@app.get("/api/bible/activity/feed")
+async def proxy_bible_activity_feed(request: Request, limit: int = 20):
+    viewer = await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        "/activity/feed",
+        label="Failed to read the family reading feed",
+        params={"viewer": viewer, "limit": limit},
+    )
+
+
+@app.get("/api/bible/blb/link")
+async def proxy_bible_blb_link(request: Request, ref: str, tool: str = ""):
+    """Deep link into Blue Letter Bible study tools for a reference."""
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        "/blb/link",
+        label="Failed to build a Blue Letter Bible link",
+        params={"ref": ref, "tool": tool},
+    )
+
+
+# Reading aloud goes through the execution service's Kokoro engine, which
+# already expands scripture references into spoken chapter and verse numbers, so
+# the gateway only forwards a passage. The timeout is generous because the
+# first call of a day pays for loading the voice model; the bible service
+# caches the result so the second play of a passage is instant.
+_BIBLE_NARRATION_TIMEOUT = aiohttp.ClientTimeout(total=300.0)
+
+
+@app.get("/api/bible/voices")
+async def proxy_bible_voices(request: Request):
+    """Voice list for read-aloud. No username: these are engine voices, not user data."""
+    await _bible_caller(request)
+    return await _bible_json("GET", "/voices", label="Voice list unavailable")
+
+
+@app.get("/api/bible/narration")
+async def proxy_bible_narration(request: Request, ref: str, version: str | None = None, voice: str = ""):
+    """Render a passage to speech. 503 keeps the engine's own diagnosis."""
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        "/narration",
+        label="Failed to narrate this passage",
+        params={"ref": ref, "version": version, "voice": voice},
+        timeout=_BIBLE_NARRATION_TIMEOUT,
+    )
+
+
+# --- Bible imports (admin) ---------------------------------------------------
+# Installing a translation or a study Bible is a filesystem change to the
+# family's own copy of the text, so it is admin-only and every call is checked
+# before the bible service is touched. The refusals that matter ("that code is
+# not in the manifest", "the book of Exodus is missing") come back as a report
+# body, not a bare status code, because the operator has to read them.
+
+
+_BIBLE_IMPORT_TIMEOUT = aiohttp.ClientTimeout(total=900.0)
+_BIBLE_IMPORT_FIELDS = (
+    "code",
+    "kind",
+    "name",
+    "sha256",
+    "source_path",
+    "edition",
+    "edition_name",
+    "publisher",
+    "rights_holder",
+    "import_notes",
+    "provider",
+    "provider_id",
+    "dry_run",
+    "budget",
+)
+
+
+def _bible_import_payload(body: dict) -> dict:
+    """Forward only the fields the importer declares, with types it can trust."""
+    payload: dict = {}
+    for field in _BIBLE_IMPORT_FIELDS:
+        if field not in body:
+            continue
+        value = body[field]
+        if value is None or value == "":
+            continue
+        if field in {"import_notes", "dry_run"}:
+            payload[field] = bool(value)
+        elif field == "budget":
+            payload[field] = int(value)
+        else:
+            payload[field] = str(value)
+    return payload
+
+
+@app.get("/api/bible/admin/imports")
+async def proxy_bible_admin_imports(request: Request):
+    """The installed catalogue, the declared providers and the import history."""
+    await _require_admin(request)
+    return await _bible_json(
+        "GET", "/admin/imports", label="Failed to read the Bible import catalogue",
+        timeout=_BIBLE_IMPORT_TIMEOUT,
+    )
+
+
+async def _bible_import_response(resp) -> JSONResponse:
+    """Return the importer's report, marking a refusal as 422.
+
+    A refusal is a 422 whether it arrived as one or as a report body saying
+    ``status: "failed"``, so a browser fetch cannot treat "that PDF is missing
+    Exodus" as a success and clear the form.
+    """
+    body = await resp.json(content_type=None)
+    if isinstance(body, dict) and body.get("status") == "failed":
+        return JSONResponse(status_code=422, content=body)
+    if resp.status >= 400:
+        detail = body.get("detail") if isinstance(body, dict) else body
+        raise HTTPException(status_code=resp.status, detail=str(detail)[:300])
+    return JSONResponse(status_code=200, content=body)
+
+
+@app.get("/api/bible/admin/providers/{code}/translations")
+async def proxy_bible_admin_provider_translations(request: Request, code: str):
+    """Ask a provider what it can supply. Admin only, and never on a read path."""
+    await _require_admin(request)
+    return await _bible_json(
+        "GET",
+        f"/admin/providers/{code}/translations",
+        label=f"Could not reach the {code} translation provider",
+        timeout=_BIBLE_IMPORT_TIMEOUT,
+    )
+
+
+@app.get("/api/bible/admin/providers/{code}/estimate")
+async def proxy_bible_admin_provider_estimate(
+    request: Request, code: str, translation_id: str = ""
+):
+    """What would installing this translation cost in provider requests?
+
+    Kept ahead of the Install button rather than behind it. A whole Bible is
+    roughly 1,189 requests against a plan that allows about 5,000 a month, so
+    the count has to be visible before anyone spends it. Admin only.
+    """
+    await _require_admin(request)
+    return await _bible_json(
+        "GET",
+        f"/admin/providers/{code}/estimate",
+        label=f"Could not estimate the cost of the {code} translation",
+        params={"translation_id": translation_id or None},
+        timeout=_BIBLE_IMPORT_TIMEOUT,
+    )
+
+
+@app.post("/api/bible/admin/imports")
+async def proxy_bible_admin_import(request: Request):
+    """Install a translation or study Bible from a file already on the server."""
+    await _require_admin(request)
+    body = await request.json()
+    payload = _bible_import_payload(body if isinstance(body, dict) else {})
+    resp = await _bible_call(
+        "POST", "/admin/imports", json=payload, timeout=_BIBLE_IMPORT_TIMEOUT
+    )
+    return await _bible_import_response(resp)
+
+
+@app.post("/api/bible/admin/imports/upload")
+async def proxy_bible_admin_import_upload(request: Request):
+    """Install from a file the admin picked in the browser.
+
+    The upload is re-multiparted rather than streamed through: the bible service
+    is the only place that knows the extension rules, so it decides what a file
+    is and refuses a wrong suffix before anything is written.
+    """
+    await _require_admin(request)
+    form = await request.form()
+    uploaded = form.get("file")
+    if not isinstance(uploaded, UploadFile) or not uploaded.filename:
+        raise HTTPException(status_code=400, detail="A Bible file is required")
+    data = {}
+    for field in _BIBLE_IMPORT_FIELDS:
+        if field == "import_notes":
+            continue
+        value = form.get(field)
+        if value not in (None, ""):
+            data[field] = str(value)
+    flags = form.get("import_notes")
+    if flags not in (None, ""):
+        data["import_notes"] = str(flags).strip().lower() in {"1", "true", "yes", "on"}
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{BIBLE_SVC}/admin/imports/upload",
+            files={"file": (uploaded.filename, uploaded.file, uploaded.content_type or "")},
+            data=data,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=_BIBLE_IMPORT_TIMEOUT,
+        )
+        return await _bible_import_response(resp)
 
 
 # --- Scheduled telemetry reports (health/fitness + power) --------------------

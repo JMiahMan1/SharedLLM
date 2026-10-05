@@ -11,4 +11,6 @@
       user is not left with a progress bar and no value.
     -->
     <string name="health_ring_description">Progress toward your daily step goal</string>
+    <string name="verse_widget_description">Today\'s verse of the day and reading streak</string>
+    <string name="verse_widget_refresh_description">Refresh the verse of the day</string>
 </resources>

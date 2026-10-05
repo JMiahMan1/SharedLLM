@@ -33,6 +33,7 @@ import {
   RefreshCw,
   Users,
   Sparkles,
+  BookMarked,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
@@ -59,8 +60,9 @@ import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 import DnsManagementPanel from '../components/settings/DnsManagementPanel';
 import TelemetryAdminPanel from '../components/settings/TelemetryAdminPanel';
 import StarBalance from '../components/wander/StarBalance';
+import BibleAdminPanel from '../components/admin/BibleAdminPanel';
 
-type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database' | 'services';
+type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
 
 const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string }[] = [
   { id: 'users', label: 'Users & Devices', icon: Shield, path: '/admin/users' },
@@ -72,6 +74,7 @@ const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string
   { id: 'settings', label: 'LLM & Settings', icon: Code2, path: '/admin/integrations' },
   { id: 'database', label: 'Database & Audit', icon: BarChart3, path: '/admin/database' },
   { id: 'services', label: 'System Services', icon: Server, path: '/admin/services' },
+  { id: 'bible', label: 'Bible', icon: BookMarked, path: '/admin/bible' },
 ];
 
 const adminTabFromPathname = (pathname: string): AdminTab => {
@@ -85,6 +88,7 @@ const adminTabFromPathname = (pathname: string): AdminTab => {
   if (pathname.startsWith('/admin/intercom')) return 'intercom';
   if (pathname.startsWith('/admin/users')) return 'users';
   if (pathname.startsWith('/admin/services')) return 'services';
+  if (pathname.startsWith('/admin/bible')) return 'bible';
   return 'users';
 };
 
@@ -1467,6 +1471,14 @@ const Admin = () => {
             </div>
           </div>
           <HardwarePanel />
+        </section>
+      )}
+
+      {activeTab === 'bible' && (
+        <section className="space-y-6">
+          <div className="glass-panel p-4 sm:p-6">
+            <BibleAdminPanel />
+          </div>
         </section>
       )}
 

@@ -1,0 +1,369 @@
+import { useState } from 'react';
+import { ChevronLeft, ChevronRight, Minus, Plus, Settings2, X } from 'lucide-react';
+import { useHaptics } from '../../hooks/useHaptics';
+import type {
+  BibleBookInfo,
+  BibleEditionInfo,
+  BiblePreferences,
+  BiblePosition,
+  BibleVersionInfo,
+} from '../../types/api';
+
+interface ReferenceBarProps {
+  books: BibleBookInfo[];
+  versions: BibleVersionInfo[];
+  /** Study Bibles installed for the chosen translation; more than one is normal. */
+  editions?: BibleEditionInfo[];
+  position: BiblePosition;
+  preferences: BiblePreferences;
+  /** Text the reader typed, kept here so a failed parse does not lose it. */
+  input: string;
+  onInput: (value: string) => void;
+  onSubmit: () => void;
+  onPosition: (patch: Partial<BiblePosition>) => void;
+  onPreferences: (patch: Partial<BiblePreferences>) => void;
+  onStep: (delta: number) => void;
+}
+
+const TEXT_STEPS = [0.85, 1, 1.15, 1.3, 1.5];
+
+/**
+ * Everything needed to point the reader somewhere, and to make the text
+ * comfortable once it is there.
+ *
+ * Two rules drive the layout. First, no control is smaller than a thumb: every
+ * button carries `min-h-11` so the phone is usable one-handed, and the steppers
+ * are 44px rather than the 24px a desktop density would allow. Second, nothing
+ * is hover-only -- the display controls are a real popover with a real close
+ * button, because a phone has no hover state to reveal them with.
+ */
+export default function ReferenceBar({
+  books,
+  versions,
+  editions = [],
+  position,
+  preferences,
+  input,
+  onInput,
+  onSubmit,
+  onPosition,
+  onPreferences,
+  onStep,
+}: ReferenceBarProps) {
+  const { trigger } = useHaptics();
+  const [displayOpen, setDisplayOpen] = useState(false);
+
+  const book = books.find((b) => b.osis === position.book) ?? books[0];
+  const selectedVersion = versions.find((v) => v.code === preferences.default_version);
+  const installedEditions = editions.filter((entry) => entry.installed);
+  const selectedEdition = installedEditions.some(
+    (entry) => entry.code === preferences.default_edition,
+  )
+    ? preferences.default_edition
+    : (installedEditions[0]?.code ?? '');
+  const selectedEditionEntry = installedEditions.find((entry) => entry.code === selectedEdition);
+  const chapterCount = book?.chapters ?? 1;
+  const textIndex = Math.max(0, TEXT_STEPS.indexOf(preferences.font_scale));
+
+  const nudge = (delta: number) => {
+    void trigger('light');
+    onStep(delta);
+  };
+
+  const bumpFont = (direction: 1 | -1) => {
+    void trigger('light');
+    const next = Math.min(TEXT_STEPS.length - 1, Math.max(0, textIndex + direction));
+    onPreferences({ font_scale: TEXT_STEPS[next] });
+  };
+
+  return (
+    <div className="space-y-3" data-testid="bible-reference-bar">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit();
+        }}
+        className="flex gap-2"
+      >
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => onInput(e.target.value)}
+          placeholder="John 3:16, Psalm 23, or a keyword"
+          aria-label="Passage or search"
+          data-testid="bible-ref-input"
+          className="flex-1 min-w-0 glass-input px-3 py-2.5 text-sm min-h-11 rounded-xl bg-black/25 border border-white/10 text-slate-100 placeholder:text-slate-600"
+        />
+        <button
+          type="submit"
+          data-testid="bible-ref-go"
+          className="glass-button px-4 py-2.5 text-sm font-semibold min-h-11 shrink-0"
+        >
+          Go
+        </button>
+      </form>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <label className="col-span-2 sm:col-span-1 flex flex-col gap-1 min-w-0">
+          <span className="text-[10px] uppercase tracking-wider text-slate-500">Book</span>
+          <select
+            value={position.book}
+            onChange={(e) => onPosition({ book: e.target.value, chapter: 1, verse: 1 })}
+            aria-label="Book"
+            data-testid="bible-book-select"
+            className="min-h-11 rounded-xl bg-black/25 border border-white/10 text-sm text-slate-100 px-2 py-2"
+          >
+            {books.map((b) => (
+              <option key={b.osis} value={b.osis}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase tracking-wider text-slate-500">Chapter</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onPosition({ chapter: Math.max(1, position.chapter - 1) })}
+              disabled={position.chapter <= 1}
+              aria-label="Previous chapter"
+              data-testid="bible-chapter-down"
+              className="min-h-11 min-w-11 shrink-0 rounded-xl glass-button flex items-center justify-center disabled:opacity-30"
+            >
+              <Minus size={14} />
+            </button>
+            <input
+              type="number"
+              min={1}
+              max={chapterCount}
+              value={position.chapter}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                if (Number.isFinite(value) && value >= 1) {
+                  onPosition({ chapter: Math.min(value, chapterCount), verse: 1 });
+                }
+              }}
+              aria-label="Chapter number"
+              data-testid="bible-chapter-input"
+              className="min-h-11 w-full min-w-0 text-center rounded-xl bg-black/25 border border-white/10 text-sm text-slate-100 px-1 py-2"
+            />
+            <button
+              type="button"
+              onClick={() => onPosition({ chapter: Math.min(chapterCount, position.chapter + 1) })}
+              disabled={position.chapter >= chapterCount}
+              aria-label="Next chapter"
+              data-testid="bible-chapter-up"
+              className="min-h-11 min-w-11 shrink-0 rounded-xl glass-button flex items-center justify-center disabled:opacity-30"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
+
+        <label className="flex flex-col gap-1 min-w-0">
+          <span className="text-[10px] uppercase tracking-wider text-slate-500">Version</span>
+          <select
+            value={preferences.default_version}
+            onChange={(e) => onPreferences({ default_version: e.target.value })}
+            aria-label="Translation"
+            data-testid="bible-version-select"
+            className="min-h-11 rounded-xl bg-black/25 border border-white/10 text-sm text-slate-100 px-2 py-2"
+          >
+            {versions.map((v) => (
+              <option key={v.code} value={v.code}>
+                {v.name}
+                {v.installed ? '' : ' — not on this server'}
+              </option>
+            ))}
+          </select>
+          {selectedVersion && !selectedVersion.installed && (
+            <p
+              data-testid="bible-version-unavailable"
+              className="text-[11px] leading-snug text-amber-300/90"
+            >
+              {selectedVersion.note}
+            </p>
+          )}
+          {selectedVersion?.installed && selectedVersion.license_class === 'licensed' && (
+            <p
+              data-testid="bible-version-licensed"
+              className="text-[11px] leading-snug text-slate-400"
+            >
+              {selectedVersion.note || 'Licensed text. Do not redistribute.'}
+            </p>
+          )}
+        </label>
+
+        {installedEditions.length > 0 && (
+          <label className="flex flex-col gap-1 min-w-0">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500">Study Bible</span>
+            <select
+              value={selectedEdition}
+              onChange={(e) => onPreferences({ default_edition: e.target.value })}
+              aria-label="Study Bible"
+              data-testid="bible-edition-select"
+              className="min-h-11 rounded-xl bg-black/25 border border-white/10 text-sm text-slate-100 px-2 py-2"
+            >
+              {installedEditions.map((entry) => (
+                <option key={entry.code} value={entry.code}>
+                  {entry.name}
+                  {entry.note_count ? ` · ${entry.note_count.toLocaleString()} notes` : ' · no notes'}
+                </option>
+              ))}
+            </select>
+            {selectedEditionEntry?.license_class === 'licensed' && (
+              <p
+                data-testid="bible-edition-licensed"
+                className="text-[11px] leading-snug text-slate-400"
+              >
+                {selectedEditionEntry.note || 'Licensed notes. Do not redistribute.'}
+              </p>
+            )}
+          </label>
+        )}
+
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase tracking-wider text-slate-500">Display</span>
+          <button
+            type="button"
+            onClick={() => {
+              void trigger('light');
+              setDisplayOpen((open) => !open);
+            }}
+            aria-expanded={displayOpen}
+            aria-label="Text display options"
+            data-testid="bible-display-toggle"
+            className="min-h-11 rounded-xl glass-button px-3 py-2 text-sm flex items-center justify-center gap-2"
+          >
+            <Settings2 size={14} />
+            {preferences.theme === 'sans' ? 'Sans' : 'Serif'}
+          </button>
+        </div>
+      </div>
+
+      {displayOpen && (
+        <div
+          className="glass-panel rounded-2xl p-4 space-y-4"
+          data-testid="bible-display-panel"
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-200">Text display</h3>
+            <button
+              type="button"
+              onClick={() => setDisplayOpen(false)}
+              aria-label="Close display options"
+              className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-slate-400 hover:text-white"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-400">Text size</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => bumpFont(-1)}
+                disabled={textIndex === 0}
+                aria-label="Smaller text"
+                className="min-h-11 min-w-11 rounded-xl glass-button flex items-center justify-center disabled:opacity-30"
+              >
+                <Minus size={14} />
+              </button>
+              <span className="text-xs text-slate-300 w-14 text-center" data-testid="bible-font-scale">
+                {preferences.font_scale.toFixed(2)}x
+              </span>
+              <button
+                type="button"
+                onClick={() => bumpFont(1)}
+                disabled={textIndex === TEXT_STEPS.length - 1}
+                aria-label="Larger text"
+                className="min-h-11 min-w-11 rounded-xl glass-button flex items-center justify-center disabled:opacity-30"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-400">Line spacing</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onPreferences({ line_height: Math.max(1, preferences.line_height - 0.2) })}
+                disabled={preferences.line_height <= 1}
+                aria-label="Tighter line spacing"
+                className="min-h-11 min-w-11 rounded-xl glass-button flex items-center justify-center disabled:opacity-30"
+              >
+                <Minus size={14} />
+              </button>
+              <span className="text-xs text-slate-300 w-14 text-center">{preferences.line_height.toFixed(1)}</span>
+              <button
+                type="button"
+                onClick={() => onPreferences({ line_height: Math.min(3, preferences.line_height + 0.2) })}
+                disabled={preferences.line_height >= 3}
+                aria-label="Looser line spacing"
+                className="min-h-11 min-w-11 rounded-xl glass-button flex items-center justify-center disabled:opacity-30"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-400">Typeface</span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => onPreferences({ theme: 'serif' })}
+                aria-pressed={preferences.theme === 'serif'}
+                data-testid="bible-theme-serif"
+                className={`min-h-11 px-3 rounded-xl border text-sm font-serif ${
+                  preferences.theme === 'serif'
+                    ? 'border-amber-400/50 text-amber-200 bg-amber-500/10'
+                    : 'border-white/10 text-slate-300'
+                }`}
+              >
+                Serif
+              </button>
+              <button
+                type="button"
+                onClick={() => onPreferences({ theme: 'sans' })}
+                aria-pressed={preferences.theme === 'sans'}
+                data-testid="bible-theme-sans"
+                className={`min-h-11 px-3 rounded-xl border text-sm ${
+                  preferences.theme === 'sans'
+                    ? 'border-amber-400/50 text-amber-200 bg-amber-500/10'
+                    : 'border-white/10 text-slate-300'
+                }`}
+              >
+                Sans
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => nudge(-1)}
+          data-testid="bible-prev-chapter"
+          className="glass-button px-3 py-2.5 text-sm min-h-11 flex items-center justify-center gap-1.5"
+        >
+          <ChevronLeft size={15} /> Previous
+        </button>
+        <button
+          type="button"
+          onClick={() => nudge(1)}
+          data-testid="bible-next-chapter"
+          className="glass-button px-3 py-2.5 text-sm min-h-11 flex items-center justify-center gap-1.5"
+        >
+          Next <ChevronRight size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}

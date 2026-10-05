@@ -86,6 +86,87 @@ async def get_all_settings() -> dict[str, str]:
             return fetched
 
     return await get_cached_settings(_fetch, dict(_DEFAULTS))
+def _as_meta_dict(value):
+    """Normalise a RAG hit's metadata into a dict.
+
+    ``/rag/sync/files`` stringifies every metadata value that is not a scalar,
+    so a chapter number ingested as a JSON number comes back as ``"7"``, and a
+    nested object comes back as a stringified dict. Unquoting scalars is
+    safe and worth doing; a string that parses as a dict is worth parsing.
+    Anything else is left exactly as it is.
+    """
+    if isinstance(value, dict):
+        out = dict(value)
+    elif isinstance(value, str) and value.strip().startswith("{"):
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            return {}
+        out = parsed if isinstance(parsed, dict) else {}
+    else:
+        return {}
+
+    for key, val in list(out.items()):
+        if not isinstance(val, str):
+            continue
+        if val.startswith('"') and val.endswith('"') and len(val) > 1:
+            try:
+                decoded = json.loads(val)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(decoded, (int, float, bool)) or decoded is None:
+                out[key] = decoded
+            continue
+        # A locator that is really a number is stored as its str() form, which
+        # would otherwise render as "chapter 12" only by luck of formatting and
+        # would compare unequal to any numeric locator from another source.
+        if val.strip().lstrip("-").isdigit():
+            out[key] = int(val.strip())
+        elif _is_plain_float(val):
+            out[key] = float(val.strip())
+    return out
+
+
+def _is_plain_float(value: str) -> bool:
+    try:
+        float(value)
+    except (ValueError, TypeError):
+        return False
+    return "." in value
+
+
+def _citation_suffix(meta: dict) -> str:
+    """Render a hit's locator so the model can attribute what it quotes.
+
+    Without this, every non-lesson hit reaches the prompt as bare prose: the
+    locator was stored at ingest and retrievable over the API, then dropped
+    here, so two chunks from different chapters of the same book were
+    indistinguishable. Kept compact because it is charged against the same
+    character budget as the chunk itself.
+    """
+    if not isinstance(meta, dict):
+        return ""
+    if meta.get("is_metadata"):
+        return ""
+    doc = meta.get("title") or meta.get("name")
+    if isinstance(doc, str) and doc.startswith("File/Folder:"):
+        doc = None
+    loc = ""
+    for key in ("chapter", "page", "section", "location"):
+        val = meta.get(key)
+        if val not in (None, "", 0, "0"):
+            loc = f"{key} {val}"
+            break
+    if not loc:
+        idx = meta.get("chunk_index")
+        if idx not in (None, ""):
+            loc = f"chunk {idx}"
+    bits = [str(b) for b in (doc, loc) if b]
+    if not bits:
+        return ""
+    return f" (Source: {', '.join(bits)})"
+
+
 
 
 def _sync_main_constants(settings: dict[str, str]) -> None:
@@ -360,7 +441,7 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
                         coll_added = False
                         for h in hits:
                             content = h["content"]
-                            _meta = h.get("metadata") or {}
+                            _meta = _as_meta_dict(h.get("metadata"))
                             if len(content) > MAX_CHARS_PER_HIT:
                                 content = content[:MAX_CHARS_PER_HIT] + "... [TRUNCATED]"
 
@@ -398,9 +479,10 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
                                 _out = _meta.get("outcome", "")
                                 _out_s = f" [{_out}]" if _out else ""
                                 rag_context += f"- [{_lid}]{_out_s}{_conf_s} {_rule}\n"
+                                total_chars += len(content)
                             else:
-                                rag_context += f"- {content}\n"
-                            total_chars += len(content)
+                                rag_context += f"- {content}{_citation_suffix(_meta)}\n"
+                                total_chars += len(content) + len(_citation_suffix(_meta))
                             total_hits += 1
 
                             if total_hits >= MAX_TOTAL_HITS:

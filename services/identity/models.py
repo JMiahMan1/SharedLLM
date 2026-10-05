@@ -484,6 +484,13 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "embedding_model", "value": "nomic-ai/nomic-embed-text-v1.5", "description": "Embedding model for RAG"},
     {"key": "phrasebook_path", "value": "", "description": "Path to phrasebook file"},
     {"key": "huggingface_token", "value": "", "description": "Hugging Face Hub API Token (read-access, for private models and fast downloads)"},
+    {"key": "bible_svc_url", "value": "http://bible:8010", "description": "Bible service URL (reading app, verse of the day, devotionals)"},
+    {"key": "blb_base_url", "value": "", "description": "Blue Letter Bible base URL for study-tool deep links and devotionals. Left blank on purpose: unset, the reader says which setting to fix rather than guessing a host."},
+    {"key": "bible_devotional_dir", "value": "", "description": "Folder of local devotionals (<dir>/<work>/NNNN.md, one file per day of the year). Blank = run without local devotionals; the reader says so."},
+    {"key": "bible_api_key", "value": "", "description": "api.bible API key. Blank keeps the reader on the vendored public-domain translations; set it to unlock licensed ones. The API host is api.scripture.api.bible -- api.bible itself is the marketing site."},
+    {"key": "bible_import_dir", "value": "", "description": "Writable folder for uploaded Bible files and staged extractions. Admin > Bible says so when this is blank instead of importing quietly into a path nobody chose."},
+    {"key": "bible_provider_cache", "value": "", "description": "Long-term per-chapter provider cache. Kept beside the text it feeds so it survives a wiped database. Blank derives it from BIBLE_DATABASE_URL; set it to make the location explicit."},
+    {"key": "bible_provider_call_budget", "value": "", "description": "Most NEW provider requests one import may make. Blank = no ceiling. Only chapters that are not already cached count, so a warm cache costs nothing. A whole Bible is about 1,189 requests."},
 
     # --- DNS MAPPINGS (multi-IP fallback support) ---
     # Format: {"hostname": ["primary_ip", "fallback_ip", ...]}

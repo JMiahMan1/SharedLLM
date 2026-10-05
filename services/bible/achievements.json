@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "kind": "jarvis.bible.achievements",
+  "achievements": [
+    {
+      "id": "first_chapter",
+      "name": "In the Word",
+      "description": "Finish your first chapter of Scripture.",
+      "points": 5,
+      "rule": { "type": "chapters_total", "value": 1 }
+    },
+    {
+      "id": "chapters_25",
+      "name": "Steady Reader",
+      "description": "Read 25 chapters.",
+      "points": 10,
+      "rule": { "type": "chapters_total", "value": 25 }
+    },
+    {
+      "id": "chapters_100",
+      "name": "One Hundred Chapters",
+      "description": "Read 100 chapters.",
+      "points": 25,
+      "rule": { "type": "chapters_total", "value": 100 }
+    },
+    {
+      "id": "chapters_500",
+      "name": "Five Hundred Chapters",
+      "description": "Read 500 chapters.",
+      "points": 50,
+      "rule": { "type": "chapters_total", "value": 500 }
+    },
+    {
+      "id": "books_read_1",
+      "name": "Finished a Book",
+      "description": "Read every chapter of one book, start to finish.",
+      "points": 5,
+      "rule": { "type": "books_read", "value": 1 }
+    },
+    {
+      "id": "books_read_10",
+      "name": "Ten Books",
+      "description": "Read ten books all the way through.",
+      "points": 30,
+      "rule": { "type": "books_read", "value": 10 }
+    },
+    {
+      "id": "streak_3",
+      "name": "Three Days",
+      "description": "Read Scripture three days in a row.",
+      "points": 10,
+      "rule": { "type": "read_streak", "value": 3 }
+    },
+    {
+      "id": "streak_7",
+      "name": "A Full Week",
+      "description": "Read Scripture seven days in a row.",
+      "points": 25,
+      "rule": { "type": "read_streak", "value": 7 }
+    },
+    {
+      "id": "streak_30",
+      "name": "A Month of Reading",
+      "description": "Read Scripture thirty days in a row.",
+      "points": 75,
+      "rule": { "type": "read_streak", "value": 30 }
+    },
+    {
+      "id": "streak_100",
+      "name": "One Hundred Days",
+      "description": "Read Scripture one hundred days in a row.",
+      "points": 150,
+      "rule": { "type": "read_streak", "value": 100 }
+    },
+    {
+      "id": "plan_days_7",
+      "name": "Plan Keeper",
+      "description": "Complete seven days of a reading plan.",
+      "points": 15,
+      "rule": { "type": "plan_days_total", "value": 7 }
+    },
+    {
+      "id": "plan_days_30",
+      "name": "Thirty Days of Study",
+      "description": "Complete thirty days of a reading plan.",
+      "points": 40,
+      "rule": { "type": "plan_days_total", "value": 30 }
+    },
+    {
+      "id": "plan_completed_1",
+      "name": "Plan Complete",
+      "description": "Finish an entire reading plan.",
+      "points": 50,
+      "rule": { "type": "plan_completed", "value": 1 }
+    },
+    {
+      "id": "memory_mastered_1",
+      "name": "Hidden Away",
+      "description": "Memorize your first verse.",
+      "points": 15,
+      "rule": { "type": "memory_mastered", "value": 1 }
+    },
+    {
+      "id": "memory_mastered_10",
+      "name": "Treasury",
+      "description": "Memorize ten verses.",
+      "points": 50,
+      "rule": { "type": "memory_mastered", "value": 10 }
+    },
+    {
+      "id": "memory_mastered_25",
+      "name": "Storing Up Treasure",
+      "description": "Memorize twenty-five verses.",
+      "points": 100,
+      "rule": { "type": "memory_mastered", "value": 25 }
+    },
+    {
+      "id": "quiz_first",
+      "name": "First Quiz",
+      "description": "Finish your first quiz.",
+      "points": 5,
+      "rule": { "type": "quizzes_total", "value": 1 }
+    },
+    {
+      "id": "quizzes_25",
+      "name": "Well Studied",
+      "description": "Finish twenty-five quizzes.",
+      "points": 40,
+      "rule": { "type": "quizzes_total", "value": 25 }
+    },
+    {
+      "id": "quiz_perfect_1",
+      "name": "Perfect Score",
+      "description": "Answer every question in a quiz correctly.",
+      "points": 15,
+      "rule": { "type": "quiz_perfect", "value": 1 }
+    },
+    {
+      "id": "quiz_perfect_10",
+      "name": "Quiz Ace",
+      "description": "Score a perfect ten times.",
+      "points": 60,
+      "rule": { "type": "quiz_perfect", "value": 10 }
+    }
+  ]
+}

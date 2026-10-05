@@ -14,6 +14,7 @@ const SCOPES: Array<{ id: string; label: string; description: string }> = [
   { id: 'totals', label: 'Totals', description: 'Steps, workout distance, and driving' },
   { id: 'workouts', label: 'Workouts', description: 'Workout count and recent workouts' },
   { id: 'achievements', label: 'Achievements', description: 'Points and badges earned' },
+  { id: 'bible', label: 'Bible', description: 'Reading streaks, days read and Bible badges — never what was read or highlighted' },
 ];
 
 /**

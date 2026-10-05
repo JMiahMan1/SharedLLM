@@ -124,4 +124,26 @@ describe('ActivitySharingPanel', () => {
     const toast = (await import('react-hot-toast')).default;
     expect(toast.error).toHaveBeenCalledWith('Pick at least one thing to share');
   });
+
+  it('offers Bible reading as its own shareable thing', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ActivitySharingPanel />);
+    await screen.findByTestId('activity-sharing-panel');
+
+    await user.click(screen.getByTestId('sharing-toggle'));
+
+    const bibleScope = await screen.findByTestId('scope-bible');
+    // Off until chosen: adding a new kind of sharing must not silently start
+    // publishing reading history to the circle.
+    expect(bibleScope).not.toBeChecked();
+  });
+
+  it('never offers sharing what was read, only the reading totals', async () => {
+    renderWithProviders(<ActivitySharingPanel />);
+    await screen.findByTestId('activity-sharing-panel');
+
+    await userEvent.setup().click(screen.getByTestId('sharing-toggle'));
+
+    expect(await screen.findByText(/never what was read or highlighted/i)).toBeInTheDocument();
+  });
 });

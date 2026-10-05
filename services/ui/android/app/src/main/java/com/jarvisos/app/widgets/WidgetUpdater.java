@@ -39,6 +39,7 @@ public final class WidgetUpdater {
         request(context, DashboardWidget.class);
         request(context, ActionButtonWidget.class);
         request(context, HealthWidget.class);
+        request(context, VerseWidget.class);
     }
 
     public static void request(Context context, Class<?> cls) {
@@ -181,6 +182,19 @@ public final class WidgetUpdater {
         if (ids == null || ids.length == 0) return;
         onBackground(() -> {
             RemoteViews views = HealthWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
+    /** Verse-of-the-day home-screen widget (display only, one request). */
+    public static void pushVerse(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, VerseWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = VerseWidget.build(context);
             onMain(() -> {
                 for (int id : ids) mgr.updateAppWidget(id, views);
             });

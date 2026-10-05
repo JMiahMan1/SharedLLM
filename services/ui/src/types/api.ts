@@ -1388,3 +1388,466 @@ export interface TelemetryNotification {
   read: boolean;
 }
 
+
+// ── Bible (services/bible) ───────────────────────────────────────────────────
+
+export interface BibleVersionInfo {
+  code: string;
+  name: string;
+  language: string;
+  license_class: 'public_domain' | 'licensed' | string;
+  /** Who owns the text, for the copyrighted translations. */
+  rights_holder: string;
+  /** False when we know the translation but its text is not on this server. */
+  installed: boolean;
+  verse_count: number | null;
+  imported_at: string | null;
+  /** How many study Bibles explain this translation on this server. */
+  editions: number;
+  /**
+   * True for the translation the reader gets when nothing is chosen. The
+   * manifest marks exactly one, so the default is never whichever
+   * translation happens to sort first.
+   */
+  primary: boolean;
+  /**
+   * The online provider that can install this translation ("api.bible"), or
+   * empty when its text has to be supplied as a file.
+   */
+  provider: string;
+  /**
+   * Why an uninstalled translation is absent, or the do-not-redistribute
+   * warning for an installed copyrighted one. Empty when there is nothing
+   * to say.
+   */
+  note: string;
+}
+
+export interface BibleBookInfo {
+  osis: string;
+  name: string;
+  order: number;
+  chapters: number;
+}
+
+export interface BibleVerse {
+  version: string;
+  osis: string;
+  book_name: string;
+  chapter: number;
+  verse: number;
+  reference: string;
+  text: string;
+}
+
+export interface BiblePassageSpan {
+  book: string;
+  book_name: string;
+  chapter_start: number;
+  chapter_end: number;
+  verse_start: number;
+  verse_end: number | null;
+  whole_book: boolean;
+  display: string;
+}
+
+export interface BiblePassage {
+  version: string;
+  requested: string;
+  reference: string;
+  spans: BiblePassageSpan[];
+  verses: BibleVerse[];
+  count: number;
+}
+
+export interface BibleSearchHit {
+  osis: string;
+  book_name: string;
+  chapter: number;
+  verse: number;
+  reference: string;
+  text: string;
+}
+
+export interface BibleSearchResult {
+  version: string;
+  query: string;
+  results: BibleSearchHit[];
+  count: number;
+}
+
+export interface BibleVerseOfDay {
+  day: string;
+  day_of_year: number;
+  version: string;
+  scope: 'all' | 'ot' | 'nt';
+  osis: string;
+  book: string;
+  book_name: string;
+  chapter: number;
+  verse: number;
+  reference: string;
+  text: string;
+}
+
+/**
+ * A devotional day. `kind` is `link` for sources we deep-link to (Blue Letter
+ * Bible) and `text` for ones we serve ourselves; `skipped` names every source
+ * that could not answer and the setting to fix, so an empty devotional is never
+ * silent.
+ */
+export interface BibleDevotionalEntry {
+  source: string;
+  work: string;
+  title: string;
+  day_of_year: number;
+  kind: 'text' | 'link';
+  reference: string;
+  text: string;
+  url: string;
+}
+
+export interface BibleDevotionalSourceInfo {
+  code: string;
+  title: string;
+  priority: number;
+  works: string[];
+  configured: boolean;
+  reason: string;
+}
+
+export interface BibleDevotionalResponse {
+  day?: string;
+  day_of_year?: number;
+  source: string;
+  entry: BibleDevotionalEntry | null;
+  skipped: Array<{ source: string; reason: string }>;
+  reason?: string;
+  stored?: boolean;
+}
+
+export interface BibleMark {
+  id: number;
+  version_code: string;
+  osis: string;
+  book_name: string;
+  chapter: number;
+  verse_start: number;
+  verse_end: number | null;
+  kind: 'highlight' | 'bookmark';
+  color: string;
+  note_path: string;
+  note_preview: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface BiblePosition {
+  book: string;
+  chapter: number;
+  verse: number;
+}
+
+export interface BiblePreferences {
+  default_version: string;
+  /** Which study Bible explains the text. Empty until one is chosen. */
+  default_edition: string;
+  /**
+   * Whether study panels may include commentary written for a different
+   * translation. Off by default; the reader opts in per session or remembers it.
+   */
+  cross_version_notes: boolean;
+  font_scale: number;
+  line_height: number;
+  theme: 'serif' | 'sans';
+  read_aloud_voice: string;
+  split_view: 'compare' | 'parallel';
+}
+
+export interface BibleStateResponse {
+  username: string;
+  position: BiblePosition | null;
+  preferences: BiblePreferences;
+}
+
+export interface BibleStreaks {
+  username: string;
+  read_streak_current: number;
+  read_streak_longest: number;
+  open_streak_current: number;
+  open_streak_longest: number;
+  days_read: number;
+}
+
+export interface BibleStats extends BibleStreaks {
+  metrics: Record<string, number>;
+  days_opened: number;
+  marks: number;
+  highlights: number;
+  bookmarks: number;
+  position: BiblePosition | null;
+  last_read_at: string | null;
+  window: Record<string, number>;
+}
+
+export interface BibleEarnedAchievement {
+  id: string;
+  name: string;
+  description: string;
+  points: number;
+  earned_on: string;
+}
+
+export interface BibleNextAchievement {
+  id: string;
+  name: string;
+  description: string;
+  points: number;
+  current: number;
+  target: number;
+  remaining: number;
+  percent: number;
+  unit: string;
+}
+
+export interface BibleAchievementsResponse {
+  username: string;
+  points: number;
+  newly_earned: BibleEarnedAchievement[];
+  earned: BibleEarnedAchievement[];
+  next_up: BibleNextAchievement[];
+  stars: { granted: number; status: string };
+  /** Rules whose backing feature lands in a later phase; they read zero today. */
+  pending_rules: string[];
+  announced: { posted: number; status: string };
+}
+
+export interface BibleActivitySummary {
+  username: string;
+  days_read: number;
+  chapters_read: number;
+  books_read: number;
+  read_streak_current: number;
+  read_streak_longest: number;
+  achievements: Array<{ id: string; name: string }>;
+  points: number;
+}
+
+export interface BibleActivityFeed {
+  entries: BibleActivitySummary[];
+  members: string[];
+  count?: number;
+  note?: string;
+}
+
+export interface BibleBlbLink {
+  ref: string;
+  url: string;
+  tool: string | null;
+}
+
+/**
+ * Study apparatus for a passage, kept out of the verse text itself.
+ *
+ * A study Bible carries commentary, footnotes and introductions next to the
+ * scripture; we store them apart and load them only when asked, so the reading
+ * surface stays plain. `ordinal` keeps several notes of one kind in the order
+ * the publisher put them.
+ */
+export interface BibleStudyNote {
+  osis: string;
+  book: string;
+  chapter: number;
+  verse: number;
+  reference: string;
+  kind: BibleStudyNoteKind;
+  ordinal: number;
+  body: string;
+  source: string;
+  /** Which translation this commentary was written for. */
+  version: string;
+  version_name: string;
+  /** Which study Bible it came from. */
+  edition: string;
+  edition_name: string;
+}
+
+export type BibleStudyNoteKind = 'commentary' | 'footnote' | 'introduction' | 'heading';
+
+/**
+ * One study Bible on top of an installed translation. A translation can have
+ * several: the Nelson study Bible and the MacArthur study Bible are both NKJV,
+ * and their commentary is not interchangeable.
+ */
+export interface BibleEditionInfo {
+  code: string;
+  version: string;
+  name: string;
+  publisher: string;
+  language: string;
+  license_class: 'public_domain' | 'licensed' | string;
+  rights_holder: string;
+  /** False when we know the study Bible but its notes are not on this server. */
+  installed: boolean;
+  note_count: number;
+  note_kinds: BibleStudyNoteKind[];
+  /** How to install it, or why it is absent. */
+  note: string;
+}
+
+export interface BibleOtherTranslation {
+  version: string;
+  version_name: string;
+  edition: string;
+  edition_name: string;
+  note_count: number;
+}
+
+export interface BibleEditionsResponse {
+  version: string;
+  default: string;
+  editions: BibleEditionInfo[];
+  /** Translations other than this one that carry study notes. */
+  other_translations: BibleOtherTranslation[];
+}
+
+export interface BibleStudyNotesResponse {
+  version: string;
+  /** The study Bible that was used, resolved even when the client sent none. */
+  edition: string;
+  edition_name: string;
+  requested: string | null;
+  reference: string;
+  kinds: BibleStudyNoteKind[];
+  /** What this installed translation carries, even if none of it is for this passage. */
+  available_kinds: Partial<Record<BibleStudyNoteKind, number>>;
+  /** Whether notes from other translations were included. */
+  cross_version: boolean;
+  /** Translations other than this one that carry notes, so the toggle can say what it would add. */
+  other_translations: BibleOtherTranslation[];
+  /** Every installed study Bible for this translation, so the reader can switch. */
+  editions: BibleEditionInfo[];
+  notes: BibleStudyNote[];
+  count: number;
+  /** Why an empty list is empty, rather than leaving the panel blank. */
+  note?: string | null;
+}
+
+/** One request fills the dashboard widget and the Android home screen. */
+export interface BibleDailyResponse {
+  day: string;
+  verse_of_day: BibleVerseOfDay | { error: string };
+  devotional: BibleDevotionalResponse;
+  sources: BibleDevotionalSourceInfo[];
+  streaks?: {
+    read_streak_current: number;
+    read_streak_longest: number;
+    open_streak_current: number;
+    days_read: number;
+    chapters_read: number;
+  };
+  position?: BiblePosition | null;
+}
+
+// ── Reading aloud ───────────────────────────────────────────────────────────
+
+export interface BibleVoicesResponse {
+  voices: string[];
+  count: number;
+}
+
+export interface BibleNarration {
+  version: string;
+  reference: string;
+  /** The voice actually used, "default" when the engine picked one. */
+  voice: string;
+  verse_count: number;
+  /** True when this passage was already narrated today or earlier. */
+  cached: boolean;
+  mime_type: string;
+  length_bytes: number;
+  /** Base64 WAV, played through a data: URL so no audio file is exposed. */
+  audio_base64: string;
+}
+
+// ── Bible imports (Admin › Bible) ───────────────────────────────────────────
+
+export type BibleImportKind = 'json' | 'pdf' | 'epub';
+
+export interface BibleImportProviderInfo {
+  code: string;
+  title: string;
+  base_url: string;
+  /** The setting that has to hold a value before this provider can be used. */
+  requires: string;
+  configured: boolean;
+  /** Why it cannot be used, naming the setting to fix. Empty when configured. */
+  reason: string;
+  note: string;
+  translations?: BibleRemoteTranslation[];
+}
+
+export interface BibleRemoteTranslation {
+  id: string;
+  name: string;
+  language: string;
+  license_class: string;
+  rights_holder: string;
+  note: string;
+}
+
+export interface BibleImportRun {
+  source: string;
+  kind: string;
+  code: string;
+  name: string;
+  provider: string;
+  provider_id: string;
+  status: 'succeeded' | 'failed' | string;
+  message: string;
+  verse_count: number | null;
+  book_count: number | null;
+  note_count: number | null;
+  log: string[];
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface BibleImportsResponse {
+  /** The translation a reader gets with no choice made. */
+  default_version: string;
+  /** The translation the manifest marks primary, even if it is not installed yet. */
+  primary: string;
+  versions: BibleVersionInfo[];
+  editions: BibleEditionInfo[];
+  providers: BibleImportProviderInfo[];
+  kinds: BibleImportKind[];
+  /** Where uploads and fetched translations are staged; empty when unset. */
+  import_dir: string;
+  /** Why nothing can be installed yet, when the directory is not configured. */
+  import_dir_error: string;
+  runs: BibleImportRun[];
+}
+
+/** What installing a translation online would cost, asked before spending anything. */
+export interface BibleProviderEstimate {
+  translation_id: string;
+  name: string;
+  books: number;
+  /** Every chapter this translation has. */
+  chapters: number;
+  /** Of those, how many are already on disk and will not be requested again. */
+  cached: number;
+  /** Of those, how many would still be requested from the provider. */
+  remaining: number;
+  calls: number;
+  cache_directory: string;
+  /** The configured ceiling on new requests for one run; null when there is none. */
+  budget: number | null;
+  /** Whether this install fits inside the budget. */
+  within_budget: boolean;
+  /** False when no cache directory could be used, so every run refetches. */
+  cache_enabled: boolean;
+  /** Why caching is off, when it is. */
+  cache_warning?: string;
+}

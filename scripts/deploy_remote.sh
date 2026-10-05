@@ -78,10 +78,6 @@ SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout
 wait_for_build
 
 # Sync non-git files to remote to ensure config match
-#
-# .env is EXCLUDED on purpose. It is untracked and gitignored, so the host's
-# copy is the only record of anything set on the host, and `cat >` truncates
-# rather than merges. Copy it by hand when you actually mean to change it.
 for NON_GIT_FILE in "prompts/"; do
     if [ -e "$NON_GIT_FILE" ]; then
         echo "Syncing $NON_GIT_FILE to remote..."
@@ -94,8 +90,29 @@ for NON_GIT_FILE in "prompts/"; do
     fi
 done
 
+# .env is SEED-ONLY: services read it once at boot to learn their settings, and
+# from then on Identity's GlobalSetting rows are the runtime source of truth
+# (editable in Admin > Settings). It is still synced, because a fresh host has
+# never seen it and INTERNAL_SECRET, FERNET_KEY, the network URLs and PUID/PGID
+# have no other source.
+#
+# The merge is strictly additive. A key the host already defines is left exactly
+# as it is: that copy is the only record of anything deliberately set there, and
+# a deploy must not revert it. Only missing keys are appended, verbatim.
 if [ -e ".env" ]; then
-    echo "[SKIP] .env not synced -- host settings are preserved. Copy it by hand if it must change."
+    echo "Merging .env into the host copy (existing host values are preserved)..."
+    MERGE_SCRIPT="scripts/merge_env.py"
+    REMOTE_MERGE="'$DIR'/.tmp/merge_env.py"
+    ssh $SSH_OPTS "$HOST" "mkdir -p '$DIR/.tmp'"
+    ssh $SSH_OPTS "$HOST" "cat > $REMOTE_MERGE" < "$MERGE_SCRIPT"
+    if ! ssh $SSH_OPTS "$HOST" "cd '$DIR' && python3 $REMOTE_MERGE '$DIR/.env'" < ".env"; then
+        echo "[FAIL] Could not merge .env on the host. The host's copy was left alone."
+        echo "       Everything set there is still intact; fix the merge and redeploy."
+        exit 1
+    fi
+    ssh $SSH_OPTS "$HOST" "rm -f $REMOTE_MERGE" || true
+else
+    echo "[WARN] No local .env to merge. The host keeps whatever it already has."
 fi
 
 echo "Deploying to $HOST:$DIR"

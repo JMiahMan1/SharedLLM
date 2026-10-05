@@ -10,6 +10,7 @@
 - **docs/AUTOMATION_SERVICE.md** — background tasks
 - **docs/CONTROL_PLANE_SERVICE.md** — Docker orchestration
 - **docs/GEO_SERVICE.md** — family location (wraps Home Assistant)
+- **docs/BIBLE_STUDY.md** — Bible study feature (blb.org study base, plans, streaks, achievements, quizzes, memorization, games, Jarvis assist)
 - **docs/ACHIEVEMENTS.md** — goals, achievements, opt-in sharing, Skylight bonuses
 - **docs/HEALTH_STEPS.md** — pedometer capture, device ledger, fusion, widgets
 - **docs/LOGGING_SERVICE.md** — observability
