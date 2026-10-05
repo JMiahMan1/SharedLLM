@@ -2277,21 +2277,25 @@ async def execute_media_state_sync(req: MediaStateSyncRequest):
     return await MediaPlaybackService.sync_local(req)
 
 
-async def _resolve_mass_ha_creds(user_id: str):
+_MASS_HA_CREDS_TTL_SECONDS = 60.0
+_MASS_HA_CREDS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_MASS_HA_CREDS_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _clear_mass_ha_creds_cache() -> None:
+    _MASS_HA_CREDS_CACHE.clear()
+
+
+async def _load_mass_ha_creds(user_id: str) -> dict[str, Any]:
     """Resolve a user's Music Assistant / Home Assistant credentials.
 
     Either pair is enough: MA's REST API when `mass_url`/`mass_token` are set,
     HA's `music_assistant.*` services when `ha_url`/`ha_token` are. The MA config
     entry id (needed by the HA path) is discovered from HA when it is missing.
 
-    Raises ServiceNotConfiguredError when no user was named or the user has
-    neither pair — callers surface that instead of borrowing someone else's.
+    Raises ServiceNotConfiguredError when the user has neither pair — callers
+    surface that instead of borrowing someone else's.
     """
-    if not user_id:
-        raise ServiceNotConfiguredError(
-            "No user was supplied, so no Music Assistant credentials can be resolved. "
-            "Pass user_id (the authenticated username)."
-        )
     creds = await resolve_internal_user(rag_user=user_id)
     if not creds:
         raise ServiceNotConfiguredError(
@@ -2315,6 +2319,35 @@ async def _resolve_mass_ha_creds(user_id: str):
             creds["mass_config_entry_id"] = entry_id
             log.info(f"[mass_ha] Discovered MA config entry: {entry_id}")
     return creds
+
+
+async def _resolve_mass_ha_creds(user_id: str) -> dict[str, Any]:
+    """Resolve MA/HA credentials for a user, cached per user for a minute.
+
+    The MA widget asks for playlists, recent items, browse pages and search in
+    quick succession; without a cache each call repeated the Identity resolve
+    and, when HA is the only configured pair, an HA config-entry discovery.
+    The 60s TTL collapses that to one round of upstream lookups while credential
+    changes still take effect within a minute.
+    """
+    if not user_id:
+        raise ServiceNotConfiguredError(
+            "No user was supplied, so no Music Assistant credentials can be resolved. "
+            "Pass user_id (the authenticated username)."
+        )
+    now = time.monotonic()
+    hit = _MASS_HA_CREDS_CACHE.get(user_id)
+    if hit and hit[0] > now:
+        return dict(hit[1])
+    lock = _MASS_HA_CREDS_LOCKS.setdefault(user_id, asyncio.Lock())
+    async with lock:
+        now = time.monotonic()
+        hit = _MASS_HA_CREDS_CACHE.get(user_id)
+        if hit and hit[0] > now:
+            return dict(hit[1])
+        creds = await _load_mass_ha_creds(user_id)
+        _MASS_HA_CREDS_CACHE[user_id] = (now + _MASS_HA_CREDS_TTL_SECONDS, dict(creds))
+        return creds
 
 
 async def _get_ma_playlists_via_ha(ha_url: str, ha_token: str, mass_entry_id: str = "", limit: int = 50) -> list[dict[str, Any]]:

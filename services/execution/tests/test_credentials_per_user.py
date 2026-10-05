@@ -17,6 +17,15 @@ from services.execution.main import app
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _clear_mass_ha_creds_cache():
+    import services.execution.main as exec_main
+
+    exec_main._clear_mass_ha_creds_cache()
+    yield
+    exec_main._clear_mass_ha_creds_cache()
+
+
 def _secret() -> str:
     return os.environ["INTERNAL_SECRET"]
 
