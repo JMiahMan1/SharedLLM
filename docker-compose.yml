@@ -527,6 +527,50 @@ services:
     networks:
       - sharedllm
 
+  bible:
+    image: ghcr.io/jmiahman1/sharedllm-bible:latest
+    build:
+      context: .
+      dockerfile: services/bible/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_bible
+    restart: unless-stopped
+    mem_limit: 512m
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - NETWORK_MODE=bridge
+      - BIBLE_DATABASE_URL=${BIBLE_DATABASE_URL:-sqlite:////data/bible.db}
+      - BLB_BASE_URL=${BLB_BASE_URL}
+      - BIBLE_DEVOTIONAL_DIR=${BIBLE_DEVOTIONAL_DIR}
+      - BIBLE_API_KEY=${BIBLE_API_KEY}
+      - BIBLE_PROVIDER_CACHE=${BIBLE_PROVIDER_CACHE}
+      - BIBLE_PROVIDER_CALL_BUDGET=${BIBLE_PROVIDER_CALL_BUDGET}
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
+      - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
+      - GEO_SVC_URL=${BRIDGE_GEO_SVC_URL:-http://geo:8009}
+      - REDIS_URL=${BRIDGE_REDIS_URL}
+      - GATEWAY_INTERNAL_URL=http://gateway:11435
+      - TZ=America/Phoenix
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./data/bible:/data
+    depends_on:
+      - redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+      - 172.26.0.254
+    networks:
+      - sharedllm
+
   geo:
     image: ghcr.io/jmiahman1/sharedllm-geo:latest
     build:

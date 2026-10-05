@@ -10,7 +10,8 @@ export type WidgetKey =
   | 'workspaces'
   | 'health_activity'
   | 'climate'
-  | 'presence';
+  | 'presence'
+  | 'bible_daily';
 
 export type WidgetVisibility = 'visible' | 'hidden' | 'removed';
 export type WidgetSize = 'small' | 'medium' | 'wide' | 'tall';

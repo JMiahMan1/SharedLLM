@@ -73,6 +73,10 @@
     reverse_proxy geo:8009
 }
 
+:8010 {
+    reverse_proxy bible:8010
+}
+
 # Standard Routes
 :80 {
     log {

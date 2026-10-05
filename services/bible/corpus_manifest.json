@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "kind": "jarvis.bible.corpus",
+  "versions": [
+    {
+      "code": "asv",
+      "name": "American Standard Version",
+      "language": "en",
+      "license_class": "public_domain",
+      "rights_holder": "",
+      "source_url": "https://raw.githubusercontent.com/thiagobodruk/bible/master/json/en_asv.json",
+      "sha256": "0ea94daeb94258a85c443f4f3a00990d58b8646c8e813153d3b96b0df81df009"
+    },
+    {
+      "code": "esv",
+      "name": "English Standard Version",
+      "language": "en",
+      "license_class": "licensed",
+      "rights_holder": "Crossway",
+      "provider": "api.bible",
+      "source_url": "",
+      "sha256": ""
+    },
+    {
+      "code": "kjv",
+      "name": "King James Version",
+      "language": "en",
+      "license_class": "public_domain",
+      "rights_holder": "",
+      "source_url": "https://raw.githubusercontent.com/thiagobodruk/bible/master/json/en_kjv.json",
+      "sha256": "fc99486e7d3b86e4ad1f0f424b36ab41b4ec4db858a776bd13aee1b7910f136b"
+    },
+    {
+      "code": "nkjv",
+      "name": "New King James Version",
+      "language": "en",
+      "license_class": "licensed",
+      "rights_holder": "Thomas Nelson",
+      "primary": true,
+      "source_url": "",
+      "sha256": ""
+    },
+    {
+      "code": "niv",
+      "name": "New International Version",
+      "language": "en",
+      "license_class": "licensed",
+      "rights_holder": "Biblica",
+      "provider": "api.bible",
+      "source_url": "",
+      "sha256": ""
+    },
+    {
+      "code": "nlt",
+      "name": "New Living Translation",
+      "language": "en",
+      "license_class": "licensed",
+      "rights_holder": "Tyndale House",
+      "provider": "api.bible",
+      "source_url": "",
+      "sha256": ""
+    },
+    {
+      "code": "web",
+      "name": "World English Bible",
+      "language": "en",
+      "license_class": "public_domain",
+      "rights_holder": "",
+      "source_url": "https://raw.githubusercontent.com/thiagobodruk/bible/master/json/en_web.json",
+      "sha256": "1e53bb1cb8c8b51d3b68fd3116e0b0ec96f1368c9b89954f7945e138fa8f0e10"
+    }
+  ],
+  "editions": [
+    {
+      "code": "nkjv-tmn",
+      "version": "nkjv",
+      "name": "NKJV Study Bible",
+      "publisher": "Thomas Nelson",
+      "language": "en",
+      "license_class": "licensed",
+      "rights_holder": "Thomas Nelson",
+      "source_url": "",
+      "sha256": ""
+    },
+    {
+      "code": "nkjv-macarthur",
+      "version": "nkjv",
+      "name": "NKJV, The MacArthur Study Bible",
+      "publisher": "MacArthur Bible Ministries",
+      "language": "en",
+      "license_class": "licensed",
+      "rights_holder": "MacArthur Bible Ministries",
+      "source_url": "",
+      "sha256": ""
+    },
+    {
+      "code": "esv-tg",
+      "version": "esv",
+      "name": "ESV, The Gospel Coalition Study Bible",
+      "publisher": "Crossway",
+      "language": "en",
+      "license_class": "licensed",
+      "rights_holder": "Crossway",
+      "source_url": "",
+      "sha256": ""
+    },
+    {
+      "code": "niv-life",
+      "version": "niv",
+      "name": "NIV, Life Application Study Bible",
+      "publisher": "Biblica / Zondervan",
+      "language": "en",
+      "license_class": "licensed",
+      "rights_holder": "Biblica",
+      "source_url": "",
+      "sha256": ""
+    },
+    {
+      "code": "nlt-tyndale",
+      "version": "nlt",
+      "name": "NLT, The Tyndale House Study Bible",
+      "publisher": "Tyndale House",
+      "language": "en",
+      "license_class": "licensed",
+      "rights_holder": "Tyndale House",
+      "source_url": "",
+      "sha256": ""
+    }
+  ],
+  "providers": [
+    {
+      "code": "api.bible",
+      "title": "api.bible online translations",
+"base_url": "https://api.scripture.api.bible",
+    "requires": "bible_api_key",
+    "note": "Copyrighted translations are not stored on this server while they are served by api.bible; the text is fetched on demand at import time and cached like any other translation. The API host is api.scripture.api.bible -- api.bible itself is the marketing site."
+    }
+  ]
+}

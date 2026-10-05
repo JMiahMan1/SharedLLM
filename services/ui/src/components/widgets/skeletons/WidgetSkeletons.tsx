@@ -219,6 +219,24 @@ export const PresenceSkeleton: React.FC = () => (
   </div>
 );
 
+export const BibleDailySkeleton: React.FC = () => (
+  <div className="glass-panel overflow-hidden p-5 flex flex-col h-full w-full relative">
+    <SkeletonHeader title="Verse of the Day" icon="📖" />
+    <div className="flex-1 flex flex-col justify-between min-h-0">
+      <div className="space-y-2.5">
+        <div className="h-3.5 w-24 bg-white/5 rounded animate-pulse" />
+        <div className="h-3 w-full bg-white/5 rounded animate-pulse" />
+        <div className="h-3 w-11/12 bg-white/5 rounded animate-pulse" />
+        <div className="h-3 w-4/5 bg-white/5 rounded animate-pulse" />
+      </div>
+      <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
+        <div className="h-2.5 w-16 bg-white/5 rounded animate-pulse" />
+        <div className="h-6 w-20 bg-white/5 rounded-lg animate-pulse" />
+      </div>
+    </div>
+  </div>
+);
+
 const skeletonMap: Record<WidgetKey, React.ComponentType> = {
   energy_insights: EnergyInsightsSkeleton,
   ambient_timer: AmbientTimerSkeleton,
@@ -232,6 +250,7 @@ const skeletonMap: Record<WidgetKey, React.ComponentType> = {
   health_activity: HealthActivitySkeleton,
   climate: ClimateSkeleton,
   presence: PresenceSkeleton,
+  bible_daily: BibleDailySkeleton,
 };
 
 interface WidgetSkeletonSelectorProps {

@@ -2765,7 +2765,7 @@ def update_user_theme(
 
 # ─── Per-user opt-in activity sharing (private by default) ───────────────────
 
-ACTIVITY_SHARE_SCOPES = {"totals", "workouts", "achievements"}
+ACTIVITY_SHARE_SCOPES = {"totals", "workouts", "achievements", "bible"}
 ACTIVITY_AUDIENCES = {"circle", "users"}
 
 

@@ -9,7 +9,7 @@ import type {
   WidgetInstance,
 } from '../types/widget';
 import { api } from '../services/api';
-import { Activity, CalendarDays, Compass, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap } from 'lucide-react';
+import { Activity, BookOpen, CalendarDays, Compass, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap } from 'lucide-react';
 
 export interface WidgetStateItem {
   id: string;
@@ -32,6 +32,7 @@ const defaultSizes: Record<WidgetKey, WidgetSize> = {
   health_activity: 'medium',
   climate: 'medium',
   presence: 'medium',
+  bible_daily: 'medium',
 };
 
 function createDefaultSettings(key: WidgetKey, order: number): UserWidgetSettings {
@@ -67,6 +68,10 @@ export const defaultWidgetDefs: WidgetDef[] = [
   { key: 'health_activity', label: 'Health', icon: Activity, minSize: 'small', defaultSize: 'medium' },
   { key: 'climate', label: 'Climate', icon: Thermometer, minSize: 'small', defaultSize: 'medium' },
   { key: 'presence', label: 'Family Presence', icon: Compass, minSize: 'small', defaultSize: 'medium' },
+  // The reading app's front door. `small` is enough for the verse text, and the
+  // whole widget is one tap into the chapter, so it is not hidden by default:
+  // a dashboard that does not show today's Scripture is not a family dashboard.
+  { key: 'bible_daily', label: 'Verse of the Day', icon: BookOpen, minSize: 'small', defaultSize: 'medium' },
 ];
 
 /**

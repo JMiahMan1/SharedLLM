@@ -1654,12 +1654,18 @@ async def ingest_redis(payload: dict):
 
 
 @app.get("/rag/indexed-paths", dependencies=[Depends(require_internal)])
-async def get_indexed_paths(user_id: str = "default"):
+async def get_indexed_paths(user_id: str = "default", collection_name: str = "nextcloud_files"):
+    """Distinct source paths currently indexed for a user in a collection.
+
+    ``collection_name`` is a parameter because the storage indexer needs this to
+    compute which of its own files disappeared upstream. Hardcoding one
+    collection made that impossible for any future provider.
+    """
     user_id = user_id.lower()
     try:
         rows = _conn().execute(
-            "SELECT metadata FROM rag_items WHERE collection_name = 'nextcloud_files' AND user_id = ?",
-            [user_id],
+            "SELECT metadata FROM rag_items WHERE collection_name = ? AND user_id = ?",
+            [collection_name, user_id],
         ).fetchall()
         paths = {json.loads(r["metadata"]).get("path") for r in rows if r["metadata"]}
         paths.discard(None)

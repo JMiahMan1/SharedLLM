@@ -12,6 +12,7 @@ import os
 
 # Import runtime-resolved values from services.config (updated by resolve_runtime_config)
 from services.config import (
+    BIBLE_SVC_URL,
     CONTROL_PLANE_URL,
     EXECUTION_SVC_URL,
     GEO_SVC_URL,
@@ -58,6 +59,7 @@ ALPACA_WEB_URL = os.getenv("ALPACA_WEB_URL", "http://jeremiah-home-desktop.local
 IDENTITY_SVC = IDENTITY_SVC_URL
 EXECUTION_SVC = EXECUTION_SVC_URL
 GEO_SVC = GEO_SVC_URL
+BIBLE_SVC = BIBLE_SVC_URL
 RAG_SVC = RAG_SVC_URL
 STORAGE_SVC = STORAGE_SVC_URL
 LOGGING_SVC = LOGGING_SVC_URL

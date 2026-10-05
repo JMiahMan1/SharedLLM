@@ -116,6 +116,35 @@ import type {
   WorkspaceSyncDirection,
   WorkspaceSyncResponse,
   WorkspaceUploadResponse,
+  BibleVersionInfo,
+  BibleBookInfo,
+  BiblePassage,
+  BibleSearchResult,
+  BibleVerseOfDay,
+  BibleDevotionalSourceInfo,
+  BibleDevotionalResponse,
+  BibleMark,
+  BiblePosition,
+  BiblePreferences,
+  BibleStateResponse,
+  BibleStreaks,
+  BibleStats,
+  BibleAchievementsResponse,
+  BibleActivitySummary,
+  BibleActivityFeed,
+  BibleEditionsResponse,
+  BibleBlbLink,
+  BibleStudyNoteKind,
+  BibleStudyNotesResponse,
+  BibleDailyResponse,
+  BibleVoicesResponse,
+  BibleNarration,
+  BibleImportKind,
+  BibleImportRun,
+  BibleImportsResponse,
+  BibleImportProviderInfo,
+  BibleRemoteTranslation,
+  BibleProviderEstimate,
 } from '../types/api';
 
 // Re-export domain types so consumers can import them from the api module.
@@ -2649,6 +2678,210 @@ export const api = {
 
   async restartService(serviceName: string): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post(`/api/admin/services/${serviceName}/restart`);
+    return resp.data;
+  },
+
+  // Bible (reading app)
+  //
+  // No method here takes a username. The gateway always scopes reading state to
+  // the caller, so a client that could name someone else would either leak
+  // their position or be silently ignored -- neither is worth the API surface.
+  // The one cross-user read, `getBibleActivitySummary`, is consent-gated
+  // server-side and exists so the family view can ask.
+  async getBibleDaily(): Promise<BibleDailyResponse> {
+    const resp = await apiClient.get('/api/bible/daily');
+    return resp.data;
+  },
+
+  async getBibleVersions(): Promise<{ versions: BibleVersionInfo[] }> {
+    const resp = await apiClient.get('/api/bible/versions');
+    return resp.data;
+  },
+
+  async getBibleBooks(version?: string): Promise<{ version: string; books: BibleBookInfo[] }> {
+    const resp = await apiClient.get('/api/bible/books', { params: { version } });
+    return resp.data;
+  },
+
+  async getBiblePassage(ref: string, version?: string): Promise<BiblePassage> {
+    const resp = await apiClient.get('/api/bible/passages', { params: { ref, version } });
+    return resp.data;
+  },
+
+  async searchBible(q: string, options: { version?: string; book?: string; limit?: number } = {}): Promise<BibleSearchResult> {
+    const resp = await apiClient.get('/api/bible/search', { params: { q, ...options } });
+    return resp.data;
+  },
+
+  async getBibleVerseOfDay(params: { day?: string; version?: string; scope?: 'all' | 'ot' | 'nt' } = {}): Promise<BibleVerseOfDay> {
+    const resp = await apiClient.get('/api/bible/verse-of-day', { params });
+    return resp.data;
+  },
+
+  async getBibleDevotional(params: { day?: string; work?: string } = {}): Promise<BibleDevotionalResponse> {
+    const resp = await apiClient.get('/api/bible/devotional', { params });
+    return resp.data;
+  },
+
+  async getBibleDevotionalSources(): Promise<{ sources: BibleDevotionalSourceInfo[] }> {
+    const resp = await apiClient.get('/api/bible/devotional/sources');
+    return resp.data;
+  },
+
+  async getBibleMarks(osis?: string): Promise<{ marks: BibleMark[] }> {
+    const resp = await apiClient.get('/api/bible/marks', { params: { osis } });
+    return resp.data;
+  },
+
+  async putBibleMark(payload: {
+    ref: string;
+    kind?: 'highlight' | 'bookmark';
+    color?: string;
+    version_code?: string;
+    note_path?: string;
+    note_preview?: string;
+  }): Promise<{ mark: BibleMark }> {
+    const resp = await apiClient.put('/api/bible/marks', payload);
+    return resp.data;
+  },
+
+  async deleteBibleMark(markId: number): Promise<{ deleted: number }> {
+    const resp = await apiClient.delete(`/api/bible/marks/${markId}`);
+    return resp.data;
+  },
+
+  async getBibleState(): Promise<BibleStateResponse> {
+    const resp = await apiClient.get('/api/bible/state');
+    return resp.data;
+  },
+
+  async putBibleState(payload: Partial<BiblePosition> & Partial<BiblePreferences>): Promise<BibleStateResponse> {
+    const resp = await apiClient.put('/api/bible/state', payload);
+    return resp.data;
+  },
+
+  async recordBibleEvent(kind: string, ref = '', value = 0): Promise<{ ok: boolean }> {
+    const resp = await apiClient.post('/api/bible/events', { kind, ref, value });
+    return resp.data;
+  },
+
+  async getBibleStats(days = 30): Promise<BibleStats> {
+    const resp = await apiClient.get('/api/bible/stats', { params: { days } });
+    return resp.data;
+  },
+
+  async getBibleStreaks(): Promise<BibleStreaks> {
+    const resp = await apiClient.get('/api/bible/streaks');
+    return resp.data;
+  },
+
+  async getBibleAchievements(): Promise<BibleAchievementsResponse> {
+    const resp = await apiClient.get('/api/bible/achievements');
+    return resp.data;
+  },
+
+  async getBibleActivitySummary(userId: string): Promise<BibleActivitySummary> {
+    const resp = await apiClient.get('/api/bible/activity/summary', { params: { user_id: userId } });
+    return resp.data;
+  },
+
+  async getBibleActivityFeed(limit = 20): Promise<BibleActivityFeed> {
+    const resp = await apiClient.get('/api/bible/activity/feed', { params: { limit } });
+    return resp.data;
+  },
+
+  async getBlbLink(ref: string, tool?: string): Promise<BibleBlbLink> {
+    const resp = await apiClient.get('/api/bible/blb/link', { params: { ref, tool } });
+    return resp.data;
+  },
+
+  async getBibleEditions(version?: string): Promise<BibleEditionsResponse> {
+    const resp = await apiClient.get('/api/bible/editions', {
+      params: { version },
+    });
+    return resp.data;
+  },
+
+  async getBibleStudyNotes(
+    ref: string,
+    version?: string,
+    opts: {
+      edition?: string;
+      kind?: BibleStudyNoteKind[];
+      crossVersion?: boolean;
+    } = {},
+  ): Promise<BibleStudyNotesResponse> {
+    const resp = await apiClient.get('/api/bible/study/notes', {
+      params: {
+        ref,
+        version,
+        edition: opts.edition,
+        kind: opts.kind?.join(','),
+        cross_version: opts.crossVersion ? true : undefined,
+      },
+    });
+    return resp.data;
+  },
+
+  async getBibleVoices(): Promise<BibleVoicesResponse> {
+    const resp = await apiClient.get('/api/bible/voices');
+    return resp.data;
+  },
+
+  async getBibleNarration(ref: string, version?: string, voice?: string): Promise<BibleNarration> {
+    const resp = await apiClient.get('/api/bible/narration', { params: { ref, version, voice } });
+    return resp.data;
+  },
+
+  async getBibleImports(): Promise<BibleImportsResponse> {
+    const resp = await apiClient.get('/api/bible/admin/imports');
+    return resp.data;
+  },
+
+  async getBibleProviderTranslations(
+    code: string,
+  ): Promise<{ provider: BibleImportProviderInfo; translations: BibleRemoteTranslation[]; count: number }> {
+    const resp = await apiClient.get(`/api/bible/admin/providers/${code}/translations`);
+    return resp.data;
+  },
+
+  async runBibleImport(payload: {
+    code: string;
+    kind: BibleImportKind;
+    name?: string;
+    sha256?: string;
+    source_path?: string;
+    edition?: string;
+    edition_name?: string;
+    publisher?: string;
+    rights_holder?: string;
+    import_notes?: boolean;
+    provider?: string;
+    provider_id?: string;
+    /** Fetch one book to prove the parsing, then install nothing. */
+    dry_run?: boolean;
+    /** Refuse this run if it would need more than this many new requests. */
+    budget?: number;
+  }): Promise<BibleImportRun> {
+    const resp = await apiClient.post('/api/bible/admin/imports', payload);
+    return resp.data;
+  },
+
+  async uploadBibleImport(form: FormData): Promise<BibleImportRun> {
+    const resp = await apiClient.post('/api/bible/admin/imports/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return resp.data;
+  },
+
+  /** What installing this translation online would cost, before any of it is spent. */
+  async getBibleProviderEstimate(
+    code: string,
+    translationId: string,
+  ): Promise<BibleProviderEstimate> {
+    const resp = await apiClient.get(`/api/bible/admin/providers/${code}/estimate`, {
+      params: { translation_id: translationId },
+    });
     return resp.data;
   },
 };

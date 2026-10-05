@@ -138,20 +138,11 @@ async def _run_full_index_task(req: IndexScanRequest):
         collection_name = f"{req.provider.kind}_files"
         BATCH_SIZE = 25
         total_synced = 0
+        scanned_paths = {c["metadata"]["path"] for c in chunks if c["metadata"].get("path")}
 
         async with get_client() as client:
             try:
-                # 3.5. Cleanup old entries BEFORE syncing new ones
-                purge_resp = await client.post(
-                    f"{RAG_SVC}/rag/purge/{req.provider.kind}_files",
-                    params={"user_id": user_id},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=aiohttp.ClientTimeout(total=60.0, connect=5.0),
-                )
-                if purge_resp.status != 200:
-                    log.warning(f"Purge failed (non-fatal): {purge_resp.status} {await purge_resp.text()}")
-                else:
-                    log.info(f"Cleaned old {collection_name} entries for user {user_id}")
+                await _purge_stale_paths(client, collection_name, user_id, scanned_paths)
 
                 # 3.6. Sync to RAG in batches to avoid timeout on large payloads
                 for i in range(0, len(chunks), BATCH_SIZE):
@@ -187,6 +178,62 @@ async def _run_full_index_task(req: IndexScanRequest):
         log.error(f"Background index task failed: {e}")
         import traceback
         log.error(traceback.format_exc())
+
+async def _purge_stale_paths(
+    client,
+    collection_name: str,
+    user_id: str,
+    scanned_paths: set[str],
+) -> None:
+    """Drop only chunks whose source path disappeared upstream.
+
+    The previous implementation purged the whole collection before repopulating
+    it, which meant any failure partway through a sync silently shrank the index
+    and there was nothing to restore from. Syncing is already idempotent (the
+    per-chunk id is derived from user+path+index), so the only thing a purge is
+    actually needed for is removing chunks whose file is gone. A lookup failure
+    here is logged and ignored: leaving a stale chunk is recoverable, deleting
+    live chunks because a bookkeeping call failed is not.
+    """
+    try:
+        listed = await client.get(
+            f"{RAG_SVC}/rag/indexed-paths",
+            params={"user_id": user_id, "collection_name": collection_name},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=30.0, connect=5.0),
+        )
+        if listed.status != 200:
+            log.warning(
+                "Stale-path lookup returned %s; leaving %s untouched for %s",
+                listed.status, collection_name, user_id,
+            )
+            return
+        known = set((await listed.json() or {}).get("paths") or [])
+    except Exception as e:
+        log.warning("Stale-path lookup failed (%s); leaving %s untouched for %s", e, collection_name, user_id)
+        return
+
+    stale = sorted(known - scanned_paths)
+    if not stale:
+        return
+
+    removed = 0
+    for path in stale:
+        try:
+            resp = await client.post(
+                f"{RAG_SVC}/rag/purge/{collection_name}",
+                json={"user_id": user_id, "filter": {"path": path}},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=30.0, connect=5.0),
+            )
+            if resp.status == 200:
+                removed += 1
+            else:
+                log.warning("Stale purge for %s returned %s", path, resp.status)
+        except Exception as e:
+            log.warning("Stale purge for %s failed: %s", path, e)
+    log.info("Removed %s stale path(s) from %s for %s", removed, collection_name, user_id)
+
 
 @app.post("/index/pause", dependencies=[Depends(_require_internal_secret)])
 def pause_indexing():

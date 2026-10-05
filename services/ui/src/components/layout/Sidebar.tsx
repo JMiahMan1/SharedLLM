@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Activity, Brain, Calendar, Compass, Database, FolderKanban, HeartPulse, LayoutDashboard, Loader2, Music, Shield, ShieldCheck, SlidersHorizontal, StickyNote, Users } from 'lucide-react';
+import { Activity, BookOpen, Brain, Calendar, Compass, Database, FolderKanban, HeartPulse, LayoutDashboard, Loader2, Music, Shield, ShieldCheck, SlidersHorizontal, StickyNote, Users } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useAuth } from '../../context/AuthContext';
@@ -16,6 +16,7 @@ const navItems = [
   { icon: Compass, label: 'Wander', path: '/wander' },
   { icon: HeartPulse, label: 'Health', path: '/fitness' },
   { icon: Users, label: 'Family', path: '/family' },
+  { icon: BookOpen, label: 'Bible', path: '/bible' },
   { icon: StickyNote, label: 'Notes', path: '/notes' },
   { icon: Calendar, label: 'Calendar', path: '/calendar' },
   { icon: Music, label: 'Media', path: '/media' },

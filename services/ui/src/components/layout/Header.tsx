@@ -19,6 +19,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Wander', path: '/wander', section: 'Pages', keywords: 'trips family circle presence travel drives vehicles fuel mileage locations map' },
   { label: 'Health', path: '/fitness', section: 'Pages', keywords: 'steps workouts pedometer fitness goals achievements' },
   { label: 'Family', path: '/family', section: 'Pages', keywords: 'games talk chores rewards together' },
+  { label: 'Bible', path: '/bible', section: 'Pages', keywords: 'scripture read verse devotional plan memorise quiz study blb' },
   { label: 'Media', path: '/media', section: 'Pages', keywords: 'music assistant audiobookshelf player' },
   { label: 'Remote', path: '/remote', section: 'Pages', keywords: 'home assistant control devices' },
   { label: 'Settings', path: '/settings', section: 'Pages', keywords: 'preferences configuration profile' },
