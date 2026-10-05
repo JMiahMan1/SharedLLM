@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from services.execution.main import app
+from services.execution.main import app, _skylight_chore_ids
 
 client = TestClient(app)
 
@@ -244,6 +244,89 @@ def test_skylight_chore_complete_and_uncomplete_are_inverses():
     assert calls[0][2]["status"] == "complete"
     assert calls[1][2]["status"] == "pending"
     assert calls[0][2]["instance_date"] == calls[1][2]["instance_date"] == "2026-05-29"
+
+
+def test_skylight_chore_ids_parsing():
+    """Instance ids carry an optional time-of-day suffix; the date in the body
+    must stay date-only and the time goes in its own field."""
+    from datetime import date as _date
+
+    today = _date.today().isoformat()
+    assert _skylight_chore_ids("52409380-2026-10-04") == ("52409380", "2026-10-04", None)
+    assert _skylight_chore_ids("46464093-2026-10-04-2000") == ("46464093", "2026-10-04", "20:00")
+    assert _skylight_chore_ids("52743843-2026-10-04-0600") == ("52743843", "2026-10-04", "06:00")
+    assert _skylight_chore_ids("52409380") == ("52409380", today, None)
+
+
+def test_skylight_chore_complete_timed_instance():
+    """A routine occurrence id ({series}-{date}-{HHMM}) must be completed with
+    the date and time sent as separate fields. Sending the time inside
+    instance_date ("2026-10-04-2000") is what Skylight rejects."""
+    calls = []
+
+    async def mock_get_session(*args, **kwargs):
+        return _mock_session()
+
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
+        calls.append((method, suffix, json_body))
+        return {"success": True}
+
+    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
+        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
+            resp = client.post(
+                "/api/integrations/skylight/chores/52743843-2026-10-04-0600/complete",
+                headers={"X-Internal-Secret": "test-secret"}
+            )
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "SUCCESS"
+
+    assert calls == [
+        (
+            "PUT",
+            "/chores/52743843/completions",
+            {
+                "id": "52743843",
+                "instance_date": "2026-10-04",
+                "instance_time": "06:00",
+                "status": "complete",
+            },
+        )
+    ], f"timed instance completed wrong: {calls}"
+
+
+def test_skylight_chore_uncomplete_timed_instance():
+    """Uncompleting a routine occurrence mirrors the complete body exactly,
+    with status pending and the same date/time split."""
+    calls = []
+
+    async def mock_get_session(*args, **kwargs):
+        return _mock_session()
+
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
+        calls.append((method, suffix, json_body))
+        return {"success": True}
+
+    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
+        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
+            resp = client.post(
+                "/api/integrations/skylight/chores/46464093-2026-10-04-2000/uncomplete",
+                headers={"X-Internal-Secret": "test-secret"}
+            )
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "SUCCESS"
+
+    assert calls == [
+        (
+            "PUT",
+            "/chores/46464093/completions",
+            {
+                "id": "46464093",
+                "instance_date": "2026-10-04",
+                "instance_time": "20:00",
+                "status": "pending",
+            },
+        )
+    ], f"timed instance uncompleted wrong: {calls}"
 
 
 def test_skylight_rewards():
