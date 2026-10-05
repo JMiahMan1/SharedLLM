@@ -79,6 +79,40 @@ Example streamed `/api/chat` chunks:
 {"model":"qwen3:latest","done":true}
 ```
 
+## Media Endpoints
+
+All media routes authenticate the caller first (bearer API key, or `?mt=&user=`
+with a signed media token for streams/SSE). See `docs/MEDIA_PLAYER.md` for the
+full architecture and response shapes.
+
+Unified screens:
+
+- `GET /api/media/home`: Listen Now shelves (MA recent/continue/playlists/favorites/radio + ABS last played) with per-provider `errors`
+- `GET /api/media/search?q=&types=&limit=`: unified MA + ABS search (`{top, tracks, artists, albums, playlists, audiobooks, podcasts, authors}`)
+- `GET /api/media/item?uri=`: item detail with children (MA URIs or `abs://<id>`)
+- `GET /api/media/library/{tab}?offset=&limit=&order_by=`: paginated library (`tracks, albums, artists, playlists, radio, podcasts, audiobooks`)
+- `GET /api/media/favorites`: merged MA favorites
+- `POST /api/media/abs/progress`: report Audiobookshelf progress (`item_id`, optional `episode_id`, `current_time`, `duration`, `is_finished`)
+
+Streaming, events and tokens:
+
+- `POST /api/media/stream/music-assistant`: start playback and resolve an MA stream URL (`GET` resolves an already-playing queue; `409` otherwise)
+- `GET /api/media/stream/abs-session/{session_id}/{track_index}[/{segment}]`: Audiobookshelf session HLS proxy
+- `GET /api/media/events`: per-user SSE media events (snapshot, player/queue updates, 15 s heartbeats)
+- `POST /api/media/token`: signed media token `{token, expires_at}` for `?mt=` URLs
+- `GET /api/media/imageproxy?path=&token=`: per-user image proxy
+- `WS /api/ma-jsonrpc`: Music Assistant control socket (command allowlist + per-user player scope)
+
+Provider routes (existing screens and widgets):
+
+- `GET /api/media/music-assistant/playlists|recent|browse|search`
+- `GET /api/media/audiobookshelf/libraries|last-played|library/{id}|search|status`
+- `GET /api/media/detail?uri=`, `POST /api/media/favorite`, `POST /api/media/ma-library-uri`
+
+Playback control (execution service):
+
+- `POST /execute/media/play`, `POST /execute/media/transport` (includes `shuffle_set`, `repeat_set`, `join`, `unjoin`), `POST /execute/media/status`, `POST /execute/media/state/sync`
+
 ## Workspace Runtime Endpoints
 
 - `GET /health`: service health
