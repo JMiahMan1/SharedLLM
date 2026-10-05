@@ -669,6 +669,42 @@ async def handle_media_transport(req) -> ExecutionResult:
     feature_bit = feature_bits.get(command)
     standard_supported = feature_bit is not None and bool(supported_features & feature_bit)
 
+    # Shuffle/repeat/grouping are ordinary media_player.* services, not
+    # feature-gated and never served by a brand remote fallback.
+    if command in ("shuffle_set", "repeat_set", "join", "unjoin"):
+        if command == "shuffle_set":
+            if req.shuffle is None:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message="shuffle_set requires shuffle (true/false).",
+                    service="media_transport",
+                )
+            service_cmd, data = "shuffle_set", {"shuffle": bool(req.shuffle)}
+        elif command == "repeat_set":
+            if req.repeat is None:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message="repeat_set requires repeat (off/one/all).",
+                    service="media_transport",
+                )
+            service_cmd, data = "repeat_set", {"repeat": req.repeat}
+        elif command == "join":
+            if not req.group_members:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message="join requires group_members (player entity ids).",
+                    service="media_transport",
+                )
+            service_cmd, data = "join", {"group_members": req.group_members}
+        else:
+            service_cmd, data = "unjoin", None
+        result = await ha_client.call_service(
+            ha_url, ha_token, "media_player", service_cmd, full_entity_id, data,
+        )
+        if result.get("ok"):
+            return ExecutionResult(status="SUCCESS", message=f"Media command '{command}' executed on {full_entity_id}.", service="media_transport")
+        return ExecutionResult(status="FAILURE", message=f"Media command failed: {result.get('error')}", service="media_transport", detail=result)
+
     if not standard_supported:
         if tv_type == "android_tv":
             return await android_tv.send_command(ha_url, ha_token, full_entity_id, command)

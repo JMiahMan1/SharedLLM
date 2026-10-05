@@ -214,10 +214,14 @@ class MediaTransportRequest(BaseRequest):
         "pause", "resume", "stop", "next", "previous",
         "volume_up", "volume_down", "volume_set", "volume_mute", "mute",
         "home", "power_off", "back", "play", "seek",
+        "shuffle_set", "repeat_set", "join", "unjoin",
     ]
     volume_level: float | None = Field(None, ge=0.0, le=1.0)
     position: float | None = Field(None, ge=0.0, description="Seek target in seconds (command='seek')")
     muted: bool | None = Field(None, description="Mute target state (command='volume_mute')")
+    shuffle: bool | None = Field(None, description="Shuffle target state (command='shuffle_set')")
+    repeat: Literal["off", "one", "all"] | None = Field(None, description="Repeat mode (command='repeat_set')")
+    group_members: list[str] | None = Field(None, description="Extra player entity ids to join (command='join')")
 
 
 class MediaStateSyncRequest(BaseRequest):
@@ -235,6 +239,13 @@ class MediaStateSyncRequest(BaseRequest):
     media_title: str | None = None
     media_artist: str | None = None
     media_album: str | None = None
+    media_position_updated_at: str | None = None
+    shuffle: bool | None = None
+    repeat: str | None = None
+    group_members: list | None = None
+    app_name: str | None = None
+    icon_kind: str | None = None
+    ma_player_id: str | None = None
     queue: list | None = None
 
 
