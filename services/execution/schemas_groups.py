@@ -11,6 +11,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+try:
+    from schemas import UserContext
+except ImportError:
+    from .schemas import UserContext
+
 
 class MediaGroupRequest(BaseModel):
     action: Literal["create", "delete", "list", "add_member", "remove_member"]
@@ -18,6 +23,7 @@ class MediaGroupRequest(BaseModel):
     group_name: str | None = None
     member_entity_ids: list[str] | None = None
     scope: Literal["user", "system"] = "user"
+    user_context: UserContext | None = None
 
 
 class LightClusterRequest(BaseModel):
@@ -27,6 +33,7 @@ class LightClusterRequest(BaseModel):
     member_entity_ids: list[str] | None = None
     room: str | None = None
     scope: Literal["user", "system", "room"] = "room"
+    user_context: UserContext | None = None
 
 
 class LightPatternStep(BaseModel):

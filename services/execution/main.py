@@ -128,6 +128,11 @@ from services.execution.schemas import (
     WorkspaceSearchRequest,
     WorkspaceShellRequest,
 )
+from services.execution.schemas_groups import (
+    LightClusterRequest,
+    LightPatternRequest,
+    MediaGroupRequest,
+)
 from services.execution.tts import text_to_speech as _text_to_speech
 from services.shared.info_endpoint import info_router
 from services.shared.rag_client import push_telemetry_alert
@@ -2690,38 +2695,26 @@ async def execute_ha_config(req: "HAConfigRequest"):
 # ─── Device & Light Grouping (Section 3.14) ───────────────────────────────────
 
 @app.post("/execute/groups/media", response_model=ExecutionResult)
-async def execute_media_group(req):
+async def execute_media_group(req: MediaGroupRequest):
     """Manage media device groups."""
-    from schemas_groups import MediaGroupRequest
-    dump = req.model_dump() if isinstance(req, BaseModel) else req
-    if "user_context" not in dump:
-        dump["user_context"] = UserContext(user="")
-    parsed = MediaGroupRequest(**dump)
-    ctx = getattr(parsed, "user_context", UserContext(user=""))
-    log.info(f"[groups] media_group action={parsed.action} group_id={parsed.group_id}")
-    return await groups.handle_media_group(parsed, ctx)
+    ctx = req.user_context or UserContext(user="")
+    log.info(f"[groups] media_group action={req.action} group_id={req.group_id}")
+    return await groups.handle_media_group(req, ctx)
 
 
 @app.post("/execute/groups/lights", response_model=ExecutionResult)
-async def execute_light_cluster(req):
+async def execute_light_cluster(req: LightClusterRequest):
     """Manage light clusters."""
-    from schemas_groups import LightClusterRequest
-    dump = req.model_dump() if isinstance(req, BaseModel) else req
-    if "user_context" not in dump:
-        dump["user_context"] = UserContext(user="")
-    parsed = LightClusterRequest(**dump)
-    ctx = getattr(parsed, "user_context", UserContext(user=""))
-    log.info(f"[groups] light_cluster action={parsed.action} cluster_id={parsed.cluster_id}")
-    return await groups.handle_light_cluster(parsed, ctx)
+    ctx = req.user_context or UserContext(user="")
+    log.info(f"[groups] light_cluster action={req.action} cluster_id={req.cluster_id}")
+    return await groups.handle_light_cluster(req, ctx)
 
 
 @app.post("/execute/groups/patterns", response_model=ExecutionResult)
-async def execute_light_pattern(req):
+async def execute_light_pattern(req: LightPatternRequest):
     """Manage light patterns."""
-    from schemas_groups import LightPatternRequest
-    parsed = LightPatternRequest(**req.model_dump() if hasattr(req, 'model_dump') else req)
-    log.info(f"[groups] light_pattern action={parsed.action} pattern_id={parsed.pattern_id}")
-    return await groups.handle_light_pattern(parsed)
+    log.info(f"[groups] light_pattern action={req.action} pattern_id={req.pattern_id}")
+    return await groups.handle_light_pattern(req)
 
 
 # ─── Presence Detection (Section 3.8) ─────────────────────────────────────────
