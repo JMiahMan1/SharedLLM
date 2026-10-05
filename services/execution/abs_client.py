@@ -334,12 +334,20 @@ async def update_progress(
     current_time: float,
     duration: float,
     is_complete: bool = False,
+    episode_id: str | None = None,
 ) -> dict:
-    """Update playback progress for a book (ABS route is PATCH, not POST)."""
+    """Update playback progress for a book or podcast episode (route is PATCH).
+
+    ABS exposes per-episode progress at ``/api/me/progress/{item}/{episode}``;
+    without ``episode_id`` the book-level route is used (docs/MEDIA_UPSTREAM_API_NOTES.md).
+    """
+    path = f"/api/me/progress/{item_id}"
+    if episode_id:
+        path = f"{path}/{episode_id}"
     return await abs_patch(
         abs_url,
         abs_api_key,
-        f"/api/me/progress/{item_id}",
+        path,
         json={
             "currentTime": current_time,
             "duration": duration,

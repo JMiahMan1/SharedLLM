@@ -69,6 +69,17 @@ from services.gateway.ma_ws_client import MAWebSocketClient
 from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
 from services.gateway.ma_scope import check_ma_frame_scope, record_web_player_id
 from services.gateway.media_events import acquire_media_hub, stop_all_media_hubs
+from services.gateway.media_models import (
+    AbsProgressRequest,
+    MediaErrorInfo,
+    MediaFavoritesResponse,
+    MediaHomeResponse,
+    MediaItemChild,
+    MediaItemDetail,
+    MediaLibrary,
+    MediaLibraryResponse,
+    MediaSearchResponse,
+)
 from services.gateway.messaging import InferenceJobQueue, JobStatus
 from services.gateway.orchestrator import _get, call_ollama, get_all_settings, get_llm_settings
 from services.gateway.prompts import (
@@ -9354,6 +9365,503 @@ async def get_abs_status(request: Request):
     except Exception as e:
         log.warning(f"[abs/status] ABS status check failed: {e}")
         return {"status": "ERROR", "error": str(e), "reachable": False}
+
+
+# ─── Unified media endpoints (§7.5) ──────────────────────────────────────
+#
+# These endpoints normalize Music Assistant item mappings and Audiobookshelf
+# payloads into the Pydantic models in ``services/gateway/media_models.py``.
+# A failed upstream never fails the whole response: each service contributes
+# what it can and names itself in ``errors`` (the UI's partial state, §4.5).
+
+_MEDIA_UPSTREAM_TIMEOUT = 4.0
+_MEDIA_CHILD_TIMEOUT = 8.0
+_MEDIA_EXEC_TIMEOUT = 10.0
+
+_MEDIA_LIBRARY_TABS = frozenset(
+    {"tracks", "albums", "artists", "playlists", "radio", "podcasts", "audiobooks"}
+)
+_MEDIA_SEARCH_BUCKETS = ("tracks", "artists", "albums", "playlists", "audiobooks", "podcasts", "authors")
+
+# MA command per detail media_type for the child listing. Verified live against
+# MA (2026-10-05): the child commands take the numeric library item id plus
+# ``provider_instance_id_or_domain`` -- not the ``provider`` key.
+_MEDIA_CHILD_COMMANDS = {
+    "album": "music/albums/album_tracks",
+    "artist": "music/artists/artist_albums",
+    "playlist": "music/playlists/playlist_tracks",
+    "podcast": "music/podcasts/podcast_episodes",
+}
+
+
+class _MediaUpstreamError(Exception):
+    """One media upstream (MA or ABS) is unavailable for this request."""
+
+
+def _media_ma_item(raw: Any) -> dict:
+    """Normalize a Music Assistant item mapping (or full item) to MediaItem kwargs.
+
+    Recently-played endpoints wrap the item in ``media_item``; search and
+    library endpoints return the item directly. ``image`` is a dict with a
+    ``path`` on some providers and a plain string on others.
+    """
+    if not isinstance(raw, dict):
+        return {"name": str(raw or "")}
+    item = raw.get("media_item")
+    if not isinstance(item, dict):
+        item = raw
+    artists = item.get("artists") or []
+    artist = ""
+    if isinstance(artists, list) and artists:
+        first = artists[0]
+        artist = first.get("name", "") if isinstance(first, dict) else str(first)
+    elif isinstance(item.get("artist"), str):
+        artist = item["artist"]
+    album = item.get("album")
+    if isinstance(album, dict):
+        album = album.get("name") or ""
+    elif not isinstance(album, str):
+        album = ""
+    image = item.get("image")
+    if isinstance(image, dict):
+        image = image.get("path") or ""
+    elif not isinstance(image, str):
+        image = ""
+    duration = item.get("duration")
+    try:
+        duration = float(duration) if duration is not None else None
+    except (TypeError, ValueError):
+        duration = None
+    favorite = item.get("favorite")
+    return {
+        "uri": item.get("uri") or "",
+        "name": item.get("name") or item.get("title") or "",
+        "media_type": str(item.get("media_type") or item.get("type") or "").lower(),
+        "artist": artist,
+        "album": album or "",
+        "image": image or "",
+        "duration": duration,
+        "version": str(item.get("version") or ""),
+        "favorite": favorite if isinstance(favorite, bool) else None,
+    }
+
+
+def _media_ma_children(raw: Any) -> list[dict]:
+    out = []
+    for entry in _media_ma_list(raw):
+        item = _media_ma_item(entry)
+        item.pop("favorite", None)
+        item.pop("artist", None)
+        item.pop("album", None)
+        item.pop("version", None)
+        item["index"] = entry.get("disc_number") or entry.get("track_number") if isinstance(entry, dict) else None
+        out.append(item)
+    return out
+
+
+def _media_ma_list(result: Any) -> list[Any]:
+    """Flatten MA library results: a bare list, an ``items`` dict, or buckets."""
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        items = result.get("items")
+        if isinstance(items, list):
+            return items
+        out: list[Any] = []
+        for value in result.values():
+            if isinstance(value, list):
+                out.extend(value)
+        return out
+    return []
+
+
+async def _media_ma_rpc(
+    request: Request,
+    command: str,
+    args: dict | None = None,
+    *,
+    timeout: float = _MEDIA_UPSTREAM_TIMEOUT,
+) -> Any:
+    """Run one MA JSON-RPC command for the caller; raise ``_MediaUpstreamError``."""
+    mass_url, mass_token = await _resolve_ma_credentials(request)
+    if not mass_url or not mass_token:
+        raise _MediaUpstreamError("Music Assistant is not configured")
+    try:
+        return await _ma_rpc(mass_url, mass_token, command, args, timeout=timeout)
+    except HTTPException as e:
+        raise _MediaUpstreamError(f"Music Assistant returned HTTP {e.status_code}") from e
+    except (TimeoutError, aiohttp.ClientError) as e:
+        raise _MediaUpstreamError(f"Music Assistant is unreachable: {type(e).__name__}") from e
+
+
+async def _media_ma_items(request: Request, command: str, args: dict | None = None, *, timeout: float = _MEDIA_UPSTREAM_TIMEOUT) -> list[dict]:
+    result = await _media_ma_rpc(request, command, args, timeout=timeout)
+    return [_media_ma_item(entry) for entry in _media_ma_list(result)]
+
+
+async def _media_exec_audiobookshelf(creds: Any, params: dict, *, timeout: float = _MEDIA_EXEC_TIMEOUT) -> dict:
+    """Fetch an ABS action through the execution service; return ``detail``.
+
+    ABS talks to the upstream with the *user's* credentials, which only the
+    execution service holds the client for, so the gateway proxies rather than
+    duplicating that client (mirrors the audiobookshelf routes above).
+    """
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(
+                f"{EXECUTION_SVC}/execute/audiobookshelf",
+                params={"user_id": creds.get("user") or "", **params},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            )
+            if resp.status != 200:
+                raise _MediaUpstreamError(f"Audiobookshelf is unreachable (execution HTTP {resp.status})")
+            data = await resp.json()
+    except (TimeoutError, aiohttp.ClientError) as e:
+        raise _MediaUpstreamError(f"Audiobookshelf is unreachable: {type(e).__name__}") from e
+    detail = data.get("detail") or {}
+    if data.get("status") == "FAILURE":
+        raise _MediaUpstreamError(data.get("message") or "Audiobookshelf request failed")
+    return detail
+
+
+def _media_abs_book_item(book: dict) -> dict:
+    """Normalize an ABS last-played/list book to MediaItem kwargs."""
+    return {
+        "uri": f"abs://{book.get('id') or ''}",
+        "name": book.get("title") or "",
+        "media_type": "audiobook",
+        "artist": book.get("author") or "",
+        "album": book.get("series") or "",
+        "image": book.get("cover_path") or "",
+        "duration": book.get("duration"),
+        "favorite": None,
+    }
+
+
+@app.get("/api/media/home")
+async def get_media_home(request: Request):
+    """One call for Listen Now: MA shelves + ABS last played, 4s each, partial."""
+    creds = await _resolve_identity_from_request(request)
+    errors = MediaErrorInfo()
+
+    async def shelf(name: str, command: str, args: dict) -> tuple[str, list[dict]]:
+        try:
+            return name, await _media_ma_items(request, command, args)
+        except _MediaUpstreamError as e:
+            if errors.ma is None:
+                errors.ma = str(e)
+            return name, []
+
+    async def abs_recent() -> list[dict]:
+        try:
+            detail = await _media_exec_audiobookshelf(creds, {"action": "last_played", "limit": 20})
+        except _MediaUpstreamError as e:
+            errors.abs = str(e)
+            return []
+        return [_media_abs_book_item(b) for b in detail.get("books") or []]
+
+    results = await asyncio.gather(
+        shelf("recent", "music/recently_played_items", {"limit": 20}),
+        shelf("continue", "music/in_progress_items", {"limit": 20}),
+        shelf("playlists", "music/playlists/library_items", {"limit": 20}),
+        # Live-verified 2026-10-05: the library_items family accepts favorite=true.
+        shelf("favorites", "music/tracks/library_items", {"limit": 20, "favorite": True}),
+        shelf("radio", "music/radios/library_items", {"limit": 20}),
+        abs_recent(),
+    )
+    shelves = {name: items for name, items in results[:-1]}
+    payload = {
+        "recent": shelves["recent"] + results[-1],
+        "continue": shelves["continue"],
+        "playlists": shelves["playlists"],
+        "favorites": shelves["favorites"],
+        "radio": shelves["radio"],
+        "errors": errors,
+    }
+    return MediaHomeResponse(**payload).model_dump(by_alias=True)
+
+
+@app.get("/api/media/search")
+async def search_media(request: Request, q: str = "", types: str = "", limit: int = 20):
+    """Unified MA + ABS search (§7.5); each side fails independently."""
+    query = (q or "").strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="q is required")
+    creds = await _resolve_identity_from_request(request)
+    limit = max(1, min(limit, 50))
+    wanted = {t.strip().lower() for t in (types or "").split(",") if t.strip()}
+    errors = MediaErrorInfo()
+    buckets: dict[str, list[dict]] = {key: [] for key in _MEDIA_SEARCH_BUCKETS}
+
+    async def ma_search() -> dict:
+        args: dict = {"search_query": query, "limit": limit, "config": {"providers": ["library"]}}
+        if wanted:
+            args["media_type"] = sorted(wanted)
+        return await _media_ma_rpc(request, "music/search", args, timeout=_MEDIA_EXEC_TIMEOUT)
+
+    async def abs_search() -> dict:
+        if wanted and not (wanted & {"audiobooks", "podcasts", "authors"}):
+            return {}
+        return await _media_exec_audiobookshelf(creds, {"action": "search", "query": query, "limit": limit})
+
+    ma_result: Any = {}
+    abs_detail: dict = {}
+    ma_ok, abs_ok = await asyncio.gather(
+        ma_search(),
+        abs_search(),
+        return_exceptions=True,
+    )
+    if isinstance(ma_ok, BaseException):
+        errors.ma = str(ma_ok) if isinstance(ma_ok, _MediaUpstreamError) else f"Music Assistant is unreachable: {type(ma_ok).__name__}"
+        ma_result = {}
+    else:
+        ma_result = ma_ok
+    if isinstance(abs_ok, BaseException):
+        errors.abs = str(abs_ok) if isinstance(abs_ok, _MediaUpstreamError) else f"Audiobookshelf is unreachable: {type(abs_ok).__name__}"
+        abs_detail = {}
+    else:
+        abs_detail = abs_ok
+
+    if isinstance(ma_result, dict):
+        for key, value in ma_result.items():
+            bucket = str(key).lower()
+            if bucket in buckets and isinstance(value, list):
+                buckets[bucket].extend(_media_ma_item(entry) for entry in value)
+    if isinstance(abs_detail, dict):
+        buckets["audiobooks"].extend(_media_abs_book_item(b) for b in abs_detail.get("books") or [])
+        for podcast in abs_detail.get("podcasts") or []:
+            buckets["podcasts"].append(
+                {
+                    "uri": f"abs://{podcast.get('id') or ''}",
+                    "name": podcast.get("title") or "",
+                    "media_type": "podcast",
+                    "artist": podcast.get("author") or "",
+                    "image": podcast.get("cover") or "",
+                }
+            )
+        for author in abs_detail.get("authors") or []:
+            buckets["authors"].append(
+                {
+                    "uri": f"abs://author/{author.get('id') or ''}",
+                    "name": author.get("name") or "",
+                    "media_type": "author",
+                }
+            )
+
+    top = None
+    for key in ("tracks", "albums", "artists", "playlists", "audiobooks", "podcasts"):
+        for item in buckets[key]:
+            if (item.get("name") or "").casefold() == query.casefold():
+                top = item
+                break
+        if top:
+            break
+    if top is None and buckets["tracks"]:
+        top = buckets["tracks"][0]
+
+    return MediaSearchResponse(top=top, errors=errors, **buckets).model_dump(by_alias=True)
+
+
+async def _media_abs_item_detail(creds: Any, item_id: str) -> dict:
+    """ABS item detail via direct ``GET /api/items/{id}?expanded=1`` (P2-T29).
+
+    The user's stored ABS API key is available on the resolved identity, and
+    the imageproxy route already uses it the same way. A missing key fails
+    fast -- ABS answers 401 and pretending otherwise would look like data loss.
+    """
+    abs_url = (creds.get("audiobookshelf_url") or "").rstrip("/")
+    abs_key = creds.get("audiobookshelf_api_key") or ""
+    if not abs_url:
+        raise HTTPException(status_code=400, detail="Audiobookshelf is not configured")
+    if not abs_key:
+        raise HTTPException(status_code=400, detail="Audiobookshelf API key is not configured")
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(
+                f"{abs_url}/api/items/{item_id}",
+                params={"expanded": "1"},
+                headers={"Authorization": f"Bearer {abs_key}"},
+                timeout=aiohttp.ClientTimeout(total=_MEDIA_CHILD_TIMEOUT),
+            )
+            if resp.status == 404:
+                raise HTTPException(status_code=404, detail="Audiobookshelf does not know this item")
+            if resp.status != 200:
+                raise HTTPException(status_code=502, detail=f"Audiobookshelf returned HTTP {resp.status}")
+            raw = await resp.json()
+    except HTTPException:
+        raise
+    except (TimeoutError, aiohttp.ClientError) as e:
+        raise HTTPException(status_code=502, detail=f"Audiobookshelf is unreachable: {type(e).__name__}") from e
+
+    media = raw.get("media") or {}
+    metadata = media.get("metadata") or {}
+    episodes = media.get("episodes") or []
+    is_podcast = bool(episodes)
+    children = []
+    if is_podcast:
+        for episode in episodes:
+            children.append(
+                MediaItemChild(
+                    uri=f"abs://{item_id}/{episode.get('id') or ''}",
+                    name=episode.get("title") or "",
+                    media_type="podcast_episode",
+                    duration=episode.get("duration"),
+                    index=episode.get("episode"),
+                )
+            )
+    else:
+        for index, chapter in enumerate(media.get("chapters") or []):
+            children.append(
+                MediaItemChild(
+                    uri=f"abs://{item_id}#chapter-{index}",
+                    name=chapter.get("title") or "",
+                    media_type="chapter",
+                    duration=chapter.get("duration"),
+                    index=index,
+                )
+            )
+    return MediaItemDetail(
+        uri=f"abs://{item_id}",
+        name=metadata.get("title") or "",
+        media_type="podcast" if is_podcast else "audiobook",
+        artist=metadata.get("authorName") or "",
+        album=metadata.get("seriesName") or "",
+        image=f"/api/items/{item_id}/cover",
+        duration=media.get("duration"),
+        description=metadata.get("description") or "",
+        children=children,
+    ).model_dump(by_alias=True)
+
+
+@app.get("/api/media/item")
+async def get_media_item(request: Request, uri: str = ""):
+    """Album/artist/playlist/book/podcast detail with children (§7.5).
+
+    ``abs://<item_id>`` addresses an Audiobookshelf item; every other URI is
+    handed to Music Assistant's ``music/item_by_uri``.
+    """
+    uri = (uri or "").strip()
+    if not uri:
+        raise HTTPException(status_code=422, detail="uri is required")
+    creds = await _resolve_identity_from_request(request)
+    if uri.startswith("abs://"):
+        return await _media_abs_item_detail(creds, uri[len("abs://"):])
+
+    try:
+        item = await _media_ma_rpc(request, "music/item_by_uri", {"uri": uri}, timeout=_MEDIA_CHILD_TIMEOUT)
+    except _MediaUpstreamError as e:
+        # An unreachable MA is 502; "MA does not know this URI" is the 404 below.
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    if not isinstance(item, dict) or not item.get("uri"):
+        raise HTTPException(status_code=404, detail="Music Assistant does not know this item")
+
+    errors = MediaErrorInfo()
+    children: list[dict] = []
+    media_type = str(item.get("media_type") or "").lower()
+    command = _MEDIA_CHILD_COMMANDS.get(media_type)
+    if command and item.get("item_id"):
+        try:
+            raw_children = await _media_ma_rpc(
+                request,
+                command,
+                {
+                    "item_id": str(item["item_id"]),
+                    "provider_instance_id_or_domain": item.get("provider") or "library",
+                },
+                timeout=_MEDIA_CHILD_TIMEOUT,
+            )
+            children = _media_ma_children(raw_children)
+        except _MediaUpstreamError as e:
+            errors.ma = str(e)
+
+    detail = _media_ma_item(item)
+    detail.pop("favorite", None)
+    return MediaItemDetail(children=[MediaItemChild(**c) for c in children], errors=errors, **detail).model_dump(by_alias=True)
+
+
+@app.get("/api/media/library/{tab}")
+async def get_media_library(tab: str, request: Request, offset: int = 0, limit: int = 50, order_by: str = "", library_id: str = ""):
+    """Paginated library tab: MA ``*/library_items`` or ABS libraries/books."""
+    tab = (tab or "").strip().lower()
+    if tab not in _MEDIA_LIBRARY_TABS:
+        raise HTTPException(status_code=422, detail=f"Unknown library tab '{tab}'")
+    creds = await _resolve_identity_from_request(request)
+    errors = MediaErrorInfo()
+    limit = max(1, min(limit, 200))
+
+    if tab == "audiobooks":
+        try:
+            if library_id:
+                detail = await _media_exec_audiobookshelf(creds, {"action": "list", "library_id": library_id, "limit": min(limit, 50)}, timeout=ABS_TIMEOUT)
+                items = [_media_abs_book_item(b) for b in detail.get("books") or []]
+                return MediaLibraryResponse(tab=tab, items=items, offset=offset, limit=limit, errors=errors).model_dump(by_alias=True)
+            detail = await _media_exec_audiobookshelf(creds, {"action": "libraries"}, timeout=ABS_TIMEOUT)
+            libraries = [
+                MediaLibrary(id=str(lib.get("id") or ""), name=lib.get("name") or "", media_type=lib.get("type") or lib.get("media_type") or "audiobook")
+                for lib in detail.get("libraries") or []
+            ]
+            return MediaLibraryResponse(tab=tab, libraries=libraries, offset=offset, limit=limit, errors=errors).model_dump(by_alias=True)
+        except _MediaUpstreamError as e:
+            errors.abs = str(e)
+            return MediaLibraryResponse(tab=tab, offset=offset, limit=limit, errors=errors).model_dump(by_alias=True)
+
+    ma_tab = "radios" if tab == "radio" else tab
+    args: dict = {"limit": limit, "offset": offset}
+    if order_by:
+        args["order_by"] = order_by
+    try:
+        items = await _media_ma_items(request, f"music/{ma_tab}/library_items", args, timeout=_MEDIA_EXEC_TIMEOUT)
+    except _MediaUpstreamError as e:
+        errors.ma = str(e)
+        items = []
+    return MediaLibraryResponse(tab=tab, items=items, offset=offset, limit=limit, errors=errors).model_dump(by_alias=True)
+
+
+@app.get("/api/media/favorites")
+async def get_media_favorites(request: Request, limit: int = 50):
+    """Favorite items across MA media types (live-verified ``favorite=true``)."""
+    await _resolve_identity_from_request(request)
+    errors = MediaErrorInfo()
+    limit = max(1, min(limit, 200))
+
+    async def favorite(media_type: str) -> list[dict]:
+        try:
+            return await _media_ma_items(
+                request,
+                f"music/{media_type}/library_items",
+                {"limit": limit, "favorite": True},
+                timeout=_MEDIA_EXEC_TIMEOUT,
+            )
+        except _MediaUpstreamError as e:
+            if errors.ma is None:
+                errors.ma = str(e)
+            return []
+
+    tracks, albums, artists, playlists = await asyncio.gather(
+        favorite("tracks"), favorite("albums"), favorite("artists"), favorite("playlists")
+    )
+    return MediaFavoritesResponse(items=tracks + albums + artists + playlists, errors=errors).model_dump(by_alias=True)
+
+
+@app.post("/api/media/abs/progress")
+async def post_abs_progress(req: AbsProgressRequest, request: Request):
+    """Push playback progress for an ABS item/episode (§7.5, P2-T32).
+
+    The UI calls this every 15s while an ABS item plays on any output and on
+    pause/stop; the execution service owns the ABS credentials and PATCHes
+    ``/api/me/progress/{id}[/{episode}]``.
+    """
+    payload = {
+        "action": "update_progress",
+        "item_id": req.item_id,
+        "current_time": req.current_time,
+        "duration": req.duration,
+        "is_finished": req.is_finished,
+    }
+    if req.episode_id:
+        payload["episode_id"] = req.episode_id
+    return await _proxy_execution_with_identity(request, "/execute/audiobookshelf", payload=payload)
 
 
 # ─── Execution service proxy routes (for UI access) ──────────────────────

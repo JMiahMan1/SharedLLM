@@ -9,7 +9,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from services.execution.handlers.audiobookshelf import _handle_last_played, _handle_progress
+from services.execution.handlers.audiobookshelf import (
+    _handle_last_played,
+    _handle_progress,
+    _handle_update_progress,
+)
 from services.execution.schemas import AudiobookshelfRequest, UserContext
 
 ABS_URL = "http://abs.local:13378"
@@ -121,3 +125,68 @@ async def test_last_played_progress_error_degrades_to_zero():
     assert all(b["is_complete"] is False for b in books)
     assert get_all.await_count == 1
     assert get_book.await_count == 0
+
+
+def _update_req(**overrides) -> AudiobookshelfRequest:
+    ctx = UserContext(ha_url="http://ha.local", ha_token="test-ha-token", user="testuser")
+    fields: dict = {
+        "item_id": "book-1",
+        "current_time": 12.5,
+        "duration": 100.0,
+        "is_finished": False,
+    }
+    fields.update(overrides)
+    return AudiobookshelfRequest(user_context=ctx, action="update_progress", **fields)
+
+
+@pytest.mark.asyncio
+async def test_update_progress_forwards_episode_and_values():
+    """action=update_progress PATCHes the item/episode with the given position."""
+    update = AsyncMock(return_value={"currentTime": 12.5})
+    with patch(PATCH + "update_progress", new=update):
+        result = await _handle_update_progress(
+            ABS_URL, ABS_KEY, _update_req(episode_id="ep-1")
+        )
+
+    assert result.status == "SUCCESS"
+    assert result.detail["item_id"] == "book-1"
+    assert result.detail["episode_id"] == "ep-1"
+    update.assert_awaited_once_with(
+        ABS_URL, ABS_KEY, "book-1", 12.5, 100.0, is_complete=False, episode_id="ep-1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_progress_requires_item_id():
+    update = AsyncMock(return_value={})
+    with patch(PATCH + "update_progress", new=update):
+        result = await _handle_update_progress(
+            ABS_URL, ABS_KEY, _update_req(item_id=None)
+        )
+
+    assert result.status == "FAILURE"
+    assert result.message == "item_id is required for update_progress."
+    assert update.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_update_progress_requires_position_and_duration():
+    update = AsyncMock(return_value={})
+    with patch(PATCH + "update_progress", new=update):
+        result = await _handle_update_progress(
+            ABS_URL, ABS_KEY, _update_req(duration=None)
+        )
+
+    assert result.status == "FAILURE"
+    assert result.message == "current_time and duration are required for update_progress."
+    assert update.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_update_progress_error_dict_is_failure():
+    update = AsyncMock(return_value={"error": "API key invalid"})
+    with patch(PATCH + "update_progress", new=update):
+        result = await _handle_update_progress(ABS_URL, ABS_KEY, _update_req())
+
+    assert result.status == "FAILURE"
+    assert result.message == "Failed to save progress: API key invalid"

@@ -95,6 +95,11 @@ async def _assert_call(upstream, method, path_and_query):
             "PATCH",
             "/api/me/progress/book1",
         ),
+        (
+            lambda: abs_client.update_progress(ABS, KEY, "book1", 12.5, 100.0, episode_id="ep1"),
+            "PATCH",
+            "/api/me/progress/book1/ep1",
+        ),
         (lambda: abs_client.get_items_in_progress(ABS, KEY), "GET", "/api/me/items-in-progress"),
         (lambda: abs_client.play_item(ABS, KEY, "book1"), "POST", "/api/items/book1/play"),
         (
