@@ -220,6 +220,39 @@ export interface GlobalSetting {
   description?: string;
 }
 
+/** A device linked to a user: phones register themselves on login; watches,
+ * assistants and lights are added through pairing (code) or adoption. */
+export interface CompanionDevice {
+  device_key: string;
+  kind: string; // phone | watch | assistant | light
+  label: string;
+  owner_username?: string | null;
+  registered_by: string; // self | admin | paired | adopted
+  model?: string | null;
+  manufacturer?: string | null;
+  app_version?: string | null;
+  esphome_version?: string | null;
+  hardware?: string | null;
+  last_ip_address?: string | null;
+  last_seen_at?: string | null;
+}
+
+export interface PairDeviceRequest {
+  step: 'discover' | 'start' | 'finish';
+  host?: string;
+  port?: number;
+  code?: string;
+  kind?: string;
+}
+
+export interface DiscoveredDevice {
+  name: string;
+  friendly_name: string;
+  host: string;
+  port: number;
+  mac?: string | null;
+}
+
 export interface EsphomeDevice {
   name: string;
   host: string;

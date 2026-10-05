@@ -3906,6 +3906,70 @@ async def proxy_get_widget_settings(request: Request):
         return await _proxy_json_response(resp)
 
 
+@app.get("/api/devices/favorites")
+async def device_favorites(request: Request):
+    """The user's favourite devices (the Devices widget's pinned devices) with live state.
+
+    A compact answer for small clients such as the watch, which cannot hold
+    the full entity search (hundreds of entities). Pins come from Identity's
+    device_control widget settings; states come from the execution service's
+    entity search, which also applies the user's entity permissions, so a pin
+    the user may no longer see is reported as unavailable rather than leaked.
+    """
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/widgets/settings",
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status != 200:
+            return await _proxy_json_response(resp)
+        settings = await resp.json()
+
+    pinned: list[str] = []
+    for widget in (settings or {}).get("widgets", []):
+        if widget.get("widget_key") == "device_control":
+            pinned = [str(e) for e in (widget.get("pinned_devices") or []) if e]
+            break
+    if not pinned:
+        return {"devices": [], "message": "No favourite devices. Star some in the Devices widget."}
+
+    domains = sorted({eid.split(".", 1)[0] for eid in pinned if "." in eid})
+    user_ctx = await _resolve_user_context(request, {})
+    client = get_http_client()
+    resp = await client.post(
+        f"{EXECUTION_SVC}/execute/entity/search",
+        json={
+            "query": "",
+            "domain": ",".join(domains) or None,
+            "area": None,
+            "state": None,
+            "limit": 1000,
+            "user_context": user_ctx,
+        },
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+        timeout=aiohttp.ClientTimeout(total=15.0),
+    )
+    data = await resp.json()
+    if resp.status != 200 or data.get("status") != "SUCCESS":
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not read device states: {data.get('message') or resp.status}",
+        )
+    by_id = {e.get("entity_id"): e for e in (data.get("detail") or {}).get("entities", [])}
+    devices = []
+    for eid in pinned:
+        entity = by_id.get(eid)
+        devices.append({
+            "entity_id": eid,
+            "domain": eid.split(".", 1)[0] if "." in eid else "",
+            "name": (entity or {}).get("friendly_name") or eid,
+            "state": (entity or {}).get("state") or "unavailable",
+        })
+    return {"devices": devices}
+
+
 @app.put("/api/widgets/settings/{widget_key}")
 async def proxy_update_widget_setting(widget_key: str, request: Request):
     body = await request.json()
@@ -10003,10 +10067,17 @@ async def _forward_execution_request(
     service_label: str,
     timeout: float = 60.0,
     transform_result: bool = False,
+    body_extra: dict | None = None,
 ):
-    """Unified proxy forwarding helper for execution service endpoints."""
+    """Unified proxy forwarding helper for execution service endpoints.
+
+    ``body_extra`` is merged over the caller's body: values the gateway knows
+    and the caller must not choose.
+    """
     client = get_http_client()
     body = await request.json() if await request.body() else {}
+    if body_extra:
+        body = {**body, **body_extra}
     max_retries = 2 if _execution_request_is_idempotent(endpoint, body) else 0
 
     async def do_proxy():
@@ -10067,6 +10138,32 @@ async def proxy_entity_search(request: Request):
 async def proxy_audiobookshelf(request: Request):
     """Proxy audiobookshelf requests from UI to execution service."""
     return await _forward_execution_request(request, "/execute/audiobookshelf", "audiobookshelf")
+
+
+@app.post("/api/devices/pair")
+async def proxy_device_pair(request: Request):
+    """Add a companion device as the signed-in user: discover | start | finish.
+
+    Any signed-in user, not just admins: the device is linked to whoever adds
+    it. Devices with a screen prove possession with the code they show;
+    Identity refuses to move an already-linked device without that code.
+    """
+    return await _forward_execution_request(
+        request, "/execute/esphome/pair", "device pairing", timeout=60.0,
+        body_extra={"jarvis_url": _public_origin(request)},
+    )
+
+
+def _public_origin(request: Request) -> str:
+    """The address the user reached Jarvis at, e.g. https://jarvis.sumemail.com.
+
+    A device paired from here is given this same address to call Jarvis on, so
+    nothing has to be configured: Caddy forwards the scheme and host the
+    browser used, and a direct LAN request carries its own Host.
+    """
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme).split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
+    return f"{proto}://{host}"
 
 
 @app.post("/execute/ha_service")

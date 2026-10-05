@@ -54,6 +54,7 @@ import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
 import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
 import HardwarePanel from '../components/settings/HardwarePanel';
+import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 import DnsManagementPanel from '../components/settings/DnsManagementPanel';
 import TelemetryAdminPanel from '../components/settings/TelemetryAdminPanel';
@@ -861,6 +862,12 @@ const Admin = () => {
                 Pick who the stars are for. Nothing is granted until someone is chosen.
               </p>
             )}
+          </section>
+
+          <section className="glass-panel p-6 min-w-0 overflow-hidden">
+            <h3 className="flex items-center gap-3 text-xl font-bold text-white">Companion devices</h3>
+            <p className="mt-1 mb-4 text-sm text-slate-400">Phones register themselves when their owner signs in; watches and assistants are linked to whoever adds them (a watch with the code on its screen).</p>
+            <CompanionDevicesPanel scope="all" />
           </section>
 
           <section className="glass-panel p-6 min-w-0 overflow-hidden">

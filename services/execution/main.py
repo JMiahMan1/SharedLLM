@@ -80,6 +80,7 @@ from services.execution.schemas import (
     DockerComposeRequest,
     DockerLogsRequest,
     EntitySearchRequest,
+    EsphomePairRequest,
     EsphomeRequest,
     ExecutionLogRequest,
     ExecutionResult,
@@ -781,6 +782,12 @@ async def execute_light(req: LightControlRequest):
 async def execute_esphome(req: EsphomeRequest):
     """Control ESPHome devices directly via their native API (no HA hop)."""
     return await esphome.handle_esphome(req)
+
+
+@app.post("/execute/esphome/pair", response_model=ExecutionResult)
+async def execute_esphome_pair(req: EsphomePairRequest):
+    """Add a companion device as the calling user (code pairing or adoption)."""
+    return await esphome.handle_esphome_pair(req)
 
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
