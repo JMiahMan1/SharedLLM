@@ -134,8 +134,13 @@ ssh $SSH_OPTS "$HOST" << EOF
     # project -- including unrelated wsbox-* ones -- so each deploy briefly
     # took the whole stack down and dumped a burst of connection errors across
     # services that had not changed at all.
+    # Deliberately NO --remove-orphans. Compose reads the compose file in the
+    # checkout it deploys from, so any container that is not in *that* file gets
+    # deleted as an orphan -- including one another author added but has not
+    # committed, or anything started by hand. A deploy should never be able to
+    # remove a container nobody asked it to touch.
     # shellcheck disable=SC2086
-    docker compose up -d --force-recreate --remove-orphans --pull never $SERVICES
+    docker compose up -d --force-recreate --pull never $SERVICES
 
     echo "Waiting for application startup..."
     TIMEOUT=180

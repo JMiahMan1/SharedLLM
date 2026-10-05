@@ -202,7 +202,10 @@ if ssh $SSH_OPTS "$HOST" << EOF
     # shellcheck disable=SC2086
     docker compose pull $SERVICES
     # shellcheck disable=SC2086
-    docker compose up -d --force-recreate --remove-orphans $SERVICES
+    # NO --remove-orphans: see deploy_local_build.sh. It deletes any container
+    # missing from this checkout's compose file, including another author's
+    # uncommitted service.
+    docker compose up -d --force-recreate $SERVICES
 
     echo "Waiting for application startup..."
     # Monitor logs for success or failure
