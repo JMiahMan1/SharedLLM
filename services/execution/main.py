@@ -3458,14 +3458,34 @@ def _skylight_chore_to_item(raw: dict, included_map: dict | None = None) -> dict
     }
 
 
-def _skylight_chore_ids(chore_id: str) -> tuple[str, str]:
-    """Split an API chore instance id ({series}-{YYYY}-{MM}-{DD}) into the
-    numeric series id (path) and the instance date (body). Falls back to today
-    for plain series ids."""
-    parts = chore_id.split("-")
-    if len(parts) >= 4:
-        return parts[0], "-".join(parts[1:])
-    return chore_id, date_cls.today().isoformat()
+_CHORE_INSTANCE_ID_RE = re.compile(
+    r"^(?P<series>[0-9A-Za-z]+)-(?P<date>\d{4}-\d{2}-\d{2})(?:-(?P<time>\d{4}))?$"
+)
+
+
+def _skylight_chore_ids(chore_id: str) -> tuple[str, str, str | None]:
+    """Split a chore instance id into (series id, instance date, instance time).
+
+    Skylight instance ids come in two shapes:
+
+    * ``{series}-{YYYY}-{MM}-{DD}``            plain occurrence, no time
+    * ``{series}-{YYYY}-{MM}-{DD}-{HHMM}``     time-of-day routine occurrence
+
+    The completions endpoint takes the numeric series id in the path, the date
+    in ``instance_date`` and -- only for routines that run at several times a
+    day -- the time in a separate ``instance_time`` field ("HH:MM"). Passing
+    the time inside the date (e.g. "2026-10-04-2000") is not a date the API
+    accepts. Falls back to (chore_id, today, None) for plain series ids.
+    """
+    match = _CHORE_INSTANCE_ID_RE.match(chore_id)
+    if not match:
+        return chore_id, date_cls.today().isoformat(), None
+    time_part = match.group("time")
+    return (
+        match.group("series"),
+        match.group("date"),
+        f"{time_part[:2]}:{time_part[2:]}" if time_part else None,
+    )
 
 
 async def _skylight_setting(key: str) -> str:
@@ -3622,13 +3642,17 @@ async def complete_skylight_chore(
     if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    # Chore ids from the API are instance ids of the form {series}-{YYYY}-{MM}-{DD}.
-    # The completions endpoint expects the numeric series id in the path plus the
-    # instance date in the body.
-    series_id, instance_date = _skylight_chore_ids(chore_id)
+    # Chore ids from the API are instance ids of the form
+    # {series}-{YYYY}-{MM}-{DD} or {series}-{YYYY}-{MM}-{DD}-{HHMM}. The
+    # completions endpoint expects the numeric series id in the path plus the
+    # instance date -- and, for time-of-day routines, the time in its own
+    # instance_time field.
+    series_id, instance_date, instance_time = _skylight_chore_ids(chore_id)
+    body = {"id": series_id, "instance_date": instance_date, "status": "complete"}
+    if instance_time is not None:
+        body["instance_time"] = instance_time
     result = await _skylight_request(
-        session, "PUT", f"/chores/{series_id}/completions",
-        {"id": series_id, "instance_date": instance_date, "status": "complete"},
+        session, "PUT", f"/chores/{series_id}/completions", body,
     )
     if result is not None:
         return {"status": "SUCCESS", "message": "Chore completed"}
@@ -3656,10 +3680,12 @@ async def uncomplete_skylight_chore(
     if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    series_id, instance_date = _skylight_chore_ids(chore_id)
+    series_id, instance_date, instance_time = _skylight_chore_ids(chore_id)
+    body = {"id": series_id, "instance_date": instance_date, "status": "pending"}
+    if instance_time is not None:
+        body["instance_time"] = instance_time
     result = await _skylight_request(
-        session, "PUT", f"/chores/{series_id}/completions",
-        {"id": series_id, "instance_date": instance_date, "status": "pending"},
+        session, "PUT", f"/chores/{series_id}/completions", body,
     )
     if result is not None:
         return {"status": "SUCCESS", "message": "Chore uncompleted"}

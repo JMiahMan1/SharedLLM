@@ -497,4 +497,48 @@ Live probe of a book (item `510e38dd-3196-4755-8a9b-7c81208c373b`, "God's Smuggl
 - `GET /public/session/{sid}/track/0` → 404, `track/1` → **302** to `/hls/{sid}/output.m3u8` (root-relative), `track/2` → 404. The redirect appears **immediately**, even while the playlist does not exist.
 - `GET /hls/{sid}/output.m3u8` → 404 at first (25s in), then 200 `application/vnd.apple.mpegurl`: VOD, `TARGETDURATION 6`, **5291 segments** (`output-0.ts`…`output-5290.ts`, 136606 bytes). Minutes later a **new** session for the same book was ready in 0.2s (warm transcode cache) — so the earlier "book HLS is broken" conclusion was wrong; it was a cold-start race. Any client (or gateway) must tolerate tens of seconds before the playlist exists.
 - `GET /hls/{sid}/output-0.ts` → 200 `video/mp2t` 44932 bytes, and `Range: bytes=0-1023` → 206 + `Content-Range`. `output-1.m3u8`/`index.m3u8` do not exist.
-- `POST /api/items/{podcastId}/play` with **no** episode id → session + 302, but the playlist **never** appears (404 for a full 120s poll): a podcast session is only playable with an episode id, which is exactly what BUG-26 fixed.
+- `POST /api/items/{podcastId}/play` with **no** episode id → session + 302,
+  but the playlist **never** appears (404 for a full 120s poll): a podcast
+  session is only playable with an episode id, which is exactly what BUG-26
+  fixed.
+
+## Skylight chore completions: timed instances need `instance_time` (2026-10-05)
+
+Cross-checked against two community references — `joshuaswarren/pyskylight`
+(`client.py`) and `chrischall/skylight-mcp` (`src/tools/chores.ts`) — then
+verified live from inside the execution container.
+
+**Contract** (both references agree):
+
+- `PUT /api/frames/{frame}/chores/{series}/completions` — the path takes the
+  numeric series id, not the instance id.
+- Body: `{status: "complete" | "pending", instance_date: "YYYY-MM-DD", instance_time: "HH:MM"}`.
+  `status` is `complete`/`pending` (not `completed`).
+- `instance_date` is **date-only**. For a time-of-day routine (recurrence set
+  with `BYHOUR`, e.g. `RRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=20`) the time must
+  go in its own `instance_time` field — omitting it fails with
+  **422 `{"errors":{"instance_time":["can't be blank"]}}`**.
+- `category_id` must be omitted for a normally-assigned chore (422 "must be
+  blank" otherwise); it is only for up-for-grabs chores.
+- Our bodies also carry an extra `id` field (the two references omit it); the
+  API tolerates it (live 200) and it is kept deliberately.
+
+**Instance id shapes** returned by `GET /chores?after=&before=`:
+
+- plain occurrence: `{series}-{YYYY}-{MM}-{DD}` (e.g. `52409380-2026-10-04`)
+- timed routine occurrence: `{series}-{YYYY}-{MM}-{DD}-{HHMM}` (e.g.
+  `46464093-2026-10-05-2000`, "Brush Teeth" at 20:00)
+
+**The bug this replaces:** `_skylight_chore_ids` split the id naively and
+returned `instance_date="2026-10-05-2000"` with no `instance_time`. Live probe
+2026-10-05 (pending→pending no-op, state verified unchanged afterwards):
+
+- old body → 422 `instance_time can't be blank` → execution maps non-2xx to
+  `None` → route returns `{"status":"FAILURE","message":"Failed to uncomplete chore"}`
+- corrected body (`instance_date="2026-10-05"`, `instance_time="20:00"`) →
+  **200 with the updated chore JSON**
+
+Implementation: `_skylight_chore_ids` in `services/execution/main.py` now
+returns `(series, date, "HH:MM" | None)` via a strict regex; the complete and
+uncomplete routes add `instance_time` only when the id carried one. Exact-body
+tests live in `services/execution/tests/test_skylight_proxy.py`.
