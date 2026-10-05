@@ -75,8 +75,8 @@ async def handle_document_broadcast(req) -> ExecutionResult:
 
     import os
 
-    from services.execution.main import TEMP_AUDIO_CACHE, TEMP_AUDIO_DIR
-    TEMP_AUDIO_CACHE[audio_cache_key] = audio_bytes
+    from services.execution.main import TEMP_AUDIO_DIR, cache_temp_audio
+    cache_temp_audio(audio_cache_key, audio_bytes)
 
     # Save to disk for media server FileResponse
     wav_path = os.path.join(TEMP_AUDIO_DIR, f"{audio_cache_key}.wav")
