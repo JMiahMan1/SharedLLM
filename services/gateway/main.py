@@ -67,6 +67,7 @@ from services.gateway.llm_providers import (
 )
 from services.gateway.ma_ws_client import MAWebSocketClient
 from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
+from services.gateway.media_events import acquire_media_hub, stop_all_media_hubs
 from services.gateway.messaging import InferenceJobQueue, JobStatus
 from services.gateway.orchestrator import _get, call_ollama, get_all_settings, get_llm_settings
 from services.gateway.prompts import (
@@ -773,6 +774,9 @@ async def lifespan(app: FastAPI):
     log.info("Gateway shutting down...")
     if raven_worker:
         raven_worker.stop()
+
+    with suppress(Exception):
+        await stop_all_media_hubs()
 
     # Close every per-loop HTTP client we created (API loop + worker loop).
     for _client in list(_http_clients.values()):
@@ -11110,6 +11114,34 @@ async def post_media_token(request: Request):
         raise HTTPException(status_code=401, detail="Authentication required")
     token, expires_at = sign(user)
     return {"token": token, "expires_at": expires_at}
+
+
+@app.get("/api/media/events")
+async def media_events_stream(request: Request):
+    """SSE stream of normalized media events for the caller (§7.2).
+
+    EventSource cannot set headers, so the signed ``?mt=`` media token (§7.4)
+    is accepted here in addition to the normal API key; native clients may
+    keep the Authorization header. The first message is a full player
+    snapshot, followed by live player/queue events and a heartbeat every 15
+    seconds.
+    """
+    creds = await _resolve_identity_from_media_token(request)
+    if creds is None:
+        creds = await _resolve_identity_from_request(request)
+    creds_dict = _identity_cred_dict(creds) if not isinstance(creds, dict) else creds
+    user = creds_dict.get("user") or ""
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    hub = await acquire_media_hub(user, creds_dict)
+    return StreamingResponse(
+        hub.subscribe(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.websocket("/api/workspaces/{workspace_id}/terminal")
