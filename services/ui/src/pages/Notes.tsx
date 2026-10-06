@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import SendAsSelector, { useSendAsPref } from '../components/chat/SendAsSelector';
+import SendAsSelector from '../components/chat/SendAsSelector';
+import { useSendAsPref } from '../components/chat/sendAsPref';
 import {
   Check,
   CheckSquare,

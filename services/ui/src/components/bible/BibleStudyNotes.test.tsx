@@ -126,7 +126,7 @@ function renderPanel(
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <BibleStudyNotes passage="John 3:16" version="nkjv" {...props} />
+        <BibleStudyNotes passage="John 3:16" version="nkjv" onClose={() => {}} {...props} />
       </MemoryRouter>
     </QueryClientProvider>,
   );

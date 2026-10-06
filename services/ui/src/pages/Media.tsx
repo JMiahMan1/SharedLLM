@@ -638,7 +638,7 @@ const MediaExplorerModal = ({
   show, onClose, playAudiobook, playPlaylist, playMedia, playLocal, selectedTarget, localMode,
 }: {
   show: boolean; onClose: () => void;
-  playAudiobook: (id: string) => void;
+  playAudiobook: (id: string, title?: string) => void;
   playPlaylist: (uri: string) => void;
   playMedia: (query: string, mediaType?: string) => void;
   playLocal: (id: string, title: string, subtitle: string, type: 'audiobook' | 'music', source: 'abs' | 'ma') => void;

@@ -63,7 +63,7 @@ const renderWidget = () =>
     >
       <ChoresProgressWidget
         settingsButton={null}
-        userSettings={{ widgets: {} }}
+        userSettings={{ config: {}, widget_key: 'chores_progress' } as never}
         onTogglePin={vi.fn()}
       />
     </QueryClientProvider>,

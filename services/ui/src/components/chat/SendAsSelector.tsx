@@ -1,23 +1,5 @@
-import { useCallback, useState } from 'react';
 import { User, Users } from 'lucide-react';
-
-export type SendAs = 'me' | 'admin';
-
-const STORAGE_KEY = 'jarvis-talk-send-as';
-
-export function readSendAsPref(): SendAs {
-  if (typeof localStorage === 'undefined') return 'me';
-  return localStorage.getItem(STORAGE_KEY) === 'admin' ? 'admin' : 'me';
-}
-
-export function useSendAsPref(isAdmin: boolean): [SendAs, (next: SendAs) => void] {
-  const [sendAs, setSendAs] = useState<SendAs>(readSendAsPref);
-  const set = useCallback((next: SendAs) => {
-    setSendAs(next);
-    if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEY, next);
-  }, []);
-  return [isAdmin ? sendAs : 'me', set];
-}
+import type { SendAs } from './sendAsPref';
 
 /**
  * Admin-only "Send as" control. Defaults to the caller's own identity; the

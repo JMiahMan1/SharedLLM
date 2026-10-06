@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import BibleAdminPanel from './BibleAdminPanel';
-import type { BibleImportsResponse } from '../../types/api';
+import type { BibleEditionInfo, BibleImportsResponse, BibleProviderEstimate } from '../../types/api';
 
 vi.mock('../../hooks/useHaptics', () => ({ useHaptics: () => ({ trigger: vi.fn() }) }));
 
@@ -49,7 +49,7 @@ const ESV = {
   note: 'ESV is copyrighted, so its text is not bundled. Install it from the api.bible provider.',
 };
 
-const EDITION = {
+const EDITION: BibleEditionInfo = {
   code: 'nkjv-tmn',
   version: 'nkjv',
   name: 'NKJV Study Bible',
@@ -57,8 +57,10 @@ const EDITION = {
   language: 'en',
   license_class: 'licensed',
   rights_holder: 'Thomas Nelson',
+  installed: true,
   note_count: 44336,
   note_kinds: ['commentary', 'footnote'],
+  note: '',
 };
 
 const PROVIDER_OK = {
@@ -320,7 +322,7 @@ describe('BibleAdminPanel', () => {
     expect(screen.getByText('Try again')).toBeTruthy();
   });
 });
-const ESTIMATE_BASE = {
+const ESTIMATE_BASE: BibleProviderEstimate = {
   translation_id: 'ESV',
   name: 'English Standard Version',
   books: 66,
@@ -334,7 +336,7 @@ const ESTIMATE_BASE = {
   cache_enabled: true,
 };
 
-function estimate(over: Partial<typeof ESTIMATE_BASE> = {}) {
+function estimate(over: Partial<BibleProviderEstimate> = {}): BibleProviderEstimate {
   return { ...ESTIMATE_BASE, ...over };
 }
 

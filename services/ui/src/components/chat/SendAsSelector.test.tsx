@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import SendAsSelector, { readSendAsPref, useSendAsPref } from './SendAsSelector';
+import SendAsSelector from './SendAsSelector';
+import { readSendAsPref, useSendAsPref } from './sendAsPref';
 
 function Harness({ isAdmin }: { isAdmin: boolean }) {
   const [sendAs, setSendAs] = useSendAsPref(isAdmin);

@@ -33,10 +33,15 @@ docs/BIBLE_STUDY.md "Reading is offline-first".
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from sqlalchemy import LargeBinary
 from sqlmodel import Field, SQLModel
+
+
+def utcnow() -> datetime:
+    """Now, in UTC, with its zone attached (sqlmodel refuses naive datetimes)."""
+    return datetime.now(timezone.utc)
 
 
 class BibleVersion(SQLModel, table=True):
@@ -54,7 +59,7 @@ class BibleVersion(SQLModel, table=True):
     # Verse count read at import time. A mismatch against reality is how a
     # truncated download announces itself instead of silently serving holes.
     verse_count: int = Field(default=0)
-    imported_at: datetime = Field(default_factory=datetime.utcnow)
+    imported_at: datetime = Field(default_factory=utcnow)
 
 
 class BibleEdition(SQLModel, table=True):
@@ -89,7 +94,7 @@ class BibleEdition(SQLModel, table=True):
     # without counting 44k rows per request.
     note_count: int = Field(default=0)
     note_kinds: str = Field(default="")
-    imported_at: datetime = Field(default_factory=datetime.utcnow)
+    imported_at: datetime = Field(default_factory=utcnow)
 
 
 class BibleBook(SQLModel, table=True):
@@ -195,8 +200,8 @@ class VerseMark(SQLModel, table=True):
     color: str = Field(default="")
     note_path: str = Field(default="")
     note_preview: str = Field(default="")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class StudyNote(SQLModel, table=True):
@@ -224,7 +229,7 @@ class StudyNote(SQLModel, table=True):
     ordinal: int = Field(default=0)
     body: str = Field(default="")
     source: str = Field(default="")
-    imported_at: datetime = Field(default_factory=datetime.utcnow)
+    imported_at: datetime = Field(default_factory=utcnow)
 
 
 class NarrationAudio(SQLModel, table=True):
@@ -246,7 +251,7 @@ class NarrationAudio(SQLModel, table=True):
     verse_count: int = Field(default=0)
     mime_type: str = Field(default="audio/wav")
     audio: bytes = Field(default=b"", sa_type=LargeBinary)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class ImportRun(SQLModel, table=True):
@@ -278,7 +283,7 @@ class ImportRun(SQLModel, table=True):
     note_count: int = Field(default=0)
     log: str = Field(default="")
     duration_ms: int = Field(default=0)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class ReadingEvent(SQLModel, table=True):
@@ -297,7 +302,7 @@ class ReadingEvent(SQLModel, table=True):
     ref: str = Field(default="")
     day: str = Field(index=True)
     value: int = Field(default=0)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class AchievementEarned(SQLModel, table=True):
