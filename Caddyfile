@@ -210,6 +210,15 @@
     handle /api/users* {
         reverse_proxy identity:8001
     }
+    # Gateway routes under /api/devices (the watch's Home favorites, pairing
+    # a companion device); everything else under it is identity's. Caddy
+    # tries the longer path first.
+    handle /api/devices/favorites* {
+        reverse_proxy gateway:11435
+    }
+    handle /api/devices/pair* {
+        reverse_proxy gateway:11435
+    }
     handle /api/devices* {
         reverse_proxy identity:8001
     }

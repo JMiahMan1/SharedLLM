@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
     from services.config import resolve_runtime_config
 
     await resolve_runtime_config()
-    engine = app.state.engine
+    engine = _db()  # app.state.engine is None until first use; tests set their own
     SQLModel.metadata.create_all(engine)
     try:
         applied = migrations.apply(engine)
