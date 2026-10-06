@@ -106,10 +106,18 @@ function evaluateApk(remote: AppVersionInfo, nativeBuildNumber: number | undefin
     return { updateAvailable: false, indeterminate: true };
   }
   // A browser is not running an APK at all, so there is no installed build to
-  // compare against and nothing here is "needed" -- but a published build is
-  // still worth surfacing (it is what the phone should be on). The notice
-  // omits any "you are on build N" claim, since nativeBuildNumber is undefined.
-  return { updateAvailable: true, indeterminate: false };
+  // compare against. A published build is still worth offering where it can
+  // be installed (an Android browser, or a Chromebook, which runs Android
+  // apps); a desktop browser cannot install it, so it is not offered there.
+  // The notice omits any "you are on build N" claim, since nativeBuildNumber
+  // is undefined.
+  return { updateAvailable: browserCanInstallApk(), indeterminate: false };
+}
+
+/** Whether this browser's device can install an Android APK: Android itself,
+ *  or ChromeOS (Chromebooks run Android apps). */
+export function browserCanInstallApk(userAgent: string = typeof navigator === 'undefined' ? '' : navigator.userAgent): boolean {
+  return /Android|CrOS/i.test(userAgent);
 }
 
 let isInitialized = false;

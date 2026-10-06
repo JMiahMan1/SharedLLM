@@ -106,11 +106,29 @@ describe('checkApkUpdate', () => {
     expect(status.nativeBuildNumber).toBeUndefined();
   });
 
-  it('still surfaces a published build to a browser viewer', async () => {
+  it('offers a published build to a browser that can install it (Android, Chromebook)', async () => {
     mocks.isNative.mockReturnValue(false);
     mocks.get.mockResolvedValue({ data: remote() });
-    const status = await checkApkUpdate();
-    expect(status.updateAvailable).toBe(true);
+    for (const ua of [
+      'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36',
+      'Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 Chrome/131 Safari/537.36',
+    ]) {
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(ua);
+      expect((await checkApkUpdate()).updateAvailable).toBe(true);
+    }
+  });
+
+  it('does not offer an APK to a desktop browser, which cannot install it', async () => {
+    mocks.isNative.mockReturnValue(false);
+    mocks.get.mockResolvedValue({ data: remote() });
+    for (const ua of [
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/154 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+    ]) {
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(ua);
+      expect((await checkApkUpdate()).updateAvailable).toBe(false);
+    }
   });
 
   // The real bug: a device whose build cannot be read used to compare against
