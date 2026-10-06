@@ -271,6 +271,29 @@ def test_a_librarian_turn_searches_the_library_even_when_the_query_names_no_book
     assert asks["context_calls"][0]["include_library"] is True
 
 
+def test_a_model_that_cannot_answer_is_reported_as_a_failure(auth_headers, asks, monkeypatch):
+    """A failed turn must not arrive as a successful answer.
+
+    ``_single_turn_inference`` used to return "I encountered an error while
+    trying to generate a response" as its string, which this route shipped with
+    HTTP 200 and a success toast -- so a composer that never answered looked
+    like one answering nonsense. Nothing was wrong except that it never worked.
+
+    The client timeout is the other half of the same failure: with the default
+    15s axios timeout the question was aborted before the model replied at all.
+    """
+
+    async def refusing(**kwargs):
+        raise orchestrator.InferenceUnavailable("Ollama HTTP 503: queue_timeout")
+
+    monkeypatch.setattr(orchestrator, "_single_turn_inference", refusing)
+
+    response = _post(auth_headers, query="what did he say?", mode="librarian")
+
+    assert response.status_code == 503
+    assert "queue_timeout" in response.json()["detail"]
+
+
 def test_a_raven_dispatch_does_not_force_the_library(asks, auth_headers):
     """Only the research mode promises the user's books; a mission does not.
 

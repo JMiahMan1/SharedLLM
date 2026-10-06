@@ -5568,7 +5568,11 @@ async def ask_in_workspace(workspace_id: str, request: Request):
 
     mode, reason = _resolve_workspace_ask_mode(query, requested_mode)
 
-    from services.gateway.orchestrator import _fetch_rag_context, _single_turn_inference
+    from services.gateway.orchestrator import (
+        InferenceUnavailable,
+        _fetch_rag_context,
+        _single_turn_inference,
+    )
 
     if mode == "raven":
         system = body.get("system") or await _build_raven_system_prompt(query)
@@ -5611,14 +5615,20 @@ async def ask_in_workspace(workspace_id: str, request: Request):
         model = await get_assistant_model()
         context = ""
 
-    answer = await _single_turn_inference(
-        query=query,
-        model=model,
-        system_prompt=body.get("system") or select_system_instruction_for_query(query, model),
-        rag_context=context,
-        history=[],
-        creds=ResolvedCredentials(**creds),
-    )
+    try:
+        answer = await _single_turn_inference(
+            query=query,
+            model=model,
+            system_prompt=body.get("system") or select_system_instruction_for_query(query, model),
+            rag_context=context,
+            history=[],
+            creds=ResolvedCredentials(**creds),
+        )
+    except InferenceUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"The model did not answer: {exc}",
+        ) from exc
     return {
         "status": "SUCCESS",
         "requested_mode": requested_mode,

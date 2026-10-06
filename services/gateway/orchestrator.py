@@ -504,7 +504,14 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, mission_id, rag_context=rag_context, show_thinking=show_thinking, workspace_id=workspace_id, history_log=history_log)
     else:
         # Librarian handles standard single-turn inference
-        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking)
+        try:
+            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking)
+        except InferenceUnavailable as exc:
+            # A mission and the voice assistant have no status code to report
+            # on: the answer field is the only channel they have, so the old
+            # sentence is kept here and nowhere else.
+            log.error(f"[Orchestrator] Inference unavailable: {exc}")
+            ans = f"I encountered an error while trying to generate a response (All retries failed): {exc}"
 
     return ans
 
@@ -1228,6 +1235,34 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
         log.warning(f"[_execute_single_tool] Unsupported tool for single-turn: {action}")
         return f"I don't have a handler for the '{action}' action yet. Could you try rephrasing, or let me know what you'd like me to do?"
 
+class InferenceUnavailable(RuntimeError):
+    """The model server could not take the turn.
+
+    Raised rather than returned as a sentence, because a caller that ships the
+    sentence in an ``answer`` field reports a failure as a success: the
+    workspace composer showed "I encountered an error while trying to generate a
+    response" with HTTP 200 and a success toast, so the only visible symptom was
+    that the chat never worked. Callers with no error channel -- a mission, the
+    voice assistant -- catch this and keep the old sentence.
+    """
+
+
+def _is_capacity_refusal(error: Exception) -> bool:
+    """True when the model server said it has no room, not that it failed.
+
+    A queue timeout means the server held the request for its whole queue
+    window. Retrying that three times multiplies both the load on a server that
+    is already full and the caller's wait: the observed turn took over seven
+    minutes and returned nothing but the timeout it already knew about.
+    """
+    text = str(error).lower()
+    return (
+        "queue_timeout" in text
+        or "no slots available" in text
+        or "no llama-server slots" in text
+    )
+
+
 async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False) -> str:
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
     single_turn_guide = load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE)
@@ -1280,13 +1315,20 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 break
             except Exception as e:
                 log.warning(f"[_single_turn_inference] Inference attempt {retry_count + 1} failed: {e}")
+                if _is_capacity_refusal(e):
+                    log.error(
+                        "[_single_turn_inference] The model server is at capacity and refused the "
+                        f"turn ({e}); not retrying, because a retry adds load to a full server and "
+                        "makes the caller wait the queue timeout again."
+                    )
+                    raise InferenceUnavailable(str(e)) from e
                 if retry_count < MAX_INFERENCE_RETRIES - 1:
                     wait_time = 5 * (retry_count + 1)
                     log.info(f"[_single_turn_inference] Retrying in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                 else:
                     log.error(f"[_single_turn_inference] FATAL: All inference retries failed: {e}")
-                    return f"I encountered an error while trying to generate a response (All retries failed): {e}"
+                    raise InferenceUnavailable(str(e)) from e
 
         tool_data = extract_action_json(ans)
         if not tool_data:

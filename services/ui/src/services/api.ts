@@ -629,12 +629,19 @@ export const api = {
   },
 
   async chat(message: string, workspaceId?: string, userId?: string, stream = false): Promise<unknown> {
-    const resp = await apiClient.post('/api/chat', {
-      query: message,
-      workspace_id: workspaceId,
-      user_id: userId,
-      stream,
-    });
+    // A non-streaming turn is billed to the model, so it outlives the 15s
+    // axios default: the quick assistant aborted every question it asked and
+    // showed a failure for a request the server answered seconds later.
+    const resp = await apiClient.post(
+      '/api/chat',
+      {
+        query: message,
+        workspace_id: workspaceId,
+        user_id: userId,
+        stream,
+      },
+      { timeout: 640_000 },
+    );
     return resp.data;
   },
 
@@ -1697,12 +1704,22 @@ export const api = {
    * and returns its id instead. `auto` resolves server-side and reports which
    * mode it chose in `resolved_mode`/`reason`.
    */
+  // The turn is billed to the model, so it runs for far longer than the 15s
+  // axios default: every question was aborted client-side before the server had
+  // answered, which is exactly why the composer looked broken. The server keeps
+  // working after a client gives up, so the short timeout also orphaned real
+  // work. 640s follows the OCR and image-edit calls, the other two places a
+  // workspace waits on a model.
   async askWorkspace(
     workspaceId: string,
     query: string,
     mode: WorkspaceAskMode = 'auto',
   ): Promise<WorkspaceAskResult> {
-    const resp = await apiClient.post(`/api/workspaces/${workspaceId}/ask`, { query, mode });
+    const resp = await apiClient.post(
+      `/api/workspaces/${workspaceId}/ask`,
+      { query, mode },
+      { timeout: 640_000 },
+    );
     return resp.data;
   },
 
