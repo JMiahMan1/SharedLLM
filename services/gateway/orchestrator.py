@@ -1002,6 +1002,24 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
 
             if action == "contextsearchrequest":
                 payload["user_id"] = creds.user or "default"
+                # A search with no collection is not a search, it is a guess:
+                # /rag/search defaults to nextcloud_files, so an under-specified
+                # call quietly reports "no relevant context found" while the
+                # material the caller wanted sits unread in another collection.
+                # Observed live: the Librarian was handed Macduff passages in
+                # its context, called this without a collection three times, and
+                # answered "No relevant context found" about a book it was
+                # already holding. So refuse, and say what to pass.
+                if not str(payload.get("collection_name") or "").strip():
+                    return (
+                        "collection_name is required and was not supplied, so the "
+                        "search was not run. /rag/search would default to "
+                        "nextcloud_files and report no results regardless of what "
+                        "was asked. Pass collection_name explicitly -- "
+                        "calibre_files for the book library, nextcloud_files for "
+                        "files, system_learnings for past lessons, ha_entities for "
+                        "the house."
+                    )
 
             if action == "talkrequest" and not payload.get("action"):
                 if payload.get("message") or payload.get("text_to_voice"):
