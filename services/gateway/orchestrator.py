@@ -27,6 +27,79 @@ from services.gateway.schemas import ResolvedCredentials
 
 log = logging.getLogger("gateway.orchestrator")
 
+# Vocabulary that means "the answer is probably in something I have read", which
+# is what a Calibre library of 3,000 books holds.
+#
+# This list is deliberately narrower than LIBRARIAN_SIGNALS. That one decides
+# which MODEL answers, so it can afford to be broad -- "notes" or "music" are
+# good enough reasons to use the Librarian. This one decides whether to spend
+# the context budget on book text, so it must not fire on a merely Librarian-ish
+# question: adding it there would silently pull books into every music or notes
+# answer. Bare verbs are excluded for the same reason -- "read the logs" is a
+# systems task, and "read" cannot be a book signal without catching it.
+LIBRARY_INTENT_SIGNALS = (
+    "book", "books", "bookshelf", "library", "libraries", "calibre", "calibre library",
+    "ebook", "ebooks", "e-book", "author", "authors", "wrote by", "written by",
+    "commentary", "commentaries", "sermon", "sermons", "preach", "preaching",
+    "preached", "homily", "devotional", "devotionals", "lectionary", "hymn",
+    "hymns", "theology", "meditation", "meditate", "quote", "quotation", "cite",
+    "passage", "exposition", "gospel", "epistle", "psalm", "psalms", "proverb",
+    "proverbs", "testament", "chapter", "verse", "scripture", "biblical",
+)
+
+# How a collection is named to the model. The internal name is an identifier,
+# not prose, and "CALIBRE_FILES" tells the Librarian nothing about what it can
+# answer. Anything absent falls back to the uppercased collection name.
+COLLECTION_HEADERS = {
+    "calibre_files": "LIBRARY — TEXT FROM YOUR BOOK LIBRARY",
+}
+
+
+def _collection_header(collection: str) -> str:
+    """Return the prompt header for a collection name."""
+    return COLLECTION_HEADERS.get(collection, collection.upper())
+
+
+def _library_intent_asked(query: str) -> bool:
+    """True when a query names the kind of thing a book library answers."""
+    q = query.lower()
+    return any(signal in q for signal in LIBRARY_INTENT_SIGNALS)
+
+
+# Collections consulted for a query that names no particular source. Book text
+# is absent on purpose: see _collections_for_query.
+_BASE_COLLECTIONS = ("ha_entities", "nextcloud_files", "system_capabilities", "system_learnings")
+_CODING_INTENT_TOKENS = ("file", "code", "git", "workspace", "fix", "repair")
+_CODING_COLLECTIONS = ("system_capabilities", "nextcloud_files", "system_learnings", "ha_entities")
+
+
+def _collections_for_query(query: str) -> list[str]:
+    """Choose which RAG collections a query is allowed to spend budget on.
+
+    A book library is not searched unless the query asks for one. It is by far
+    the largest collection in the index and the least likely to be relevant to
+    an arbitrary question, so including it by default would trade real answers
+    for noise on every turn and would quietly become the default as the library
+    grew. The same reasoning already keeps nextcloud_files out of the standing
+    set.
+
+    When a query does name books, they go first: a passage from a book is
+    stronger evidence for the question than anything the other collections hold,
+    and the caller's budget stops before they could crowd out the answer.
+
+    Kept separate from the fetching loop so the decision itself is testable
+    without standing up an HTTP client.
+    """
+    q = query.lower()
+    if any(token in q for token in _CODING_INTENT_TOKENS):
+        collections = list(_CODING_COLLECTIONS)
+    else:
+        collections = list(_BASE_COLLECTIONS)
+    if _library_intent_asked(q):
+        collections = ["calibre_files"] + [c for c in collections if c != "calibre_files"]
+    return collections
+
+
 # --- Default service URLs (Docker DNS) — overridable via Identity settings ---
 _DEFAULTS = cast(dict[str, str], {
     "identity_svc_url": IDENTITY_SVC,
@@ -368,6 +441,17 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     workspace_id = job_payload.get("workspace_id")
     rag_context = await _fetch_rag_context(query, user_id, creds, workspace_id=workspace_id)
 
+    # A Raven mission may arrive with context already retrieved at dispatch
+    # time, so that the mission brief can carry the sources it was launched
+    # from. It is prepended rather than substituted: _fetch_rag_context also
+    # contributes live Home Assistant state and workspace memory, and
+    # replacing its output with the prefetched string would silently drop
+    # both. The prefetched block was already trimmed to the retrieval budget
+    # when it was built.
+    prefetched = (job_payload.get("rag_context") or "").strip()
+    if prefetched:
+        rag_context = f"{prefetched}\n\n{rag_context}".strip() if rag_context else prefetched
+
     # Hardened intent: only flag a Raven mission when the prompt explicitly
     # invokes Raven AND issues a command. Bare action verbs (e.g. "fix the
     # app") without the Raven keyword no longer auto-route to the autonomous
@@ -404,11 +488,7 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
     try:
         # Prioritize collections based on query intent
         q = query.lower()
-        collections = ["ha_entities", "nextcloud_files", "system_capabilities", "system_learnings"]
-
-        # Adjust priorities: if it looks like a coding/sys task, prioritize capabilities and files
-        if any(token in q for token in ["file", "code", "git", "workspace", "fix", "repair"]):
-            collections = ["system_capabilities", "nextcloud_files", "system_learnings", "ha_entities"]
+        collections = _collections_for_query(query)
 
         # Context constraints
         MAX_TOTAL_HITS = 20
@@ -460,7 +540,7 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
                                         "`Apply: [id]` in your plan so it is recorded as used.]\n"
                                     )
                                 else:
-                                    rag_context += f"\n[{coll.upper()}]\n"
+                                    rag_context += f"\n[{_collection_header(coll)}]\n"
                                 coll_added = True
 
                             # Compact lesson rendering: prefer the structured RULE
