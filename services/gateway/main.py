@@ -8896,8 +8896,9 @@ async def proxy_set_step_goal(request: Request):
 
 @app.get("/api/geo/trends/activity")
 async def get_geo_activity_trends(request: Request, user_id: str | None = None, days: int = 7, refresh: bool = False):
-    if not user_id:
-        target, viewer, is_admin = await _read_target(request, user_id)
+    # Always resolved: this was inside `if not user_id:`, and the Fitness page
+    # always passes user_id, so every request failed with UnboundLocalError.
+    target, viewer, is_admin = await _read_target(request, user_id)
     params = {"days": days, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     if refresh:
         params["refresh"] = "true"
@@ -10804,7 +10805,9 @@ async def _forward_execution_request(
         if transform_result:
             data = await resp.json()
             if isinstance(data, dict):
-                entities = data.get("detail", {}).get("entities", [])
+                # detail is null on a FAILURE (e.g. no Home Assistant token),
+                # which made `.get` on it a 500 instead of the failure itself
+                entities = (data.get("detail") or {}).get("entities", [])
                 data["result"] = entities
             return JSONResponse(content=data, status_code=resp.status)
         return await _proxy_json_response(resp)

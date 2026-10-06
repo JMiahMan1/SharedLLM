@@ -170,3 +170,21 @@ def test_workspace_lint_route_forwards_to_execution(monkeypatch):
                                 headers={"Authorization": "Bearer sk-x"})
     assert resp.status_code == 200
     assert seen["url"].endswith("/execute/workspace_lint")
+
+
+def test_entity_search_failure_is_passed_on_not_a_500(monkeypatch):
+    """A FAILURE from execution carries detail=null; reading entities off it
+    used to raise, turning the failure into a 500."""
+    class _ExecClient:
+        async def post(self, url, **kw):
+            return _Resp(200, {"status": "FAILURE", "message": "Home Assistant URL or token not configured",
+                               "detail": None})
+
+    async def fake_ctx(request, body):
+        return {"user": "jeremiah"}
+
+    monkeypatch.setattr(gateway_main, "get_http_client", lambda: _ExecClient())
+    monkeypatch.setattr(gateway_main, "_resolve_user_context", fake_ctx)
+    resp = TestClient(app).post("/execute/entity/search", json={"query": ""}, headers={"Authorization": "Bearer sk-x"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "FAILURE" and resp.json()["result"] == []
