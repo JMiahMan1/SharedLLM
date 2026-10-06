@@ -41,8 +41,13 @@ def asks(monkeypatch):
     """
     seen: dict = {"context_calls": [], "inference_calls": [], "mission_calls": []}
 
-    async def fake_context(query, user_id, creds=None, workspace_id=None):
-        seen["context_calls"].append({"query": query, "user_id": user_id, "workspace_id": workspace_id})
+    async def fake_context(query, user_id, creds=None, workspace_id=None, include_curriculum=True):
+        seen["context_calls"].append({
+            "query": query,
+            "user_id": user_id,
+            "workspace_id": workspace_id,
+            "include_curriculum": include_curriculum,
+        })
         return "RETRIEVED CONTEXT"
 
     async def fake_inference(**kwargs):
@@ -121,6 +126,34 @@ def test_retrieval_is_scoped_to_the_workspace_being_asked_about(auth_headers, as
     _post(auth_headers, query="what did he say?", mode="librarian")
     assert asks["context_calls"][0]["workspace_id"] == "ws-1"
     assert asks["context_calls"][0]["user_id"] == "testuser"
+
+
+def test_a_librarian_turn_asks_for_no_curriculum(auth_headers, asks):
+    """Regression: a cited answer used to come back as an Ollama context error.
+
+    ``TOTAL_CHARS_LIMIT`` bounds only the search hits, while the protocol
+    lessons, CLI toolchain inventory and Nextcloud/HA inventories are appended
+    after that budget is spent. A library question assembled 26,434 characters
+    against an 8,192-token window and the model returned ``exceeds the
+    available context size`` *as the answer* -- an error wearing the costume of
+    a response. A read-only turn cannot act on any of that furniture, so it must
+    not be handed it.
+    """
+    response = _post(auth_headers, query="what did Macduff say about poverty?", mode="librarian")
+    assert response.status_code == 200
+    assert asks["context_calls"][0]["include_curriculum"] is False
+
+
+def test_a_raven_dispatch_still_asks_for_the_curriculum(auth_headers, asks):
+    """The other half: Raven is the caller the curriculum was written for.
+
+    It creates workspaces, runs shell commands and dispatches tasks, so dropping
+    its protocol lessons would be a silent capability regression. The flag has to
+    be opt-out per caller, not global.
+    """
+    response = _post(auth_headers, query="summarize the project and fix it", mode="raven")
+    assert response.status_code == 200
+    assert asks["context_calls"][0]["include_curriculum"] is True
 
 
 def test_a_raven_dispatch_carries_the_context_it_was_launched_with(auth_headers, asks):
