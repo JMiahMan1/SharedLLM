@@ -43,7 +43,15 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api, type RavenMission, type Workspace } from '../../services/api';
-import type { AiCapability, GitLogEntry, GitStatusResponse, WorkspaceFileEntry } from '../../types/api';
+import type {
+  AiCapability,
+  GitLogEntry,
+  GitStatusResponse,
+  ResolvedWorkspaceAskMode,
+  WorkspaceAskMode,
+  WorkspaceAskResult,
+  WorkspaceFileEntry,
+} from '../../types/api';
 import { detectLanguage } from '../../lib/editorLanguages';
 import {
   buildFacePreservePrompt,
@@ -63,6 +71,7 @@ import { ExcelViewer } from './viewers/ExcelViewer';
 import { TerminalPane } from './viewers/TerminalPane';
 import { WorkspaceSecrets } from './WorkspaceSecrets';
 import { cn } from '../../lib/utils';
+import { useHaptics } from '../../hooks/useHaptics';
 import { Capacitor } from '@capacitor/core';
 import {
   selectionFromDataTransfer,
@@ -117,12 +126,63 @@ function apiErr(e: unknown): string {
   return err?.response?.data?.detail || err?.message || 'Unknown error';
 }
 
+/**
+ * The three workspace-composer jobs, in the order a person reads them.
+ *
+ * `auto` is first on purpose: it is the default, and it resolves server-side
+ * from the shape of the query. The other three are the escape hatch, for when
+ * the guess is wrong — which it will be, because a keyword classifier cannot
+ * tell "read the logs" (a systems task) from "what did Macduff say about
+ * poverty" (a library question).
+ */
+const ASK_MODES: {
+  id: WorkspaceAskMode;
+  label: string;
+  blurb: string;
+  placeholder: string;
+}[] = [
+  {
+    id: 'auto',
+    label: 'Auto',
+    blurb: 'Pick from the question',
+    placeholder: 'Ask something, or describe a task to run in this workspace…',
+  },
+  {
+    id: 'librarian',
+    label: 'Ask',
+    blurb: 'Answer from your books, files and notes',
+    placeholder: 'Ask a question. Raven searches your library, Nextcloud and lessons first…',
+  },
+  {
+    id: 'single_task',
+    label: 'Task',
+    blurb: 'One job, one answer, no retrieval',
+    placeholder: 'Describe one job for the assistant…',
+  },
+  {
+    id: 'raven',
+    label: 'Raven',
+    blurb: 'Autonomous mission, runs in the background',
+    placeholder: 'Describe a task for Raven to run in this workspace…',
+  },
+];
+
+const ASK_MODE_CHIPS: Record<ResolvedWorkspaceAskMode, string> = {
+  librarian: 'bg-teal-500/15 text-teal-300 border-teal-500/40',
+  single_task: 'bg-sky-500/15 text-sky-300 border-sky-500/40',
+  raven: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/40',
+};
+
+function askModeMeta(mode: WorkspaceAskMode) {
+  return ASK_MODES.find((m) => m.id === mode) ?? ASK_MODES[0];
+}
+
 const ACTIVITY: { id: View; icon: typeof FolderOpen; label: string }[] = [
   { id: 'explorer', icon: FolderOpen, label: 'Explorer' },
   { id: 'git', icon: GitBranch, label: 'Source Control' },
   { id: 'tools', icon: Wrench, label: 'Tools' },
   { id: 'terminal', icon: Terminal, label: 'Terminal' },
-  { id: 'chat', icon: MessageSquare, label: 'Raven Chat' },
+  { id: 'chat', icon: MessageSquare, label: 'Chat' },
 ];
 
 interface FileCtxMenuItemProps {
@@ -314,6 +374,10 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
   const [refineBusy, setRefineBusy] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
+  const [askMode, setAskMode] = useState<WorkspaceAskMode>('auto');
+  const [askResult, setAskResult] = useState<WorkspaceAskResult | null>(null);
+  const [askQuestion, setAskQuestion] = useState('');
+  const haptics = useHaptics();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -1080,22 +1144,65 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
   }, [activeView, loadMissions]);
 
   const sendChat = useCallback(async () => {
-    if (!chatInput.trim()) {
+    const question = chatInput.trim();
+    if (!question) {
       toast.error('Describe a task for Raven');
       return;
     }
     setChatBusy(true);
+    setAskQuestion(question);
     try {
-      const res = await api.createWorkspaceMission(workspace.id, chatInput.trim(), 3);
-      toast.success(`Raven mission #${res.mission?.id ?? '?'} dispatched`);
-      setChatInput('');
-      await loadMissions();
+      const res = await api.askWorkspace(workspace.id, question, askMode);
+      setAskResult(res);
+      if (res.resolved_mode === 'raven') {
+        toast.success(`Raven mission #${res.mission_id ?? '?'} dispatched`);
+        await loadMissions();
+      } else {
+        void haptics.trigger('success');
+      }
     } catch (e: unknown) {
+      setAskResult(null);
       toast.error(`Dispatch failed: ${apiErr(e)}`);
     } finally {
       setChatBusy(false);
+      setChatInput('');
     }
-  }, [chatInput, workspace.id, loadMissions]);
+  }, [askMode, chatInput, workspace.id, loadMissions, haptics]);
+
+  /**
+   * Hand a finished answer to Raven as a mission brief.
+   *
+   * This is how the two modes mix. The Librarian's turn is synchronous and
+   * short, so it cannot wait on a mission that runs for minutes; escalating
+   * instead means the mission is briefed with the question, the answer and the
+   * context length that produced it, rather than with a bare question that
+   * would have to be researched all over again.
+   */
+  const escalateToRaven = useCallback(async () => {
+    const current = askResult;
+    if (!current || current.resolved_mode === 'raven') return;
+    const brief = [
+      `A librarian pass answered this and its sources should be reused:`,
+      ``,
+      `Question: ${askQuestion}`,
+      ``,
+      `Answer: ${(current.answer ?? '').slice(0, 4000)}`,
+      ``,
+      `${current.context_chars} characters of retrieved context were available to the librarian.`,
+      `Re-derive anything the answer left uncertain, then carry out the task.`,
+    ].join('\n');
+    setChatBusy(true);
+    try {
+      const res = await api.askWorkspace(workspace.id, brief, 'raven');
+      setAskResult(res);
+      toast.success(`Raven mission #${res.mission_id ?? '?'} dispatched`);
+      await loadMissions();
+    } catch (e: unknown) {
+      toast.error(`Could not hand off to Raven: ${apiErr(e)}`);
+    } finally {
+      setChatBusy(false);
+    }
+  }, [askQuestion, askResult, workspace.id, loadMissions]);
 
   const refineLastMission = useCallback(async () => {
     const last = missions[0];
@@ -1727,7 +1834,8 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                   </div>
                 ) : missions.length === 0 ? (
                   <div className="px-3 py-8 text-center text-slate-600 text-xs">
-                    No missions yet. Describe a task below to dispatch Raven.
+                    No missions yet. Pick a mode above — Ask for a cited answer,
+                    or Raven for an autonomous task.
                   </div>
                 ) : (
                   missions.map((m) => (
@@ -1748,29 +1856,97 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                 )}
               </div>
               <div className="border-t border-white/10 p-2 space-y-2">
+                <div
+                  role="group"
+                  aria-label="Response mode"
+                  className="flex gap-1 rounded-lg bg-black/40 p-0.5"
+                >
+                  {ASK_MODES.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => {
+                        setAskMode(m.id);
+                        void haptics.trigger('light');
+                      }}
+                      aria-pressed={askMode === m.id}
+                      title={m.blurb}
+                      className={cn(
+                        'flex-1 rounded-md px-2 min-h-9 pointer-coarse:min-h-11 text-[11px] font-medium transition-colors',
+                        askMode === m.id
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-400 hover:bg-white/10 hover:text-slate-200',
+                      )}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  {askModeMeta(askMode).blurb}
+                </p>
                 <div className="flex gap-2">
                   <textarea
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
+                    aria-label="Workspace prompt"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                         e.preventDefault();
                         void sendChat();
                       }
                     }}
-                    placeholder="Describe a task for Raven to run in this workspace…  (⌘/Ctrl+Enter to send)"
+                    placeholder={`${askModeMeta(askMode).placeholder}  (⌘/Ctrl+Enter to send)`}
                     rows={2}
                     className="flex-1 bg-black/50 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none resize-none"
                   />
                   <button
                     onClick={sendChat}
                     disabled={chatBusy || !chatInput.trim()}
+                    aria-label={`Send as ${askModeMeta(askMode).label}`}
                     className="px-3 self-stretch flex items-center justify-center rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white"
-                    title="Dispatch Raven mission"
                   >
                     {chatBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                   </button>
                 </div>
+                {askResult && (
+                  <div className="rounded-lg border border-white/10 bg-black/30 p-2 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={cn(
+                          'text-[10px] uppercase tracking-wide border rounded px-1.5 py-0.5',
+                          ASK_MODE_CHIPS[askResult.resolved_mode],
+                        )}
+                      >
+                        {askResult.resolved_mode === 'librarian'
+                          ? 'Ask'
+                          : askResult.resolved_mode === 'single_task'
+                            ? 'Task'
+                            : 'Raven'}
+                      </span>
+                      <span className="text-[10px] text-slate-500 truncate">
+                        {askResult.model ?? `mission #${askResult.mission_id ?? '?'}`}
+                        {askResult.context_chars > 0 && ` · ${askResult.context_chars} chars retrieved`}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 leading-tight">{askResult.reason}</p>
+                    {askResult.answer && (
+                      <div className="text-[11px] text-slate-200 whitespace-pre-wrap max-h-56 overflow-y-auto custom-scrollbar">
+                        {askResult.answer}
+                      </div>
+                    )}
+                    {askResult.resolved_mode !== 'raven' && (
+                      <button
+                        type="button"
+                        onClick={escalateToRaven}
+                        disabled={chatBusy}
+                        className="w-full rounded-md bg-indigo-600/20 hover:bg-indigo-600/30 disabled:opacity-40 text-indigo-200 text-[11px] px-2 min-h-9 pointer-coarse:min-h-11 flex items-center justify-center gap-1.5"
+                      >
+                        <Bot size={12} /> Hand this to Raven
+                      </button>
+                    )}
+                  </div>
+                )}
                 {missions.length > 0 && (
                   <div className="flex gap-2">
                     <input
