@@ -118,13 +118,14 @@ class TestNoOptInEventAllowlist:
 
 
 class TestDeviceKinds:
-    def test_the_three_kinds_are_declared(self):
-        assert DEVICE_KINDS == ("phone", "assistant", "light")
+    def test_the_kinds_are_declared(self):
+        # watch: a companion device paired from Jarvis with its on-screen code
+        assert DEVICE_KINDS == ("phone", "assistant", "light", "watch")
 
     def test_light_is_excluded_from_the_advanced_panel(self):
-        """A light has no screen and nothing to install."""
+        """A light has no screen and nothing to install; a watch has both."""
         assert "light" not in ADVANCED_DEVICE_KINDS
-        assert set(ADVANCED_DEVICE_KINDS) == {"phone", "assistant"}
+        assert set(ADVANCED_DEVICE_KINDS) == {"phone", "assistant", "watch"}
 
     def test_device_kind_defaults_to_phone(self):
         assert Device.model_fields["kind"].default == "phone"

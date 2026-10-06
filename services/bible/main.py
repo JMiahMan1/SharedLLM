@@ -60,6 +60,7 @@ from services.bible import (
 from services.bible.corpus import CorpusError
 from services.bible.devotionals import registry as devotional_registry
 from services.bible.models import (
+    utcnow,
     AchievementEarned,
     BibleBook,
     BibleVerse,
@@ -682,7 +683,7 @@ def put_mark(
         VerseMark.kind == payload.kind,
     )
     existing = session.exec(stmt).first()
-    now = datetime.utcnow()
+    now = utcnow()
     if existing is None:
         existing = VerseMark(
             username=username,
@@ -838,7 +839,7 @@ def put_state(
         value = getattr(payload, attr)
         if value is not None:
             setattr(state, attr, value)
-    state.last_read_at = datetime.utcnow()
+    state.last_read_at = utcnow()
     session.commit()
     session.refresh(state)
     return {"username": username, "position": _state_position(state), "preferences": _preferences(state)}

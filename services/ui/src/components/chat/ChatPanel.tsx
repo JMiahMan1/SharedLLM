@@ -4,7 +4,8 @@ import { BarChart3, Loader2, MessageSquare, Mic, Phone, Plus, RefreshCw, Send, S
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
-import SendAsSelector, { useSendAsPref } from './SendAsSelector';
+import SendAsSelector from './SendAsSelector';
+import { useSendAsPref } from './sendAsPref';
 import EnvelopeBody from './EnvelopeBody';
 
 interface TalkConversation {

@@ -53,8 +53,8 @@ vi.mock('../services/api', async (importOriginal) => {
 const mocked = vi.mocked(api);
 
 const VERSIONS: BibleVersionInfo[] = [
-  { code: 'kjv', name: 'King James Version', language: 'en', license_class: 'public_domain', rights_holder: '', installed: true, verse_count: 31102, imported_at: '2026-01-01T00:00:00', editions: 0, note: '' },
-  { code: 'asv', name: 'American Standard Version', language: 'en', license_class: 'public_domain', rights_holder: '', installed: true, verse_count: 31086, imported_at: '2026-01-01T00:00:00', editions: 0, note: '' },
+  { code: 'kjv', name: 'King James Version', language: 'en', license_class: 'public_domain', rights_holder: '', installed: true, verse_count: 31102, imported_at: '2026-01-01T00:00:00', editions: 0, primary: false, provider: '', note: '' },
+  { code: 'asv', name: 'American Standard Version', language: 'en', license_class: 'public_domain', rights_holder: '', installed: true, verse_count: 31086, imported_at: '2026-01-01T00:00:00', editions: 0, primary: false, provider: '', note: '' },
   {
     code: 'esv',
     name: 'English Standard Version',
@@ -65,6 +65,8 @@ const VERSIONS: BibleVersionInfo[] = [
     verse_count: 0,
     imported_at: null,
     editions: 1,
+    primary: false,
+    provider: '',
     note: 'English Standard Version (Crossway) is copyrighted, so its text is not bundled.',
   },
 ];
@@ -246,11 +248,11 @@ beforeEach(() => {
     ],
     members: ['sam', 'tester'],
   });
-  mocked.putBibleState.mockReset().mockResolvedValue(undefined);
-  mocked.putBibleMark.mockReset().mockResolvedValue(MARKS());
-  mocked.deleteBibleMark.mockReset().mockResolvedValue(undefined);
-  mocked.recordBibleEvent.mockReset().mockResolvedValue(undefined);
-  mocked.createNote.mockReset().mockResolvedValue({ success: true });
+  mocked.putBibleState.mockReset().mockResolvedValue(undefined as never);
+  mocked.putBibleMark.mockReset().mockResolvedValue({ mark: MARKS().marks[0] });
+  mocked.deleteBibleMark.mockReset().mockResolvedValue({ deleted: 1 });
+  mocked.recordBibleEvent.mockReset().mockResolvedValue({ ok: true });
+  mocked.createNote.mockReset().mockResolvedValue({ status: 'SUCCESS', message: 'saved', service: 'note' });
   mocked.getBlbLink.mockReset().mockResolvedValue({ ref: 'John 3:16', url: 'https://bible.test/jhn/3/16', tool: null });
   mocked.getBibleEditions.mockReset().mockResolvedValue({
     version: 'kjv',

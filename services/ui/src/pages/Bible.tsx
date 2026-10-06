@@ -5,6 +5,7 @@ import { BookOpen, Flame, Search, Sparkles, Trophy, X } from 'lucide-react';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import type {
+  BibleBookInfo,
   BibleMark,
   BiblePosition,
   BibleEditionInfo,
@@ -89,7 +90,7 @@ function BibleReaderPane({
   versions: BibleVersionInfo[];
   editions: BibleEditionInfo[];
   version: string;
-  books: Array<{ osis: string; name: string; chapters: number }>;
+  books: BibleBookInfo[];
 }) {
   const { trigger } = useHaptics();
   const [position, setPosition] = useState<BiblePosition>(

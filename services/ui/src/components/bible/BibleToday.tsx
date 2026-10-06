@@ -25,8 +25,9 @@ export default function BibleToday({ onOpenRef }: BibleTodayProps) {
   });
 
   const failure = error instanceof Error ? error.message : null;
-  const verse = data && 'error' in data.verse_of_day ? null : data?.verse_of_day;
-  const verseError = data && 'error' in data.verse_of_day ? data.verse_of_day.error : null;
+  const vod = data?.verse_of_day;
+  const verse = vod && !('error' in vod) ? vod : null;
+  const verseError = vod && 'error' in vod ? vod.error : null;
   const entry = data?.devotional?.entry ?? null;
   const skipped = data?.devotional?.skipped ?? [];
 

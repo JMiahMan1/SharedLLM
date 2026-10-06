@@ -74,7 +74,7 @@ async function playOnMaPlayer(bookTitle: string) {
   await userEvent.click(play);
 }
 
-let userEvent: ReturnType<typeof import('@testing-library/user-event').default>;
+let userEvent: typeof import('@testing-library/user-event').default;
 
 beforeEach(async () => {
   userEvent = (await import('@testing-library/user-event')).default;

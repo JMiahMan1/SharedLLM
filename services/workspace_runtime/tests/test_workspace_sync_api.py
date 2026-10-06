@@ -221,10 +221,14 @@ def test_upload_overwrite_false_skips_existing(client):
 
 
 def test_upload_over_the_limit_is_refused(client, monkeypatch):
-    import services.config as config
+    # Patch the config module the upload code holds, not whatever
+    # services.config resolves to now: other tests reload that module, and a
+    # fresh copy would leave upload_ops reading the old limit (it passed alone
+    # and failed in the full CI run).
+    from services.workspace_runtime import upload_ops
 
     assert _create(client).status_code == 200
-    monkeypatch.setattr(config, "WORKSPACE_UPLOAD_MAX_BYTES", 10)
+    monkeypatch.setattr(upload_ops.config, "WORKSPACE_UPLOAD_MAX_BYTES", 10)
     resp = _upload(client, [("big.bin", b"x" * 100)])
     assert resp.status_code == 413
     assert "WORKSPACE_UPLOAD_MAX_BYTES" in resp.json()["detail"]

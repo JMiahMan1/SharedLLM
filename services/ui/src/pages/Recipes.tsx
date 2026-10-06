@@ -4,7 +4,8 @@ import { BookOpen, Loader2, Plus, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { ExecutionResponse } from '../types/api';
-import SendAsSelector, { useSendAsPref } from '../components/chat/SendAsSelector';
+import SendAsSelector from '../components/chat/SendAsSelector';
+import { useSendAsPref } from '../components/chat/sendAsPref';
 
 export const RECIPES_DIR = 'Recipes';
 const STORAGE = 'nextcloud';

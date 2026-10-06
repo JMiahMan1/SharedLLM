@@ -56,7 +56,7 @@ const emptyErrors = { ma: null, abs: null }
 const fixtures: Record<MediaSchemaName, unknown> = {
   MediaErrorInfo: { ma: null, abs: 'Audiobookshelf is unreachable' },
   MediaItem: track,
-  MediaLibrary: { id: 'lib-1', name: 'Audiobooks', media_type: 'book' },
+  MediaLibrary: { id: 'lib-1', name: 'Audiobooks', media_type: 'book' } as MediaLibrary,
   MediaHomeResponse: {
     recent: [track, book],
     continue: [book],

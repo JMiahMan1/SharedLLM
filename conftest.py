@@ -95,6 +95,10 @@ _TEST_ENV_DEFAULTS = {
     # service aliases (which only resolve inside the compose network).
     "GATEWAY_INTERNAL_URL": "http://gateway:11435",
     "EXECUTION_EXTERNAL_HOST": "localhost",
+    # Jarvis's public address, handed to paired devices. Blank in tests: the
+    # pairing tests set it themselves, and the rest must not depend on a
+    # developer's .env.
+    "JARVIS_HOST": "",
     "NETWORK_MODE": "bridge",
     "REDIS_URL": "redis://localhost:6379/0",
     "SEARXNG_URL": "http://localhost:8080",

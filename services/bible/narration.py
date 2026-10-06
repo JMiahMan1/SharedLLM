@@ -34,7 +34,7 @@ import aiohttp
 from sqlmodel import Session, select
 
 from services.bible.corpus import fetch_passage
-from services.bible.models import NarrationAudio
+from services.bible.models import NarrationAudio, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ def store(
     row.verse_count = verse_count
     row.mime_type = mime_type
     row.audio = audio
-    row.created_at = datetime.utcnow()
+    row.created_at = utcnow()
     session.commit()
     return row
 
