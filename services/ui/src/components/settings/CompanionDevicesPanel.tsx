@@ -52,7 +52,8 @@ function lastSeen(iso?: string | null): string {
 
 interface Props {
   /** mine: the signed-in user's devices (Identity page). all: everyone's, with
-   * owners (Admin -> Users & Devices; the server only returns all to admins). */
+   * an owner picker on each (Admin -> Users & Devices; the server only returns
+   * all to admins, and only an admin may reassign). */
   scope?: 'mine' | 'all';
 }
 
@@ -70,6 +71,20 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
     queryFn: () => api.getCompanionDevices(),
   });
   const devices = scope === 'mine' ? allDevices.filter((d) => (d.owner_username || '').toLowerCase() === me) : allDevices;
+  const { data: users = [] } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => api.getUsers(),
+    enabled: scope === 'all',
+  });
+
+  const assign = useMutation({
+    mutationFn: (v: { deviceKey: string; owner: string }) => api.assignCompanionDevice(v.deviceKey, v.owner),
+    onSuccess: (d) => {
+      toast.success(d.owner_username ? `Assigned to @${d.owner_username}` : 'Unassigned');
+      queryClient.invalidateQueries({ queryKey: ['companion-devices'] });
+    },
+    onError: (e: Error) => toast.error(e.message || 'Could not assign the device'),
+  });
 
   const discover = useMutation({
     mutationFn: () => api.pairDevice({ step: 'discover' }),
@@ -256,18 +271,34 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
           const Icon = KIND_ICON[d.kind] ?? Cpu;
           const name = d.label || [d.manufacturer, d.model].filter(Boolean).join(' ') || d.device_key;
           const sub = [
-            scope === 'all' ? (d.owner_username ? `@${d.owner_username}` : 'Unassigned') : '',
             HOW[d.registered_by] ?? d.registered_by,
             lastSeen(d.last_seen_at),
           ].filter(Boolean).join(' · ');
           return (
-            <li key={d.device_key} className={`flex items-center gap-3 px-4 sm:px-6 py-3 ${touch}`}>
+            <li key={d.device_key} className={`flex flex-wrap items-center gap-3 px-4 sm:px-6 py-3 ${touch}`}>
               <Icon size={20} className="text-sky-400 shrink-0" />
               <span className="flex-1 min-w-0">
                 <span className="block text-sm text-white truncate">{name}</span>
                 <span className="block text-xs text-slate-500 truncate">{sub}</span>
               </span>
               <span className="text-[10px] uppercase tracking-widest text-slate-500">{d.kind}</span>
+              {scope === 'all' && (
+                <select
+                  aria-label={`Owner of ${name}`}
+                  value={(d.owner_username || '').toLowerCase()}
+                  disabled={assign.isPending}
+                  onChange={(e) => assign.mutate({ deviceKey: d.device_key, owner: e.target.value })}
+                  className={`w-full sm:w-44 glass-input bg-black/30 text-sm ${touch}`}
+                >
+                  <option value="">Unassigned</option>
+                  {users.map((u) => (
+                    <option key={u.username} value={u.username.toLowerCase()}>@{u.username}</option>
+                  ))}
+                  {d.owner_username && !users.some((u) => u.username.toLowerCase() === d.owner_username!.toLowerCase()) && (
+                    <option value={d.owner_username.toLowerCase()}>@{d.owner_username}</option>
+                  )}
+                </select>
+              )}
             </li>
           );
         })}

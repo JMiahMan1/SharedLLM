@@ -421,22 +421,62 @@ STEP_SOURCES = ("phone", "watch", "ha", "health_connect", "intervals")
 APP_TIMEZONE = os.environ.get("APP_TIMEZONE", "America/Phoenix")
 
 
+async def _source_hours(r, clean_id: str, day: str, source: str) -> dict[int, int]:
+    """One source's hour buckets for `day` ({hour: steps}); {} when it sent none."""
+    try:
+        raw = await r.hgetall(f"geo:steps_hourly:{clean_id}:{source}")
+    except Exception as e:
+        log.warning(f"[Geo] Failed to read hourly steps for {clean_id}/{source}: {e}")
+        return {}
+    prefix = f"{day}:"
+    hours: dict[int, int] = {}
+    for field, value in raw.items():
+        name = field.decode() if isinstance(field, bytes) else str(field)
+        if not name.startswith(prefix):
+            continue
+        try:
+            hour = int(name[len(prefix):])
+            steps = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= hour <= 23 and steps >= 0:
+            hours[hour] = steps
+    return hours
+
+
+async def _fused_hours(r, clean_id: str, day: str) -> dict[int, int]:
+    """Each hour of `day` at the most any one source counted in it.
+
+    Comparing hour by hour is what fills the blanks: the phone's morning and
+    the watch's afternoon both count in full, while an hour both devices were
+    carried for counts once (at whichever counted more), never twice.
+    """
+    fused: dict[int, int] = {}
+    for source in STEP_SOURCES:
+        for hour, steps in (await _source_hours(r, clean_id, day, source)).items():
+            fused[hour] = max(fused.get(hour, 0), steps)
+    return fused
+
+
 async def _fuse_day(r, clean_id: str, day: str) -> int:
     """Fuse one day across sources.
 
-    Devices counting the same walk would double-count if summed, so the fused
-    value is the max across sources: it never overstates a shared walk, and a
-    watch still contributes steps the phone missed (left on the table).
+    Hours first: the sum of each hour's best source (`_fused_hours`), so a day
+    split between phone and watch adds up. A source that reports no hours (an
+    older phone build, Home Assistant, Health Connect) or counted steps it
+    could not place in an hour still has its day total, so the fused day is
+    never below the best single source: summing day totals would double-count
+    a shared walk, and that floor is the old max-of-sources answer.
     """
-    fused = 0
+    best_source = 0
     for source in STEP_SOURCES:
         raw = await r.hget(f"geo:steps_src:{clean_id}:{source}", day)
         try:
             value = int(raw) if raw is not None else 0
         except (TypeError, ValueError):
             value = 0
-        fused = max(fused, value)
-    return fused
+        best_source = max(best_source, value)
+    return max(best_source, sum((await _fused_hours(r, clean_id, day)).values()))
 
 
 async def _record_daily_steps(
@@ -542,38 +582,19 @@ async def _record_hourly_steps(
     return written
 
 
-async def _get_hourly_steps(r, clean_id: str, day: str, source: str = "phone") -> list[dict]:
-    """Recorded hour buckets for one day, oldest hour first.
+async def _get_hourly_steps(r, clean_id: str, day: str) -> list[dict]:
+    """Recorded hour buckets for one day, oldest hour first, fused across
+    sources the same way the day total is (`_fused_hours`).
 
     Returns ``[]`` when the day has never been reported -- an honest absence,
-    never a list of 24 zeros, because "your phone hasn't reported hourly steps
+    never a list of 24 zeros, because "no device has reported hourly steps
     yet" and "you sat still for 24 hours" are completely different facts.
     """
-    try:
-        raw = await r.hgetall(f"geo:steps_hourly:{clean_id}:{source}")
-    except Exception as e:
-        log.warning(f"[Geo] Failed to read hourly steps for {clean_id}: {e}")
-        return []
-    prefix = f"{day}:"
-    buckets: list[dict] = []
-    for field, value in raw.items():
-        name = field.decode() if isinstance(field, bytes) else str(field)
-        if not name.startswith(prefix):
-            continue
-        try:
-            hour = int(name[len(prefix):])
-            steps = int(value)
-        except (TypeError, ValueError):
-            continue
-        if hour < 0 or hour > 23 or steps < 0:
-            continue
-        buckets.append({
-            "hour": hour,
-            "label": f"{hour:02d}:00",
-            "steps": steps,
-        })
-    buckets.sort(key=lambda b: b["hour"])
-    return buckets
+    hours = await _fused_hours(r, clean_id, day)
+    return [
+        {"hour": hour, "label": f"{hour:02d}:00", "steps": steps}
+        for hour, steps in sorted(hours.items())
+    ]
 
 
 async def _get_daily_steps(r, clean_id: str, days: int = 30) -> dict:
@@ -2518,9 +2539,10 @@ async def post_daily_steps(
     Also accepted via location updates (`daily_steps` field) so the phone can
     piggyback on breadcrumb posts.
 
-    `hourly` is the phone's own hour-by-hour breakdown for the day that
-    `timestamp` resolves to in `timezone` -- the day the phone itself filed the
-    reading under, so the hours land in the same bucket the total does. Builds
+    `hourly` is the device's own hour-by-hour breakdown (phone or watch) for
+    the day that `timestamp` resolves to in `timezone` -- the day the device
+    itself filed the reading under, so the hours land in the same bucket the
+    total does. The day total is then fused hour by hour across devices. Builds
     that predate the hourly ledger simply omit it, and a day with no hourly
     detail stays absent rather than becoming 24 fabricated zeros.
     """
@@ -2553,6 +2575,9 @@ async def post_daily_steps(
         hours_written = await _record_hourly_steps(
             r, user, update.get("hourly"), day, source if source in STEP_SOURCES else "phone"
         )
+        if hours_written:
+            # The day was fused above, before these hours were stored.
+            await r.hset(f"geo:steps:{user}", day, await _fuse_day(r, user, day))
     return {
         "status": "ok",
         "user_id": user,

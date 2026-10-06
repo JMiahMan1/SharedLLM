@@ -59,8 +59,32 @@ describe('CompanionDevicesPanel', () => {
   it('shows everyone, with owners, in the admin view', async () => {
     renderWithProviders(<CompanionDevicesPanel scope="all" />);
     expect(await screen.findByText("Kate's phone")).toBeInTheDocument();
-    expect(screen.getByText(/@kate/)).toBeInTheDocument();
-    expect(screen.getByText(/@default/)).toBeInTheDocument();
+    expect(((await screen.findByLabelText("Owner of Kate's phone")) as HTMLSelectElement).value).toBe('kate');
+    expect((screen.getByLabelText('Owner of Google Pixel 7') as HTMLSelectElement).value).toBe('default');
+  });
+
+  it('lets an admin give a device to someone else, or unassign it', async () => {
+    const patches: Array<{ key: string; body: Record<string, unknown> }> = [];
+    server.use(
+      http.get('/api/users', () => HttpResponse.json([
+        { id: 1, username: 'default', role: 'admin' },
+        { id: 2, username: 'kate', role: 'user' },
+      ])),
+      http.patch('/api/user-panel/devices/:key', async ({ params, request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        patches.push({ key: String(params.key), body });
+        myDevices = myDevices.map((d) => (d.device_key === params.key ? { ...d, owner_username: body.owner_username || null } : d));
+        return HttpResponse.json(myDevices.find((d) => d.device_key === params.key));
+      }),
+    );
+    renderWithProviders(<CompanionDevicesPanel scope="all" />);
+    const owner = (await screen.findByLabelText('Owner of Google Pixel 7')) as HTMLSelectElement;
+    await waitFor(() => expect(owner.querySelectorAll('option')).toHaveLength(3));  // Unassigned, @default, @kate
+    fireEvent.change(owner, { target: { value: 'kate' } });
+    await waitFor(() => expect(patches).toEqual([{ key: 'phone-abc12345', body: { owner_username: 'kate' } }]));
+    await waitFor(() => expect((screen.getByLabelText('Owner of Google Pixel 7') as HTMLSelectElement).value).toBe('kate'));
+    fireEvent.change(screen.getByLabelText('Owner of Google Pixel 7'), { target: { value: '' } });
+    await waitFor(() => expect(patches[1]).toEqual({ key: 'phone-abc12345', body: { owner_username: '' } }));
   });
 
   it('pairs a watch with the code it shows', async () => {

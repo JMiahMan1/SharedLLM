@@ -225,6 +225,14 @@ class TestAssignment:
         assert resp.status_code == 200
         assert resp.json()["owner_username"] == "michele"
 
+    def test_an_admin_can_unassign(self, session: Session):
+        _client(session)
+        admin = login(session, "jeremiah")
+        admin.post("/api/user-panel/devices", json={"device_key": "light-1", "kind": "light", "owner_username": "jeremiah"})
+        resp = admin.patch("/api/user-panel/devices/light-1", json={"owner_username": ""})
+        assert resp.status_code == 200
+        assert resp.json()["owner_username"] is None
+
     def test_an_unknown_device_is_404(self, session: Session):
         _client(session)
         assert login(session, "jeremiah").patch("/api/user-panel/devices/ghost", json={"owner_username": "michele"}).status_code == 404
