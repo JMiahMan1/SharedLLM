@@ -405,3 +405,13 @@ def test_a_200_with_data_is_unaffected(monkeypatch, make_client):
     resp = make_client().get("/api/geo/steps")
     assert resp.status_code == 200
     assert resp.json()["daily_steps"] == {"2026-10-01": 5}
+
+
+def test_activity_trends_with_a_user_id_forwards_the_viewer(make_client, monkeypatch):
+    """The Fitness page always passes user_id. The target used to be resolved
+    only when it was absent, so every such request failed (UnboundLocalError)."""
+    captured = _patch_geo(monkeypatch, payload={"days": []})
+    resp = make_client(user="michele").get("/api/geo/trends/activity", params={"days": 7, "user_id": "jeremiah"})
+    assert resp.status_code == 200
+    sent = captured["calls"][-1]["params"]
+    assert sent["viewer"] == "michele" and sent["user_id"] == "jeremiah"
