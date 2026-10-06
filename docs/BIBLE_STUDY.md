@@ -532,7 +532,8 @@ StudyNote            id, version_code, edition_code, osis, chapter,
 UserBibleState       username, last_book/chapter/verse, last_open_day, last_read_at,
                                            default_version, default_edition,
                                            favorite_version, compare_version,
-                                           cross_version_notes, font_scale,
+                                           cross_version_notes, show_notes,
+                                           font_scale,
                                            line_height, theme, read_aloud_voice,
                                            split_view
 ```
@@ -545,6 +546,10 @@ means no comparison and is never guessed, and comparing a translation against
 itself is refused, because the same words twice reads as a bug rather than as
 a comparison. `split_view` chooses the *layout* of that second column
 (`compare` = a row per verse, `parallel` = the whole second chapter).
+`show_notes` is the reader saying they want the chapter's commentary on the
+reading surface rather than behind a tap; it defaults off so the reader opens
+as text, and turning it on fetches nothing extra because the chapter's notes
+are already loaded to mark which verses carry study material.
 
 Note bodies are **not** here. `VerseMark.note_path` points at a Nextcloud
 file written by the existing notes handler; `note_preview` is a few words
@@ -818,6 +823,7 @@ of Phase 1 explicitly rather than being quietly dropped.
 | **Verse of the Day** | Deterministic by date, cached `bible:votd:{date}`, at the top of Read and in the `bible_daily` widget | 1 |
 | **Share a verse** | Verse Image card (SVG, theme-aware, scales with container) → native share sheet or web share; deep link back to the passage | 1 |
 | **Compare / parallel versions** | `compare_version` picks a second translation, fetched from `/passages` like any other. `ChapterReader` puts the two in one row per verse from `sm` up and stacks them on a phone, since a phone cannot show two readable columns. A verse the second translation does not have says "Not in this translation." rather than vanishing — NIV2011 genuinely omits Matthew 17:21, and an invisible gap reads as a rendering fault. The version picker never offers the translation being read, and the server refuses it too | 1 |
+| **Commentary beside the text** | `show_notes` puts the chapter's study material in a column next to the reader on `lg` and under the chapter on a phone — off by default, because the reader starts as text. The notes are already fetched to mark which verses carry study material, so this costs no extra request. Each note names its verse and tapping it moves the reader there. The commentary is never mixed into `BibleVerse.text` | 1 |
 | **Streak on screen** | App-open streak (offline-tolerant) and Guided-Scripture streak (resets on a skipped day, number hidden until earned again) — YouVersion's two-streak model, not one generic counter | 1 |
 | **No network? Still read** | Corpus is local; last chapter + bookmarks + VOTD + plan day cached in TanStack query + Capacitor Preferences; reads never wait on an upstream | 1 |
 | Offline audio download | Recorded audio is out of scope (licensed); cached TTS WAVs give repeat-listen without network. Documented as a deliberate gap, not a bug | later |
@@ -1009,6 +1015,7 @@ src/components/bible/TypographyControls.tsx      # font scale, line height, seri
 src/components/bible/BibleReadAloud.tsx          # narration player + voice picker
 src/components/bible/ReferenceBar.tsx            # ref input, book/chapter steppers,
                                                 #   version, study Bible, compare, display
+src/components/bible/ChapterNotes.tsx           # commentary beside the text, per verse
 src/components/bible/BibleToday.tsx              # verse of the day + today's devotional
 src/components/bible/MarksRail.tsx              # highlights/bookmarks strip per chapter
 src/components/bible/NoteEditor.tsx             # verse note -> Nextcloud via notes API

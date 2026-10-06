@@ -1601,6 +1601,11 @@ export interface BiblePreferences {
    * translation. Off by default; the reader opts in per session or remembers it.
    */
   cross_version_notes: boolean;
+  /**
+   * Whether the chapter's commentary sits beside the text while reading, rather
+   * than waiting behind a tap. Off by default so the reader starts as text.
+   */
+  show_notes: boolean;
   font_scale: number;
   line_height: number;
   theme: 'serif' | 'sans';

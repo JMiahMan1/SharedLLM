@@ -86,6 +86,7 @@ const STATE = (overrides: Partial<BibleStateResponse> = {}): BibleStateResponse 
     favorite_version: '',
     compare_version: '',
     cross_version_notes: false,
+    show_notes: false,
     font_scale: 1,
     line_height: 1.6,
     theme: 'serif',
@@ -836,5 +837,97 @@ describe('comparing two translations', () => {
     await waitFor(() => expect(mocked.putBibleState).toHaveBeenCalledWith({ compare_version: '' }));
     await waitFor(() => expect(screen.queryByTestId('bible-compare-legend')).toBeNull());
     expect(screen.queryByTestId('bible-compare-select')).toBeNull();
+  });
+});
+
+describe('commentary alongside the text', () => {
+  const NOTES = {
+    version: 'kjv',
+    edition: 'nkjv-tmn',
+    edition_name: 'NKJV Study Bible',
+    cross_version: false,
+    other_translations: [],
+    editions: [],
+    requested: 'Psalms 23',
+    reference: 'Psalms 23',
+    kinds: ['commentary'],
+    available_kinds: { commentary: 1 },
+    notes: [
+      {
+        osis: 'Ps',
+        book: 'Psalms',
+        chapter: 23,
+        verse: 1,
+        reference: 'Psalms 23:1',
+        kind: 'commentary' as const,
+        ordinal: 1,
+        body: 'The shepherd knows each sheep by name.',
+        source: 'nkjv-tmn',
+        version: 'kjv',
+        version_name: 'King James Version',
+        edition: 'nkjv-tmn',
+        edition_name: 'NKJV Study Bible',
+      },
+    ],
+    count: 1,
+    note: null,
+  };
+
+  it('keeps the commentary out of the way until it is asked for', async () => {
+    mocked.getBibleStudyNotes.mockResolvedValue(NOTES);
+    renderPage();
+
+    await screen.findByTestId('bible-chapter-heading');
+    expect(screen.queryByTestId('bible-notes-alongside')).toBeNull();
+  });
+
+  it('shows the chapter commentary beside the text, naming the verse', async () => {
+    mocked.getBibleStudyNotes.mockResolvedValue(NOTES);
+    mocked.getBibleState.mockResolvedValue(
+      STATE({ preferences: { ...STATE().preferences, show_notes: true } }),
+    );
+    renderPage();
+
+    expect(await screen.findByTestId('bible-notes-alongside')).toHaveTextContent(
+      'NKJV Study Bible on this chapter',
+    );
+    const note = await screen.findByTestId('bible-note-alongside-23-1');
+    expect(note).toHaveTextContent('Psalms 23:1');
+    expect(note).toHaveTextContent('The shepherd knows each sheep by name.');
+    // The text is still the text: the commentary is beside it, not inside it.
+    expect(screen.getByTestId('bible-verse-23-1')).not.toHaveTextContent('shepherd knows each sheep');
+  });
+
+  it('turns the commentary on and off through the display options', async () => {
+    mocked.getBibleStudyNotes.mockResolvedValue(NOTES);
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('bible-display-toggle'));
+    fireEvent.click(await screen.findByTestId('bible-notes-toggle'));
+
+    await waitFor(() => expect(mocked.putBibleState).toHaveBeenCalledWith({ show_notes: true }));
+    await waitFor(() => expect(screen.getByTestId('bible-notes-alongside')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('bible-notes-toggle'));
+    await waitFor(() => expect(mocked.putBibleState).toHaveBeenCalledWith({ show_notes: false }));
+  });
+
+  it('says what to add when the translation has no study Bible', async () => {
+    mocked.getBibleStudyNotes.mockResolvedValue({
+      ...NOTES,
+      edition_name: 'King James Version',
+      available_kinds: {},
+      notes: [],
+      count: 0,
+      note: 'King James Version carries no study notes. A study Bible has to be added in Admin > Bible.',
+    });
+    mocked.getBibleState.mockResolvedValue(
+      STATE({ preferences: { ...STATE().preferences, show_notes: true } }),
+    );
+    renderPage();
+
+    expect(await screen.findByTestId('bible-notes-alongside')).toHaveTextContent(
+      'A study Bible has to be added in Admin > Bible.',
+    );
   });
 });

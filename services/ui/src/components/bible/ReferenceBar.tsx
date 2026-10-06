@@ -377,6 +377,31 @@ export default function ReferenceBar({
           </div>
 
           <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-400">Commentary</span>
+            <button
+              type="button"
+              onClick={() => {
+                void trigger('light');
+                onPreferences({ show_notes: !preferences.show_notes });
+              }}
+              aria-pressed={preferences.show_notes}
+              aria-label={
+                preferences.show_notes
+                  ? 'Hide commentary from the reading surface'
+                  : 'Show commentary alongside the text'
+              }
+              data-testid="bible-notes-toggle"
+              className={`min-h-11 px-3 rounded-xl border text-sm ${
+                preferences.show_notes
+                  ? 'border-amber-400/50 text-amber-200 bg-amber-500/10'
+                  : 'border-white/10 text-slate-300'
+              }`}
+            >
+              {preferences.show_notes ? 'Alongside' : 'Hidden'}
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-slate-400">Typeface</span>
             <div className="flex gap-2">
               <button

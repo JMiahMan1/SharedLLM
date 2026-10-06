@@ -18,6 +18,7 @@ import ReferenceBar from '../components/bible/ReferenceBar';
 import ChapterReader from '../components/bible/ChapterReader';
 import VerseActionSheet from '../components/bible/VerseActionSheet';
 import BibleReadAloud from '../components/bible/BibleReadAloud';
+import ChapterNotes from '../components/bible/ChapterNotes';
 import BibleToday from '../components/bible/BibleToday';
 import BibleProgress from '../components/bible/BibleProgress';
 
@@ -35,6 +36,7 @@ const DEFAULT_PREFERENCES: BiblePreferences = {
   favorite_version: '',
   compare_version: '',
   cross_version_notes: false,
+  show_notes: false,
   font_scale: 1,
   line_height: 1.6,
   theme: 'serif',
@@ -141,7 +143,7 @@ function BibleReaderPane({
       ? `${shownChapter.book_name} ${shownChapter.chapter_start}`
       : null;
   const edition = preferences.default_edition || undefined;
-  const { data: studyData } = useQuery({
+  const { data: studyData, isFetching: studyLoading } = useQuery({
     queryKey: ['bible-study-index', studyScope, version, edition ?? '', preferences.cross_version_notes],
     queryFn: () =>
       api.getBibleStudyNotes(studyScope as string, version, {
@@ -154,6 +156,12 @@ function BibleReaderPane({
   });
   // Which verses of the chapter carry study material. Loaded once per chapter so
   // the reader can show it, then the notes themselves are fetched only on demand.
+  // Commentary sits beside the text rather than behind a tap when the reader asks
+  // for it, and only for a real chapter: a whole-book span has no verses to
+  // attach a note to, so an empty column there would be noise.
+  const notesAlongside = preferences.show_notes && Boolean(studyScope);
+  const noteUnavailable =
+    studyData && !studyData.notes.length ? (studyData.note ?? null) : null;
   const studiedVerses = useMemo(
     () =>
       new Set(
@@ -306,28 +314,43 @@ function BibleReaderPane({
           )}
         </section>
       ) : (
-        <section className="glass-panel rounded-2xl p-4 sm:p-5 border border-white/10">
-          <div className="flex items-baseline justify-between gap-3 mb-3">
-            <h2 className="font-serif text-lg text-white truncate" data-testid="bible-chapter-heading">
-              {shownChapter ? `${shownChapter.book_name} ${shownChapter.chapter_start}` : 'Reading'}
-            </h2>
-            <span className="text-[11px] text-slate-500 shrink-0 tabular-nums">{passage?.version}</span>
-          </div>
-          <ChapterReader
-            verses={passage?.verses ?? []}
-            marks={marks}
-            studiedVerses={studiedVerses}
-            compareVerses={compareData?.verses}
-            compareName={compareName}
-            fontScale={preferences.font_scale}
-            lineHeight={preferences.line_height}
-            theme={preferences.theme}
-            loading={isFetching}
-            error={error instanceof Error ? error.message : null}
-            onVerseTap={setActiveVerse}
-            onRetry={() => void refetch()}
-          />
-        </section>
+        <div className={notesAlongside ? 'lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-4 lg:items-start' : ''}>
+          <section className="glass-panel rounded-2xl p-4 sm:p-5 border border-white/10">
+            <div className="flex items-baseline justify-between gap-3 mb-3">
+              <h2 className="font-serif text-lg text-white truncate" data-testid="bible-chapter-heading">
+                {shownChapter ? `${shownChapter.book_name} ${shownChapter.chapter_start}` : 'Reading'}
+              </h2>
+              <span className="text-[11px] text-slate-500 shrink-0 tabular-nums">{passage?.version}</span>
+            </div>
+            <ChapterReader
+              verses={passage?.verses ?? []}
+              marks={marks}
+              studiedVerses={studiedVerses}
+              compareVerses={compareData?.verses}
+              compareName={compareName}
+              fontScale={preferences.font_scale}
+              lineHeight={preferences.line_height}
+              theme={preferences.theme}
+              loading={isFetching}
+              error={error instanceof Error ? error.message : null}
+              onVerseTap={setActiveVerse}
+              onRetry={() => void refetch()}
+            />
+          </section>
+          {notesAlongside && (
+            <div className="mt-4 lg:mt-0">
+              <ChapterNotes
+                notes={studyData?.notes ?? []}
+                editionName={studyData?.edition_name}
+                availableKinds={studyData?.available_kinds}
+                unavailable={noteUnavailable}
+                loading={studyLoading}
+                onOpenVerse={onRequestRef}
+                onClose={() => onPreferences({ show_notes: false })}
+              />
+            </div>
+          )}
+        </div>
       )}
 
       {passage?.reference && !searching ? (
