@@ -124,3 +124,27 @@ def test_device_pairing_route_forwards_to_execution_as_the_user(monkeypatch):
     # the address the user reached Jarvis at, not one the caller supplies
     assert seen["json"]["jarvis_url"] == "https://jarvis.sumemail.com"
     assert seen["json"]["step"] == "start" and seen["json"]["user_context"]["user"] == "jeremiah"
+
+
+def test_esphome_control_route_forwards_to_execution_as_the_user(monkeypatch):
+    """POST /execute/esphome exists on the gateway (Admin -> Hardware's Test
+    button answered 404 without it)."""
+    seen = {}
+
+    class _ExecClient:
+        async def post(self, url, **kw):
+            if "/execute/" in url:
+                seen["url"] = url
+                seen["json"] = kw.get("json")
+            return _Resp(200, {"status": "SUCCESS", "message": "", "detail": {"entities": []}})
+
+    async def fake_ctx(request, body):
+        return {"user": "jeremiah", "api_key": "sk-x"}
+
+    monkeypatch.setattr(gateway_main, "get_http_client", lambda: _ExecClient())
+    monkeypatch.setattr(gateway_main, "_resolve_user_context", fake_ctx)
+    resp = TestClient(app).post("/execute/esphome", json={"action": "list", "device": "jarvis-watch"},
+                                headers={"Authorization": "Bearer sk-x"})
+    assert resp.status_code == 200
+    assert seen["url"].endswith("/execute/esphome")
+    assert seen["json"]["device"] == "jarvis-watch" and seen["json"]["user_context"]["user"] == "jeremiah"

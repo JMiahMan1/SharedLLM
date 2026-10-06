@@ -14,7 +14,6 @@
  *     to anyone else. The server rejects anything outside its allowlist anyway.
  */
 import { Capacitor } from '@capacitor/core';
-import { getServerOrigin } from './serverUrl';
 
 /**
  * Derive a stable id for this install, generated once and then persisted.
@@ -73,11 +72,13 @@ const defaults: {
     const info = await Device.getInfo();
     return { model: info.model, manufacturer: info.manufacturer, osVersion: info.osVersion };
   },
+  // Through apiClient, which signs the request with the user's key and points
+  // at the configured server. A bare axios call sent no Authorization, so the
+  // server answered 401 every time -- swallowed by design -- and no phone was
+  // ever registered.
   post: async (payload) => {
-    const axios = (await import('axios')).default;
-    await axios.post(`${getServerOrigin()}/api/user-panel/devices/register`, payload, {
-      timeout: 7000,
-    });
+    const { apiClient } = await import('../services/api');
+    await apiClient.post('/api/user-panel/devices/register', payload, { timeout: 7000 });
   },
 };
 
