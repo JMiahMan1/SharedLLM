@@ -92,3 +92,22 @@ def test_the_prompt_header_names_the_library_in_words():
     assert _collection_header("calibre_files") == COLLECTION_HEADERS["calibre_files"]
     assert "LIBRARY" in _collection_header("calibre_files")
     assert _collection_header("nextcloud_files") == "NEXTCLOUD_FILES"
+
+def test_forcing_the_library_in_beats_the_keyword_gate():
+    """``include_library`` is the answer to "what did <surname> say?".
+
+    No keyword list can match an author name, and the library holds 1,347 of
+    them. When the caller already knows a library is wanted, the wording of the
+    question stops being the gate.
+    """
+    got = _collections_for_query("what did Macduff say about poverty?", include_library=True)
+    assert got[0] == "calibre_files"
+    assert got.count("calibre_files") == 1
+
+
+def test_forcing_the_library_in_does_not_disturb_the_coding_set():
+    """A forced library joins whatever set the query already chose."""
+    got = _collections_for_query("fix the code in workspace", include_library=True)
+    assert got[0] == "calibre_files"
+    assert "system_capabilities" in got
+    assert got.count("calibre_files") == 1
