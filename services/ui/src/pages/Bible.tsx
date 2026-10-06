@@ -399,6 +399,9 @@ export default function Bible() {
     [versions]
   );
   const savedVersion = effectivePreferences.default_version;
+  const noVersionsMessage =
+    versionData?.message ||
+    'No Bible text is installed on this server, so there is nothing to read yet. An administrator needs to load a translation in Admin > Bible.';
   const version =
     savedVersion && installedCodes.has(savedVersion)
       ? savedVersion
@@ -477,11 +480,7 @@ export default function Bible() {
           </div>
         ) : installedCodes.size === 0 ? (
           <p className="glass-panel rounded-2xl p-4 text-sm text-amber-300/90 leading-relaxed" data-testid="bible-no-versions">
-            No Bible text is imported yet. Install a public-domain translation with
-            <code className="mx-1 text-[11px]">python -m services.bible.import_corpus --manifest</code>
-            , or import a translation you are licensed to use with
-            <code className="mx-1 text-[11px]">python -m services.bible.import_pdf</code>
-            .
+            {noVersionsMessage}
           </p>
         ) : stateLoading || !stateData ? (
           <div className="glass-panel rounded-2xl p-4 space-y-2">

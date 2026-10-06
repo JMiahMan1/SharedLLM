@@ -138,6 +138,10 @@ BIBLE_DATABASE_URL = os.getenv("BIBLE_DATABASE_URL")
 # must produce a visible "configure this" state in the devotional card, not a
 # deep link guessed at some host that may not be blb.org's.
 BLB_BASE_URL = os.getenv("BLB_BASE_URL")
+# Root of the Nextcloud library, e.g. /Books/Text. Blank refuses to browse
+# rather than guessing a shelf, because a wrong guess reports itself as an
+# empty library and reads like "we have no Bibles".
+CALIBRE_LIBRARY_PATH = os.getenv("CALIBRE_LIBRARY_PATH")
 BIBLE_DEVOTIONAL_DIR = os.getenv("BIBLE_DEVOTIONAL_DIR")
 # Where uploaded Bibles and fetched provider text are staged. No code default:
 # the admin import page refuses to accept a file until an operator says where
@@ -241,6 +245,7 @@ async def resolve_runtime_config():
         "control_plane_url": "CONTROL_PLANE_URL",
         "ha_url": "HA_URL",
         "ha_token": "HA_TOKEN",
+        "calibre_library_path": "CALIBRE_LIBRARY_PATH",
         "nextcloud_url": "NEXTCLOUD_URL",
         "nextcloud_user": "NEXTCLOUD_USER",
         "nextcloud_pass": "NEXTCLOUD_PASS",

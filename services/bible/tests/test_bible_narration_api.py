@@ -137,7 +137,7 @@ def test_a_passage_that_is_too_long_to_read_is_a_400(loaded_client: TestClient, 
     assert engine.calls == [], "an over-long passage must not be sent to the speech engine"
 
 
-def test_a_missing_voice_file_is_a_503_that_names_the_fix(loaded_client: TestClient, monkeypatch):
+def test_a_missing_voice_file_is_a_503_that_names_who_fixes_it(loaded_client: TestClient, monkeypatch):
     _patch_engine(
         monkeypatch,
         _Engine(_failure("TTS generation failed: Kokoro voices missing: /app/models/voices-v1.0.bin")),
@@ -145,8 +145,9 @@ def test_a_missing_voice_file_is_a_503_that_names_the_fix(loaded_client: TestCli
     resp = loaded_client.get("/narration", params={"ref": "John 3", "version": "kjv"})
     assert resp.status_code == 503
     detail = resp.json()["detail"]
-    assert "Kokoro voices missing" in detail
-    assert "/execute/tts/download" in detail
+    assert "not set up here yet" in detail
+    assert "administrator" in detail
+    assert "/execute/tts/download" not in detail
 
 
 def test_an_unreachable_speech_engine_is_a_503(loaded_client: TestClient, monkeypatch):
@@ -207,11 +208,13 @@ def test_the_default_translation_is_used_when_none_is_named(loaded_client: TestC
     assert resp.json()["version"] == "kjv"
 
 
-def test_an_empty_corpus_says_how_to_load_one(client: TestClient, monkeypatch):
+def test_an_empty_corpus_points_at_the_admin_page(client: TestClient, monkeypatch):
     _patch_engine(monkeypatch, _Engine())
     resp = client.get("/narration", params={"ref": "John 3"})
     assert resp.status_code == 503
-    assert "No Bible text is imported" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert "Admin > Bible" in detail
+    assert "import_corpus" not in detail
 
 
 def test_voices_are_listed(loaded_client: TestClient, monkeypatch):

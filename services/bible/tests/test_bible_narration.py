@@ -219,7 +219,7 @@ async def test_an_unconfigured_execution_service_says_so(loaded):
 
 
 @pytest.mark.asyncio
-async def test_a_missing_voice_file_names_the_command_that_installs_it(loaded, monkeypatch):
+async def test_a_missing_voice_file_says_who_has_to_fix_it(loaded, monkeypatch):
     _patch(monkeypatch, _Session(_failure("TTS generation failed: Kokoro voices missing: /app/models/voices-v1.0.bin")))
     with pytest.raises(narration.NarrationUnavailable) as err:
         await narration.narrate(
@@ -232,8 +232,10 @@ async def test_a_missing_voice_file_names_the_command_that_installs_it(loaded, m
             internal_secret="secret",
         )
     message = str(err.value)
-    assert "Kokoro voices missing" in message
-    assert "/execute/tts/download" in message
+    assert "not set up here yet" in message
+    assert "administrator" in message
+    assert "/execute/tts/download" not in message
+    assert "python" not in message
 
 
 @pytest.mark.asyncio

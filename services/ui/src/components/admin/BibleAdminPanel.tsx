@@ -4,8 +4,12 @@ import {
   AlertTriangle,
   BookMarked,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   CloudDownload,
+  FileText,
   FileUp,
+  Folder,
   History,
   Loader2,
   Star,
@@ -17,7 +21,8 @@ import type {
   BibleImportProviderInfo,
   BibleImportRun,
   BibleRemoteTranslation,
-} from '../../types/api';
+  BibleLibraryEntry,
+  BibleLibraryListing,} from '../../types/api';
 import { useHaptics } from '../../hooks/useHaptics';
 
 const KIND_LABELS: Record<BibleImportKind, string> = {
@@ -39,7 +44,6 @@ export default function BibleAdminPanel() {
   const { trigger } = useHaptics();
   const client = useQueryClient();
   const [notice, setNotice] = useState('');
-  const [failure, setFailure] = useState('');
   const [log, setLog] = useState<string[]>([]);
 
   const catalogue = useQuery({
@@ -50,7 +54,7 @@ export default function BibleAdminPanel() {
 
   function report(run: BibleImportRun) {
     setNotice(run.message);
-    setFailure(run.status === 'failed' ? run.message : '');
+    setNotice(run.status === 'failed' ? run.message : '');
     setLog(run.log ?? []);
     void trigger(run.status === 'failed' ? 'error' : 'success');
     void client.invalidateQueries({ queryKey: ['bible-imports'] });
@@ -60,7 +64,7 @@ export default function BibleAdminPanel() {
   function failed(error: unknown) {
     const text = error instanceof Error ? error.message : 'The import did not run.';
     setNotice(text);
-    setFailure(text);
+    setNotice(text);
     void trigger('error');
   }
 
@@ -179,6 +183,14 @@ export default function BibleAdminPanel() {
         onInstall={(payload) => runImport.mutate(payload)}
       />
 
+      <LibrarySection
+        root={data?.library_root ?? ''}
+        setting={data?.library_setting ?? 'calibre_library_path'}
+        error={data?.library_error ?? ''}
+        busy={runImport.isPending}
+        onInstall={(payload) => runImport.mutate(payload)}
+      />
+
       <UploadSection
         kinds={data?.kinds ?? ['json', 'pdf', 'epub']}
         busy={uploadImport.isPending}
@@ -191,13 +203,13 @@ export default function BibleAdminPanel() {
         <div
           data-testid="bible-admin-notice"
           className={
-            failure
+            notice
               ? 'rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-xs text-amber-200'
               : 'rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5 text-xs text-emerald-200'
           }
         >
           <p className="flex items-start gap-1.5">
-            {failure ? (
+            {notice ? (
               <AlertTriangle size={13} className="shrink-0 mt-0.5" />
             ) : (
               <CheckCircle2 size={13} className="shrink-0 mt-0.5" />
@@ -413,6 +425,199 @@ function ProviderCard({
         )
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The Nextcloud book library: the shelf the family already keeps study Bibles on.
+ *
+ * Nothing is listed until this section is opened, because a shelf can hold
+ * thousands of entries and an admin panel should not walk one the operator did
+ * not ask about. Files in formats the importer cannot read are shown with the
+ * reason rather than hidden, so a shelf holding one unusable DOCX does not look
+ * like a shelf with a hole in it.
+ */
+function LibrarySection({
+  root,
+  setting,
+  error,
+  busy,
+  onInstall,
+}: {
+  root: string;
+  setting: string;
+  error: string;
+  busy: boolean;
+  onInstall: (payload: {
+    code: string;
+    kind: BibleImportKind;
+    library_path: string;
+    name?: string;
+    import_notes?: boolean;
+  }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [path, setPath] = useState('');
+
+  const browse = useQuery({
+    queryKey: ['bible-library', path],
+    queryFn: () => api.getBibleLibrary(path),
+    enabled: open && Boolean(root),
+    retry: false,
+    staleTime: 60 * 1000,
+  });
+
+  // The listing is the only place a folder path comes from, so keep what the
+  // server answered rather than a second copy of it in this component.
+  const shown = (browse.data as BibleLibraryListing | undefined) ?? null;
+  const folders = (shown?.entries ?? []).filter((entry) => entry.is_dir);
+  const files = (shown?.entries ?? []).filter((entry) => !entry.is_dir);
+
+  function install(entry: BibleLibraryEntry, kind: BibleImportKind) {
+    const suggestion = entry.name
+      .replace(/\.[^.]+$/, '')
+      .replace(/[^A-Za-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase();
+    onInstall({ code: suggestion, kind, library_path: entry.path, name: entry.name });
+  }
+
+  if (!open) {
+    return (
+      <section className="space-y-2">
+        <button
+          type="button"
+          data-testid="bible-admin-library-open"
+          onClick={() => setOpen(true)}
+          disabled={!root}
+          className="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left text-xs text-slate-300 disabled:opacity-50"
+        >
+          <span className="flex items-center gap-1.5">
+            <BookMarked size={13} className="text-slate-400" />
+            Nextcloud book library
+          </span>
+          <span className="text-[10px] text-slate-500">
+            {root ? `Browse ${root}` : `${setting} is not set`}
+          </span>
+        </button>
+        {error ? (
+          <p
+            data-testid="bible-admin-library-error"
+            className="px-1 text-[11px] leading-relaxed text-amber-300/90"
+          >
+            {error}
+          </p>
+        ) : null}
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-2" data-testid="bible-admin-library">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+          <BookMarked size={13} className="text-slate-400" />
+          Nextcloud book library
+        </h3>
+        <button
+          type="button"
+          data-testid="bible-admin-library-close"
+          onClick={() => setOpen(false)}
+          className="min-h-11 px-2 text-[11px] text-slate-400"
+        >
+          Close
+        </button>
+      </div>
+
+      <p className="px-1 text-[11px] leading-relaxed text-slate-400">
+        Files are fetched from the shelf and then installed exactly as if they had been uploaded,
+        so a study Bible keeps its notes either way.
+      </p>
+
+      {browse.isError ? (
+        <PanelError
+          message={String((browse.error as { message?: string })?.message ?? browse.error)}
+          onRetry={() => void browse.refetch()}
+        />
+      ) : null}
+
+      {browse.isPending ? (
+        <div className="space-y-1.5" data-testid="bible-admin-library-loading">
+          {[0, 1, 2].map((row) => (
+            <div
+              key={row}
+              className="h-9 animate-pulse rounded-lg bg-white/5"
+              style={{ animationDelay: `${row * 120}ms` }}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {shown ? (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+            {shown.parent ? (
+              <button
+                type="button"
+                data-testid="bible-admin-library-up"
+                onClick={() => setPath(shown.parent)}
+                className="flex min-h-11 items-center gap-1 rounded-lg border border-white/10 px-2 text-slate-300"
+              >
+                <ChevronLeft size={13} />
+                Up one level
+              </button>
+            ) : null}
+            <span className="truncate">{shown.root}</span>
+            <span className="ml-auto shrink-0">
+              {shown.installable} of {shown.count} ready to install
+            </span>
+          </div>
+
+          {folders.map((entry) => (
+            <button
+              key={entry.path}
+              type="button"
+              data-testid={`bible-admin-library-folder-${entry.name}`}
+              onClick={() => setPath(entry.path)}
+              className="flex min-h-11 w-full items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 text-left text-xs text-slate-300"
+            >
+              <Folder size={13} className="shrink-0 text-slate-500" />
+              <span className="truncate">{entry.name}</span>
+              <ChevronRight size={13} className="ml-auto shrink-0 text-slate-500" />
+            </button>
+          ))}
+
+          {files.map((entry) => (
+            <div
+              key={entry.path}
+              data-testid={`bible-admin-library-file-${entry.name}`}
+              className="flex min-h-11 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 text-xs"
+            >
+              <FileText size={13} className="shrink-0 text-slate-500" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-slate-300">{entry.name}</span>
+                <span className="block truncate text-[10px] text-slate-500">{entry.note}</span>
+              </span>
+              <button
+                type="button"
+                data-testid={`bible-admin-library-install-${entry.name}`}
+                disabled={!entry.installable || busy}
+                onClick={() => entry.kind && install(entry, entry.kind)}
+                className="min-h-11 shrink-0 rounded-lg border border-white/10 px-2 text-[11px] text-emerald-300 disabled:opacity-40"
+              >
+                Install
+              </button>
+            </div>
+          ))}
+
+          {!folders.length && !files.length ? (
+            <p className="px-1 text-[11px] text-slate-500">
+              Nothing in this folder. Use Up one level to go back.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

@@ -42,20 +42,49 @@ def test_health_reports_the_corpus(client: TestClient):
     assert body["versions"] == []
 
 
-def test_an_empty_corpus_says_how_to_load_one(client: TestClient):
+def test_an_empty_corpus_points_at_the_admin_page_not_a_shell(client: TestClient):
     detail = client.get("/passages", params={"ref": "John 3:16"}).json()["detail"]
-    assert "import_corpus" in detail
+    assert "Admin > Bible" in detail
+    assert "python" not in detail
+    assert "import_corpus" not in detail
 
 
-def test_an_empty_corpus_says_how_to_load_one_for_the_verse(client: TestClient):
+def test_an_empty_corpus_points_at_the_admin_page_for_the_verse(client: TestClient):
     detail = client.get("/verse-of-day").json()["detail"]
-    assert "import_corpus" in detail
+    assert "Admin > Bible" in detail
+    assert "import_corpus" not in detail
+
+
+def test_the_empty_corpus_message_names_the_public_domain_fallback(client: TestClient):
+    detail = client.get("/passages", params={"ref": "John 3:16"}).json()["detail"]
+    assert "fallback" in detail
+    assert "kjv" in detail
 
 
 def test_daily_surfaces_the_corpus_error_instead_of_a_blank_card(client: TestClient):
     body = client.get("/daily").json()
     assert "error" in body["verse_of_day"]
-    assert "import_corpus" in body["verse_of_day"]["error"]
+    assert "Admin > Bible" in body["verse_of_day"]["error"]
+    assert "import_corpus" not in body["verse_of_day"]["error"]
+
+
+def test_versions_carries_the_reason_there_is_nothing_to_read(client: TestClient):
+    body = client.get("/versions").json()
+    assert "Admin > Bible" in body["message"]
+    assert "import_corpus" not in body["message"]
+
+
+def test_versions_has_no_message_once_something_is_installed(loaded_client: TestClient):
+    assert loaded_client.get("/versions").json()["message"] == ""
+
+
+def test_the_catalogue_never_hands_a_reader_a_command(loaded_client: TestClient):
+    versions = loaded_client.get("/versions").json()["versions"]
+    editions = loaded_client.get("/editions").json()["editions"]
+    for entry in [*versions, *editions]:
+        note = str(entry.get("note") or "")
+        assert "python" not in note
+        assert "import_" not in note
 
 
 # ── reading ─────────────────────────────────────────────────────────────────
@@ -79,9 +108,10 @@ def test_an_unimported_version_names_the_alternatives(loaded_client: TestClient)
     assert "esv" in detail and "api.bible" in detail
 
 
-def test_an_unknown_version_is_a_400_that_names_the_manifest(loaded_client: TestClient):
+def test_an_unknown_version_is_a_400_that_lists_what_is_there(loaded_client: TestClient):
     detail = loaded_client.get("/passages", params={"ref": "Gen 1:1", "version": "nope"}).json()["detail"]
-    assert "nope" in detail and "corpus_manifest.json" in detail
+    assert "nope" in detail and "not a translation this server knows about" in detail
+    assert "corpus_manifest.json" not in detail
 
 
 def test_versions_lists_uninstalled_translations_with_a_reason(loaded_client: TestClient):

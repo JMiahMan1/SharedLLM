@@ -383,14 +383,30 @@ describe('Bible page', () => {
     expect(mocked.putBibleMark).not.toHaveBeenCalled();
   });
 
-  it('says exactly how to load a translation when no corpus is installed', async () => {
+  it('never tells a reader to run a command when no corpus is installed', async () => {
     mocked.getBibleVersions.mockResolvedValue({ versions: [] });
 
     renderPage();
 
     const notice = await screen.findByTestId('bible-no-versions');
-    expect(notice).toHaveTextContent('python -m services.bible.import_corpus --manifest');
-    expect(notice).toHaveTextContent('python -m services.bible.import_pdf');
+    expect(notice).toHaveTextContent('Admin > Bible');
+    expect(notice).not.toHaveTextContent('python');
+    expect(notice).not.toHaveTextContent('import_corpus');
+    expect(notice).not.toHaveTextContent('import_pdf');
+    expect(notice.querySelector('code')).toBeNull();
+  });
+
+  it("shows the server's own reason rather than a local guess", async () => {
+    mocked.getBibleVersions.mockResolvedValue({
+      versions: [],
+      message: 'No Bible text is installed on this server. The kjv translation is meant to be available as the fallback.',
+    });
+
+    renderPage();
+
+    expect(await screen.findByTestId('bible-no-versions')).toHaveTextContent(
+      'kjv translation is meant to be available as the fallback'
+    );
   });
 
   it('keeps reading when only catalogued-but-uninstalled translations exist', async () => {

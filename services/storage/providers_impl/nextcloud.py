@@ -20,6 +20,9 @@ class NextcloudStorageProvider(StorageProvider):
     async def get_content(self, path: str) -> str | None:
         return await self.client.get_file_content(path)
 
+    async def get_bytes(self, path: str) -> bytes | None:
+        return await self.client.get_file_bytes(path, timeout=60.0)
+
     async def write_content(
         self,
         path: str,

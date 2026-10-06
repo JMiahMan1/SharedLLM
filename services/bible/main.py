@@ -49,6 +49,7 @@ from services.bible import books as book_table
 from services.bible import (
     corpus,
     importer,
+    library,
     metrics,
     migrations,
     narration as narration_mod,
@@ -211,13 +212,20 @@ def versions(session: Session = Depends(get_session)):
     """Every translation we know about, installed or not.
 
     The version picker needs the uninstalled ones too: listing only what is
-    loaded makes a missing ESV look like a bug, whereas listing it with the
-    command that installs it makes it a task.
+    loaded makes a missing ESV look like a bug, whereas listing it with how an
+    administrator adds it makes it a task. ``message`` carries the reason
+    nothing can be read, when that is the case, so the reader is never handed a
+    command to run on the server.
     """
     try:
-        return {"versions": corpus.catalogue(session)}
+        catalogue = corpus.catalogue(session)
     except CorpusError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    installed = [entry for entry in catalogue if entry.get("installed")]
+    return {
+        "versions": catalogue,
+        "message": "" if installed else _no_corpus_message(),
+    }
 
 
 @app.get("/editions")
@@ -287,11 +295,18 @@ def _default_version(session: Session) -> str:
 
 
 def _no_corpus_message() -> str:
+    """What a reader is told when no translation is installed at all.
+
+    The manifest marks a public-domain fallback, so reaching this means the
+    fallback itself is missing, which an operator has to fix. It says where the
+    fix happens; it never asks the reader to run anything.
+    """
+    fallback = corpus.fallback_code()
+    named = f"The {fallback} translation" if fallback else "A public-domain translation"
     return (
-        "No Bible text is imported. Load a public-domain translation with "
-        "`python -m services.bible.import_corpus --code kjv --name \"King James Version\" "
-        "--source /path/to/kjv.json`, or set the bible_api_key setting to unlock a "
-        "licensed translation."
+        "No Bible text is installed on this server, so there is nothing to read yet. "
+        f"{named} is meant to be available as the fallback -- an administrator needs to "
+        "load it in Admin > Bible."
     )
 
 
@@ -413,13 +428,12 @@ def _no_notes_message(
     if cross_version:
         return (
             "No study notes are installed for this passage in any translation. "
-            "Install one with: python3 -m services.bible.import_epub --source <path> "
-            "--import --import-notes"
+            "A study Bible has to be added in Admin > Bible."
         )
     return (
         f"{_edition_name(session, edition, version)} has no study notes installed. "
         "Public-domain text carries none, so this is expected unless a study Bible "
-        "was imported with import_epub.py --import-notes."
+        "was added in Admin > Bible."
     )
 
 
@@ -1364,6 +1378,10 @@ class ImportRequest(BaseModel):
     provider: str = Field(default="", description="Provider code, e.g. 'api.bible'")
     provider_id: str = Field(default="", description="Which translation at that provider")
     source_path: str = Field(default="", description="A path on this service's filesystem")
+    library_path: str = Field(
+        default="",
+        description="A file in the Nextcloud book library; fetched and then imported",
+    )
     kind: str = Field(default="", description="json, pdf or epub; detected when blank")
     name: str = Field(default="")
     sha256: str = Field(default="")
@@ -1395,6 +1413,7 @@ def _plan_from(payload: ImportRequest, *, source_path: str | None = None) -> imp
         kind=kind,
         name=str(payload.name or "").strip(),
         source_path=str(payload.source_path or source_path or "").strip(),
+        library_path=str(payload.library_path or "").strip(),
         sha256=str(payload.sha256 or "").strip().lower(),
         edition=str(payload.edition or "").strip(),
         edition_name=str(payload.edition_name or "").strip(),
@@ -1413,12 +1432,15 @@ def _plan_response(report: importer.ImportReport) -> JSONResponse:
     return JSONResponse(status_code=200 if report.ok else 422, content=report.as_dict())
 
 
-def _admin_imports_report(registry: providers.ProviderRegistry) -> dict:
+def _admin_imports_report(
+    registry: providers.ProviderRegistry, library_root: str
+) -> dict:
     """The Admin > Bible page body. Runs in a worker thread with its own session.
 
     SQLite sessions are not safe to share between the event loop and a worker
     thread, so the session is opened here rather than injected, and the caller
-    resolves the provider registry first because that needs the network.
+    resolves the provider registry and the library root first because those need
+    the network and the settings database.
     """
     with Session(_db()) as session:
         try:
@@ -1432,6 +1454,13 @@ def _admin_imports_report(registry: providers.ProviderRegistry) -> dict:
             directory = str(_import_dir())
         except HTTPException as exc:
             import_dir_error = str(exc.detail)
+        library_error = ""
+        if not library_root:
+            library_error = (
+                f"The {library.LIBRARY_SETTING} global setting is not set, so the "
+                f"Nextcloud book library is not available. Set it in Admin > Settings "
+                f"to the folder that holds your Bibles, for example /Books/Text."
+            )
         return {
             "default_version": corpus.default_version_code(session),
             "primary": corpus.primary_code(),
@@ -1441,14 +1470,86 @@ def _admin_imports_report(registry: providers.ProviderRegistry) -> dict:
             "kinds": list(importer.KINDS),
             "import_dir": directory,
             "import_dir_error": import_dir_error,
+            "library_root": library_root,
+            "library_setting": library.LIBRARY_SETTING,
+            "library_error": library_error,
             "runs": importer.recent_runs(session),
         }
+
+
+async def _library_root() -> str:
+    """The folder in the Nextcloud library that holds Bibles.
+
+    Read from the live settings so an operator who points ``calibre_library_path``
+    at their Calibre shelf in Admin sees the shelf immediately. Blank is the
+    operator's answer not yet given, never an invitation to guess a folder: a
+    guessed shelf reads as an empty library and hides the real one.
+    """
+    import services.config as cfg
+
+    live = await _live_settings()
+    return str(live.get(library.LIBRARY_SETTING) or cfg.CALIBRE_LIBRARY_PATH or "").strip()
+
+
+def _library_client(root: str) -> library.LibraryClient:
+    """A client for the book library, via the storage service.
+
+    Storage is asked for the bytes rather than reading WebDAV here, so the
+    Nextcloud password stays in the one place that holds it. An unset storage URL
+    is a 503 naming the setting instead of a library that mysteriously lists
+    nothing.
+    """
+    from services.config import INTERNAL_SECRET, STORAGE_SVC_URL
+
+    url = str(STORAGE_SVC_URL or "").strip()
+    if not url:
+        raise library.LibraryUnavailable(
+            "storage_svc_url is not resolved, so the book library cannot be read. Set the "
+            "storage_svc_url global setting (or STORAGE_SVC_URL) to the storage service."
+        )
+    return library.LibraryClient(storage_url=url, internal_secret=str(INTERNAL_SECRET or ""))
+
+
+@app.get("/admin/library")
+async def admin_library(path: str = Query(default="")):
+    """List one folder of the Nextcloud book library.
+
+    Returns the folder, its parent and every entry it holds, including the files
+    this service cannot read. Hiding those would make a shelf holding one
+    unreadable e-book look like a shelf with a hole in it, and the reason belongs
+    next to the file rather than in a log the operator never opens.
+    """
+    root = await _library_root()
+    if not root:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"The {library.LIBRARY_SETTING} global setting is not set, so this "
+                "service does not know which shelf of the book library to read. Set "
+                "it in Admin > Settings to the folder that holds your Bibles, for "
+                "example /Books/Text."
+            ),
+        )
+    client = _library_client(root)
+    try:
+        listing = await client.browse(root=root, path=str(path or "").strip())
+    except library.LibraryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except library.LibraryUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "root": root,
+        "setting": library.LIBRARY_SETTING,
+        **listing.as_dict(),
+    }
 
 
 @app.get("/admin/imports")
 async def admin_imports():
     """Everything needed to install something: the catalogue, the providers, the history."""
-    return await run_in_threadpool(_admin_imports_report, await _provider_registry())
+    return await run_in_threadpool(
+        _admin_imports_report, await _provider_registry(), await _library_root()
+    )
 
 
 @app.get("/admin/providers/{code}/translations")

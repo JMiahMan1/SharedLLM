@@ -43,9 +43,9 @@ def _pick_version(session: Session, requested: str | None) -> str:
     available = _versions(session)
     if not available:
         raise LookupError(
-            "No Bible text is imported. Load a public-domain translation with "
-            "`python -m services.bible.import_corpus --code kjv --name \"King James Version\" "
-            "--source /path/to/kjv.json` before asking for a verse of the day."
+            "No Bible text is installed on this server, so there is no verse of "
+            "the day to draw. An administrator needs to load a translation in "
+            "Admin > Bible."
         )
     if requested:
         if requested not in available:

@@ -126,6 +126,7 @@ def load_manifest(path: Path | None = None) -> list[dict]:
                 "source_url": str(raw.get("source_url") or ""),
                 "sha256": str(raw.get("sha256") or ""),
                 "primary": bool(raw.get("primary")),
+                "fallback": bool(raw.get("fallback")),
                 "provider": str(raw.get("provider") or "").strip(),
             }
         )
@@ -140,6 +141,16 @@ def load_manifest(path: Path | None = None) -> list[dict]:
         raise CorpusError(
             "corpus manifest marks more than one translation primary: " + ", ".join(sorted(primary))
         )
+    fallback = [v["code"] for v in versions if v["fallback"]]
+    if len(fallback) > 1:
+        raise CorpusError(
+            "corpus manifest marks more than one translation fallback: " + ", ".join(sorted(fallback))
+        )
+    if fallback and primary and fallback[0] == primary[0]:
+        raise CorpusError(
+            f"corpus manifest marks {primary[0]!r} as both primary and fallback; "
+            "the fallback exists for when the primary is missing"
+        )
     return sorted(versions, key=lambda v: v["code"])
 
 
@@ -153,6 +164,21 @@ def primary_code(path: Path | None = None) -> str:
     """
     for version in load_manifest(path):
         if version["primary"]:
+            return str(version["code"])
+    return ""
+
+
+def fallback_code(path: Path | None = None) -> str:
+    """The translation to read when the primary one is not installed, or ``""``.
+
+    The manifest marks at most one translation ``fallback``. It exists so a
+    server holding nothing but out-of-copyright text still opens a readable
+    Bible instead of an error page -- the app should degrade to something free
+    to use rather than refuse to read. Marking it is a deliberate act in
+    configuration; the code never decides on its own that "KJV" is the answer.
+    """
+    for version in load_manifest(path):
+        if version["fallback"]:
             return str(version["code"])
     return ""
 
@@ -233,28 +259,72 @@ def _manifest_payload(manifest_path: Path) -> dict:
     return payload
 
 
-def _acquisition_hint(version: dict) -> str:
-    """How to obtain a translation we do not ship the text for."""
+def install_route(version: dict) -> dict:
+    """How this translation can be installed, as something a UI can act on.
+
+    A shell command is deliberately never returned. The catalogue is readable by
+    everyone who opens the app, and "run this on the server" is not something the
+    person reading a passage can do. Admin surfaces turn this into a button;
+    the command line tools print their own instructions instead.
+    """
     provider = str(version.get("provider") or "")
     if version["license_class"] == "public_domain":
         if version["source_url"]:
-            return (
-                "Install it with: python3 -m services.bible.import_corpus --manifest "
-                f"--only {version['code']}"
-            )
-        return "This public-domain translation has no source_url in the corpus manifest."
-    holder = f" ({version['rights_holder']})" if version["rights_holder"] else ""
+            return {"kind": "bundled"}
+        return {"kind": "unavailable", "reason": "This public-domain translation has no download recorded in the corpus manifest."}
     if provider:
+        return {"kind": "provider", "provider": provider}
+    return {"kind": "file"}
+
+
+def reader_note(version: dict) -> str:
+    """One sentence about a translation, with nothing in it the reader must run."""
+    provider = str(version.get("provider") or "")
+    holder = str(version.get("rights_holder") or "").strip()
+    credited = f"Copyrighted by {holder}" if holder else "Copyrighted by its publisher"
+    route = install_route(version)
+    if route["kind"] == "bundled":
+        return "Free to use. An administrator can install it in Admin > Bible."
+    if route["kind"] == "provider":
         return (
-            f"{version['name']}{holder} is copyrighted, so its text is not bundled. "
-            f"Install it from the {provider} provider on the Admin > Bible page."
+            f"{credited}, so its text is not bundled. An administrator can install "
+            f"it from {provider} in Admin > Bible."
         )
-    return (
-        f"{version['name']}{holder} is copyrighted, so its text is not bundled. "
-        "Import the copy you are licensed to use with: "
-        f"python3 -m services.bible.import_corpus --only {version['code']} "
-        f"--source <path-to-{version['code']}.json>"
-    )
+    if route["kind"] == "file":
+        return (
+            f"{credited}, so its text is not bundled. An administrator has to add a "
+            "licensed copy in Admin > Bible."
+        )
+    return str(route.get("reason") or "This translation is not available yet.")
+
+
+def _acquisition_hint(version: dict) -> str:
+    """The command-line route to a translation we do not ship the text for.
+
+    Only the CLI importers print this. It must never travel through the HTTP API,
+    where a reader would be told to run something on the server.
+    """
+    route = install_route(version)
+    if route["kind"] == "bundled":
+        return (
+            "Install it with: python3 -m services.bible.import_corpus --manifest "
+            f"--only {version['code']}"
+        )
+    if route["kind"] == "provider":
+        return (
+            f"{version['name']} is not bundled. Fetch it with "
+            f"'--provider {route['provider']}' on the Admin > Bible page, or from the "
+            f"command line with python3 -m services.bible.import_corpus --only "
+            f"{version['code']} --provider {route['provider']} --provider-id <id>"
+        )
+    if route["kind"] == "file":
+        return (
+            f"{version['name']} is copyrighted, so its text is not bundled. "
+            "Import the copy you are licensed to use with: "
+            f"python3 -m services.bible.import_corpus --only {version['code']} "
+            f"--source <path-to-{version['code']}.json>"
+        )
+    return str(route.get("reason") or "This translation is not available yet.")
 
 
 def _load_source(path: Path) -> list[dict]:
@@ -505,19 +575,22 @@ def default_version_code(session: Session, *, manifest_path: Path | None = None)
     """Which installed translation a reader gets when they have no preference.
 
     The manifest's ``primary`` translation wins when its text is installed.
-    Otherwise the installed translation with the most verses wins, which in
-    practice means "the most complete Bible we can actually serve". Returns
-    ``""`` when nothing is installed, so the caller can raise its own message
-    rather than inventing a fallback code.
+    Failing that the manifest's ``fallback`` translation does, which is how a
+    server that only has out-of-copyright text stays readable instead of
+    showing an error. Only *installed* translations are ever chosen -- a code
+    is never returned on the strength of being listed in the manifest. The
+    richest installed translation is the last resort, and ``""`` means nothing
+    is installed at all, so the caller raises its own message rather than
+    inventing a code.
     """
     available = list_versions(session)
     if not available:
         return ""
-    preferred = primary_code(manifest_path)
-    if preferred:
-        for row in available:
-            if row["code"] == preferred:
-                return str(row["code"])
+    installed = {str(row["code"]) for row in available}
+    for marker in (primary_code, fallback_code):
+        wanted = marker(manifest_path)
+        if wanted and wanted in installed:
+            return wanted
     richest = max(available, key=lambda row: (int(row["verse_count"]), str(row["code"])))
     return str(richest["code"])
 
@@ -546,11 +619,13 @@ def catalogue(session: Session, *, manifest_path: Path | None = None) -> list[di
             "verse_count": row["verse_count"] if row else 0,
             "editions": editions_by_version.get(version["code"], 0),
             "primary": version["primary"],
+            "fallback": version["fallback"],
             "provider": version["provider"],
             "note": "",
+            "install": install_route(version),
         }
         if row is None:
-            entry["note"] = _acquisition_hint(version)
+            entry["note"] = reader_note(version)
         entries.append(entry)
 
     for code, row in sorted(imported.items()):
@@ -564,8 +639,10 @@ def catalogue(session: Session, *, manifest_path: Path | None = None) -> list[di
             "verse_count": row["verse_count"],
             "editions": editions_by_version.get(code, 0),
             "primary": code == primary_code(manifest_path),
+            "fallback": code == fallback_code(manifest_path),
             "provider": "",
             "note": "",
+            "install": {"kind": "installed"},
         }
         if row["license_class"] == "licensed":
             entry["note"] = (
@@ -594,9 +671,8 @@ def require_version(session: Session, code: str, *, manifest_path: Path | None =
         entry["code"] for entry in known.values() if entry["installed"]
     ) or "none installed"
     raise ReferenceError(
-        f"Bible version {code!r} is not in the corpus manifest and is not "
-        f"installed. Installed versions: {available}. Add it to "
-        "services/bible/corpus_manifest.json before importing it."
+        f"Bible version {code!r} is not a translation this server knows about. "
+        f"Installed versions: {available}."
     )
 
 
@@ -742,11 +818,25 @@ def require_edition(session: Session, version: str, edition: str | None = None) 
     return default_edition(session, version)
 
 
+def edition_install_route(edition: dict) -> dict:
+    """How a study Bible's notes can be added, as something a UI can act on.
+
+    The study counterpart of :func:`install_route`, and for the same reason: the
+    catalogue is readable by everyone, so a reader is never handed a command to
+    run on the server. ``kind`` is ``file`` whenever an administrator has to
+    supply the copy they are licensed for, which is the usual answer for a study
+    Bible -- the notes ride in the publisher's book rather than being fetched.
+    """
+    if edition.get("source_url"):
+        return {"kind": "bundled"}
+    return {"kind": "file"}
+
+
 def edition_catalogue(session: Session, version: str | None = None) -> list[dict]:
     """Every study Bible we know about, and whether its notes are installed.
 
     Same reasoning as :func:`catalogue` for translations: a study Bible that is
-    catalogued but not installed is listed with the command that installs it, so
+    catalogued but not installed is listed with how an administrator adds it, so
     its absence reads as a task rather than a bug.
     """
     installed = {entry["code"]: entry for entry in list_editions(session, version)}
@@ -760,13 +850,15 @@ def edition_catalogue(session: Session, version: str | None = None) -> list[dict
         entry["installed"] = row is not None
         entry["note_count"] = row["note_count"] if row else 0
         entry["note_kinds"] = row["note_kinds"] if row else []
-        entry["note"] = "" if row else _edition_acquisition_hint(edition)
+        entry["install"] = edition_install_route(edition)
+        entry["note"] = "" if row else edition_reader_note(edition)
         entries.append(entry)
     for code, row in sorted(installed.items()):
         if version and row["version"] != version:
             continue
         entry = dict(row)
         entry["installed"] = True
+        entry["install"] = {"kind": "installed"}
         entry["note"] = (
             f"{row['name']} is installed from a licensed source. Do not redistribute it."
             if row["license_class"] == "licensed"
@@ -778,6 +870,12 @@ def edition_catalogue(session: Session, version: str | None = None) -> list[dict
 
 
 def _edition_acquisition_hint(edition: dict) -> str:
+    """The command-line route to a study Bible we do not ship.
+
+    Like its translation counterpart, this is for the CLI importers only. The
+    catalogue entry a reader sees says the notes exist elsewhere, not how to
+    obtain them.
+    """
     holder = f" ({edition['rights_holder']})" if edition["rights_holder"] else ""
     if not edition["source_url"]:
         return (
@@ -790,6 +888,18 @@ def _edition_acquisition_hint(edition: dict) -> str:
         f"Install it with: python3 -m services.bible.import_corpus --manifest "
         f"--only {edition['version']}"
     )
+
+
+def edition_reader_note(edition: dict) -> str:
+    """One sentence about a study Bible, with nothing in it the reader must run."""
+    holder = str(edition.get("rights_holder") or "").strip()
+    credited = f" by {holder}" if holder else ""
+    if not edition.get("source_url"):
+        return (
+            f"{edition['name']}{credited} is copyrighted, so its notes are not "
+            "bundled. An administrator has to add a licensed copy in Admin > Bible."
+        )
+    return "Free to use. An administrator can install it in Admin > Bible."
 
 
 def notes_summary(session: Session, code: str) -> dict:

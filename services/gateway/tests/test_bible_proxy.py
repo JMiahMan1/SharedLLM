@@ -46,6 +46,7 @@ ROUTES = [
     ("get", "/api/bible/admin/imports"),
     ("get", "/api/bible/admin/providers/api.bible/estimate?translation_id=niv"),
     ("post", "/api/bible/admin/imports"),
+    ("post", "/api/bible/admin/library"),
     ("post", "/api/bible/admin/imports/upload"),
     ("put", "/api/bible/marks"),
     ("delete", "/api/bible/marks/3"),
@@ -571,3 +572,68 @@ def test_the_call_budget_is_forwarded_as_a_number(make_client, monkeypatch):
     payload = gateway_main._bible_import_payload({"code": "nlt", "budget": 1200})
     assert payload["budget"] == 1200
     assert gateway_main._bible_import_payload({"code": "nlt"}) == {"code": "nlt"}
+
+
+def test_the_library_folder_is_forwarded_as_a_path_not_a_query_string(make_client, monkeypatch):
+    """A folder name is operator input, so it travels in the body.
+
+    WebDAV folder names carry slashes and can carry semicolons, so putting one
+    in a query string is a quoting problem waiting to happen.
+    """
+    captured = _patch_bible(monkeypatch, payload={"root": "/Books/Text", "entries": [], "count": 0})
+    resp = make_client(user="jeremiah", is_admin=True).post(
+        "/api/bible/admin/library", json={"path": "/Books/Text/Thomas Nelson; NKJV (3198)"}
+    )
+    assert resp.status_code == 200
+    call = captured["calls"][-1]
+    assert call["url"] == f"{gateway_main.BIBLE_SVC}/admin/library"
+    assert call["json"] == {"path": "/Books/Text/Thomas Nelson; NKJV (3198)"}
+
+
+def test_browsing_the_library_with_no_path_asks_for_the_shelf_root(make_client, monkeypatch):
+    """The admin page lists the shelf first, so an absent path means the root."""
+    captured = _patch_bible(monkeypatch, payload={"root": "/Books/Text", "entries": []})
+    resp = make_client(user="jeremiah", is_admin=True).post("/api/bible/admin/library", json={})
+    assert resp.status_code == 200
+    assert captured["calls"][-1]["json"] == {"path": ""}
+
+
+def test_browsing_the_library_keeps_the_reason_the_shelf_is_unreachable(make_client, monkeypatch):
+    """An unset shelf is the operator's to fix, so the sentence has to survive."""
+    _patch_bible(monkeypatch, status=503, payload={"detail": "calibre_library_path is not set."})
+    resp = make_client(user="jeremiah", is_admin=True).post("/api/bible/admin/library", json={})
+    assert resp.status_code == 503
+    assert "calibre_library_path" in resp.json()["detail"]
+
+
+def test_browsing_the_library_is_admin_only(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={"entries": []})
+    resp = make_client(user="michele").post("/api/bible/admin/library", json={})
+    assert resp.status_code == 403
+    assert captured["calls"] == []
+
+
+def test_a_library_import_is_forwarded_whole(make_client, monkeypatch):
+    """The gateway never fetches the file; it names the shelf and stands back."""
+    captured = _patch_bible(monkeypatch, payload={"status": "succeeded", "code": "kjv"})
+    resp = make_client(user="jeremiah", is_admin=True).post(
+        "/api/bible/admin/imports",
+        json={"code": "kjv", "kind": "epub", "library_path": "/Books/Text/Thomas Nelson/Bible.epub"},
+    )
+    assert resp.status_code == 200
+    call = captured["calls"][-1]
+    assert call["json"]["library_path"] == "/Books/Text/Thomas Nelson/Bible.epub"
+    assert "source_path" not in call["json"]
+
+
+def test_a_shelf_import_refusal_reaches_the_operator_as_422(make_client, monkeypatch):
+    _patch_bible(
+        monkeypatch,
+        payload={"status": "failed", "message": "Exodus is missing from that book."},
+    )
+    resp = make_client(user="jeremiah", is_admin=True).post(
+        "/api/bible/admin/imports",
+        json={"code": "kjv", "library_path": "/Books/Text/x.epub"},
+    )
+    assert resp.status_code == 422
+    assert "Exodus" in resp.json()["message"]

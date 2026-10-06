@@ -39,6 +39,19 @@ class StorageProvider(ABC):
         """
         return None
 
+    async def get_bytes(self, path: str) -> bytes | None:
+        """Return the document's raw bytes, or ``None`` if this provider has none.
+
+        ``get_content`` decodes a response as text, which turns a PDF or an
+        EPUB into replacement characters rather than failing -- and anything
+        that then reads that string works from confident mojibake. A caller that
+        has to hand the file to a binary parser comes here instead.
+
+        ``None`` means "this provider cannot give you bytes", which is a
+        different answer from "the file was empty".
+        """
+        return None
+
 def _resolve_nextcloud_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """Merge request settings with defaults from config.py."""
     merged = dict(settings)

@@ -1,4 +1,5 @@
 # services/storage/main.py
+import base64
 import hmac
 import logging
 import re
@@ -11,7 +12,7 @@ from services.common.http import get_client
 from services.config import INTERNAL_SECRET, RAG_SVC_URL
 from services.shared.info_endpoint import info_router
 from services.storage.indexer import CheckpointManager, build_content_index, extract_and_chunk_contents, is_indexer_paused, set_indexer_pause
-from services.storage.models import ProviderMirrorRequest, ProviderWriteRequest
+from services.storage.models import ProviderFetchRequest, ProviderMirrorRequest, ProviderWriteRequest
 from services.storage.models import IndexScanRequest
 from services.storage.providers import ProviderConfig, build_provider
 
@@ -280,6 +281,63 @@ async def list_provider_entries(req: IndexScanRequest):
     except Exception as e:
         log.error(f"List failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/providers/fetch", dependencies=[Depends(_require_internal_secret)])
+async def fetch_provider_file(req: ProviderFetchRequest):
+    """Hand a document back as bytes to another service.
+
+    The other side of this is an importer that has to parse the file itself --
+    a Bible arriving as an EPUB or a PDF, for instance. Routing the bytes
+    through this service rather than having the caller build its own WebDAV
+    client is what keeps the Nextcloud credentials in one place; a second copy
+    of that client is a second copy of the credentials to rotate.
+
+    ``max_bytes`` is refused rather than truncated. A silently shortened EPUB
+    looks to an importer like a complete one that happens to end early, and the
+    failure surfaces much later as missing chapters.
+    """
+    try:
+        provider = build_provider(req.provider)
+        if req.max_bytes <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="max_bytes has to be a positive number of bytes.",
+            )
+
+        payload = await provider.get_bytes(req.path)
+        if payload is None:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"{req.provider.kind} could not read {req.path!r} as bytes. "
+                    "Either the file is missing, the credentials are wrong, or "
+                    "this provider cannot return binary content."
+                ),
+            )
+
+        size = len(payload)
+        if size > req.max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"{req.path!r} is {size} bytes, over the {req.max_bytes} byte limit "
+                    "for one fetch. Raise the limit if that file really is wanted."
+                ),
+            )
+
+        return {
+            "status": "SUCCESS",
+            "path": req.path,
+            "name": req.path.rsplit("/", 1)[-1],
+            "size": size,
+            "content_b64": base64.b64encode(payload).decode("ascii"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Fetch failed for {req.path}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/providers/search", dependencies=[Depends(_require_internal_secret)])
 async def search_provider(query: str = Query(...), req: IndexScanRequest = Body(...)):

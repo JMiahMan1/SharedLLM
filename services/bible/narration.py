@@ -51,8 +51,7 @@ MIN_BODY_CHARACTERS = 2
 AUDIO_MIME = "audio/wav"
 
 VOICE_DOWNLOAD_HINT = (
-    "the Kokoro model and voices are installed with "
-    "POST /execute/tts/download?voice_type=kokoro-v1.0"
+    "an administrator has to install the voice model on this server"
 )
 
 
@@ -321,12 +320,13 @@ async def _speak(
 def _failure_message(payload: dict) -> str:
     """Turn the execution service's own message into something actionable.
 
-    A missing Kokoro model is the common case and the raw message only names a
-    path, so the fix is appended rather than left for the operator to guess.
+    A missing voice model is the common case, and the raw message only names a
+    file path on the server, which is not something a reader can act on. The
+    fix is appended in terms of what to do about it rather than how to install it.
     """
     message = str(payload.get("message") or "The speech engine refused the request.")
     if "Kokoro" in message and "missing" in message:
-        return f"{message.rstrip('.')}. {VOICE_DOWNLOAD_HINT}."
+        return f"Reading aloud is not set up here yet: {VOICE_DOWNLOAD_HINT}."
     return message
 
 
