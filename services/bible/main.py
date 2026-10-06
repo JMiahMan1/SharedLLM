@@ -762,6 +762,7 @@ class StatePayload(BaseModel):
     favorite_version: str | None = None
     compare_version: str | None = None
     cross_version_notes: bool | None = None
+    show_notes: bool | None = None
     font_scale: float | None = Field(default=None, ge=0.6, le=2.5)
     line_height: float | None = Field(default=None, ge=1.0, le=3.0)
     theme: str | None = Field(default=None, pattern="^(serif|sans)$")
@@ -791,6 +792,7 @@ def _default_preferences(session: Session) -> dict:
         "favorite_version": "",
         "compare_version": "",
         "cross_version_notes": False,
+        "show_notes": False,
         "font_scale": 1.0,
         "line_height": 1.6,
         "theme": "serif",
@@ -806,6 +808,7 @@ def _preferences(state: UserBibleState) -> dict:
         "favorite_version": state.favorite_version,
         "compare_version": state.compare_version,
         "cross_version_notes": state.cross_version_notes,
+        "show_notes": state.show_notes,
         "font_scale": state.font_scale,
         "line_height": state.line_height,
         "theme": state.theme,
@@ -876,7 +879,7 @@ def put_state(
             state.compare_version = _require_version(session, payload.compare_version)
     if payload.cross_version_notes is not None:
         state.cross_version_notes = payload.cross_version_notes
-    for attr in ("font_scale", "line_height", "theme", "read_aloud_voice", "split_view"):
+    for attr in ("show_notes", "font_scale", "line_height", "theme", "read_aloud_voice", "split_view"):
         value = getattr(payload, attr)
         if value is not None:
             setattr(state, attr, value)

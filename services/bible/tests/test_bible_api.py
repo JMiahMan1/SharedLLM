@@ -564,6 +564,27 @@ def test_the_comparison_can_be_turned_off_without_touching_the_default(two_trans
     assert shown["default_version"] == "kjv", "the reader still opens the translation they chose"
 
 
+def test_commentary_alongside_is_remembered_and_off_to_begin_with(loaded_client: TestClient):
+    """The reading surface starts as text; showing the notes is the reader's call."""
+    fresh = loaded_client.get(
+        "/state", params={"username": "quiet"}, headers=auth()
+    ).json()["preferences"]
+    assert fresh["show_notes"] is False
+
+    loaded_client.put(
+        "/state", params={"username": "quiet"}, json={"show_notes": True}, headers=auth()
+    )
+    remembered = loaded_client.get(
+        "/state", params={"username": "quiet"}, headers=auth()
+    ).json()["preferences"]
+    assert remembered["show_notes"] is True
+
+    off = loaded_client.put(
+        "/state", params={"username": "quiet"}, json={"show_notes": False}, headers=auth()
+    ).json()["preferences"]
+    assert off["show_notes"] is False
+
+
 def test_comparing_a_translation_against_itself_is_refused(two_translations: TestClient):
     """The same words twice is not a comparison, and it looks like a bug."""
     resp = two_translations.put(

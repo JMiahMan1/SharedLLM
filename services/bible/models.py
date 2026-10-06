@@ -182,6 +182,9 @@ class UserBibleState(SQLModel, table=True):
     # Whether study panels may show commentary published against another
     # translation. Off by default: such a note is commentary on different words.
     cross_version_notes: bool = Field(default=False)
+    # Whether the chapter's commentary sits beside the text while reading, rather
+    # than waiting behind a tap. Off by default so the reader starts as text.
+    show_notes: bool = Field(default=False)
     font_scale: float = Field(default=1.0)
     line_height: float = Field(default=1.6)
     theme: str = Field(default="serif")
