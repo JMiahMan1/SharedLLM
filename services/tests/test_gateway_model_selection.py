@@ -698,3 +698,93 @@ def test_gateway_top_level_import_loads_prompts():
     )
 
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+@pytest.mark.asyncio
+async def test_a_capacity_refusal_is_not_retried_and_is_raised(monkeypatch):
+    """A full model server must be reported once, not queued at three times.
+
+    Retrying a queue timeout adds load to a server that is already full and
+    makes the caller wait the queue window again per attempt -- the observed
+    turn took over seven minutes and returned nothing but the timeout it already
+    knew about. The failure is raised rather than returned so a route with a
+    status code can answer 503 instead of shipping an error sentence in an
+    ``answer`` field.
+    """
+    calls = {"n": 0}
+
+    async def refusing(payload, use_chat=True):
+        calls["n"] += 1
+        raise RuntimeError(
+            'Ollama HTTP 503: {"error":"No llama-server slots available within '
+            'timeout","status":"queue_timeout"}'
+        )
+
+    monkeypatch.setattr(gateway_orchestrator, "call_ollama", refusing)
+    monkeypatch.setattr(gateway_orchestrator, "load_prompt_sync", lambda x: "guide")
+
+    with pytest.raises(gateway_orchestrator.InferenceUnavailable) as raised:
+        await gateway_orchestrator._single_turn_inference(
+            query="hello",
+            model=ASSISTANT_MODEL,
+            system_prompt=ASSIST_SYSTEM_INSTRUCTION,
+            rag_context="",
+            history=[],
+            creds=gateway_main.ResolvedCredentials(user="alice"),
+        )
+
+    assert calls["n"] == 1, "a capacity refusal must not be retried"
+    assert "queue_timeout" in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_a_transient_failure_is_still_retried(monkeypatch):
+    """The fast path is only for refusals, so a dropped connection still retries."""
+    calls = {"n": 0}
+
+    async def flaky(payload, use_chat=True):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise RuntimeError("Connection reset by peer")
+        return {"message": {"content": "Recovered."}}
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(gateway_orchestrator, "call_ollama", flaky)
+    monkeypatch.setattr(gateway_orchestrator, "load_prompt_sync", lambda x: "guide")
+    monkeypatch.setattr(gateway_orchestrator.asyncio, "sleep", no_sleep)
+
+    answer = await gateway_orchestrator._single_turn_inference(
+        query="hello",
+        model=ASSISTANT_MODEL,
+        system_prompt=ASSIST_SYSTEM_INSTRUCTION,
+        rag_context="",
+        history=[],
+        creds=gateway_main.ResolvedCredentials(user="alice"),
+    )
+
+    assert calls["n"] == 2
+    assert answer == "Recovered."
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        'Ollama HTTP 503: {"error":"No llama-server slots available within timeout","status":"queue_timeout"}',
+        "No slots available within 120.0s",
+        "No llama-server slots available within timeout",
+    ],
+)
+def test_every_shape_of_capacity_refusal_is_recognised(message):
+    """The two refusals come from different layers and both must be caught.
+
+    ``_wait_for_slot`` raises its own sentence while the server's own 503 body
+    carries ``queue_timeout``; missing either reintroduces the retry storm the
+    fast path exists to prevent.
+    """
+    assert gateway_orchestrator._is_capacity_refusal(RuntimeError(message))
+
+
+def test_a_transient_failure_is_not_mistaken_for_a_refusal():
+    assert not gateway_orchestrator._is_capacity_refusal(RuntimeError("Connection reset by peer"))
