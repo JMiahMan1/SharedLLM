@@ -7484,6 +7484,7 @@ async def update_gateway_config(new_config: dict):
 @app.get("/api/admin/dns")
 async def get_dns_config(request: Request):
     """Get full DNS configuration (mappings, upstream, poll interval)."""
+    await _require_admin(request)
     raw_mappings = await fetch_global_setting("dns_mappings", "{}")
     upstream = await fetch_global_setting("dns_upstream", "8.8.8.8,1.1.1.1")
     poll_interval_str = await fetch_global_setting("dns_poll_interval", "30")
@@ -7508,6 +7509,7 @@ async def get_dns_config(request: Request):
 @app.post("/api/admin/dns/register")
 async def register_dns_entry(request: Request):
     """Register a new DNS hostname-to-IP mapping."""
+    await _require_admin(request)
     body = await request.json()
     hostname = body.get("hostname", "").strip()
     ip = body.get("ip", "").strip()
@@ -7537,6 +7539,7 @@ async def register_dns_entry(request: Request):
 @app.delete("/api/admin/dns/{hostname:path}")
 async def remove_dns_entry(hostname: str, request: Request):
     """Remove a DNS hostname-to-IP mapping."""
+    await _require_admin(request)
     raw_mappings = await fetch_global_setting("dns_mappings", "{}")
     try:
         dns_mappings = json.loads(raw_mappings)
@@ -7562,6 +7565,7 @@ async def remove_dns_entry(hostname: str, request: Request):
 @app.post("/api/admin/dns/update")
 async def update_dns_config(request: Request):
     """Update DNS configuration (upstream, poll interval, or full mappings)."""
+    await _require_admin(request)
     body = await request.json()
 
     if "dns_upstream" in body:
