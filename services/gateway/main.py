@@ -10674,6 +10674,14 @@ async def proxy_audiobookshelf(request: Request):
     return await _forward_execution_request(request, "/execute/audiobookshelf", "audiobookshelf")
 
 
+@app.post("/execute/esphome")
+async def proxy_esphome(request: Request):
+    """Direct ESPHome native-API list/call (Admin -> Hardware's Test, device
+    control without Home Assistant). The execution service checks the device's
+    owner against the caller."""
+    return await _forward_execution_request(request, "/execute/esphome", "esphome", timeout=30.0)
+
+
 @app.post("/api/devices/pair")
 async def proxy_device_pair(request: Request):
     """Add a companion device as the signed-in user: discover | start | finish.

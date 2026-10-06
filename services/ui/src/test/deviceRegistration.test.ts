@@ -6,6 +6,8 @@
  * user and their app -- every failure path has to resolve, not reject.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { http, HttpResponse } from 'msw';
+import { server } from './setup';
 import {
   registerThisDevice,
   resolveDeviceKey,
@@ -141,5 +143,36 @@ describe('registerThisDevice', () => {
       reason: 'not a native platform',
     });
     expect(post).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('registerThisDevice on the wire', () => {
+  let restore: () => void = () => {};
+  afterEach(() => {
+    restore();
+    localStorage.clear();
+  });
+
+  it("signs the request with the user's key", async () => {
+    let auth: string | null = null;
+    server.use(
+      http.post('*/api/user-panel/devices/register', ({ request }) => {
+        auth = request.headers.get('authorization');
+        return HttpResponse.json({ device_key: 'x', kind: 'phone' });
+      }),
+    );
+    localStorage.setItem('jarvis_api_key', 'sk-test-key');
+    // native, but with the real network seam
+    restore = __setImpl({
+      isNative: () => true,
+      getAppInfo: async () => ({ version: '1.5.0', build: '24' }),
+      getDeviceInfo: async () => ({ model: 'Pixel 7', manufacturer: 'Google', osVersion: '14' }),
+    });
+
+    const result = await registerThisDevice();
+
+    expect(result.registered).toBe(true);
+    expect(auth).toBe('Bearer sk-test-key');
   });
 });
