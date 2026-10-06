@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Minus, Plus, Settings2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Minus, Plus, Settings2, Star, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import type {
   BibleBookInfo,
@@ -55,6 +55,8 @@ export default function ReferenceBar({
 
   const book = books.find((b) => b.osis === position.book) ?? books[0];
   const selectedVersion = versions.find((v) => v.code === preferences.default_version);
+  const isFavorite = Boolean(preferences.favorite_version);
+  const favoriteName = versions.find((v) => v.code === preferences.favorite_version)?.name ?? '';
   const installedEditions = editions.filter((entry) => entry.installed);
   const selectedEdition = installedEditions.some(
     (entry) => entry.code === preferences.default_edition,
@@ -184,6 +186,22 @@ export default function ReferenceBar({
               className="text-[11px] leading-snug text-amber-300/90"
             >
               {selectedVersion.note}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => onPreferences({ favorite_version: isFavorite ? '' : (preferences.default_version ?? '') })}
+            aria-pressed={isFavorite}
+            aria-label={isFavorite ? 'Remove this translation from favourites' : 'Make this translation a favourite'}
+            data-testid="bible-favorite-toggle"
+            className="mt-1 flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-black/25 px-2 py-1 text-[11px] text-slate-200"
+          >
+            <Star size={14} className={isFavorite ? 'fill-amber-300 text-amber-300' : 'text-slate-400'} />
+            {isFavorite ? 'Favourite' : 'Make favourite'}
+          </button>
+          {favoriteName && (
+            <p data-testid="bible-favorite-note" className="text-[11px] leading-snug text-slate-400">
+              You can jump to {favoriteName} from the Home tab.
             </p>
           )}
           {selectedVersion?.installed && selectedVersion.license_class === 'licensed' && (

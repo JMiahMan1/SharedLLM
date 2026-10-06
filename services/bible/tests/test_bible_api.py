@@ -195,6 +195,39 @@ def test_state_stores_typographic_preferences(loaded_client: TestClient):
     assert prefs["split_view"] == "parallel"
 
 
+def test_a_favourite_is_remembered(loaded_client: TestClient):
+    body = loaded_client.put(
+        "/state", params={"username": "reader"}, json={"favorite_version": "kjv"}
+    ).json()
+    assert body["preferences"]["favorite_version"] == "kjv"
+
+
+def test_taking_the_favourite_off_leaves_the_default_alone(loaded_client: TestClient):
+    loaded_client.put(
+        "/state",
+        params={"username": "reader"},
+        json={"default_version": "kjv", "favorite_version": "kjv"},
+    )
+    body = loaded_client.put(
+        "/state", params={"username": "reader"}, json={"favorite_version": ""}
+    ).json()
+    assert body["preferences"]["favorite_version"] == ""
+    assert body["preferences"]["default_version"] == "kjv"
+
+
+def test_a_favourite_is_refused_when_the_translation_is_not_installed(loaded_client: TestClient):
+    response = loaded_client.put(
+        "/state", params={"username": "reader"}, json={"favorite_version": "nkjv"}
+    )
+    assert response.status_code == 400
+    assert "nkjv" in response.json()["detail"]
+
+
+def test_no_favourite_is_chosen_for_the_reader(loaded_client: TestClient):
+    body = loaded_client.get("/state", params={"username": "brand-new"}).json()
+    assert body["preferences"]["favorite_version"] == ""
+
+
 def test_state_rejects_a_book_the_reader_never_heard_of(loaded_client: TestClient):
     response = loaded_client.put("/state", params={"username": "sam"}, json={"book": "Hobbits"})
     assert response.status_code == 400

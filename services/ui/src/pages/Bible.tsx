@@ -32,6 +32,7 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof BookOpen }> = [
 const DEFAULT_PREFERENCES: BiblePreferences = {
   default_version: '',
   default_edition: '',
+  favorite_version: '',
   cross_version_notes: false,
   font_scale: 1,
   line_height: 1.6,

@@ -83,6 +83,7 @@ const STATE = (overrides: Partial<BibleStateResponse> = {}): BibleStateResponse 
   preferences: {
     default_version: 'kjv',
     default_edition: '',
+    favorite_version: '',
     cross_version_notes: false,
     font_scale: 1,
     line_height: 1.6,
@@ -660,6 +661,37 @@ describe('Bible page', () => {
           edition: 'nkjv',
           crossVersion: false,
         }),
+      );
+    });
+
+    it('marks the translation in hand as a favourite', async () => {
+      renderPage();
+      const toggle = await screen.findByTestId('bible-favorite-toggle');
+      expect(toggle).toHaveAttribute('aria-pressed', 'false');
+      const shown = (await screen.findByTestId('bible-version-select')) as HTMLSelectElement;
+      const code = shown.value;
+      fireEvent.click(toggle);
+      await waitFor(() =>
+        expect(mocked.putBibleState).toHaveBeenCalledWith({ favorite_version: code }),
+      );
+    });
+
+    it('takes the favourite back off the same button', async () => {
+      const shown = 'nkjv';
+      mocked.getBibleState.mockResolvedValue(
+        STATE({ preferences: { ...STATE().preferences, default_version: shown, favorite_version: shown } }),
+      );
+      renderPage();
+      const toggle = await screen.findByTestId('bible-favorite-toggle');
+      await waitFor(() => expect(toggle).toHaveAttribute('aria-pressed', 'true'));
+      await waitFor(() =>
+        expect(screen.getByTestId('bible-favorite-note')).toHaveTextContent(
+          'New King James Version',
+        ),
+      );
+      fireEvent.click(toggle);
+      await waitFor(() =>
+        expect(mocked.putBibleState).toHaveBeenCalledWith({ favorite_version: '' }),
       );
     });
   });
