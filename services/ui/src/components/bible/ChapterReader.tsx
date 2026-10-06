@@ -7,6 +7,13 @@ interface ChapterReaderProps {
   marks: BibleMark[];
   /** `"chapter:verse"` keys of verses that carry study material in this translation. */
   studiedVerses?: Set<string>;
+  /**
+   * The verses of a second translation for the same passage. Absent or empty
+   * means no comparison is being asked for.
+   */
+  compareVerses?: BibleVerse[];
+  /** The comparison's own name, shown so the second column is never anonymous. */
+  compareName?: string;
   fontScale: number;
   lineHeight: number;
   theme: 'serif' | 'sans';
@@ -25,7 +32,12 @@ const MARK_TINTS: Record<string, string> = {
 };
 
 function markFor(marks: BibleMark[], verse: BibleVerse): BibleMark | undefined {
-  return marks.find((m) => m.chapter === verse.chapter && m.verse_start <= verse.verse);
+  return marks.find(
+    (m) =>
+      m.chapter === verse.chapter &&
+      m.verse_start <= verse.verse &&
+      (m.verse_end ?? m.verse_start) >= verse.verse,
+  );
 }
 
 /**
@@ -39,11 +51,18 @@ function markFor(marks: BibleMark[], verse: BibleVerse): BibleMark | undefined {
  *
  * A study Bible is still a study Bible here: a verse that carries commentary or
  * footnotes is marked, without any of that material being mixed into the text.
+ *
+ * Two translations sit side by side from `sm` up and stack on a phone, because a
+ * phone cannot show two readable columns. A verse the second translation does not
+ * have says so rather than vanishing: NIV2011 genuinely omits Matthew 17:21, and
+ * a gap the reader cannot see looks like a rendering fault.
  */
 export default function ChapterReader({
   verses,
   marks,
   studiedVerses,
+  compareVerses,
+  compareName,
   fontScale,
   lineHeight,
   theme,
@@ -53,6 +72,11 @@ export default function ChapterReader({
   onRetry,
 }: ChapterReaderProps) {
   const { trigger } = useHaptics();
+  const comparing = Boolean(compareVerses?.length);
+  const byVerse = new Map<number, string>();
+  for (const entry of compareVerses ?? []) {
+    if (entry.chapter === verses[0]?.chapter) byVerse.set(entry.verse, entry.text);
+  }
 
   if (loading) {
     return (
@@ -94,10 +118,19 @@ export default function ChapterReader({
 
   return (
     <div className="space-y-1" data-testid="bible-reader">
+      {comparing && (
+        <p
+          data-testid="bible-compare-legend"
+          className="pb-2 text-[11px] uppercase tracking-wider text-slate-500"
+        >
+          {compareName ? `${compareName} alongside` : 'A second translation alongside'}
+        </p>
+      )}
       {verses.map((verse) => {
         const mark = markFor(marks, verse);
         const tint = mark ? (MARK_TINTS[mark.color] ?? MARK_TINTS.yellow) : '';
         const studied = studiedVerses?.has(`${verse.chapter}:${verse.verse}`) ?? false;
+        const compareText = comparing ? byVerse.get(verse.verse) : undefined;
         return (
           <button
             key={`${verse.osis}-${verse.chapter}-${verse.verse}`}
@@ -106,24 +139,48 @@ export default function ChapterReader({
               void trigger('light');
               onVerseTap(verse);
             }}
-            aria-label={`${verse.reference}. ${verse.text}${studied ? '. Has study notes.' : ''}`}
+            aria-label={`${verse.reference}. ${verse.text}${studied ? '. Has study notes.' : ''}${
+              comparing && !compareText ? '. Not in the compared translation.' : ''
+            }`}
             data-testid={`bible-verse-${verse.chapter}-${verse.verse}`}
             className={`w-full text-left rounded-lg px-2 py-1 min-h-11 pointer-coarse:min-h-11 hover:bg-white/[0.04] transition-colors ${
               mark ? `border-l-2 ${tint}` : 'border-l-2 border-transparent'
             }`}
           >
-            <span className="flex gap-2 items-baseline">
-              <sup className="text-[0.6em] text-amber-400/80 font-sans select-none shrink-0">
-                {verse.verse}
-              </sup>
-              <span
-                className={`text-slate-100 ${
-                  theme === 'serif' ? 'font-serif' : 'font-sans'
-                }`}
-                style={{ fontSize: `${1 * fontScale}rem`, lineHeight }}
-              >
-                {verse.text}
+            <span className={`flex gap-2 items-baseline ${comparing ? 'sm:grid sm:grid-cols-2 sm:gap-4' : ''}`}>
+              <span className="flex gap-2 items-baseline min-w-0">
+                <sup className="text-[0.6em] text-amber-400/80 font-sans select-none shrink-0">
+                  {verse.verse}
+                </sup>
+                <span
+                  className={`text-slate-100 ${
+                    theme === 'serif' ? 'font-serif' : 'font-sans'
+                  }`}
+                  style={{ fontSize: `${1 * fontScale}rem`, lineHeight }}
+                >
+                  {verse.text}
+                </span>
               </span>
+              {comparing && (
+                <span className="min-w-0 pl-5 sm:pl-0 sm:border-l sm:border-white/10 sm:pl-4">
+                  <span
+                    className={`block text-slate-300/80 ${
+                      theme === 'serif' ? 'font-serif' : 'font-sans'
+                    }`}
+                    style={{ fontSize: `${0.95 * fontScale}rem`, lineHeight }}
+                    data-testid={`bible-compare-${verse.chapter}-${verse.verse}`}
+                  >
+                    {compareText ?? (
+                      <em
+                        className="text-slate-500 not-italic"
+                        data-testid={`bible-compare-missing-${verse.chapter}-${verse.verse}`}
+                      >
+                        Not in this translation.
+                      </em>
+                    )}
+                  </span>
+                </span>
+              )}
               {studied && (
                 <span
                   className="ml-auto shrink-0 self-center text-amber-400/70 font-sans"

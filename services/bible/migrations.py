@@ -40,6 +40,7 @@ COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("studynote", "edition_code", "TEXT", "''"),
     ("userbiblestate", "default_edition", "TEXT", "''"),
     ("userbiblestate", "favorite_version", "TEXT", "''"),
+    ("userbiblestate", "compare_version", "TEXT", "''"),
     ("userbiblestate", "cross_version_notes", "INTEGER", "0"),
 )
 

@@ -174,6 +174,11 @@ class UserBibleState(SQLModel, table=True):
     # The reader's own favourite, kept apart from the default so that "start me
     # where I left off" and "open my favourite" stay two different decisions.
     favorite_version: str = Field(default="")
+    # The translation set beside the default one when the reader compares. Blank
+    # means no comparison; it is never guessed, because quietly showing a second
+    # version the reader did not ask for would make it unclear which words they
+    # are reading.
+    compare_version: str = Field(default="")
     # Whether study panels may show commentary published against another
     # translation. Off by default: such a note is commentary on different words.
     cross_version_notes: bool = Field(default=False)

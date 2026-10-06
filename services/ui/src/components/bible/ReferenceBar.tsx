@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Minus, Plus, Settings2, Star, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Columns2, Minus, Plus, Settings2, Star, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import type {
   BibleBookInfo,
@@ -66,6 +66,12 @@ export default function ReferenceBar({
   const selectedEditionEntry = installedEditions.find((entry) => entry.code === selectedEdition);
   const chapterCount = book?.chapters ?? 1;
   const textIndex = Math.max(0, TEXT_STEPS.indexOf(preferences.font_scale));
+  const comparing = Boolean(preferences.compare_version);
+  // The same words twice is not a comparison, so the reader's own translation is
+  // never offered as something to compare against.
+  const comparableVersions = versions.filter(
+    (v) => v.installed && v.code !== preferences.default_version,
+  );
 
   const nudge = (delta: number) => {
     void trigger('light');
@@ -241,6 +247,46 @@ export default function ReferenceBar({
             )}
           </label>
         )}
+
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase tracking-wider text-slate-500">Compare</span>
+          <button
+            type="button"
+            onClick={() => {
+              void trigger('light');
+              onPreferences({
+                compare_version: comparing ? '' : (comparableVersions[0]?.code ?? ''),
+              });
+            }}
+            disabled={!comparableVersions.length}
+            aria-pressed={comparing}
+            aria-label={comparing ? 'Stop comparing translations' : 'Compare with another translation'}
+            data-testid="bible-compare-toggle"
+            className={`min-h-11 rounded-xl px-3 py-2 text-sm flex items-center justify-center gap-1.5 border disabled:opacity-40 ${
+              comparing
+                ? 'border-amber-400/50 text-amber-200 bg-amber-500/10'
+                : 'border-white/10 glass-button text-slate-200'
+            }`}
+          >
+            <Columns2 size={14} />
+            {comparing ? 'On' : 'Off'}
+          </button>
+          {comparing && (
+            <select
+              value={preferences.compare_version}
+              onChange={(e) => onPreferences({ compare_version: e.target.value })}
+              aria-label="Translation to compare with"
+              data-testid="bible-compare-select"
+              className="min-h-11 rounded-xl bg-black/25 border border-white/10 text-sm text-slate-100 px-2 py-2"
+            >
+              {comparableVersions.map((v) => (
+                <option key={v.code} value={v.code}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
 
         <div className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wider text-slate-500">Display</span>

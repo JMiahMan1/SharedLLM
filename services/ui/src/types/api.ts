@@ -1590,6 +1590,13 @@ export interface BiblePreferences {
    */
   favorite_version: string;
   /**
+   * Which translation is shown beside the one being read. Empty means no
+   * comparison; it is never guessed, because quietly showing a second version
+   * the reader did not ask for would make it unclear which words they are
+   * reading. A translation identical to the default is refused by the server.
+   */
+  compare_version: string;
+  /**
    * Whether study panels may include commentary written for a different
    * translation. Off by default; the reader opts in per session or remembers it.
    */
