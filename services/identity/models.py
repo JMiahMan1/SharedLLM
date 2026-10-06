@@ -262,6 +262,7 @@ NO_OPT_IN_EVENTS = frozenset(
         "apk_install",  # an APK update was installed
         "feature_use",  # a feature was used
         "capability_miss",  # asked for something that does not exist
+        "battery",  # the device's own charge: voltage, percent, on USB (a watch's discharge log)
     }
 )
 

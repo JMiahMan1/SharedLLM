@@ -256,6 +256,18 @@ class TestTelemetryIngest:
         assert json.loads(stored[0].extra) == {"from": "widget"}
         assert stored[0].username == "michele"
 
+    def test_a_battery_reading_is_logged(self, client: TestClient, session: Session):
+        """A watch logs its charge each sync, so the discharge curve can be
+        tuned from real readings."""
+        key = self._registered(client)
+        reading = {"cell_v": 3.71, "sense_v": 3.69, "pct": 27.0, "usb": False, "uptime_s": 41}
+        resp = client.post(
+            "/api/user-panel/devices/telemetry",
+            json={"device_key": key, "events": [{"event": "battery", "extra": reading}]},
+        )
+        assert resp.json() == {"written": 1, "rejected": []}
+        assert json.loads(session.exec(select(DeviceEvent)).one().extra) == reading
+
     @pytest.mark.parametrize(
         "event", ["transcript", "message_sent", "location_update", "steps", "health_sync"]
     )

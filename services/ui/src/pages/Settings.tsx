@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
 import { useLocation } from '../context/LocationContext';
+import { Capacitor } from '@capacitor/core';
 import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, Settings as SettingsIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
@@ -480,7 +481,9 @@ const AppUpdatesSection = () => {
   const [apkPhase, setApkPhase] = useState<'idle' | 'downloading' | 'ready' | 'installing'>('idle');
   const [progress, setProgress] = useState<ApkDownloadProgress | null>(null);
   const [apkError, setApkError] = useState<string | null>(null);
-  const [canVerify, setCanVerify] = useState(false);
+  // null until known, so nothing is offered while the check is still running.
+  const [canVerify, setCanVerify] = useState<boolean | null>(null);
+  const native = Capacitor.isNativePlatform();
   const [updateInfo, setUpdateInfo] = useState<{
     version: string;
     gitSha: string;
@@ -645,18 +648,25 @@ const AppUpdatesSection = () => {
               )}
             </div>
           </div>
+          {/* In the app it all happens here: Download (with progress, checksum
+              verified) -> Install -> Android's installer, which restarts the
+              app. Install permission is asked for only at Install, the one
+              step that needs it. A browser (an Android phone's or a
+              Chromebook's) cannot install anything itself, so it gets the
+              file to open. */}
           <div className="flex flex-wrap items-center gap-2">
-            {perm?.known && !perm.allowed ? (
-              <button
-                onClick={() => {
-                  trigger('medium');
-                  void openApkInstallSettings();
-                }}
-                className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
+            {!native ? (
+              <a
+                href={apk.apkUrl!}
+                download="jarvis-os.apk"
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => trigger('light')}
+                className="px-3 py-1.5 rounded-xl text-amber-200/90 hover:text-white border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 pointer-coarse:min-h-11"
               >
-                <SettingsIcon size={13} />
-                <span>Allow updates</span>
-              </button>
+                <ExternalLink size={13} />
+                <span>Download link</span>
+              </a>
             ) : apkPhase === 'downloading' ? (
               <div
                 data-testid="apk-download-progress"
@@ -681,6 +691,17 @@ const AppUpdatesSection = () => {
                   </p>
                 ) : null}
               </div>
+            ) : (apkPhase === 'ready' || apkPhase === 'installing') && perm?.known && !perm.allowed ? (
+              <button
+                onClick={() => {
+                  trigger('medium');
+                  void openApkInstallSettings();
+                }}
+                className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
+              >
+                <SettingsIcon size={13} />
+                <span>Allow updates</span>
+              </button>
             ) : apkPhase === 'ready' || apkPhase === 'installing' ? (
               <button
                 data-testid="apk-install-button"
@@ -723,9 +744,20 @@ const AppUpdatesSection = () => {
                 <Download size={13} />
                 <span>Download</span>
               </button>
-            ) : perm?.known ? (
-              // No digest or no verified flow on this build: fall back to the
-              // unverified in-app install rather than pretending we verified it.
+            ) : canVerify === false && perm?.known && !perm.allowed ? (
+              <button
+                onClick={() => {
+                  trigger('medium');
+                  void openApkInstallSettings();
+                }}
+                className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
+              >
+                <SettingsIcon size={13} />
+                <span>Allow updates</span>
+              </button>
+            ) : canVerify === false && perm?.known ? (
+              // An APK older than the verified flow, or no digest published:
+              // the unverified in-app install, never a browser.
               <button
                 onClick={() => {
                   trigger('medium');
@@ -737,20 +769,6 @@ const AppUpdatesSection = () => {
                 <span>Install update</span>
               </button>
             ) : null}
-            {/* Only a last resort: the verified path above never leaves the app. */}
-            {!canVerify && (
-              <a
-                href={apk.apkUrl!}
-                download="jarvis-os.apk"
-                target="_blank"
-                rel="noreferrer"
-                onClick={() => trigger('light')}
-                className="px-3 py-1.5 rounded-xl text-amber-200/90 hover:text-white border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 pointer-coarse:min-h-11"
-              >
-                <ExternalLink size={13} />
-                <span>Download link</span>
-              </a>
-            )}
           </div>
           {apkError && (
             <p data-testid="apk-download-error" role="alert" className="text-[11px] text-red-300">
