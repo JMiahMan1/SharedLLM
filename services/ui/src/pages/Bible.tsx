@@ -33,6 +33,7 @@ const DEFAULT_PREFERENCES: BiblePreferences = {
   default_version: '',
   default_edition: '',
   favorite_version: '',
+  compare_version: '',
   cross_version_notes: false,
   font_scale: 1,
   line_height: 1.6,
@@ -117,6 +118,18 @@ function BibleReaderPane({
     enabled: searching && (searchTerm?.length ?? 0) >= 2,
     retry: 0,
   });
+
+  // The second translation is only fetched when the reader asked to compare, and
+  // when it fails it reads as a comparison that could not load rather than as a
+  // missing chapter: the primary passage is still on screen.
+  const compareVersion = preferences.compare_version;
+  const { data: compareData } = useQuery({
+    queryKey: ['bible-passage', compareVersion, requestRef],
+    queryFn: () => api.getBiblePassage(requestRef, compareVersion),
+    enabled: Boolean(version) && Boolean(compareVersion) && !searching,
+    retry: 0,
+  });
+  const compareName = versions.find((v) => v.code === compareVersion)?.name ?? compareVersion;
 
   // Position and chapter-complete both follow the chapter that was actually
   // shown, which is the requested ref when one came in from a link. The
@@ -304,6 +317,8 @@ function BibleReaderPane({
             verses={passage?.verses ?? []}
             marks={marks}
             studiedVerses={studiedVerses}
+            compareVerses={compareData?.verses}
+            compareName={compareName}
             fontScale={preferences.font_scale}
             lineHeight={preferences.line_height}
             theme={preferences.theme}
@@ -375,7 +390,6 @@ export default function Bible() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<Tab>(searchParams.get('tab') === 'devotional' ? 'today' : 'read');
   const [requestedRef, setRequestedRef] = useState<string | null>(searchParams.get('ref'));
-  const [preferences, setPreferences] = useState<BiblePreferences>(DEFAULT_PREFERENCES);
 
   const { data: stateData, isLoading: stateLoading } = useQuery({
     queryKey: ['bible-state'],
@@ -387,11 +401,15 @@ export default function Bible() {
   const versions = useMemo(() => versionData?.versions ?? [], [versionData]);
   const marks = useMemo(() => markData?.marks ?? [], [markData]);
 
-  // Saved preferences seed the reader once; a local change afterwards wins.
-  const [preferencesTouched, setPreferencesTouched] = useState(false);
-  const effectivePreferences = preferencesTouched
-    ? preferences
-    : { ...DEFAULT_PREFERENCES, ...(stateData?.preferences ?? {}) };
+  // Saved preferences are the base and a local change is an overlay, never a
+  // replacement: spreading a local copy wholesale would blank every setting the
+  // reader had already saved the moment they changed one of them.
+  const [preferencePatch, setPreferencePatch] = useState<Partial<BiblePreferences>>({});
+  const effectivePreferences = {
+    ...DEFAULT_PREFERENCES,
+    ...(stateData?.preferences ?? {}),
+    ...preferencePatch,
+  };
 
   // The picker shows every translation we know about so a missing one is a
   // visible task rather than a mystery, but only installed ones can be read.
@@ -439,8 +457,7 @@ export default function Bible() {
   );
 
   const applyPreferences = (patch: Partial<BiblePreferences>) => {
-    setPreferencesTouched(true);
-    setPreferences((current) => ({ ...current, ...patch }));
+    setPreferencePatch((current) => ({ ...current, ...patch }));
     void api.putBibleState(patch);
   };
 

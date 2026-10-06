@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import Bible from './Bible';
@@ -84,6 +84,7 @@ const STATE = (overrides: Partial<BibleStateResponse> = {}): BibleStateResponse 
     default_version: 'kjv',
     default_edition: '',
     favorite_version: '',
+    compare_version: '',
     cross_version_notes: false,
     font_scale: 1,
     line_height: 1.6,
@@ -94,8 +95,13 @@ const STATE = (overrides: Partial<BibleStateResponse> = {}): BibleStateResponse 
   ...overrides,
 });
 
-const PASSAGE = (reference: string, chapter: number, text: string): BiblePassage => ({
-  version: 'kjv',
+const PASSAGE = (
+  reference: string,
+  chapter: number,
+  text: string,
+  version = 'kjv',
+): BiblePassage => ({
+  version,
   requested: reference,
   reference,
   spans: [
@@ -111,7 +117,7 @@ const PASSAGE = (reference: string, chapter: number, text: string): BiblePassage
     },
   ],
   verses: [1, 2, 3].map((v) => ({
-    version: 'kjv',
+    version,
     osis: reference.startsWith('Ps') ? 'Ps' : 'John',
     book_name: reference.startsWith('Ps') ? 'Psalms' : 'John',
     chapter,
@@ -234,11 +240,23 @@ beforeEach(() => {
   mocked.getBibleVersions.mockReset().mockResolvedValue({ versions: VERSIONS });
   mocked.getBibleBooks.mockReset().mockResolvedValue({ version: 'kjv', books: BOOKS });
   mocked.getBibleMarks.mockReset().mockResolvedValue(MARKS());
-  mocked.getBiblePassage.mockReset().mockImplementation(async (ref: string) => {
-    if (ref.startsWith('Ps')) return PASSAGE('Psalms 23', 23, 'The LORD is my shepherd');
-    const chapter = Number(ref.split(/\s+/)[1]?.split(':')[0] ?? 1);
-    return PASSAGE(ref, chapter, 'For God so loved the world');
-  });
+  mocked.getBiblePassage
+    .mockReset()
+    .mockImplementation(async (ref: string, version = 'kjv') => {
+      const chapter = Number(ref.split(/\s+/)[1]?.split(':')[0] ?? 1);
+      const text =
+        version === 'asv'
+          ? 'The Lord is my shepherd, I shall not want'
+          : ref.startsWith('Ps')
+            ? 'The LORD is my shepherd'
+            : 'For God so loved the world';
+      const passage = PASSAGE(ref.startsWith('Ps') ? 'Psalms 23' : ref, chapter, text, version);
+      // One verse the second translation genuinely does not have, so a gap in a
+      // comparison is exercised rather than assumed.
+      return version === 'asv'
+        ? { ...passage, verses: passage.verses.filter((v) => v.verse !== 3), count: 2 }
+        : passage;
+    });
   mocked.searchBible.mockReset().mockResolvedValue({ query: 'faith', version: 'kjv', results: [], count: 0 } as BibleSearchResult);
   mocked.getBibleDaily.mockReset().mockResolvedValue(DAILY());
   mocked.getBibleAchievements.mockReset().mockResolvedValue(ACHIEVEMENTS());
@@ -752,5 +770,71 @@ describe('Bible page', () => {
         expect.objectContaining({ crossVersion: true }),
       ),
     );
+  });
+});
+describe('comparing two translations', () => {
+  const openCompare = async () => {
+    renderPage();
+    await screen.findByTestId('bible-chapter-heading');
+    const toggle = await screen.findByTestId('bible-compare-toggle');
+    fireEvent.click(toggle);
+    return toggle;
+  };
+
+  it('offers the comparison only for translations other than the one being read', async () => {
+    await openCompare();
+
+    // kjv is what the reader is reading, so asv is the only thing left to
+    // compare against -- offering kjv would render the same words twice.
+    await waitFor(() => expect(mocked.putBibleState).toHaveBeenCalledWith({ compare_version: 'asv' }));
+    const select = await screen.findByTestId('bible-compare-select');
+    expect(within(select).queryByRole('option', { name: /King James/ })).toBeNull();
+    expect(within(select).getByRole('option', { name: /American Standard/ })).toBeTruthy();
+  });
+
+  it('shows the second translation beside the first', async () => {
+    mocked.getBibleState.mockResolvedValue(
+      STATE({ preferences: { ...STATE().preferences, compare_version: 'asv' } }),
+    );
+    renderPage();
+
+    expect(await screen.findByTestId('bible-compare-legend')).toHaveTextContent(
+      'American Standard Version alongside',
+    );
+    expect(await screen.findByTestId('bible-compare-23-1')).toHaveTextContent(
+      'The Lord is my shepherd, I shall not want (1)',
+    );
+    // The reader's own text is still there and is still the primary one.
+    expect(screen.getByTestId('bible-verse-23-1')).toHaveTextContent('The LORD is my shepherd (1)');
+    await waitFor(() => expect(mocked.getBiblePassage).toHaveBeenCalledWith('Ps 23', 'asv'));
+  });
+
+  it('says so when the second translation has no such verse', async () => {
+    mocked.getBibleState.mockResolvedValue(
+      STATE({ preferences: { ...STATE().preferences, compare_version: 'asv' } }),
+    );
+    renderPage();
+
+    expect(await screen.findByTestId('bible-compare-missing-23-3')).toHaveTextContent(
+      'Not in this translation.',
+    );
+    // Absent, not dropped: the verse row itself is still rendered.
+    expect(screen.getByTestId('bible-verse-23-3')).toBeTruthy();
+  });
+
+  it('stops comparing without disturbing the translation being read', async () => {
+    mocked.getBibleState.mockResolvedValue(
+      STATE({ preferences: { ...STATE().preferences, compare_version: 'asv' } }),
+    );
+    renderPage();
+
+    const toggle = await screen.findByTestId('bible-compare-toggle');
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(mocked.putBibleState).toHaveBeenCalledWith({ compare_version: '' }));
+    await waitFor(() => expect(screen.queryByTestId('bible-compare-legend')).toBeNull());
+    expect(screen.queryByTestId('bible-compare-select')).toBeNull();
   });
 });

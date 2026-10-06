@@ -6,6 +6,7 @@ port), and the failure messages, because "unconfigured" is only useful if it
 says which setting to set.
 """
 from datetime import date
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,8 @@ from sqlmodel import Session
 import services.config as cfg
 from services.bible import corpus
 from services.bible import main as bible_main
+
+from services.bible.tests.conftest import auth
 
 SECRET = "test-secret"
 
@@ -508,3 +511,71 @@ def test_imported_devotionals_win_over_the_registry(loaded_client: TestClient, r
 
 def test_corpus_helper_is_reachable_for_the_health_report(client: TestClient):
     assert corpus.count_rows.__name__ == "count_rows"
+
+@pytest.fixture
+def two_translations(loaded_client: TestClient, reader_db: Session, corpus_file: Path):
+    """Two installed translations, because a comparison needs two."""
+    corpus.import_corpus(
+        reader_db, code="asv", name="American Standard Version", source_path=corpus_file
+    )
+    return loaded_client
+
+
+def test_no_comparison_is_chosen_for_the_reader(two_translations: TestClient):
+    prefs = two_translations.get(
+        "/state", params={"username": "reader"}, headers=auth()
+    ).json()["preferences"]
+    assert prefs["compare_version"] == "", "a second version must be asked for, never guessed"
+
+
+def test_a_translation_can_be_set_beside_the_one_being_read(two_translations: TestClient):
+    two_translations.put(
+        "/state", params={"username": "reader"}, json={"default_version": "kjv"}, headers=auth()
+    )
+    body = two_translations.put(
+        "/state",
+        params={"username": "reader"},
+        json={"compare_version": "asv"},
+        headers=auth(),
+    ).json()["preferences"]
+    assert body["compare_version"] == "asv"
+    shown = two_translations.get(
+        "/state", params={"username": "reader"}, headers=auth()
+    ).json()["preferences"]
+    assert shown["default_version"] == "kjv", (
+        "choosing what to compare against must not move the reader's own text"
+    )
+
+
+def test_the_comparison_can_be_turned_off_without_touching_the_default(two_translations: TestClient):
+    two_translations.put(
+        "/state",
+        params={"username": "reader"},
+        json={"default_version": "kjv", "compare_version": "asv"},
+        headers=auth(),
+    )
+    after = two_translations.put(
+        "/state", params={"username": "reader"}, json={"compare_version": ""}, headers=auth()
+    ).json()["preferences"]
+    shown = two_translations.get(
+        "/state", params={"username": "reader"}, headers=auth()
+    ).json()["preferences"]
+    assert after["compare_version"] == ""
+    assert shown["default_version"] == "kjv", "the reader still opens the translation they chose"
+
+
+def test_comparing_a_translation_against_itself_is_refused(two_translations: TestClient):
+    """The same words twice is not a comparison, and it looks like a bug."""
+    resp = two_translations.put(
+        "/state", params={"username": "reader"}, json={"compare_version": "kjv"}, headers=auth()
+    )
+    assert resp.status_code == 400
+    assert "different translation" in resp.json()["detail"]
+
+
+def test_a_comparison_against_a_translation_we_do_not_have_is_refused(loaded_client: TestClient):
+    resp = loaded_client.put(
+        "/state", params={"username": "reader"}, json={"compare_version": "nkjv"}, headers=auth()
+    )
+    assert resp.status_code == 400
+    assert "nkjv" in resp.json()["detail"]

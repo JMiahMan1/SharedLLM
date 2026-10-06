@@ -531,10 +531,20 @@ StudyNote            id, version_code, edition_code, osis, chapter,
                                            ordinal, body, source, imported_at
 UserBibleState       username, last_book/chapter/verse, last_open_day, last_read_at,
                                            default_version, default_edition,
+                                           favorite_version, compare_version,
                                            cross_version_notes, font_scale,
                                            line_height, theme, read_aloud_voice,
                                            split_view
 ```
+
+`default_version` is where the reader is; `favorite_version` is the one they
+come back to; `compare_version` is the one shown *beside* the text. Three
+separate fields because they are three separate decisions — turning a
+comparison off must not move the reader's own text. `compare_version` blank
+means no comparison and is never guessed, and comparing a translation against
+itself is refused, because the same words twice reads as a bug rather than as
+a comparison. `split_view` chooses the *layout* of that second column
+(`compare` = a row per verse, `parallel` = the whole second chapter).
 
 Note bodies are **not** here. `VerseMark.note_path` points at a Nextcloud
 file written by the existing notes handler; `note_preview` is a few words
@@ -807,7 +817,7 @@ of Phase 1 explicitly rather than being quietly dropped.
 | **Read aloud** | `POST /execute/tts` via `/api/bible/speak`; per-verse highlight while speaking; play/pause, speed, voice picker; cache in `bible:tts:*`; "play on the kitchen speaker" via `/execute/ha_service` `tts.piper` | 1 |
 | **Verse of the Day** | Deterministic by date, cached `bible:votd:{date}`, at the top of Read and in the `bible_daily` widget | 1 |
 | **Share a verse** | Verse Image card (SVG, theme-aware, scales with container) → native share sheet or web share; deep link back to the passage | 1 |
-| **Compare / parallel versions** | Side-by-side synchronized panes on desktop, stacked tabs on phone; scroll position locked across versions | 1 |
+| **Compare / parallel versions** | `compare_version` picks a second translation, fetched from `/passages` like any other. `ChapterReader` puts the two in one row per verse from `sm` up and stacks them on a phone, since a phone cannot show two readable columns. A verse the second translation does not have says "Not in this translation." rather than vanishing — NIV2011 genuinely omits Matthew 17:21, and an invisible gap reads as a rendering fault. The version picker never offers the translation being read, and the server refuses it too | 1 |
 | **Streak on screen** | App-open streak (offline-tolerant) and Guided-Scripture streak (resets on a skipped day, number hidden until earned again) — YouVersion's two-streak model, not one generic counter | 1 |
 | **No network? Still read** | Corpus is local; last chapter + bookmarks + VOTD + plan day cached in TanStack query + Capacitor Preferences; reads never wait on an upstream | 1 |
 | Offline audio download | Recorded audio is out of scope (licensed); cached TTS WAVs give repeat-listen without network. Documented as a deliberate gap, not a bug | later |
@@ -998,7 +1008,7 @@ src/components/bible/ReaderToolbar.tsx          # version / font / compare / alo
 src/components/bible/TypographyControls.tsx      # font scale, line height, serif/sans
 src/components/bible/BibleReadAloud.tsx          # narration player + voice picker
 src/components/bible/ReferenceBar.tsx            # ref input, book/chapter steppers,
-                                                #   version, study Bible, display
+                                                #   version, study Bible, compare, display
 src/components/bible/BibleToday.tsx              # verse of the day + today's devotional
 src/components/bible/MarksRail.tsx              # highlights/bookmarks strip per chapter
 src/components/bible/NoteEditor.tsx             # verse note -> Nextcloud via notes API
@@ -1033,7 +1043,11 @@ src/components/admin/BibleAdminPanel.tsx         # Admin › Bible: catalogue,
                                                 #   before Install, one-book test
 ```
 
-Tests: `src/pages/Bible.test.tsx`, `src/components/bible/BibleStudyNotes.test.tsx`,
+Tests: `src/pages/Bible.test.tsx` (including comparing two translations: the
+picker never offers the translation being read, the second column renders, a
+verse the second translation lacks says so, and turning the comparison off
+leaves the reader's own text alone),
+`src/components/bible/BibleStudyNotes.test.tsx`,
 `services/bible/tests/test_bible_editions.py` (two study Bibles over one
 translation, cross-version gating, re-import scoping, recounting a stale note
 cache),
