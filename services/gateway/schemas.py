@@ -85,9 +85,22 @@ class StorageListRequest(BaseModel):
     recursive: bool = False
 
 class StorageIndexRequest(BaseModel):
+    """Ask the storage service to crawl a provider and sync it into RAG.
+
+    ``provider_kind`` selects which :class:`~services.storage.models.ProviderKind`
+    the storage service builds. Each kind lands in its own RAG collection
+    (``<kind>_files``), so a Calibre library and a Nextcloud tree never mix.
+
+    ``library_path`` is Calibre-only: it is the library root inside the user's
+    Nextcloud account, and it has no default. A guessed path would silently
+    index the wrong shelf, so an unset value is a refusal rather than a default.
+    When omitted it is read from the ``calibre_library_path`` global setting.
+    """
+    provider_kind: Literal["nextcloud", "calibre"] = "nextcloud"
     path: str = "/"
     recursive: bool = True
     force: bool = False
+    library_path: str | None = None
 
 class StorageStatusRequest(BaseModel):
     """

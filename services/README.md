@@ -24,7 +24,12 @@ This directory contains the microservices refactor of the SharedLLM system.
 
 ### 4. Storage Bridge (`services/storage`)
 - **Provider Layer**: Normalizes multiple file stores behind a shared interface.
-- **Initial Backend**: Nextcloud via WebDAV.
+- **Backends**: Nextcloud via WebDAV, and a **read-only Calibre library** also in Nextcloud. Each
+  provider kind lands in its own RAG collection (`<kind>_files`), so the two never mix.
+- **Calibre**: downloads `metadata.db`, parses it with stdlib `sqlite3` (never locks a file two
+  other hosts write), then fetches each EPUB and extracts it **by its own heading structure** rather
+  than by fixed character window, so citations name a section ("31st Day.") and not "chunk 412".
+  Writes are refused; Calibre owns `metadata.db`. See `docs/CALIBRE_LIBRARY.md`.
 - **Writeback**: Supports explicit provider writeback so local authoritative
   workspace changes can be reflected into a designated provider folder.
 - **Content Indexer**: Classifies repositories, notes, documents, ebooks, images,

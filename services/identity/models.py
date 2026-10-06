@@ -492,6 +492,9 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "bible_provider_cache", "value": "", "description": "Long-term per-chapter provider cache. Kept beside the text it feeds so it survives a wiped database. Blank derives it from BIBLE_DATABASE_URL; set it to make the location explicit."},
     {"key": "bible_provider_call_budget", "value": "", "description": "Most NEW provider requests one import may make. Blank = no ceiling. Only chapters that are not already cached count, so a warm cache costs nothing. A whole Bible is about 1,189 requests."},
 
+    # --- CALIBRE (read-only library index) ---
+    {"key": "calibre_library_path", "value": "", "description": "Calibre library root inside Nextcloud, e.g. /Books/Text. Blank refuses to index rather than guessing a shelf. The library is read over WebDAV and indexed read-only; calibre or Calibre-Web still owns metadata.db."},
+
     # --- DNS MAPPINGS (multi-IP fallback support) ---
     # Format: {"hostname": ["primary_ip", "fallback_ip", ...]}
     # dnsmasq generates multiple A records; clients try in order

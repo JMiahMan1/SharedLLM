@@ -205,6 +205,33 @@ class NextCloudClient:
             log.error(f"Failed to fetch content for {remote_path}: {e}")
             return None
 
+    async def get_file_bytes(self, remote_path: str, timeout: float | None = None) -> bytes | None:
+        """Fetch a file as raw bytes.
+
+        ``get_file_content`` decodes the response as text, which mangles any
+        binary payload into mojibake rather than failing -- a PDF or an EPUB
+        fetched through it comes back as replacement characters, and anything
+        that then embeds that string stores a confident lie. Binary callers must
+        come here instead.
+
+        ``timeout`` overrides the session's 15 second total, which is too tight
+        for a multi-megabyte format file on a slow link.
+        """
+        url = await self._full_url(remote_path)
+        kwargs: dict[str, Any] = {}
+        if timeout is not None:
+            kwargs["timeout"] = aiohttp.ClientTimeout(total=timeout, sock_read=timeout)
+        log.info(f"NextCloud GET (bytes): {url}")
+
+        try:
+            async with self.client.get(url, **kwargs) as resp:
+                if resp.status >= 400:
+                    raise Exception(f"HTTP {resp.status}")
+                return await resp.read()
+        except Exception as e:
+            log.error(f"Failed to fetch bytes for {remote_path}: {e}")
+            return None
+
     async def ensure_directory(self, remote_path: str) -> None:
         """Ensure a directory exists using MKCOL."""
         normalized = "/" + str(remote_path).strip("/")

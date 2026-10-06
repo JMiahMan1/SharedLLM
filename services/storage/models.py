@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-ProviderKind = Literal["nextcloud"]
+ProviderKind = Literal["nextcloud", "calibre"]
 
 
 class ProviderConfig(BaseModel):
@@ -19,6 +19,7 @@ class StorageEntry(BaseModel):
     size: int | None = None
     mtime: str | None = None
     content_type: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ContentIndexItem(BaseModel):
@@ -38,6 +39,21 @@ class ContentIndexItem(BaseModel):
     restrictions: list[str] = Field(default_factory=list)
     related_items: list[str] = Field(default_factory=list)
     usage_hints: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ContentSection(BaseModel):
+    """One addressable unit of a document, carrying a human-readable label.
+
+    A 900-page book chunked on a fixed character window produces chunks with no
+    stable name, so a citation can only say "chunk 412". A section says
+    "31st Day" or "Chapter 4", which is what a reader -- and a retrieval-augmented
+    answer -- can actually check against the book.
+    """
+
+    ordinal: int
+    label: str
+    text: str
 
 
 class ProviderListRequest(BaseModel):
