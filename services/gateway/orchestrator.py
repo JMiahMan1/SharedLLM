@@ -242,6 +242,15 @@ def _citation_suffix(meta: dict) -> str:
     doc = meta.get("title") or meta.get("name")
     if isinstance(doc, str) and doc.startswith("File/Folder:"):
         doc = None
+    # An author turns a bare title into an attribution. A question naming an
+    # author ("what did Macduff say about poverty") cannot be answered from
+    # passages labelled only "Memories of Bethany, XIV": the model has no way to
+    # know the book it is quoting is by the author being asked about, and it
+    # answers that it found nothing rather than guessing.
+    who = meta.get("author")
+    if isinstance(who, str) and who.strip():
+        who = who.strip()
+        doc = f"{doc} by {who}" if doc else f"by {who}"
     loc = ""
     for key in ("chapter", "page", "section", "location"):
         val = meta.get(key)

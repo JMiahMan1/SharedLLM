@@ -66,3 +66,24 @@ def test_locator_is_bounded_even_with_a_long_path():
     """The locator is charged against the prompt budget, so it stays compact."""
     suffix = _citation_suffix({"title": "T", "chunk_index": 1, "path": "/x" * 500})
     assert len(suffix) < 200
+
+def test_a_citation_names_the_author_so_a_question_about_one_can_be_answered():
+    """A passage labelled only by title cannot answer a question about an author.
+
+    Observed live: "What did Macduff say about trusting God in poverty?"
+    retrieved passages from *Memories of Bethany*, which is by John R. Macduff,
+    but the citation read "Source: Memories of Bethany, XIV." The model had no
+    way to connect them and reported that nothing matched.
+    """
+    assert _citation_suffix({"title": "Memories of Bethany", "author": "John R. Macduff", "chapter": "XIV."}) == \
+        " (Source: Memories of Bethany by John R. Macduff, chapter XIV.)"
+
+
+def test_an_author_without_a_title_still_attributes():
+    assert _citation_suffix({"author": "John R. Macduff", "chapter": "XIV."}) == \
+        " (Source: by John R. Macduff, chapter XIV.)"
+
+
+def test_a_blank_author_adds_nothing_rather_than_a_stray_by():
+    assert _citation_suffix({"title": "A Book", "author": "   ", "chapter": "1"}) == \
+        " (Source: A Book, chapter 1)"
