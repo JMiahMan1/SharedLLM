@@ -121,6 +121,18 @@ def _patch_bible(monkeypatch, status=200, payload=None, captured=None):
     return captured
 
 
+def _form_fields(call):
+    """Read a forwarded aiohttp FormData back as (name, value, filename) triples.
+
+    ``FormData._fields`` holds (headers, options, value) tuples, where the part
+    name and filename live in the headers MultiDict. The upload routes build a
+    FormData because aiohttp has no ``files=`` argument, so the assertion has to
+    read the same structure the wire would carry.
+    """
+    form = call["data"]
+    return [(f[0].get("name"), f[2], f[0].get("filename")) for f in form._fields]
+
+
 @pytest.fixture
 def anon_client():
     return TestClient(app, raise_server_exceptions=False)
@@ -500,9 +512,11 @@ def test_the_upload_is_remultiparted_with_its_file(make_client, monkeypatch):
     assert resp.status_code == 200
     call = captured["calls"][-1]
     assert call["url"].endswith("/admin/imports/upload")
-    assert call["files"]["file"][0] == "nkjv.epub"
-    assert call["data"]["import_notes"] is True
-    assert call["data"]["edition"] == "nkjv-macarthur"
+    fields = {name: value for name, value, _filename in _form_fields(call)}
+    files = {name: (filename, value) for name, value, filename in _form_fields(call) if filename}
+    assert files["file"][0] == "nkjv.epub"
+    assert fields["import_notes"] == "true"
+    assert fields["edition"] == "nkjv-macarthur"
 
 
 def test_an_upload_without_a_file_is_refused_before_the_service(make_client, monkeypatch):

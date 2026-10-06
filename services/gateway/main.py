@@ -9472,13 +9472,26 @@ async def proxy_bible_admin_import_upload(request: Request):
         if value not in (None, ""):
             data[field] = str(value)
     flags = form.get("import_notes")
+    upload = aiohttp.FormData()
+    for field, value in data.items():
+        upload.add_field(field, value)
     if flags not in (None, ""):
-        data["import_notes"] = str(flags).strip().lower() in {"1", "true", "yes", "on"}
+        # The bible service parses this as text, so the boolean is spelled the
+        # way it already accepts rather than relying on str(True).
+        upload.add_field(
+            "import_notes",
+            "true" if str(flags).strip().lower() in {"1", "true", "yes", "on"} else "false",
+        )
+    upload.add_field(
+        "file",
+        uploaded.file,
+        filename=uploaded.filename,
+        content_type=uploaded.content_type or "application/octet-stream",
+    )
     async with shared_http_client() as client:
         resp = await client.post(
             f"{BIBLE_SVC}/admin/imports/upload",
-            files={"file": (uploaded.filename, uploaded.file, uploaded.content_type or "")},
-            data=data,
+            data=upload,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=_BIBLE_IMPORT_TIMEOUT,
         )
@@ -9957,29 +9970,65 @@ async def publish_app_update(request: Request):
     return {"status": "ok", "metadata": meta}
 
 
+#: Transcription is minutes of CPU, not milliseconds of I/O. Whisper runs
+#: faster than realtime for short clips but a service recording or a video's
+#: audio track is tens of minutes long, and the first call of a session also
+#: pays for loading the model. A 30s ceiling could only ever abort work the
+#: engine was still doing; the engine is the one place that should decide when
+#: it has taken too long.
+_STT_TIMEOUT = aiohttp.ClientTimeout(total=3600.0, connect=30.0)
+
+
 @app.post("/api/stt/transcribe")
 async def transcribe_audio(request: Request):
-    """Transcribe audio using Whisper STT."""
+    """Transcribe an uploaded recording, or the audio track of an uploaded video.
+
+    The bytes are handed to Whisper as they arrive, with the caller's own
+    content type, because Whisper reads through ffmpeg: an MKV or MP4 works
+    exactly as well as a WAV, and re-encoding first would only throw away time
+    and quality. This route used to pass ``files=`` to aiohttp, which has no
+    such parameter -- a ``requests`` habit -- so every call raised TypeError
+    inside the middleware and returned "Internal Gateway Error" without ever
+    reaching the engine.
+    """
     form = await request.form()
     audio_file = form.get("audio")
-    assert isinstance(audio_file, UploadFile), "audio must be a file"
-    model = form.get("model", "base")
-    language = form.get("language", "en")
+    if not isinstance(audio_file, UploadFile):
+        raise HTTPException(status_code=400, detail="An audio file is required.")
+    model = form.get("model") or "base"
+    language = form.get("language") or "en"
 
-    if not audio_file:
-        raise HTTPException(status_code=400, detail="audio file required")
+    upload = aiohttp.FormData()
+    upload.add_field("model", str(model))
+    upload.add_field("language", str(language))
+    upload.add_field(
+        "file",
+        audio_file.file,
+        filename=audio_file.filename or "recording",
+        content_type=audio_file.content_type or "application/octet-stream",
+    )
 
     async with shared_http_client() as client:
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/stt/transcribe",
-            files={"file": (audio_file.filename, audio_file.file, "audio/wav")},
-            data={"model": model, "language": language},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-            , timeout=aiohttp.ClientTimeout(total=30.0),
+            data=upload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=_STT_TIMEOUT,
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="STT service unavailable")
+        # The execution service reports failures as ExecutionResult, which
+        # carries "message" rather than FastAPI's "detail". Reading both means
+        # "Whisper not installed" reaches the caller instead of a generic 502.
+        try:
+            body = await resp.json()
+        except Exception:  # noqa: BLE001 - a non-JSON error body is not fatal
+            body = {}
+        detail = body.get("message") or body.get("detail") or ""
+    raise HTTPException(
+        status_code=502,
+        detail=detail or "STT service unavailable",
+    )
 
 
 @app.post("/api/voice/command")
