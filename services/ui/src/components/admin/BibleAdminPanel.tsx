@@ -54,7 +54,6 @@ export default function BibleAdminPanel() {
 
   function report(run: BibleImportRun) {
     setNotice(run.message);
-    setNotice(run.status === 'failed' ? run.message : '');
     setLog(run.log ?? []);
     void trigger(run.status === 'failed' ? 'error' : 'success');
     void client.invalidateQueries({ queryKey: ['bible-imports'] });
@@ -63,7 +62,6 @@ export default function BibleAdminPanel() {
 
   function failed(error: unknown) {
     const text = error instanceof Error ? error.message : 'The import did not run.';
-    setNotice(text);
     setNotice(text);
     void trigger('error');
   }

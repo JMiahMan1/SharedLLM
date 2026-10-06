@@ -171,6 +171,9 @@ class UserBibleState(SQLModel, table=True):
     last_read_at: datetime | None = None
     default_version: str = Field(default="")
     default_edition: str = Field(default="")
+    # The reader's own favourite, kept apart from the default so that "start me
+    # where I left off" and "open my favourite" stay two different decisions.
+    favorite_version: str = Field(default="")
     # Whether study panels may show commentary published against another
     # translation. Off by default: such a note is commentary on different words.
     cross_version_notes: bool = Field(default=False)

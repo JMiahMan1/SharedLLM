@@ -1584,6 +1584,12 @@ export interface BiblePreferences {
   /** Which study Bible explains the text. Empty until one is chosen. */
   default_edition: string;
   /**
+   * The reader's own favourite translation, kept apart from the default so
+   * "resume where I left off" and "open my favourite" stay two decisions.
+   * Empty until one is chosen.
+   */
+  favorite_version: string;
+  /**
    * Whether study panels may include commentary written for a different
    * translation. Off by default; the reader opts in per session or remembers it.
    */

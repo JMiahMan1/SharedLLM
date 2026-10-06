@@ -759,6 +759,7 @@ class StatePayload(BaseModel):
     verse: int | None = Field(default=None, ge=1)
     default_version: str | None = None
     default_edition: str | None = None
+    favorite_version: str | None = None
     cross_version_notes: bool | None = None
     font_scale: float | None = Field(default=None, ge=0.6, le=2.5)
     line_height: float | None = Field(default=None, ge=1.0, le=3.0)
@@ -786,6 +787,7 @@ def _default_preferences(session: Session) -> dict:
     return {
         "default_version": version,
         "default_edition": corpus.default_edition(session, version),
+        "favorite_version": "",
         "cross_version_notes": False,
         "font_scale": 1.0,
         "line_height": 1.6,
@@ -799,6 +801,7 @@ def _preferences(state: UserBibleState) -> dict:
     return {
         "default_version": state.default_version,
         "default_edition": state.default_edition,
+        "favorite_version": state.favorite_version,
         "cross_version_notes": state.cross_version_notes,
         "font_scale": state.font_scale,
         "line_height": state.line_height,
@@ -847,6 +850,13 @@ def put_state(
         # different translation, so it follows the translation instead of failing
         # on the reader's next study panel.
         state.default_edition = corpus.default_edition(session, state.default_version)
+    if payload.favorite_version is not None:
+        # An empty string is how the reader says "no favourite yet", so it is
+        # cleared rather than run through _require_version, which would refuse
+        # it as an unknown translation.
+        state.favorite_version = (
+            _require_version(session, payload.favorite_version) if payload.favorite_version else ""
+        )
     if payload.cross_version_notes is not None:
         state.cross_version_notes = payload.cross_version_notes
     for attr in ("font_scale", "line_height", "theme", "read_aloud_voice", "split_view"):
