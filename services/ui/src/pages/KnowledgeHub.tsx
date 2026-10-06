@@ -172,10 +172,7 @@ const KnowledgeHub = () => {
 
   const fullReindexMutation = useMutation({
     mutationFn: ({ force = false }: { force?: boolean }) => 
-      api.triggerFullIndex(
-        { kind: 'nextcloud', settings: {} },
-        { force, user_id: user?.username }
-      ),
+      api.triggerFullIndex({ kind: 'nextcloud' }, { force }),
     onSuccess: () => {
       toast.success('Full NextCloud reindex started in background');
       queryClient.invalidateQueries({ queryKey: ['rag-stats'] });

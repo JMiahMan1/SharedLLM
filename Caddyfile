@@ -261,6 +261,17 @@
         reverse_proxy gateway:11435
     }
 
+    # Gateway routes under /api/admin; the rest of /api/admin is the
+    # workspace runtime's (Caddy tries the longer path first).
+    handle /api/admin/users/*/stars {
+        reverse_proxy gateway:11435
+    }
+    handle /api/admin/volumes* {
+        reverse_proxy gateway:11435
+    }
+    handle /api/admin/dns* {
+        reverse_proxy gateway:11435
+    }
     handle /api/admin* {
         reverse_proxy workspace_runtime:8007
     }

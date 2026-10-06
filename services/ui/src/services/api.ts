@@ -245,6 +245,13 @@ const mapUserPayload = (data: Partial<UserProfile>) => {
   return payload;
 };
 
+/** A list endpoint's records, whether it answers with the list itself or
+ *  wraps it as `{ [key]: [...] }`. */
+function listOf(data: unknown, key: string): Record<string, unknown>[] {
+  const list = Array.isArray(data) ? data : (data as Record<string, unknown> | null)?.[key];
+  return Array.isArray(list) ? (list as Record<string, unknown>[]) : [];
+}
+
 const normalizeWorkspaces = (data: WorkspaceListResponse): Workspace[] => {
   if (Array.isArray(data)) {
     return data;
@@ -1565,17 +1572,18 @@ export const api = {
     return resp.data;
   },
 
-  async triggerFullIndex(provider: { kind: string; settings: Record<string, unknown> }, options?: {
+  // The gateway resolves the signed-in user's own provider credentials, so
+  // only the kind is sent. (This used to post to /api/storage/index/full,
+  // which no service serves.)
+  async triggerFullIndex(provider: { kind: string }, options?: {
     path?: string;
     recursive?: boolean;
-    user_id?: string;
     force?: boolean;
   }): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post('/api/storage/index/full', {
-      provider,
+    const resp = await apiClient.post('/api/storage/index', {
+      provider_kind: provider.kind,
       path: options?.path ?? '/',
       recursive: options?.recursive ?? true,
-      user_id: options?.user_id,
       force: options?.force ?? false,
     });
     return resp.data;
@@ -1727,9 +1735,17 @@ export const api = {
     return resp.data;
   },
 
+  // Identity returns these as plain lists of stored records (group_id /
+  // group_name, cluster_id / cluster_name, pattern_id / pattern_name); reading
+  // `.groups` / `.clusters` / `.patterns` off them always gave [], so nothing
+  // created on the Groups page ever showed up.
   async getMediaGroups(): Promise<MediaGroup[]> {
     const resp = await apiClient.get('/api/groups/media');
-    return resp.data.groups || [];
+    return listOf(resp.data, 'groups').map((g) => ({
+      ...g,
+      name: String(g.name ?? g.group_id ?? g.group_name ?? ''),
+      member_entity_ids: (g.member_entity_ids as string[] | undefined) ?? [],
+    })) as MediaGroup[];
   },
 
   async createMediaGroup(data: { name: string; member_entity_ids: string[]; sync_state?: boolean }): Promise<{ status: string; message: string }> {
@@ -1744,7 +1760,10 @@ export const api = {
 
   async getLightClusters(): Promise<LightCluster[]> {
     const resp = await apiClient.get('/api/groups/lights');
-    return resp.data.clusters || [];
+    return listOf(resp.data, 'clusters').map((c) => ({
+      name: String(c.name ?? c.cluster_id ?? c.cluster_name ?? ''),
+      member_entity_ids: (c.member_entity_ids as string[] | undefined) ?? [],
+    }));
   },
 
   async createLightCluster(data: { name: string; member_entity_ids: string[]; default_brightness?: number; default_color_temp?: number }): Promise<{ status: string; message: string }> {
@@ -1759,7 +1778,10 @@ export const api = {
 
   async getLightPatterns(): Promise<LightPattern[]> {
     const resp = await apiClient.get('/api/groups/patterns');
-    return resp.data.patterns || [];
+    return listOf(resp.data, 'patterns').map((p) => ({
+      name: String(p.name ?? p.pattern_id ?? p.pattern_name ?? ''),
+      steps: (p.steps as unknown[] | undefined) ?? [],
+    }));
   },
 
   async createLightPattern(data: { name: string; steps: Array<{ brightness?: number; color_temp?: number; rgb_color?: number[]; transition?: number; delay?: number }> }): Promise<{ status: string; message: string }> {
@@ -1772,8 +1794,13 @@ export const api = {
     return resp.data;
   },
 
-  async executeLightPattern(data: { pattern_name: string; target_cluster?: string; target_entity_ids?: string[] }): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post('/execute/groups/lights', data);
+  async executeLightPattern(data: { pattern_name: string; target_cluster?: string }): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/execute/groups/patterns', {
+      action: 'apply',
+      pattern_id: data.pattern_name,
+      cluster_id: data.target_cluster || null,
+    });
+    if (resp.data?.status !== 'SUCCESS') throw new Error(resp.data?.message || 'The pattern could not be applied');
     return resp.data;
   },
 

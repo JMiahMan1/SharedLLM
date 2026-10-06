@@ -4065,6 +4065,18 @@ async def proxy_users(request: Request):
 
 @app.api_route("/api/groups/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_groups(path: str, request: Request):
+    """Media groups, light clusters and patterns (Admin -> Groups).
+
+    This adds the internal secret Identity requires, so it must not do so for
+    anyone at all: it used to, and anyone who could reach Jarvis could list,
+    create or delete the household's groups. Reading takes a signed-in user;
+    changing them takes an admin.
+    """
+    if request.method == "GET":
+        if not await _acting_identity(request):
+            raise HTTPException(status_code=401, detail="Authentication required")
+    else:
+        await _require_admin(request)
     auth_header = request.headers.get("Authorization")
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     if auth_header:
@@ -5580,7 +5592,15 @@ async def ask_in_workspace(workspace_id: str, request: Request):
 
     if mode == "librarian":
         model = await get_librarian_model()
-        context = await _fetch_rag_context(query, creds["user"], ResolvedCredentials(**creds), workspace_id=workspace_id)
+        # No curriculum: this turn cannot create a workspace, run a shell command
+        # or dispatch a mission, so the protocol lessons and toolchain inventory
+        # are pure overhead -- and they are appended outside the search-hit
+        # budget, which is what pushed a cited answer past the model's context
+        # window and returned an error in place of an answer.
+        context = await _fetch_rag_context(
+            query, creds["user"], ResolvedCredentials(**creds),
+            workspace_id=workspace_id, include_curriculum=False,
+        )
     else:
         model = await get_assistant_model()
         context = ""
@@ -10830,6 +10850,13 @@ async def proxy_entity_search(request: Request):
 async def proxy_audiobookshelf(request: Request):
     """Proxy audiobookshelf requests from UI to execution service."""
     return await _forward_execution_request(request, "/execute/audiobookshelf", "audiobookshelf")
+
+
+@app.post("/execute/groups/patterns")
+async def proxy_light_pattern(request: Request):
+    """Apply a light pattern to a cluster (Admin -> Groups -> Execute Pattern).
+    The execution service checks the caller may control the lights."""
+    return await _forward_execution_request(request, "/execute/groups/patterns", "light patterns", timeout=30.0)
 
 
 @app.post("/execute/esphome")

@@ -2839,7 +2839,7 @@ async def execute_light_cluster(req: LightClusterRequest):
 async def execute_light_pattern(req: LightPatternRequest):
     """Manage light patterns."""
     log.info(f"[groups] light_pattern action={req.action} pattern_id={req.pattern_id}")
-    return await groups.handle_light_pattern(req)
+    return await groups.handle_light_pattern(req, req.user_context or UserContext(user=""))
 
 
 # ─── Presence Detection (Section 3.8) ─────────────────────────────────────────
