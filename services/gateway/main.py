@@ -5597,9 +5597,15 @@ async def ask_in_workspace(workspace_id: str, request: Request):
         # are pure overhead -- and they are appended outside the search-hit
         # budget, which is what pushed a cited answer past the model's context
         # window and returned an error in place of an answer.
+        #
+        # include_library: this mode is billed to the user as answering from
+        # their books, and asking a library a question by author name is the most
+        # natural way to ask one -- a question no keyword list can match. The
+        # generic path still gates the library behind LIBRARY_INTENT_SIGNALS.
         context = await _fetch_rag_context(
             query, creds["user"], ResolvedCredentials(**creds),
             workspace_id=workspace_id, include_curriculum=False,
+            include_library=True,
         )
     else:
         model = await get_assistant_model()

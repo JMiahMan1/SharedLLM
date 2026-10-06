@@ -41,12 +41,13 @@ def asks(monkeypatch):
     """
     seen: dict = {"context_calls": [], "inference_calls": [], "mission_calls": []}
 
-    async def fake_context(query, user_id, creds=None, workspace_id=None, include_curriculum=True):
+    async def fake_context(query, user_id, creds=None, workspace_id=None, include_curriculum=True, include_library=False):
         seen["context_calls"].append({
             "query": query,
             "user_id": user_id,
             "workspace_id": workspace_id,
             "include_curriculum": include_curriculum,
+            "include_library": include_library,
         })
         return "RETRIEVED CONTEXT"
 
@@ -249,3 +250,37 @@ def test_the_route_resolves_identity_for_real(auth_headers, asks, monkeypatch):
         headers=auth_headers,
     )
     assert response.status_code == 401, "an unknown key must not reach the model"
+
+def test_a_librarian_turn_searches_the_library_even_when_the_query_names_no_book_word(
+    asks, auth_headers,
+):
+    """Asking a library a question by author name is the natural way to ask one.
+
+    "What did Macduff say about trusting God in poverty" contains no word from
+    LIBRARY_INTENT_SIGNALS, so the keyword gate alone would silently skip the
+    50 indexed Macduff chapters and the model would answer from its own memory
+    instead. The research mode is billed to the user as answering from their
+    books, so it brings the library in regardless of wording.
+    """
+    r = client.post(
+        "/api/workspaces/ws-1/ask",
+        json={"query": "What did Macduff say about trusting God in poverty?", "mode": "librarian"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    assert asks["context_calls"][0]["include_library"] is True
+
+
+def test_a_raven_dispatch_does_not_force_the_library(asks, auth_headers):
+    """Only the research mode promises the user's books; a mission does not.
+
+    Without this, forcing the library in for missions would put the largest
+    collection in front of every autonomous turn, which is the noise the
+    keyword gate exists to prevent.
+    """
+    client.post(
+        "/api/workspaces/ws-1/ask",
+        json={"query": "Refactor the parser", "mode": "raven"},
+        headers=auth_headers,
+    )
+    assert asks["context_calls"][0]["include_library"] is False

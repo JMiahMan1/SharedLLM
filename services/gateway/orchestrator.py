@@ -73,7 +73,7 @@ _CODING_INTENT_TOKENS = ("file", "code", "git", "workspace", "fix", "repair")
 _CODING_COLLECTIONS = ("system_capabilities", "nextcloud_files", "system_learnings", "ha_entities")
 
 
-def _collections_for_query(query: str) -> list[str]:
+def _collections_for_query(query: str, *, include_library: bool = False) -> list[str]:
     """Choose which RAG collections a query is allowed to spend budget on.
 
     A book library is not searched unless the query asks for one. It is by far
@@ -87,6 +87,13 @@ def _collections_for_query(query: str) -> list[str]:
     stronger evidence for the question than anything the other collections hold,
     and the caller's budget stops before they could crowd out the answer.
 
+    ``include_library`` covers the case keywords cannot: naming an author is the
+    most natural way to ask a library a question ("what did Macduff say about
+    trusting God in poverty"), and no keyword list can match 1,347 surnames. It
+    is set when the caller has already been told a library is wanted -- the user
+    picking the research mode, whose own description promises their books. It is
+    not set on the generic path, where the keyword test remains the gate.
+
     Kept separate from the fetching loop so the decision itself is testable
     without standing up an HTTP client.
     """
@@ -95,7 +102,7 @@ def _collections_for_query(query: str) -> list[str]:
         collections = list(_CODING_COLLECTIONS)
     else:
         collections = list(_BASE_COLLECTIONS)
-    if _library_intent_asked(q):
+    if include_library or _library_intent_asked(q):
         collections = ["calibre_files"] + [c for c in collections if c != "calibre_files"]
     return collections
 
@@ -488,6 +495,7 @@ async def _fetch_rag_context(
     workspace_id: str | None = None,
     *,
     include_curriculum: bool = True,
+    include_library: bool = False,
 ) -> str:
     """Assemble the retrieved context for one turn.
 
@@ -500,6 +508,9 @@ async def _fetch_rag_context(
     assemble 26k characters and still die on an 8k-token model with ``exceeds the
     available context size``. That failure surfaces as an error *answer* rather
     than as an error, which is the worst place for it to appear.
+
+    ``include_library`` forces the book collection in for a caller that has
+    already established books are wanted; see ``_collections_for_query``.
     """
     rag_context = ""
     settings = await get_all_settings()
@@ -507,7 +518,7 @@ async def _fetch_rag_context(
     try:
         # Prioritize collections based on query intent
         q = query.lower()
-        collections = _collections_for_query(query)
+        collections = _collections_for_query(query, include_library=include_library)
 
         # Context constraints
         MAX_TOTAL_HITS = 20
