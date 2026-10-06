@@ -570,8 +570,11 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "LLM backend info: loaded models, VRAM, Ollama state.",
      "payload fields: (none required)."),
     ("ContextSearchRequest", SVC_RAG, "POST", "/rag/search", False,
-     "Semantic RAG search over indexed knowledge.",
-     "payload fields: query, collection, top_k."),
+     "Semantic RAG search over indexed knowledge. Pass collection_name "
+     "explicitly: the default is system_capabilities, so an omitted collection "
+     "searches the tool inventory instead of what was asked about. "
+     "collection_name=calibre_files searches the user's book library.",
+     "payload fields: query, collection_name, k."),
     ("HAConfigRequest", SVC_EXECUTION, "POST", "/execute/ha_config", False,
      "Read Home Assistant configuration snapshot.",
      "payload fields: action, domain, entity_domain, keyword."),

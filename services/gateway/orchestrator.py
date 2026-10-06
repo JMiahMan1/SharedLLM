@@ -51,7 +51,18 @@ LIBRARY_INTENT_SIGNALS = (
 # not prose, and "CALIBRE_FILES" tells the Librarian nothing about what it can
 # answer. Anything absent falls back to the uppercased collection name.
 COLLECTION_HEADERS = {
-    "calibre_files": "LIBRARY — TEXT FROM YOUR BOOK LIBRARY",
+    # The instruction to answer from these passages is load-bearing, not
+    # decoration. Observed: given a Macduff question with the right passages
+    # already in its context, the model threw them away, called
+    # ContextSearchRequest without a collection (landing on the default
+    # system_capabilities), and answered "no results were found" while the
+    # evidence sat unread in its own system prompt.
+    "calibre_files": (
+        "LIBRARY — TEXT FROM YOUR BOOK LIBRARY — ALREADY RETRIEVED FOR THIS "
+        "QUESTION. Answer from these passages and cite the bracketed source and "
+        "chapter. Do not call ContextSearchRequest to look them up again; only "
+        "search the library if these passages plainly do not answer the question."
+    ),
 }
 
 

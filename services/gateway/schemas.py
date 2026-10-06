@@ -178,9 +178,24 @@ class WorkspaceBootstrapRequest(BaseModel):
     create_if_missing: bool = True
 
 class ContextSearchRequest(BaseModel):
-    """Search RAG collections for context when initial retrieval is insufficient."""
+    """Search RAG collections for context when initial retrieval is insufficient.
+
+    Only use this when the context already in the system prompt does not answer
+    the question. Pass ``collection_name`` explicitly: the default is
+    ``system_capabilities``, so an omitted collection silently searches the tool
+    inventory rather than whatever the question was about.
+    """
     query: str = Field(..., description="Natural language search query")
-    collection_name: str = Field("system_capabilities", description="Target collection: ha_entities, nextcloud_files, system_capabilities, system_learnings")
+    collection_name: str = Field(
+        "system_capabilities",
+        description=(
+            "Target collection. One of: calibre_files (text from the user's book "
+            "library), nextcloud_files, ha_entities, system_learnings, "
+            "system_capabilities, user_facts, conversation_memory. Must match the "
+            "kind of thing asked about -- calibre_files for books, authors, "
+            "sermons or commentaries."
+        ),
+    )
     k: int = Field(5, description="Number of results to return")
 
 class HAConfigRequest(BaseModel):
