@@ -15,7 +15,9 @@ playwright
 Pillow>=10.0.0
 html2text
 docker>=7.0.0
-pykokoro[cpu]
+# Pinned exactly: 0.10 removed KokoroPipeline and SSMD support outright, and an
+# unpinned upgrade is what left read-aloud unable to import its own engine.
+pykokoro[cpu]==0.10.4
 soundfile
 yt-dlp
 aiosqlite>=0.20.0

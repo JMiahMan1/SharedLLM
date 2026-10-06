@@ -1,12 +1,12 @@
 import re
 
-# Mock heavy dependencies for testing
+# pykokoro is imported lazily inside KokoroTTSEngine._ensure_loaded, so these
+# tests can import the engine and exercise the text pipeline without it.
 import sys
 from unittest.mock import MagicMock
 
 import pytest
 
-sys.modules['kokoro_onnx'] = MagicMock()
 sys.modules['onnxruntime'] = MagicMock()
 
 import numpy as np
@@ -35,9 +35,11 @@ def test_storybook_segmentation():
 @pytest.mark.asyncio
 async def test_kokoro_engine_generate_mock():
     engine = KokoroTTSEngine()
-    mock_pipeline = MagicMock()
-    mock_pipeline.run.return_value = MagicMock(audio=np.zeros(1000, dtype=np.float32), sample_rate=24000)
-    engine._pipeline = mock_pipeline
+    mock_synth = MagicMock()
+    mock_synth.synthesize_text.return_value = MagicMock(
+        audio=np.zeros(1000, dtype=np.float32), sample_rate=24000
+    )
+    engine._synth = mock_synth
 
     audio = await engine.generate("Test audio")
     assert len(audio) > 0

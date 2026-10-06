@@ -11,7 +11,9 @@ ENV PYTHONPATH=/app
 COPY . .
 # TTS runtime: pykokoro (Kokoro ONNX) replaces the legacy kokoro-onnx engine.
 # Installed explicitly here because the shared base image still ships kokoro-onnx.
-RUN pip install --no-cache-dir "pykokoro[cpu]"
+# Pinned exactly: 0.10 removed KokoroPipeline and SSMD support outright, and an
+# unpinned upgrade is what left read-aloud unable to import its own engine.
+RUN pip install --no-cache-dir "pykokoro[cpu]==0.10.4"
 EXPOSE 8003
 ENV PYTHONUNBUFFERED=1
 

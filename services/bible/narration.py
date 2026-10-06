@@ -50,8 +50,11 @@ MIN_BODY_CHARACTERS = 2
 
 AUDIO_MIME = "audio/wav"
 
+#: Names the model files rather than "the voice model" because the engine needs
+#: three of them now: the ONNX model, the voice pack and the vocabulary. Which
+#: one is missing is in the engine's own message; this sentence says who fixes it.
 VOICE_DOWNLOAD_HINT = (
-    "an administrator has to install the voice model on this server"
+    "an administrator has to install the voice model files on this server"
 )
 
 

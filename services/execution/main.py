@@ -318,6 +318,67 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
             log.error(f"[telemetry] ingestion loop error: {ex}")
 
 
+def _kokoro_model_files() -> list[tuple[str, str]]:
+    """The three files the Kokoro engine needs, and where each one comes from.
+
+    One list for both the startup fetch and the download route. They drifted
+    once already, and the file that fell out of both was the phoneme vocabulary
+    pykokoro 0.10 made mandatory — so a download that reported success left an
+    engine that could not load.
+    """
+    from services.execution.tts import KOKORO_CONFIG_FILENAME
+
+    release = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+    return [
+        ("kokoro-v1.0.onnx", f"{release}/kokoro-v1.0.onnx"),
+        ("voices-v1.0.bin", f"{release}/voices-v1.0.bin"),
+        (
+            KOKORO_CONFIG_FILENAME,
+            "https://github.com/buchwandler/kokoro-onnx-models/releases/download/"
+            "model-files-v1.0-timestamped-r4/vocab-v1.0.json",
+        ),
+    ]
+
+
+def _download_kokoro_files() -> tuple[list[str], list[str]]:
+    """Fetch any missing Kokoro file into MODELS_DIR.
+
+    Returns ``(results, failures)``. A failed curl leaves a truncated file
+    behind, so the partial is removed rather than left to be mistaken for a
+    finished download on the next run.
+    """
+    import subprocess
+
+    from services.config import MODELS_DIR
+
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    results: list[str] = []
+    failures: list[str] = []
+    for filename, url in _kokoro_model_files():
+        path = os.path.join(MODELS_DIR, filename)
+        if os.path.exists(path):
+            results.append(f"{filename} already exists.")
+            continue
+        try:
+            subprocess.run(
+                ["curl", "-L", "--fail", "-o", path, url],
+                check=True,
+                capture_output=True,
+                timeout=900,
+            )
+            results.append(f"Successfully downloaded {filename}")
+        except Exception as e:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            detail = f"Failed to download {filename}: {e}"
+            results.append(detail)
+            failures.append(detail)
+    return results, failures
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import subprocess  # always available for startup shell setup (gh auth, git config)
@@ -336,19 +397,18 @@ async def lifespan(app: FastAPI):
     # Auto-download Kokoro models if missing
     from services.config import MODELS_DIR
     os.makedirs(MODELS_DIR, exist_ok=True)
-    kokoro_path = os.path.join(MODELS_DIR, "kokoro-v1.0.onnx")
-    voices_path = os.path.join(MODELS_DIR, "voices-v1.0.bin")
-    if not os.path.exists(kokoro_path) or not os.path.exists(voices_path):
+    if not all(
+        os.path.exists(os.path.join(MODELS_DIR, name))
+        for name, _ in _kokoro_model_files()
+    ):
         log.info("Downloading default Kokoro TTS models...")
-        import subprocess
-        try:
-            if not os.path.exists(kokoro_path):
-                subprocess.run(["curl", "-L", "-o", kokoro_path, "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"], check=True)
-            if not os.path.exists(voices_path):
-                subprocess.run(["curl", "-L", "-o", voices_path, "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"], check=True)
+        results, failures = _download_kokoro_files()
+        for line in results:
+            log.info(f"[tts] {line}")
+        if failures:
+            log.error(f"Failed to auto-download Kokoro models: {'; '.join(failures)}")
+        else:
             log.info("Kokoro models downloaded successfully.")
-        except Exception as e:
-            log.error(f"Failed to auto-download Kokoro models: {e}")
 
     # Start FastAPI media server on port 8888 for external access
     # Uses FileResponse (same as main branch) for proper HTTP Range support
@@ -1551,28 +1611,23 @@ async def list_tts_voices():
 @app.post("/execute/tts/download")
 async def download_tts_voice(voice_type: str = "kokoro-v1.0"):
     """
-    Downloads the Kokoro ONNX model and voices if missing.
+    Downloads the Kokoro ONNX model, voice pack and phoneme vocabulary if missing.
+
+    Writes into MODELS_DIR, which is where the engine reads from, and reports a
+    failure as a failure: this answered SUCCESS after downloading two of the
+    three files, which left an engine that could not load.
     """
-    import subprocess
     log.info(f"[tts] Downloading model files for {voice_type}")
-
-    links = [
-        ("kokoro-v1.0.onnx", "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"),
-        ("voices-v1.0.bin", "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin")
-    ]
-
-    results = []
-    for filename, url in links:
-        path = f"/app/models/{filename}"
-        if os.path.exists(path):
-            results.append(f"{filename} already exists.")
-            continue
-        try:
-            cmd = ["curl", "-L", "-o", path, url]
-            subprocess.run(cmd, check=True)
-            results.append(f"Successfully downloaded {filename}")
-        except Exception as e:
-            results.append(f"Failed to download {filename}: {e}")
+    results, failures = _download_kokoro_files()
+    if failures:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "status": "FAILURE",
+                "results": results,
+                "message": "; ".join(failures),
+            },
+        )
     return {"status": "SUCCESS", "results": results}
 
 @app.post("/execute/announce", response_model=ExecutionResult)

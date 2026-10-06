@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
@@ -13,17 +14,22 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("execution.tts")
 
-# pykokoro (Kokoro ONNX) resolves the ~510-token cap internally by auto-splitting
-# phoneme batches and re-joining segments with clause/sentence-level pauses, so
-# no manual chunking with inter-chunk silence is needed here. Pause pacing is
-# delegated to GenerationConfig(pause_mode="auto", ...); explicit structure
-# beats (after titles/headers, list items, and scripture references) are mapped
-# to an SSMD break of PAUSE_STRUCTURE seconds.
-PAUSE_STRUCTURE = 0.55  # seconds of pause after titles/headers, list items, and references
-PAUSE_CLAUSE = 0.3      # pause after clause-boundary splits (; : ,)
-PAUSE_SENTENCE = 0.5    # pause after sentence boundaries (. ? !)
-PAUSE_PARAGRAPH = 1.0   # pause between paragraphs
+# Kokoro-v1.0 (ONNX) through pykokoro 0.10.x. The engine needs three files: the
+# model, the voice style pack, and the phoneme vocabulary the 0.10 API made a
+# hard requirement. pykokoro auto-splits phoneme batches at the model's
+# ~510-token cap and re-joins them, so long texts need no manual chunking.
+#
+# Pauses are ours to place. The 0.10 API dropped every pause knob the old one
+# had (GenerationConfig carries only lang/speed/seed now) and dropped SSMD
+# (Speech Synthesis Markdown) entirely, so a ``...500ms`` break token would be
+# phonemized as words rather than rendered as silence. Narrator-structure beats
+# are therefore marked with _PAUSE_MARK while the text is prepared, and
+# _synthesize pays them out as real silence. SSMD arriving from a caller is
+# translated the same way rather than read aloud; punctuation inside a segment
+# is the phonemizer's own business.
+PAUSE_STRUCTURE = 0.55  # seconds of silence after titles/headers, list items, and references
 SAMPLE_RATE_HZ = 24000
+KOKORO_CONFIG_FILENAME = "vocab-v1.0.json"  # pykokoro 0.10 refuses to load v1.0 without it
 
 # Internal marker used to flag narrator-structure boundaries (paragraph
 # titles/headers, list items, and scripture references) in the text. It is
@@ -31,61 +37,27 @@ SAMPLE_RATE_HZ = 24000
 # NEVER passed to Kokoro (which would otherwise try to speak it).
 _PAUSE_MARK = "\x02"
 
-# SSMD (Speech Synthesis Markdown) is the pause/emphasis markup language
-# pykokoro renders natively — break tokens like ``...p`` (paragraph pause),
-# ``...500ms`` (custom duration), say-as annotations ``[123]{as="cardinal"}``,
-# and voice-bound ``<div voice="...">`` blocks. Our deterministic scripture/
-# year/number normalization runs as regex passes over the RAW text, so any of
-# those constructs would otherwise be mangled (the digits inside say-as tags,
-# for example). We shield SSMD constructs with placeholder tokens before
-# normalizing and restore them afterwards.
-_SSMD_SHUFFLE_START = "\x07"
-_SSMD_SHUFFLE_END = "\x08"
-_SSMD_ANNOTATION_RE = re.compile(r"\[(?:[^\[\]]*)\]\{[^{}]*\}")
-_SSMD_DIV_RE = re.compile(r"<div\b[^>]*>.*?</div>", re.DOTALL)
-
-
-def _structure_break() -> str:
-    """Return the SSMD break token for the narrator-structure beat."""
-    return f"...{int(PAUSE_STRUCTURE * 1000)}ms"
-
-
+# SSMD constructs the old pykokoro rendered and the new one does not. Keeping
+# the recognition here means a caller's pause is honoured instead of spelled
+# out: a break becomes our own _PAUSE_MARK, and a wrapper keeps its content and
+# loses its markup.
 _SSMD_BREAK_RE = re.compile(r"\.\.\.(?:\d+(?:ms|s)|[nwcsp])")
+_SSMD_ANNOTATION_RE = re.compile(r"\[([^\[\]]*)\]\{[^{}]*\}")
+_SSMD_DIV_RE = re.compile(r"<div\b[^>]*>(.*?)</div>", re.DOTALL)
 
 
-def _has_ssmd_markup(text: str) -> bool:
-    """Return True when the text already contains SSMD markup (breaks, say-as,
-    or voice-bound blocks) that pykokoro will render directly."""
-    return bool(_SSMD_BREAK_RE.search(text) or _SSMD_ANNOTATION_RE.search(text) or _SSMD_DIV_RE.search(text))
+def _translate_ssmd(text: str) -> str:
+    """Rewrite SSMD so pykokoro 0.10 speaks the words and not the markup.
 
-
-def _shield_ssmd(text: str) -> tuple[str, list[tuple[str, str]]]:
-    """Replace SSMD constructs with placeholder tokens so the deterministic
-    normalization passes cannot mangle them.
-
-    Returns ``(shielded_text, replacements)`` where each replacement is a
-    ``(placeholder, original)`` pair that ``_unshield_ssmd`` restores.
+    Break tokens become the same _PAUSE_MARK our structure beats use, so they
+    are paid out as real silence. A say-as annotation keeps the value it wraps
+    (our own number expansion then words it) and a voice-bound block keeps its
+    content; only the markup is dropped, because the new API would otherwise
+    read it aloud.
     """
-    replacements: list[tuple[str, str]] = []
-
-    def _repl(m: re.Match) -> str:
-        placeholder = f"{_SSMD_SHUFFLE_START}ssmd{len(replacements)}{_SSMD_SHUFFLE_END}"
-        replacements.append((placeholder, m.group(0)))
-        return placeholder
-
-    # Voice-bound <div> blocks first (they can span lines), then inline say-as
-    # annotations, then break tokens.
-    text = _SSMD_DIV_RE.sub(_repl, text)
-    text = _SSMD_ANNOTATION_RE.sub(_repl, text)
-    text = _SSMD_BREAK_RE.sub(_repl, text)
-    return text, replacements
-
-
-def _unshield_ssmd(text: str, replacements: list[tuple[str, str]]) -> str:
-    """Restore the original SSMD constructs after normalization ran."""
-    for placeholder, original in replacements:
-        text = text.replace(placeholder, original)
-    return text
+    text = _SSMD_DIV_RE.sub(r"\1", text)
+    text = _SSMD_ANNOTATION_RE.sub(r"\1", text)
+    return _SSMD_BREAK_RE.sub(_PAUSE_MARK, text)
 
 # Bible books (with cardinal prefixes like "1 Corinthians") used to expand
 # scripture references into natural narration. Longest-first ordering so
@@ -163,51 +135,77 @@ class TTSEngine(Protocol):
 
 class KokoroTTSEngine:
     """Local-first TTS using Kokoro-v1.0 (ONNX) via pykokoro. Includes Storybook Mode logic."""
-    def __init__(self, model_path: str = "", voices_path: str = ""):
+    def __init__(self, model_path: str = "", voices_path: str = "", config_path: str = ""):
         if not model_path:
             model_path = os.path.join(MODELS_DIR, "kokoro-v1.0.onnx")
         if not voices_path:
             voices_path = os.path.join(MODELS_DIR, "voices-v1.0.bin")
+        if not config_path:
+            config_path = os.path.join(MODELS_DIR, KOKORO_CONFIG_FILENAME)
         self.model_path = model_path
         self.voices_path = voices_path
-        self._pipeline = None
+        self.config_path = config_path
+        self._synth = None
+        self._voice_manager = None
 
     def _ensure_loaded(self):
-        if self._pipeline is None:
-            from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-            if not os.path.exists(self.model_path):
-                log.error(f"Kokoro model not found at {self.model_path}")
-                raise FileNotFoundError(f"Kokoro model missing: {self.model_path}")
+        if self._synth is None:
+            # Checked before pykokoro is imported: a missing file is the
+            # likelier fault on a server, and reporting "No module named
+            # 'pykokoro'" for a missing vocabulary sends the operator to the
+            # wrong problem.
+            missing = [
+                (label, path)
+                for label, path in (
+                    ("model", self.model_path),
+                    ("voices", self.voices_path),
+                    ("vocabulary", self.config_path),
+                )
+                if not os.path.exists(path)
+            ]
+            for label, path in missing:
+                log.error(f"Kokoro {label} not found at {path}")
+            if missing:
+                # The vocabulary is the one the 0.10 API made mandatory, and the
+                # one nobody expects to be missing, so say where it comes from
+                # rather than only that it is absent.
+                first = missing[0]
+                hint = ""
+                if first[0] == "vocabulary":
+                    hint = (
+                        f" ({KOKORO_CONFIG_FILENAME} ships with the Kokoro v1.0 "
+                        "model files from the kokoro-onnx-models release)"
+                    )
+                raise FileNotFoundError(f"Kokoro {first[0]} missing: {first[1]}{hint}")
+
+            from pykokoro import GenerationConfig, SynthesisConfig
+            from pykokoro.synthesizer import KokoroSynthesizer
+
+            config = SynthesisConfig(
+                generation=GenerationConfig(lang="en", speed=1.0),
+                model_path=self.model_path,
+                voices_path=self.voices_path,
+                model_config_path=self.config_path,
+                cache_dir=os.path.join(os.path.expanduser("~"), ".cache", "pykokoro"),
+            )
+            self._synth = KokoroSynthesizer(config)
+
+    def list_voices(self) -> list[str]:
+        """The voice styles the installed voice pack actually contains.
+
+        Read from the pack rather than hardcoded: the pack ships 54 styles and
+        a list written by hand drifts from the model the moment either changes.
+        """
+        if self._voice_manager is None:
+            from pykokoro.voice_manager import VoiceManager
+
             if not os.path.exists(self.voices_path):
                 log.error(f"Kokoro voices not found at {self.voices_path}")
                 raise FileNotFoundError(f"Kokoro voices missing: {self.voices_path}")
-            config = PipelineConfig(
-                voice=(DEFAULT_TTS_VOICE or "am_michael"),
-                model_path=self.model_path,
-                voices_path=self.voices_path,
-                model_source="github",
-                model_variant="v1.0",
-                model_quality="fp32",
-                provider="cpu",
-                return_trace=False,
-                retain_segment_audio=False,
-                cache_dir=os.path.join(os.path.expanduser("~"), ".cache", "pykokoro"),
-                generation=GenerationConfig(
-                    lang="en",
-                    pause_mode="auto",
-                    pause_clause=PAUSE_CLAUSE,
-                    pause_sentence=PAUSE_SENTENCE,
-                    pause_paragraph=PAUSE_PARAGRAPH,
-                ),
-            )
-            self._pipeline = KokoroPipeline(config)
-
-    def list_voices(self) -> list[str]:
-        """Returns a list of available voice styles in the current model."""
-        return [
-            "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky",
-            "am_adam", "am_michael", "bf_emma", "bf_isabella", "bm_george", "bm_lewis"
-        ]
+            manager = VoiceManager()
+            manager.load_voices(Path(self.voices_path))
+            self._voice_manager = manager
+        return list(self._voice_manager.get_voices())
 
     async def generate(self, text: str, voice: str | None = None, storybook: bool = False) -> bytes:
         self._ensure_loaded()
@@ -218,6 +216,7 @@ class KokoroTTSEngine:
         if storybook:
             return await self._generate_storybook(text, voice)
 
+        text = _translate_ssmd(text)
         text = self._mark_structure_pauses(text)
         text = self._normalize_text(text)
         samples, sample_rate = await self._synthesize(text, voice)
@@ -226,24 +225,35 @@ class KokoroTTSEngine:
         return self._samples_to_bytes(samples, sample_rate)
 
     async def _synthesize(self, text: str, voice: str) -> tuple[np.ndarray, int]:
-        """Synthesize text with the pykokoro pipeline.
+        """Synthesize text, paying out the structure beats as real silence.
 
-        pykokoro auto-splits long inputs at the model's ~510-phoneme cap and
-        re-joins the pieces with clause-level pauses, so long texts no longer
-        need manual chunking with spliced silence. Structured narration beats
-        (titles, list items, scripture references) are inserted as SSMD breaks
-        so they read as deliberate pauses instead of robotic gaps.
+        _PAUSE_MARK is not speech and pykokoro 0.10 has no markup for one, so
+        the text is split on the marker, each piece is synthesized on its own,
+        and PAUSE_STRUCTURE seconds of silence are spliced between the results.
+        A marker with nothing after it is dropped rather than left as a gap at
+        the end.
         """
-        assert self._pipeline is not None
-        # Map the internal structure marker to an explicit SSMD break so the
-        # beat survives the pipeline (it would otherwise be phonemized).
-        text = text.replace(_PAUSE_MARK, _structure_break())
-        result = await asyncio.to_thread(self._pipeline.run, text, voice=voice)
-        samples = np.asarray(result.audio, dtype=np.float32)
-        sample_rate = int(result.sample_rate)
-        if len(samples) == 0:
+        assert self._synth is not None
+        chunks: list[np.ndarray] = []
+        sample_rate = SAMPLE_RATE_HZ
+        for piece in text.split(_PAUSE_MARK):
+            if not piece.strip():
+                continue
+            segment = await asyncio.to_thread(
+                self._synth.synthesize_text, piece, language="en", voice=voice
+            )
+            samples = np.asarray(segment.audio, dtype=np.float32)
+            if len(samples) == 0:
+                continue
+            sample_rate = int(segment.sample_rate)
+            if chunks:
+                chunks.append(
+                    np.zeros(int(PAUSE_STRUCTURE * sample_rate), dtype=np.float32)
+                )
+            chunks.append(samples)
+        if not chunks:
             return np.array([], dtype=np.float32), SAMPLE_RATE_HZ
-        return samples, sample_rate
+        return np.concatenate(chunks), sample_rate
 
 
     async def _generate_storybook(self, text: str, primary_voice: str) -> bytes:
@@ -265,10 +275,10 @@ class KokoroTTSEngine:
             if not normalized.strip():
                 continue
 
-            assert self._pipeline is not None
-            result = await asyncio.to_thread(self._pipeline.run, normalized, voice=voice)
-            all_samples.append(np.asarray(result.audio, dtype=np.float32))
-            last_sample_rate = int(result.sample_rate)
+            samples, last_sample_rate = await self._synthesize(normalized, voice)
+            if len(samples) == 0:
+                continue
+            all_samples.append(samples)
 
         if not all_samples:
             return b""
@@ -300,15 +310,11 @@ class KokoroTTSEngine:
     def _normalize_text(self, text: str) -> str:
         """Robust normalization for high-quality TTS. Ported/expanded from Docket-TTS.
 
-        SSMD constructs (breaks, say-as annotations, voice-bound blocks) are
-        shielded with placeholder tokens first so the regex passes below cannot
-        mangle their digits or bindings, then restored verbatim before return.
         Plain narrative text moves through unchanged, and scripture references /
-        years / small numbers are still expanded for natural speech.
+        years / small numbers are expanded for natural speech. SSMD is handled
+        before this runs (_translate_ssmd), so no markup survives to be mangled
+        by the regex passes below.
         """
-        # Shield SSMD constructs so any pre-existing markup survives untouched.
-        shielded, replacements = _shield_ssmd(text)
-
         # Common Abbreviations + Roman Numerals (Simple cases for chapters)
         abbr_map = {
             r"\bDr\.\b": "Doctor",
@@ -345,14 +351,14 @@ class KokoroTTSEngine:
             # Remove trailing \b because the period already acts as a boundary
             # and \b after a period won't match if followed by a space.
             pattern = pattern.rstrip(r"\b")
-            shielded = re.sub(pattern, replacement, shielded, flags=re.IGNORECASE)
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
         # Scripture references, years, then remaining small numbers.
-        shielded = self._expand_scripture_refs(shielded)
-        shielded = self._expand_years(shielded)
-        shielded = self._expand_small_numbers(shielded)
+        text = self._expand_scripture_refs(text)
+        text = self._expand_years(text)
+        text = self._expand_small_numbers(text)
 
-        return _unshield_ssmd(shielded, replacements)
+        return text
 
     def _mark_structure_pauses(self, text: str) -> str:
         """Insert narrator-structure pause markers around structural units.
@@ -506,14 +512,39 @@ class KokoroTTSEngine:
         return buffer.getvalue()
 
 # Factory to get the current engine
-def get_tts_engine() -> TTSEngine:
-    # Always return Kokoro as Edge is deprecated/unreliable
-    return KokoroTTSEngine()
+_ENGINE: KokoroTTSEngine | None = None
 
+_SYNTH_LOCK = asyncio.Lock()
+
+
+def get_tts_engine() -> TTSEngine:
+    """The engine for this process, built once.
+
+    Constructing a KokoroTTSEngine is free -- it loads nothing -- but its
+    first synthesis builds a fresh ONNX session for a 325 MB model. Measured
+    on the deployment host: a new engine spends 3-4s before it makes a sound
+    with the model warm in the page cache and about 9s with it cold, while
+    one that has already spoken synthesizes further passages in under 2s and
+    repeats a passage it has spoken instantly. The reader narrates a passage
+    at a time, so without this that load would be paid again for every
+    passage, and the synthesizer's own in-memory cache would start empty
+    every time.
+    """
+    global _ENGINE
+    if _ENGINE is None:
+        _ENGINE = KokoroTTSEngine()
+    return _ENGINE
 
 
 async def text_to_speech(text: str, voice: str | None = None, storybook: bool = False) -> bytes:
-    """Helper to generate audio bytes from text."""
+    """Helper to generate audio bytes from text.
+
+    Synthesis is CPU-bound, so two calls in flight cannot finish sooner than
+    two calls one after another -- and the ONNX session behind the engine is
+    not documented as safe to drive from several threads at once. The lock
+    makes the queue explicit rather than leaving it to chance.
+    """
     engine = get_tts_engine()
-    return await engine.generate(text, voice, storybook=storybook)
+    async with _SYNTH_LOCK:
+        return await engine.generate(text, voice, storybook=storybook)
 
