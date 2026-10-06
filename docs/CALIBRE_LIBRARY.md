@@ -72,11 +72,71 @@ gives one 50,000-character "chapter"; heading-aware sectioning gives thirty-two 
 Every value written to chunk metadata is a scalar, because `/rag/sync/files` coerces non-scalars with
 `str()` — a list arrives back as a quoted string.
 
+## The Bible shelf as a second consumer
+
+The same shelf is also a **source of Bible translations and study Bibles**. The
+RAG index above reads `metadata.db` and derives searchable sections; the Bible
+importer needs the opposite — the raw bytes of one file, to extract verses and
+commentary from it. Both consumers share one setting and one WebDAV path, and
+neither of them writes to the library.
+
+```
+cloud.sumemail.com/Books/Text
+        |  WebDAV GET / PROPFIND
+        v
+services/storage   POST /providers/list      (browse one folder)
+                    POST /providers/fetch     (one file, as bytes)
+        |  internal secret, no credentials cross the wire
+        v
+services/bible     services/bible/library.py  (list, validate, fetch)
+                    importer.run(...)          (download -> import folder -> importer)
+        |
+        v
+BibleVersion + BibleVerse + StudyNote rows in bible.db
+```
+
+### What was added to storage, and why it lives there
+
+| Piece | Location | Why here |
+|---|---|---|
+| `StorageProvider.get_bytes(path)` | `services/storage/providers.py` | `get_content` decodes bytes as text, so a PDF or EPUB comes back as a string of replacement characters rather than an error — anything reading it then works from confident mojibake. `get_bytes` returns the real bytes, and returns `None` for "this provider cannot give you bytes", which is a different answer from "the file was empty" |
+| `NextcloudStorageProvider.get_bytes` | `services/storage/providers_impl/nextcloud.py` | `NextCloudClient.get_file_bytes`, whose own docstring warns about `get_file_content` |
+| `CalibreStorageProvider.get_bytes` | returns `None` | The Calibre provider is an **index**, not a file server. Declining is correct, and `test_a_provider_that_cannot_give_bytes_declines_instead_of_guessing` pins it |
+| `ProviderFetchRequest` | `services/storage/models.py` | `provider`, `path`, `max_bytes` |
+| `POST /providers/fetch` | `services/storage/main.py` | Returns `{"status":"SUCCESS","path","name","size","content_b64"}`, guarded by `X-Internal-Secret` |
+
+The Bible service browses through the **nextcloud** provider rather than the
+calibre provider, because it needs bytes and only Nextcloud serves files. This
+keeps the credentials in one place: rotating the Nextcloud password is one edit
+in one service rather than one per caller.
+
+`POST /providers/fetch` failures are all distinguishable, because they need
+different fixes:
+
+| Status | Meaning |
+|---|---|
+| **413** | The file is larger than `max_bytes`. Both numbers are named. A silently shortened EPUB would look to an importer like a complete one that ends early, so this is refused rather than truncated |
+| **502** | `get_bytes` returned `None`. Names the path and lists all three causes: missing file, wrong credentials, provider cannot return binary |
+| **422** | `max_bytes <= 0` — a ceiling of zero is a mistake, not a request for nothing |
+
+### Configuration
+
+`calibre_library_path` is **the same setting** as the RAG index uses. A server
+already indexing books for search gets Bible imports for free from the same
+folder, and blank is a refusal for both consumers rather than a guess that
+reports the wrong shelf as an empty library.
+
+The bible service reads it **from Identity at call time**, so pointing it at a
+new shelf in Admin › Settings takes effect without a restart; the storage
+service's index reads it through `resolve_runtime_config()`, which does need one.
+
 ## What is deliberately not supported
 
 - **Writes.** `write_content` returns a refusal. `metadata.db` belongs to Calibre.
 - **PDF and DOCX text.** Only `EPUB`, `AZW3`, `MOBI` and `FB2` are extracted. A PDF-only book still
   appears as a searchable metadata row rather than a failure, and nothing pretends its bytes are text.
+  (The Bible importer is the exception, because it has its own PDF reader — see
+  `services/bible/pdf_import.py` — and it refuses a PDF whose chapter counts do not match the canon.)
 - **Calibre-Web's `/cdb/cmd`.** That endpoint executes arbitrary `calibredb` commands, which is a
   shell on the library. Use `calibredb` deliberately, not by proxy.
 - **Annotations and reading progress.** The schema carries both tables; neither is read yet.

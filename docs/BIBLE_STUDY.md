@@ -321,15 +321,16 @@ study notes.
 
 ### Installing more: Admin › Bible
 
-Three ways in, because the family's sources differ, all through
+Four ways in, because the family's sources differ, all through
 `services/bible/importer.py` — one code path, with the three CLIs reduced to
 thin callers:
 
 | Way | Route | What it needs |
 |---|---|---|
 | Online provider | `GET /admin/providers/{code}/estimate` for the cost, `GET /admin/providers/{code}/translations` to list, `POST /admin/imports` with `provider`/`provider_id` to install | `bible_api_key` (or whatever the provider declares). The catalogue is a *separate* call so listing it never needs the network and an unreachable provider produces one message in one place. Install is disabled until the estimate is in and the run fits the budget |
+| **The Calibre shelf in Nextcloud** | `POST /admin/library` with `path` to browse, `POST /admin/imports` with `library_path` to install | `CALIBRE_LIBRARY_PATH` and `BIBLE_IMPORT_DIR`. Browse first, then install a file you can see — see below |
 | Upload from the browser | `POST /admin/imports/upload` (multipart) | `BIBLE_IMPORT_DIR`. The extension is checked **before** anything is written; a 256 MB limit streams in 1 MB chunks and removes the partial file if it trips |
-| A path on the server | `POST /admin/imports` with `source_path` | The path. Useful for the Nextcloud downloads the family keeps |
+| A path on the server | `POST /admin/imports` with `source_path` | The path, for a file already downloaded somewhere the service can reach |
 
 Every run is recorded in `ImportRun` **including the failures** — the refusals
 are the interesting half ("Exodus is missing from that PDF", "That code is not
@@ -337,6 +338,53 @@ in the manifest") and the report is returned with a 422 so a browser fetch
 cannot treat a refusal as a success. No scripture text is stored in the history.
 Import routes are **admin-only** at the gateway (`_require_admin`), because
 installing a translation writes files on the family's own server.
+
+### The Calibre shelf as a translation source
+
+The family already keeps books in a Calibre library inside Nextcloud, and that
+library is already indexed read-only into RAG (see `docs/CALIBRE_LIBRARY.md`).
+The shelf is therefore a **first-class import source**, not a workaround: the
+admin panel opens it, walks folders, shows which files can be read, and installs
+one — with no credentials in the browser and no command to type.
+
+```tsx
+Admin › Bible → Browse /Books/Text
+  ↑ Up one level
+  📁 Thomas Nelson (3198)
+  📕 The NKJV Study Bible - Thomas Nelson.epub      Ready to import as epub      [Install]
+  📄 The NKJV Study Bible - Thomas Nelson.docx      Not a Bible format (docx)
+```
+
+The design is deliberately boring: **download the file, then import it exactly
+as if it had been uploaded.**
+
+| Step | Where |
+|---|---|
+| Browse one folder over WebDAV | `services/bible/library.py` `LibraryClient.browse` → `POST {storage}/providers/list` |
+| Fetch one file as raw bytes | `LibraryClient.fetch` → `POST {storage}/providers/fetch`, staged `<import_dir>/nextcloud-<folder-hash>-<filename>` |
+| Import it | `importer._materialise_from_library` → `plan._replace_source(fetched)` → the ordinary `pdf`/`epub` path |
+
+There is exactly **one importer to trust, not one per source**: a shelf EPUB is
+parsed by the same code that parses a browser upload of the same book, so a
+study Bible keeps its commentary whichever way it arrived.
+
+Three decisions worth recording:
+
+- **Bytes travel through `services/storage`, never through the bible service
+  directly.** Storage already owns the Nextcloud credentials, so rotating the
+  password is one edit in one service instead of one per caller.
+- **An unreadable file is shown, not hidden.** A shelf holding one unusable
+  DOCX should not look like a shelf with a hole in it, and the reason belongs
+  next to the file rather than in a log line an operator never sees.
+- **The fetched name carries a folder hash.** Two shelves can both hold a file
+  called `Bible.epub`; without the hash one silently overwrites the other. The
+  real filename stays at the end so it is still recognisable in the import
+  folder.
+
+`CALIBRE_LIBRARY_PATH` unset is a **visible** state, not a silent skip: the
+Browse button is disabled and Admin › Bible shows `calibre_library_path` with
+the setting name and a suggested value. Guessing a shelf would report the wrong
+folder as an empty library, which is worse than saying nothing.
 
 ## Decisions
 
@@ -449,6 +497,13 @@ optional plumbing — each row is a small, testable diff.
 | `services/execution/handlers/note.py` | no change — but a new `category` value (`Bible`) is used by the reader so Bible notes land in `Bible/{Title}.md` and stay separable from other notes | existing notes tests |
 | `services/geo/achievements.py` | no change — `reason` already accepts `achievement`/`game` | existing star tests |
 | `services/ui/src/lib/chatEnvelope.ts` | new `card_kind` values (`bible_achievement`, `bible_plan_day`, `bible_verse`, `bible_quiz`) in the envelope type union; renderer already generic | envelope round-trip test |
+| `services/storage/providers.py` | `StorageProvider.get_bytes(path)` on the ABC — `get_content` decodes bytes as text, so a PDF/EPUB comes back as replacement characters rather than an error. `None` means "this provider cannot give you bytes", which is a different answer from "the file was empty" | `test_a_provider_that_cannot_give_bytes_declines_instead_of_guessing` |
+| `services/storage/providers_impl/nextcloud.py` | `get_bytes` → `NextCloudClient.get_file_bytes` (the binary-safe path; `get_file_content` mangles binaries) | `test_storage_provider_fetch.py` |
+| `services/storage/providers_impl/calibre.py` | `get_bytes` returns `None` — the Calibre provider is an **index, not a file server**, so declining is the honest answer | `test_a_provider_that_cannot_give_bytes_declines_instead_of_guessing` |
+| `services/storage/models.py` + `main.py` | `ProviderFetchRequest(provider, path, max_bytes)` and `POST /providers/fetch` returning `{status, path, name, size, content_b64}` behind `X-Internal-Secret`. 413 over the ceiling (both numbers named), 502 when `get_bytes` returns `None`, 422 when `max_bytes <= 0` | `test_storage_provider_fetch.py` (8 tests) |
+
+Cross-reference: the shelf itself, and why it is indexed read-only, is
+documented in [`docs/CALIBRE_LIBRARY.md`](CALIBRE_LIBRARY.md).
 
 ### Data model (`models.py`)
 
@@ -568,8 +623,10 @@ opt-in scopes.
 | `GET /narration?ref=&version=&voice=` | The passage as speech, cached per translation+reference+voice. Refuses rather than truncating: over 120 verses or 12,000 characters is a 400 naming the number |
 | `GET /admin/imports` | **Admin.** Installed catalogue with `primary`/`provider`, declared providers with their configuration reason, supported kinds, the import directory, and the import history |
 | `GET /admin/providers/{code}/translations` | **Admin.** What one provider can supply. Separate from the catalogue so listing it never needs the network |
+| `GET /admin/library?path=` | **Admin.** One folder of the Calibre shelf: folders first, then files, each marked installable or carrying the reason it is not. An unreadable file is **shown with its reason**, not hidden — a shelf holding one unusable DOCX should not look like a shelf with a hole in it. Gateway: `POST /api/bible/admin/library` (POST, not GET: a WebDAV folder name carries slashes and can carry semicolons, so it is the wrong thing for a query string) |
 | `GET /admin/providers/{code}/estimate?translation_id=` | **Admin.** What installing it would cost: chapters cached vs. remaining requests, the budget, and whether this run would be refused. Asked **before** the Install button is offered, not after |
-| `POST /admin/imports` | **Admin.** Install from `source_path` or from `provider`/`provider_id`. 200 on success, **422 carrying the refusal** |
+| `POST /admin/imports` | **Admin.** Install from `source_path`, from `provider`/`provider_id`, or from `library_path`. 200 on success, **422 carrying the refusal** |
+| `POST /admin/imports` with `library_path` | **Admin.** Fetch one file off the shelf and import it through exactly the same code an upload would use. The fetch log line comes first so the operator can see the bytes arrived before the refusal |
 | `POST /admin/imports/upload` | **Admin.** Install a picked file. Extension checked before any write; 256 MB cap with the partial file removed |
 | `POST /admin/imports` with `dry_run: true` | **Admin.** Fetch one book (Genesis 1), parse it, show the text and install nothing — one request instead of 1,189. The sampled chapter stays in the cache |
 
@@ -1023,6 +1080,8 @@ line, a host file with no trailing newline and a byte-identical no-op.
 | `BIBLE_IMPORT_DIR` (`bible_import_dir`) | `.env` / `GlobalSetting` | Admin › Bible says nothing can be installed yet and why; reading is unaffected. A file import refuses with that sentence rather than picking a path |
 | `BIBLE_PROVIDER_CACHE` (`bible_provider_cache`) | `.env` / `GlobalSetting` | Where fetched provider chapters are kept write-once. Blank derives `<directory of BIBLE_DATABASE_URL>/provider-cache`. Left unset, every chapter is fetched again on the next import — Admin › Bible says so on the cost line rather than importing quietly uncached |
 | `BIBLE_PROVIDER_CALL_BUDGET` (`bible_provider_call_budget`) | `.env` / `GlobalSetting` | The most **new** requests one provider import may need. Blank means no ceiling. A run over it is refused before the first request, naming both numbers; only uncached chapters count, so a warm cache costs nothing |
+| `CALIBRE_LIBRARY_PATH` (`calibre_library_path`) | `.env` / `GlobalSetting` — **the same setting the storage service's Calibre RAG index uses**, so a server already indexing books gets Bible imports free | Unset, Admin › Bible's Browse button is disabled and says so by name. **Not** a guess: a guessed shelf reports the wrong folder as an empty library, which is worse than saying nothing. The bible service reads it from Identity **per call**, so pointing it at a shelf takes effect without a restart (the storage index reads it through `resolve_runtime_config()`, which needs one) |
+| `STORAGE_SVC_URL` | `.env` (compose sets it from `BRIDGE_STORAGE_SVC_URL`) | The shelf browse and fetch routes return "storage_svc_url is not configured", naming the setting — the bible service never holds Nextcloud credentials itself |
 | `blb_base_url` | Identity `GlobalSetting` (default `https://www.blueletterbible.org` is a **documented default in settings seed**, not a code fallback) | BLB tool buttons return the server's "blb_base_url is not configured" message in the action sheet |
 | TTS voices (`/execute/tts/voices`) | existing execution service (`DEFAULT_TTS_VOICE`, Kokoro/Edge) | Reader states the real engine error (e.g. `Kokoro voices missing`) and how to install; never plays nothing |
 | LLM provider (`assistant_model` etc.) | existing config | Ask Jarvis shows the standard unconfigured message |
