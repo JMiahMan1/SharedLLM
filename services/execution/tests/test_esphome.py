@@ -314,7 +314,7 @@ def _device_api(services, confirm_ok=True, requires_encryption=False):
     """APIClient stand-in recording connects (with their psk) and actions."""
     calls = {"connects": [], "actions": [], "keys": []}
     info = MagicMock(friendly_name="Jarvis Watch", mac_address="74:4D:BD:2C:97:28",
-                     model="esp32-s3-devkitc-1", esphome_version="2026.9.0")
+                     model="esp32-s3-devkitc-1", esphome_version="2026.9.0", project_version="1.2.0")
     info.name = "jarvis-watch"
 
     def make(host, port, password, noise_psk=None):
@@ -410,6 +410,7 @@ async def test_pair_finish_with_the_right_code_links_the_device(pairing_env):
                                        "jarvis_url": "http://10.0.0.9:11435"})]
     assert claims[0]["verified"] is True and claims[0]["kind"] == "watch"
     assert claims[0]["device_key"] == "esphome:744dbd2c9728"
+    assert claims[0]["app_version"] == "1.2.0"  # the watch's own firmware version
     assert removed == []
 
 

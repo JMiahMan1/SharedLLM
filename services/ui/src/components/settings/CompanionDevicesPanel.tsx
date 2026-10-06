@@ -271,6 +271,7 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
           const Icon = KIND_ICON[d.kind] ?? Cpu;
           const name = d.label || [d.manufacturer, d.model].filter(Boolean).join(' ') || d.device_key;
           const sub = [
+            d.app_version ? `v${d.app_version}` : '',
             HOW[d.registered_by] ?? d.registered_by,
             lastSeen(d.last_seen_at),
           ].filter(Boolean).join(' · ');

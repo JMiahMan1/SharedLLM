@@ -377,6 +377,9 @@ class TestCompanionClaim:
         mine = client.get("/api/user-panel/devices").json()
         assert [d["device_key"] for d in mine] == ["esphome:744dbd2c9728"]
 
+    def test_the_firmware_version_is_recorded(self, client: TestClient):
+        assert client.post(CLAIM, json=_claim(app_version="1.2.0")).json()["app_version"] == "1.2.0"
+
     def test_a_screenless_device_is_adopted_not_paired(self, client: TestClient):
         body = client.post(CLAIM, json=_claim(device_key="esphome:aa", kind="assistant", verified=False)).json()
         assert body["registered_by"] == "adopted"

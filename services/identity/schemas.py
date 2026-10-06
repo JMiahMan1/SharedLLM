@@ -447,6 +447,8 @@ class DeviceClaim(BaseModel):
     #: True when the user proved possession with the code the device showed.
     verified: bool = False
     esphome_version: str | None = None
+    #: The device's own firmware version (ESPHome project version), e.g. 1.2.0.
+    app_version: str | None = None
     hardware: str | None = None
     capabilities: dict = Field(default_factory=dict)
     ip_address: str | None = None
