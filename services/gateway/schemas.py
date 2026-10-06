@@ -181,19 +181,25 @@ class ContextSearchRequest(BaseModel):
     """Search RAG collections for context when initial retrieval is insufficient.
 
     Only use this when the context already in the system prompt does not answer
-    the question. Pass ``collection_name`` explicitly: the default is
-    ``system_capabilities``, so an omitted collection silently searches the tool
-    inventory rather than whatever the question was about.
+    the question.
+
+    ``collection_name`` is required rather than defaulted. It used to default to
+    ``system_capabilities``, which meant a search that forgot to name its
+    collection quietly searched the CLI toolchain inventory and reported "no
+    relevant context found" -- while the passages that did answer the question
+    sat unread in the same system prompt. A wrong answer that looks like a
+    negative result is worse than a refused call, so an omitted collection is
+    now a validation error naming the field.
     """
     query: str = Field(..., description="Natural language search query")
     collection_name: str = Field(
-        "system_capabilities",
+        ...,
         description=(
-            "Target collection. One of: calibre_files (text from the user's book "
-            "library), nextcloud_files, ha_entities, system_learnings, "
-            "system_capabilities, user_facts, conversation_memory. Must match the "
-            "kind of thing asked about -- calibre_files for books, authors, "
-            "sermons or commentaries."
+            "Target collection, required. One of: calibre_files (text from the "
+            "user's book library), nextcloud_files, ha_entities, "
+            "system_learnings, system_capabilities, user_facts, "
+            "conversation_memory. Must match the kind of thing asked about -- "
+            "calibre_files for books, authors, sermons or commentaries."
         ),
     )
     k: int = Field(5, description="Number of results to return")
