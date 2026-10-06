@@ -10852,6 +10852,13 @@ async def proxy_audiobookshelf(request: Request):
     return await _forward_execution_request(request, "/execute/audiobookshelf", "audiobookshelf")
 
 
+@app.post("/execute/workspace_lint")
+async def proxy_workspace_lint(request: Request):
+    """Lint a workspace file (the workspace editor's Lint). The UI called this
+    and it had no gateway route, so it answered 404."""
+    return await _forward_execution_request(request, "/execute/workspace_lint", "workspace lint", timeout=60.0)
+
+
 @app.post("/execute/groups/patterns")
 async def proxy_light_pattern(request: Request):
     """Apply a light pattern to a cluster (Admin -> Groups -> Execute Pattern).
