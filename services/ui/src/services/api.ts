@@ -30,6 +30,8 @@ import type {
   StorageEntry,
   RagStats,
   RavenMission,
+  WorkspaceAskMode,
+  WorkspaceAskResult,
   RavenConfig,
   MediaGroup,
   LightCluster,
@@ -145,7 +147,7 @@ import type {
   BibleImportProviderInfo,
   BibleRemoteTranslation,
   BibleProviderEstimate,
-} from '../types/api';
+  BibleLibraryListing,} from '../types/api';
 
 // Re-export domain types so consumers can import them from the api module.
 export type {
@@ -1680,6 +1682,22 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * Run the workspace composer against one of the three execution modes.
+   *
+   * `librarian` and `single_task` answer inline; `raven` dispatches a mission
+   * and returns its id instead. `auto` resolves server-side and reports which
+   * mode it chose in `resolved_mode`/`reason`.
+   */
+  async askWorkspace(
+    workspaceId: string,
+    query: string,
+    mode: WorkspaceAskMode = 'auto',
+  ): Promise<WorkspaceAskResult> {
+    const resp = await apiClient.post(`/api/workspaces/${workspaceId}/ask`, { query, mode });
+    return resp.data;
+  },
+
   async killRavenMission(id: number): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post(`/api/raven/missions/${id}/kill`);
     return resp.data;
@@ -2701,7 +2719,7 @@ export const api = {
     return resp.data;
   },
 
-  async getBibleVersions(): Promise<{ versions: BibleVersionInfo[] }> {
+  async getBibleVersions(): Promise<{ versions: BibleVersionInfo[]; message?: string }> {
     const resp = await apiClient.get('/api/bible/versions');
     return resp.data;
   },
@@ -2866,6 +2884,8 @@ export const api = {
     import_notes?: boolean;
     provider?: string;
     provider_id?: string;
+    /** A file in the Nextcloud book library; fetched and then imported. */
+    library_path?: string;
     /** Fetch one book to prove the parsing, then install nothing. */
     dry_run?: boolean;
     /** Refuse this run if it would need more than this many new requests. */
@@ -2890,6 +2910,17 @@ export const api = {
     const resp = await apiClient.get(`/api/bible/admin/providers/${code}/estimate`, {
       params: { translation_id: translationId },
     });
+    return resp.data;
+  },
+
+  /**
+   * List one folder of the Nextcloud book library.
+   *
+   * A POST because the folder is operator input: WebDAV names carry slashes and
+   * can carry semicolons, so a query string is the wrong place for one.
+   */
+  async getBibleLibrary(path?: string): Promise<BibleLibraryListing> {
+    const resp = await apiClient.post('/api/bible/admin/library', { path: path ?? '' });
     return resp.data;
   },
 };

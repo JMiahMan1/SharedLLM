@@ -5482,6 +5482,127 @@ async def get_workspace_raven_missions_proxy(workspace_id: str, request: Request
     )
     return await _proxy_json_response(resp)
 
+_WORKSPACE_ASK_QUESTION_OPENERS = (
+    "who ", "what ", "when ", "where ", "why ", "how ", "which ",
+    "is ", "are ", "was ", "were ", "does ", "do ", "did ", "can ", "should ",
+    "explain", "summarize", "summarise", "compare", "contrast", "find",
+    "search", "look up", "tell me about", "what's", "whats",
+)
+
+def _resolve_workspace_ask_mode(query: str, requested: str) -> tuple[str, str]:
+    """Pick how the workspace composer should answer ``query``.
+
+    Returns ``(mode, reason)``. ``reason`` is handed back to the client so the
+    UI can show *why* it chose, which is the whole point: a silent guess that is
+    wrong is far more expensive to debug than a labelled chip.
+
+    ``auto`` is a convenience, not the contract. The caller may always name a
+    mode outright, and the workspace composer does exactly that. The reasoning
+    for keeping auto at all is that most questions want one of these three and
+    making the user choose every time is friction; the reasoning for not letting
+    it decide alone is the recorded incident at ``orchestrator.py``: a
+    workspace-creating prompt that lacked the literal word "raven" was routed
+    to the single-turn path, which cannot create workspaces, and answered 404.
+
+    Only ``is_raven_intent`` decides Raven, because it already requires both a
+    Raven keyword and a command verb. Everything else is shaped by whether the
+    user asked a question, since that is the case that benefits from retrieval.
+    """
+    if requested != "auto":
+        return requested, "chosen explicitly"
+    if is_raven_intent(query):
+        return "raven", "the prompt names Raven and asks for a command"
+    stripped = (query or "").strip().lower()
+    if stripped.endswith("?") or stripped.startswith(_WORKSPACE_ASK_QUESTION_OPENERS):
+        return "librarian", "shaped like a question, so it is grounded in retrieved sources"
+    return "single_task", "shaped like a command, so it runs as one job without retrieval"
+
+@app.post("/api/workspaces/{workspace_id}/ask")
+async def ask_in_workspace(workspace_id: str, request: Request):
+    """Run the workspace composer against an explicitly chosen execution mode.
+
+    Three modes, because the three jobs are genuinely different shapes:
+
+    ``librarian``  answers from retrieved sources (books, Nextcloud, lessons,
+                   Home Assistant). Synchronous, one answer, citable.
+    ``single_task`` does one job and returns one answer, with no retrieval --
+                   the cheap path when nothing outside the model is needed.
+    ``raven``      dispatches an autonomous mission that runs for minutes in
+                   the background and reports through the mission queue.
+
+    Raven missions are given the retrieval context available at dispatch time,
+    so a mission briefed from a book starts already holding the passages it was
+    launched from. The Librarian cannot call Raven instead: its turn is three
+    steps of temperature-0 inference, while a mission is queued and outlives the
+    turn, so such a tool could only ever return a mission id with no result
+    attached. Mixing is done by escalating a finished answer instead.
+    """
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    body = await request.json()
+    query = (body.get("query") or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="A query is required.")
+
+    requested_mode = (body.get("mode") or "auto").strip().lower()
+    allowed = ("auto", "librarian", "single_task", "raven")
+    if requested_mode not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown mode {requested_mode!r}. Use one of: {', '.join(allowed)}.",
+        )
+
+    mode, reason = _resolve_workspace_ask_mode(query, requested_mode)
+
+    from services.gateway.orchestrator import _fetch_rag_context, _single_turn_inference
+
+    if mode == "raven":
+        system = body.get("system") or await _build_raven_system_prompt(query)
+        context = await _fetch_rag_context(query, creds["user"], ResolvedCredentials(**creds), workspace_id=workspace_id)
+        mission = await _enqueue_user_mission(
+            query=query,
+            system=system,
+            creds=creds,
+            workspace_id=workspace_id,
+            rag_context=context,
+        )
+        return {
+            "status": "SUCCESS",
+            "requested_mode": requested_mode,
+            "resolved_mode": mode,
+            "reason": reason,
+            "context_chars": len(context or ""),
+            "mission_id": mission.get("id"),
+            "mission": mission,
+        }
+
+    if mode == "librarian":
+        model = await get_librarian_model()
+        context = await _fetch_rag_context(query, creds["user"], ResolvedCredentials(**creds), workspace_id=workspace_id)
+    else:
+        model = await get_assistant_model()
+        context = ""
+
+    answer = await _single_turn_inference(
+        query=query,
+        model=model,
+        system_prompt=body.get("system") or select_system_instruction_for_query(query, model),
+        rag_context=context,
+        history=[],
+        creds=ResolvedCredentials(**creds),
+    )
+    return {
+        "status": "SUCCESS",
+        "requested_mode": requested_mode,
+        "resolved_mode": mode,
+        "reason": reason,
+        "model": model,
+        "context_chars": len(context or ""),
+        "answer": answer,
+    }
+
 @app.post("/api/storage/mirror")
 async def mirror_storage(request: Request):
     creds = await _resolve_identity_from_request(request)
@@ -6591,6 +6712,7 @@ async def _enqueue_user_mission(
     priority: int = 1,
     depends_on_mission_id: int | None = None,
     next_mission_query: str | None = None,
+    rag_context: str | None = None,
     job_queue_override: "InferenceJobQueue | None" = None,
 ) -> dict:
     """Create a Raven user mission in Identity and enqueue it for the Raven worker.
@@ -6602,6 +6724,11 @@ async def _enqueue_user_mission(
     ``job_queue_override`` lets the background worker (which runs on its own
     event loop) inject its own loop-bound InferenceJobQueue instead of the
     module-global one owned by the API loop.
+
+    ``rag_context`` is retrieval performed by the caller at dispatch time. It
+    is passed through untouched rather than re-derived in the worker, so the
+    person who launched the mission decides what it starts with. Omitted, the
+    mission retrieves its own context when it runs.
 
     The mission runs with NO pre-assigned workspace: Raven creates its own
     dedicated workspace at the start of the mission (via the WorkspaceCreateRequest
@@ -6649,7 +6776,7 @@ async def _enqueue_user_mission(
 
         queue = job_queue_override or job_queue
         assert queue is not None, "Job queue not initialized"
-        await queue.enqueue_job(creds.get("user") or owner_user or "raven_user", {
+        job: dict = {
             "query": query,
             "model": target_model,
             "system": system,
@@ -6658,7 +6785,10 @@ async def _enqueue_user_mission(
             "_mission_id": mission_id,
             "workspace_id": workspace_id,
             "next_mission_query": next_mission_query,
-        })
+        }
+        if rag_context:
+            job["rag_context"] = rag_context
+        await queue.enqueue_job(creds.get("user") or owner_user or "raven_user", job)
 
         await client.patch(
             f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
@@ -9159,6 +9289,7 @@ _BIBLE_IMPORT_FIELDS = (
     "import_notes",
     "provider",
     "provider_id",
+    "library_path",
     "dry_run",
     "budget",
 )
@@ -9240,9 +9371,36 @@ async def proxy_bible_admin_provider_estimate(
     )
 
 
+@app.post("/api/bible/admin/library")
+async def proxy_bible_admin_library(request: Request):
+    """List one folder of the Nextcloud book library.
+
+    A POST rather than a GET because ``path`` is a value: a folder name with a
+    slash and a semicolon in it is not something to put in a query string, and
+    the admin page asks for a path the operator picked rather than typed. Admin
+    only, and the bible service is the one that decides whether a path is inside
+    the shelf.
+    """
+    await _require_admin(request)
+    body = await request.json()
+    payload = body if isinstance(body, dict) else {}
+    return await _bible_json(
+        "POST",
+        "/admin/library",
+        label="Could not read the Nextcloud book library",
+        json={"path": str(payload.get("path") or "")},
+        timeout=_BIBLE_IMPORT_TIMEOUT,
+    )
+
+
 @app.post("/api/bible/admin/imports")
 async def proxy_bible_admin_import(request: Request):
-    """Install a translation or study Bible from a file already on the server."""
+    """Install a translation or study Bible from a file already on the server.
+
+    ``library_path`` arrives here unchanged and is fetched by the bible service
+    from the shelf, so the gateway never holds the Nextcloud credentials and the
+    admin page never has to know where the bytes come from.
+    """
     await _require_admin(request)
     body = await request.json()
     payload = _bible_import_payload(body if isinstance(body, dict) else {})

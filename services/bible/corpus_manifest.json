@@ -27,6 +27,7 @@
       "language": "en",
       "license_class": "public_domain",
       "rights_holder": "",
+      "fallback": true,
       "source_url": "https://raw.githubusercontent.com/thiagobodruk/bible/master/json/en_kjv.json",
       "sha256": "fc99486e7d3b86e4ad1f0f424b36ab41b4ec4db858a776bd13aee1b7910f136b"
     },

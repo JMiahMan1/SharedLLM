@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -77,11 +77,29 @@ class ImportPlan:
     provider_id: str = ""
     dry_run: bool = False
     budget: int | None = None
+    library_path: str = ""
 
     def source_label(self) -> str:
+        if self.library_path:
+            return f"nextcloud:{self.library_path}"
         if self.provider:
             return f"{self.provider}:{self.provider_id}" if self.provider_id else self.provider
         return self.source_path
+
+    def _replace_source(self, path: Path) -> "ImportPlan":
+        """The same request, pointed at a local file that is already here.
+
+        ``library_path`` is cleared because the file has been fetched: leaving it
+        set would send the next pass back to the shelf for a download it already
+        has.
+        """
+        return replace(
+            self,
+            source_path=str(path),
+            library_path="",
+            provider="",
+            provider_id="",
+        )
 
 
 @dataclass
@@ -158,7 +176,13 @@ def _manifest_entry(code: str) -> dict:
 
 
 def _resolved(plan: ImportPlan) -> dict:
-    """Plan + manifest -> the names and licence facts the importer needs."""
+    """Plan + manifest -> the names, licence facts and endpoints the importer needs.
+
+    The endpoint values are read here rather than passed in so that an import
+    which never touches the library does not require the storage service to be
+    configured, and so there is exactly one place that knows what a library
+    import needs.
+    """
     entry = _manifest_entry(plan.code)
     name = plan.name or str(entry["name"])
     return {
@@ -169,7 +193,22 @@ def _resolved(plan: ImportPlan) -> dict:
         "edition": plan.edition or plan.code,
         "edition_name": plan.edition_name or name,
         "publisher": plan.publisher or str(entry["rights_holder"]),
+        "storage_url": _live_config("STORAGE_SVC_URL"),
+        "internal_secret": _live_config("INTERNAL_SECRET"),
+        "library_root": _live_config("CALIBRE_LIBRARY_PATH"),
     }
+
+
+def _live_config(name: str) -> str:
+    """Read one config value as it stands now, not as it stood at boot.
+
+    ``resolve_runtime_config`` rewrites module globals once at startup, so an
+    operator who sets the library path in the settings database would otherwise
+    not see it take effect until the next restart.
+    """
+    import services.config as config
+
+    return str(getattr(config, name, "") or "")
 
 
 def _run_async(coroutine: Any) -> Any:
@@ -260,12 +299,16 @@ def _materialise(
     plan: ImportPlan, resolved: dict, report: ImportReport, registry, import_dir: Path | None
 ) -> Materialised:
     """Produce corpus-shaped JSON for ``plan``, and say where it came from."""
+    if plan.library_path:
+        return _materialise_from_library(plan, resolved, report, import_dir)
+
     if plan.provider:
         return _materialise_from_provider(plan, resolved, report, registry, import_dir)
 
     if not plan.source_path:
         raise ImportRefusal(
-            "Nothing to import: give a source_path for a file import, or a provider for an online one."
+            "Nothing to import: give a source_path for a file import, a library_path "
+            "for one from the Nextcloud shelf, or a provider for an online one."
         )
     source = Path(plan.source_path).expanduser()
     if not source.exists():
@@ -299,6 +342,46 @@ def _materialise(
     staged.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     report.log.append(f"Staged the extraction beside the source as {staged.name}.")
     return Materialised(path=staged, staged=staged, notes=notes)
+
+
+def _materialise_from_library(
+    plan: ImportPlan, resolved: dict, report: ImportReport, import_dir: Path | None
+) -> Materialised:
+    """Fetch a Bible off the Nextcloud shelf, then import it like any file.
+
+    The download lands in the import folder and is then handled by the ordinary
+    file path below, so a shelf EPUB is parsed by exactly the code a browser
+    upload of the same book would be. That is the whole point of doing the
+    transfer first and the parsing second: there is one importer to trust, not
+    one per source.
+
+    The file is fetched under its own name rather than the translation code so
+    two shelves holding ``Bible.epub`` do not overwrite each other, and so the
+    operator can recognise it in the import folder afterwards.
+    """
+    if import_dir is None:
+        raise ImportRefusal(
+            "A library import needs a writable import folder, and none is configured. "
+            "Set bible_import_dir (or BIBLE_IMPORT_DIR)."
+        )
+
+    from services.bible import library as library_mod
+
+    client = library_mod.LibraryClient(
+        storage_url=resolved.get("storage_url", ""),
+        internal_secret=resolved.get("internal_secret", ""),
+    )
+    root = str(resolved.get("library_root") or "")
+    destination = import_dir / library_mod.candidate_names(plan.library_path)
+    fetched = _run_async(client.fetch(root=root, path=plan.library_path, destination=destination))
+    report.log.append(
+        f"Fetched {plan.library_path} from the Nextcloud library to "
+        f"{fetched.name} ({fetched.stat().st_size} bytes)."
+    )
+    report.kind = plan.kind or detect_kind(fetched)
+    if report.kind == "json":
+        return Materialised(path=fetched)
+    return _materialise(plan._replace_source(fetched), resolved, report, registry=None, import_dir=import_dir)
 
 
 def _materialise_from_provider(

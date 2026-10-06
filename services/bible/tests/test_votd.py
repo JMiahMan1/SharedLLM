@@ -75,7 +75,9 @@ def test_an_unknown_scope_is_rejected(loaded):
 def test_an_empty_corpus_explains_how_to_fix_itself(session):
     with pytest.raises(LookupError) as exc:
         votd.pick(session)
-    assert "import_corpus" in str(exc.value)
+    message = str(exc.value)
+    assert "Admin > Bible" in message
+    assert "import_corpus" not in message
 
 
 def test_an_unimported_version_is_refused_not_swapped(loaded):

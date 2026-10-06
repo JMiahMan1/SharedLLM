@@ -371,6 +371,37 @@ export interface RagStats {
   message?: string;
 }
 
+/**
+ * Which of the three workspace-composer jobs to run.
+ *
+ * `auto` lets the gateway decide from the shape of the query and reports back
+ * which it chose, so the caller can show the user what actually ran.
+ */
+export type WorkspaceAskMode = 'auto' | 'librarian' | 'single_task' | 'raven';
+
+/** The three settled jobs, as opposed to `auto` which has not been resolved yet. */
+export type ResolvedWorkspaceAskMode = Exclude<WorkspaceAskMode, 'auto'>;
+
+/**
+ * Result of one workspace composer turn.
+ *
+ * The two synchronous modes answer inline and carry `model`; `raven` dispatches
+ * a mission instead and carries `mission_id`. `reason` explains why the
+ * resolved mode was chosen, which is the only way the user can tell an
+ * automatic decision from a deliberate one.
+ */
+export interface WorkspaceAskResult {
+  status: string;
+  requested_mode: WorkspaceAskMode;
+  resolved_mode: ResolvedWorkspaceAskMode;
+  reason: string;
+  context_chars: number;
+  model?: string;
+  answer?: string;
+  mission_id?: number | null;
+  mission?: RavenMission;
+}
+
 export interface RavenMission {
   id: number;
   mission_type: string;
@@ -1827,6 +1858,37 @@ export interface BibleImportsResponse {
   /** Why nothing can be installed yet, when the directory is not configured. */
   import_dir_error: string;
   runs: BibleImportRun[];
+  /** The Calibre shelf inside Nextcloud, once an operator has pointed at one. */
+  library_root: string;
+  /** The setting that holds the shelf; the same name whatever the shelf is called. */
+  library_setting: string;
+  /** Why the shelf cannot be listed, naming the setting to fix. */
+  library_error: string;
+}
+
+export interface BibleLibraryEntry {
+  /** The full path on the shelf, which is what an import is given. */
+  path: string;
+  name: string;
+  is_dir: boolean;
+  size: number;
+  /** json, pdf or epub; empty for a folder or a format we cannot read. */
+  kind: BibleImportKind | '';
+  /** False for a folder and for a file in a format we cannot read. */
+  installable: boolean;
+  /** Why this cannot be installed yet, in words the operator can read. */
+  note: string;
+}
+
+export interface BibleLibraryListing {
+  /** The folder that was listed, which is empty at the shelf root. */
+  path: string;
+  root: string;
+  /** One level up, or empty at the root so the breadcrumb can hide itself. */
+  parent: string;
+  entries: BibleLibraryEntry[];
+  count: number;
+  installable: number;
 }
 
 /** What installing a translation online would cost, asked before spending anything. */

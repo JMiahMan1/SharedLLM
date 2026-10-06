@@ -70,6 +70,18 @@ class IndexScanRequest(BaseModel):
     force: bool = False
 
 
+class ProviderFetchRequest(BaseModel):
+    """Ask for one document's bytes.
+
+    ``max_bytes`` is a ceiling, not a hint: a caller that needs the whole file
+    has to be told rather than quietly handed a prefix.
+    """
+
+    provider: ProviderConfig
+    path: str
+    max_bytes: int = 256 * 1024 * 1024
+
+
 class ProviderWriteRequest(BaseModel):
     provider: ProviderConfig
     path: str

@@ -11,6 +11,7 @@ import pytest
 
 from services.bible import books as book_table
 from services.bible import corpus
+from services.bible.corpus import CorpusError
 from services.bible.refs import ReferenceError, parse_one
 
 
@@ -100,7 +101,8 @@ def test_require_version_names_what_is_available(session):
         corpus.require_version(session, "nope")
     message = str(exc.value)
     assert "nope" in message
-    assert "corpus_manifest.json" in message
+    assert "not a translation this server knows about" in message
+    assert "corpus_manifest.json" not in message
 
 
 def test_require_version_of_a_catalogued_translation_explains_how_to_install_it(loaded):
@@ -108,13 +110,13 @@ def test_require_version_of_a_catalogued_translation_explains_how_to_install_it(
         corpus.require_version(loaded, "esv")
     message = str(exc.value)
     assert "esv" in message
-    assert "copyrighted" in message
+    assert "Copyrighted by Crossway" in message
     assert "api.bible" in message
     assert "Admin > Bible" in message
+    assert "import_corpus" not in message
 
 
-def test_a_translation_with_no_provider_still_gets_the_command(loaded, tmp_path):
-    """A catalogued but unbacked translation must not point at a service."""
+def _unbacked_manifest(tmp_path):
     manifest = tmp_path / "corpus_manifest.json"
     manifest.write_text(
         json.dumps(
@@ -134,11 +136,96 @@ def test_a_translation_with_no_provider_still_gets_the_command(loaded, tmp_path)
         ),
         encoding="utf-8",
     )
+    return manifest
+
+
+def test_a_translation_with_no_provider_is_not_pointed_at_a_service(loaded, tmp_path):
+    """A catalogued but unbacked translation must not name an online provider."""
+    manifest = _unbacked_manifest(tmp_path)
     with pytest.raises(ReferenceError) as exc:
         corpus.require_version(loaded, "xyz", manifest_path=manifest)
     message = str(exc.value)
-    assert "--only xyz" in message
+    assert "Nobody" in message
+    assert "Admin > Bible" in message
     assert "api.bible" not in message
+    assert "python" not in message
+
+
+def test_the_shell_route_is_kept_for_the_command_line_only(tmp_path):
+    """The CLI still needs to know how to install it; the API must not say so."""
+    version = corpus.load_manifest(_unbacked_manifest(tmp_path))[0]
+    hint = corpus._acquisition_hint(version)
+    assert "--only xyz" in hint
+    assert "import_corpus" in hint
+    assert "import_corpus" not in corpus.reader_note(version)
+
+
+def test_the_manifest_marks_one_primary_and_one_public_domain_fallback():
+    assert corpus.primary_code() == "nkjv"
+    assert corpus.fallback_code() == "kjv"
+    marked = [v["code"] for v in corpus.load_manifest() if v.get("fallback")]
+    assert marked == ["kjv"]
+
+
+def test_a_fallback_is_only_used_when_it_is_actually_installed(loaded):
+    """Being listed in the manifest is not the same as being readable."""
+    assert corpus.default_version_code(loaded) == "kjv"
+    assert corpus.fallback_code() not in {"", None}
+
+
+def test_the_reader_default_falls_back_when_the_primary_is_absent(loaded, tmp_path):
+    """A server with only public-domain text still opens a readable Bible."""
+    manifest = tmp_path / "corpus_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "kind": "jarvis.bible.corpus",
+                "versions": [
+                    {"code": "kjv", "name": "KJV", "language": "en",
+                     "license_class": "public_domain", "fallback": True,
+                     "source_url": "https://example.invalid/kjv.json"},
+                    {"code": "nkjv", "name": "NKJV", "language": "en",
+                     "license_class": "licensed", "primary": True,
+                     "rights_holder": "Thomas Nelson"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ReferenceError):
+        corpus.require_version(loaded, "nkjv", manifest_path=manifest)
+    assert corpus.default_version_code(loaded, manifest_path=manifest) == "kjv"
+
+
+def test_a_translation_cannot_be_both_primary_and_fallback(tmp_path):
+    manifest = tmp_path / "corpus_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "kind": "jarvis.bible.corpus",
+                "versions": [
+                    {"code": "kjv", "name": "KJV", "language": "en",
+                     "license_class": "public_domain", "source_url": "x",
+                     "primary": True, "fallback": True},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CorpusError) as exc:
+        corpus.load_manifest(manifest)
+    assert "primary" in str(exc.value) and "fallback" in str(exc.value)
+
+
+def test_the_install_route_is_something_a_ui_can_act_on():
+    entries = {v["code"]: v for v in corpus.load_manifest()}
+    assert corpus.install_route(entries["kjv"]) == {"kind": "bundled"}
+    assert corpus.install_route(entries["esv"]) == {
+        "kind": "provider", "provider": "api.bible"
+    }
+    assert corpus.install_route(entries["nkjv"]) == {"kind": "file"}
 
 
 def test_catalogue_lists_installed_and_missing_translations(loaded):
