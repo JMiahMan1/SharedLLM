@@ -39,43 +39,58 @@ echo "[OK] Services to deploy on ${HOST}: $SERVICES"
 # It does NOT wait for E2E/test pipelines — those run independently and do not
 # block deployment.
 wait_for_build() {
-    echo "Waiting for latest 'Build & Push Images' on microservices to finish..."
+    local branch="$1"
+    local expect_sha="$2"
+    echo "Waiting for 'Build & Push Images' ($expect_sha) on $branch to finish..."
     local max_attempts=90
     local attempt=0
     local wait_time=10
 
     while [ $attempt -lt $max_attempts ]; do
-        local latest_status latest_conclusion latest_sha
+        # One call for all three fields. Asking for status, conclusion and
+        # headSha separately meant reading them from three different moments:
+        # GitHub flips status to "completed" before it populates conclusion, so
+        # the script could pair a completed status with an empty conclusion and
+        # declare the build failed while it was still being finalised.
         # Query the workflow itself: filtering the newest N branch runs missed
         # this workflow entirely on commits that also trigger docs/UI/APK/E2E.
-        latest_status=$(gh run list --workflow=build-images.yml --branch=microservices --limit 1 --json status --jq '.[0].status' 2>/dev/null)
-        latest_conclusion=$(gh run list --workflow=build-images.yml --branch=microservices --limit 1 --json conclusion --jq '.[0].conclusion' 2>/dev/null)
-        latest_sha=$(gh run list --workflow=build-images.yml --branch=microservices --limit 1 --json headSha --jq '.[0].headSha' 2>/dev/null)
+        local run
+        run=$(gh run list --workflow=build-images.yml --branch="$branch" --limit 5 \
+            --json headSha,status,conclusion 2>/dev/null \
+            | jq -c --arg sha "$expect_sha" '[.[] | select(.headSha == $sha)][0] // {}')
 
-        if [ "$latest_status" = "completed" ] && [ "$latest_conclusion" = "success" ]; then
-            echo "[OK] Build & Push Images (${latest_sha:0:8}) completed successfully."
+        local run_status run_conclusion
+        run_status=$(printf '%s' "$run" | jq -r '.status // ""')
+        run_conclusion=$(printf '%s' "$run" | jq -r '.conclusion // ""')
+
+        if [ "$run_status" = "completed" ] && [ "$run_conclusion" = "success" ]; then
+            echo "[OK] Build & Push Images (${expect_sha:0:8}) completed successfully."
             return 0
         fi
 
-        if [ "$latest_status" = "completed" ] && [ "$latest_conclusion" != "success" ]; then
-            echo "[FAIL] Build & Push Images (${latest_sha:0:8}) failed with conclusion: $latest_conclusion"
+        # An empty conclusion on a completed run is the API settling, not a
+        # verdict. Treating it as failure aborted deploys that were about to
+        # succeed.
+        if [ "$run_status" = "completed" ] && [ -n "$run_conclusion" ] && [ "$run_conclusion" != "success" ]; then
+            echo "[FAIL] Build & Push Images (${expect_sha:0:8}) failed with conclusion: $run_conclusion"
             exit 1
         fi
 
-        echo "Build & Push Images (${latest_sha:0:8}) status: ${latest_status:-waiting}... (${attempt}/${max_attempts})"
+        if [ -z "$run_status" ]; then
+            echo "No 'Build & Push Images' run for ${expect_sha:0:8} on $branch yet... (${attempt}/${max_attempts})"
+        else
+            echo "Build & Push Images (${expect_sha:0:8}) status: ${run_status}${run_conclusion:+ ($run_conclusion)}... (${attempt}/${max_attempts})"
+        fi
         sleep $wait_time
         attempt=$((attempt + 1))
     done
 
-    echo "[FAIL] Timeout waiting for Build & Push Images."
+    echo "[FAIL] Timeout waiting for Build & Push Images (${expect_sha:0:8})."
     exit 1
 }
 
 # SSH options for robustness: auto-accept new host keys, fail on broken pipe
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10"
-
-# Wait for GitHub Actions build to complete before deploying
-wait_for_build
 
 # Sync non-git files to remote to ensure config match
 for NON_GIT_FILE in "prompts/"; do
@@ -128,6 +143,18 @@ else
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
 fi
 echo "Branch: $BRANCH"
+
+# Wait for GitHub Actions to build the commit we are about to deploy. This runs
+# after the branch is resolved so it honours DEPLOY_BRANCH and a detached HEAD,
+# and it names the SHA so a newer push landing mid-deploy cannot be mistaken
+# for this one.
+EXPECT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+if [ -n "$EXPECT_SHA" ]; then
+    wait_for_build "$BRANCH" "$EXPECT_SHA"
+else
+    echo "[FAIL] Could not resolve the commit being deployed; refusing to deploy an unverified build."
+    exit 1
+fi
 
 # Check if a latest Android APK artifact is available from CI and sync it to update directory
 if command -v gh >/dev/null 2>&1; then
