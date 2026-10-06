@@ -298,3 +298,53 @@ class TestRangesRouteCarriesHours:
         monkeypatch.setattr(geo_main, "_fetch_activity_sharing", opted_out)
         r = client.get("/steps/ranges?range=D&user_id=jeremiah&viewer=michele", headers=HEADERS)
         assert r.status_code == 404
+
+class TestDevicesFillEachOthersBlanks:
+    """A day split between devices adds up hour by hour; an hour both carried
+    counts once. Before, the day was the max of the day totals, so a phone
+    morning and a watch afternoon kept only the larger half."""
+
+    DAY = "2026-09-25"
+
+    def _post(self, client, source, total, hours):
+        return client.post(
+            "/steps",
+            headers=HEADERS,
+            json={
+                "user_id": "jeremiah",
+                "steps": total,
+                "timestamp": ts_for(self.DAY),
+                "timezone": "America/Phoenix",
+                "source": source,
+                "hourly": [{"hour": h, "steps": s} for h, s in hours],
+            },
+        )
+
+    def test_a_phone_morning_and_a_watch_afternoon_add_up(self, client, fake):
+        self._post(client, "phone", 4000, [(8, 1500), (9, 2500)])
+        self._post(client, "watch", 5000, [(14, 3000), (15, 2000)])
+        assert fake.hashes["geo:steps:jeremiah"][self.DAY] == "9000"
+
+    def test_an_hour_both_devices_carried_counts_once(self, client, fake):
+        self._post(client, "phone", 3000, [(8, 1000), (9, 2000)])
+        self._post(client, "watch", 2600, [(9, 2100), (10, 500)])
+        # 08 phone 1000 + 09 the larger 2100 + 10 watch 500
+        assert fake.hashes["geo:steps:jeremiah"][self.DAY] == "3600"
+
+    def test_a_source_without_hours_is_never_undercut(self, client, fake):
+        """Home Assistant (or an old phone build) only has a day total; the day
+        never falls below the best single source."""
+        self._post(client, "watch", 900, [(9, 900)])
+        client.post(
+            "/steps",
+            headers=HEADERS,
+            json={"user_id": "jeremiah", "steps": 6000, "timestamp": ts_for(self.DAY), "source": "ha"},
+        )
+        assert fake.hashes["geo:steps:jeremiah"][self.DAY] == "6000"
+
+    def test_the_day_view_shows_the_merged_hours(self, client, fake):
+        day = geo_main._today_date().isoformat()
+        fake.hashes["geo:steps_hourly:jeremiah:phone"] = {f"{day}:08": "700", f"{day}:09": "300"}
+        fake.hashes["geo:steps_hourly:jeremiah:watch"] = {f"{day}:09": "450", f"{day}:15": "1200"}
+        body = client.get("/steps/ranges?range=D&user_id=jeremiah", headers=HEADERS).json()
+        assert [(b["hour"], b["steps"]) for b in body["hourly"]] == [(8, 700), (9, 450), (15, 1200)]

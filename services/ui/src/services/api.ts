@@ -2214,6 +2214,14 @@ export const api = {
     return resp.data;
   },
 
+  // Admin: give a companion device to a user ('' unassigns it).
+  async assignCompanionDevice(deviceKey: string, ownerUsername: string): Promise<CompanionDevice> {
+    const resp = await apiClient.patch(`/api/user-panel/devices/${encodeURIComponent(deviceKey)}`, {
+      owner_username: ownerUsername,
+    });
+    return resp.data;
+  },
+
   async pairDevice(body: PairDeviceRequest): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/devices/pair', body, { timeout: 60000 });
     return resp.data;

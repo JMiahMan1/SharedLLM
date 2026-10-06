@@ -4424,7 +4424,8 @@ def update_device(
     session: Session = Depends(get_session),
     admin: User = Depends(require_api_key),
 ):
-    """Assign or reassign a device to a user. Admin only.
+    """Assign or reassign a device to a user, or unassign it with an empty
+    owner_username. Admin only.
 
     Assignment stays admin-side on purpose: a device being able to claim an
     owner would let anyone reassign the family's assistant by holding its key.
@@ -4434,7 +4435,9 @@ def update_device(
     device = session.exec(select(Device).where(Device.device_key == device_key)).first()
     if device is None:
         raise HTTPException(status_code=404, detail="No such device")
-    if body.owner_username:
+    if body.owner_username == "":
+        device.owner_username = None
+    elif body.owner_username:
         owner = session.exec(select(User).where(User.username == body.owner_username.lower())).first()
         if owner is None:
             raise HTTPException(status_code=404, detail=f"No such user: {body.owner_username}")
