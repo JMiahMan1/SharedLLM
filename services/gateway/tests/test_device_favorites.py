@@ -148,3 +148,25 @@ def test_esphome_control_route_forwards_to_execution_as_the_user(monkeypatch):
     assert resp.status_code == 200
     assert seen["url"].endswith("/execute/esphome")
     assert seen["json"]["device"] == "jarvis-watch" and seen["json"]["user_context"]["user"] == "jeremiah"
+
+
+def test_workspace_lint_route_forwards_to_execution(monkeypatch):
+    """POST /execute/workspace_lint exists on the gateway (the editor's Lint
+    answered 404 without it)."""
+    seen = {}
+
+    class _ExecClient:
+        async def post(self, url, **kw):
+            if "/execute/" in url:
+                seen["url"] = url
+            return _Resp(200, {"status": "SUCCESS", "message": "", "detail": {"problems": []}})
+
+    async def fake_ctx(request, body):
+        return {"user": "jeremiah", "api_key": "sk-x"}
+
+    monkeypatch.setattr(gateway_main, "get_http_client", lambda: _ExecClient())
+    monkeypatch.setattr(gateway_main, "_resolve_user_context", fake_ctx)
+    resp = TestClient(app).post("/execute/workspace_lint", json={"workspace_id": "w1", "path": "a.py"},
+                                headers={"Authorization": "Bearer sk-x"})
+    assert resp.status_code == 200
+    assert seen["url"].endswith("/execute/workspace_lint")
