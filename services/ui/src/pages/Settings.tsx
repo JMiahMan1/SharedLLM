@@ -534,6 +534,21 @@ const AppUpdatesSection = () => {
   const apkPending = Boolean(apk?.updateAvailable && apk.apkUrl);
   const apkSize = formatBytes(apk?.sizeBytes);
 
+  // Why the in-app flow is or is not on offer, so the notice can say which of
+  // the three very different situations it is in. The bundle arrives over OTA,
+  // so a brand new UI can land on a device still running the APK built before
+  // the native downloader existed -- and that used to render an amber banner
+  // with no button at all, which is indistinguishable from a broken app.
+  const apkFlow: 'checking' | 'ready' | 'no-plugin' | 'no-digest' = !native
+    ? 'checking'
+    : perm === null || canVerify === null
+      ? 'checking'
+      : !perm.known
+        ? 'no-plugin'
+        : canVerify
+          ? 'ready'
+          : 'no-digest';
+
   // Android only grants "Install unknown apps" from system Settings, so the
   // check has to happen before the user commits to installing -- otherwise they
   // tap Install and get bounced into Settings mid-flow, which is what made
@@ -667,6 +682,15 @@ const AppUpdatesSection = () => {
                 <ExternalLink size={13} />
                 <span>Download link</span>
               </a>
+            ) : apkFlow === 'checking' && apkPhase === 'idle' ? (
+              <p
+                data-testid="apk-install-checking"
+                role="status"
+                aria-live="polite"
+                className="text-[11px] text-amber-200/80"
+              >
+                Checking what this build can do…
+              </p>
             ) : apkPhase === 'downloading' ? (
               <div
                 data-testid="apk-download-progress"
@@ -768,11 +792,42 @@ const AppUpdatesSection = () => {
                 <Download size={13} />
                 <span>Install update</span>
               </button>
+            ) : apkFlow === 'no-plugin' ? (
+              // The amber banner with no button is what made this look broken.
+              // This build's native side predates the in-app downloader, so say
+              // so plainly and give the one step that fixes it for good.
+              <p
+                data-testid="apk-install-unavailable"
+                className="w-full space-y-1.5 text-[11px] leading-snug text-amber-100/90"
+              >
+                <span className="block font-semibold">
+                  This version of the app cannot install updates from inside itself.
+                </span>
+                <span className="block text-amber-200/70">
+                  Open{' '}
+                  <a
+                    href={apk.apkUrl!}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline underline-offset-2"
+                    onClick={() => trigger('light')}
+                  >
+                    this link
+                  </a>{' '}
+                  once to install the current app. After that, updates download and install on their own.
+                </span>
+              </p>
             ) : null}
           </div>
           {apkError && (
             <p data-testid="apk-download-error" role="alert" className="text-[11px] text-red-300">
               {apkError}
+            </p>
+          )}
+          {apkFlow === 'no-digest' && (
+            <p data-testid="apk-install-nodigest" className="text-[11px] text-amber-200/70">
+              The server published no checksum for this build, so the download cannot be verified
+              before it is installed.
             </p>
           )}
           {apkPhase === 'ready' && (

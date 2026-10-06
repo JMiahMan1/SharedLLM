@@ -382,4 +382,44 @@ describe('Settings APK verified download flow', () => {
     expect(await findControlByName(/allow updates/i)).toBeInTheDocument();
     expect(screen.queryByTestId('apk-install-button')).not.toBeInTheDocument();
   });
+
+  // The regression this covers: the notice ended in `: null`, so a build
+  // without the ApkInstall plugin showed an amber "App Update Ready" banner
+  // with no button at all -- indistinguishable from a broken app. The
+  // unverified fallback above never fired there either, because it required
+  // perm.known, which is exactly what an absent plugin cannot report.
+  describe('a build that cannot install updates in-app', () => {
+    beforeEach(() => {
+      // An APK built before ApkInstallPlugin existed: neither probe can find
+      // the plugin, so both answers are negative.
+      mocks.hasVerifiedInstallFlow.mockResolvedValue(false);
+      mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: false });
+    });
+
+    it('says so and gives the one step that fixes it, rather than showing no button', async () => {
+      renderWithProviders(<Settings />);
+      const notice = await findControl('apk-install-unavailable');
+      expect(notice).toHaveTextContent(/cannot install updates from inside itself/i);
+      expect(notice).toHaveTextContent(/after that, updates download and install on their own/i);
+    });
+
+    it('still offers the APK file, because that is the only way out', async () => {
+      renderWithProviders(<Settings />);
+      const link = await screen.findByRole('link', { name: /this link/i }, { timeout: CONTROL_TIMEOUT_MS });
+      expect(link).toHaveAttribute('href', verified.apkUrl);
+    });
+
+    it('does not offer a browser handoff as if it were the answer', async () => {
+      renderWithProviders(<Settings />);
+      await findControl('apk-install-unavailable');
+      expect(screen.queryByRole('link', { name: /download link/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it('says when it cannot verify the download, beside the button it still offers', async () => {
+    mocks.checkApkUpdate.mockResolvedValue({ ...verified, apkSha256: undefined });
+    renderWithProviders(<Settings />);
+    expect(await findControlByName(/install update/i)).toBeInTheDocument();
+    expect(await findControl('apk-install-nodigest')).toHaveTextContent(/no checksum/i);
+  });
 });
