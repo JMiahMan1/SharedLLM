@@ -90,6 +90,19 @@ async def request(
         }
 
 
+_TLS_WARNED: set[tuple[str, str]] = set()
+
+
+def _warn_once(host: str, message: str) -> None:
+    """Say it once per host and message, not on every request: the Nextcloud
+    callers ask for verify=False on each call, and repeating it (3,248 times
+    in three hours in production) buried every other warning."""
+    if (host, message) in _TLS_WARNED:
+        return
+    _TLS_WARNED.add((host, message))
+    log.warning(message, host)
+
+
 async def get_session(host: str, verify: bool = True) -> ClientSession:
     """Get or create a session for the given host with connection pooling.
 
@@ -101,12 +114,12 @@ async def get_session(host: str, verify: bool = True) -> ClientSession:
     if verify:
         effective_verify = True
     elif _insecure_tls_allowed():
-        log.warning("TLS verification DISABLED for %s (MEDIA_ALLOW_INSECURE_TLS)", host)
+        _warn_once(host, "TLS verification DISABLED for %s (MEDIA_ALLOW_INSECURE_TLS)")
         effective_verify = False
     else:
-        log.warning(
-            "TLS verification turned OFF for %s but MEDIA_ALLOW_INSECURE_TLS is not enabled; verifying anyway",
+        _warn_once(
             host,
+            "TLS verification turned OFF for %s but MEDIA_ALLOW_INSECURE_TLS is not enabled; verifying anyway",
         )
         effective_verify = True
 
