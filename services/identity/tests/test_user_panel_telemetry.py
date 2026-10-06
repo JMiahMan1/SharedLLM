@@ -100,6 +100,7 @@ class TestNoOptInEventAllowlist:
                 "apk_install",
                 "feature_use",
                 "capability_miss",
+                "battery",
             }
         )
 

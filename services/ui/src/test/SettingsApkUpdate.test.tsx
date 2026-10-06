@@ -14,7 +14,14 @@ const mocks = vi.hoisted(() => ({
   hasVerifiedInstallFlow: vi.fn(),
   openApkInstallSettings: vi.fn(),
   getRunningVersion: vi.fn(),
+  native: true,
 }));
+
+// The APK flow is the Android app's; in a browser the notice is a plain link.
+vi.mock('@capacitor/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@capacitor/core')>();
+  return { ...actual, Capacitor: { ...actual.Capacitor, isNativePlatform: () => mocks.native } };
+});
 
 vi.mock('../lib/appUpdater', () => ({
   checkApkUpdate: mocks.checkApkUpdate,
@@ -109,12 +116,25 @@ describe('Settings APK update notice', () => {
     expect(mocks.checkForAppUpdates).not.toHaveBeenCalled();
   });
 
-  it('offers a download link pointing at the published APK', async () => {
+  it('offers a browser (Android, Chromebook) the APK file, since it cannot install it itself', async () => {
+    mocks.native = false;
+    try {
+      mocks.checkApkUpdate.mockResolvedValue(pending);
+      renderWithProviders(<Settings />);
+      const link = await findControlByName(/download link/i, 'link');
+      expect(link).toHaveAttribute('href', 'https://jarvis.example.com/api/app-updates/app-debug.apk');
+      expect(link).toHaveAttribute('download', 'jarvis-os.apk');
+    } finally {
+      mocks.native = true;
+    }
+  });
+
+  it('never hands the app off to a browser', async () => {
     mocks.checkApkUpdate.mockResolvedValue(pending);
     renderWithProviders(<Settings />);
-    const link = await findControlByName(/download link/i, 'link');
-    expect(link).toHaveAttribute('href', 'https://jarvis.example.com/api/app-updates/app-debug.apk');
-    expect(link).toHaveAttribute('download', 'jarvis-os.apk');
+    await screen.findByTestId('apk-update-notice');
+    await findControlByName(/install update/i);
+    expect(screen.queryByRole('link', { name: /download link/i })).not.toBeInTheDocument();
   });
 
   it('installs through the native path when the install button is used', async () => {
@@ -235,13 +255,13 @@ describe('Settings APK install permission', () => {
 
   // No plugin means no in-app install; offering a button that cannot work is
   // the same trap as the old silent browser fallback.
-  it('offers only the download link when the install path is unavailable', async () => {
+  it('offers nothing that leaves the app when the install path is unavailable', async () => {
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: false });
     renderWithProviders(<Settings />);
 
-    expect(await findControlByName(/download link/i, 'link')).toBeInTheDocument();
+    await screen.findByTestId('apk-update-notice');
+    expect(screen.queryByRole('link', { name: /download link/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /install update/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /allow updates/i })).not.toBeInTheDocument();
   });
 });
 
@@ -339,11 +359,12 @@ describe('Settings APK verified download flow', () => {
 
   // The web bundle can be newer than the installed APK, so the verified flow
   // must be feature-detected rather than assumed.
-  it('falls back to the link when this build cannot verify downloads', async () => {
+  it('falls back to the in-app install, not a link, when this build cannot verify downloads', async () => {
     mocks.hasVerifiedInstallFlow.mockResolvedValue(false);
     renderWithProviders(<Settings />);
-    expect(await findControlByName(/download link/i, 'link')).toBeInTheDocument();
+    expect(await findControlByName(/install update/i)).toBeInTheDocument();
     expect(screen.queryByTestId('apk-download-button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /download link/i })).not.toBeInTheDocument();
   });
 
   it('does not offer a verified install when the server published no digest', async () => {
@@ -354,10 +375,11 @@ describe('Settings APK verified download flow', () => {
     expect(screen.queryByTestId('apk-download-button')).not.toBeInTheDocument();
   });
 
-  it('asks for the one-time grant before downloading', async () => {
+  it('downloads first and asks for the one-time grant only at Install', async () => {
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: true });
     renderWithProviders(<Settings />);
+    await userEvent.click(await findControl('apk-download-button'));
     expect(await findControlByName(/allow updates/i)).toBeInTheDocument();
-    expect(screen.queryByTestId('apk-download-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('apk-install-button')).not.toBeInTheDocument();
   });
 });
