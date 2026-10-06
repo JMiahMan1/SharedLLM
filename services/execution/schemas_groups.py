@@ -43,13 +43,17 @@ class LightPatternStep(BaseModel):
 
 
 class LightPatternRequest(BaseModel):
-    action: Literal["create", "delete", "list", "update"]
+    """``apply`` sets the cluster's lights to the pattern (``pattern_id`` may be
+    the pattern's id or its name; ``cluster_id`` overrides the pattern's own)."""
+
+    action: Literal["create", "delete", "list", "update", "apply"]
     pattern_id: str
     pattern_name: str | None = None
     cluster_id: str | None = None
     steps: list[LightPatternStep] | None = None
     loop: bool = False
     transition_ms: int = Field(default=500, ge=0)
+    user_context: UserContext | None = None
 
 
 SYSTEM_DEFAULT_PATTERNS = [
