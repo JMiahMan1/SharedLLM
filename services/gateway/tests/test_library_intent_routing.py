@@ -111,3 +111,31 @@ def test_forcing_the_library_in_does_not_disturb_the_coding_set():
     assert got[0] == "calibre_files"
     assert "system_capabilities" in got
     assert got.count("calibre_files") == 1
+
+
+def test_the_library_header_says_the_passages_are_already_retrieved():
+    """Guards a real production failure.
+
+    Asked what Macduff said about trusting God in poverty and trial, the model
+    was handed eight correctly-located passages from *Memories of Bethany* and
+    ignored them: it called ContextSearchRequest with no `collection_name`,
+    which defaults to system_capabilities, got nothing, and answered "no results
+    were found" with the evidence unread in its own system prompt.
+
+    The header is the only place that can tell it otherwise.
+    """
+    header = _collection_header("calibre_files")
+    assert "ALREADY RETRIEVED" in header
+    assert "Do not call ContextSearchRequest" in header
+    assert "cite" in header.lower()
+
+
+def test_only_the_library_header_carries_the_do_not_research_instruction():
+    """The instruction is specific to a collection whose passages are preloaded.
+
+    Applying it everywhere would tell the model to distrust context that was
+    not in fact preloaded.
+    """
+    for other in ("ha_entities", "nextcloud_files", "system_capabilities",
+                  "system_learnings"):
+        assert "ALREADY RETRIEVED" not in _collection_header(other)
