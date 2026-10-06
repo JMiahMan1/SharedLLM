@@ -18,6 +18,7 @@
 - **docs/SQLITE_VEC_MIGRATION.md** — RAG vector store (referenced by `services/rag/main.py`)
 - **docs/THEMES.md** — theme pack system (Jarvis-wide, per-user)
 - **docs/ENTITY_PROTECTION.md** — locking entities to admins + chosen users; hidden outright from everyone else
+- **docs/CALIBRE_LIBRARY.md** — indexing a Calibre library out of Nextcloud into RAG, read-only, with chapter-level citations
 
 ## UI
 - **docs/THEMES.md** — theme packs, import/export, Android widget tinting

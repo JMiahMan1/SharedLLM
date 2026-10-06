@@ -5558,14 +5558,30 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
     if not creds.get("nextcloud_url") or not creds.get("nextcloud_user") or not creds.get("nextcloud_pass"):
         raise HTTPException(status_code=400, detail="NextCloud credentials not configured for this user.")
 
+    provider_settings = {
+        "url": creds["nextcloud_url"],
+        "username": creds["nextcloud_user"],
+        "password": creds["nextcloud_pass"],
+    }
+
+    if body.provider_kind == "calibre":
+        library_path = (body.library_path or "").strip()
+        if not library_path:
+            library_path = (await fetch_global_setting("calibre_library_path")).strip()
+        if not library_path:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No Calibre library path configured. Set the 'calibre_library_path' "
+                    "setting (Admin > Settings) or pass library_path with the request."
+                ),
+            )
+        provider_settings["library_path"] = library_path
+
     payload = {
         "provider": {
-            "kind": "nextcloud",
-            "settings": {
-                "url": creds["nextcloud_url"],
-                "username": creds["nextcloud_user"],
-                "password": creds["nextcloud_pass"]
-            }
+            "kind": body.provider_kind,
+            "settings": provider_settings,
         },
         "path": body.path,
         "recursive": body.recursive,
