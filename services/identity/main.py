@@ -4405,6 +4405,7 @@ def claim_device(
     device.registered_by = "paired" if body.verified else "adopted"
     device.revoked = False
     device.esphome_version = body.esphome_version or device.esphome_version
+    device.app_version = body.app_version or device.app_version
     device.hardware = body.hardware or device.hardware
     if body.capabilities:
         device.capabilities = json.dumps(body.capabilities)

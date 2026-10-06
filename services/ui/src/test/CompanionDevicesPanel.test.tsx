@@ -50,8 +50,10 @@ describe('CompanionDevicesPanel', () => {
   });
 
   it('lists only my own devices on my page', async () => {
+    myDevices = [{ ...myDevices[0], app_version: '1.5.0' }, myDevices[1]];
     renderWithProviders(<CompanionDevicesPanel />);
     expect(await screen.findByText('Google Pixel 7')).toBeInTheDocument();
+    expect(screen.getByText(/v1\.5\.0/)).toBeInTheDocument();
     expect(screen.getByText(/Signed in on this device/)).toBeInTheDocument();
     expect(screen.queryByText("Kate's phone")).not.toBeInTheDocument();
   });

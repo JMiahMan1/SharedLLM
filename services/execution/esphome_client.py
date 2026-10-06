@@ -670,6 +670,7 @@ async def pair_finish(host: str, port: int, code: str | None, user: str, user_ap
         "owner_username": user,
         "verified": method == "code",
         "esphome_version": info.esphome_version,
+        "app_version": info.project_version or None,
         "hardware": info.model,
         "ip_address": host,
     })
