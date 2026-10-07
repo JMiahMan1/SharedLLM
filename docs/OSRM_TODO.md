@@ -21,6 +21,15 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
 - [x] 9. Self-hosted place names (Nominatim) instead of the public service, if the server can hold it
   (Arizona import, Postgres tuned for a shared host; the public service only for places outside it)
 
+## Live on 205 (2026-10-07)
+- `osrm` (roads, ~770 MB) and `osrm-foot` (paths, ~1.2 GB), both rebuilt on
+  GitHub from `osrm/regions.txt`; the control plane redeploys both after a build.
+- `nominatim` (Arizona, ~10 GB on disk in `data/nominatim`, ~1.5 GB RAM).
+  It does not grow with `osrm/regions.txt`: places outside Arizona fall back to
+  the public service. Re-importing with a merged extract would cover more.
+- Leave-by reminders need someone's events to be theirs (see below) and a
+  fresh position; phones without the battery exemption go quiet overnight.
+
 ## Bugs found and fixed on the way
 - Assistant location answers ignored location-sharing consent: "where is X?"
   read X's telemetry with no viewer, so an opted-out member could still be
