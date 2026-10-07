@@ -305,6 +305,19 @@ describe('Bible page', () => {
     expect(mocked.getBiblePassage).toHaveBeenCalledWith('Ps 23', 'kjv');
   });
 
+  it('opens a chapter as a page without the controls', async () => {
+    renderPage();
+    await screen.findByTestId('bible-chapter-heading');
+    fireEvent.click(screen.getByTestId('bible-focus-open'));
+
+    const focus = await screen.findByTestId('bible-focus');
+    expect(focus).toBeInTheDocument();
+    expect(screen.getByTestId('bible-focus-reference')).toHaveTextContent('Psalms 23');
+
+    fireEvent.click(screen.getByTestId('bible-focus-close'));
+    await waitFor(() => expect(screen.queryByTestId('bible-focus')).not.toBeInTheDocument());
+  });
+
   it('records the app open once so the streak has something to count', async () => {
     renderPage();
     await screen.findByTestId('bible-chapter-heading');
