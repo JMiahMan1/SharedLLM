@@ -72,6 +72,20 @@ _BACK_MATTER = frozenset({
 _OPF_NS = "{http://www.idpf.org/2007/opf}"
 _DC_NS = "{http://purl.org/dc/elements/1.1/}"
 
+# A commentary with no verse anchors still names its position: a section title
+# ends with the passage it covers ("... (1:1-4)") beneath a chapter heading that
+# reads "<Book> <chapter>". Anchors are what the verse harvester trusts, so when
+# none exist this is the only canonical position such a source carries.
+_SECTION_REF = re.compile(r"\((\d{1,3}):(\d{1,3})(?:\s*[\u2013\u2014-]\s*\d{0,3}:?\s*(\d{1,3}))?\)\s*$")
+_HEADING_CHAPTER = re.compile(r"^(.*?)\s+(\d{1,3})$")
+_BOOK_NUMBER_BY_NAME = {
+    str(entry["name"]).casefold(): position
+    for position, entry in enumerate(BOOKS, start=1)
+}
+# Quoted scripture sits in its own shaded paragraph; keeping it would file the
+# Bible text as commentary about itself.
+_SCRIPTURE_MARKER = "background-color"
+
 
 class EpubImportError(CorpusError):
     """Raised when an EPUB cannot be trusted as a complete Bible."""
@@ -394,6 +408,110 @@ class _StudyHarvester(HTMLParser):
         self.handle_endtag("p")
 
 
+class _CommentaryHarvester(HTMLParser):
+    """Collects section-titled prose keyed by the passage each section covers.
+
+    Used only when the archive carries no verse anchors at all: a modern
+    commentary EPUB converted from a word processor has chapter headings
+    ("Romans 1"), section titles ending in a passage reference ("... (1:1-4)")
+    and shaded paragraphs quoting the scripture under discussion. Paragraphs
+    before the first anchored section (introductions, prefaces) are counted as
+    unanchored rather than guessed onto a verse, and shaded scripture is dropped
+    so the note files the discussion, not the text it discusses.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.notes: list[StudyNote] = []
+        self.unanchored_paragraphs = 0
+        self._book: int | None = None
+        self._heading_tag: str | None = None
+        self._heading_text: list[str] = []
+        self._paragraph: list[str] | None = None
+        self._paragraph_style = ""
+        self._section: dict | None = None
+        self._ordinals: Counter[tuple[int, int, int]] = Counter()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            self._heading_tag = tag
+            self._heading_text = []
+        elif tag == "p":
+            self._paragraph = []
+            self._paragraph_style = next(
+                (str(value) for key, value in attrs if key == "style"), ""
+            )
+
+    def handle_data(self, data: str) -> None:
+        if self._heading_tag is not None:
+            self._heading_text.append(data)
+        elif self._paragraph is not None:
+            self._paragraph.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._heading_tag is not None and tag == self._heading_tag:
+            text = _WHITESPACE.sub(" ", "".join(self._heading_text)).strip()
+            level, self._heading_tag, self._heading_text = self._heading_tag, None, []
+            if level == "h1":
+                self._close_section()
+                self._book = self._book_of_heading(text)
+            elif level in ("h3", "h4") and self._section is not None and text:
+                self._section["parts"].append(text)
+            return
+        if tag == "p" and self._paragraph is not None:
+            self._close_paragraph()
+
+    @staticmethod
+    def _book_of_heading(text: str) -> int | None:
+        match = _HEADING_CHAPTER.match(text)
+        if not match:
+            return None
+        return _BOOK_NUMBER_BY_NAME.get(str(match.group(1)).strip().casefold())
+
+    def _close_paragraph(self) -> None:
+        text = _WHITESPACE.sub(" ", "".join(self._paragraph or [])).strip()
+        style, self._paragraph, self._paragraph_style = self._paragraph_style, None, ""
+        if not text:
+            return
+        if _SCRIPTURE_MARKER in style:
+            return
+        anchor = _SECTION_REF.search(text)
+        if anchor:
+            if self._book is None:
+                self.unanchored_paragraphs += 1
+                return
+            self._close_section()
+            self._section = {
+                "book": self._book,
+                "chapter": int(anchor.group(1)),
+                "verse": int(anchor.group(2)),
+                "parts": [text],
+            }
+            return
+        if self._section is None:
+            self.unanchored_paragraphs += 1
+            return
+        self._section["parts"].append(text)
+
+    def _close_section(self) -> None:
+        if self._section is None:
+            return
+        body = "\n\n".join(self._section["parts"]).strip()
+        key = (self._section["book"], self._section["chapter"], self._section["verse"])
+        self._section = None
+        if not body:
+            return
+        ordinal = self._ordinals[key]
+        self._ordinals[key] = ordinal + 1
+        self.notes.append(StudyNote(key[0], key[1], key[2], "commentary", body, ordinal))
+
+    def close(self) -> None:
+        super().close()
+        if self._paragraph is not None:
+            self._close_paragraph()
+        self._close_section()
+
+
 def _documents(path: str) -> list[tuple[str, str]]:
     """Every html document in the archive paired with its decoded text."""
     try:
@@ -408,12 +526,21 @@ def _documents(path: str) -> list[tuple[str, str]]:
 
 
 def extract(path: str) -> dict:
-    """Read every verse and every study note out of the epub and report gaps."""
+    """Read every verse and every study note out of the epub and report gaps.
+
+    When the archive carries no verse anchors at all, the same bytes are then
+    read as a commentary: section titles that name a passage become notes keyed
+    to that passage, and the result is ``mode="commentary"`` so the importer
+    knows there is no translation to install. An anchored study Bible never
+    takes that path, and a file with neither anchors nor sections keeps the
+    ordinary empty result so the importer refuses it by name.
+    """
     verses: dict[tuple[int, int, int], str] = {}
     links: dict[tuple[int, int, int], list[str]] = {}
     blocks: dict[str, str] = {}
     skipped: Counter[str] = Counter()
-    for name, markup in _documents(path):
+    documents = _documents(path)
+    for name, markup in documents:
         harvester = _VerseHarvester()
         harvester.feed(markup)
         harvester.close()
@@ -470,6 +597,30 @@ def extract(path: str) -> dict:
     for number in sorted({b for b, _, _ in verses} - set(range(1, total_books + 1))):
         warnings.append(f"verse anchors reference book position {number}, which is not in the 66-book canon")
 
+    if not verses:
+        commentary = _CommentaryHarvester()
+        for name, markup in documents:
+            commentary.feed(markup)
+            commentary.close()
+        if commentary.notes:
+            if commentary.unanchored_paragraphs:
+                warnings.append(
+                    f"{commentary.unanchored_paragraphs} paragraphs carry no passage heading "
+                    "(introductions and prefaces), so they were not filed as notes"
+                )
+            return {
+                "path": path,
+                "title": _title_of(path),
+                "books": {},
+                "flat": {},
+                "notes": commentary.notes,
+                "study": StudyReport(),
+                "reports": [],
+                "warnings": warnings,
+                "verse_count": 0,
+                "mode": "commentary",
+            }
+
     return {
         "path": path,
         "title": _title_of(path),
@@ -480,6 +631,7 @@ def extract(path: str) -> dict:
         "reports": reports,
         "warnings": warnings,
         "verse_count": len(verses),
+        "mode": "verse",
     }
 
 

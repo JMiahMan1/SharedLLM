@@ -234,14 +234,18 @@ def import_notes(
     or of dicts with ``book``/``chapter``/``verse``/``kind``/``body``. Replacing
     rather than merging keeps a re-import from duplicating notes.
 
-    The delete is scoped to ``(version_code, edition_code)``. That is the whole
-    point of the edition axis: re-importing one study Bible must not silently
-    remove the commentary from another one over the same translation.
+    The delete is scoped to ``(version_code, edition_code, source)``: a
+    re-import replaces exactly what that source previously filed, so a
+    multi-volume commentary keeps its other volumes while a single file can
+    never duplicate itself. The edition axis still separates one study Bible
+    from another over the same translation, and a file that moves leaves its
+    old notes behind until the edition is removed with ``corpus.remove_edition``.
     """
     require_version(session, version)
     if not source:
         raise StudyNoteError("study notes need a source name so a reader can tell where they came from")
     edition_code = str(edition or "").strip().lower() or ensure_default_edition(session, version)
+    stored_source = source[:_SOURCE_MAX]
     prepared: list[StudyNote] = []
     seen: set[tuple[str, int, int, str, int]] = set()
     skipped = 0
@@ -276,13 +280,14 @@ def import_notes(
             kind=record["kind"],
             ordinal=record["ordinal"],
             body=record["body"],
-            source=source[:_SOURCE_MAX],
+            source=stored_source,
         ))
 
     session.exec(
         delete(StudyNote).where(
             StudyNote.version_code == version,
             StudyNote.edition_code == edition_code,
+            StudyNote.source == stored_source,
         )
     )
     for record in prepared:

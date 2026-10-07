@@ -141,7 +141,12 @@ class ImportReport:
 
 @dataclass
 class Materialised:
-    """Corpus-shaped JSON plus whatever else the source yielded."""
+    """Corpus-shaped JSON plus whatever else the source yielded.
+
+    ``notes_only`` marks a commentary: passage notes and no verse text, so
+    there is no translation for ``import_corpus`` to install and the notes are
+    the whole deliverable.
+    """
 
     path: Path
     staged: Path | None = None
@@ -150,6 +155,7 @@ class Materialised:
     allow_gaps: bool = False
     dry_run: bool = False
     sample_verses: int = 0
+    notes_only: bool = False
 
 
 def detect_kind(path: Path) -> str:
@@ -252,6 +258,22 @@ def run(session, plan: ImportPlan, *, registry=None, import_dir: Path | None = N
             )
             report.log.extend(_record(session, plan, report, int((time.monotonic() - started) * 1000)))
             return report
+        if materialised.notes_only:
+            if not plan.import_notes:
+                raise ImportRefusal(
+                    f"{report.source} carries study notes but no verse text, so there is no "
+                    f"translation to install. Set import_notes to file its "
+                    f"{len(materialised.notes)} notes against an edition."
+                )
+            report.note_count = _install_notes(session, plan, resolved, materialised, report)
+            report.status = "succeeded"
+            report.message = (
+                f"Filed {report.note_count} study notes against "
+                f"{resolved['edition']!r}. The source carries no verse text, so no "
+                "translation was installed."
+            )
+            report.log.extend(_record(session, plan, report, int((time.monotonic() - started) * 1000)))
+            return report
         report.staged_path = str(materialised.staged) if materialised.staged else ""
         summary = corpus.import_corpus(
             session,
@@ -333,9 +355,15 @@ def _materialise(
         notes: list[dict] = []
     else:
         extracted = epub_import.extract(source)
-        payload = epub_import.to_corpus_source(extracted)
         report.log.extend(epub_import.report_lines(extracted))
         notes = [note.as_dict() for note in extracted["notes"]]
+        if extracted.get("mode") == "commentary":
+            report.log.append(
+                f"Commentary source: {len(notes)} notes anchored to passages. "
+                "It carries no verse text, so nothing is staged for a translation install."
+            )
+            return Materialised(path=source, notes=notes, notes_only=True)
+        payload = epub_import.to_corpus_source(extracted)
 
     staged = source.with_suffix(source.suffix + ".source.json")
     staged.parent.mkdir(parents=True, exist_ok=True)
