@@ -109,7 +109,15 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             content = f"# {req.title}\nCategory: {req.category}\n\n{req.content or ''}"
             resp = await http_request("PUT", url, data=content.encode('utf-8'), auth=(provider.username, provider.password), verify=False)
             if resp["status_code"] in [200, 201, 204]:
-                return ExecutionResult(status="SUCCESS", message=f"Note '{req.title}' created.", service="note_create")
+                # The path comes back so a caller that wants to point at this
+                # note later records the name that was actually written rather
+                # than re-deriving our filename rules and drifting from them.
+                return ExecutionResult(
+                    status="SUCCESS",
+                    message=f"Note '{req.title}' created.",
+                    service="note_create",
+                    detail={"path": f"{req.category or 'Notes'}/{filename}"},
+                )
 
         elif action == "read":
             if req.path:
@@ -154,7 +162,13 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 headers={"Content-Type": "text/markdown; charset=utf-8"},
             )
             if resp["status_code"] in [200, 201, 204]:
-                return ExecutionResult(status="SUCCESS", message=f"Note '{req.title}' saved.", service="note_write")
+                written = f"{category}/{file_title}.md" if not req.path else req.path.lstrip("/")
+                return ExecutionResult(
+                    status="SUCCESS",
+                    message=f"Note '{req.title}' saved.",
+                    service="note_write",
+                    detail={"path": written},
+                )
 
         elif action == "check_off":
             # Toggle one checklist item ("- [ ] text" <-> "- [x] text").

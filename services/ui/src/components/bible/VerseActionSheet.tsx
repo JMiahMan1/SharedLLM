@@ -30,6 +30,7 @@ interface VerseActionSheetProps {
   onCrossVersionChange?: (on: boolean) => void;
   onClose: () => void;
   onToggleMark: (kind: 'highlight' | 'bookmark', color: string) => void;
+  /** Called after a note and its pointer are both stored, to refresh the marks. */
   onNoteSaved?: () => void;
   onShared?: (target: 'clipboard' | 'system') => void;
 }
@@ -75,10 +76,18 @@ export default function VerseActionSheet({
   const [busy, setBusy] = useState(false);
   const [studyOpen, setStudyOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
+  const [noteBody, setNoteBody] = useState<string | null>(null);
   const { trigger } = useHaptics();
 
   const highlight = marks.find((m) => m.kind === 'highlight');
   const bookmark = marks.find((m) => m.kind === 'bookmark');
+  const noteMark = marks.find(
+    (m) =>
+      m.kind === 'note' &&
+      m.note_path &&
+      m.verse_start <= verse.verse &&
+      (m.verse_end ?? m.verse_start) >= verse.verse,
+  );
 
   const run = async (label: string, work: () => Promise<string | void>) => {
     setBusy(true);
@@ -94,14 +103,46 @@ export default function VerseActionSheet({
 
   const saveNote = () =>
     run('Saved to Notes', async () => {
-      await api.createNote({
+      const saved = await api.createNote({
         title: verse.reference,
         category: 'Bible',
         content: `${verse.reference}\n\n${verse.text}`,
       });
       await api.recordBibleEvent('note_created', verse.reference);
+      const path = typeof saved.detail?.path === 'string' ? saved.detail.path : '';
+      if (!path) {
+        // The note was written but we were not told where, so the verse cannot
+        // be marked as having one. Say that rather than claim a pointer we do
+        // not have.
+        return 'Saved to Notes, but the app was not told where. Reopen Notes to find it.';
+      }
+      try {
+        await api.putBibleMark({
+          ref: verse.reference,
+          kind: 'note',
+          version_code: version,
+          note_path: path,
+          note_preview: `${verse.reference} — ${verse.text.slice(0, 120)}`,
+        });
+      } catch {
+        // The note itself is safe; only the pointer failed. Saying so is better
+        // than marking the verse and letting the reader find an empty note, or
+        // than hiding it and letting them write the same note twice.
+        onNoteSaved?.();
+        return 'Saved to Notes, but this verse could not be marked as having one.';
+      }
       onNoteSaved?.();
       return 'Saved to Notes';
+    });
+
+  const openNote = () =>
+    run('Note opened', async () => {
+      const stored = noteMark?.note_path;
+      if (!stored) return 'No note for this verse yet.';
+      const read = await api.readNote(verse.reference, 'nextcloud', stored);
+      if (read.status !== 'SUCCESS') return read.message || 'The note could not be read.';
+      setNoteBody(read.message);
+      return 'Note opened';
     });
 
   const copy = () =>
@@ -245,6 +286,19 @@ export default function VerseActionSheet({
             <span className="flex-1">Save to Notes</span>
           </button>
 
+          {noteMark && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void openNote()}
+              className={ACTION_CLASS}
+              data-testid="bible-action-open-note"
+            >
+              <NotebookPen size={16} className="text-sky-300" />
+              <span className="flex-1">Open your note</span>
+            </button>
+          )}
+
           <button
             type="button"
             disabled={busy}
@@ -289,6 +343,13 @@ export default function VerseActionSheet({
             <span className="flex-1">Interlinear (Greek &amp; Hebrew)</span>
           </button>
         </div>
+
+        {noteBody !== null && (
+          <div className="mt-3 rounded-xl border border-white/10 bg-black/30 p-3" data-testid="bible-note-body">
+            <p className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">Your note</p>
+            <p className="whitespace-pre-wrap text-xs text-slate-200">{noteBody}</p>
+          </div>
+        )}
 
         {status && (
           <p className="mt-3 text-xs text-slate-400" data-testid="bible-sheet-status">

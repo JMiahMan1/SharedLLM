@@ -721,7 +721,7 @@ def devotional_sources():
 class MarkPayload(BaseModel):
     version_code: str = ""
     ref: str
-    kind: str = Field(default="highlight", pattern="^(highlight|bookmark)$")
+    kind: str = Field(default="highlight", pattern="^(highlight|bookmark|note)$")
     color: str = ""
     note_path: str = ""
     note_preview: str = ""
@@ -772,7 +772,10 @@ def put_mark(
     """Create or update the mark covering a reference.
 
     Idempotent on (username, osis, chapter, verse_start, kind) so double-tapping
-    a verse in the reader does not stack two highlights.
+    a verse in the reader does not stack two highlights. ``note`` is a kind of
+    its own: a reader may write a note about a verse without wanting it
+    highlighted, and the reader needs to know which verses have one so it can
+    mark them. The note itself lives in Nextcloud; this row is the index.
     """
     spans = _require_one_span(payload.ref)
     span = spans[0]

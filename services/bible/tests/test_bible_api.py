@@ -283,6 +283,55 @@ def test_a_mark_is_created_and_idempotent(loaded_client: TestClient):
     assert marks[0]["reference"] if "reference" in marks[0] else marks[0]["osis"] == "John"
 
 
+def test_a_note_pointer_is_a_mark_of_its_own(loaded_client: TestClient):
+    """Writing a note about a verse is not the same as highlighting it.
+
+    The note lives in Nextcloud and this row only says one exists, so the two
+    decisions stay separate: a reader can write a note without tinting the
+    verse, and the reader can show which verses have one.
+    """
+    response = loaded_client.put(
+        "/marks",
+        params={"username": "sam"},
+        json={
+            "ref": "John 3:16",
+            "version_code": "kjv",
+            "kind": "note",
+            "note_path": "Bible/John 3_16.md",
+            "note_preview": "John 3:16 — For God so loved the world",
+        },
+    )
+    assert response.status_code == 200, response.text
+    mark = response.json()["mark"]
+    assert mark["kind"] == "note"
+    assert mark["note_path"] == "Bible/John 3_16.md"
+
+    marks = loaded_client.get("/marks", params={"username": "sam"}).json()["marks"]
+    assert [m["kind"] for m in marks] == ["note"]
+    assert marks[0]["note_preview"].startswith("John 3:16")
+
+
+def test_a_note_and_a_highlight_can_share_a_verse(loaded_client: TestClient):
+    """The two are keyed by kind, so neither replaces the other."""
+    loaded_client.put(
+        "/marks", params={"username": "sam"}, json={"ref": "John 3:16", "kind": "highlight"}
+    )
+    loaded_client.put(
+        "/marks",
+        params={"username": "sam"},
+        json={"ref": "John 3:16", "kind": "note", "note_path": "Bible/John 3_16.md"},
+    )
+    marks = loaded_client.get("/marks", params={"username": "sam"}).json()["marks"]
+    assert sorted(m["kind"] for m in marks) == ["highlight", "note"]
+
+
+def test_an_unknown_mark_kind_is_still_refused(loaded_client: TestClient):
+    response = loaded_client.put(
+        "/marks", params={"username": "sam"}, json={"ref": "John 3:16", "kind": "bookmarker"}
+    )
+    assert response.status_code == 422
+
+
 def test_marks_can_be_filtered_by_book(loaded_client: TestClient):
     loaded_client.put("/marks", params={"username": "sam"}, json={"ref": "John 3:16"})
     loaded_client.put("/marks", params={"username": "sam"}, json={"ref": "Ps 23:1"})

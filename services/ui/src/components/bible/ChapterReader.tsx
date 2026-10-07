@@ -1,4 +1,4 @@
-import { BookMarked } from 'lucide-react';
+import { BookMarked, NotebookPen } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { BibleMark, BibleVerse } from '../../types/api';
 
@@ -7,6 +7,12 @@ interface ChapterReaderProps {
   marks: BibleMark[];
   /** `"chapter:verse"` keys of verses that carry study material in this translation. */
   studiedVerses?: Set<string>;
+  /**
+   * `"chapter:verse"` keys of verses the reader has written a note about. A
+   * note lives in Nextcloud and this only says one exists, so the glyph is a
+   * pointer rather than the content.
+   */
+  notedVerses?: Set<string>;
   /**
    * The verses of a second translation for the same passage. Absent or empty
    * means no comparison is being asked for.
@@ -61,6 +67,7 @@ export default function ChapterReader({
   verses,
   marks,
   studiedVerses,
+  notedVerses,
   compareVerses,
   compareName,
   fontScale,
@@ -130,6 +137,7 @@ export default function ChapterReader({
         const mark = markFor(marks, verse);
         const tint = mark ? (MARK_TINTS[mark.color] ?? MARK_TINTS.yellow) : '';
         const studied = studiedVerses?.has(`${verse.chapter}:${verse.verse}`) ?? false;
+        const noted = notedVerses?.has(`${verse.chapter}:${verse.verse}`) ?? false;
         const compareText = comparing ? byVerse.get(verse.verse) : undefined;
         return (
           <button
@@ -140,8 +148,8 @@ export default function ChapterReader({
               onVerseTap(verse);
             }}
             aria-label={`${verse.reference}. ${verse.text}${studied ? '. Has study notes.' : ''}${
-              comparing && !compareText ? '. Not in the compared translation.' : ''
-            }`}
+              noted ? '. Has your note.' : ''
+            }${comparing && !compareText ? '. Not in the compared translation.' : ''}`}
             data-testid={`bible-verse-${verse.chapter}-${verse.verse}`}
             className={`w-full text-left rounded-lg px-2 py-1 min-h-11 pointer-coarse:min-h-11 hover:bg-white/[0.04] transition-colors ${
               mark ? `border-l-2 ${tint}` : 'border-l-2 border-transparent'
@@ -181,13 +189,26 @@ export default function ChapterReader({
                   </span>
                 </span>
               )}
-              {studied && (
-                <span
-                  className="ml-auto shrink-0 self-center text-amber-400/70 font-sans"
-                  title="Has study notes"
-                  data-testid={`bible-verse-studied-${verse.chapter}-${verse.verse}`}
-                >
-                  <BookMarked size={12} />
+              {(studied || noted) && (
+                <span className="ml-auto shrink-0 self-center flex items-center gap-1 font-sans">
+                  {studied && (
+                    <span
+                      className="text-amber-400/70"
+                      title="Has study notes"
+                      data-testid={`bible-verse-studied-${verse.chapter}-${verse.verse}`}
+                    >
+                      <BookMarked size={12} />
+                    </span>
+                  )}
+                  {noted && (
+                    <span
+                      className="text-sky-300/80"
+                      title="You wrote a note about this verse"
+                      data-testid={`bible-verse-noted-${verse.chapter}-${verse.verse}`}
+                    >
+                      <NotebookPen size={12} />
+                    </span>
+                  )}
                 </span>
               )}
             </span>

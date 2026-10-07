@@ -109,3 +109,56 @@ async def test_check_off_reports_missing_item(provider, monkeypatch):
 async def test_check_off_requires_item(provider):
     result = await note_handler.handle_note(request("check_off", title="List"))
     assert result.status == "FAILURE"
+
+
+async def test_create_reports_where_the_note_was_written(provider, monkeypatch):
+    """A caller that wants to point at the note later needs the real path.
+
+    The filename is this handler's rule, so the path is handed back rather than
+    rebuilt by the caller -- a second implementation of "sanitize_filename"
+    would drift and start pointing at files that do not exist.
+    """
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, **kwargs):
+        return {"status_code": 201, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(
+        request("create", title="John 3:16", category="Bible", content="text")
+    )
+
+    assert result.status == "SUCCESS"
+    assert result.detail is not None
+    assert result.detail["path"] == "Bible/John_3:16.md"
+
+
+async def test_write_reports_where_the_note_was_written(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, **kwargs):
+        return {"status_code": 204, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(
+        request("write", title="John 3:16", category="Bible", content="text")
+    )
+    assert result.detail is not None
+    assert result.detail["path"] == "Bible/John_3:16.md"
+
+
+async def test_write_to_an_explicit_path_reports_that_path(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, **kwargs):
+        return {"status_code": 204, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(
+        request("write", title="John 3:16", path="/Bible/John 3_16.md", content="text")
+    )
+    assert result.detail is not None
+    assert result.detail["path"] == "Bible/John 3_16.md"
