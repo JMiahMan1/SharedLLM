@@ -14,7 +14,9 @@ import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
@@ -44,27 +46,42 @@ public class LocationTrackingService extends Service {
     private static final int NOTIFICATION_ID = 0x10A1;
     private static final long MIN_TIME_MS = 30_000L;
     private static final float MIN_DISTANCE_M = 5f;
+    /** At most one upload this often while fixes keep arriving (moving). */
+    private static final long UPLOAD_MIN_MS = 30_000L;
     /**
-     * Re-send even when nothing moved. Without this a stationary device produces
-     * no LocationManager callback at all, so the family's view of "still there"
-     * silently ages out.
+     * Ask for a fresh fix this often even when nothing moved. Without it a
+     * stationary device produces no LocationManager callback at all, so the
+     * family's view of "still there" silently ages out. (This was declared
+     * once and never scheduled; it was also used as the upload throttle, so a
+     * moving phone uploaded at most every five minutes.)
      */
     private static final long HEARTBEAT_MS = 5 * 60 * 1000L;
+    /** A fix this much newer than the one we hold replaces it regardless. */
+    private static final long SIGNIFICANTLY_NEWER_MS = 2 * 60 * 1000L;
     private static final long UPLOAD_TIMEOUT_MS = 15_000L;
 
     private LocationManager locationManager;
     private PowerManager.WakeLock wakeLock;
     private volatile Location lastKnown;
     private volatile long lastUploadAt = 0L;
+    /** Fix time of the last fix uploaded, so an unchanged fix is not re-sent. */
+    private volatile long lastUploadedFixTime = 0L;
     private volatile String username;
     private volatile String userId;
     private volatile boolean uploading = false;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable heartbeat = new Runnable() {
+        @Override
+        public void run() {
+            if (System.currentTimeMillis() - lastUploadAt >= HEARTBEAT_MS) requestFreshFix();
+            handler.postDelayed(this, HEARTBEAT_MS);
+        }
+    };
 
     private final LocationListener listener = new LocationListener() {
         @Override
         public void onLocationChanged(Location location) {
-            lastKnown = location;
-            upload(location, false);
+            consider(location);
         }
 
         @Override
@@ -108,6 +125,8 @@ public class LocationTrackingService extends Service {
         startForegroundCompat();
         acquireWakeLock();
         requestUpdates();
+        handler.removeCallbacks(heartbeat);
+        handler.postDelayed(heartbeat, HEARTBEAT_MS);
         // Sticky: if Android reclaims us, come back on our own.
         return START_STICKY;
     }
@@ -191,7 +210,7 @@ public class LocationTrackingService extends Service {
             Location cached = bestLastKnown();
             if (cached != null) {
                 lastKnown = cached;
-                upload(cached, true);
+                upload(cached, true);  // sent with its own (possibly old) fix time
             }
             Log.i(TAG, "tracking started for " + username);
         } catch (SecurityException e) {
@@ -216,7 +235,63 @@ public class LocationTrackingService extends Service {
     }
 
     /**
-     * @param force upload even inside the heartbeat window, used for a seeded fix
+     * Keep the better of a new fix and the one held, then upload when due.
+     * GPS and network fixes both arrive here; without the comparison a coarse
+     * network fix (tens of metres) that happened to arrive first was uploaded
+     * and a precise GPS fix seconds later was dropped by the throttle.
+     */
+    private void consider(Location location) {
+        if (isBetter(location, lastKnown)) lastKnown = location;
+        if (System.currentTimeMillis() - lastUploadAt >= UPLOAD_MIN_MS && lastKnown != null) {
+            upload(lastKnown, false);
+        }
+    }
+
+    /** Android's "is this a better fix" rule: newer, then more accurate. */
+    static boolean isBetter(Location candidate, Location current) {
+        if (current == null) return true;
+        long dt = candidate.getTime() - current.getTime();
+        if (dt > SIGNIFICANTLY_NEWER_MS) return true;
+        if (dt < -SIGNIFICANTLY_NEWER_MS) return false;
+        float da = (candidate.hasAccuracy() ? candidate.getAccuracy() : Float.MAX_VALUE)
+                - (current.hasAccuracy() ? current.getAccuracy() : Float.MAX_VALUE);
+        if (da < 0) return true;                       // more accurate
+        if (dt > 0 && da == 0) return true;            // as accurate, newer
+        boolean sameProvider = candidate.getProvider() != null
+                && candidate.getProvider().equals(current.getProvider());
+        return dt > 0 && da <= 200 && sameProvider;    // newer and not much worse
+    }
+
+    /** One fresh fix from each enabled provider, for the heartbeat. */
+    @SuppressWarnings("deprecation")
+    private void requestFreshFix() {
+        if (locationManager == null) return;
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) return;
+        try {
+            for (String provider : new String[]{
+                    LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+                if (locationManager.isProviderEnabled(provider)) {
+                    locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper());
+                }
+            }
+        } catch (SecurityException e) {
+            Log.w(TAG, "fresh fix denied", e);
+        }
+        // Nothing may arrive (indoors, no GPS): re-send what we hold, which
+        // carries its own fix time, so the server can tell it is not new.
+        handler.postDelayed(() -> {
+            Location held = lastKnown;
+            if (System.currentTimeMillis() - lastUploadAt >= HEARTBEAT_MS && held != null
+                    && held.getTime() > lastUploadedFixTime) {
+                upload(held, true);
+            }
+        }, 60_000L);
+    }
+
+    /**
+     * @param force upload even inside the throttle window, used for a seeded
+     *              fix and the heartbeat
      */
     private void upload(Location location, boolean force) {
         long now = System.currentTimeMillis();
@@ -224,7 +299,7 @@ public class LocationTrackingService extends Service {
             Log.w(TAG, "no username persisted; not uploading");
             return;
         }
-        if (!force && now - lastUploadAt < HEARTBEAT_MS) {
+        if (!force && now - lastUploadAt < UPLOAD_MIN_MS) {
             return;
         }
         if (uploading) {
@@ -235,6 +310,7 @@ public class LocationTrackingService extends Service {
             try {
                 doUpload(location);
                 lastUploadAt = System.currentTimeMillis();
+                lastUploadedFixTime = location.getTime();
             } finally {
                 uploading = false;
             }
@@ -277,7 +353,9 @@ public class LocationTrackingService extends Service {
         body.put("longitude", location.getLongitude());
         body.put("accuracy", location.hasAccuracy() ? location.getAccuracy() : 0);
         body.put("speed", location.hasSpeed() ? location.getSpeed() : 0);
-        body.put("timestamp", System.currentTimeMillis() / 1000.0);
+        // When the fix was taken, not when it is sent: a cached last-known fix
+        // (hours old, possibly) used to be reported as current.
+        body.put("timestamp", (location.getTime() > 0 ? location.getTime() : System.currentTimeMillis()) / 1000.0);
         body.put("user_id", userId != null ? userId : username);
         if (userId != null) {
             body.put("username", username);
@@ -299,6 +377,7 @@ public class LocationTrackingService extends Service {
     }
 
     private void stopTracking() {
+        handler.removeCallbacksAndMessages(null);
         if (locationManager != null) {
             try {
                 locationManager.removeUpdates(listener);
@@ -313,6 +392,7 @@ public class LocationTrackingService extends Service {
 
     @Override
     public void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
         releaseWakeLock();
         if (locationManager != null) {
             try {
