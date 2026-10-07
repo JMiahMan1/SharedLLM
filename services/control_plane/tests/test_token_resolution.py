@@ -22,43 +22,42 @@ def control_plane_code():
 
 
 class TestTokenResolutionFallback:
-    """Test token resolution fallback order."""
+    """_github_token(): Identity's token for user 1, else GHCR_TOKEN, else
+    GITHUB_TOKEN. (Behaviour, not source text: the lookup moved into one
+    helper shared by update checks and the road-map automation.)"""
 
-    def test_ghcr_token_takes_priority_over_github_token(self, control_plane_code):
-        """GHCR_TOKEN should be used when both GHCR_TOKEN and GITHUB_TOKEN are set."""
-        assert "os.getenv(\"GHCR_TOKEN\", \"\")" in control_plane_code
-        assert "os.getenv(\"GITHUB_TOKEN\", \"\")" in control_plane_code
+    @staticmethod
+    def _identity(monkeypatch, token):
+        import io
+        import json
+        import urllib.request
 
-        # Verify GHCR_TOKEN is checked before GITHUB_TOKEN
-        ghcr_pos = control_plane_code.find('os.getenv("GHCR_TOKEN", "")')
-        github_pos = control_plane_code.find('os.getenv("GITHUB_TOKEN", "")')
-        assert ghcr_pos < github_pos, "GHCR_TOKEN should be checked before GITHUB_TOKEN"
+        def urlopen(req, timeout=None):
+            if token is None:
+                raise OSError("identity down")
+            return io.BytesIO(json.dumps({"github_token": token}).encode())
+        monkeypatch.setattr(urllib.request, "urlopen", urlopen)
 
-    def test_fallback_to_github_token(self, control_plane_code):
-        """Should fall back to GITHUB_TOKEN if GHCR_TOKEN is empty."""
-        assert "# Fallback to GHCR_TOKEN environment variable" in control_plane_code
-        assert "# Fallback to GITHUB_TOKEN environment variable" in control_plane_code
+    def test_identity_token_comes_first(self, monkeypatch):
+        from services.control_plane import main
+        self._identity(monkeypatch, "ghp_identity")
+        monkeypatch.setenv("GHCR_TOKEN", "ghcr_env")
+        monkeypatch.setenv("GITHUB_TOKEN", "gh_env")
+        assert main._github_token() == "ghp_identity"
 
-        # Verify the fallback logic structure
-        assert 'if not ghcr_token:' in control_plane_code
-        assert 'ghcr_token = os.getenv("GHCR_TOKEN", "")' in control_plane_code
-        assert 'ghcr_token = os.getenv("GITHUB_TOKEN", "")' in control_plane_code
+    def test_ghcr_token_before_github_token(self, monkeypatch):
+        from services.control_plane import main
+        self._identity(monkeypatch, None)
+        monkeypatch.setenv("GHCR_TOKEN", "ghcr_env")
+        monkeypatch.setenv("GITHUB_TOKEN", "gh_env")
+        assert main._github_token() == "ghcr_env"
 
-    def test_identity_service_fetched_first(self, control_plane_code):
-        """Should fetch github_token from identity service first."""
-        assert "identity_svc_url" in control_plane_code
-        assert "/api/resolve" in control_plane_code
-        assert '"user_id": 1' in control_plane_code
-
-    def test_github_token_from_identity_takes_priority(self, control_plane_code):
-        """Identity service github_token should be used before env vars."""
-        # Verify identity service fetch comes before env var fallbacks
-        identity_pos = control_plane_code.find('resp_data.get("github_token")')
-        ghcr_env_pos = control_plane_code.find('os.getenv("GHCR_TOKEN", "")')
-        github_env_pos = control_plane_code.find('os.getenv("GITHUB_TOKEN", "")')
-
-        assert identity_pos < ghcr_env_pos, "Identity service should be checked before GHCR_TOKEN"
-        assert identity_pos < github_env_pos, "Identity service should be checked before GITHUB_TOKEN"
+    def test_falls_back_to_github_token(self, monkeypatch):
+        from services.control_plane import main
+        self._identity(monkeypatch, "")
+        monkeypatch.delenv("GHCR_TOKEN", raising=False)
+        monkeypatch.setenv("GITHUB_TOKEN", "gh_env")
+        assert main._github_token() == "gh_env"
 
 
 class TestEnvironmentVariableConfiguration:

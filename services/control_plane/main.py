@@ -10,7 +10,8 @@ from docker.errors import NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 import docker
-from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
+from services.config import GEO_SVC_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
+from services.control_plane import osrm_map
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
@@ -107,6 +108,41 @@ def _reap_orphan_sandboxes() -> int:
     return removed
 
 
+OSRM_MAP_CHECK_INTERVAL = int(os.getenv("OSRM_MAP_CHECK_INTERVAL", "3600"))
+
+
+def osrm_map_tick() -> None:
+    """Extend the road map to regions trips needed, and deploy a rebuilt map
+    (services/control_plane/osrm_map.py)."""
+    token = _github_token()
+    if not token:
+        log.info("[osrm-map] no GitHub token; not managing the map")
+        return
+    try:
+        resp = requests.get(f"{GEO_SVC_URL}/map/regions", headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=15)
+        resp.raise_for_status()
+        osrm_map.extend(resp.json().get("needed") or [], token)
+    except Exception as e:
+        log.warning(f"[osrm-map] could not extend the map: {e}")
+    try:
+        container = _resolve_container("osrm") if client else None
+        created = container.attrs.get("Created") if container else None
+        if container and osrm_map.needs_deploy(created, osrm_map.latest_build_finished_at(token)):
+            log.info("[osrm-map] a newer map was built; deploying it")
+            pull_and_restart("osrm")
+    except Exception as e:
+        log.warning(f"[osrm-map] could not deploy the map: {e}")
+
+
+def _osrm_map_loop() -> None:
+    while True:
+        time.sleep(OSRM_MAP_CHECK_INTERVAL)
+        try:
+            osrm_map_tick()
+        except Exception as e:  # never let the thread die
+            log.error(f"[osrm-map] unexpected error: {e}")
+
+
 def _reaper_loop() -> None:
     while True:
         time.sleep(SANDBOX_REAP_INTERVAL)
@@ -120,6 +156,7 @@ def _reaper_loop() -> None:
 async def lifespan(app: FastAPI):
     t = threading.Thread(target=_reaper_loop, name="sandbox-reaper", daemon=True)
     t.start()
+    threading.Thread(target=_osrm_map_loop, name="osrm-map", daemon=True).start()
     log.info(f"Sandbox reaper started (interval={SANDBOX_REAP_INTERVAL}s)")
     yield
 
@@ -726,6 +763,27 @@ def delete_container(service_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _github_token() -> str:
+    """The GitHub token: user ID 1's github_token from Identity, else the
+    GHCR_TOKEN or GITHUB_TOKEN environment variable, else ""."""
+    import json as _json
+    import urllib.request
+
+    token = ""
+    try:
+        req = urllib.request.Request(
+            f"{IDENTITY_SVC_URL}/api/resolve",
+            data=_json.dumps({"user_id": 1}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-Internal-Secret": INTERNAL_SECRET},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            token = _json.loads(resp.read().decode("utf-8")).get("github_token") or ""
+    except Exception as e:
+        log.warning(f"[github] Failed to resolve GitHub token for user ID 1: {e}")
+    return token or os.getenv("GHCR_TOKEN", "") or os.getenv("GITHUB_TOKEN", "")
+
+
 @app.get("/api/admin/services/updates", dependencies=[Depends(verify_internal_secret)])
 def check_all_updates():
     """
@@ -740,42 +798,13 @@ def check_all_updates():
     2. GHCR_TOKEN environment variable
     3. GITHUB_TOKEN environment variable
     """
-    import json as _json
     import urllib.request
 
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
 
     # GHCR auth token (GitHub PAT with read:packages scope)
-    # First, try to fetch user ID 1's github_token from identity service
-    ghcr_token = ""
-    try:
-        identity_svc_url = IDENTITY_SVC_URL
-        req_data = _json.dumps({"user_id": 1}).encode("utf-8")
-        req = urllib.request.Request(
-            f"{identity_svc_url}/api/resolve",
-            data=req_data,
-            headers={
-                "Content-Type": "application/json",
-                "X-Internal-Secret": INTERNAL_SECRET
-            },
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            resp_data = _json.loads(resp.read().decode("utf-8"))
-            ghcr_token = resp_data.get("github_token") or ""
-            if ghcr_token:
-                log.info("[updates] Successfully resolved GitHub token for user ID 1 from identity")
-    except Exception as e:
-        log.warning(f"[updates] Failed to resolve GitHub token for user ID 1: {e}")
-
-    # Fallback to GHCR_TOKEN environment variable
-    if not ghcr_token:
-        ghcr_token = os.getenv("GHCR_TOKEN", "")
-
-    # Fallback to GITHUB_TOKEN environment variable
-    if not ghcr_token:
-        ghcr_token = os.getenv("GITHUB_TOKEN", "")
+    ghcr_token = _github_token()
 
     # Decide whether remote digest checks are viable BEFORE looping over every
     # container. Without a usable GHCR token (or with GHCR unreachable), each
