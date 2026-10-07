@@ -294,15 +294,29 @@ def _add_item(
     such as lifespan seeding and tests).
     """
     user_id = user_id.lower()
+    # A replace refreshes content, metadata and the lesson columns, but the
+    # counters are history. The old statement reset them to 0/NULL on every
+    # re-ingest, so re-learning the same rule wiped its applied_count (which
+    # the Apply: loop scores against) and each HA sync reset every entity's
+    # usage_count to zero five minutes after the previous sync set it.
+    existing = _conn().execute(
+        "SELECT created_at, usage_count, last_used_at, applied_count"
+        " FROM rag_items WHERE id = ?",
+        [doc_id],
+    ).fetchone()
+    created_at = existing["created_at"] if existing else created_at
+    usage_count = existing["usage_count"] if existing else 0
+    last_used_at = existing["last_used_at"] if existing else None
+    applied_count = existing["applied_count"] if existing else 0
     # Carry usage tracking into metadata for backward-visible reuse stats.
     stored_metadata = dict(metadata or {})
-    stored_metadata.setdefault("usage_count", 0)
+    stored_metadata["usage_count"] = usage_count
     _conn().execute(
         "INSERT OR REPLACE INTO rag_items"
         "(id, collection_name, user_id, content, metadata, created_at, indexed_at, "
         " usage_count, last_used_at, rule, root_cause, outcome, confidence, "
         " applied_count, supersedes) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, 0, ?)",
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             doc_id,
             collection,
@@ -311,10 +325,13 @@ def _add_item(
             json.dumps(stored_metadata),
             created_at,
             indexed_at,
+            usage_count,
+            last_used_at,
             (metadata or {}).get("rule", ""),
             (metadata or {}).get("root_cause", ""),
             (metadata or {}).get("outcome", "success"),
             float((metadata or {}).get("confidence", 0.5)),
+            applied_count,
             json.dumps((metadata or {}).get("supersedes", [])),
         ],
     )
