@@ -187,6 +187,14 @@ class KokoroTTSEngine:
                 voices_path=self.voices_path,
                 model_config_path=self.config_path,
                 cache_dir=os.path.join(os.path.expanduser("~"), ".cache", "pykokoro"),
+                # Kokoro's window is 510 model tokens (roughly a thousand
+                # characters). Without this, anything longer -- a whole chapter,
+                # a podcast script, a storybook page -- is refused outright with
+                # "split the request externally". With it, pykokoro splits on
+                # sentences, then clauses, then words, packing each piece back
+                # up to the limit, so a long passage is spoken instead of
+                # rejected.
+                long_text_split="sentence",
             )
             self._synth = KokoroSynthesizer(config)
 

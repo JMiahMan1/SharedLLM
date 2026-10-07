@@ -8,7 +8,8 @@ vi.mock('../../hooks/useHaptics', () => ({ useHaptics: () => ({ trigger: vi.fn()
 
 const apiMock = vi.hoisted(() => ({
   getBibleVoices: vi.fn(),
-  getBibleNarration: vi.fn(),
+  getBibleNarrationPlan: vi.fn(),
+  getBibleNarrationChunk: vi.fn(),
 }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -20,12 +21,33 @@ function audioElement(): HTMLAudioElement {
   return screen.getByTestId('bible-read-aloud-audio') as unknown as HTMLAudioElement;
 }
 
-function narration(over: Record<string, unknown> = {}) {
+function plan(over: Record<string, unknown> = {}) {
+  const count = (over.count as number) ?? 3;
   return {
     version: 'nkjv',
     reference: 'John 3',
     voice: 'af_heart',
-    verse_count: 36,
+    count,
+    characters: 900,
+    cached_count: 0,
+    all_cached: false,
+    chunks: Array.from({ length: count }, (_unused, index) => ({
+      index,
+      characters: 300,
+      cached: false,
+    })),
+    ...over,
+  };
+}
+
+function chunk(over: Record<string, unknown> = {}) {
+  return {
+    version: 'nkjv',
+    reference: 'John 3',
+    voice: 'af_heart',
+    index: 0,
+    count: 3,
+    characters: 300,
     cached: false,
     mime_type: 'audio/wav',
     length_bytes: 4,
@@ -34,13 +56,13 @@ function narration(over: Record<string, unknown> = {}) {
   };
 }
 
-function renderPanel(voice = '') {
+function renderPanel(voice = '', reference = 'John 3') {
   const onVoiceChange = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <BibleReadAloud
-        reference="John 3"
+        reference={reference}
         version="nkjv"
         voice={voice}
         onVoiceChange={onVoiceChange}
@@ -56,7 +78,10 @@ describe('BibleReadAloud', () => {
   beforeEach(() => {
     blobUrls = 0;
     apiMock.getBibleVoices.mockResolvedValue({ voices: ['af_heart'], count: 1 });
-    apiMock.getBibleNarration.mockResolvedValue(narration());
+    apiMock.getBibleNarrationPlan.mockResolvedValue(plan());
+    apiMock.getBibleNarrationChunk.mockImplementation(async (_ref: string, index: number) =>
+      chunk({ index }),
+    );
     URL.createObjectURL = vi.fn(() => {
       blobUrls += 1;
       return `blob:verse-${blobUrls}`;
@@ -70,22 +95,70 @@ describe('BibleReadAloud', () => {
     renderPanel();
     expect(await screen.findByTestId('bible-read-aloud')).toBeTruthy();
     expect(screen.getByTestId('bible-read-aloud-play').textContent).toContain('Read this passage');
-    expect(apiMock.getBibleNarration).not.toHaveBeenCalled();
+    expect(apiMock.getBibleNarrationPlan).not.toHaveBeenCalled();
+    expect(apiMock.getBibleNarrationChunk).not.toHaveBeenCalled();
   });
 
-  it('asks the gateway for the passage in the open translation and plays it', async () => {
+  it('asks how the passage is spoken, then plays the first piece', async () => {
     renderPanel();
     await userEvent.click(screen.getByTestId('bible-read-aloud-play'));
-    await waitFor(() => expect(apiMock.getBibleNarration).toHaveBeenCalledWith('John 3', 'nkjv', undefined));
+    await waitFor(() =>
+      expect(apiMock.getBibleNarrationPlan).toHaveBeenCalledWith('John 3', 'nkjv', undefined),
+    );
+    await waitFor(() =>
+      expect(apiMock.getBibleNarrationChunk).toHaveBeenCalledWith('John 3', 0, 'nkjv', undefined),
+    );
     await waitFor(() => expect(audioElement().src).toBe('blob:verse-1'));
     expect(screen.getByTestId('bible-read-aloud-play').textContent).toContain('Pause');
   });
 
-  it('says a second play of the same passage came from the cache', async () => {
-    apiMock.getBibleNarration.mockResolvedValue(narration({ cached: true }));
+  it('starts playing before the rest of the passage has been fetched', async () => {
+    let release: (() => void) | null = null;
+    apiMock.getBibleNarrationChunk.mockImplementation(async (_ref: string, index: number) => {
+      if (index > 0) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return chunk({ index });
+    });
     renderPanel();
     await userEvent.click(screen.getByTestId('bible-read-aloud-play'));
-    expect(await screen.findByText(/from the narration cache/i)).toBeTruthy();
+    // Piece 0 is playing while piece 1 is still in flight.
+    await waitFor(() => expect(audioElement().src).toBe('blob:verse-1'));
+    expect(screen.getByTestId('bible-read-aloud-play').textContent).toContain('Pause');
+    release?.();
+  });
+
+  it('plays the next piece when the current one ends', async () => {
+    renderPanel();
+    await userEvent.click(screen.getByTestId('bible-read-aloud-play'));
+    await waitFor(() => expect(audioElement().src).toBe('blob:verse-1'));
+    audioElement().dispatchEvent(new Event('ended'));
+    await waitFor(() => expect(audioElement().src).toBe('blob:verse-2'));
+    expect(await screen.findByTestId('bible-read-aloud-progress')).toHaveTextContent('Part 2 of 3');
+  });
+
+  it('reuses a piece the server reports as already spoken', async () => {
+    apiMock.getBibleNarrationPlan.mockResolvedValue(
+      plan({
+        count: 1,
+        all_cached: true,
+        cached_count: 1,
+        chunks: [{ index: 0, characters: 300, cached: true }],
+      }),
+    );
+    renderPanel('', 'Ps 23');
+    await userEvent.click(screen.getByTestId('bible-read-aloud-play'));
+    await waitFor(() => expect(apiMock.getBibleNarrationChunk).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId('bible-read-aloud-progress')).toHaveTextContent(
+      /from the narration cache/,
+    );
+    await userEvent.click(screen.getByText('Stop'));
+    // Second play, same passage and voice: the piece is already in hand.
+    await userEvent.click(screen.getByTestId('bible-read-aloud-play'));
+    await waitFor(() => expect(audioElement().src).toBeTruthy());
+    expect(apiMock.getBibleNarrationChunk).toHaveBeenCalledTimes(1);
   });
 
   it('passes the chosen voice through and remembers the change', async () => {
@@ -100,12 +173,12 @@ describe('BibleReadAloud', () => {
     renderPanel('af_bella');
     await userEvent.click(await screen.findByTestId('bible-read-aloud-play'));
     await waitFor(() =>
-      expect(apiMock.getBibleNarration).toHaveBeenCalledWith('John 3', 'nkjv', 'af_bella'),
+      expect(apiMock.getBibleNarrationPlan).toHaveBeenCalledWith('John 3', 'nkjv', 'af_bella'),
     );
   });
 
   it('shows the server sentence when the engine cannot narrate', async () => {
-    apiMock.getBibleNarration.mockRejectedValue(
+    apiMock.getBibleNarrationPlan.mockRejectedValue(
       new Error('Kokoro voices missing. Install them with POST /execute/tts/download?voice_type=kokoro-v1.0'),
     );
     renderPanel();
@@ -117,7 +190,7 @@ describe('BibleReadAloud', () => {
   });
 
   it('shows the refusal when a passage is too long to narrate', async () => {
-    apiMock.getBibleNarration.mockRejectedValue(
+    apiMock.getBibleNarrationPlan.mockRejectedValue(
       new Error('That passage is 200 verses. Select a shorter passage.'),
     );
     renderPanel();
@@ -142,8 +215,8 @@ describe('BibleReadAloud', () => {
     expect(screen.queryByTestId('bible-read-aloud-voice')).toBeNull();
   });
 
-  it('pauses and resumes without asking for the passage again', async () => {
-    renderPanel();
+  it('pauses and resumes without asking for anything again', async () => {
+    renderPanel('', 'Rom 8');
     const play = screen.getByTestId('bible-read-aloud-play');
     await userEvent.click(play);
     await waitFor(() => expect(audioElement().src).toBe('blob:verse-1'));
@@ -155,6 +228,6 @@ describe('BibleReadAloud', () => {
     expect(play.textContent).toContain('Resume');
     await userEvent.click(play);
     expect(element.play).toHaveBeenCalledTimes(1);
-    expect(apiMock.getBibleNarration).toHaveBeenCalledTimes(1);
+    expect(apiMock.getBibleNarrationPlan).toHaveBeenCalledTimes(1);
   });
 });

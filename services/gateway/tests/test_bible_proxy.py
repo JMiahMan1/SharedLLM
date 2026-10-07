@@ -43,6 +43,8 @@ ROUTES = [
     ("get", "/api/bible/blb/link?ref=John+3:16"),
     ("get", "/api/bible/voices"),
     ("get", "/api/bible/narration?ref=John+3:16"),
+    ("get", "/api/bible/narration/plan?ref=John+3:16"),
+    ("get", "/api/bible/narration/chunk?ref=John+3:16&index=0"),
     ("post", "/api/bible/study/ask"),
     ("get", "/api/bible/admin/imports"),
     ("get", "/api/bible/admin/providers/api.bible/estimate?translation_id=niv"),
@@ -427,6 +429,52 @@ def test_a_passage_that_is_too_long_to_narrate_is_a_400(make_client, monkeypatch
     assert resp.status_code == 400
     assert "shorter passage" in resp.json()["detail"]
     assert captured["calls"]
+
+
+def test_the_narration_plan_is_asked_without_a_voice_when_none_is_chosen(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={"count": 12, "chunks": []})
+    resp = make_client(user="michele").get("/api/bible/narration/plan", params={"ref": "Romans 8"})
+    assert resp.status_code == 200
+    call = captured["calls"][-1]
+    assert call["url"].endswith("/narration/plan")
+    assert call["params"] == {"ref": "Romans 8"}
+
+
+def test_one_piece_is_asked_for_by_its_index(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={"audio_base64": "AAA=", "index": 3})
+    resp = make_client(user="michele").get(
+        "/api/bible/narration/chunk",
+        params={"ref": "Romans 8", "index": 3, "version": "nkjv", "voice": "af_heart"},
+    )
+    assert resp.status_code == 200
+    assert captured["calls"][-1]["params"] == {
+        "ref": "Romans 8",
+        "index": 3,
+        "version": "nkjv",
+        "voice": "af_heart",
+    }
+
+
+def test_a_piece_past_the_end_is_the_readers_problem_not_the_operators(make_client, monkeypatch):
+    _patch_bible(monkeypatch, status=400, payload={"detail": "There are 12 pieces. Ask for 0 to 11."})
+    resp = make_client(user="michele").get(
+        "/api/bible/narration/chunk", params={"ref": "Romans 8", "index": 99}
+    )
+    assert resp.status_code == 400
+    assert "12 pieces" in resp.json()["detail"]
+
+
+def test_a_missing_voice_file_still_names_its_fix_on_the_piece_route(make_client, monkeypatch):
+    _patch_bible(
+        monkeypatch,
+        status=503,
+        payload={"detail": "Kokoro voices missing. Install them with POST /execute/tts/download"},
+    )
+    resp = make_client(user="michele").get(
+        "/api/bible/narration/chunk", params={"ref": "Romans 8", "index": 0}
+    )
+    assert resp.status_code == 503
+    assert "/execute/tts/download" in resp.json()["detail"]
 
 
 # ── imports are an administrator's job ──────────────────────────────────────

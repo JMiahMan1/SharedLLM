@@ -617,6 +617,74 @@ async def narration(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@app.get("/narration/plan")
+async def narration_plan(
+    ref: str = Query(..., description="Human reference, e.g. 'John 3:16' or 'Ps 23'"),
+    version: str | None = Query(default=None),
+    voice: str | None = Query(default=None, description="Voice id from /voices"),
+    session: Session = Depends(get_session),
+):
+    """How a passage will be spoken: how many pieces, and which are already cached.
+
+    The reader's client asks this before it plays anything, so it can start the
+    first piece immediately and fetch the rest while the reader is listening.
+    Nothing is synthesised to answer it, so asking costs nothing.
+    """
+    resolved = _require_version(session, version) if version else _default_version(session)
+    try:
+        spans = parse_reference(ref)
+    except ReferenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    reference = format_reference(spans)
+    try:
+        return narration_mod.plan(
+            session,
+            version=resolved,
+            spans=spans,
+            reference=reference,
+            voice=voice,
+        )
+    except narration_mod.NarrationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/narration/chunk")
+async def narration_chunk(
+    ref: str = Query(..., description="Human reference, e.g. 'John 3:16' or 'Ps 23'"),
+    index: int = Query(..., ge=0, description="Which piece, from /narration/plan"),
+    version: str | None = Query(default=None),
+    voice: str | None = Query(default=None, description="Voice id from /voices"),
+    session: Session = Depends(get_session),
+):
+    """Speak one piece of a passage, or serve it if it has been spoken before.
+
+    A piece is small enough that sound starts while the next is still being
+    rendered, and it is cached on its own, so a verse played after its chapter
+    is already spoken costs nothing to speak again.
+    """
+    resolved = _require_version(session, version) if version else _default_version(session)
+    try:
+        spans = parse_reference(ref)
+    except ReferenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    reference = format_reference(spans)
+    try:
+        return await narration_mod.narrate_chunk(
+            session,
+            version=resolved,
+            spans=spans,
+            reference=reference,
+            voice=voice,
+            index=index,
+            execution_url=EXECUTION_SVC_URL,
+            internal_secret=INTERNAL_SECRET,
+        )
+    except narration_mod.NarrationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except narration_mod.NarrationUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @app.get("/search")
 def search(
     q: str = Query(..., min_length=2),

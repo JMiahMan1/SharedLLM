@@ -43,6 +43,7 @@ COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("userbiblestate", "compare_version", "TEXT", "''"),
     ("userbiblestate", "cross_version_notes", "INTEGER", "0"),
     ("userbiblestate", "show_notes", "INTEGER", "0"),
+    ("narrationaudio", "chunk_index", "INTEGER", "0"),
 )
 
 

@@ -147,6 +147,8 @@ import type {
   BibleDailyResponse,
   BibleVoicesResponse,
   BibleNarration,
+  BibleNarrationChunk,
+  BibleNarrationPlan,
   BibleImportKind,
   BibleImportRun,
   BibleImportsResponse,
@@ -2985,7 +2987,48 @@ export const api = {
     return resp.data;
   },
   async getBibleNarration(ref: string, version?: string, voice?: string): Promise<BibleNarration> {
-    const resp = await apiClient.get('/api/bible/narration', { params: { ref, version, voice } });
+    const resp = await apiClient.get('/api/bible/narration', {
+      params: { ref, version, voice },
+      timeout: 320_000,
+    });
+    return resp.data;
+  },
+
+  /**
+   * How a passage will be spoken: how many pieces, and which are already cached.
+   *
+   * Costs nothing to ask, and lets playback start on the first piece instead of
+   * waiting for a whole chapter to be rendered.
+   */
+  async getBibleNarrationPlan(
+    ref: string,
+    version?: string,
+    voice?: string,
+  ): Promise<BibleNarrationPlan> {
+    const resp = await apiClient.get('/api/bible/narration/plan', {
+      params: { ref, version, voice },
+      timeout: 320_000,
+    });
+    return resp.data;
+  },
+
+  /**
+   * One piece of a passage's narration.
+   *
+   * The generous timeout is the engine's, not the network's: synthesis is
+   * CPU-bound and the server may be busy, and a piece that is refused after
+   * minutes is worse than one that arrives late.
+   */
+  async getBibleNarrationChunk(
+    ref: string,
+    index: number,
+    version?: string,
+    voice?: string,
+  ): Promise<BibleNarrationChunk> {
+    const resp = await apiClient.get('/api/bible/narration/chunk', {
+      params: { ref, index, version, voice },
+      timeout: 320_000,
+    });
     return resp.data;
   },
 

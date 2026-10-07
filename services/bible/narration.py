@@ -27,6 +27,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -49,6 +50,22 @@ MAX_CHARACTERS = 12_000
 MIN_BODY_CHARACTERS = 2
 
 AUDIO_MIME = "audio/wav"
+
+#: How much text one chunk of narration may hold. The engine's own long-text
+#: splitter re-phonemises an ever-growing span as it packs sentences, which
+#: costs minutes on a whole chapter; the same chapter cut into ten pieces here
+#: and handed over a piece at a time takes a tenth as long. So the split
+#: happens here, where it is cheap, and every engine call stays on the fast
+#: path. Roughly a minute of speech, near a thousand characters.
+TARGET_CHUNK_CHARACTERS = 600
+#: The first chunk is deliberately short. It is the one the reader waits for,
+#: and everything else is packed to the target while they are already listening.
+FIRST_CHUNK_CHARACTERS = 240
+
+#: A split point: a paragraph break, or the space after a sentence end. Both
+#: leave the punctuation on the piece that ends, so no chunk starts mid-sentence
+#: more than the reader would notice as a natural pause.
+_SPLIT = re.compile(r"\n{2,}|(?<=[.!?])\s+")
 
 #: Names the model files rather than "the voice model" because the engine needs
 #: three of them now: the ONNX model, the voice pack and the vocabulary. Which
@@ -247,6 +264,228 @@ def _payload(
         "reference": reference,
         "voice": voice,
         "verse_count": verse_count,
+        "cached": cached,
+        "mime_type": mime_type,
+        "length_bytes": len(audio),
+        "audio_base64": base64.b64encode(audio).decode("utf-8"),
+    }
+
+
+@dataclass(frozen=True)
+class Chunk:
+    """One piece of a passage, spoken on its own and cached on its own."""
+
+    index: int
+    text: str
+
+    @property
+    def characters(self) -> int:
+        return len(self.text)
+
+
+def split_script(script: Script) -> list[Chunk]:
+    """Cut a script into the pieces the reader hears one after another.
+
+    Splitting here is a speed decision as much as a correctness one: the
+    engine's own splitter re-phonemises an ever-growing span as it packs
+    sentences, which is acceptable for a paragraph and ruinous for a chapter.
+    Pieces are cut at paragraph and sentence boundaries so no chunk ends
+    mid-word, and the first is short so sound starts while the rest is still
+    being rendered.
+    """
+    pieces = [part.strip() for part in _SPLIT.split(script.text) if part.strip()]
+    chunks: list[Chunk] = []
+    current: list[str] = []
+    size = 0
+    limit = FIRST_CHUNK_CHARACTERS
+    for piece in pieces:
+        if current and size + len(piece) + 1 > limit:
+            chunks.append(Chunk(index=len(chunks), text=" ".join(current)))
+            current, size = [], 0
+            limit = TARGET_CHUNK_CHARACTERS
+        current.append(piece)
+        size += len(piece) + 1
+    if current:
+        chunks.append(Chunk(index=len(chunks), text=" ".join(current)))
+    return chunks
+
+
+def chunk_key(version: str, reference: str, voice: str, chunk: Chunk) -> str:
+    """A stable key for one chunk of one passage in one voice.
+
+    The chunk's own text is part of the digest, so re-importing a translation
+    -- or changing how the script is split -- can never leave audio sitting
+    under a key that now means different words.
+    """
+    digest = hashlib.sha256(
+        f"{version}|{reference}|{voice}|c{chunk.index}|{chunk.text}".encode()
+    ).hexdigest()
+    return digest[:32]
+
+
+def _cached_keys(session: Session, keys: list[str]) -> set[str]:
+    """Which of these keys are already spoken, in one query rather than N."""
+    if not keys:
+        return set()
+    rows = session.exec(select(NarrationAudio.key).where(NarrationAudio.key.in_(keys))).all()
+    return {str(key) for key in rows}
+
+
+def _script_for(session: Session, version: str, spans: list, reference: str) -> Script:
+    return build_script(reference, fetch_passage(session, version, spans))
+
+
+def plan(
+    session: Session,
+    *,
+    version: str,
+    spans: list,
+    reference: str,
+    voice: str | None,
+) -> dict:
+    """What speaking this passage takes, and how much of it is already spoken.
+
+    Nothing is synthesised here: the client asks first so it can start the first
+    chunk immediately and fetch the rest while the reader is already listening.
+    """
+    key_voice = voice or "default"
+    script = _script_for(session, version, spans, reference)
+    chunks = split_script(script)
+    keys = {chunk.index: chunk_key(version, reference, key_voice, chunk) for chunk in chunks}
+    spoken = _cached_keys(session, list(keys.values()))
+    return {
+        "version": version,
+        "reference": reference,
+        "voice": key_voice,
+        "count": len(chunks),
+        "characters": script.characters,
+        "cached_count": len(spoken),
+        "all_cached": len(spoken) == len(chunks),
+        "chunks": [
+            {
+                "index": chunk.index,
+                "characters": chunk.characters,
+                "cached": keys[chunk.index] in spoken,
+            }
+            for chunk in chunks
+        ],
+    }
+
+
+async def narrate_chunk(
+    session: Session,
+    *,
+    version: str,
+    spans: list,
+    reference: str,
+    voice: str | None,
+    index: int,
+    execution_url: str,
+    internal_secret: str,
+    timeout: float = 180.0,
+) -> dict:
+    """Speak one chunk of a passage, or serve it from the cache.
+
+    One chunk per request is what makes playback start quickly: the client asks
+    for chunk 0, plays it, and fetches the next while the reader is listening.
+    An index outside the passage is the caller's mistake and says so, rather
+    than returning silence as if the passage had ended.
+    """
+    key_voice = voice or "default"
+    chunks = split_script(_script_for(session, version, spans, reference))
+    if index < 0 or index >= len(chunks):
+        raise NarrationError(
+            f"{reference} is {len(chunks)} parts of narration, so there is no part {index}."
+        )
+    chunk = chunks[index]
+    hit = session.get(NarrationAudio, chunk_key(version, reference, key_voice, chunk))
+    if hit is not None and hit.audio:
+        return _chunk_payload(
+            version=version,
+            reference=reference,
+            voice=key_voice,
+            index=index,
+            count=len(chunks),
+            chunk=chunk,
+            audio=hit.audio,
+            mime_type=hit.mime_type or AUDIO_MIME,
+            cached=True,
+        )
+    audio, mime_type = await _speak(
+        chunk.text,
+        voice=voice,
+        execution_url=execution_url,
+        internal_secret=internal_secret,
+        timeout=timeout,
+    )
+    store_chunk(
+        session,
+        version=version,
+        reference=reference,
+        voice=key_voice,
+        chunk=chunk,
+        audio=audio,
+        mime_type=mime_type,
+    )
+    return _chunk_payload(
+        version=version,
+        reference=reference,
+        voice=key_voice,
+        index=index,
+        count=len(chunks),
+        chunk=chunk,
+        audio=audio,
+        mime_type=mime_type,
+        cached=False,
+    )
+
+
+def store_chunk(
+    session: Session,
+    *,
+    version: str,
+    reference: str,
+    voice: str,
+    chunk: Chunk,
+    audio: bytes,
+    mime_type: str = AUDIO_MIME,
+) -> NarrationAudio:
+    """Remember one spoken chunk, so the next play of this passage is instant."""
+    key = chunk_key(version, reference, voice, chunk)
+    row = session.get(NarrationAudio, key)
+    if row is None:
+        row = NarrationAudio(key=key)
+        session.add(row)
+    row.version_code = version
+    row.reference = reference
+    row.voice = voice
+    row.chunk_index = chunk.index
+    row.mime_type = mime_type
+    row.audio = audio
+    row.created_at = utcnow()
+    session.commit()
+    return row
+
+
+def _chunk_payload(
+    *,
+    version: str,
+    reference: str,
+    voice: str,
+    index: int,
+    count: int,
+    chunk: Chunk,
+    audio: bytes,
+    mime_type: str,
+    cached: bool,
+) -> dict:
+    return {
+        "version": version,
+        "reference": reference,
+        "voice": voice,
+        "index": index,
+        "count": count,
+        "characters": chunk.characters,
         "cached": cached,
         "mime_type": mime_type,
         "length_bytes": len(audio),
