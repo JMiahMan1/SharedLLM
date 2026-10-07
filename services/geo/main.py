@@ -449,7 +449,7 @@ async def record_point(
     except Exception as e:
         log.warning(f"[Geo] Failed to process trip point: {e}")
     # Arrivals and departures, off the upload path (HA zones, ETAs, pushes).
-    asyncio.create_task(_safe_presence_transition(r, clean_id, lat, lon, ts))
+    asyncio.create_task(_safe_presence_transition(r, clean_id, lat, lon, ts, accuracy or 0.0))
 
 
 # ─── Arrival / departure notices ──────────────────────────────────────────────
@@ -488,8 +488,12 @@ def _zone_at(zones: list[dict], lat: float, lon: float, margin: float = 0.0, onl
     return best
 
 
-async def _presence_transition(r, user: str, lat: float, lon: float, ts: float) -> list[dict]:
-    """Detect a zone change for the user's new fix and notify; returns the events."""
+async def _presence_transition(r, user: str, lat: float, lon: float, ts: float, acc: float = 0.0) -> list[dict]:
+    """Detect a zone change for the user's new fix and notify; returns the events.
+
+    Leaving takes a fix outside the zone by more than the margin or the fix's
+    own uncertainty, whichever is larger: an indoor network fix 90 m off at
+    the edge of home is not a departure."""
     zones = await _zones_cached()
     if not zones or not r:
         return []
@@ -499,7 +503,8 @@ async def _presence_transition(r, user: str, lat: float, lon: float, ts: float) 
     if state and float(state.get("t", 0)) > ts:
         return []  # a late fix
     current = state.get("zone") if state else None
-    still = _zone_at(zones, lat, lon, ZONE_EXIT_MARGIN_M, only=current) if current else None
+    margin = max(ZONE_EXIT_MARGIN_M, float(acc or 0.0))
+    still = _zone_at(zones, lat, lon, margin, only=current) if current else None
     inside = still or _zone_at(zones, lat, lon)
     new = inside["entity_id"] if inside else None
     await r.set(key, json.dumps({"zone": new, "t": ts}))
@@ -516,9 +521,9 @@ async def _presence_transition(r, user: str, lat: float, lon: float, ts: float) 
     return events
 
 
-async def _safe_presence_transition(r, user, lat, lon, ts) -> None:
+async def _safe_presence_transition(r, user, lat, lon, ts, acc=0.0) -> None:
     try:
-        await _presence_transition(r, user, lat, lon, ts)
+        await _presence_transition(r, user, lat, lon, ts, acc)
     except Exception as e:
         log.warning(f"[Geo] Presence check failed for {user}: {e}")
 

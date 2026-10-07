@@ -53,3 +53,6 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
   household (Skylight) calendar ("Work at Discount Tire" is Kaleb's). Only a
   person's own events remind them now: filed under their name in Skylight,
   mapped to them in calendar settings, or on their own Nextcloud/iCal.
+- A vague indoor fix (up to 100 m off) at the edge of home could announce a
+  departure: the exit margin was a fixed 50 m. It now covers the fix's own
+  uncertainty too.

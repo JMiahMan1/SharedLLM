@@ -87,6 +87,19 @@ async def test_jitter_at_the_edge_does_not_flap(world):
 
 
 @pytest.mark.asyncio
+async def test_a_vague_fix_at_the_edge_is_not_a_departure(world):
+    r = R()
+    t = time.time()
+    await geo._presence_transition(r, "michele", 33.1667, -111.5646, t)            # home
+    # 180 m out with 90 m uncertainty: could well be inside
+    await geo._presence_transition(r, "michele", 33.16832, -111.5646, t + 30, acc=90.0)
+    assert world == []
+    # The same spot, precisely: gone
+    await geo._presence_transition(r, "michele", 33.16832, -111.5646, t + 60, acc=8.0)
+    assert ("jeremiah", "Michele left Home", "") in world
+
+
+@pytest.mark.asyncio
 async def test_alerts_can_be_switched_off(world):
     r = R()
     await r.hset(geo.PRESENCE_ALERTS_KEY, "michele", "off")
