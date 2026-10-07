@@ -1937,6 +1937,45 @@ export interface BibleNarration {
   audio_base64: string;
 }
 
+export interface BibleNarrationPlanChunk {
+  index: number;
+  characters: number;
+  /** True when this piece is already spoken and will come back immediately. */
+  cached: boolean;
+}
+
+/**
+ * How a passage will be spoken: how many pieces, and which are already spoken.
+ *
+ * Asked before playback so the first piece can be played while the rest is
+ * still being rendered. Nothing is synthesised to answer it.
+ */
+export interface BibleNarrationPlan {
+  version: string;
+  reference: string;
+  voice: string;
+  count: number;
+  characters: number;
+  cached_count: number;
+  /** True when the whole passage is already spoken, so playback is instant. */
+  all_cached: boolean;
+  chunks: BibleNarrationPlanChunk[];
+}
+
+export interface BibleNarrationChunk {
+  version: string;
+  reference: string;
+  voice: string;
+  index: number;
+  count: number;
+  characters: number;
+  cached: boolean;
+  mime_type: string;
+  length_bytes: number;
+  /** Base64 audio for this piece only. */
+  audio_base64: string;
+}
+
 // ── Bible imports (Admin › Bible) ───────────────────────────────────────────
 
 export type BibleImportKind = 'json' | 'pdf' | 'epub';

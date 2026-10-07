@@ -9559,7 +9559,45 @@ async def proxy_bible_narration(request: Request, ref: str, version: str | None 
         "GET",
         "/narration",
         label="Failed to narrate this passage",
-        params={"ref": ref, "version": version, "voice": voice},
+        params={"ref": ref, "version": version, "voice": voice or None},
+        timeout=_BIBLE_NARRATION_TIMEOUT,
+    )
+
+
+@app.get("/api/bible/narration/plan")
+async def proxy_bible_narration_plan(
+    request: Request, ref: str, version: str | None = None, voice: str = ""
+):
+    """How a passage will be spoken: how many pieces, and which are cached.
+
+    Asked before playback begins so the client can start the first piece while
+    the rest is still being rendered. Nothing is synthesised to answer it.
+    """
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        "/narration/plan",
+        label="Failed to plan this passage's narration",
+        params={"ref": ref, "version": version, "voice": voice or None},
+        timeout=_BIBLE_NARRATION_TIMEOUT,
+    )
+
+
+@app.get("/api/bible/narration/chunk")
+async def proxy_bible_narration_chunk(
+    request: Request,
+    ref: str,
+    index: int,
+    version: str | None = None,
+    voice: str = "",
+):
+    """One piece of a passage's narration. 503 keeps the engine's own diagnosis."""
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        "/narration/chunk",
+        label="Failed to narrate this part of the passage",
+        params={"ref": ref, "index": index, "version": version, "voice": voice or None},
         timeout=_BIBLE_NARRATION_TIMEOUT,
     )
 

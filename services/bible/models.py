@@ -244,14 +244,17 @@ class StudyNote(SQLModel, table=True):
 
 
 class NarrationAudio(SQLModel, table=True):
-    """A spoken rendering of one passage, kept so it is only synthesised once.
+    """A spoken rendering of one piece of a passage, kept so it is only synthesised once.
 
-    ``key`` is a digest of translation, reference and voice (see
-    ``narration.cache_key``), which is the whole identity: the same passage in
-    the same voice always sounds the same, so there is nothing to invalidate
-    except the corpus itself. ``audio`` holds the WAV bytes as SQLite stores
-    them -- a chapter is a couple of megabytes, which is far cheaper than
-    re-running the speech engine every time somebody presses Play.
+    A whole passage is spoken as a *sequence* of chunks, because the speech
+    engine's window is about a thousand characters and because a reader should
+    hear the first sentence while the rest is still being rendered. ``key`` is a
+    digest of translation, reference, voice, chunk index *and the chunk's own
+    text* (see ``narration.chunk_key``), so re-importing a translation cannot
+    leave a chunk's audio sitting under a key that now means different words.
+    ``audio`` holds the WAV bytes as SQLite stores them -- a chunk is a fraction
+    of a megabyte, far cheaper than re-running the engine when somebody presses
+    Play again.
     """
 
     __table_args__ = {"extend_existing": True}
@@ -259,6 +262,10 @@ class NarrationAudio(SQLModel, table=True):
     version_code: str = Field(default="", index=True)
     reference: str = Field(default="")
     voice: str = Field(default="")
+    #: Which piece of the passage this is. Rows written before passages were
+    #: split predate the column and read back as 0, which is also the first
+    #: chunk, so an old row is simply a passage that happens to be one piece.
+    chunk_index: int = Field(default=0, index=True)
     verse_count: int = Field(default=0)
     mime_type: str = Field(default="audio/wav")
     audio: bytes = Field(default=b"", sa_type=LargeBinary)
