@@ -2429,21 +2429,34 @@ async def get_trips(
     return {"trips": trips, "total_trips": len(trips)}
 
 
+async def _trip_by_id(r, trip_id: str) -> dict | None:
+    """A finished trip, or someone's trip in progress, by its exact id."""
+    raw = await r.get(f"geo:trip:{trip_id}")
+    if raw:
+        return json.loads(raw)
+    for k in await r.keys("geo:active_trip:*"):
+        ar = await r.get(k)
+        if not ar:
+            continue
+        with contextlib.suppress(ValueError):
+            trip = json.loads(ar)
+            # Compared whole: a substring test of the raw JSON matched any
+            # short id ("a") to someone's live trip.
+            if isinstance(trip, dict) and str(trip.get("id")) == trip_id:
+                return trip
+    return None
+
+
 @app.get("/trips/{trip_id}")
-async def get_trip(trip_id: str):
+async def get_trip(trip_id: str, viewer: str | None = None, is_admin: str | None = None):
     r = await get_redis()
     if not r:
         raise HTTPException(status_code=503, detail="Redis unavailable")
-    raw = await r.get(f"geo:trip:{trip_id}")
-    if not raw:
-        # Check active trips
-        active_keys = await r.keys("geo:active_trip:*")
-        for k in active_keys:
-            ar = await r.get(k)
-            if ar and trip_id in ar:
-                return json.loads(ar)
+    trip = await _trip_by_id(r, trip_id)
+    if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
-    return json.loads(raw)
+    await _require_may_view(viewer, trip.get("user_id"), is_admin)
+    return trip
 
 
 @app.patch("/trips/{trip_id}")
@@ -2792,23 +2805,16 @@ async def get_location_suggestions(
 
 
 @app.get("/trips/{trip_id}/locations")
-async def get_trip_locations(trip_id: str):
+async def get_trip_locations(trip_id: str, viewer: str | None = None, is_admin: str | None = None):
     """Resolved start/end locations for a trip: coordinates plus a human-readable
     place name (HA zone → nearby business → street → coords)."""
     r = await get_redis()
     if not r:
         raise HTTPException(status_code=503, detail="Redis unavailable")
-    raw = await r.get(f"geo:trip:{trip_id}")
-    if not raw:
-        active_keys = await r.keys("geo:active_trip:*")
-        for k in active_keys:
-            ar = await r.get(k)
-            if ar and trip_id in ar:
-                raw = ar
-                break
-    if not raw:
+    trip = await _trip_by_id(r, trip_id)
+    if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
-    trip = json.loads(raw)
+    await _require_may_view(viewer, trip.get("user_id"), is_admin)
 
     async def _loc(entry: dict | None, default_label: str) -> dict:
         if not entry:
