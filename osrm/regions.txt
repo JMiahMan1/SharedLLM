@@ -1,0 +1,5 @@
+# Road network regions for snapping trip routes to roads (OSRM).
+# One Geofabrik .osm.pbf URL per line; the "Build OSRM map" workflow merges
+# them, prepares them and publishes ghcr.io/jmiahman1/sharedllm-osrm. A region
+# a trip has been in but is missing here is reported by geo (/map/regions).
+https://download.geofabrik.de/north-america/us/arizona-latest.osm.pbf

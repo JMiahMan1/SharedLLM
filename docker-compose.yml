@@ -573,6 +573,18 @@ services:
     networks:
       - sharedllm
 
+  # Road network for snapping trip routes to roads (services/geo/map_match.py).
+  # Built with its map data by .github/workflows/osrm-map.yml (regions in
+  # osrm/regions.txt) and pulled here. Self-hosted so the family's locations
+  # never leave this server.
+  osrm:
+    image: ghcr.io/jmiahman1/sharedllm-osrm:latest
+    container_name: sharedllm_osrm
+    restart: unless-stopped
+    mem_limit: 1536m
+    networks:
+      - sharedllm
+
   geo:
     image: ghcr.io/jmiahman1/sharedllm-geo:latest
     build:
@@ -601,6 +613,7 @@ services:
       - REDIS_URL=${BRIDGE_REDIS_URL}
       - GATEWAY_INTERNAL_URL=http://gateway:11435
       - TZ=America/Phoenix
+      - OSRM_URL=${OSRM_URL:-http://osrm:5000}
     volumes:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
