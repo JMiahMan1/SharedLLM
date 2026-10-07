@@ -30,6 +30,33 @@ import time
 
 START_TIME = time.time()
 
+_CHECKPOINT_WARNED = False
+
+
+def _checkpoint_path() -> str | None:
+    """Resolve where index checkpoints persist between crawls, from config.
+
+    Reads ``STORAGE_CHECKPOINT_PATH`` (compose sets it to the mounted
+    ``/data/index_checkpoint.json``). Deliberately no code default: a relative
+    default would resolve inside the container's working directory and vanish
+    on recreate, which is the bug this exists to prevent. Unset means
+    checkpoints are not persisted and the crawl restarts from the first file
+    after a recreate -- a legitimate dev state, so it warns once by name
+    instead of failing.
+    """
+    global _CHECKPOINT_WARNED
+    path = (os.getenv("STORAGE_CHECKPOINT_PATH") or "").strip()
+    if path:
+        return path
+    if not _CHECKPOINT_WARNED:
+        _CHECKPOINT_WARNED = True
+        log.warning(
+            "STORAGE_CHECKPOINT_PATH is not set: index checkpoints are not "
+            "persisted, so a container recreate restarts the crawl from the "
+            "first file. Set it (compose mounts /data for storage) to resume."
+        )
+    return None
+
 @app.get("/health")
 def health():
     return {
@@ -83,7 +110,7 @@ async def get_storage_status():
 
     checkpoint_count = 0
     try:
-        cp = CheckpointManager()
+        cp = CheckpointManager(_checkpoint_path() or "")
         checkpoint_count = len(cp.data)
     except Exception:
         pass
@@ -122,7 +149,7 @@ async def _run_full_index_task(req: IndexScanRequest):
         items = build_content_index(entries)
 
         # 2. Extract and chunk with checkpointing
-        checkpoint = None if req.force else CheckpointManager()
+        checkpoint = None if req.force else CheckpointManager(_checkpoint_path() or "")
         chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
         log.info(f"Extracted {len(chunks)} total chunks from {len(items)} files.")
 

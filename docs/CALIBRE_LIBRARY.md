@@ -144,8 +144,10 @@ service's index reads it through `resolve_runtime_config()`, which does need one
 ## Operational notes
 
 - **`metadata.db` is downloaded once per crawl**, not once per book.
-- **Give `services/storage` a volume before a full crawl.** Its `index_checkpoint.json` has no volume
-  today, so it is lost on every `up -d --force-recreate` and a 3,000-book run restarts from zero.
+- **The index checkpoint persists across restarts.** Compose mounts `./data/storage` at `/data` and
+  sets `STORAGE_CHECKPOINT_PATH=/data/index_checkpoint.json`, so an interrupted crawl resumes from
+  where it stopped instead of re-fetching all 3,000 books. Unset, the path is refused rather than
+  guessed: checkpoints stop persisting and the service logs a one-time warning naming the setting.
 - **A full-library crawl is long.** Scope it with `path` (e.g. one author folder) or `force=false`.
 - The library directory is skipped by `GLOBAL_SKIP_LIST` only for entries that carry provider
   metadata; a book under an author folder named `lib` is still indexed, and a skip that did happen
