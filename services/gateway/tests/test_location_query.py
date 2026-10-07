@@ -20,3 +20,12 @@ def test_questions(q, user, detail, to):
 
 def test_the_asker_is_the_default():
     assert parse_location_query("when will I be home", "jeremiah")["user"] == "jeremiah"
+
+
+@pytest.mark.parametrize("q,to", [
+    ("Who is closest to the school?", "school"),
+    ("who's nearest to work", "work"),
+])
+def test_closest(q, to):
+    got = parse_location_query(q, "jeremiah")
+    assert got["detail"] == "closest" and got["to"] == to

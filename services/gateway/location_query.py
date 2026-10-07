@@ -18,6 +18,8 @@ _ETA_WORDS = ("when will", "when's", "how long until", "how long till", "how lon
 _TO = re.compile(r"\b(?:get|be|arrive|reach|from|to|at)\s+(?:at\s+|to\s+)?(?:the\s+)?([a-z][a-z' ]{1,30}?)\s*\??$",
                  re.IGNORECASE)
 _NOT_PLACES = {"there", "here", "it", "me"}
+_CLOSEST = re.compile(r"\bwho(?:'s| is)\s+(?:the\s+)?(?:closest|nearest)\s+(?:to\s+)?(?:the\s+)?([a-z][a-z' ]{1,30}?)\s*\??$",
+                      re.IGNORECASE)
 _SELF = {"i", "me", "my", "myself", "we", "us"}
 
 
@@ -31,6 +33,9 @@ def parse_location_query(query: str, default_user: str | None) -> dict:
         user = default_user
     detail = None
     to = None
+    near = _CLOSEST.search(query or "")
+    if near:
+        return {"user": None, "detail": "closest", "to": near.group(1).strip().lower()}
     if any(k in q for k in _ETA_WORDS):
         detail = "eta"
         place = _TO.search(query or "")

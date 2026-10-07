@@ -167,3 +167,16 @@ async def test_no_target_means_the_asker_not_a_hardcoded_user():
         req.user_context = UserContext(user="michele", role="user")
         await handle_location(req)
     assert "/people/michele/" in seen[0][0]
+
+
+@pytest.mark.asyncio
+async def test_closest_names_the_nearest_by_road():
+    seen = []
+    data = {"to": "School", "people": [{"user_id": "michele", "duration_s": 720, "fix_age_s": 30},
+                                       {"user_id": "jeremiah", "duration_s": 1500, "fix_age_s": 60}]}
+    with patch("services.common.http.get_client_insecure", return_value=_client_returning(200, data, seen)):
+        req = LocationRequest(detail="closest", to="school")
+        req.user_context = UserContext(user="jeremiah", role="user")
+        result = await handle_location(req)
+    assert result.message == "Michele is closest to School, about 12 minutes away by road. Then Jeremiah 25 minutes."
+    assert seen[0][0].endswith("/closest") and seen[0][1]["viewer"] == "jeremiah"

@@ -822,3 +822,33 @@ def test_eta_and_telemetry_respect_sharing(client, fake_redis, monkeypatch):
     h = {"X-Internal-Secret": INTERNAL_SECRET}
     assert client.get("/people/michele/eta?viewer=kate", headers=h).status_code == 404
     assert client.get("/people/michele/telemetry?viewer=kate", headers=h).status_code == 404
+
+
+SCHOOL = {"entity_id": "zone.school", "name": "School", "latitude": 33.2, "longitude": -111.6, "radius": 150.0}
+
+
+@pytest.mark.asyncio
+async def test_closest_ranks_by_road_time_among_those_shared(client, fake_redis, monkeypatch):
+    now = time.time()
+    for user, lat in (("jeremiah", 33.10), ("michele", 33.19), ("kate", 33.21), ("old", 33.2)):
+        t = now - (7200 if user == "old" else 30)
+        await fake_redis.zadd(f"geo:history:{user}", {json.dumps({"t": t, "lat": lat, "lon": -111.6}): t})
+
+    async def tracked(r):
+        return ["jeremiah", "kate", "michele", "old"]
+
+    async def zones():
+        return [SCHOOL]
+
+    async def may_see(viewer, target):
+        return target != "kate"   # kate does not share with the viewer
+
+    async def table(sources, dest, url):
+        return [1500.0 if lat == 33.10 else 400.0 for lat, _ in sources]
+    monkeypatch.setattr(geo, "_tracked_users", tracked)
+    monkeypatch.setattr(geo, "_zones", zones)
+    monkeypatch.setattr(geo, "_viewer_may_see", may_see)
+    monkeypatch.setattr(geo.map_match, "table", table)
+    body = client.get("/closest?to=school&viewer=jeremiah", headers={"X-Internal-Secret": INTERNAL_SECRET}).json()
+    assert body["to"] == "School"
+    assert [p["user_id"] for p in body["people"]] == ["michele", "jeremiah"]  # kate unshared, old stale
