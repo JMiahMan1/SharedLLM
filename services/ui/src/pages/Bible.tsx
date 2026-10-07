@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { BookOpen, Flame, Search, Sparkles, Trophy, X } from 'lucide-react';
+import { BookOpen, Flame, Maximize2, Search, Sparkles, Trophy, X } from 'lucide-react';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import type {
@@ -16,6 +16,7 @@ import type {
 } from '../types/api';
 import ReferenceBar from '../components/bible/ReferenceBar';
 import ChapterReader from '../components/bible/ChapterReader';
+import FocusReader from '../components/bible/FocusReader';
 import VerseActionSheet from '../components/bible/VerseActionSheet';
 import BibleReadAloud from '../components/bible/BibleReadAloud';
 import ChapterNotes from '../components/bible/ChapterNotes';
@@ -103,6 +104,7 @@ function BibleReaderPane({
   const [input, setInput] = useState(requestedRef ?? chapterRef(position));
   const [searchTerm, setSearchTerm] = useState<string | null>(null);
   const [activeVerse, setActiveVerse] = useState<BibleVerse | null>(null);
+  const [focusing, setFocusing] = useState(false);
 
   const requestRef = searchTerm ?? requestedRef ?? chapterRef(position);
   const searching = searchTerm !== null;
@@ -332,7 +334,19 @@ function BibleReaderPane({
               <h2 className="font-serif text-lg text-white truncate" data-testid="bible-chapter-heading">
                 {shownChapter ? `${shownChapter.book_name} ${shownChapter.chapter_start}` : 'Reading'}
               </h2>
-              <span className="text-[11px] text-slate-500 shrink-0 tabular-nums">{passage?.version}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] text-slate-500 tabular-nums">{passage?.version}</span>
+                <button
+                  type="button"
+                  onClick={() => setFocusing(true)}
+                  aria-label="Read this chapter without the controls"
+                  data-testid="bible-focus-open"
+                  className="min-h-11 pointer-coarse:min-h-11 px-2 rounded-xl border border-white/10 bg-white/5 text-[11px] text-slate-300 flex items-center gap-1.5"
+                >
+                  <Maximize2 size={13} />
+                  Focus
+                </button>
+              </div>
             </div>
             <ChapterReader
               verses={passage?.verses ?? []}
@@ -388,6 +402,21 @@ function BibleReaderPane({
           ))}
         </ul>
       </section>
+
+      {focusing && (
+        <FocusReader
+          reference={displayPosition ? `${shownChapter?.book_name ?? displayPosition.book} ${displayPosition.chapter}` : 'Reading'}
+          verses={passage?.verses ?? []}
+          marks={marks}
+          fontScale={preferences.font_scale}
+          lineHeight={preferences.line_height}
+          theme={preferences.theme}
+          loading={isFetching}
+          onPrev={() => step(-1)}
+          onNext={() => step(1)}
+          onClose={() => setFocusing(false)}
+        />
+      )}
 
       {activeVerse && (
         <VerseActionSheet
