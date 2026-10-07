@@ -21,14 +21,26 @@ permissions:
   packages: write
 
 env:
-  # Lowercase: image names must be, and the owner is JMiahMan1.
-  IMAGE: ghcr.io/jmiahman1/sharedllm-osrm
+  # Image names (per profile, below) are lowercase: they must be, and the
+  # owner is JMiahMan1.
   OSRM: ghcr.io/project-osrm/osrm-backend:v6.0.0
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Roads, for trips (OSRM_URL)
+          - profile: car
+            image: ghcr.io/jmiahman1/sharedllm-osrm
+          # Paths, trails and sidewalks, for workout routes (OSRM_FOOT_URL)
+          - profile: foot
+            image: ghcr.io/jmiahman1/sharedllm-osrm-foot
+    env:
+      IMAGE: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,7 +70,7 @@ jobs:
       - name: Prepare (extract, partition, customize)
         run: |
           run() { docker run --rm -v "$PWD/osrm/data:/data" "$OSRM" "$@"; }
-          run osrm-extract -p /opt/car.lua /data/region.osm.pbf
+          run osrm-extract -p /opt/${{ matrix.profile }}.lua /data/region.osm.pbf
           run osrm-partition /data/region.osrm
           run osrm-customize /data/region.osrm
           rm osrm/data/region.osm.pbf

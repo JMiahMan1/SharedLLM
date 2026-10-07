@@ -25,7 +25,7 @@ async def test_osrm_down_means_no_match():
 
 @pytest.mark.asyncio
 async def test_a_match_returns_the_road_path(monkeypatch):
-    async def fake_chunk(session, base, chunk):
+    async def fake_chunk(session, base, chunk, profile="driving"):
         # OSRM returns [lon, lat]; the road bends through an extra vertex
         return [[-111.5, 33.1], [-111.49, 33.15], [-111.5, 33.2]], 6000.0, 6000.0 * 0.8
     monkeypatch.setattr(map_match, "_match_chunk", fake_chunk)
@@ -40,7 +40,7 @@ async def test_a_match_returns_the_road_path(monkeypatch):
 async def test_long_trails_are_matched_in_overlapping_chunks(monkeypatch):
     calls = []
 
-    async def fake_chunk(session, base, chunk):
+    async def fake_chunk(session, base, chunk, profile="driving"):
         calls.append(len(chunk))
         return [[p["lon"], p["lat"]] for p in chunk], 1.0, 1.0
     monkeypatch.setattr(map_match, "_match_chunk", fake_chunk)
@@ -54,7 +54,7 @@ async def test_long_trails_are_matched_in_overlapping_chunks(monkeypatch):
 async def test_no_road_path_is_reported_not_hidden(monkeypatch):
     """A trail that fits no road is a phantom; that must differ from OSRM
     being unavailable (None), or real trips would be discarded when it is down."""
-    async def no_match(session, base, chunk):
+    async def no_match(session, base, chunk, profile="driving"):
         raise map_match._NoMatch("NoMatch")
     monkeypatch.setattr(map_match, "_match_chunk", no_match)
     pts = [{"t": 1, "lat": 33.1, "lon": -111.5, "acc": 5}, {"t": 2, "lat": 33.2, "lon": -111.5, "acc": 5}]

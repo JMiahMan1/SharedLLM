@@ -125,11 +125,14 @@ def osrm_map_tick() -> None:
     except Exception as e:
         log.warning(f"[osrm-map] could not extend the map: {e}")
     try:
-        container = _resolve_container("osrm") if client else None
-        created = container.attrs.get("Created") if container else None
-        if container and osrm_map.needs_deploy(created, osrm_map.latest_build_finished_at(token)):
-            log.info("[osrm-map] a newer map was built; deploying it")
-            pull_and_restart("osrm")
+        built_at = osrm_map.latest_build_finished_at(token)
+        # One build makes both networks: roads (trips) and paths (workouts)
+        for service in ("osrm", "osrm-foot"):
+            container = _resolve_container(service) if client else None
+            created = container.attrs.get("Created") if container else None
+            if container and osrm_map.needs_deploy(created, built_at):
+                log.info(f"[osrm-map] a newer map was built; deploying {service}")
+                pull_and_restart(service)
     except Exception as e:
         log.warning(f"[osrm-map] could not deploy the map: {e}")
 

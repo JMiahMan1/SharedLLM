@@ -36,7 +36,7 @@ from pydantic import BaseModel
 _STATIC = Path(__file__).resolve().parent / "static"
 
 from services.common.http import get_client, get_client_insecure
-from services.config import HA_TOKEN, HA_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, OSRM_URL, REDIS_URL, TELEMETRY_SVC_URL
+from services.config import HA_TOKEN, HA_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, OSRM_FOOT_URL, OSRM_URL, REDIS_URL, TELEMETRY_SVC_URL
 from services.geo import map_match, map_regions
 from services.shared.info_endpoint import info_router
 
@@ -386,6 +386,9 @@ def _format_duration(seconds: float) -> str:
 MAX_BREADCRUMB_ACCURACY_M = 100.0
 #: A trip whose road match OSRM is less sure of than this is a phantom.
 MIN_TRIP_MATCH_CONFIDENCE = 0.05
+#: A workout trail must fit the foot network at least this well to be drawn
+#: and measured along it (a loop around a field with no paths does not).
+MIN_WORKOUT_MATCH_CONFIDENCE = 0.1
 #: Fixes this far from the last one are checked against the road network: a
 #: place you could not have driven to in the time since is a position jump.
 JUMP_CHECK_M = 300.0
@@ -2581,7 +2584,7 @@ async def update_trip_share(
 
 
 @app.get("/trips/{trip_id}/route")
-async def get_trip_route(trip_id: str):
+async def get_trip_route(trip_id: str, viewer: str | None = None, is_admin: str | None = None):
     """GPS breadcrumb route for a trip, reconstructed from the Redis history trail.
 
     Returns points between trip start and end (plus a small buffer) so the UI
@@ -2596,6 +2599,7 @@ async def get_trip_route(trip_id: str):
     trip = json.loads(raw)
 
     user_id = trip.get("user_id", "")
+    await _require_may_view(viewer, user_id, is_admin)  # same consent as their location
     start_t = float(trip.get("start_time", 0)) - 60
     end_t = float(trip.get("end_time", 0)) + 60
 
@@ -3918,6 +3922,13 @@ async def stop_workout(
 
     duration = max(1, int(end_t - start_t))
     distance_miles = update.distance_miles if update.distance_miles else round(total_m * 0.000621371, 2)
+    # The path length along the foot network, when it fits: the fix-to-fix sum
+    # cuts corners on sparse fixes and adds GPS jitter on dense ones.
+    if not update.distance_miles:
+        matched = await map_match.match(points, OSRM_FOOT_URL, profile="foot")
+        if matched and matched.get("matched") and matched.get("confidence", 0) >= MIN_WORKOUT_MATCH_CONFIDENCE:
+            distance_miles = round(matched["distance_m"] * 0.000621371, 2)
+            workout["distance_source"] = "foot_network"
 
     # Steps: hardware pedometer wins; otherwise GPS stride-model estimate for foot activities
     steps: int | None = None
@@ -3954,7 +3965,7 @@ async def stop_workout(
 
 
 @app.get("/workouts/{workout_id}/route")
-async def get_workout_route(workout_id: str):
+async def get_workout_route(workout_id: str, viewer: str | None = None, is_admin: str | None = None):
     """GPS breadcrumb route for a completed workout (for map rendering)."""
     r = await get_redis()
     if not r:
@@ -3965,6 +3976,7 @@ async def get_workout_route(workout_id: str):
     workout = json.loads(raw)
 
     user = workout.get("user_id", "")
+    await _require_may_view(viewer, user, is_admin)  # same consent as their location
     start_t = float(workout.get("start_time", 0)) - 30
     end_t = float(workout.get("end_time") or time.time()) + 30
 
@@ -3984,6 +3996,24 @@ async def get_workout_route(workout_id: str):
             log.warning(f"[Geo] Workout route read failed for {workout_id}: {e}")
 
     points.sort(key=lambda x: x.get("t", 0))
+
+    # Along paths, trails and sidewalks when the foot network fits the trail
+    # (OSRM_FOOT_URL); the raw fixes otherwise.
+    matched = await map_match.match(points, OSRM_FOOT_URL, profile="foot")
+    if matched and matched.get("matched") and matched.get("confidence", 0) >= MIN_WORKOUT_MATCH_CONFIDENCE:
+        coords = matched["coordinates"]
+        t0 = float(points[0].get("t", workout.get("start_time", 0)))
+        t1 = float(points[-1].get("t", t0))
+        span = (t1 - t0) / max(1, len(coords) - 1)
+        return {
+            "workout_id": workout_id,
+            "activity_type": workout.get("activity_type"),
+            "distance_miles": workout.get("distance_miles"),
+            "snapped": True,
+            "matched_distance_miles": round(matched["distance_m"] * 0.000621371, 2),
+            "points": [{"t": t0 + i * span, "lat": lat, "lon": lon, "spd": 0} for i, (lat, lon) in enumerate(coords)],
+        }
+
     if len(points) > 500:
         step = math.ceil(len(points) / 500)
         points = points[::step]
@@ -3992,6 +4022,7 @@ async def get_workout_route(workout_id: str):
         "workout_id": workout_id,
         "activity_type": workout.get("activity_type"),
         "distance_miles": workout.get("distance_miles"),
+        "snapped": False,
         "points": [
             {"t": p.get("t"), "lat": p.get("lat"), "lon": p.get("lon"), "spd": p.get("spd", 0)}
             for p in points
