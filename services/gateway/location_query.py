@@ -15,7 +15,8 @@ _WHO = re.compile(
 )
 _ETA_WORDS = ("when will", "when's", "how long until", "how long till", "how long before", "how far",
               "eta", "get home", "be home", "arrive", "get there", "be there")
-_TO = re.compile(r"\b(?:get|be|arrive|reach|from|to|at)\s+(?:at\s+|to\s+)?(?:the\s+)?([a-z][a-z' ]{1,30}?)\s*\??$",
+# A place: a zone or place name, or a street address ("1234 Main St, Mesa")
+_TO = re.compile(r"\b(?:get|be|arrive|reach|from|to|at)\s+(?:at\s+|to\s+)?(?:the\s+)?([a-z0-9][a-z0-9'.,&# -]{1,80}?)\s*\??$",
                  re.IGNORECASE)
 _NOT_PLACES = {"there", "here", "it", "me"}
 _CLOSEST = re.compile(r"\bwho(?:'s| is)\s+(?:the\s+)?(?:closest|nearest)\s+(?:to\s+)?(?:the\s+)?([a-z][a-z' ]{1,30}?)\s*\??$",

@@ -43,3 +43,9 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
   consent check, and a trip in progress was looked up by a substring of its
   raw JSON, so any fragment ("a") returned someone's live trip. Trips are now
   matched by their whole id and the viewer is checked.
+- Phones stopped reporting for hours overnight: the stationary heartbeat was a
+  Handler delay, frozen while the CPU sleeps (the wake lock lapsed after ten
+  minutes; Doze ignores wake locks). It is now an allow-while-idle alarm, and
+  Settings offers Android's battery-optimisation exemption.
+- "How long until I get to 1234 Main St?" lost the address: the place pattern
+  took letters only. Addresses (digits, commas) now reach the ETA.
