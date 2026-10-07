@@ -11,6 +11,7 @@ Design + rationale: see S26-Setup/geo-service/README.md and
 docs/GEO_SERVICE.md. OSM = data, MapLibre = renderer. Traccar is the documented
 upgrade path if HA's sharing/geofence UX proves insufficient.
 """
+import asyncio
 import json
 import logging
 import math
@@ -36,7 +37,7 @@ _STATIC = Path(__file__).resolve().parent / "static"
 
 from services.common.http import get_client_insecure
 from services.config import HA_TOKEN, HA_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, OSRM_URL, REDIS_URL
-from services.geo import map_match
+from services.geo import map_match, map_regions
 from services.shared.info_endpoint import info_router
 
 try:
@@ -1729,7 +1730,31 @@ async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -
     await r.set(f"geo:trip:{completed['id']}", json.dumps(completed))
     await r.zadd(f"geo:trips:user:{clean_user}", {completed["id"]: completed["start_time"]})
     await r.zadd("geo:trips:all", {completed["id"]: completed["start_time"]})
+    # A trip outside the road map cannot be snapped: note its region so the
+    # map can be extended (map_regions). In the background: it asks OSRM and,
+    # the first time, fetches Geofabrik's index.
+    for loc in (completed.get("start_location"), completed.get("end_location")):
+        if loc and loc.get("latitude") is not None and loc.get("longitude") is not None:
+            asyncio.create_task(_note_map_region(r, float(loc["latitude"]), float(loc["longitude"])))
     return completed
+
+
+async def _note_map_region(r, lat: float, lon: float) -> None:
+    try:
+        await map_regions.note_if_off_map(r, lat, lon, OSRM_URL)
+    except Exception as e:
+        log.warning(f"[Geo] Map region check failed: {e}")
+
+
+@app.get("/map/regions")
+async def get_map_regions(
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Regions trips have been in that the road map (OSRM) lacks."""
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return {"needed": await map_regions.needed(await get_redis())}
 
 
 async def _estimate_speed_from_history(r, clean_user: str, lat: float, lon: float, ts: float) -> float | None:
