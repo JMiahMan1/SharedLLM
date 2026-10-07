@@ -35,8 +35,8 @@ from pydantic import BaseModel
 
 _STATIC = Path(__file__).resolve().parent / "static"
 
-from services.common.http import get_client_insecure
-from services.config import HA_TOKEN, HA_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, OSRM_URL, REDIS_URL
+from services.common.http import get_client, get_client_insecure
+from services.config import HA_TOKEN, HA_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, OSRM_URL, REDIS_URL, TELEMETRY_SVC_URL
 from services.geo import map_match, map_regions
 from services.shared.info_endpoint import info_router
 
@@ -435,6 +435,138 @@ async def record_point(
         await process_trip_point(clean_id, lat, lon, speed, ts)
     except Exception as e:
         log.warning(f"[Geo] Failed to process trip point: {e}")
+    # Arrivals and departures, off the upload path (HA zones, ETAs, pushes).
+    asyncio.create_task(_safe_presence_transition(r, clean_id, lat, lon, ts))
+
+
+# ─── Arrival / departure notices ──────────────────────────────────────────────
+#
+# Each person's current HA zone is kept in geo:zone_state:{user}. Entering a
+# zone, or leaving one (by ZONE_EXIT_MARGIN_M past its edge, so GPS jitter at
+# the boundary does not flap), notifies the family members who may see them
+# (sharing consent) and have not switched the alerts off: "Jeremiah left Work
+# · home in about 22 min", "Michele arrived at Home".
+
+ZONE_EXIT_MARGIN_M = 50.0
+PRESENCE_REPEAT_S = 600
+PRESENCE_ALERTS_KEY = "geo:presence_alerts"   # hash viewer -> "off"
+_zone_cache: dict = {"at": 0.0, "zones": []}
+
+
+async def _zones_cached() -> list[dict]:
+    if time.time() - _zone_cache["at"] > 300:
+        try:
+            _zone_cache["zones"] = await _zones()
+            _zone_cache["at"] = time.time()
+        except Exception as e:
+            log.debug(f"[Geo] Zones unavailable: {e}")
+    return _zone_cache["zones"]
+
+
+def _zone_at(zones: list[dict], lat: float, lon: float, margin: float = 0.0, only: str | None = None) -> dict | None:
+    """The smallest zone containing the point (within radius + margin)."""
+    best = None
+    for z in zones:
+        if only and z["entity_id"] != only:
+            continue
+        d = _haversine_distance(lat, lon, z["latitude"], z["longitude"])
+        if d <= z["radius"] + margin and (best is None or z["radius"] < best["radius"]):
+            best = z
+    return best
+
+
+async def _presence_transition(r, user: str, lat: float, lon: float, ts: float) -> list[dict]:
+    """Detect a zone change for the user's new fix and notify; returns the events."""
+    zones = await _zones_cached()
+    if not zones or not r:
+        return []
+    key = f"geo:zone_state:{user}"
+    raw = await r.get(key)
+    state = json.loads(raw) if raw else None
+    if state and float(state.get("t", 0)) > ts:
+        return []  # a late fix
+    current = state.get("zone") if state else None
+    still = _zone_at(zones, lat, lon, ZONE_EXIT_MARGIN_M, only=current) if current else None
+    inside = still or _zone_at(zones, lat, lon)
+    new = inside["entity_id"] if inside else None
+    await r.set(key, json.dumps({"zone": new, "t": ts}))
+    if state is None or new == current:
+        return []  # first sighting, or no change
+    by_id = {z["entity_id"]: z for z in zones}
+    events = []
+    if current and current in by_id:
+        events.append({"kind": "departed", "zone": by_id[current]})
+    if new:
+        events.append({"kind": "arrived", "zone": inside})
+    for ev in events:
+        await _notify_presence(r, user, ev["kind"], ev["zone"])
+    return events
+
+
+async def _safe_presence_transition(r, user, lat, lon, ts) -> None:
+    try:
+        await _presence_transition(r, user, lat, lon, ts)
+    except Exception as e:
+        log.warning(f"[Geo] Presence check failed for {user}: {e}")
+
+
+async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
+    dedupe = f"geo:presence_notified:{person}:{zone['entity_id']}:{kind}"
+    if not await r.set(dedupe, "1", ex=PRESENCE_REPEAT_S, nx=True):
+        return
+    name = person.title()
+    if kind == "arrived":
+        title, body = f"{name} arrived at {zone['name']}", ""
+    else:
+        title, body = f"{name} left {zone['name']}", ""
+        if zone["entity_id"] != "zone.home":
+            try:
+                eta = await compute_eta(person, "home")
+                if not eta.get("arrived"):
+                    body = f"Home in about {max(1, round(eta['duration_s'] / 60))} min by road."
+            except HTTPException:
+                pass
+    off = await r.hgetall(PRESENCE_ALERTS_KEY) or {}
+    off = {(k.decode() if isinstance(k, bytes) else k) for k, v in off.items() if (v.decode() if isinstance(v, bytes) else v) == "off"}
+    for viewer in await _tracked_users(r):
+        if viewer == person or viewer in off:
+            continue
+        if not await _viewer_may_see(viewer, person):
+            continue
+        await _send_notice(viewer, "presence", title, body, {"person": person, "zone": zone["entity_id"], "event": kind})
+
+
+async def _send_notice(user: str, kind: str, title: str, body: str, data: dict) -> None:
+    """One notification through the telemetry service (in-app + push)."""
+    try:
+        async with get_client() as client, client.post(
+            f"{TELEMETRY_SVC_URL.rstrip('/')}/api/telemetry/notify",
+            json={"user": user, "kind": kind, "title": title, "body": body, "data": data},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status != 200:
+                log.warning(f"[Geo] Notice to {user} failed: HTTP {resp.status}")
+    except Exception as e:
+        log.warning(f"[Geo] Notice to {user} failed: {e}")
+
+
+@app.get("/presence-alerts/{viewer}")
+async def get_presence_alerts(viewer: str):
+    """Whether the viewer gets family arrival/departure notices (on by default)."""
+    r = await get_redis()
+    v = await r.hget(PRESENCE_ALERTS_KEY, viewer.lower()) if r else None
+    return {"viewer": viewer.lower(), "enabled": (v.decode() if isinstance(v, bytes) else v) != "off"}
+
+
+@app.put("/presence-alerts/{viewer}")
+async def put_presence_alerts(viewer: str, body: dict):
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    enabled = bool(body.get("enabled", True))
+    await r.hset(PRESENCE_ALERTS_KEY, viewer.lower(), "on" if enabled else "off")
+    return {"viewer": viewer.lower(), "enabled": enabled}
 
 
 async def _is_impossible_jump(r, clean_id: str, lat: float, lon: float, ts: float) -> bool:

@@ -14,7 +14,7 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
 - [x] 4. ETA home (or to a saved place) from someone's live position: API, Jarvis answers "when will X be home?", dashboard while driving, watch glance
 - [ ] 5. Leave-by reminders for calendar events with a location, from the real drive time
 - [x] 6. Who's closest by drive time to a place (OSRM table)
-- [ ] 7. Arrival / departure notices with an ETA ("left work, home in ~22 min")
+- [x] 7. Arrival / departure notices with an ETA ("left work, home in ~22 min")
 
 ## Bigger
 - [ ] 8. Walking/foot road network: snap workout routes (walk, run, hike, ride) to paths and trails

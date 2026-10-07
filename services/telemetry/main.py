@@ -380,6 +380,34 @@ def create_app():
         rc = _redis()
         return {"status": "SUCCESS", "notifications": await store.list_notifications(rc, user, limit)}
 
+    @application.post("/api/telemetry/notify")
+    async def notify(body: dict = Body(...), _: bool = Depends(require_internal)):
+        """Send one notification to a user from another service (arrivals,
+        leave-by reminders): the in-app outbox first, then push to their
+        devices, best effort. body: {user, kind, title, body, data?}."""
+        user = str(body.get("user") or "").strip().lower()
+        title = str(body.get("title") or "").strip()
+        if not user or not title:
+            raise HTTPException(status_code=422, detail="user and title required")
+        text = str(body.get("body") or "")[:180]
+        data = body.get("data") if isinstance(body.get("data"), dict) else {}
+        rc = _redis()
+        await store.push_notification(rc, user, {
+            "id": store.new_id(),
+            "kind": str(body.get("kind") or "notice"),
+            "title": title[:120],
+            "body": text,
+            "data": data,
+            "created_at": utcnow_iso(),
+            "read": False,
+        })
+        delivered = {}
+        try:
+            delivered = await push.send_to_user(user, title[:120], text, data)
+        except Exception as e:  # the outbox already has it
+            log.warning("Push delivery failed for %s: %s", user, e)
+        return {"status": "SUCCESS", "push": delivered}
+
     @application.get("/api/telemetry/push/key")
     async def get_push_key(_: bool = Depends(require_internal)):
         """VAPID public key the browser needs to subscribe."""
