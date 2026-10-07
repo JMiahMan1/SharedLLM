@@ -22,7 +22,7 @@ android {
         // (appUpdater.ts: `remote.apk_version_code > nativeBuildNumber`), so a
         // rebuild that only changes Java MUST bump this or the phone will never
         // be offered it.
-        versionCode 28
+        versionCode 29
         versionName uiVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

@@ -68,6 +68,28 @@ export async function storageSet(key: string, value: string): Promise<void> {
   }
 }
 
+/**
+ * Copy the stored credentials to the native side (TokenBridge), where the
+ * background location service and the home-screen widgets read them.
+ *
+ * storageSet does this only when a key is written, i.e. on an explicit login.
+ * A phone that stayed signed in from before those native readers existed
+ * never wrote them again, so the location service found no credentials and
+ * uploaded nothing. Called on every session restore.
+ */
+export async function mirrorNativeCredentials(): Promise<void> {
+  if (!isNative) return;
+  const apiKey = _cache['jarvis_api_key'] ?? (await Preferences.get({ key: 'jarvis_api_key' })).value ?? undefined;
+  const serverUrl = _cache['jarvis_server_url'] ?? (await Preferences.get({ key: 'jarvis_server_url' })).value ?? undefined;
+  if (!apiKey && !serverUrl) return;
+  try {
+    await TokenBridge.setCredentials({ apiKey: apiKey || undefined, serverUrl: serverUrl || undefined });
+    await TokenBridge.refreshWidgets();
+  } catch (err) {
+    console.error('[storage] TokenBridge setCredentials failed:', err);
+  }
+}
+
 export async function storageRemove(key: string): Promise<void> {
   delete _cache[key];
   if (isNative) {

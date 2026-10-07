@@ -39,3 +39,18 @@ describe('device registration is wired into both ways of having a session', () =
     expect(occurrences.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('the native location service gets credentials on a restored session too', () => {
+  // The background location service reads the key, server and username from
+  // TokenBridge. Only an explicit login used to fill it, so a phone signed in
+  // from before the service existed tracked nothing while the app was closed.
+  const init = source.slice(source.indexOf('const initAuth = async'), source.indexOf('const logout'));
+
+  it('mirrors the stored credentials on restore', () => {
+    expect(init).toMatch(/void mirrorNativeCredentials\(\)/);
+  });
+
+  it('mirrors the username on restore', () => {
+    expect(init).toMatch(/void mirrorIdentity\(profile\.username\)/);
+  });
+});

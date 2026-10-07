@@ -3,7 +3,7 @@ import { api } from '../services/api';
 import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
 import axios from 'axios';
-import { storageGet, storageSet, storageRemove, storageInit } from '../lib/storage';
+import { storageGet, storageSet, storageRemove, storageInit, mirrorNativeCredentials } from '../lib/storage';
 import { registerThisDevice } from '../lib/deviceRegistration';
 import { mirrorIdentity } from '../lib/locationTracking';
 
@@ -48,6 +48,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             // exactly why nobody's phone showed up in the panel. Fire-and-forget
             // for the same reason as below: it must never block the session.
             void registerThisDevice();
+            // Same reason for the native side: the background location
+            // service reads the key, server and username from TokenBridge,
+            // which only an explicit login used to fill.
+            void mirrorNativeCredentials();
+            if (profile.username) void mirrorIdentity(profile.username);
           } catch {
             setInitError('Session expired. Please log in again.');
             setToken(null);
