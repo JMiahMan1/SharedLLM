@@ -42,9 +42,15 @@ async def handle_system_learning(req: SystemLearningRequest) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=str(e), service="learning")
     try:
         # Stable, citable lesson id derived from the rule so re-ingests of the
-        # same lesson converge and `Apply: [id]` citations stay valid.
+        # same lesson converge and `Apply: [id]` citations stay valid. The
+        # user is part of the hash because rag_items is keyed by id alone:
+        # without it, two users writing the same rule text collide on one row
+        # and the second ingest silently re-owns (and hides) the first user's
+        # lesson.
         _lid = "lesson-" + hashlib.sha1(
-            (req.rule or req.content or req.topic).encode("utf-8")
+            (req.user_context.user or "default").encode("utf-8")
+            + b"\x00"
+            + (req.rule or req.content or req.topic).encode("utf-8")
         ).hexdigest()[:10]
         # The stored document is COMPACT JSON (not prose) so the mission-prompt
         # renderer (orchestrator._fetch_rag_context) can inject each lesson as
