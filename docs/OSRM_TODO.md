@@ -56,3 +56,6 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
 - A vague indoor fix (up to 100 m off) at the edge of home could announce a
   departure: the exit margin was a fixed 50 m. It now covers the fix's own
   uncertainty too.
+- Deploys hung 15 minutes and failed whenever the newest commit was docs-only:
+  the script waited for an image build of HEAD, which the build workflow's
+  path filter never starts. It now waits for the newest commit that was built.
