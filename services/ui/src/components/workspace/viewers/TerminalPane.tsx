@@ -218,9 +218,22 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
       term.writeln(`\r\n\x1b[31mTerminal session closed (code: ${event.code}, reason: ${event.reason || 'none'}).\x1b[0m`);
     };
 
+    // A keystroke typed while the socket is not open used to vanish with no
+    // trace, which is indistinguishable from a terminal that is broken. Say it
+    // once: every later keystroke would fail the same way, and repeating the
+    // line would scroll the reason off the screen.
+    let warnedAboutClosedSocket = false;
+
     term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(data);
+        return;
+      }
+      if (!warnedAboutClosedSocket) {
+        warnedAboutClosedSocket = true;
+        term.writeln(
+          '\r\n\x1b[33mNot connected to the workspace shell, so this keystroke was not sent. Reopen the terminal to reconnect.\x1b[0m'
+        );
       }
     });
 
@@ -241,10 +254,23 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     };
   }, [workspace.id, handleContextMenu]);
 
+  // Clicking anywhere in the pane puts the caret back in the terminal. xterm
+  // only focuses when its own screen is clicked, so a click on the panel's
+  // padding -- or anywhere else in the IDE followed by a click back here --
+  // left the hidden textarea unfocused and every keystroke went nowhere.
+  const focusOnMouseDown = useCallback(() => {
+    try {
+      termRef.current?.focus();
+    } catch {
+      /* not attached yet */
+    }
+  }, []);
+
   return (
     <div 
       className="h-full w-full bg-[#0b0f1a] p-1" 
       ref={ref}
+      onMouseDown={focusOnMouseDown}
     >
       {/* Context Menu Overlay */}
       {menuPos.visible && (
