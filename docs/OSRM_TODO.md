@@ -39,3 +39,7 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
 - Every trip's start and end, and every stop, sent its exact coordinates to the
   public nominatim.openstreetmap.org for a place name; they now stay on the
   server (self-hosted Nominatim) unless the place is outside the imported region.
+- A single trip and its start/end place names were also served without the
+  consent check, and a trip in progress was looked up by a substring of its
+  raw JSON, so any fragment ("a") returned someone's live trip. Trips are now
+  matched by their whole id and the viewer is checked.

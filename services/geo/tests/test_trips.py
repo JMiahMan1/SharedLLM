@@ -914,3 +914,20 @@ async def test_routes_follow_the_owners_sharing_consent(client, fake_redis, monk
     await fake_redis.set("geo:trip:t1", json.dumps({"id": "t1", "user_id": "jeremiah", "start_time": 1, "end_time": 2}))
     assert client.get("/trips/t1/route", params={"viewer": "kate"}).status_code == 404
     assert client.get("/trips/t1/route", params={"viewer": "jeremiah"}).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_trip_is_found_by_its_whole_id_and_for_those_it_is_shared_with(client, fake_redis, monkeypatch):
+    async def shares_only_with_self(viewer, target):
+        return viewer == target
+
+    monkeypatch.setattr(geo, "_viewer_may_see", shares_only_with_self)
+    live = {"id": "trip-abc123", "user_id": "jeremiah", "start_time": 1}
+    await fake_redis.set("geo:active_trip:jeremiah", json.dumps(live))
+    # A fragment of someone's live trip id (or of any field) is not that trip
+    for probe in ("a", "trip", "jeremiah"):
+        assert client.get(f"/trips/{probe}").status_code == 404
+        assert client.get(f"/trips/{probe}/locations").status_code == 404
+    assert client.get("/trips/trip-abc123", params={"viewer": "jeremiah"}).json()["id"] == "trip-abc123"
+    assert client.get("/trips/trip-abc123", params={"viewer": "kate"}).status_code == 404
+    assert client.get("/trips/trip-abc123/locations", params={"viewer": "kate"}).status_code == 404

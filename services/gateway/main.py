@@ -5894,9 +5894,13 @@ async def purge_storage_collection(collection_name: str, request: Request):
     body = await request.json()
 
     async with borrow_http_client() as client:
+        # The shape must match RAG's contract: {user_id, filter}. Sending the
+        # filter dict as the bare body lost the user_id (so the purge ran as
+        # "default") and RAG's payload.get("filter") found nothing, turning
+        # every scoped purge from the UI into a whole-collection delete.
         resp = await client.post(
-            f"{RAG_SVC}/rag/purge/{collection_name}?user_id={user_id}",
-            json=body.get("filter", {}),
+            f"{RAG_SVC}/rag/purge/{collection_name}",
+            json={"user_id": user_id, "filter": body.get("filter") or {}},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         return await _proxy_json_response(resp)
@@ -8328,10 +8332,11 @@ async def get_geo_trips(request: Request, user_id: str | None = None, limit: int
 
 @app.get("/api/geo/trips/{trip_id}")
 async def get_geo_trip(request: Request, trip_id: str):
-    await _require_authenticated(request)
+    _, viewer, is_admin = await _read_target(request, None)  # the owner's sharing consent applies
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/trips/{trip_id}",
+            params={"viewer": viewer, "is_admin": is_admin},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
@@ -8343,10 +8348,11 @@ async def get_geo_trip(request: Request, trip_id: str):
 @app.get("/api/geo/trips/{trip_id}/locations")
 async def get_geo_trip_locations(request: Request, trip_id: str):
     """Resolved start/end place names + coordinates for a trip."""
-    await _require_authenticated(request)
+    _, viewer, is_admin = await _read_target(request, None)  # the owner's sharing consent applies
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/trips/{trip_id}/locations",
+            params={"viewer": viewer, "is_admin": is_admin},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=12.0),
         )
