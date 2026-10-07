@@ -625,6 +625,7 @@ def _search_all_collections(
 async def search(req: SearchRequest):
     # `collection_name` of "all"/""/None searches across every collection the
     # user (or shared `default`) owns, instead of a single hardcoded one.
+    log.info(f"[RAG] search query_len={len(req.query)} coll={req.collection_name} k={req.k}")
     try:
         if req.collection_name in (None, "", "all", "__all__"):
             results = _search_all_collections(
