@@ -3178,8 +3178,20 @@ async def websocket_terminal(
             with suppress(Exception):
                 await websocket.send_text(json.dumps({"type": "stdout", "data": data.decode(errors="replace")}))
 
+        input_warning_logged = False
+
         # Read from socket and forward to websocket
         async def read_socket():
+            """Forward the shell's output until the exec socket really ends.
+
+            A timed-out read is not the end of the session. This socket
+            inherits the Docker client's timeout (``from_env(timeout=5)``), so a
+            shell that has merely gone quiet raises ``socket.timeout`` (an alias
+            of ``TimeoutError``) every five seconds. Treating that as
+            end-of-stream closed the session while the shell was still alive,
+            which the reader experienced as keystrokes that suddenly stopped
+            registering.
+            """
             loop = asyncio.get_event_loop()
             while True:
                 try:
@@ -3187,12 +3199,16 @@ async def websocket_terminal(
                     if not data:
                         break
                     await send_to_client(data)
+                except TimeoutError:
+                    # Nothing to read yet, and the socket stays usable.
+                    continue
                 except Exception as e:
                     log.warning(f"[terminal] socket read error: {e}")
                     break
 
         # Read from websocket and forward to exec stdin
         async def read_websocket():
+            nonlocal input_warning_logged
             try:
                 async for msg in websocket.iter_text():
                     is_ctrl = False
@@ -3217,8 +3233,14 @@ async def websocket_terminal(
                                 raw.sendall(msg.encode())
                             else:
                                 sock.write(msg.encode())
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            # A dropped keystroke used to vanish here. Say it
+                            # once per session: every later keystroke will fail
+                            # the same way, and a per-keystroke warning would
+                            # bury the first one.
+                            if not input_warning_logged:
+                                input_warning_logged = True
+                                log.warning(f"[terminal] could not send input to the shell: {e}")
             except Exception as e:
                 log.warning(f"[terminal] websocket read error: {e}")
 
