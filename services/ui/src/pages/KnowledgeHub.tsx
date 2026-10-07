@@ -22,9 +22,37 @@ import {
   ArrowUpDown,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api, type StorageEntry, type RagStats } from '../services/api';
+import { api, type StorageEntry, type RagStats, type StorageStatus } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
+
+/** The two backends a full reindex can target, with the copy each one shows. */
+const REINDEX_PROVIDERS: {
+  id: 'nextcloud' | 'calibre';
+  label: string;
+  heading: string;
+  blurb: string;
+}[] = [
+  {
+    id: 'nextcloud',
+    label: 'NextCloud',
+    heading: 'Full NextCloud Reindex',
+    blurb: 'Bypass checkpoint and re-process all files from NextCloud. Clears existing data before re-indexing.',
+  },
+  {
+    id: 'calibre',
+    label: 'Calibre library',
+    heading: 'Reindex the Calibre Library',
+    blurb: 'Re-read every book on the shelf and rebuild the calibre_files collection from its extracted text. Requires the calibre_library_path setting (Admin > Settings).',
+  },
+];
+
+const CRAWL_PHASE_LABELS: Record<string, string> = {
+  starting: 'Starting',
+  listing: 'Listing entries',
+  extracting: 'Extracting text',
+  syncing: 'Syncing to RAG',
+};
 
 const KnowledgeHub = () => {
   const [currentPath, setCurrentPath] = useState('/');
@@ -33,6 +61,7 @@ const KnowledgeHub = () => {
   const [purgeModalCollection, setPurgeModalCollection] = useState<string | null>(null);
   const [fullReindexForce, setFullReindexForce] = useState(false);
   const [indexForce, setIndexForce] = useState(false);
+  const [reindexProvider, setReindexProvider] = useState<'nextcloud' | 'calibre'>('nextcloud');
 
   const [ragQuery, setRagQuery] = useState('');
   const [ragResults, setRagResults] = useState<{ answer?: string; files?: { name: string; path: string }[] } | null>(null);
@@ -69,6 +98,15 @@ const KnowledgeHub = () => {
     queryKey: ['rag-stats'],
     queryFn: () => api.getRagStats(),
     refetchInterval: 10000,
+  });
+
+  const { data: storageStatus } = useQuery<StorageStatus>({
+    queryKey: ['storage-status'],
+    queryFn: () => api.getStorageStatus(),
+    // Poll fast only while a crawl is running; an idle indexer has nothing
+    // to report, and 2-second polling of a stopped crawl is just noise.
+    refetchInterval: (query) =>
+      (query.state.data as StorageStatus | undefined)?.crawl?.active ? 2000 : 15000,
   });
 
   const { data: files = [], isLoading: filesLoading, isFetching: filesFetching } = useQuery<StorageEntry[]>({
@@ -171,14 +209,23 @@ const KnowledgeHub = () => {
   });
 
   const fullReindexMutation = useMutation({
-    mutationFn: ({ force = false }: { force?: boolean }) => 
-      api.triggerFullIndex({ kind: 'nextcloud' }, { force }),
-    onSuccess: () => {
-      toast.success('Full NextCloud reindex started in background');
+    mutationFn: ({ force = false, provider }: { force?: boolean; provider: 'nextcloud' | 'calibre' }) =>
+      api.triggerFullIndex({ kind: provider }, { force }),
+    onSuccess: (_data, vars) => {
+      toast.success(
+        vars.provider === 'calibre'
+          ? 'Calibre library crawl started in background'
+          : 'Full NextCloud reindex started in background',
+      );
       queryClient.invalidateQueries({ queryKey: ['rag-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['storage-status'] });
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to start full reindex');
+      // Surface the gateway's own detail: an unset calibre_library_path is
+      // answered as a 400 naming the setting, and "Request failed with status
+      // code 400" would hide exactly what the operator has to fix.
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(detail || err.message || 'Failed to start full reindex');
     },
   });
 
@@ -191,6 +238,10 @@ const KnowledgeHub = () => {
     },
     onError: (err: Error) => toast.error(err.message || 'Purge failed'),
   });
+
+  const reindexInfo =
+    REINDEX_PROVIDERS.find((p) => p.id === reindexProvider) ?? REINDEX_PROVIDERS[0];
+  const crawl = storageStatus?.crawl;
 
   const breadcrumbs = useMemo(() => {
     const parts = currentPath.split('/').filter(Boolean);
@@ -806,12 +857,34 @@ const KnowledgeHub = () => {
           <div className="glass-panel p-6 border-amber-500/10 hover:border-amber-500/30 transition-colors group mb-6">
              <div className="flex items-start justify-between mb-4">
                 <div className="space-y-1">
-                   <h4 className="font-bold text-white">Full NextCloud Reindex</h4>
-                   <p className="text-xs text-slate-500">Bypass checkpoint and re-process all files from NextCloud. Clears existing data before re-indexing.</p>
+                   <h4 className="font-bold text-white">{reindexInfo.heading}</h4>
+                   <p className="text-xs text-slate-500">{reindexInfo.blurb}</p>
                 </div>
                 <RefreshCw className="text-amber-500/40 group-hover:text-amber-400 transition-colors" size={24} />
              </div>
-             <div className="flex items-center gap-3 mb-4">
+             <div className="flex flex-wrap items-center gap-4 mb-4">
+                <div
+                  role="group"
+                  aria-label="Library to reindex"
+                  className="inline-flex rounded-lg border border-white/10 bg-black/20 p-1"
+                >
+                  {REINDEX_PROVIDERS.map((provider) => (
+                    <button
+                      key={provider.id}
+                      type="button"
+                      onClick={() => setReindexProvider(provider.id)}
+                      aria-pressed={reindexProvider === provider.id}
+                      className={`min-h-9 pointer-coarse:min-h-11 px-4 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider transition-colors ${
+                        reindexProvider === provider.id
+                          ? 'bg-amber-500/20 text-amber-200'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {provider.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
                 <input 
                   id="fullForce"
                   type="checkbox" 
@@ -822,9 +895,10 @@ const KnowledgeHub = () => {
                 <label htmlFor="fullForce" className="text-sm text-slate-300 cursor-pointer">
                   Force bypass checkpoint
                 </label>
+                </div>
              </div>
              <button 
-               onClick={() => fullReindexMutation.mutate({ force: fullReindexForce })}
+               onClick={() => fullReindexMutation.mutate({ force: fullReindexForce, provider: reindexProvider })}
                disabled={fullReindexMutation.isPending}
                className="w-full glass-button py-3 text-amber-400 border-amber-500/20 hover:bg-amber-500/10 font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2"
              >
@@ -835,6 +909,37 @@ const KnowledgeHub = () => {
                )}
                {fullReindexMutation.isPending ? 'Reindexing...' : 'Start Full Reindex'}
              </button>
+             {crawl && (crawl.active || crawl.error) && (
+               <div
+                 role="status"
+                 aria-live="polite"
+                 className={`mt-4 rounded-xl border p-4 text-sm ${
+                   crawl.error && !crawl.active
+                     ? 'border-red-500/20 bg-red-500/5 text-red-300'
+                     : 'border-amber-500/20 bg-amber-500/5 text-amber-200'
+                 }`}
+               >
+                 {crawl.active ? (
+                   <span className="flex items-center gap-2">
+                     <RefreshCw size={14} className="animate-spin shrink-0" />
+                     <span>
+                       Crawling {crawl.kind || 'library'} —{' '}
+                       {CRAWL_PHASE_LABELS[crawl.phase ?? ''] || crawl.phase || 'working'}
+                       {typeof crawl.total === 'number' && crawl.total > 0
+                         ? `: ${crawl.done ?? 0}/${crawl.total}`
+                         : ''}
+                     </span>
+                   </span>
+                 ) : (
+                   <span>Crawl stopped: {crawl.error}</span>
+                 )}
+               </div>
+             )}
+             {crawl && !crawl.active && !crawl.error && typeof crawl.files === 'number' && (
+               <p className="mt-3 text-[11px] text-slate-500">
+                 Last crawl: {crawl.files} entries → {crawl.chunks ?? 0} chunks ({crawl.synced ?? 0} synced)
+               </p>
+             )}
           </div>
 
           <div className="grid gap-6 grid-cols-1 md:grid-cols-2">
@@ -867,6 +972,22 @@ const KnowledgeHub = () => {
                   className="w-full glass-button py-3 text-red-400 border-red-500/20 hover:bg-red-500/10 font-black text-[10px] uppercase tracking-widest"
                 >
                    Purge HA Entities
+                </button>
+             </div>
+
+             <div className="glass-panel p-6 border-red-500/10 hover:border-red-500/30 transition-colors group">
+                <div className="flex items-start justify-between mb-6">
+                   <div className="space-y-1">
+                      <h4 className="font-bold text-white">Clear Calibre Collection</h4>
+                      <p className="text-xs text-slate-500">Remove every indexed book chunk from the calibre_files collection. Books stay on the shelf and can be re-crawled.</p>
+                   </div>
+                   <AlertTriangle className="text-red-500/40 group-hover:text-red-500 transition-colors" size={24} />
+                </div>
+                <button 
+                  onClick={() => setPurgeModalCollection('calibre_files')}
+                  className="w-full glass-button py-3 text-red-400 border-red-500/20 hover:bg-red-500/10 font-black text-[10px] uppercase tracking-widest"
+                >
+                   Purge Calibre Data
                 </button>
              </div>
           </div>

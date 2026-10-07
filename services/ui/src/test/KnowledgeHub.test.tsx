@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
+import toast from 'react-hot-toast';
 import KnowledgeHub from '../pages/KnowledgeHub';
 import { renderWithProviders } from './render';
 import { api } from '../services/api';
@@ -13,7 +14,13 @@ vi.mock('../services/api', async (importOriginal) => {
       ...(actual.api as Record<string, unknown>),
       getStorageFiles: vi.fn(),
       triggerIndexing: vi.fn(),
+      triggerFullIndex: vi.fn().mockResolvedValue({ status: 'ACCEPTED', message: 'Indexing started in background.' }),
       getRagStats: vi.fn(),
+      getStorageStatus: vi.fn().mockResolvedValue({
+        status: 'SUCCESS',
+        indexer: 'IDLE',
+        checkpointed_files: 0,
+      }),
     },
   };
 });
@@ -86,5 +93,67 @@ describe('KnowledgeHub', () => {
     await waitFor(() => {
       expect(api.triggerIndexing).toHaveBeenCalledWith('/Notes', true);
     });
+  });
+
+  it('starts a Calibre library crawl when that library is selected', async () => {
+    renderWithProviders(<KnowledgeHub />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Calibre library' }));
+
+    // The card must describe the provider that is actually selected.
+    expect(await screen.findByText('Reindex the Calibre Library')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Start Full Reindex/ }));
+
+    await waitFor(() => {
+      expect(api.triggerFullIndex).toHaveBeenCalledWith({ kind: 'calibre' }, { force: false });
+    });
+  });
+
+  it('keeps the NextCloud reindex as the default provider', async () => {
+    renderWithProviders(<KnowledgeHub />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Start Full Reindex/ }));
+
+    await waitFor(() => {
+      expect(api.triggerFullIndex).toHaveBeenCalledWith({ kind: 'nextcloud' }, { force: false });
+    });
+  });
+
+  it('shows live crawl progress while a crawl is running', async () => {
+    vi.mocked(api.getStorageStatus).mockResolvedValue({
+      status: 'SUCCESS',
+      indexer: 'IDLE',
+      checkpointed_files: 0,
+      crawl: { active: true, kind: 'calibre', phase: 'extracting', done: 120, total: 3079 },
+    });
+
+    renderWithProviders(<KnowledgeHub />);
+
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('Crawling calibre');
+    expect(status).toHaveTextContent('Extracting text');
+    expect(status).toHaveTextContent('120/3079');
+  });
+
+  it('surfaces the gateway detail when the crawl is refused', async () => {
+    vi.mocked(api.triggerFullIndex).mockRejectedValueOnce({
+      response: {
+        data: {
+          detail:
+            "No Calibre library path configured. Set the 'calibre_library_path' setting (Admin > Settings) or pass library_path with the request.",
+        },
+      },
+    });
+    const errorSpy = vi.spyOn(toast, 'error').mockImplementation(() => 'id');
+
+    renderWithProviders(<KnowledgeHub />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Calibre library' }));
+    fireEvent.click(screen.getByRole('button', { name: /Start Full Reindex/ }));
+
+    await waitFor(() => {
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('calibre_library_path'));
+    });
+    errorSpy.mockRestore();
   });
 });

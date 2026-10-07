@@ -425,6 +425,39 @@ export interface RagStats {
 }
 
 /**
+ * One storage crawl as reported by `GET /api/storage/status`.
+ *
+ * A crawl runs as a background task behind a 202, so this record is the only
+ * honest way to show progress: `phase` walks listing → extracting → syncing,
+ * `done`/`total` count the current phase, and `error` records why a crawl
+ * stopped if it failed rather than leaving a spinner running forever.
+ */
+export interface StorageCrawl {
+  active: boolean;
+  kind?: string;
+  path?: string;
+  phase?: string;
+  done?: number;
+  total?: number;
+  started_at?: number;
+  updated_at?: number;
+  files?: number;
+  chunks?: number;
+  synced?: number;
+  error?: string;
+}
+
+/** Storage indexer health plus the active crawl, if any. */
+export interface StorageStatus {
+  status: string;
+  indexer: string;
+  checkpointed_files: number;
+  message?: string;
+  crawl?: StorageCrawl;
+  rag_index?: Record<string, unknown>;
+}
+
+/**
  * Which of the three workspace-composer jobs to run.
  *
  * `auto` lets the gateway decide from the shape of the query and reports back

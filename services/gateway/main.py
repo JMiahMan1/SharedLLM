@@ -5859,6 +5859,23 @@ async def get_storage_stats(request: Request):
 
     return JSONResponse(status_code=200, content=content)
 
+@app.get("/api/storage/status")
+async def get_storage_status(request: Request):
+    """Current indexer state plus the active crawl, if one is running.
+
+    The crawl record is what makes a background crawl visible at all:
+    ``POST /api/storage/index`` answers 202 and runs out of sight, and storage's
+    own ``indexer`` field only ever reads IDLE or PAUSED. Identity is required
+    for the same reason as every other storage route: an unproven caller gets a
+    401 rather than a view of the family's index.
+    """
+    await _resolve_identity_from_request(request)
+    resp = await get_http_client().get(
+        f"{STORAGE_SVC}/status",
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    return await _proxy_json_response(resp)
+
 @app.get("/api/storage/collection/{collection_name}")
 async def get_collection_docs(collection_name: str, request: Request, limit: int = 100):
     try:
