@@ -48,7 +48,13 @@ def usable(points: list[dict]) -> list[dict]:
     return out
 
 
-async def _match_chunk(session: aiohttp.ClientSession, base: str, chunk: list[dict]) -> tuple[list, float] | None:
+class _NoMatch(Exception):
+    """OSRM answered, and the fixes fit no road."""
+
+
+async def _match_chunk(session: aiohttp.ClientSession, base: str, chunk: list[dict]) -> tuple[list, float, float]:
+    """(line [[lon, lat], ...], distance m, confidence x distance) for one
+    chunk. Raises _NoMatch when OSRM finds no road path through the fixes."""
     coords = ";".join(f"{p['lon']:.6f},{p['lat']:.6f}" for p in chunk)
     radiuses = ";".join(f"{_radius(p.get('acc')):.0f}" for p in chunk)
     url = f"{base}/match/v1/driving/{coords}"
@@ -63,42 +69,103 @@ async def _match_chunk(session: aiohttp.ClientSession, base: str, chunk: list[di
     }
     async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
         data = await resp.json(content_type=None)
-    if resp.status != 200 or data.get("code") != "Ok" or not data.get("matchings"):
-        log.info("[map_match] OSRM %s: %s", resp.status, data.get("code"))
-        return None
+    if data.get("code") in ("NoMatch", "NoSegment", "TooBig") or (resp.status == 200 and not data.get("matchings")):
+        raise _NoMatch(data.get("code"))
+    if resp.status != 200 or data.get("code") != "Ok":
+        raise RuntimeError(f"OSRM {resp.status}: {data.get('code')}")
     line: list = []
     distance = 0.0
+    weighted = 0.0
     for m in data["matchings"]:
         line.extend(m.get("geometry", {}).get("coordinates", []))
-        distance += float(m.get("distance") or 0.0)
-    return line, distance
+        d = float(m.get("distance") or 0.0)
+        distance += d
+        weighted += d * float(m.get("confidence") or 0.0)
+    return line, distance, weighted
 
 
 async def match(points: list[dict], osrm_url: str | None) -> dict | None:
-    """The road path through ``points``: {"coordinates": [[lat, lon], ...],
-    "distance_m": float, "used": n}, or None when it cannot be matched."""
+    """The road path through ``points``.
+
+    {"matched": True, "coordinates": [[lat, lon], ...], "distance_m",
+    "confidence" (0-1), "used": n} when it fits the roads; {"matched": False,
+    "used": n} when OSRM finds no road path through them (a phantom trail);
+    None when it cannot be asked (no OSRM, OSRM down, under two fixes), which
+    callers must not take as "no road"."""
     base = (osrm_url or "").rstrip("/")
     fixes = usable(points)
     if not base or len(fixes) < 2:
         return None
     line: list = []
     distance = 0.0
+    weighted = 0.0
     try:
         async with aiohttp.ClientSession() as session:
             # Consecutive chunks share their boundary fix so the path is continuous.
             start = 0
             while start < len(fixes) - 1:
                 chunk = fixes[start:start + CHUNK]
-                got = await _match_chunk(session, base, chunk)
-                if got is None:
-                    return None
-                part, dist = got
+                part, dist, w = await _match_chunk(session, base, chunk)
                 line.extend(part if not line else part[1:])
                 distance += dist
+                weighted += w
                 start += CHUNK - 1
+    except _NoMatch as e:
+        log.info("[map_match] no road path through %d fixes (%s)", len(fixes), e)
+        return {"matched": False, "used": len(fixes)}
     except Exception as e:  # unreachable, timeout, bad JSON: serve raw points instead
         log.warning("[map_match] OSRM unavailable: %s", e)
         return None
     if len(line) < 2:
+        return {"matched": False, "used": len(fixes)}
+    return {
+        "matched": True,
+        "coordinates": [[lat, lon] for lon, lat in line],
+        "distance_m": distance,
+        "confidence": (weighted / distance) if distance > 0 else 0.0,
+        "used": len(fixes),
+    }
+
+
+async def route(a: tuple[float, float], b: tuple[float, float], osrm_url: str | None,
+                timeout_s: float = 5.0) -> dict | None:
+    """Fastest road route from a to b ((lat, lon) each): {"distance_m",
+    "duration_s"}, or None when OSRM cannot be asked or finds no route."""
+    base = (osrm_url or "").rstrip("/")
+    if not base:
         return None
-    return {"coordinates": [[lat, lon] for lon, lat in line], "distance_m": distance, "used": len(fixes)}
+    url = f"{base}/route/v1/driving/{a[1]:.6f},{a[0]:.6f};{b[1]:.6f},{b[0]:.6f}"
+    try:
+        async with aiohttp.ClientSession() as session, session.get(
+                url, params={"overview": "false"}, timeout=aiohttp.ClientTimeout(total=timeout_s)) as resp:
+            data = await resp.json(content_type=None)
+    except Exception as e:
+        log.info("[map_match] route unavailable: %s", e)
+        return None
+    if data.get("code") != "Ok" or not data.get("routes"):
+        return None
+    r = data["routes"][0]
+    return {"distance_m": float(r.get("distance") or 0.0), "duration_s": float(r.get("duration") or 0.0)}
+
+
+async def table(sources: list[tuple[float, float]], destination: tuple[float, float],
+                osrm_url: str | None) -> list[float | None] | None:
+    """Drive time (s) from each source to one destination (OSRM table), None
+    for a source with no route; None when OSRM cannot be asked."""
+    base = (osrm_url or "").rstrip("/")
+    if not base or not sources:
+        return None
+    coords = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in [*sources, destination])
+    params = {"sources": ";".join(str(i) for i in range(len(sources))),
+              "destinations": str(len(sources)), "annotations": "duration"}
+    try:
+        async with aiohttp.ClientSession() as session, session.get(
+                f"{base}/table/v1/driving/{coords}", params=params,
+                timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            data = await resp.json(content_type=None)
+    except Exception as e:
+        log.info("[map_match] table unavailable: %s", e)
+        return None
+    if data.get("code") != "Ok":
+        return None
+    return [row[0] if row and row[0] is not None else None for row in data.get("durations") or []]

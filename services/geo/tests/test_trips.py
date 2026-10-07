@@ -698,3 +698,70 @@ async def test_a_late_fix_does_not_move_a_trip_backwards(fake_redis):
     after = json.loads(await fake_redis.get("geo:active_trip:jeremiah"))
     assert after["distance_miles"] == before["distance_miles"]
     assert after["last_lat"] == before["last_lat"]
+
+
+# ---------------------------------------------------------------------------
+# Road network checks on trips (OSRM): road distance, phantoms, jumps
+# ---------------------------------------------------------------------------
+
+def _active_trip(now, miles=1.0):
+    return {"id": "trip_jeremiah_1", "start_time": now - 600, "last_moving_time": now - 400,
+            "distance_miles": miles, "start_location": {"latitude": 33.1, "longitude": -111.5},
+            "end_location": {"latitude": 33.2, "longitude": -111.5}}
+
+
+@pytest.mark.asyncio
+async def test_a_trip_takes_its_road_distance(fake_redis, monkeypatch):
+    async def road(points, url):
+        return {"matched": True, "coordinates": [[33.1, -111.5], [33.2, -111.5]], "distance_m": 3218.7,
+                "confidence": 0.9, "used": 5}
+    monkeypatch.setattr(geo.map_match, "match", road)
+    done = await geo._finalize_active_trip(fake_redis, "jeremiah", _active_trip(time.time(), miles=2.6), time.time())
+    assert done["distance_miles"] == 2.0 and done["distance_source"] == "road"
+
+
+@pytest.mark.asyncio
+async def test_a_trail_that_fits_no_road_is_not_a_trip(fake_redis, monkeypatch):
+    async def phantom(points, url):
+        return {"matched": False, "used": 3}
+    monkeypatch.setattr(geo.map_match, "match", phantom)
+    assert await geo._finalize_active_trip(fake_redis, "jeremiah", _active_trip(time.time(), miles=5.3), time.time()) is None
+
+
+@pytest.mark.asyncio
+async def test_osrm_down_keeps_the_trip(fake_redis, monkeypatch):
+    async def down(points, url):
+        return None
+    monkeypatch.setattr(geo.map_match, "match", down)
+    done = await geo._finalize_active_trip(fake_redis, "jeremiah", _active_trip(time.time(), miles=1.4), time.time())
+    assert done["distance_miles"] == 1.4 and "distance_source" not in done
+
+
+@pytest.mark.asyncio
+async def test_an_impossible_jump_is_not_a_breadcrumb(fake_redis, monkeypatch):
+    now = time.time()
+    await geo.record_point(entity_id="jeremiah", lat=33.1667, lon=-111.5646, accuracy=8, timestamp=now)
+
+    async def far_by_road(a, b, url, timeout_s=5.0):
+        return {"distance_m": 30000.0, "duration_s": 1800.0}
+    monkeypatch.setattr(geo.map_match, "route", far_by_road)
+    # 4 km away 60 s later: under the speed limit for a straight line, but a
+    # 30-minute drive by road
+    await geo.record_point(entity_id="jeremiah", lat=33.2027, lon=-111.5646, accuracy=8, timestamp=now + 60)
+    # 2 hours later the same place is reachable
+    await geo.record_point(entity_id="jeremiah", lat=33.2027, lon=-111.5646, accuracy=8, timestamp=now + 7200)
+    kept = [json.loads(p)["t"] for p in await fake_redis.zrangebyscore("geo:history:jeremiah", 0, now + 9999)]
+    assert kept == [now, now + 7200]
+
+
+@pytest.mark.asyncio
+async def test_faster_than_any_vehicle_is_dropped_without_asking_osrm(fake_redis, monkeypatch):
+    now = time.time()
+    await geo.record_point(entity_id="jeremiah", lat=33.1667, lon=-111.5646, accuracy=8, timestamp=now)
+
+    async def never(*a, **k):
+        raise AssertionError("no road check needed")
+    monkeypatch.setattr(geo.map_match, "route", never)
+    await geo.record_point(entity_id="jeremiah", lat=33.30, lon=-111.5646, accuracy=8, timestamp=now + 10)
+    kept = await fake_redis.zrangebyscore("geo:history:jeremiah", 0, now + 99)
+    assert len(kept) == 1
