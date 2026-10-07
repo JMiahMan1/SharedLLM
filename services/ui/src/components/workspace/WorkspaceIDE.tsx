@@ -90,6 +90,12 @@ interface WorkspaceIDEProps {
   workspace: Workspace;
   onClose: () => void;
   initialPath?: string | null;
+  /**
+   * The session to restore, already merged from this browser and the server.
+   * Optional: without it the browser's own copy is used, so the IDE still
+   * works anywhere it is mounted without the sync in front of it.
+   */
+  initialSession?: WorkspaceSession | null;
 }
 
 type View = 'explorer' | 'git' | 'tools' | 'chat' | 'terminal';
@@ -213,11 +219,21 @@ function FileCtxMenuItem({ icon, label, onClick, danger }: FileCtxMenuItemProps)
   );
 }
 
-export default function WorkspaceIDE({ workspace, onClose, initialPath }: WorkspaceIDEProps) {
+export default function WorkspaceIDE({
+  workspace,
+  onClose,
+  initialPath,
+  initialSession,
+}: WorkspaceIDEProps) {
   // Where the reader left off last time. Read once so the lazy initialisers
   // below can use it; the open files are restored after the first render
-  // because re-opening one means fetching it.
-  const savedSession = useMemo(() => readWorkspaceSession(workspace.id), [workspace.id]);
+  // because re-opening one means fetching it. The caller hands in the merged
+  // copy when it has one (this browser vs. the server); otherwise the local
+  // copy is all there is.
+  const savedSession = useMemo(
+    () => initialSession ?? readWorkspaceSession(workspace.id),
+    [initialSession, workspace.id],
+  );
 
   const [activeView, setActiveView] = useState<View>(savedSession?.view ?? 'explorer');
   const [terminalOpen, setTerminalOpen] = useState(savedSession?.terminalOpen ?? false);
@@ -762,6 +778,27 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
     [activeView, currentPath, terminalOpen, terminalPosition, terminalHeight, activeTab, tabs],
   );
   const sessionSavedRef = useRef(false);
+  const pendingSessionRef = useRef<WorkspaceSession | null>(null);
+  const sessionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Send the newest session to the server, cancelling any wait in progress.
+  // Called on a short delay so typing does not produce a request per keystroke,
+  // and again on the way out so the last edit is not the one that is lost.
+  const flushSession = useCallback(() => {
+    if (sessionTimerRef.current) {
+      clearTimeout(sessionTimerRef.current);
+      sessionTimerRef.current = null;
+    }
+    const pending = pendingSessionRef.current;
+    pendingSessionRef.current = null;
+    if (!pending) return;
+    void api
+      .putWorkspaceSession(workspace.id, pending as unknown as Record<string, unknown>)
+      .catch((error) => {
+        console.warn('[workspace] could not save the session to the server:', error);
+      });
+  }, [workspace.id]);
+
   useEffect(() => {
     // The first pass is skipped so the empty render before the restore lands
     // cannot overwrite the tabs that are about to be put back.
@@ -770,7 +807,14 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
       return;
     }
     writeWorkspaceSession(workspace.id, sessionSnapshot);
-  }, [workspace.id, sessionSnapshot]);
+    pendingSessionRef.current = sessionSnapshot;
+    if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current);
+    sessionTimerRef.current = setTimeout(flushSession, 800);
+  }, [workspace.id, sessionSnapshot, flushSession]);
+
+  // Leaving is the moment the session matters most: flush instead of waiting
+  // out the delay, so closing the IDE right after an edit still saves it.
+  useEffect(() => flushSession, [flushSession]);
 
   // Revoke all blob/image URLs on unmount to prevent memory leaks.
   // Uses a ref updated in an effect so cleanup always sees the current tabs.

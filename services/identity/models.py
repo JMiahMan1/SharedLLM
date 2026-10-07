@@ -181,6 +181,29 @@ class UserCalendarSetting(SQLModel, table=True):  # type: ignore
     data: str = Field(default="{}")
 
 
+class UserWorkspaceSession(SQLModel, table=True):  # type: ignore
+    """Where a reader left off inside a workspace, one row per user and workspace.
+
+    Held on the server so a workspace opens in the same place on any device,
+    and so a half-typed file survives a closed browser. It is private to the
+    account that saved it and is never shared with anyone else.
+
+    data JSON keys (all validated by the UI before use, since a stored blob is
+    not trusted to be well formed):
+      - view, currentPath, terminalOpen, terminalPosition, terminalHeight
+      - activeTab, tabs: list of {path, kind, dirty, content?, language?},
+        where content is present only for a tab with unsaved edits
+      - savedAt: epoch milliseconds, so the newer of a browser copy and this
+        copy can be chosen
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True, foreign_key="user.username")
+    workspace_id: str = Field(index=True)
+    data: str = Field(default="{}")
+    updated_at: str = Field(default="")
+
+
 class UserThemeSetting(SQLModel, table=True):  # type: ignore
     """Per-user website + widget theme preference.
 
