@@ -3602,6 +3602,25 @@ async def proxy_device_battery(device_key: str, request: Request, hours: int = 2
         return await _proxy_json_response(resp)
 
 
+@app.get("/api/user-panel/devices/{device_key}/activity")
+async def proxy_device_activity(device_key: str, request: Request, hours: int = 24, limit: int = 50):
+    """What one device has reported lately (its owner's, or any for an admin).
+
+    Backs the device detail view: the device's own record, how many of each
+    event arrived, and the most recent events. Every event is from the
+    no-opt-in allowlist, so this is activity and small scalars rather than
+    anything the device heard or saw.
+    """
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/user-panel/devices/{device_key}/activity",
+            headers=_panel_headers(request),
+            params={"hours": hours, "limit": limit},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.patch("/api/user-panel/devices/{device_key}")
 async def proxy_assign_device(device_key: str, request: Request):
     async with shared_http_client() as client:
@@ -8553,6 +8572,40 @@ async def get_geo_workout_route(request: Request, workout_id: str):
         if resp.status == 200:
             return await resp.json()
     await _raise_scoped_failure(resp, "Failed to fetch workout route")
+
+
+@app.get("/api/geo/steps/sources")
+async def get_geo_step_sources(
+    request: Request,
+    user_id: str | None = None,
+    days: int = 7,
+    hourly: bool = False,
+):
+    """Per-device step history: {source: {day: steps}}.
+
+    Declared before the "/api/geo/steps" route so a literal path is never
+    captured as something else. A fused daily total cannot say which device
+    produced it, so a device's own page reads through here to show what that
+    device contributed.
+    """
+    target, viewer, is_admin = await _read_target(request, user_id)
+    params = {
+        "user_id": target,
+        "viewer": viewer,
+        "is_admin": is_admin,
+        "days": days,
+        "hourly": "true" if hourly else None,
+    }
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/steps/sources",
+            params={k: v for k, v in params.items() if v is not None},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=8.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    await _raise_scoped_failure(resp, "Failed to fetch per-device steps")
 
 
 @app.get("/api/geo/steps/ranges")

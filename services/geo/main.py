@@ -35,7 +35,8 @@ from pydantic import BaseModel
 _STATIC = Path(__file__).resolve().parent / "static"
 
 from services.common.http import get_client_insecure
-from services.config import HA_TOKEN, HA_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, REDIS_URL
+from services.config import HA_TOKEN, HA_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, OSRM_URL, REDIS_URL
+from services.geo import map_match
 from services.shared.info_endpoint import info_router
 
 try:
@@ -2206,6 +2207,25 @@ async def get_trip_route(trip_id: str):
             log.warning(f"[Geo] Route reconstruction failed for {trip_id}: {e}")
 
     points.sort(key=lambda x: x.get("t", 0))
+
+    # Along the roads when OSRM can match the trail: sparse or noisy fixes
+    # joined by straight lines cut corners and cross fields, and a gap in the
+    # trail drew as a straight shot. Raw points (snapped: false) otherwise.
+    matched = await map_match.match(points, OSRM_URL) if trip.get("activity_type", "driving") == "driving" else None
+    if matched:
+        coords = matched["coordinates"]
+        t0 = float(points[0].get("t", trip.get("start_time", 0)))
+        t1 = float(points[-1].get("t", trip.get("end_time", t0)))
+        span = (t1 - t0) / max(1, len(coords) - 1)
+        return {
+            "trip_id": trip_id,
+            "activity_type": trip.get("activity_type", "driving"),
+            "distance_miles": trip.get("distance_miles"),
+            "snapped": True,
+            "matched_distance_miles": round(matched["distance_m"] * 0.000621371, 2),
+            "points": [{"t": t0 + i * span, "lat": lat, "lon": lon, "spd": 0} for i, (lat, lon) in enumerate(coords)],
+        }
+
     # Downsample very long routes for the UI
     if len(points) > 500:
         step = math.ceil(len(points) / 500)
@@ -2215,6 +2235,7 @@ async def get_trip_route(trip_id: str):
         "trip_id": trip_id,
         "activity_type": trip.get("activity_type", "driving"),
         "distance_miles": trip.get("distance_miles"),
+        "snapped": False,
         "points": [
             {"t": p.get("t"), "lat": p.get("lat"), "lon": p.get("lon"), "spd": p.get("spd", 0)}
             for p in points
@@ -2656,6 +2677,80 @@ async def get_daily_steps(
         "today": history.get(today, 0),
         "goal": await _get_step_goal(r, clean),
         "sources": sources,
+        "last_synced": last_synced,
+    }
+
+
+@app.get("/steps/sources")
+async def get_step_sources(
+    user_id: str | None = None,
+    days: int = Query(7, ge=1, le=90),
+    hourly: bool = False,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
+):
+    """Per-device step history: {source: {day: steps}}, subject to consent.
+
+    A fused daily total hides which device produced it, so a phone left in a
+    drawer and a watch that walked all afternoon look identical. This keeps
+    them apart, keyed exactly as they were recorded, so a device's own page can
+    show what that device contributed and the difference is explainable.
+
+    A source with nothing recorded is **absent** rather than zero: no report
+    and a reported zero are different facts, and only one of them means the
+    device is working.
+    """
+    r = await get_redis()
+    if not r:
+        return {"user_id": user_id, "days": days, "sources": {}, "hourly": {}}
+    clean = await _require_may_view(viewer, user_id, is_admin)
+    tz = ZoneInfo(APP_TIMEZONE)
+    cutoff = (datetime.now(tz) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+
+    sources: dict[str, dict[str, int]] = {}
+    hours: dict[str, dict[str, int]] = {}
+    for source in STEP_SOURCES:
+        raw = await r.hgetall(f"geo:steps_src:{clean}:{source}")
+        days_for_source: dict[str, int] = {}
+        for day_str, value in raw.items():
+            if day_str < cutoff:
+                continue
+            try:
+                days_for_source[day_str] = int(value)
+            except (TypeError, ValueError):
+                continue
+        if days_for_source:
+            sources[source] = dict(sorted(days_for_source.items()))
+        if not hourly:
+            continue
+        raw_hours = await r.hgetall(f"geo:steps_hourly:{clean}:{source}")
+        hours_for_source: dict[str, int] = {}
+        for field, value in raw_hours.items():
+            day_str = field.split(":", 1)[0]
+            if day_str < cutoff:
+                continue
+            try:
+                hours_for_source[field] = int(value)
+            except (TypeError, ValueError):
+                continue
+        if hours_for_source:
+            hours[source] = dict(sorted(hours_for_source.items()))
+
+    last_synced: float | None = None
+    try:
+        raw_meta = await r.hget(f"geo:steps_meta:{clean}", "updated_at")
+        if raw_meta is not None:
+            last_synced = float(raw_meta)
+    except (TypeError, ValueError):
+        last_synced = None
+
+    return {
+        "user_id": clean,
+        "days": days,
+        "sources": sources,
+        "hourly": hours if hourly else {},
         "last_synced": last_synced,
     }
 

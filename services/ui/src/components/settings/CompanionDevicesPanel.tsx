@@ -5,6 +5,7 @@ import { Battery, BatteryCharging, BatteryLow, Lightbulb, Loader2, Mic, Plus, Se
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { DeviceDetailSheet, Sparkline } from './DeviceDetailSheet';
 import type { BatteryReading, CompanionDevice, DiscoveredDevice } from '../../services/api';
 
 /**
@@ -77,25 +78,20 @@ function BatteryHistory({ deviceKey }: { deviceKey: string }) {
     queryKey: ['device-battery', deviceKey],
     queryFn: () => api.getDeviceBattery(deviceKey, 24),
   });
-  const points = data.filter((r) => r.pct != null);
+  const points = data
+    .filter((r) => r.pct != null)
+    .map((r) => ({ at: Date.parse(r.at), value: r.pct as number }));
   if (isLoading) return <p className="text-xs text-slate-500">Loading battery history…</p>;
   if (points.length < 2) return <p className="text-xs text-slate-500">Not enough battery reports in the last day yet.</p>;
-  const t0 = Date.parse(points[0].at);
-  const span = Math.max(1, Date.parse(points[points.length - 1].at) - t0);
-  const path = points
-    .map((r, i) => `${i ? 'L' : 'M'}${((Date.parse(r.at) - t0) / span * 100).toFixed(1)},${(40 - (r.pct as number) * 0.4).toFixed(1)}`)
-    .join(' ');
   const charging = data.filter((r) => r.usb).length;
   return (
-    <figure className="w-full" aria-label="Battery, last 24 hours">
-      <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="w-full h-16 rounded-lg bg-black/30">
-        <path d={path} fill="none" stroke="currentColor" strokeWidth="1.2" vectorEffect="non-scaling-stroke" className="text-sky-400" />
-      </svg>
+    <>
+      <Sparkline points={points} ariaLabel="Battery, last 24 hours" />
       <figcaption className="mt-1 text-[11px] text-slate-500">
-        {points.length} readings · {Math.round(points[points.length - 1].pct as number)}% now
+        {points.length} readings · {Math.round(points[points.length - 1].value)}% now
         {charging ? ` · ${charging} while charging (no % on USB)` : ''}
       </figcaption>
-    </figure>
+    </>
   );
 }
 
@@ -115,6 +111,7 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
   const [code, setCode] = useState('');
   const [found, setFound] = useState<DiscoveredDevice[] | null>(null);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
+  const [detailFor, setDetailFor] = useState<CompanionDevice | null>(null);
 
   const { data: allDevices = [], isLoading } = useQuery({
     queryKey: ['companion-devices'],
@@ -327,16 +324,25 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
           ].filter(Boolean).join(' · ');
           return (
             <li key={d.device_key} className={`flex flex-wrap items-center gap-3 px-4 sm:px-6 py-3 ${touch}`}>
-              <Icon size={20} className="text-sky-400 shrink-0" />
-              <span className="flex-1 min-w-0">
-                <span className="block text-sm text-white truncate">{name}</span>
-                <span className="block text-xs text-slate-500 truncate">{sub}</span>
-              </span>
+              <button
+                type="button"
+                onClick={() => setDetailFor(d)}
+                aria-label={`Details for ${name}`}
+                data-testid={`device-open-${d.device_key}`}
+                className={`flex flex-1 min-w-0 items-center gap-3 rounded-xl px-1 text-left hover:bg-white/5 ${touch}`}
+              >
+                <Icon size={20} className="text-sky-400 shrink-0" />
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm text-white truncate">{name}</span>
+                  <span className="block text-xs text-slate-500 truncate">{sub}</span>
+                </span>
+              </button>
               {d.battery && (
                 <button
                   onClick={() => setHistoryFor(historyFor === d.device_key ? null : d.device_key)}
                   aria-expanded={historyFor === d.device_key}
                   aria-label={`Battery history for ${name}`}
+                  data-testid={`device-battery-${d.device_key}`}
                   className={`rounded-lg px-2 hover:bg-white/5 ${touch} flex items-center`}
                 >
                   <BatteryChip reading={d.battery} />
@@ -365,6 +371,10 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
           );
         })}
       </ul>
+
+      {detailFor && (
+        <DeviceDetailSheet device={detailFor} onClose={() => setDetailFor(null)} />
+      )}
     </div>
   );
 };

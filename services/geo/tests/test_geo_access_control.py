@@ -82,6 +82,7 @@ READ_ROUTES = [
     ("/points", {}),
     ("/achievements", {}),
     ("/steps/goal", {}),
+    ("/steps/sources", {"days": 7}),
     ("/trends/activity", {"days": 7}),
     ("/trips", {}),
     ("/workouts", {}),
