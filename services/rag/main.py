@@ -93,6 +93,23 @@ def embed_batched(texts: list[str], batch_size: int = EMBED_BATCH_SIZE) -> list[
     return vectors
 
 
+def _self_rss_mib() -> int:
+    """Resident set size of this process in MiB, read from /proc/self/statm.
+
+    Phase timings without a memory number cannot separate an ONNX arena that
+    keeps its allocations from a write loop that leaks: the OOM diagnosis for
+    ``/rag/sync/ha`` needed both on the same log line. ``/proc`` is always
+    readable on Linux; a missing file reports -1 rather than failing the
+    request it is only observing.
+    """
+    try:
+        with open("/proc/self/statm") as fh:
+            pages = int(fh.read().split()[1])
+        return (pages * 4096) // 1048576
+    except Exception:
+        return -1
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global conn, adapter, embedder, EMBEDDING_MODEL, EMBEDDING_DIM, BACKEND
@@ -1915,20 +1932,30 @@ async def sync_ha(payload: dict, user_id: str | None = None):
     try:
         log.info(
             f"[ha_sync] embedding {len(pending)} texts for {resolved_user} "
-            f"in batches of {EMBED_BATCH_SIZE}"
+            f"in batches of {EMBED_BATCH_SIZE} (rss={_self_rss_mib()}MiB)"
         )
+        embed_started = time.monotonic()
         vectors = await asyncio.to_thread(embed_batched, [p[1] for p in pending])
+        log.info(
+            f"[ha_sync] embedded {len(pending)} texts in "
+            f"{time.monotonic() - embed_started:.1f}s (rss={_self_rss_mib()}MiB)"
+        )
     except Exception as ex:
         log.error(f"[ha_sync] embedding {len(pending)} entities failed: {ex}")
         return JSONResponse(
             status_code=500,
             content={"status": "ERROR", "message": f"HA entity embedding failed: {ex}"},
         )
+    write_started = time.monotonic()
     for i, (cid, content, meta, created_at) in enumerate(pending):
         try:
             _add_item("ha_entities", cid, resolved_user, content, meta, created_at, now_ts, vector=vectors[i])
         except Exception as ex:
             log.error(f"HA entity sync failed for {cid}: {ex}")
+    log.info(
+        f"[ha_sync] wrote {len(pending)} items in "
+        f"{time.monotonic() - write_started:.1f}s (rss={_self_rss_mib()}MiB)"
+    )
 
     return {
         "status": "SUCCESS",
