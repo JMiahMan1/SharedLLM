@@ -27,6 +27,7 @@ import traceback
 import urllib.request
 import urllib.error
 import redis
+from collections.abc import Iterator
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
@@ -46,6 +47,7 @@ DEFAULT_EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 DEFAULT_EMBEDDING_DIM = 768
 
 EMBED_BATCH_SIZE: int = 128
+EMBED_CHAR_BUDGET: int = 5_000_000
 
 # Globals populated in the lifespan
 conn = None
@@ -75,25 +77,68 @@ def embed(texts: list[str]) -> list[list[float]]:
     return [v.tolist() for v in embedder.embed(texts)]
 
 
-def embed_batched(texts: list[str], batch_size: int = EMBED_BATCH_SIZE) -> list[list[float]]:
-    """Embed ``texts`` in bounded batches so peak memory stays flat.
+def _batch_by_cost(
+    texts: list[str], batch_size: int, char_budget: int
+) -> Iterator[list[str]]:
+    """Yield batches whose ``count * longest**2`` stays inside ``char_budget``.
 
-    ONNX inference memory grows with batch size: a single 684-entity Home
-    Assistant sync batch needed more than the container's 6 GiB limit, so the
-    service was OOM-killed roughly every six minutes by its own cleanup loop
-    (each kill restarts it, then the next user's sync repeats the batch).
-    Chunking keeps any one call inside the budget ``reindex_all`` already
-    relies on for the same reason.
+    ONNX pads a batch to its longest text, and attention is quadratic in that
+    length, so one long string multiplies the activation cost of every other
+    text it travels with. Splitting on a fixed count alone therefore lets a
+    single pathological entry (see ``embed_batched``) decide the peak memory
+    of the whole run. A text that alone exceeds the budget still forms a batch
+    of one rather than being dropped -- losing it silently would index fewer
+    documents than the caller believes were submitted.
+    """
+    batch: list[str] = []
+    longest = 0
+    for text in texts:
+        length = len(text)
+        if batch and (
+            len(batch) >= batch_size
+            or (len(batch) + 1) * max(longest, length) ** 2 > char_budget
+        ):
+            yield batch
+            batch = []
+            longest = 0
+        batch.append(text)
+        longest = max(longest, length)
+    if batch:
+        yield batch
+
+
+def embed_batched(
+    texts: list[str],
+    batch_size: int = EMBED_BATCH_SIZE,
+    char_budget: int = EMBED_CHAR_BUDGET,
+) -> list[list[float]]:
+    """Embed ``texts`` in cost-bounded batches so peak memory stays flat.
+
+    Count-bounded chunking alone was not enough. Measured against the live
+    Home Assistant index (697 entities) with a 6 GiB cgroup: five batches of
+    128 texts at <=178 chars held the process flat at ~1.9 GiB (+70 MiB per
+    batch), then the final batch of 57 texts -- carrying two 1,144-char
+    entries -- jumped 1,905 to 5,654 MiB in a single call and OOM-killed the
+    service. The write loop that followed added exactly zero.
+
+    ``char_budget`` bounds ``count * longest**2`` (the quadratic term is what
+    the measurements track): the measured-safe batch scores 128 * 178**2 =
+    4.1M while the fatal one scores 57 * 1144**2 = 75M, so a 5M budget admits
+    the former and splits the latter to three texts per call. Batches also
+    stay capped at ``batch_size``. An invalid budget fails loudly instead of
+    silently disabling the ceiling.
     """
     if batch_size < 1:
         raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+    if char_budget < 1:
+        raise ValueError(f"char_budget must be >= 1, got {char_budget}")
+    batches = list(_batch_by_cost(texts, batch_size, char_budget))
     vectors: list[list[float]] = []
-    for index, start in enumerate(range(0, len(texts), batch_size), start=1):
-        batch = texts[start : start + batch_size]
+    for index, batch in enumerate(batches, start=1):
         batch_started = time.monotonic()
         vectors.extend(embed(batch))
         log.info(
-            f"[embed_batched] batch {index}/{-(-len(texts) // batch_size)} "
+            f"[embed_batched] batch {index}/{len(batches)} "
             f"({len(batch)} texts) in {time.monotonic() - batch_started:.1f}s "
             f"rss={_self_rss_mib()}MiB"
         )
@@ -1835,12 +1880,64 @@ async def purge_rag_collection(
 # Home Assistant sync
 # ─────────────────────────────────────────────────────────────────────────────
 
+_ENTITY_ID_MAX_LENGTH = 255
+
+
+def _usable_entity_id(entity_id: object) -> bool:
+    """Whether an id still has the ``domain.object_id`` shape HA guarantees.
+
+    The live index carried two entries whose id was a serialized user record
+    roughly 1,100 characters long (display name, URLs, e-mail addresses):
+    Home Assistant accepted it because anything can be registered, and this
+    service indexed it verbatim. Those entries also set the padded batch
+    length for every text they travelled with, which is what drove a single
+    embed call from 1,905 MiB to 5,654 MiB and OOM-killed the container. A
+    malformed id is therefore refused at the boundary rather than stored, and
+    length is the discriminator that needs no charset opinion: real ids are
+    well under this bound, while the offending entries were two orders of
+    magnitude over it.
+    """
+    if not isinstance(entity_id, str):
+        return False
+    if not 0 < len(entity_id) <= _ENTITY_ID_MAX_LENGTH:
+        return False
+    if entity_id.count(".") != 1:
+        return False
+    domain, dot, object_id = entity_id.partition(".")
+    if not dot or not domain or not object_id:
+        return False
+    if " " in entity_id:
+        return False
+    return domain.islower() and domain.replace("_", "").isalnum()
+
+
 @app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
 async def sync_ha(payload: dict, user_id: str | None = None):
     entities = payload.get("entities", [])
     resolved_user = (user_id or payload.get("user_id", "default")).lower()
     now = int(time.time())
     now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    if not isinstance(entities, list):
+        return JSONResponse(
+            status_code=400,
+            content={"status": "ERROR", "message": "entities must be a list"},
+        )
+    malformed_ids = [
+        str(e.get("entity_id"))[:160]
+        for e in entities
+        if isinstance(e, dict)
+        and e.get("entity_id")
+        and not _usable_entity_id(e.get("entity_id"))
+    ]
+    if malformed_ids:
+        log.warning(
+            f"[ha_sync] refusing {len(malformed_ids)} malformed entity_ids for "
+            f"{resolved_user}: {malformed_ids[:3]}"
+        )
+    entities = [
+        e for e in entities if isinstance(e, dict) and _usable_entity_id(e.get("entity_id", ""))
+    ]
 
     try:
         existing_rows = _conn().execute(
@@ -1967,6 +2064,7 @@ async def sync_ha(payload: dict, user_id: str | None = None):
     return {
         "status": "SUCCESS",
         "count": len(entities),
+        "refused_count": len(malformed_ids),
         "new_count": new_count,
         "removed_count": len(orphaned_entities),
         "orphaned_entity_ids": orphaned_entities,
