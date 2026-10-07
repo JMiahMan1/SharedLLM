@@ -439,6 +439,10 @@ async def lifespan(app: FastAPI):
     from services.execution.watch_glance import glance_loop
     glance_task = asyncio.create_task(glance_loop())
 
+    # Leave-by reminders for calendar events with a location (drive time by road)
+    from services.execution.leave_by import leave_by_loop
+    leave_by_task = asyncio.create_task(leave_by_loop())
+
     # Start ESPresense BLE presence pipeline (E7: was never invoked)
     from services.config import REDIS_URL as _PRESENCE_REDIS_URL
     from services.execution.presence import init_presence_tracker
@@ -508,6 +512,9 @@ async def lifespan(app: FastAPI):
     glance_task.cancel()
     with suppress(Exception):
         await glance_task
+    leave_by_task.cancel()
+    with suppress(Exception):
+        await leave_by_task
     with suppress(Exception):
         from services.execution.presence import get_presence_tracker
         await get_presence_tracker().stop()

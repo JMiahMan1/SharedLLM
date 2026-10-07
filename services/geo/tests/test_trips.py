@@ -809,7 +809,11 @@ async def test_eta_when_already_there(client, fake_redis, monkeypatch):
 async def test_eta_for_an_unknown_place_says_so(client, fake_redis, monkeypatch):
     async def zones():
         return [HOME]
+
+    async def no_such_place(text, near=None):
+        return None
     monkeypatch.setattr(geo, "_zones", zones)
+    monkeypatch.setattr(geo, "_geocode_place", no_such_place)
     await fake_redis.zadd("geo:history:michele", {json.dumps({"t": 1, "lat": 33.3, "lon": -111.7}): 1})
     resp = client.get("/people/michele/eta?to=narnia", headers={"X-Internal-Secret": INTERNAL_SECRET})
     assert resp.status_code == 404 and "narnia" in resp.json()["detail"]

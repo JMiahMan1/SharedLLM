@@ -12,7 +12,7 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
 
 ## Features
 - [x] 4. ETA home (or to a saved place) from someone's live position: API, Jarvis answers "when will X be home?", dashboard while driving, watch glance
-- [ ] 5. Leave-by reminders for calendar events with a location, from the real drive time
+- [x] 5. Leave-by reminders for calendar events with a location, from the real drive time
 - [x] 6. Who's closest by drive time to a place (OSRM table)
 - [x] 7. Arrival / departure notices with an ETA ("left work, home in ~22 min")
 
@@ -28,3 +28,7 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
   "jeremiah" instead of the asker.
 - The location question parser existed twice (fast path and orchestrator);
   now one shared parse_location_query.
+- The execution image build failed when GitHub rate-limited the unauthenticated
+  "latest gh release" lookup; the gh CLI version is now pinned.
+- ETA only understood zone names and lat,lon; an address or place name (as
+  calendar events have) is now geocoded near the person, cached a month.
