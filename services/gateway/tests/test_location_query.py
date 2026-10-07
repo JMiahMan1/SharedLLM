@@ -29,3 +29,9 @@ def test_the_asker_is_the_default():
 def test_closest(q, to):
     got = parse_location_query(q, "jeremiah")
     assert got["detail"] == "closest" and got["to"] == to
+
+
+def test_an_eta_to_a_street_address_keeps_the_address():
+    q = parse_location_query("How long until I get to 1234 E Main St, Mesa?", "jeremiah")
+    assert q == {"user": "jeremiah", "detail": "eta", "to": "1234 e main st, mesa"}
+    assert parse_location_query("when will michele be home?", "jeremiah")["to"] == "home"
