@@ -433,6 +433,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {
     "logbookrequest": "/execute/ha_logbook",
     "executionlogrequest": "/execute/logs",
     "audiobookshelfrequest": "/execute/audiobookshelf",
+    "calibrerequest": "/execute/calibre",
     "documentbroadcastrequest": "/execute/composite/broadcast",
     "nightmoderequest": "/execute/composite/night_mode",
     "contextsearchrequest": "/rag/search",

@@ -113,6 +113,21 @@ class CalibreStorageProvider(StorageProvider):
             return None
         return "\n\n".join(chapter.text for chapter in sections if chapter.text)
 
+    async def get_bytes(self, path: str) -> bytes | None:
+        """The synthetic ``.txt`` file's bytes, which are its UTF-8 text.
+
+        The shelf entry *is* a ``.txt`` document, so its raw bytes are the
+        book's extracted prose -- that is what makes ``/providers/fetch`` a
+        plain byte fetch for callers like Raven's ``fetch_text`` without a
+        second content route. A PDF-only book has no text to give, and
+        returning ``None`` keeps storage's honest "cannot read as bytes"
+        refusal instead of an empty file.
+        """
+        text = await self.get_content(path)
+        if text is None:
+            return None
+        return text.encode("utf-8")
+
     async def write_content(
         self,
         path: str,

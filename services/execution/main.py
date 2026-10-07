@@ -45,6 +45,7 @@ from services.execution.handlers import (
     audiobookshelf,
     browser,
     calendar,
+    calibre,
     climate,
     composite,
     diagnostics,
@@ -74,6 +75,7 @@ from services.execution.schemas import (
     AnnouncementRequest,
     AudiobookshelfRequest,
     CalendarRequest,
+    CalibreRequest,
     DeploymentRequest,
     DiagnosticRequest,
     DiscoverySyncRequest,
@@ -2861,6 +2863,12 @@ async def execute_audiobookshelf(req: AudiobookshelfRequest):
     if not is_local:
         _ensure_ha_creds(ctx)
     return await audiobookshelf.handle_audiobookshelf(req)
+
+@app.post("/execute/calibre", response_model=ExecutionResult)
+async def execute_calibre(req: CalibreRequest):
+    """Browse, search or read the family's Calibre library (no writes)."""
+    log.info(f"[calibre] user={req.user_context.user} action={req.action} query={req.query}")
+    return await calibre.handle_calibre(req)
 
 @app.post("/execute/composite/broadcast", response_model=ExecutionResult)
 async def execute_composite_broadcast(req):

@@ -125,7 +125,23 @@ def test_a_fetch_without_a_path_is_rejected_by_validation(monkeypatch):
 
 
 async def test_a_provider_that_cannot_give_bytes_declines_instead_of_guessing():
-    """Only Nextcloud serves files; the Calibre shelf is an index, not a file store."""
+    """The base answer is None: a provider with no byte representation says so
+    rather than handing back something it made up."""
+    assert await StorageProvider.get_bytes(object(), "x.epub") is None
+
+
+async def test_the_calibre_shelf_serves_its_extracted_text_as_bytes():
+    """A shelf entry is a ``.txt`` document, so its bytes are its UTF-8 text --
+    that is what lets ``/providers/fetch`` serve Raven's ``fetch_text``. A book
+    with no extractable text still declines with None."""
     from services.storage.providers_impl.calibre import CalibreStorageProvider
 
-    assert await CalibreStorageProvider.get_bytes(object(), "x.epub") is None
+    class _Shelf:
+        def __init__(self, text):
+            self._text = text
+
+        async def get_content(self, path):
+            return self._text
+
+    assert await CalibreStorageProvider.get_bytes(_Shelf("Prose."), "x.txt") == b"Prose."
+    assert await CalibreStorageProvider.get_bytes(_Shelf(None), "x.txt") is None
