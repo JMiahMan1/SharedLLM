@@ -58,6 +58,7 @@ DEFAULT_ENGINES = "google,bing,duckduckgo"
 DEFAULT_LANGUAGE = "en"
 DEFAULT_CATEGORY = "general"
 DEFAULT_SAFESAFERCH = 0
+BROADER_ENGINES = "google,bing,duckduckgo,startpage,brave,google news"
 
 async def handle_web_search(req: WebSearchRequest) -> ExecutionResult:
     """
@@ -65,6 +66,10 @@ async def handle_web_search(req: WebSearchRequest) -> ExecutionResult:
     with a Playwright DOM fallback for the rare case the JSON endpoint is
     unavailable. The instance is configured via the `searxng_url` Identity
     setting (the search instance's base URL).
+
+    The fallback only covers a transport failure. An empty answer whose
+    instance reports blocked engines is a FAILURE from the JSON path, because
+    scraping that same instance would only re-report the same empty page.
     """
     log.info(f"[browser/search] query='{req.query}' category='{req.category or DEFAULT_CATEGORY}'")
 
@@ -83,7 +88,17 @@ async def handle_web_search(req: WebSearchRequest) -> ExecutionResult:
 
 
 async def _searxng_json_search(req: WebSearchRequest) -> ExecutionResult | None:
-    """Primary path: SearXNG JSON API. Fast, structured, no HTML scraping."""
+    """
+    Primary path: SearXNG JSON API. Fast, structured, no HTML scraping.
+
+    Returns None only for a genuinely empty answer: the caller then has
+    something worth scraping. When the instance itself reports unresponsive
+    engines the answer is not empty but broken, and returning None would send
+    the Playwright fallback back to the same broken instance, which can only
+    scrape another empty page and report success. That case is returned as a
+    FAILURE naming each engine and its reason, after one retry with a broader
+    engine list in case only the default set was suspended.
+    """
     searxng_url = await _get_searxng_url()
     params = {
         "q": req.query,
@@ -93,8 +108,9 @@ async def _searxng_json_search(req: WebSearchRequest) -> ExecutionResult | None:
         "safesearch": req.safesearch if req.safesearch is not None else DEFAULT_SAFESAFERCH,
         "pageno": req.pageno or 1,
     }
-    if req.engines:
-        params["engines"] = req.engines
+    # Default to a tested set of engines so an unconfigured instance still
+    # searches something useful; an explicit req.engines overrides this.
+    params["engines"] = req.engines or DEFAULT_ENGINES
     if req.time_range:
         params["time_range"] = req.time_range
 
@@ -124,7 +140,37 @@ async def _searxng_json_search(req: WebSearchRequest) -> ExecutionResult | None:
         })
 
     if not results:
-        return None
+        unresponsive = data.get("unresponsive_engines", [])
+        if unresponsive and not _is_testing():
+            params["engines"] = BROADER_ENGINES
+            new_url = f"{searxng_url}/search?{urlencode(params)}"
+            try:
+                async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=12.0)
+                ) as client, client.get(new_url) as resp2:
+                    resp2.raise_for_status()
+                    data2 = await resp2.json()
+                    results = data2.get("results", [])
+                    if results:
+                        data = data2
+            except Exception:
+                pass
+        if not results:
+            if unresponsive:
+                lines = [f"- {engine}: {reason}" for engine, reason in unresponsive]
+                return ExecutionResult(
+                    status="FAILURE",
+                    message=(
+                        "Web search is unavailable: every engine was blocked. "
+                        "This is not 'no results' — the SearXNG instance could not "
+                        f"reach these engines:\n\n" + "\n".join(lines) + "\n\n"
+                        "Web search requires working upstream search engines; try again "
+                        "later or configure the SearXNG instance with working engines."
+                    ),
+                    service="web_search",
+                    detail={"results": [], "source": "searxng_json", "unresponsive_engines": unresponsive},
+                )
+            return None
 
     max_results = req.max_results or 5
     results = results[:max_results]
