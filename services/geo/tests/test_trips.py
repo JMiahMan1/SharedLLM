@@ -661,3 +661,40 @@ def test_workout_pedometer_override_wins(client, fake_redis):
     w = resp_stop.json()["workout"]
     assert w["steps"] == 3210
     assert w["steps_source"] == "pedometer"
+
+
+# ---------------------------------------------------------------------------
+# Noisy fixes (production, 2026-10-06): GPS fixes interleaved with network
+# fixes 800 m away, flushed in bursts. Routes zig-zagged off the road and a
+# 10-second "trip" topped 95 mph.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_coarse_fixes_are_not_breadcrumbs(fake_redis):
+    now = time.time()
+    await geo.record_point(entity_id="jeremiah", lat=32.26375, lon=-109.85566, accuracy=19, timestamp=now)
+    await geo.record_point(entity_id="jeremiah", lat=32.26362, lon=-109.84696, accuracy=142, timestamp=now + 1)
+    await geo.record_point(entity_id="jeremiah", lat=32.26729, lon=-109.84493, accuracy=600, timestamp=now + 2)
+    kept = [json.loads(p) for p in await fake_redis.zrangebyscore("geo:history:jeremiah", 0, now + 10)]
+    assert [p["acc"] for p in kept] == [19]
+
+
+@pytest.mark.asyncio
+async def test_a_coarse_jump_cannot_start_a_trip(fake_redis):
+    """The network fix 800 m away used to read as a 95 mph drive."""
+    now = time.time()
+    await geo.record_point(entity_id="jeremiah", lat=32.26375, lon=-109.85566, accuracy=19, timestamp=now)
+    await geo.record_point(entity_id="jeremiah", lat=32.26362, lon=-109.84696, accuracy=142, timestamp=now + 10)
+    assert await fake_redis.get("geo:active_trip:jeremiah") is None
+
+
+@pytest.mark.asyncio
+async def test_a_late_fix_does_not_move_a_trip_backwards(fake_redis):
+    now = time.time()
+    await geo.process_trip_point(user_id="jeremiah", lat=33.1667, lon=-111.5646, speed_mps=15.0, timestamp=now)
+    await geo.process_trip_point(user_id="jeremiah", lat=33.1700, lon=-111.5646, speed_mps=15.0, timestamp=now + 30)
+    before = json.loads(await fake_redis.get("geo:active_trip:jeremiah"))
+    await geo.process_trip_point(user_id="jeremiah", lat=33.1680, lon=-111.5646, speed_mps=15.0, timestamp=now + 10)
+    after = json.loads(await fake_redis.get("geo:active_trip:jeremiah"))
+    assert after["distance_miles"] == before["distance_miles"]
+    assert after["last_lat"] == before["last_lat"]

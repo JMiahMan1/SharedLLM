@@ -16,7 +16,7 @@ import {
   shouldRetry,
 } from '../lib/sensorFailure';
 import { hasDayRolledOver, localDayKey } from '../lib/stepDay';
-import { isInsideGeofence, shouldUploadFix } from '../lib/locationSync';
+import { isInsideGeofence, shouldUploadFix, classifyFix, derivedSpeedMps, GOOD_FIX_M, COARSE_FIX_M } from '../lib/locationSync';
 import { startBackgroundTracking, stopBackgroundTracking } from '../lib/locationTracking';
 
 export type SensorId = 'location' | 'steps';
@@ -101,7 +101,10 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
   /** When this device last uploaded a location, for the stationary heartbeat. */
   const lastLocationUploadRef = useRef<number | null>(null);
-  const lastFixRef = useRef<{ lat: number; lng: number; t: number } | null>(null);
+  const lastFixRef = useRef<{ lat: number; lng: number; t: number; acc: number | null } | null>(null);
+  /** Fix time (ms) of the last fix uploaded, and of the last accurate fix seen. */
+  const lastUploadedFixRef = useRef<number>(0);
+  const lastGoodFixAtRef = useRef<number>(0);
   const watchIdRef = useRef<string | number | null>(null);
   const startingRef = useRef(false);
   const intervalRef = useRef<'stationary' | 'transit'>('stationary');
@@ -522,7 +525,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     }, DAILY_STEPS_SYNC_INTERVAL_MS);
   }, [refreshDailySteps, syncDailySteps, startStepService]);
 
-  const syncToGateway = useCallback(async (lat: number, lng: number, accuracy: number | null, speed: number | null) => {
+  const syncToGateway = useCallback(async (lat: number, lng: number, accuracy: number | null, speed: number | null, fixTs?: number) => {
     if (!sensorsRef.current.location.enabled) return;
     try {
       const token = await storageGet('jarvis_api_key');
@@ -558,7 +561,9 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         accuracy: accuracy ?? 0,
         speed: speed ?? 0,
         battery,
-        timestamp: Date.now() / 1000,
+        // When the fix was taken: a backlog flushed at once used to share one
+        // send time, which lost the order and made every trip 60 s long.
+        timestamp: (fixTs ?? Date.now()) / 1000,
         user_id: user,
       };
       // Attach hardware pedometer reading when present (real sensor data only)
@@ -601,17 +606,22 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     if (!sensorsRef.current.location.enabled) return;
     const { latitude, longitude, accuracy, speed } = position.coords;
     const fixTs = typeof position.timestamp === 'number' ? position.timestamp : Date.now();
+    const acc = typeof accuracy === 'number' ? accuracy : null;
+
+    // Stale (older than the last fix sent) and coarse (network/cell while
+    // GPS fixes are arriving) fixes are not uploaded: see classifyFix.
+    if (acc !== null && acc <= GOOD_FIX_M) lastGoodFixAtRef.current = fixTs;
+    const verdict = classifyFix({
+      fixTs, accuracy: acc, lastUploadedFixTs: lastUploadedFixRef.current, lastGoodFixTs: lastGoodFixAtRef.current,
+    });
+    if (verdict !== 'ok') return;
 
     // Many Android/iOS fixes omit `speed`. Derive it from consecutive fixes so
-    // the server's trip detector (>= 10 mph) actually fires during a drive.
-    let speedMps = typeof speed === 'number' && speed > 0 ? speed : 0;
-    if (speedMps === 0 && lastFixRef.current) {
-      const dtSec = (fixTs - lastFixRef.current.t) / 1000;
-      if (dtSec > 0.5 && dtSec < 60) {
-        speedMps = calculateDistance(lastFixRef.current.lat, lastFixRef.current.lng, latitude, longitude) / dtSec;
-      }
-    }
-    lastFixRef.current = { lat: latitude, lng: longitude, t: fixTs };
+    // the server's trip detector (>= 10 mph) actually fires during a drive,
+    // when the two fixes can be trusted (derivedSpeedMps).
+    const cur = { lat: latitude, lng: longitude, t: fixTs, acc };
+    const speedMps = typeof speed === 'number' && speed > 0 ? speed : derivedSpeedMps(lastFixRef.current, cur, calculateDistance);
+    if (acc === null || acc <= COARSE_FIX_M) lastFixRef.current = cur;
     if (Capacitor.isNativePlatform()) {
       TokenBridge.setLastLocation({ latitude, longitude }).catch((err) =>
         logSensor('location', 'TokenBridge.setLastLocation failed', err)
@@ -659,14 +669,16 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         lastLocationUploadRef.current = Date.now();
-        await syncToGateway(latitude, longitude, accuracy ?? null, speedMps);
+        lastUploadedFixRef.current = fixTs;
+        await syncToGateway(latitude, longitude, accuracy ?? null, speedMps, fixTs);
         return;
       }
     }
 
     lastLocationRef.current = { lat: latitude, lng: longitude };
     lastLocationUploadRef.current = Date.now();
-    await syncToGateway(latitude, longitude, accuracy ?? null, speedMps);
+    lastUploadedFixRef.current = fixTs;
+    await syncToGateway(latitude, longitude, accuracy ?? null, speedMps, fixTs);
   }, [calculateDistance, syncToGateway, syncDailySteps]);
 
   const startTracking = useCallback(async () => {

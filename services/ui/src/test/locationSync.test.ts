@@ -113,3 +113,40 @@ describe('isInsideGeofence', () => {
     expect(isInsideGeofence({ lat: 0, lng: 0 }, 0, 0, () => 200)).toBe(false);
   });
 });
+
+// Production, 2026-10-06: a drive's fixes arrived in bursts, GPS (7-24 m)
+// interleaved with a network cluster 800 m away (120-600 m), all sent at one
+// time. Lines were drawn off the road and a 10 s "trip" topped 95 mph.
+import { classifyFix, derivedSpeedMps } from '../lib/locationSync';
+
+describe('classifyFix', () => {
+  const base = { lastUploadedFixTs: 1_000_000, lastGoodFixTs: 1_000_000 };
+  it('drops a fix older than the last one sent', () => {
+    expect(classifyFix({ ...base, fixTs: 999_000, accuracy: 5 })).toBe('stale');
+  });
+  it('drops a network fix while GPS fixes are arriving', () => {
+    expect(classifyFix({ ...base, fixTs: 1_010_000, accuracy: 142 })).toBe('coarse');
+  });
+  it('keeps a coarse fix when it is all there is (indoors)', () => {
+    expect(classifyFix({ ...base, fixTs: 1_000_000 + 5 * 60_000, accuracy: 142 })).toBe('ok');
+  });
+  it('keeps a good fix', () => {
+    expect(classifyFix({ ...base, fixTs: 1_010_000, accuracy: 8 })).toBe('ok');
+  });
+});
+
+describe('derivedSpeedMps', () => {
+  const metres = (aLat: number, _aLng: number, bLat: number) => Math.abs(bLat - aLat);  // 1 unit = 1 m
+  it('measures between two GPS fixes a few seconds apart', () => {
+    expect(derivedSpeedMps({ lat: 0, lng: 0, t: 0, acc: 8 }, { lat: 100, lng: 0, t: 10_000, acc: 6 }, metres)).toBe(10);
+  });
+  it('ignores fixes milliseconds apart', () => {
+    expect(derivedSpeedMps({ lat: 0, lng: 0, t: 0, acc: 8 }, { lat: 800, lng: 0, t: 5, acc: 6 }, metres)).toBe(0);
+  });
+  it('ignores a network fix', () => {
+    expect(derivedSpeedMps({ lat: 0, lng: 0, t: 0, acc: 8 }, { lat: 800, lng: 0, t: 10_000, acc: 142 }, metres)).toBe(0);
+  });
+  it('ignores an impossible speed', () => {
+    expect(derivedSpeedMps({ lat: 0, lng: 0, t: 0, acc: 8 }, { lat: 900, lng: 0, t: 5_000, acc: 6 }, metres)).toBe(0);
+  });
+});

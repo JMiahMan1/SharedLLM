@@ -57,3 +57,50 @@ export function shouldUploadFix(opts: {
   if (lastUploadAt === null) return true;
   return now - lastUploadAt >= heartbeatMs;
 }
+
+/** A fix this accurate (m) is GPS-grade; worse than COARSE_FIX_M is a network/cell guess. */
+export const GOOD_FIX_M = 50;
+export const COARSE_FIX_M = 100;
+/** Coarse fixes are skipped while a good fix is at most this old. */
+export const GOOD_FIX_FRESH_MS = 2 * 60 * 1000;
+/** ~134 mph: anything faster between two fixes is a position jump, not a drive. */
+export const MAX_PLAUSIBLE_MPS = 60;
+
+/**
+ * Whether a fix is worth sending.
+ *
+ * Android hands over a backlog of fixes at once after the app was in the
+ * background, GPS and network fixes interleaved; in production a network
+ * cluster 800 m off the road alternated with the GPS track, and the route was
+ * drawn through both. A fix older than the last one sent is "stale"; a coarse
+ * one while accurate fixes are arriving is "coarse".
+ */
+export function classifyFix(opts: {
+  fixTs: number;
+  accuracy: number | null;
+  lastUploadedFixTs: number;
+  lastGoodFixTs: number;
+}): 'ok' | 'stale' | 'coarse' {
+  if (opts.fixTs < opts.lastUploadedFixTs) return 'stale';
+  const coarse = opts.accuracy !== null && opts.accuracy > COARSE_FIX_M;
+  if (coarse && opts.fixTs - opts.lastGoodFixTs < GOOD_FIX_FRESH_MS) return 'coarse';
+  return 'ok';
+}
+
+/**
+ * Speed (m/s) between two fixes, or 0 when it cannot be trusted: both must be
+ * GPS-grade and a second or more apart. Two fixes from different sources
+ * milliseconds apart made 200+ m/s "speeds" that started fake trips.
+ */
+export function derivedSpeedMps(
+  prev: { lat: number; lng: number; t: number; acc: number | null } | null,
+  cur: { lat: number; lng: number; t: number; acc: number | null },
+  distanceM: (aLat: number, aLng: number, bLat: number, bLng: number) => number,
+): number {
+  if (!prev || prev.acc === null || cur.acc === null) return 0;
+  if (prev.acc > GOOD_FIX_M || cur.acc > GOOD_FIX_M) return 0;
+  const dtSec = (cur.t - prev.t) / 1000;
+  if (dtSec < 1 || dtSec >= 60) return 0;
+  const speed = distanceM(prev.lat, prev.lng, cur.lat, cur.lng) / dtSec;
+  return speed <= MAX_PLAUSIBLE_MPS ? speed : 0;
+}
