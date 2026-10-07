@@ -8383,10 +8383,13 @@ async def update_geo_trip(trip_id: str, request: Request):
 
 @app.get("/api/geo/trips/{trip_id}/route")
 async def get_geo_trip_route(request: Request, trip_id: str):
-    await _require_authenticated(request)
+    # The owner's sharing consent applies, as for their location: geo checks
+    # the viewer against whoever the trip belongs to.
+    _, viewer, is_admin = await _read_target(request, None)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/trips/{trip_id}/route",
+            params={"viewer": viewer, "is_admin": is_admin},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=8.0),
         )
@@ -8552,10 +8555,13 @@ async def stop_geo_workout(request: Request):
 
 @app.get("/api/geo/workouts/{workout_id}/route")
 async def get_geo_workout_route(request: Request, workout_id: str):
-    await _require_authenticated(request)
+    # The owner's sharing consent applies, as for their location: geo checks
+    # the viewer against whoever the workout belongs to.
+    _, viewer, is_admin = await _read_target(request, None)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/workouts/{workout_id}/route",
+            params={"viewer": viewer, "is_admin": is_admin},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=8.0),
         )

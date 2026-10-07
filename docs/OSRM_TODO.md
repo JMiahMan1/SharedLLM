@@ -17,7 +17,7 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
 - [x] 7. Arrival / departure notices with an ETA ("left work, home in ~22 min")
 
 ## Bigger
-- [ ] 8. Walking/foot road network: snap workout routes (walk, run, hike, ride) to paths and trails
+- [x] 8. Walking/foot road network: snap workout routes (walk, run, hike, ride) to paths and trails
 - [ ] 9. Self-hosted place names (Nominatim) instead of the public service, if the server can hold it
 
 ## Bugs found and fixed on the way
@@ -32,3 +32,6 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
   "latest gh release" lookup; the gh CLI version is now pinned.
 - ETA only understood zone names and lat,lon; an address or place name (as
   calendar events have) is now geocoded near the person, cached a month.
+- Trip and workout routes (the GPS trail itself) were served to any signed-in
+  user who had the id, ignoring the owner's location-sharing consent; the
+  viewer is now checked against the owner like every other location read.

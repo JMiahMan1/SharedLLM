@@ -856,3 +856,61 @@ async def test_closest_ranks_by_road_time_among_those_shared(client, fake_redis,
     body = client.get("/closest?to=school&viewer=jeremiah", headers={"X-Internal-Secret": INTERNAL_SECRET}).json()
     assert body["to"] == "School"
     assert [p["user_id"] for p in body["people"]] == ["michele", "jeremiah"]  # kate unshared, old stale
+
+
+async def _a_finished_walk(client, fake_redis):
+    headers = {"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "jeremiah"}
+    client.post("/workouts/start", json={"activity_type": "walking"}, headers=headers)
+    base_t = time.time() - 600
+    active = json.loads(await fake_redis.get("geo:active_workout:jeremiah"))
+    active["start_time"] = base_t
+    await fake_redis.set("geo:active_workout:jeremiah", json.dumps(active))
+    for i in range(10):
+        await geo.record_point(entity_id="jeremiah", lat=33.1667 + i * 0.0003, lon=-111.5646,
+                               speed=1.4, timestamp=base_t + i * 30)
+    return client.post("/workouts/stop", json={}, headers=headers).json()["workout"]
+
+
+@pytest.mark.asyncio
+async def test_a_walk_is_measured_and_drawn_along_the_foot_network(client, fake_redis, monkeypatch):
+    calls = []
+
+    async def foot_match(points, url, profile="driving"):
+        calls.append(profile)
+        return {"matched": True, "coordinates": [[33.1667, -111.5646], [33.1690, -111.5640], [33.1694, -111.5646]],
+                "distance_m": 1609.344, "confidence": 0.8, "used": len(points)}
+
+    monkeypatch.setattr(geo.map_match, "match", foot_match)
+    workout = await _a_finished_walk(client, fake_redis)
+    assert workout["distance_miles"] == 1.0 and workout["distance_source"] == "foot_network"
+    route = client.get(f"/workouts/{workout['id']}/route").json()
+    assert route["snapped"] is True and len(route["points"]) == 3
+    assert calls == ["foot", "foot"]
+
+
+@pytest.mark.asyncio
+async def test_a_walk_off_the_paths_keeps_its_own_points(client, fake_redis, monkeypatch):
+    async def poor_match(points, url, profile="driving"):
+        return {"matched": True, "coordinates": [[0, 0], [1, 1]], "distance_m": 99999.0, "confidence": 0.02, "used": 2}
+
+    monkeypatch.setattr(geo.map_match, "match", poor_match)
+    workout = await _a_finished_walk(client, fake_redis)
+    assert "distance_source" not in workout and workout["distance_miles"] < 1
+    route = client.get(f"/workouts/{workout['id']}/route").json()
+    assert route["snapped"] is False and len(route["points"]) >= 5
+
+
+@pytest.mark.asyncio
+async def test_routes_follow_the_owners_sharing_consent(client, fake_redis, monkeypatch):
+    async def shares_only_with_self(viewer, target):
+        return viewer == target
+
+    monkeypatch.setattr(geo, "_viewer_may_see", shares_only_with_self)
+    workout = await _a_finished_walk(client, fake_redis)
+    url = f"/workouts/{workout['id']}/route"
+    assert client.get(url, params={"viewer": "kate"}).status_code == 404
+    assert client.get(url, params={"viewer": "jeremiah"}).status_code == 200
+    assert client.get(url, params={"viewer": "kate", "is_admin": "true"}).status_code == 200
+    await fake_redis.set("geo:trip:t1", json.dumps({"id": "t1", "user_id": "jeremiah", "start_time": 1, "end_time": 2}))
+    assert client.get("/trips/t1/route", params={"viewer": "kate"}).status_code == 404
+    assert client.get("/trips/t1/route", params={"viewer": "jeremiah"}).status_code == 200

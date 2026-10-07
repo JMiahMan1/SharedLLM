@@ -587,6 +587,15 @@ services:
     networks:
       - sharedllm
 
+  # The foot network the same build makes: workout routes snap to paths and trails.
+  osrm-foot:
+    image: ghcr.io/jmiahman1/sharedllm-osrm-foot:latest
+    container_name: sharedllm_osrm_foot
+    restart: unless-stopped
+    mem_limit: 1536m
+    networks:
+      - sharedllm
+
   geo:
     image: ghcr.io/jmiahman1/sharedllm-geo:latest
     build:
@@ -616,6 +625,7 @@ services:
       - GATEWAY_INTERNAL_URL=http://gateway:11435
       - TZ=America/Phoenix
       - OSRM_URL=${OSRM_URL:-http://osrm:5000}
+      - OSRM_FOOT_URL=${OSRM_FOOT_URL:-http://osrm-foot:5000}
     volumes:
       - /etc/localtime:/etc/localtime:ro
     depends_on:

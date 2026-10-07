@@ -81,6 +81,8 @@ HA_URL = os.getenv("HA_URL")
 #: Self-hosted OSRM for snapping trip routes to roads (services/geo/map_match.py).
 #: Unset: routes are served as raw breadcrumbs.
 OSRM_URL = os.getenv("OSRM_URL")
+#: The foot network (paths, trails, sidewalks) that workout routes snap to.
+OSRM_FOOT_URL = os.getenv("OSRM_FOOT_URL")
 HA_TOKEN = os.getenv("HA_TOKEN")
 NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
 NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")

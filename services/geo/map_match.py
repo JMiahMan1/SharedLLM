@@ -52,12 +52,13 @@ class _NoMatch(Exception):
     """OSRM answered, and the fixes fit no road."""
 
 
-async def _match_chunk(session: aiohttp.ClientSession, base: str, chunk: list[dict]) -> tuple[list, float, float]:
+async def _match_chunk(session: aiohttp.ClientSession, base: str, chunk: list[dict],
+                       profile: str = "driving") -> tuple[list, float, float]:
     """(line [[lon, lat], ...], distance m, confidence x distance) for one
     chunk. Raises _NoMatch when OSRM finds no road path through the fixes."""
     coords = ";".join(f"{p['lon']:.6f},{p['lat']:.6f}" for p in chunk)
     radiuses = ";".join(f"{_radius(p.get('acc')):.0f}" for p in chunk)
-    url = f"{base}/match/v1/driving/{coords}"
+    url = f"{base}/match/v1/{profile}/{coords}"
     params = {
         "geometries": "geojson",
         "overview": "full",
@@ -84,8 +85,9 @@ async def _match_chunk(session: aiohttp.ClientSession, base: str, chunk: list[di
     return line, distance, weighted
 
 
-async def match(points: list[dict], osrm_url: str | None) -> dict | None:
-    """The road path through ``points``.
+async def match(points: list[dict], osrm_url: str | None, profile: str = "driving") -> dict | None:
+    """The road path through ``points`` (or the foot path, against the foot
+    network's OSRM with ``profile="foot"``).
 
     {"matched": True, "coordinates": [[lat, lon], ...], "distance_m",
     "confidence" (0-1), "used": n} when it fits the roads; {"matched": False,
@@ -105,7 +107,7 @@ async def match(points: list[dict], osrm_url: str | None) -> dict | None:
             start = 0
             while start < len(fixes) - 1:
                 chunk = fixes[start:start + CHUNK]
-                part, dist, w = await _match_chunk(session, base, chunk)
+                part, dist, w = await _match_chunk(session, base, chunk, profile)
                 line.extend(part if not line else part[1:])
                 distance += dist
                 weighted += w
