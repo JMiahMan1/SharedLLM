@@ -596,6 +596,27 @@ services:
     networks:
       - sharedllm
 
+  # Place names <-> coordinates on the server (geo NOMINATIM_URL), so trip
+  # positions are not sent to the public Nominatim. Imports NOMINATIM_PBF_URL
+  # on first start (tens of minutes); until then, and for places outside it,
+  # geo asks the public service.
+  nominatim:
+    image: mediagis/nominatim:5.3
+    container_name: sharedllm_nominatim
+    restart: unless-stopped
+    mem_limit: 3g
+    shm_size: 1g
+    environment:
+      - PBF_URL=${NOMINATIM_PBF_URL:-https://download.geofabrik.de/north-america/us/arizona-latest.osm.pbf}
+      - IMPORT_US_POSTCODES=true
+      - THREADS=4
+      - NOMINATIM_PASSWORD=${NOMINATIM_DB_PASSWORD:-nominatim-internal}
+    volumes:
+      - ./data/nominatim:/var/lib/postgresql/16/main
+      - ./docker/nominatim/postgres-tuning.conf:/etc/postgresql/16/main/conf.d/postgres-tuning.conf:ro
+    networks:
+      - sharedllm
+
   geo:
     image: ghcr.io/jmiahman1/sharedllm-geo:latest
     build:
@@ -626,6 +647,7 @@ services:
       - TZ=America/Phoenix
       - OSRM_URL=${OSRM_URL:-http://osrm:5000}
       - OSRM_FOOT_URL=${OSRM_FOOT_URL:-http://osrm-foot:5000}
+      - NOMINATIM_URL=${NOMINATIM_URL:-http://nominatim:8080}
     volumes:
       - /etc/localtime:/etc/localtime:ro
     depends_on:

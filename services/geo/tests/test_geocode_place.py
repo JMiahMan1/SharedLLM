@@ -83,3 +83,48 @@ async def test_zone_names_win_over_geocoding(env, monkeypatch):
     monkeypatch.setattr(geo, "get_client_insecure", lambda: (_ for _ in ()).throw(AssertionError("no lookup")))
     assert await geo._destination("work") == zone
     assert (await geo._destination("33.1, -111.2"))["latitude"] == 33.1
+
+
+class Routed:
+    """A client answering per base URL; an Exception value means unreachable."""
+
+    def __init__(self, answers):
+        self.answers, self.urls = answers, []
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        self.urls.append(url)
+        for base, data in self.answers.items():
+            if url.startswith(base):
+                if isinstance(data, Exception):
+                    raise data
+                return Resp(data)
+        raise AssertionError(url)
+
+
+@pytest.mark.asyncio
+async def test_the_self_hosted_geocoder_answers_first(monkeypatch):
+    client = Routed({"http://nominatim:8080": {"display_name": "Home St"}, geo.NOMINATIM_PUBLIC_URL: {}})
+    monkeypatch.setattr(geo, "NOMINATIM_URL", "http://nominatim:8080")
+    monkeypatch.setattr(geo, "get_client_insecure", lambda: client)
+    assert await geo._nominatim("reverse", {"lat": 1, "lon": 2}) == {"display_name": "Home St"}
+    assert client.urls == ["http://nominatim:8080/reverse"]
+
+
+@pytest.mark.asyncio
+async def test_outside_its_regions_or_down_the_public_one_answers(monkeypatch):
+    monkeypatch.setattr(geo, "NOMINATIM_URL", "http://nominatim:8080")
+    far = Routed({"http://nominatim:8080": {"error": "Unable to geocode"},
+                  geo.NOMINATIM_PUBLIC_URL: {"display_name": "Far away"}})
+    monkeypatch.setattr(geo, "get_client_insecure", lambda: far)
+    assert (await geo._nominatim("reverse", {"lat": 1, "lon": 2}))["display_name"] == "Far away"
+    down = Routed({"http://nominatim:8080": OSError("importing"), geo.NOMINATIM_PUBLIC_URL: [{"lat": "1"}]})
+    monkeypatch.setattr(geo, "get_client_insecure", lambda: down)
+    assert await geo._nominatim("search", {"q": "x"}) == [{"lat": "1"}]
+
+
+@pytest.mark.asyncio
+async def test_no_place_anywhere_is_an_empty_answer_not_an_error(monkeypatch):
+    monkeypatch.setattr(geo, "NOMINATIM_URL", "http://nominatim:8080")
+    client = Routed({"http://nominatim:8080": [], geo.NOMINATIM_PUBLIC_URL: OSError("offline")})
+    monkeypatch.setattr(geo, "get_client_insecure", lambda: client)
+    assert await geo._nominatim("search", {"q": "nowhere"}) == []

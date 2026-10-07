@@ -83,6 +83,9 @@ HA_URL = os.getenv("HA_URL")
 OSRM_URL = os.getenv("OSRM_URL")
 #: The foot network (paths, trails, sidewalks) that workout routes snap to.
 OSRM_FOOT_URL = os.getenv("OSRM_FOOT_URL")
+#: Self-hosted Nominatim (place names <-> coordinates). Unset, not ready, or
+#: no answer (outside its regions): the public nominatim.openstreetmap.org.
+NOMINATIM_URL = os.getenv("NOMINATIM_URL")
 HA_TOKEN = os.getenv("HA_TOKEN")
 NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
 NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
