@@ -848,7 +848,7 @@ const Wander = () => {
                         <Zap size={10} className="text-amber-400" />
                         Top Speed
                       </span>
-                      <span className="text-sm font-bold text-amber-300 mt-0.5">{trip.top_speed_mph} mph</span>
+                      <span className="text-sm font-bold text-amber-300 mt-0.5">{trip.top_speed_mph != null ? `${trip.top_speed_mph} mph` : '—'}</span>
                     </div>
 
                     <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-white/[0.02]">

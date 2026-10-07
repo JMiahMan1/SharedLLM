@@ -238,12 +238,56 @@ export interface CompanionDevice {
   registered_by: string; // self | admin | paired | adopted
   model?: string | null;
   manufacturer?: string | null;
+  os_version?: string | null;
   app_version?: string | null;
+  app_build?: string | null;
   esphome_version?: string | null;
   hardware?: string | null;
+  /** What the device told the server it can do; may be empty. */
+  capabilities?: Record<string, unknown>;
   last_ip_address?: string | null;
   last_seen_at?: string | null;
+  first_seen_at?: string | null;
   battery?: BatteryReading | null;
+}
+
+/**
+ * One usage event a device reported, with whatever small scalars it carried.
+ *
+ * Every event comes from the no-opt-in allowlist, so this is activity — an app
+ * open, a battery reading, a step count — and never anything the device heard
+ * or saw.
+ */
+export interface DeviceEventRead {
+  event: string;
+  at: string;
+  extra: Record<string, unknown>;
+}
+
+/** What one device has reported lately, for its detail view. */
+export interface DeviceActivity {
+  device: CompanionDevice;
+  /** How many of each event arrived inside the window. */
+  counts: Record<string, number>;
+  /** The most recent events, newest first. */
+  events: DeviceEventRead[];
+  first_seen_at?: string | null;
+  last_seen_at?: string | null;
+}
+
+/**
+ * Per-device step history: {source: {day: steps}}.
+ *
+ * A fused daily total cannot say which device produced it. A source with
+ * nothing recorded is **absent** rather than zero, because no report and a
+ * reported zero are different facts.
+ */
+export interface StepSources {
+  user_id: string;
+  days: number;
+  sources: Record<string, Record<string, number>>;
+  hourly: Record<string, Record<string, number>>;
+  last_synced?: number | null;
 }
 
 export interface PairDeviceRequest {
@@ -1010,7 +1054,7 @@ export interface Trip {
   end_time: number;
   duration_seconds: number;
   distance_miles: number;
-  top_speed_mph: number;
+  top_speed_mph: number | null;  // null when it could not be measured (e.g. a recomputed trip)
   avg_speed_mph?: number;
   start_location?: TripLocation;
   end_location?: TripLocation;
