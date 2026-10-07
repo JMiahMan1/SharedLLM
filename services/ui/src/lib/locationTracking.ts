@@ -5,6 +5,8 @@ interface LocationTrackingPlugin {
   start(opts: { username: string; userId?: string }): Promise<{ started: boolean }>;
   stop(): Promise<void>;
   isRunning(): Promise<{ running: boolean }>;
+  batteryUnrestricted(): Promise<{ unrestricted: boolean }>;
+  requestBatteryUnrestricted(): Promise<{ unrestricted: boolean }>;
 }
 
 /**
@@ -82,5 +84,33 @@ export async function mirrorIdentity(username: string, userId?: string): Promise
     await TokenBridge.setIdentity({ username, userId });
   } catch (err) {
     console.warn('[locationTracking] could not mirror identity:', err);
+  }
+}
+
+/**
+ * Whether Android's battery optimisation leaves location sharing alone.
+ * `null` when it cannot say: not Android, or an APK older than the check.
+ * While restricted, Doze stops location for hours once the phone lies still
+ * with the screen off.
+ */
+export async function isBatteryUnrestricted(): Promise<boolean | null> {
+  const plugin = getLocationTracking();
+  if (!plugin) return null;
+  try {
+    const res = await plugin.batteryUnrestricted();
+    return Boolean(res?.unrestricted);
+  } catch {
+    return null;
+  }
+}
+
+/** Opens Android's own "allow in background" dialog. */
+export async function requestBatteryUnrestricted(): Promise<void> {
+  const plugin = getLocationTracking();
+  if (!plugin) return;
+  try {
+    await plugin.requestBatteryUnrestricted();
+  } catch (err) {
+    console.warn('[locationTracking] battery exemption request failed:', err);
   }
 }

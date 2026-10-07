@@ -4,6 +4,7 @@ import { useHaptics } from '../../hooks/useHaptics';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import Toggle from '../ui/Toggle';
+import BatteryUnrestrictedNotice from './BatteryUnrestrictedNotice';
 import toast from 'react-hot-toast';
 import {
   MapPin,
@@ -468,6 +469,8 @@ const LocationPanel = () => {
             </button>
           </div>
         )}
+
+        {isTracking && <BatteryUnrestrictedNotice />}
 
         {showRawDetails && isTracking && (
           <div className="glass-card p-3 space-y-1.5 text-xs font-mono rounded-xl bg-slate-900/50">

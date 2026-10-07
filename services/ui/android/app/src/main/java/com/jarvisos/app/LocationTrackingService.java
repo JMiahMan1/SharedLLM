@@ -1,9 +1,11 @@
 package com.jarvisos.app;
 
 import android.Manifest;
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
@@ -18,6 +20,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import java.io.OutputStream;
@@ -56,6 +59,9 @@ public class LocationTrackingService extends Service {
      * moving phone uploaded at most every five minutes.)
      */
     private static final long HEARTBEAT_MS = 5 * 60 * 1000L;
+    private static final String ACTION_HEARTBEAT = "heartbeat";
+    /** Held through one heartbeat: the fresh fix plus its upload. */
+    private static final long HEARTBEAT_WAKE_MS = 90_000L;
     /** A fix this much newer than the one we hold replaces it regardless. */
     private static final long SIGNIFICANTLY_NEWER_MS = 2 * 60 * 1000L;
     private static final long UPLOAD_TIMEOUT_MS = 15_000L;
@@ -70,13 +76,7 @@ public class LocationTrackingService extends Service {
     private volatile String userId;
     private volatile boolean uploading = false;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable heartbeat = new Runnable() {
-        @Override
-        public void run() {
-            if (System.currentTimeMillis() - lastUploadAt >= HEARTBEAT_MS) requestFreshFix();
-            handler.postDelayed(this, HEARTBEAT_MS);
-        }
-    };
+    private volatile boolean updatesRequested = false;
 
     private final LocationListener listener = new LocationListener() {
         @Override
@@ -118,6 +118,11 @@ public class LocationTrackingService extends Service {
                 stopTracking();
                 return START_NOT_STICKY;
             }
+            if (ACTION_HEARTBEAT.equals(intent.getAction())) {
+                startForegroundCompat();
+                onHeartbeat();
+                return START_STICKY;
+            }
             if (intent.getStringExtra("username") != null) {
                 persistIdentity(intent.getStringExtra("username"), intent.getStringExtra("userId"));
             }
@@ -125,8 +130,7 @@ public class LocationTrackingService extends Service {
         startForegroundCompat();
         acquireWakeLock();
         requestUpdates();
-        handler.removeCallbacks(heartbeat);
-        handler.postDelayed(heartbeat, HEARTBEAT_MS);
+        scheduleHeartbeat();
         // Sticky: if Android reclaims us, come back on our own.
         return START_STICKY;
     }
@@ -205,6 +209,7 @@ public class LocationTrackingService extends Service {
                 locationManager.requestLocationUpdates(
                         LocationManager.NETWORK_PROVIDER, MIN_TIME_MS, MIN_DISTANCE_M, listener);
             }
+            updatesRequested = true;
             // Seed from the freshest cached fix so the family map is not blank
             // for the first interval after the service starts.
             Location cached = bestLastKnown();
@@ -260,6 +265,56 @@ public class LocationTrackingService extends Service {
         boolean sameProvider = candidate.getProvider() != null
                 && candidate.getProvider().equals(current.getProvider());
         return dt > 0 && da <= 200 && sameProvider;    // newer and not much worse
+    }
+
+    /**
+     * The heartbeat runs off AlarmManager, not a Handler. A Handler delay
+     * counts uptime, which stops while the CPU sleeps -- and with the screen
+     * off and the phone still, it sleeps: the wake lock above lapses after ten
+     * minutes and Doze ignores wake locks anyway. So a phone left on the
+     * nightstand stopped reporting at all (seen: both phones silent for hours
+     * overnight). An allow-while-idle alarm is delivered in Doze too.
+     */
+    private void scheduleHeartbeat() {
+        AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+        PendingIntent pi = heartbeatIntent();
+        long at = SystemClock.elapsedRealtime() + HEARTBEAT_MS;
+        try {
+            boolean exact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms();
+            if (exact) {
+                am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi);
+            } else {
+                am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi);
+            }
+        } catch (SecurityException e) {
+            am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi);
+        }
+    }
+
+    private PendingIntent heartbeatIntent() {
+        Intent i = new Intent(this, LocationTrackingService.class).setAction(ACTION_HEARTBEAT);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? PendingIntent.getForegroundService(this, 1, i, flags)
+                : PendingIntent.getService(this, 1, i, flags);
+    }
+
+    private void cancelHeartbeat() {
+        AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        if (am != null) am.cancel(heartbeatIntent());
+    }
+
+    private void onHeartbeat() {
+        // Keep the CPU up for the fix and the upload, then let it sleep.
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        PowerManager.WakeLock beat = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:heartbeat");
+        beat.setReferenceCounted(false);
+        beat.acquire(HEARTBEAT_WAKE_MS);
+        // The alarm may have restarted the process: listen again if so.
+        if (!updatesRequested) requestUpdates();
+        if (System.currentTimeMillis() - lastUploadAt >= HEARTBEAT_MS) requestFreshFix();
+        scheduleHeartbeat();
     }
 
     /** One fresh fix from each enabled provider, for the heartbeat. */
@@ -378,6 +433,8 @@ public class LocationTrackingService extends Service {
 
     private void stopTracking() {
         handler.removeCallbacksAndMessages(null);
+        cancelHeartbeat();
+        updatesRequested = false;
         if (locationManager != null) {
             try {
                 locationManager.removeUpdates(listener);
