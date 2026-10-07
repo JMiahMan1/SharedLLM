@@ -2,10 +2,17 @@
  * Where the reader left off in a workspace: which view, which folder, which
  * files were open, and how the terminal was arranged.
  *
- * Kept in the browser on purpose -- this is a place in the UI, not workspace
- * content, and it must never be sent anywhere. An entry that cannot be read
- * starts a clean session rather than blocking the workspace, but the reason is
- * logged so a corrupt entry is not invisible.
+ * Kept in the browser so the first paint after a reload is right, and saved on
+ * the server for the reader's own account so opening the same workspace on
+ * another device lands in the same place. It is never shared with anyone else
+ * -- it is a place in the UI, not workspace content. Unsaved buffers travel
+ * with it, which is the point: a half-typed file should survive a closed
+ * browser or a second device.
+ *
+ * Every entry is validated on the way in, whether it came from storage or from
+ * the server, because neither is trusted to be well formed. An entry that
+ * cannot be read starts a clean session rather than blocking the workspace,
+ * but the reason is logged so a corrupt entry is not invisible.
  */
 export const WORKSPACE_VIEWS = ['explorer', 'git', 'tools', 'chat', 'terminal'] as const;
 export type WorkspaceView = (typeof WORKSPACE_VIEWS)[number];
@@ -27,6 +34,13 @@ export interface WorkspaceSession {
   terminalHeight: number;
   activeTab: string | null;
   tabs: WorkspaceSessionTab[];
+  /**
+   * When this session was last written, in epoch milliseconds. It exists so a
+   * browser copy and a server copy can be compared: the newer one wins, and
+   * the server copy wins a tie because it is the one both devices share.
+   * Absent counts as zero, and {@link writeWorkspaceSession} stamps it.
+   */
+  savedAt?: number;
 }
 
 const STORAGE_KEY = 'jarvis_workspace_session_v1';
@@ -83,7 +97,12 @@ function normaliseTab(raw: unknown): WorkspaceSessionTab | null {
   };
 }
 
-function normalise(raw: unknown): WorkspaceSession | null {
+/**
+ * Validate anything claiming to be a session, from the browser or the server,
+ * substituting only the field that is wrong. A server that one day sends
+ * something unexpected costs the reader a default, not their tab layout.
+ */
+export function normaliseWorkspaceSession(raw: unknown): WorkspaceSession | null {
   if (!raw || typeof raw !== 'object') return null;
   const data = raw as Record<string, unknown>;
   const view = WORKSPACE_VIEWS.includes(data.view as WorkspaceView)
@@ -107,17 +126,54 @@ function normalise(raw: unknown): WorkspaceSession | null {
         : 250,
     activeTab,
     tabs,
+    savedAt:
+      typeof data.savedAt === 'number' && Number.isFinite(data.savedAt) ? data.savedAt : 0,
   };
+}
+
+/**
+ * Pick between the copy in this browser and the copy on the server.
+ *
+ * Returns null only when there is nothing to restore. A tie goes to the remote
+ * copy because it is the one every device shares, and an unknown timestamp
+ * counts as zero so a session saved before this existed still loses to one
+ * that carries a time.
+ */
+export function mergeWorkspaceSessions(
+  local: WorkspaceSession | null,
+  remote: WorkspaceSession | null,
+): WorkspaceSession | null {
+  if (!local) return remote;
+  if (!remote) return local;
+  return (remote.savedAt ?? 0) >= (local.savedAt ?? 0) ? remote : local;
 }
 
 export function readWorkspaceSession(workspaceId: string): WorkspaceSession | null {
   const entry = readAll()[workspaceId];
   if (!entry) return null;
-  const session = normalise(entry);
+  const session = normaliseWorkspaceSession(entry);
   if (!session) {
     console.warn(`[workspace] the saved session for "${workspaceId}" was not readable.`);
   }
   return session;
+}
+
+/**
+ * Write sessions the server knows about into the browser copy, so the first
+ * paint after a reload is the right one even before the next fetch lands. The
+ * server's copy wins outright here: it was just read, so it is the freshest
+ * thing this device has seen.
+ */
+export function hydrateWorkspaceSessions(entries: Record<string, unknown>): void {
+  const sessions = readAll();
+  let changed = false;
+  for (const [workspaceId, raw] of Object.entries(entries)) {
+    const session = normaliseWorkspaceSession(raw);
+    if (!session) continue;
+    sessions[workspaceId] = session;
+    changed = true;
+  }
+  if (changed) writeAll(sessions);
 }
 
 /**
@@ -128,6 +184,7 @@ export function readWorkspaceSession(workspaceId: string): WorkspaceSession | nu
 export function writeWorkspaceSession(workspaceId: string, session: WorkspaceSession): void {
   const trimmed: WorkspaceSession = {
     ...session,
+    savedAt: Date.now(),
     tabs: session.tabs.map((tab) =>
       tab.content !== undefined && tab.content.length > MAX_SAVED_CONTENT
         ? { ...tab, content: undefined }

@@ -37,6 +37,13 @@ import { formatDateTime } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import WorkspaceIDE from '../components/workspace/WorkspaceIDE';
 import { WorkspaceSecrets } from '../components/workspace/WorkspaceSecrets';
+import {
+  hydrateWorkspaceSessions,
+  mergeWorkspaceSessions,
+  normaliseWorkspaceSession,
+  readWorkspaceSession,
+  type WorkspaceSession,
+} from '../components/workspace/workspaceSession';
 
 const generateWebhookToken = () =>
   Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -281,6 +288,29 @@ const Workspaces = () => {
   const [editingWs, setEditingWs] = useState<Workspace | null>(null);
   const [ideWs, setIdeWs] = useState<Workspace | null>(null);
   const [ideInitialPath, setIdeInitialPath] = useState<string | null>(null);
+  const [ideSession, setIdeSession] = useState<WorkspaceSession | null>(null);
+
+  /**
+   * Open the IDE where this reader last left off.
+   *
+   * The server copy is asked for because it is the one every device shares,
+   * and the browser copy is both the fallback and the thing it is compared
+   * against: whichever was saved more recently wins, so a device that has been
+   * offline is not silently reverted. A failure to reach the server is logged
+   * and opening carries on -- a workspace must never be blocked by the sync.
+   */
+  const openIde = useCallback(async (ws: Workspace) => {
+    let merged = readWorkspaceSession(ws.id);
+    try {
+      const remote = await api.getWorkspaceSessions();
+      hydrateWorkspaceSessions(remote.sessions);
+      merged = mergeWorkspaceSessions(merged, normaliseWorkspaceSession(remote.sessions[ws.id]));
+    } catch (error) {
+      console.warn('[workspace] could not read the saved sessions from the server:', error);
+    }
+    setIdeSession(merged);
+    setIdeWs(ws);
+  }, []);
   const [secretsWs, setSecretsWs] = useState<Workspace | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -312,10 +342,10 @@ const Workspaces = () => {
     const ws = workspaces.find((w) => w.id === select);
     if (ws) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- deep-link selection on load
-      setIdeWs(ws);
+      void openIde(ws);
       setSearchParams({}, { replace: true });
     }
-  }, [searchParams, workspaces, ideWs, setSearchParams]);
+  }, [searchParams, workspaces, ideWs, setSearchParams, openIde]);
 
   const saveMutation = useMutation({
     mutationFn: (data: Partial<Workspace>) => {
@@ -465,8 +495,8 @@ const Workspaces = () => {
       <AllArtifacts
         workspaces={workspaces}
         onOpenInIDE={(ws, path) => {
-          setIdeWs(ws);
           setIdeInitialPath(path);
+          void openIde(ws);
         }}
       />
 
@@ -579,7 +609,7 @@ const Workspaces = () => {
                           <Globe size={18} />
                         </button>
                         <button 
-                          onClick={() => setIdeWs(ws)}
+                          onClick={() => void openIde(ws)}
                           className="p-2 rounded-xl text-slate-500 hover:text-emerald-400 hover:bg-white/5 transition-colors"
                           title="Open workspace files (IDE)"
                         >
@@ -763,9 +793,11 @@ const Workspaces = () => {
           key={ideWs.id}
           workspace={ideWs}
           initialPath={ideInitialPath}
+          initialSession={ideSession}
           onClose={() => {
             setIdeWs(null);
             setIdeInitialPath(null);
+            setIdeSession(null);
           }}
         />
       )}

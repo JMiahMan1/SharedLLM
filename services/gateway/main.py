@@ -5020,6 +5020,36 @@ async def bootstrap_workspace_proxy(request: Request):
 async def resolve_workspace_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/workspace/resolve", request)
 
+@app.get("/api/workspaces/sessions")
+async def get_workspace_sessions_proxy(request: Request):
+    """Every saved workspace session for the caller, keyed by workspace id.
+
+    Stored in Identity against the caller's own account, so the same reader
+    opens the same place on another device. Nobody else can read them.
+    """
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/users/me/workspace-sessions",
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+@app.put("/api/workspaces/sessions/{workspace_id}")
+async def put_workspace_session_proxy(workspace_id: str, request: Request):
+    """Save where the caller left off in one workspace."""
+    auth_header = request.headers.get("Authorization")
+    body = await request.json()
+    async with shared_http_client() as client:
+        resp = await client.put(
+            f"{IDENTITY_SVC}/api/users/me/workspace-sessions/{workspace_id}",
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
 @app.patch("/api/workspaces/{workspace_id}")
 async def update_workspace_proxy(workspace_id: str, request: Request):
     return await _proxy_workspace_runtime_json("PATCH", f"/workspaces/{workspace_id}", request)

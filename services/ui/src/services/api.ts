@@ -1244,6 +1244,27 @@ export const api = {
     return resp.data.workspace;
   },
 
+  /**
+   * Every workspace session saved for this account, keyed by workspace id.
+   *
+   * Typed loosely on purpose: the session blob is validated field by field in
+   * workspaceSession.ts, and the server is not trusted to hand back a shape it
+   * was given.
+   */
+  async getWorkspaceSessions(): Promise<{ sessions: Record<string, unknown> }> {
+    const resp = await apiClient.get<{ sessions: Record<string, unknown> }>(
+      '/api/workspaces/sessions',
+    );
+    return { sessions: resp.data?.sessions ?? {} };
+  },
+
+  async putWorkspaceSession(workspaceId: string, session: Record<string, unknown>): Promise<void> {
+    await apiClient.put(
+      `/api/workspaces/sessions/${encodeURIComponent(workspaceId)}`,
+      session,
+    );
+  },
+
   async updateWorkspace(id: string, data: Partial<Workspace>): Promise<Workspace> {
     const resp = await apiClient.patch(`/api/workspaces/${id}`, data);
     return resp.data.workspace;

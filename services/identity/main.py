@@ -45,6 +45,7 @@ from services.identity.models import (
     UserCredentialShare,
     UserThemeSetting,
     UserWidget,
+    UserWorkspaceSession,
 )
 from services.identity.schemas import (
     ChangePasswordRequest,
@@ -2696,8 +2697,83 @@ def update_calendar_settings(
     return {"status": "SUCCESS", "settings": data}
 
 
-# ─── Per-user website/widget theme (same pack schema as the web client) ──────
+# ─── Where each user left off in a workspace (private, per user + workspace) ──
 
+
+@app.get("/api/users/me/workspace-sessions")
+def get_workspace_sessions(
+    session: Session = Depends(get_session),
+    user: User = Depends(require_api_key),
+):
+    """Every workspace session this user has saved, keyed by workspace id.
+
+    A row whose JSON cannot be parsed is skipped rather than failing the whole
+    list: one corrupt entry should cost that entry, not the other workspaces.
+    """
+    rows = session.exec(
+        select(UserWorkspaceSession).where(UserWorkspaceSession.username == user.username)
+    ).all()
+    sessions: dict[str, object] = {}
+    for row in rows:
+        try:
+            sessions[row.workspace_id] = json.loads(row.data) if row.data else {}
+        except (TypeError, ValueError):
+            log.warning(
+                f"[workspace-session] skipping unreadable entry for "
+                f"{user.username}/{row.workspace_id}"
+            )
+    return {"status": "SUCCESS", "sessions": sessions}
+
+
+@app.put("/api/users/me/workspace-sessions/{workspace_id}")
+def put_workspace_session(
+    workspace_id: str,
+    body: dict,
+    session: Session = Depends(get_session),
+    user: User = Depends(require_api_key),
+):
+    """Save where this user left off in one workspace.
+
+    The body is the session blob the client produced; it is stored whole
+    because the client is the only thing that knows its shape and it validates
+    every field again on the way back in.
+    """
+    row = session.exec(
+        select(UserWorkspaceSession).where(
+            UserWorkspaceSession.username == user.username,
+            UserWorkspaceSession.workspace_id == workspace_id,
+        )
+    ).first()
+    if row is None:
+        row = UserWorkspaceSession(username=user.username, workspace_id=workspace_id, data="{}")
+        session.add(row)
+    row.data = json.dumps(body or {})
+    row.updated_at = datetime.now(UTC).isoformat()
+    session.add(row)
+    session.commit()
+    return {"status": "SUCCESS", "workspace_id": workspace_id}
+
+
+@app.delete("/api/users/me/workspace-sessions/{workspace_id}")
+def delete_workspace_session(
+    workspace_id: str,
+    session: Session = Depends(get_session),
+    user: User = Depends(require_api_key),
+):
+    """Forget one workspace session for this user."""
+    row = session.exec(
+        select(UserWorkspaceSession).where(
+            UserWorkspaceSession.username == user.username,
+            UserWorkspaceSession.workspace_id == workspace_id,
+        )
+    ).first()
+    if row is not None:
+        session.delete(row)
+        session.commit()
+    return {"status": "SUCCESS", "workspace_id": workspace_id}
+
+
+# ─── Per-user website/widget theme (same pack schema as the web client) ──────
 @app.get("/api/users/me/theme")
 def get_user_theme(
     session: Session = Depends(get_session),
