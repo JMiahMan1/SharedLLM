@@ -57,6 +57,8 @@ from services.identity.schemas import (
     DeviceAssignmentCreate,
     DeviceAssignmentRead,
     BatteryReading,
+    DeviceActivity,
+    DeviceEventRead,
     DeviceRead,
     DeviceSelfRegister,
     TelemetryIngest,
@@ -4463,6 +4465,61 @@ def device_battery_history(
         .order_by(DeviceEvent.at)
     ).all()
     return [r for r in (_battery_reading(row) for row in rows) if r]
+
+
+def _device_event_to_read(event: DeviceEvent) -> DeviceEventRead:
+    try:
+        extra = json.loads(event.extra or "{}")
+    except (TypeError, ValueError):
+        # A row whose extras will not parse is still an event that happened, so
+        # the timeline keeps it and drops only the part it cannot read.
+        extra = {}
+    return DeviceEventRead(
+        event=event.event,
+        at=event.at,
+        extra=extra if isinstance(extra, dict) else {},
+    )
+
+
+@app.get("/api/user-panel/devices/{device_key}/activity", response_model=DeviceActivity)
+def device_activity(
+    device_key: str,
+    hours: int = Query(24, ge=1, le=BATTERY_RETENTION_DAYS * 24),
+    limit: int = Query(50, ge=1, le=200),
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """What one device has reported lately: its record, event counts and its
+    most recent events, newest first.
+
+    This is what a device row opens into. Every event comes from the no-opt-in
+    allowlist (see NO_OPT_IN_EVENTS), so the payload is activity and small
+    scalars -- a battery percentage, a step count, an app version -- and never
+    a transcript or a coordinate. Its owner's, or any device for an admin.
+    """
+    device = session.exec(select(Device).where(Device.device_key == device_key)).first()
+    if device is None:
+        raise HTTPException(status_code=404, detail="No such device")
+    if device.owner_username != caller.username and not caller.is_admin:
+        raise HTTPException(status_code=403, detail="Not your device")
+    since = (datetime.now() - timedelta(hours=hours)).isoformat()
+    rows = session.exec(
+        select(DeviceEvent)
+        .where(DeviceEvent.device_key == device_key, DeviceEvent.at >= since)
+        .order_by(DeviceEvent.at.desc())
+    ).all()
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row.event] = counts.get(row.event, 0) + 1
+    read = _device_to_read(device)
+    read.battery = _latest_batteries(session, [device_key]).get(device_key)
+    return DeviceActivity(
+        device=read,
+        counts=counts,
+        events=[_device_event_to_read(row) for row in rows[:limit]],
+        first_seen_at=device.first_seen_at,
+        last_seen_at=device.last_seen_at,
+    )
 
 
 @app.post("/api/user-panel/devices", response_model=DeviceRead)

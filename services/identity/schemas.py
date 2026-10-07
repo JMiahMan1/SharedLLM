@@ -491,6 +491,31 @@ class DeviceRead(BaseModel):
     battery: BatteryReading | None = None
 
 
+class DeviceEventRead(BaseModel):
+    """One usage event from a device, with whatever small scalars it carried."""
+
+    event: str
+    at: str
+    extra: dict = Field(default_factory=dict)
+
+
+class DeviceActivity(BaseModel):
+    """Everything one device has reported lately, for its detail view.
+
+    Built from the no-opt-in DeviceEvent allowlist, so it carries counts and
+    small scalars -- an event name, a battery percentage, a step count -- and
+    never content.
+    """
+
+    device: DeviceRead
+    #: How many of each event arrived inside the window.
+    counts: dict[str, int] = Field(default_factory=dict)
+    #: The most recent events, newest first.
+    events: list[DeviceEventRead] = Field(default_factory=list)
+    first_seen_at: str | None = None
+    last_seen_at: str | None = None
+
+
 class TelemetryIngest(BaseModel):
     """A usage event, written without opt-in.
 

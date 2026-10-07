@@ -23,6 +23,8 @@ import type {
   EsphomeDevice,
   CompanionDevice,
   BatteryReading,
+  DeviceActivity,
+  StepSources,
   PairDeviceRequest,
   ExecutionResponse,
   ArcadeGamesResponse,
@@ -158,6 +160,9 @@ export type {
   EsphomeDevice,
   CompanionDevice,
   BatteryReading,
+  DeviceActivity,
+  DeviceEventRead,
+  StepSources,
   PairDeviceRequest,
   DiscoveredDevice,
   LogEntry,
@@ -2303,6 +2308,29 @@ export const api = {
   async getDeviceBattery(deviceKey: string, hours = 24): Promise<BatteryReading[]> {
     const resp = await apiClient.get(`/api/user-panel/devices/${encodeURIComponent(deviceKey)}/battery`, {
       params: { hours },
+    });
+    return resp.data;
+  },
+
+  // What one device has reported lately: its record, how many of each event
+  // arrived and the most recent ones. Every event is from the no-opt-in
+  // allowlist, so it is activity and small scalars, never content.
+  async getDeviceActivity(deviceKey: string, hours = 24, limit = 50): Promise<DeviceActivity> {
+    const resp = await apiClient.get(
+      `/api/user-panel/devices/${encodeURIComponent(deviceKey)}/activity`,
+      { params: { hours, limit } },
+    );
+    return resp.data;
+  },
+
+  // Per-device step history: {source: {day: steps}}. A source with nothing
+  // recorded is absent rather than zero, so a device page can tell "never
+  // reported" from "reported nothing". The owner is named rather than assumed,
+  // because a device page may be looking at someone else's device; the server
+  // applies the usual consent rule to whoever is asking.
+  async getStepSources(days = 7, hourly = false, userId?: string): Promise<StepSources> {
+    const resp = await apiClient.get('/api/geo/steps/sources', {
+      params: { days, hourly: hourly ? 'true' : undefined, user_id: userId },
     });
     return resp.data;
   },
