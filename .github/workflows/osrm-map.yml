@@ -21,7 +21,8 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/sharedllm-osrm
+  # Lowercase: image names must be, and the owner is JMiahMan1.
+  IMAGE: ghcr.io/jmiahman1/sharedllm-osrm
   OSRM: ghcr.io/project-osrm/osrm-backend:v6.0.0
 
 jobs:
