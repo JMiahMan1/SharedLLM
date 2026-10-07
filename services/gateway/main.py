@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse,
 from pydantic import BaseModel
 from starlette.datastructures import UploadFile
 
+from services.gateway.location_query import parse_location_query
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
@@ -2887,23 +2888,12 @@ async def chat_handler(request: Request, background_tasks=None):
                 }
                 svc_base = STORAGE_SVC
             elif intent == "location_query":
-                q_lower = query.lower()
-                m = re.search(r"(?:where is|where's|how fast is|speed of)\s+([A-Za-z]+)", query, re.IGNORECASE)
-                user_target = m.group(1).strip() if m else creds.user
-                detail = None
-                if any(k in q_lower for k in ("speed", "fast", "mph", "driving")):
-                    detail = "speed"
-                elif any(k in q_lower for k in ("still", "dwell", "stationary", "how long")):
-                    detail = "dwell"
-                elif any(k in q_lower for k in ("frequent", "often", "most visited", "places")):
-                    detail = "frequented"
-                elif any(k in q_lower for k in ("cost", "mpg", "vehicle", "fuel", "gas")):
-                    detail = "cost"
-
+                parsed = parse_location_query(query, creds.user)
                 exec_payload = {
                     "user_context": creds.model_dump(),
-                    "user": user_target,
-                    "detail": detail,
+                    "user": parsed["user"],
+                    "detail": parsed["detail"],
+                    "to": parsed["to"],
                 }
                 svc_base = EXECUTION_SVC
             elif intent == "play_media":
@@ -9025,6 +9015,23 @@ async def proxy_set_step_goal(request: Request):
             return await resp.json()
         detail = await resp.text()
     raise HTTPException(status_code=resp.status, detail=detail[:200])
+
+
+@app.get("/api/geo/eta")
+async def get_geo_eta(request: Request, user_id: str | None = None, to: str = "home"):
+    """Drive time by road from someone's latest position to a place (an HA
+    zone, "home" by default). Same consent as reading their location."""
+    target, viewer, is_admin = await _read_target(request, user_id)
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/people/{target}/eta",
+            params={"to": to, "viewer": viewer, "is_admin": is_admin},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=15.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    await _raise_scoped_failure(resp, "No drive time available")
 
 
 @app.get("/api/geo/trends/activity")

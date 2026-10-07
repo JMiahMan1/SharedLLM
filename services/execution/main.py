@@ -435,6 +435,10 @@ async def lifespan(app: FastAPI):
     # Periodically delete generated videos / stale TTS files (BUG-32)
     prune_task = asyncio.create_task(temp_media_prune_loop())
 
+    # Paired watches' glance line: who is driving home, and how long they are out
+    from services.execution.watch_glance import glance_loop
+    glance_task = asyncio.create_task(glance_loop())
+
     # Start ESPresense BLE presence pipeline (E7: was never invoked)
     from services.config import REDIS_URL as _PRESENCE_REDIS_URL
     from services.execution.presence import init_presence_tracker
@@ -501,6 +505,9 @@ async def lifespan(app: FastAPI):
     prune_task.cancel()
     with suppress(Exception):
         await prune_task
+    glance_task.cancel()
+    with suppress(Exception):
+        await glance_task
     with suppress(Exception):
         from services.execution.presence import get_presence_tracker
         await get_presence_tracker().stop()

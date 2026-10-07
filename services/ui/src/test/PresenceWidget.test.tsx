@@ -40,6 +40,23 @@ describe('PresenceWidget', () => {
     expect(await screen.findByTestId('presence-widget')).toBeInTheDocument();
   });
 
+  it('shows "home in N min" for someone driving, by road', async () => {
+    useHandlers({
+      michele: { latitude: 33.30, longitude: -111.70, speed: 20, updated_at: at(20) },
+      jeremiah: { latitude: 33.16, longitude: -111.56, speed: 0, updated_at: at(20) },
+    });
+    const asked: string[] = [];
+    server.use(http.get('/api/geo/eta', ({ request }) => {
+      asked.push(new URL(request.url).searchParams.get('user_id') ?? '');
+      return HttpResponse.json({ user_id: 'michele', to: 'Home', arrived: false, duration_s: 1080,
+        distance_m: 19800, eta: 0, moving: true, fix_age_s: 20 });
+    }));
+    renderWithProviders(<PresenceWidget {...props} />);
+    expect(await screen.findByTestId('eta-michele')).toHaveTextContent('home in 18 min');
+    expect(screen.queryByTestId('eta-jeremiah')).not.toBeInTheDocument();  // not moving: no lookup
+    expect(asked).toEqual(['michele']);
+  });
+
   it('counts only genuinely live members', async () => {
     // One fresh (30s), one recent (5min), one stale (2h).
     useHandlers({
