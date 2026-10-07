@@ -47,11 +47,22 @@ GLOBAL_SKIP_LIST = [
 _SECTION_WHOLE_LIMIT = 1000
 
 class CheckpointManager:
-    def __init__(self, checkpoint_file: str = "index_checkpoint.json"):
+    def __init__(self, checkpoint_file: str = ""):
+        """Track which files this crawl has already indexed.
+
+        ``checkpoint_file`` is configuration, never a guessed relative name: a
+        path such as ``index_checkpoint.json`` resolves against the container's
+        working directory, which is recreated from the image on every restart,
+        so the checkpoint silently vanishes and a multi-hour crawl restarts
+        from the first file. An empty path means persistence is off, which is
+        an honest state rather than a write to somewhere disposable.
+        """
         self.checkpoint_file = checkpoint_file
         self.data = self._load()
 
     def _load(self):
+        if not self.checkpoint_file:
+            return {}
         if os.path.exists(self.checkpoint_file):
             try:
                 with open(self.checkpoint_file) as f:
@@ -61,6 +72,8 @@ class CheckpointManager:
         return {}
 
     def save(self):
+        if not self.checkpoint_file:
+            return
         try:
             os.makedirs(os.path.dirname(os.path.abspath(self.checkpoint_file)), exist_ok=True)
             with open(self.checkpoint_file, "w") as f:
