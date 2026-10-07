@@ -148,7 +148,13 @@ echo "Branch: $BRANCH"
 # after the branch is resolved so it honours DEPLOY_BRANCH and a detached HEAD,
 # and it names the SHA so a newer push landing mid-deploy cannot be mistaken
 # for this one.
-EXPECT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+#
+# That is the newest commit touching what build-images.yml builds from (its
+# `paths` filter), not HEAD: a docs-only HEAD gets no image build at all, and
+# waiting for one hung every deploy for 15 minutes before failing.
+EXPECT_SHA=$(git log -1 --format=%H HEAD -- services docker docker-compose.yml Caddyfile \
+    requirements.txt tools .github/workflows/build-images.yml 2>/dev/null || echo "")
+[ -n "$EXPECT_SHA" ] || EXPECT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
 if [ -n "$EXPECT_SHA" ]; then
     wait_for_build "$BRANCH" "$EXPECT_SHA"
 else
