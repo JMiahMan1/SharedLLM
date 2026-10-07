@@ -49,3 +49,7 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
   Settings offers Android's battery-optimisation exemption.
 - "How long until I get to 1234 Main St?" lost the address: the place pattern
   took letters only. Addresses (digits, commas) now reach the ETA.
+- Leave-by reminders would have gone to everyone for every event on the shared
+  household (Skylight) calendar ("Work at Discount Tire" is Kaleb's). Only a
+  person's own events remind them now: filed under their name in Skylight,
+  mapped to them in calendar settings, or on their own Nextcloud/iCal.
