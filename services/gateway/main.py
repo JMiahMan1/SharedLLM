@@ -9101,6 +9101,23 @@ async def get_geo_eta(request: Request, user_id: str | None = None, to: str = "h
     await _raise_scoped_failure(resp, "No drive time available")
 
 
+@app.get("/api/geo/closest")
+async def get_geo_closest(request: Request, to: str):
+    """Family members ranked by drive time to a place (a zone, an address or
+    lat,lon), among those who share their location with the caller."""
+    _, viewer, is_admin = await _read_target(request, None)
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/closest",
+            params={"to": to, "viewer": viewer, "is_admin": is_admin},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=20.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    await _raise_scoped_failure(resp, "No drive times available")
+
+
 @app.get("/api/geo/trends/activity")
 async def get_geo_activity_trends(request: Request, user_id: str | None = None, days: int = 7, refresh: bool = False):
     # Always resolved: this was inside `if not user_id:`, and the Fitness page
