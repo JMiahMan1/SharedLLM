@@ -71,6 +71,36 @@ def _collection_header(collection: str) -> str:
     return COLLECTION_HEADERS.get(collection, collection.upper())
 
 
+_GROUNDED_OMITTED_TOOLS = ("### ContextSearchRequest", "### WebSearchRequest")
+
+_GROUNDED_OMITTED_ACTIONS = ("contextsearchrequest", "websearchrequest")
+
+_GROUNDING_NOTICE = (
+    "Note: retrieval and web-search tools are deliberately omitted for this "
+    "turn. The retrieved context for this question is already included below, "
+    "so answer from it and cite it rather than looking anything up.\n\n"
+)
+
+
+def _grounded_tool_guide(guide: str) -> str:
+    """Strip the retrieval tools from the tool guide when context is already loaded.
+
+    A grounded turn has already paid for retrieval, so advertising a search tool
+    is an invitation to discard it. Prompting is not enough: on 2026-10-06 the
+    Librarian was given 15,913 characters of its own book passages with an
+    explicit instruction not to re-search them, called WebSearchRequest anyway,
+    and returned a summary of Shakespeare's Macbeth for a question about John
+    R. Macduff. Absence is the only lever that has held, so the sections go.
+    """
+    parts = re.split(r"(?m)^(?=#{2,3} )", guide)
+    kept = [p for p in parts if not any(p.startswith(omit) for omit in _GROUNDED_OMITTED_TOOLS)]
+    joined = "".join(kept)
+    marker = "## Available Tools"
+    if marker in joined:
+        return joined.replace(marker, f"{marker}\n\n{_GROUNDING_NOTICE}", 1)
+    return f"{_GROUNDING_NOTICE}{joined}"
+
+
 def _library_intent_asked(query: str) -> bool:
     """True when a query names the kind of thing a book library answers."""
     q = query.lower()
@@ -1263,9 +1293,12 @@ def _is_capacity_refusal(error: Exception) -> bool:
     )
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False) -> str:
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False) -> str:
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
     single_turn_guide = load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE)
+    if grounded and rag_context.strip():
+        single_turn_guide = _grounded_tool_guide(single_turn_guide)
+        log.info("[_single_turn_inference] grounded turn: retrieval tools omitted from the tool guide")
     system = f"{system_prompt.strip()}\n\nCurrent Date/Time: {now}\n\nSystem Capability Context:\n{single_turn_guide}\n\nRetrieved Context:\n{rag_context}"
     log.info(f"[_single_turn_inference] RAG context length: {len(rag_context)} chars")
     if rag_context:
@@ -1465,7 +1498,16 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         messages.append({"role": "assistant", "content": ans})
 
         # Execute the tool
-        tool_result = await _execute_single_tool(action, tool_data, query, creds)
+        if grounded and re.sub(r'[\s_]+', '', str(action or '')).lower() in _GROUNDED_OMITTED_ACTIONS:
+            tool_result = (
+                "That tool is not available for this turn. The retrieved context "
+                "for this question is already in your prompt, so answer from it "
+                "and cite the bracketed source and chapter instead of searching "
+                "again."
+            )
+            log.info("[_single_turn_inference] grounded turn refused a retrieval tool call")
+        else:
+            tool_result = await _execute_single_tool(action, tool_data, query, creds)
         log.info(f"[_single_turn_inference] Tool result: {tool_result[:300] if tool_result else 'empty'}")
 
         # Post-write lint hook: auto-lint after file write/patch to catch syntax errors

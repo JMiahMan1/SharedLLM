@@ -5636,6 +5636,7 @@ async def ask_in_workspace(workspace_id: str, request: Request):
             rag_context=context,
             history=[],
             creds=ResolvedCredentials(**creds),
+            grounded=bool(context.strip()),
         )
     except InferenceUnavailable as exc:
         raise HTTPException(
