@@ -3184,18 +3184,20 @@ async def websocket_terminal(
         async def read_socket():
             """Forward the shell's output until the exec socket really ends.
 
-            A timed-out read is not the end of the session. This socket
-            inherits the Docker client's timeout (``from_env(timeout=5)``), so a
-            shell that has merely gone quiet raises ``socket.timeout`` (an alias
-            of ``TimeoutError``) every five seconds. Treating that as
-            end-of-stream closed the session while the shell was still alive,
-            which the reader experienced as keystrokes that suddenly stopped
-            registering.
+            A timed-out read is not the end of the session, and it must not go
+            through the ``SocketIO`` wrapper either. The wrapper marks itself as
+            timed out after the first timeout and then refuses every later read
+            with "cannot read from timed out object", which stopped output at
+            the first quiet moment even though the shell was alive -- what the
+            reader saw as keystrokes that stopped registering, because nothing
+            typed was ever echoed back. The raw socket underneath stays usable
+            across a timeout, so that is what is read.
             """
             loop = asyncio.get_event_loop()
+            source = getattr(sock, "_sock", None) or sock
             while True:
                 try:
-                    data = await loop.run_in_executor(None, sock.read, 4096)
+                    data = await loop.run_in_executor(None, source.recv, 4096)
                     if not data:
                         break
                     await send_to_client(data)
