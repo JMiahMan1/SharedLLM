@@ -45,7 +45,9 @@ RUN sed -i 's/^hosts:.*/hosts:          files mdns4_minimal [NOTFOUND=return] dn
 RUN set -eux; \
     ARCH="$(uname -m)"; \
     if [ "$ARCH" = "x86_64" ]; then GH_ARCH="amd64"; else GH_ARCH="$ARCH"; fi; \
-    GH_VERSION="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | jq -r .tag_name)"; \
+    # Pinned: the unauthenticated "latest release" API call is rate-limited on
+    # shared CI runners and failed builds (403).
+    GH_VERSION="v2.63.2"; \
     curl -fsSL "https://github.com/cli/cli/releases/download/${GH_VERSION}/gh_${GH_VERSION#v}_linux_${GH_ARCH}.tar.gz" -o /tmp/gh.tar.gz; \
     tar -xzf /tmp/gh.tar.gz -C /tmp; \
     mv "/tmp/gh_${GH_VERSION#v}_linux_${GH_ARCH}/bin/gh" /usr/local/bin/gh; \
