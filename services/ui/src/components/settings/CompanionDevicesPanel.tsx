@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Lightbulb, Loader2, Mic, Plus, Search, Smartphone, Watch, X, Cpu } from 'lucide-react';
+import { Battery, BatteryCharging, BatteryLow, Lightbulb, Loader2, Mic, Plus, Search, Smartphone, Watch, X, Cpu } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import type { CompanionDevice, DiscoveredDevice } from '../../services/api';
+import type { BatteryReading, CompanionDevice, DiscoveredDevice } from '../../services/api';
 
 /**
  * The signed-in user's companion devices, and adding new ones.
@@ -39,6 +39,11 @@ type Step =
 
 const touch = 'min-h-11 pointer-coarse:min-h-11';
 
+function minutesSince(iso: string): number {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? 0 : (Date.now() - t) / 60000;
+}
+
 function lastSeen(iso?: string | null): string {
   if (!iso) return '';
   const t = Date.parse(iso);
@@ -48,6 +53,50 @@ function lastSeen(iso?: string | null): string {
   if (mins < 60) return `seen ${mins} min ago`;
   const hrs = Math.round(mins / 60);
   return hrs < 48 ? `seen ${hrs} h ago` : `seen ${Math.round(hrs / 24)} d ago`;
+}
+
+/** The latest battery report as a chip: the percentage, or Charging (a watch
+ *  cannot read its cell while on USB). Stale reports are labelled as such. */
+function BatteryChip({ reading }: { reading: BatteryReading }) {
+  const stale = minutesSince(reading.at) > 60;
+  const pct = reading.pct != null ? Math.round(reading.pct) : null;
+  const Icon = reading.usb ? BatteryCharging : pct != null && pct <= 15 ? BatteryLow : Battery;
+  const tone = reading.usb ? 'text-emerald-300' : pct != null && pct <= 15 ? 'text-amber-300' : 'text-slate-300';
+  const label = reading.usb ? 'Charging' : pct != null ? `${pct}%` : '--';
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs ${tone} ${stale ? 'opacity-60' : ''}`}
+      title={stale ? `Last reported ${lastSeen(reading.at)}` : 'Battery'} aria-label={`Battery ${label}`}>
+      <Icon size={14} /> {label}
+    </span>
+  );
+}
+
+/** The last day's battery reports as a small line (percent over time). */
+function BatteryHistory({ deviceKey }: { deviceKey: string }) {
+  const { data = [], isLoading } = useQuery({
+    queryKey: ['device-battery', deviceKey],
+    queryFn: () => api.getDeviceBattery(deviceKey, 24),
+  });
+  const points = data.filter((r) => r.pct != null);
+  if (isLoading) return <p className="text-xs text-slate-500">Loading battery history…</p>;
+  if (points.length < 2) return <p className="text-xs text-slate-500">Not enough battery reports in the last day yet.</p>;
+  const t0 = Date.parse(points[0].at);
+  const span = Math.max(1, Date.parse(points[points.length - 1].at) - t0);
+  const path = points
+    .map((r, i) => `${i ? 'L' : 'M'}${((Date.parse(r.at) - t0) / span * 100).toFixed(1)},${(40 - (r.pct as number) * 0.4).toFixed(1)}`)
+    .join(' ');
+  const charging = data.filter((r) => r.usb).length;
+  return (
+    <figure className="w-full" aria-label="Battery, last 24 hours">
+      <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="w-full h-16 rounded-lg bg-black/30">
+        <path d={path} fill="none" stroke="currentColor" strokeWidth="1.2" vectorEffect="non-scaling-stroke" className="text-sky-400" />
+      </svg>
+      <figcaption className="mt-1 text-[11px] text-slate-500">
+        {points.length} readings · {Math.round(points[points.length - 1].pct as number)}% now
+        {charging ? ` · ${charging} while charging (no % on USB)` : ''}
+      </figcaption>
+    </figure>
+  );
 }
 
 interface Props {
@@ -65,6 +114,7 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
   const [address, setAddress] = useState('');
   const [code, setCode] = useState('');
   const [found, setFound] = useState<DiscoveredDevice[] | null>(null);
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   const { data: allDevices = [], isLoading } = useQuery({
     queryKey: ['companion-devices'],
@@ -282,6 +332,16 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
                 <span className="block text-sm text-white truncate">{name}</span>
                 <span className="block text-xs text-slate-500 truncate">{sub}</span>
               </span>
+              {d.battery && (
+                <button
+                  onClick={() => setHistoryFor(historyFor === d.device_key ? null : d.device_key)}
+                  aria-expanded={historyFor === d.device_key}
+                  aria-label={`Battery history for ${name}`}
+                  className={`rounded-lg px-2 hover:bg-white/5 ${touch} flex items-center`}
+                >
+                  <BatteryChip reading={d.battery} />
+                </button>
+              )}
               <span className="text-[10px] uppercase tracking-widest text-slate-500">{d.kind}</span>
               {scope === 'all' && (
                 <select
@@ -300,6 +360,7 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
                   )}
                 </select>
               )}
+              {historyFor === d.device_key && <BatteryHistory deviceKey={d.device_key} />}
             </li>
           );
         })}

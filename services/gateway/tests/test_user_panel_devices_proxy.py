@@ -203,3 +203,12 @@ class TestRefusalsAreRelayed:
             "/api/user-panel/devices/register", json={"device_key": DEVICE["device_key"]}
         )
         assert r.status_code == 409
+
+
+def test_battery_history_is_proxied_with_the_callers_token(client, monkeypatch):
+    cap = _patch_identity(monkeypatch, payload=[{"at": "2026-10-06T10:00:00", "pct": 80.0}])
+    r = client.get("/api/user-panel/devices/esphome:744dbd2c9728/battery?hours=48",
+                   headers={"Authorization": "Bearer jeremiah-token"})
+    assert r.status_code == 200
+    assert cap["calls"][0]["url"].endswith("/api/user-panel/devices/esphome:744dbd2c9728/battery")
+    assert cap["calls"][0]["headers"].get("Authorization") == "Bearer jeremiah-token"

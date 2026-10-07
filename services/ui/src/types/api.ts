@@ -222,6 +222,14 @@ export interface GlobalSetting {
 
 /** A device linked to a user: phones register themselves on login; watches,
  * assistants and lights are added through pairing (code) or adoption. */
+/** One battery report from a device. pct is absent while it is on USB. */
+export interface BatteryReading {
+  at: string;
+  pct?: number | null;
+  usb?: boolean | null;
+  cell_v?: number | null;
+}
+
 export interface CompanionDevice {
   device_key: string;
   kind: string; // phone | watch | assistant | light
@@ -235,6 +243,7 @@ export interface CompanionDevice {
   hardware?: string | null;
   last_ip_address?: string | null;
   last_seen_at?: string | null;
+  battery?: BatteryReading | null;
 }
 
 export interface PairDeviceRequest {

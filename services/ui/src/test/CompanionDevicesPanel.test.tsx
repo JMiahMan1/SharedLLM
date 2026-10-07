@@ -124,4 +124,25 @@ describe('CompanionDevicesPanel', () => {
     expect(pairCalls[2]).toMatchObject({ step: 'finish', host: '10.0.0.40' });
     expect(pairCalls[2].code).toBeUndefined();
   });
+
+  it('shows each device\'s battery, and its last day on request', async () => {
+    const now = new Date().toISOString();
+    myDevices = [
+      { device_key: 'esphome:744dbd2c9728', kind: 'watch', label: 'Jarvis Watch', registered_by: 'paired',
+        owner_username: 'default', app_version: '1.4.1', battery: { at: now, pct: 62.4, usb: false } },
+      { device_key: 'phone-abc12345', kind: 'phone', label: 'Pixel', registered_by: 'self',
+        owner_username: 'default', battery: { at: now, usb: true } },
+    ];
+    server.use(http.get('/api/user-panel/devices/:key/battery', () => HttpResponse.json([
+      { at: '2026-10-06T10:00:00', pct: 90, usb: false },
+      { at: '2026-10-06T12:00:00', pct: 75, usb: false },
+      { at: '2026-10-06T14:00:00', pct: 62.4, usb: false },
+    ])));
+    renderWithProviders(<CompanionDevicesPanel />);
+    expect(await screen.findByLabelText('Battery 62%')).toBeInTheDocument();
+    expect(screen.getByLabelText('Battery Charging')).toBeInTheDocument();  // no % on USB
+    fireEvent.click(screen.getByRole('button', { name: 'Battery history for Jarvis Watch' }));
+    expect(await screen.findByLabelText('Battery, last 24 hours')).toBeInTheDocument();
+    expect(screen.getByText(/3 readings · 62% now/)).toBeInTheDocument();
+  });
 });

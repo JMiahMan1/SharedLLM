@@ -458,6 +458,15 @@ class DeviceAssign(BaseModel):
     owner_username: str | None = None
 
 
+class BatteryReading(BaseModel):
+    """One battery report from a device (telemetry event "battery")."""
+
+    at: str
+    pct: float | None = None  # absent while on USB, where the watch cannot read its cell
+    usb: bool | None = None
+    cell_v: float | None = None
+
+
 class DeviceRead(BaseModel):
     id: int | None = None
     device_key: str
@@ -478,6 +487,8 @@ class DeviceRead(BaseModel):
     last_ip_address: str | None = None
     last_seen_at: str | None = None
     first_seen_at: str | None = None
+    #: The device's latest battery report, when it sends them.
+    battery: BatteryReading | None = None
 
 
 class TelemetryIngest(BaseModel):
@@ -490,3 +501,6 @@ class TelemetryIngest(BaseModel):
 
     device_key: str = Field(min_length=1, max_length=128)
     events: list[dict]
+    #: The firmware/app version the device is running, kept current on the
+    #: device record (pairing alone records it once, and devices update).
+    app_version: str | None = Field(default=None, max_length=32)
