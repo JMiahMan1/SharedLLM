@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Columns2, Minus, Plus, Settings2, Star, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
+import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
 import type {
   BibleBookInfo,
   BibleEditionInfo,
@@ -52,6 +53,8 @@ export default function ReferenceBar({
 }: ReferenceBarProps) {
   const { trigger } = useHaptics();
   const [displayOpen, setDisplayOpen] = useState(false);
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const isPhone = useMediaQuery(PHONE_QUERY);
 
   const book = books.find((b) => b.osis === position.book) ?? books[0];
   const selectedVersion = versions.find((v) => v.code === preferences.default_version);
@@ -84,12 +87,32 @@ export default function ReferenceBar({
     onPreferences({ font_scale: TEXT_STEPS[next] });
   };
 
-  return (
-    <div className="space-y-3" data-testid="bible-reference-bar">
+  // Choosing a passage is a signal that the reader wants the text rather than
+  // the chooser, so on a phone the sheet gets out of the way once something is
+  // picked. The desktop bar ignores this -- nothing is covering anything there.
+  const stopBrowsing = () => {
+    if (isPhone) setBrowseOpen(false);
+  };
+
+  const choosePosition = (patch: Partial<BiblePosition>) => {
+    onPosition(patch);
+    stopBrowsing();
+  };
+
+  const chooseSubmit = () => {
+    onSubmit();
+    stopBrowsing();
+  };
+
+  const passageLabel = `${book?.name ?? position.book} ${position.chapter}`;
+
+  const controls = (
+    <>
+      <div className="space-y-3" data-testid="bible-reference-bar">
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          onSubmit();
+          chooseSubmit();
         }}
         className="flex gap-2"
       >
@@ -116,7 +139,7 @@ export default function ReferenceBar({
           <span className="text-[10px] uppercase tracking-wider text-slate-500">Book</span>
           <select
             value={position.book}
-            onChange={(e) => onPosition({ book: e.target.value, chapter: 1, verse: 1 })}
+            onChange={(e) => choosePosition({ book: e.target.value, chapter: 1, verse: 1 })}
             aria-label="Book"
             data-testid="bible-book-select"
             className="min-h-11 rounded-xl bg-black/25 border border-white/10 text-sm text-slate-100 px-2 py-2"
@@ -134,7 +157,7 @@ export default function ReferenceBar({
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => onPosition({ chapter: Math.max(1, position.chapter - 1) })}
+              onClick={() => choosePosition({ chapter: Math.max(1, position.chapter - 1) })}
               disabled={position.chapter <= 1}
               aria-label="Previous chapter"
               data-testid="bible-chapter-down"
@@ -150,7 +173,7 @@ export default function ReferenceBar({
               onChange={(e) => {
                 const value = Number(e.target.value);
                 if (Number.isFinite(value) && value >= 1) {
-                  onPosition({ chapter: Math.min(value, chapterCount), verse: 1 });
+                  choosePosition({ chapter: Math.min(value, chapterCount), verse: 1 });
                 }
               }}
               aria-label="Chapter number"
@@ -159,7 +182,7 @@ export default function ReferenceBar({
             />
             <button
               type="button"
-              onClick={() => onPosition({ chapter: Math.min(chapterCount, position.chapter + 1) })}
+              onClick={() => choosePosition({ chapter: Math.min(chapterCount, position.chapter + 1) })}
               disabled={position.chapter >= chapterCount}
               aria-label="Next chapter"
               data-testid="bible-chapter-up"
@@ -454,5 +477,82 @@ export default function ReferenceBar({
         </button>
       </div>
     </div>
+    </>
   );
+
+  if (isPhone) {
+    return (
+      <div className="flex items-center gap-1.5" data-testid="bible-phone-bar">
+        <button
+          type="button"
+          onClick={() => {
+            void trigger('light');
+            setBrowseOpen(true);
+          }}
+          aria-label={`Choose a passage. Now reading ${passageLabel}.`}
+          data-testid="bible-browse-open"
+          className="flex-1 min-w-0 min-h-11 rounded-xl glass-button px-3 py-2 text-sm flex items-center justify-between gap-2"
+        >
+          <span className="truncate text-slate-100">{passageLabel}</span>
+          <ChevronRight size={15} className="shrink-0 text-slate-400" />
+        </button>
+        <button
+          type="button"
+          onClick={() => nudge(-1)}
+          aria-label="Previous chapter"
+          data-testid="bible-prev-chapter"
+          className="w-11 min-h-11 rounded-xl glass-button flex items-center justify-center"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => nudge(1)}
+          aria-label="Next chapter"
+          data-testid="bible-next-chapter"
+          className="w-11 min-h-11 rounded-xl glass-button flex items-center justify-center"
+        >
+          <ChevronRight size={16} />
+        </button>
+
+        {browseOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Choose a passage"
+          >
+            <button
+              type="button"
+              aria-label="Close the passage chooser"
+              data-testid="bible-browse-scrim"
+              onClick={() => setBrowseOpen(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <div
+              data-testid="bible-browse-sheet"
+              className="relative w-full sm:max-w-lg bg-slate-950/97 backdrop-blur-xl border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-h-[85vh] overflow-y-auto"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-200">Choose a passage</h2>
+                <button
+                  type="button"
+                  onClick={() => setBrowseOpen(false)}
+                  aria-label="Close the passage chooser"
+                  className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-slate-400 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              {controls}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // The desktop bar is the controls themselves: one element, unchanged from
+  // what this component has always rendered.
+  return controls;
 }
