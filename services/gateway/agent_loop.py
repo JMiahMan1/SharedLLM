@@ -1195,6 +1195,27 @@ def _next_batch_step(pending_batch: list[dict]) -> tuple[bool, dict | None]:
     return False, None
 
 
+def event_text(data: Any) -> str:
+    """The text to store for one audit-log event.
+
+    Providers stream content parts (``{"type": "content", "text": ...}``) through
+    the same callback that everything else uses for plain strings. Written
+    through uncoerced, that object reached the live trace reader and crashed the
+    whole panel with React error #31 ("objects are not valid as a React child")
+    the moment a mission streamed its first token. The shape is flattened here --
+    where it can be tested -- rather than at each call site, and anything that is
+    neither a string nor a content part is stringified rather than dropped, so an
+    unknown shape is visible in the log instead of silently missing from it.
+    """
+    if isinstance(data, str):
+        return data
+    if isinstance(data, dict):
+        text = data.get("text")
+        if isinstance(text, str):
+            return text
+    return str(data)
+
+
 def compose_timeout_partial_result(
     successful_tool_calls: int,
     action_log: list[str],
@@ -2620,11 +2641,19 @@ def normalize_audit_log(audit_log: list[dict]) -> list[dict]:
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None, history_log: str | None = None) -> Any:
     full_audit_log = []
 
-    async def stream_event(event_type: str, data: str):
+    async def stream_event(event_type: str, data: Any):
+        """Append one event to the mission's audit log and live stream.
+
+        ``data`` is coerced to text because the providers stream content parts
+        (``{"type": "content", "text": ...}``) through the same callback that
+        everything else uses for strings. Written through uncoerced, that object
+        reached the reader and crashed the whole live trace with React error #31
+        ("objects are not valid as a React child") the moment a mission streamed
+        its first token.
+        """
         if not mission_id:
             return
-        import time
-        msg_obj = {"type": event_type, "data": data, "timestamp": time.time()}
+        msg_obj = {"type": event_type, "data": event_text(data), "timestamp": time.time()}
         full_audit_log.append(msg_obj)
         global _stream_redis
         if not _stream_redis:
@@ -3302,7 +3331,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     log.info(f"[AgentLoop] Inference options: {vram_params}")
                     log.info(f"[AgentLoop] Executing inference (Attempt {retry_count + 1}/{MAX_INFERENCE_RETRIES}) for {model_to_use}")
 
-                    async def chunk_logger(chunk: str):
+                    async def chunk_logger(chunk: Any):
+                        """Stream a token that just arrived from the provider.
+
+                        The provider's callback is annotated as taking ``str`` but
+                        streams content parts (``{"type": "thinking"|"content",
+                        "text": ...}``); ``stream_event`` flattens them. The
+                        annotation here says ``Any`` so the next reader is not
+                        told a shape the callers do not honour.
+                        """
                         await stream_event("reasoning", chunk)
 
                     inference_options = ollama_payload.get("options", {})

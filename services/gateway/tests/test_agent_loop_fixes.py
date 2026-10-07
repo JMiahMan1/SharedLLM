@@ -6,11 +6,49 @@ from services.gateway.agent_loop import (
     action_signature,
     build_adaptive_guidance,
     compose_timeout_partial_result,
+    event_text,
     extract_action_batch,
     guidance_branch,
     is_verification_action,
     outcome_digest,
 )
+
+
+def test_a_streamed_content_part_becomes_its_text():
+    """Regression: 'Watch Live' crashed with React error #31.
+
+    Providers stream content parts through the callback the audit log uses for
+    everything else. Stored unflattened, the object reached the trace viewer and
+    React refused to render it ("objects are not valid as a React child"), so
+    the whole live trace died on the mission's first token.
+    """
+    assert event_text({"type": "content", "text": "In the beginning"}) == "In the beginning"
+
+
+def test_a_thinking_part_becomes_its_text_too():
+    """Thinking streams through the same callback and must flatten the same way."""
+    assert event_text({"type": "thinking", "text": "Let me consider"}) == "Let me consider"
+
+
+def test_a_plain_string_is_left_alone():
+    """Most events are already text; flattening must not touch them."""
+    assert event_text("Tool response: 200") == "Tool response: 200"
+
+
+def test_an_unknown_shape_is_stringified_rather_than_dropped():
+    """An object the log does not recognise should still be visible in it.
+
+    Dropping it would turn an unexpected shape into a gap in the transcript,
+    which is harder to diagnose than a rendered repr.
+    """
+    assert event_text({"unexpected": "shape"}) == "{'unexpected': 'shape'}"
+    assert event_text(None) == "None"
+    assert event_text(7) == "7"
+
+
+def test_a_content_part_with_a_non_string_text_is_still_visible():
+    """A malformed part must not vanish either -- and must not stay an object."""
+    assert isinstance(event_text({"type": "content", "text": 42}), str)
 
 
 def test_timeout_partial_result_surfaces_real_progress_not_batch_placeholder():
