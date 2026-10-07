@@ -24,7 +24,7 @@ class LocationRequest(BaseModel):
     user: str | None = None
     person: str | None = None
     target: str | None = None
-    detail: str | None = None  # "summary", "speed", "dwell", "frequented", "cost", "vehicle", "eta"
+    detail: str | None = None  # "summary", "speed", "dwell", "frequented", "cost", "vehicle", "eta", "closest"
     to: str | None = None  # for "eta": a Home Assistant zone ("home", "work") or "lat,lon"
     hours: float = 24.0
 
@@ -46,6 +46,41 @@ def _minutes(seconds: float) -> str:
     if m < 60:
         return f"{m} minute{'s' if m != 1 else ''}"
     return f"{m // 60} h {m % 60:02d} min"
+
+
+async def _closest(to: str | None, caller: str, is_admin: bool) -> ExecutionResult:
+    """ "Who's closest to the school?": drive time by road for everyone the
+    asker may see (geo /closest), nearest first."""
+    from services.common.http import get_client_insecure
+    from services.config import GEO_SVC_URL, INTERNAL_SECRET
+
+    if not to:
+        return ExecutionResult(status="FAILURE", message="Closest to where?", service="location")
+    params = {"to": to, "viewer": caller, "is_admin": "true" if is_admin else "false"}
+    try:
+        async with get_client_insecure() as client, client.get(
+            f"{GEO_SVC_URL.rstrip('/')}/closest", params=params,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=15.0),
+        ) as resp:
+            data = await resp.json(content_type=None)
+            status = resp.status
+    except Exception as e:
+        log.warning(f"[location] closest lookup failed: {e}")
+        return ExecutionResult(status="FAILURE", message="I can't work out drive times right now.", service="location")
+    if status != 200:
+        return ExecutionResult(status="FAILURE", message=str(data.get("detail") or "No drive times available."),
+                               service="location", detail=data)
+    people = data.get("people") or []
+    place = data.get("to") or to
+    if not people:
+        return ExecutionResult(status="SUCCESS", message=f"I don't know where anyone is right now to compare against {place}.",
+                               service="location", detail=data)
+    first = people[0]
+    msg = f"{first['user_id'].title()} is closest to {place}, about {_minutes(first['duration_s'])} away by road."
+    if len(people) > 1:
+        rest = ", ".join(f"{p['user_id'].title()} {_minutes(p['duration_s'])}" for p in people[1:4])
+        msg += f" Then {rest}."
+    return ExecutionResult(status="SUCCESS", message=msg, service="location", detail=data)
 
 
 async def _eta(target_name: str, to: str | None, caller: str, is_admin: bool) -> ExecutionResult:
@@ -89,6 +124,8 @@ async def handle_location(req: LocationRequest) -> ExecutionResult:
     caller_user = (ctx.user if ctx else "") or ""
     is_admin = bool(ctx and ctx.is_admin)
     raw_target = req.user or req.person or req.target or caller_user
+    if (req.detail or "").lower() == "closest":
+        return await _closest(req.to, caller_user, is_admin)
     target_name = _clean_target_name(raw_target, caller_user)
     if not target_name:
         return ExecutionResult(status="FAILURE", message="Whose location do you mean?", service="location")

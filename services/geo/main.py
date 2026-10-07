@@ -1209,6 +1209,60 @@ async def compute_eta(clean: str, to: str = "home") -> dict:
     }
 
 
+async def _tracked_users(r) -> list[str]:
+    """Usernames with a breadcrumb history (entity-id copies left out)."""
+    users = set()
+    async for key in r.scan_iter(match="geo:history:*"):
+        name = (key.decode() if isinstance(key, bytes) else key).split(":", 2)[-1]
+        if name and "." not in name:
+            users.add(name)
+    return sorted(users)
+
+
+#: A position older than this is not "where they are" for who-is-closest.
+CLOSEST_MAX_FIX_AGE_S = 3600
+
+
+@app.get("/closest")
+async def get_closest(
+    to: str = Query(..., description="An HA zone (name or entity id) or lat,lon"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Who can get to a place soonest, by drive time on the roads (OSRM
+    table), among the people the viewer may see. Nearest first."""
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    dest = await _destination(to)
+    if not dest:
+        raise HTTPException(status_code=404, detail=f"No place called '{to}' (a Home Assistant zone or lat,lon)")
+    r = await get_redis()
+    now = time.time()
+    people = []
+    for user in await _tracked_users(r):
+        try:
+            await _require_may_view(viewer, user, is_admin)
+        except HTTPException:
+            continue
+        fix = await _latest_fix(r, user)
+        if fix and now - float(fix.get("t", 0)) <= CLOSEST_MAX_FIX_AGE_S:
+            people.append((user, fix))
+    if not people:
+        return {"to": dest["name"], "people": []}
+    durations = await map_match.table([(f["lat"], f["lon"]) for _, f in people],
+                                      (dest["latitude"], dest["longitude"]), OSRM_URL)
+    if durations is None:
+        raise HTTPException(status_code=503, detail="The road network cannot give drive times right now")
+    ranked = sorted(
+        ({"user_id": u, "duration_s": round(d), "fix_age_s": round(now - float(f.get("t", now)))}
+         for (u, f), d in zip(people, durations, strict=True) if d is not None),
+        key=lambda x: x["duration_s"],
+    )
+    return {"to": dest["name"], "people": ranked}
+
+
 @app.get("/people/{entity_id:path}/eta")
 async def get_eta(
     entity_id: str,

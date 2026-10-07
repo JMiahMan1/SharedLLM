@@ -1132,6 +1132,8 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     payload["detail"] = parsed["detail"]
                 if payload.get("detail") == "eta" and not payload.get("to"):
                     payload["to"] = parsed["to"] or "home"
+                if payload.get("detail") == "closest" and not payload.get("to"):
+                    payload["to"] = parsed["to"]
 
             _ws_file_actions = {
                 "workspacefilereadrequest",
