@@ -162,6 +162,18 @@ function BibleReaderPane({
   const notesAlongside = preferences.show_notes && Boolean(studyScope);
   const noteUnavailable =
     studyData && !studyData.notes.length ? (studyData.note ?? null) : null;
+  // Which verses the reader has written about. The note itself is in Nextcloud;
+  // this only marks that one exists, so the glyph is a pointer to something real
+  // rather than a copy of it.
+  const notedVerses = useMemo(
+    () =>
+      new Set(
+        marks
+          .filter((m) => m.kind === 'note' && m.note_path)
+          .map((m) => `${m.chapter}:${m.verse_start}`),
+      ),
+    [marks],
+  );
   const studiedVerses = useMemo(
     () =>
       new Set(
@@ -326,6 +338,7 @@ function BibleReaderPane({
               verses={passage?.verses ?? []}
               marks={marks}
               studiedVerses={studiedVerses}
+              notedVerses={notedVerses}
               compareVerses={compareData?.verses}
               compareName={compareName}
               fontScale={preferences.font_scale}
@@ -387,7 +400,12 @@ function BibleReaderPane({
           onCrossVersionChange={(on) => onPreferences({ cross_version_notes: on })}
           onClose={() => setActiveVerse(null)}
           onToggleMark={(kind, color) => void toggleMark(kind, color)}
-          onNoteSaved={() => void trigger('success')}
+          onNoteSaved={() => {
+            void trigger('success');
+            // The sheet stored both the note and the pointer to it; the reader
+            // only needs the marks refreshed so the verse shows the glyph.
+            void onMarksChanged();
+          }}
           onShared={(target) => {
             void trigger('success');
             void api.recordBibleEvent('share_tap', activeVerse.reference, target === 'system' ? 1 : 0);

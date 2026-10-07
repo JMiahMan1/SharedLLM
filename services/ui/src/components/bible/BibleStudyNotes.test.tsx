@@ -14,6 +14,8 @@ const apiMock = vi.hoisted(() => ({
   recordBibleEvent: vi.fn(),
   createNote: vi.fn(),
   getBlbLink: vi.fn(),
+  putBibleMark: vi.fn(),
+  readNote: vi.fn(),
 }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -250,5 +252,105 @@ describe('VerseActionSheet study notes', () => {
     await user.click(screen.getAllByLabelText('Close study notes')[0]);
     await waitFor(() => expect(screen.queryByTestId('bible-study-notes')).not.toBeInTheDocument());
     expect(screen.getByTestId('bible-verse-sheet')).toBeInTheDocument();
+  });
+});
+describe('a note the reader wrote about a verse', () => {
+  beforeEach(() => {
+    apiMock.recordBibleEvent.mockReset();
+    apiMock.recordBibleEvent.mockResolvedValue({});
+    apiMock.putBibleMark.mockReset();
+    apiMock.putBibleMark.mockResolvedValue({});
+    apiMock.readNote.mockReset();
+  });
+
+  function renderSheet(props: Partial<React.ComponentProps<typeof VerseActionSheet>> = {}) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const onNoteSaved = vi.fn();
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <VerseActionSheet
+            verse={VERSE}
+            marks={[]}
+            version="nkjv"
+            onClose={() => {}}
+            onToggleMark={() => {}}
+            onNoteSaved={onNoteSaved}
+            {...props}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return { onNoteSaved };
+  }
+
+  it('points the verse at the note it just wrote, using the server\'s own path', async () => {
+    apiMock.createNote.mockResolvedValue({
+      status: 'SUCCESS',
+      message: "Note 'John 3:16' created.",
+      service: 'note_create',
+      detail: { path: 'Bible/John 3_16.md' },
+    });
+    const { onNoteSaved } = renderSheet();
+    await userEvent.click(screen.getByTestId('bible-action-note'));
+
+    await waitFor(() => expect(apiMock.putBibleMark).toHaveBeenCalledTimes(1));
+    expect(apiMock.putBibleMark).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: 'John 3:16', kind: 'note', note_path: 'Bible/John 3_16.md' }),
+    );
+    expect(onNoteSaved).toHaveBeenCalled();
+  });
+
+  it('says so when the note was written but no path came back', async () => {
+    apiMock.createNote.mockResolvedValue({
+      status: 'SUCCESS',
+      message: "Note 'John 3:16' created.",
+      service: 'note_create',
+    });
+    renderSheet();
+    await userEvent.click(screen.getByTestId('bible-action-note'));
+
+    expect(await screen.findByTestId('bible-sheet-status')).toHaveTextContent(
+      /was not told where/i,
+    );
+    // No pointer, so no mark that would point at nothing.
+    expect(apiMock.putBibleMark).not.toHaveBeenCalled();
+  });
+
+  it('offers to read the note back when the verse already has one', async () => {
+    apiMock.readNote.mockResolvedValue({
+      status: 'SUCCESS',
+      message: '# John 3:16\nCategory: Bible\n\nWhat a verse.',
+      service: 'note_read',
+    });
+    renderSheet({
+      marks: [
+        {
+          id: 1,
+          version_code: 'nkjv',
+          osis: 'John',
+          book_name: 'John',
+          chapter: 3,
+          verse_start: 16,
+          verse_end: null,
+          kind: 'note',
+          color: '',
+          note_path: 'Bible/John 3_16.md',
+          note_preview: 'John 3:16',
+          created_at: null,
+          updated_at: null,
+        },
+      ],
+    });
+    await userEvent.click(screen.getByTestId('bible-action-open-note'));
+    await waitFor(() =>
+      expect(apiMock.readNote).toHaveBeenCalledWith('John 3:16', 'nextcloud', 'Bible/John 3_16.md'),
+    );
+    expect(await screen.findByTestId('bible-note-body')).toHaveTextContent('What a verse.');
+  });
+
+  it('offers no note button for a verse that has none', () => {
+    renderSheet();
+    expect(screen.queryByTestId('bible-action-open-note')).not.toBeInTheDocument();
   });
 });
