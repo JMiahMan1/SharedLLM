@@ -23,6 +23,7 @@ import type {
   EsphomeDevice,
   CompanionDevice,
   BatteryReading,
+  EtaResponse,
   DeviceActivity,
   StepSources,
   PairDeviceRequest,
@@ -161,6 +162,7 @@ export type {
   CompanionDevice,
   BatteryReading,
   DeviceActivity,
+  EtaResponse,
   DeviceEventRead,
   StepSources,
   PairDeviceRequest,
@@ -957,6 +959,13 @@ export const api = {
    * Users with tracking off simply have no entry (or a stale one).
    */
   async getAllUserLocations(): Promise<Record<string, UserLiveLocation>> {
+  // Drive time by road from someone's latest position to a place (an HA zone,
+  // "home" by default), subject to location-sharing consent.
+  async getEta(userId: string, to = 'home'): Promise<EtaResponse> {
+    const resp = await apiClient.get('/api/geo/eta', { params: { user_id: userId, to } });
+    return resp.data;
+  },
+
     const resp = await apiClient.get('/api/users/location/all');
     return resp.data || {};
   },

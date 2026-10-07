@@ -1125,6 +1125,7 @@ class LocationRequest(BaseRequest):
     user: str | None = Field(None, description="Person or user to locate (e.g. 'Jeremiah', 'Michele', 'me')")
     person: str | None = Field(None, description="Alias for user")
     target: str | None = Field(None, description="Alias for user")
-    detail: str | None = Field(None, description="Type of detail: 'summary', 'speed', 'dwell', 'frequented', 'cost', 'vehicle'")
+    detail: str | None = Field(None, description="Type of detail: 'summary', 'speed', 'dwell', 'frequented', 'cost', 'vehicle', or 'eta' (how long until they get somewhere, e.g. 'when will Michele be home?')")
+    to: str | None = Field(None, description="For detail 'eta': the place, a Home Assistant zone name such as 'home' or 'work' (default 'home')")
     hours: float | None = Field(24.0, description="Hours of history to analyze for telemetry (default: 24.0)")
 

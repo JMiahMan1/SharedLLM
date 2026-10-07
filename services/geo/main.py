@@ -1141,9 +1141,99 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
     }
 
 
+async def _zones() -> list[dict]:
+    """HA zones as {"entity_id", "name", "latitude", "longitude", "radius"}."""
+    out = []
+    for z in _filter_entities(await _ha_get_states(), "zone"):
+        attrs = z.get("attributes", {})
+        if attrs.get("latitude") is None or attrs.get("longitude") is None:
+            continue
+        out.append({
+            "entity_id": z.get("entity_id", ""),
+            "name": attrs.get("friendly_name") or z.get("entity_id", "").replace("zone.", "").title(),
+            "latitude": float(attrs["latitude"]),
+            "longitude": float(attrs["longitude"]),
+            "radius": float(attrs.get("radius", 100)),
+        })
+    return out
+
+
+async def _destination(to: str) -> dict | None:
+    """A destination by HA zone (entity id or name, "home" by default) or
+    "lat,lon": {"name", "latitude", "longitude", "radius"}."""
+    key = (to or "home").strip()
+    if re.fullmatch(r"-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?", key):
+        lat, lon = (float(v) for v in key.split(","))
+        return {"name": f"{lat:.4f}, {lon:.4f}", "latitude": lat, "longitude": lon, "radius": 50.0}
+    want = key.lower().removeprefix("zone.")
+    for z in await _zones():
+        if want in (z["entity_id"].lower().removeprefix("zone."), z["name"].lower()):
+            return z
+    return None
+
+
+async def _latest_fix(r, clean: str) -> dict | None:
+    raw = await r.zrevrange(f"geo:history:{clean}", 0, 0) if r else []
+    return json.loads(raw[0]) if raw else None
+
+
+async def compute_eta(clean: str, to: str = "home") -> dict:
+    """Drive time from someone's latest fix to a destination, by road (OSRM).
+    Raises HTTPException with the reason when it cannot be given."""
+    r = await get_redis()
+    fix = await _latest_fix(r, clean)
+    if not fix:
+        raise HTTPException(status_code=404, detail=f"No location for {clean}")
+    dest = await _destination(to)
+    if not dest:
+        raise HTTPException(status_code=404, detail=f"No place called '{to}' (a Home Assistant zone or lat,lon)")
+    straight = _haversine_distance(fix["lat"], fix["lon"], dest["latitude"], dest["longitude"])
+    out = {
+        "user_id": clean,
+        "to": dest["name"],
+        "fix_time": fix.get("t"),
+        "fix_age_s": round(time.time() - float(fix.get("t", time.time()))),
+        "moving": float(fix.get("spd") or 0) >= 2.0,
+    }
+    if straight <= dest["radius"]:
+        return {**out, "arrived": True, "duration_s": 0, "distance_m": 0, "eta": fix.get("t")}
+    route = await map_match.route((fix["lat"], fix["lon"]), (dest["latitude"], dest["longitude"]), OSRM_URL)
+    if not route:
+        raise HTTPException(status_code=503, detail="The road network cannot give a drive time right now")
+    return {
+        **out,
+        "arrived": False,
+        "duration_s": round(route["duration_s"]),
+        "distance_m": round(route["distance_m"]),
+        "eta": round(time.time() + route["duration_s"]),
+    }
+
+
+@app.get("/people/{entity_id:path}/eta")
+async def get_eta(
+    entity_id: str,
+    to: str = Query("home"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
+):
+    """How long until someone reaches a place, by road from their latest fix.
+    Subject to the same sharing consent as their location."""
+    clean = await _require_may_view(viewer, entity_id, is_admin)
+    return await compute_eta(clean, to)
+
+
 @app.get("/people/{entity_id:path}/telemetry")
-async def get_telemetry_endpoint(entity_id: str, hours: float = Query(24.0, ge=0.1, le=168.0)):
-    """Calculate rich Life360-style telemetry: speed, dwell time, zones, frequented places, vehicle cost."""
+async def get_telemetry_endpoint(
+    entity_id: str,
+    hours: float = Query(24.0, ge=0.1, le=168.0),
+    viewer: str | None = None,
+    is_admin: str | None = None,
+):
+    """Calculate rich Life360-style telemetry: speed, dwell time, zones, frequented places, vehicle cost.
+
+    A ``viewer`` must be allowed to see the person (sharing consent); the
+    assistant passes the asker, so "where is X?" respects X's opt-out."""
+    await _require_may_view(viewer, entity_id, is_admin)
     return await calculate_telemetry(entity_id, hours=hours)
 
 

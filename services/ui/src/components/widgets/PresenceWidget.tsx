@@ -9,6 +9,7 @@ import { WidgetCard } from './WidgetCard';
 import { useHaptics } from '../../hooks/useHaptics';
 import {
   FRESHNESS_STYLE,
+  MOVING_MPS,
   ageLabel,
   buildLiveMembers,
   type LiveFamilyMember,
@@ -44,6 +45,24 @@ const STATUS_TEXT: Record<LiveFamilyMember['freshness'], string> = {
   recent: 'Recent',
   stale: 'Last seen',
 };
+
+/** "home in 18 min" for someone on the move: drive time by road (OSRM). */
+function EtaHome({ userId }: { userId: string }) {
+  const { data } = useQuery({
+    queryKey: ['eta', userId, 'home'],
+    queryFn: () => api.getEta(userId, 'home'),
+    refetchInterval: POLL_MS,
+    staleTime: 30_000,
+    retry: false,
+  });
+  if (!data || data.arrived) return null;
+  const mins = Math.max(1, Math.round(data.duration_s / 60));
+  return (
+    <span className="text-purple-300 shrink-0 tabular-nums" data-testid={`eta-${userId}`}>
+      {data.to.toLowerCase()} in {mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`}
+    </span>
+  );
+}
 
 export interface PresenceWidgetConfig {
   /** Show the most recent trip row beneath the member list. */
@@ -152,6 +171,9 @@ const PresenceWidget = ({ settingsButton }: IWidgetProps) => {
                       <span className="ml-1.5 text-[10px] text-purple-300">You</span>
                     )}
                   </span>
+                  {member.freshness === 'live' && (member.speed ?? 0) >= MOVING_MPS && (
+                    <EtaHome userId={member.userId} />
+                  )}
                   <span className="ml-auto text-slate-500 shrink-0 tabular-nums">
                     {STATUS_TEXT[member.freshness]} · {ageLabel(member.ageMs)}
                   </span>

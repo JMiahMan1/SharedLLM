@@ -1419,6 +1419,19 @@ export interface AchievementsResponse {
   points: number;
   goals: ActivityGoals;
 }
+/** GET /api/geo/eta: drive time by road (OSRM) from a person's latest fix. */
+export interface EtaResponse {
+  user_id: string;
+  to: string;
+  arrived: boolean;
+  duration_s: number;
+  distance_m: number;
+  /** Epoch seconds. */
+  eta: number;
+  moving: boolean;
+  fix_age_s: number;
+}
+
 export interface UserLiveLocation {
   latitude: number;
   longitude: number;

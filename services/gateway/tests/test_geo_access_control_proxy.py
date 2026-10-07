@@ -415,3 +415,13 @@ def test_activity_trends_with_a_user_id_forwards_the_viewer(make_client, monkeyp
     assert resp.status_code == 200
     sent = captured["calls"][-1]["params"]
     assert sent["viewer"] == "michele" and sent["user_id"] == "jeremiah"
+
+
+def test_eta_requires_a_viewer_and_forwards_it(anon_client, make_client, monkeypatch):
+    captured = _patch_geo(monkeypatch, payload={"duration_s": 600})
+    assert anon_client.get("/api/geo/eta", params={"user_id": "michele"}).status_code == 401
+    resp = make_client(user="jeremiah").get("/api/geo/eta", params={"user_id": "michele", "to": "work"})
+    assert resp.status_code == 200
+    call = captured["calls"][-1]
+    assert call["url"].endswith("/people/michele/eta")
+    assert call["params"]["viewer"] == "jeremiah" and call["params"]["to"] == "work"

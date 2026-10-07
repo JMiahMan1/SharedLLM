@@ -765,3 +765,60 @@ async def test_faster_than_any_vehicle_is_dropped_without_asking_osrm(fake_redis
     await geo.record_point(entity_id="jeremiah", lat=33.30, lon=-111.5646, accuracy=8, timestamp=now + 10)
     kept = await fake_redis.zrangebyscore("geo:history:jeremiah", 0, now + 99)
     assert len(kept) == 1
+
+
+# ---------------------------------------------------------------------------
+# ETA by road (OSRM) from someone's latest fix
+# ---------------------------------------------------------------------------
+
+HOME = {"entity_id": "zone.home", "name": "Home", "latitude": 33.1667, "longitude": -111.5646, "radius": 100.0}
+
+
+@pytest.mark.asyncio
+async def test_eta_home_by_road(client, fake_redis, monkeypatch):
+    now = time.time()
+    await fake_redis.zadd("geo:history:michele", {json.dumps({"t": now - 30, "lat": 33.30, "lon": -111.70, "acc": 8, "spd": 20.0}): now - 30})
+
+    async def zones():
+        return [HOME]
+
+    async def road(a, b, url, timeout_s=5.0):
+        assert b == (HOME["latitude"], HOME["longitude"])
+        return {"distance_m": 19800.0, "duration_s": 1080.0}
+    monkeypatch.setattr(geo, "_zones", zones)
+    monkeypatch.setattr(geo.map_match, "route", road)
+    resp = client.get("/people/michele/eta?to=home", headers={"X-Internal-Secret": INTERNAL_SECRET})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["to"] == "Home" and body["duration_s"] == 1080 and body["moving"] is True and body["arrived"] is False
+
+
+@pytest.mark.asyncio
+async def test_eta_when_already_there(client, fake_redis, monkeypatch):
+    now = time.time()
+    await fake_redis.zadd("geo:history:michele", {json.dumps({"t": now, "lat": 33.1668, "lon": -111.5646, "acc": 8}): now})
+
+    async def zones():
+        return [HOME]
+    monkeypatch.setattr(geo, "_zones", zones)
+    body = client.get("/people/michele/eta", headers={"X-Internal-Secret": INTERNAL_SECRET}).json()
+    assert body["arrived"] is True and body["duration_s"] == 0
+
+
+@pytest.mark.asyncio
+async def test_eta_for_an_unknown_place_says_so(client, fake_redis, monkeypatch):
+    async def zones():
+        return [HOME]
+    monkeypatch.setattr(geo, "_zones", zones)
+    await fake_redis.zadd("geo:history:michele", {json.dumps({"t": 1, "lat": 33.3, "lon": -111.7}): 1})
+    resp = client.get("/people/michele/eta?to=narnia", headers={"X-Internal-Secret": INTERNAL_SECRET})
+    assert resp.status_code == 404 and "narnia" in resp.json()["detail"]
+
+
+def test_eta_and_telemetry_respect_sharing(client, fake_redis, monkeypatch):
+    async def not_shared(viewer, target):
+        return False
+    monkeypatch.setattr(geo, "_viewer_may_see", not_shared)
+    h = {"X-Internal-Secret": INTERNAL_SECRET}
+    assert client.get("/people/michele/eta?viewer=kate", headers=h).status_code == 404
+    assert client.get("/people/michele/telemetry?viewer=kate", headers=h).status_code == 404

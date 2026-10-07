@@ -10,6 +10,7 @@ import uuid
 
 import aiohttp
 
+from services.gateway.location_query import parse_location_query
 from services.gateway.config import (
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
@@ -1123,22 +1124,14 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     payload["action"] = "list"
 
             if action == "locationrequest":
+                # Fill only what the model left out (it may have chosen better).
+                parsed = parse_location_query(query, creds.user)
                 if not payload.get("user") and not payload.get("person"):
-                    m = re.search(r"(?:where is|where's|how fast is|speed of)\s+([A-Za-z]+)", query, re.IGNORECASE)
-                    if m:
-                        payload["user"] = m.group(1).strip()
-                    else:
-                        payload["user"] = creds.user
+                    payload["user"] = parsed["user"]
                 if not payload.get("detail"):
-                    q_lower = query.lower()
-                    if any(k in q_lower for k in ("speed", "fast", "mph", "driving")):
-                        payload["detail"] = "speed"
-                    elif any(k in q_lower for k in ("still", "dwell", "stationary", "how long")):
-                        payload["detail"] = "dwell"
-                    elif any(k in q_lower for k in ("frequent", "often", "most visited", "places")):
-                        payload["detail"] = "frequented"
-                    elif any(k in q_lower for k in ("cost", "mpg", "vehicle", "fuel", "gas")):
-                        payload["detail"] = "cost"
+                    payload["detail"] = parsed["detail"]
+                if payload.get("detail") == "eta" and not payload.get("to"):
+                    payload["to"] = parsed["to"] or "home"
 
             _ws_file_actions = {
                 "workspacefilereadrequest",

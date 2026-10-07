@@ -14,9 +14,14 @@ export interface LiveFamilyMember {
   lat: number;
   lon: number;
   accuracy: number | null;
+  /** m/s from the last fix, or null when unknown. */
+  speed?: number | null;
   ageMs: number;
   freshness: LocationFreshness;
 }
+
+/** Driving-ish: fast enough that "home in N min" is worth showing. */
+export const MOVING_MPS = 4;
 
 export function classifyLocation(
   userId: string,
@@ -37,6 +42,7 @@ export function classifyLocation(
     lat: latitude,
     lon: longitude,
     accuracy: typeof location.accuracy === 'number' ? location.accuracy : null,
+    speed: typeof location.speed === 'number' ? location.speed : null,
     ageMs,
     freshness,
   };

@@ -24,29 +24,78 @@ class LocationRequest(BaseModel):
     user: str | None = None
     person: str | None = None
     target: str | None = None
-    detail: str | None = None  # "summary", "speed", "dwell", "frequented", "cost", "vehicle"
+    detail: str | None = None  # "summary", "speed", "dwell", "frequented", "cost", "vehicle", "eta"
+    to: str | None = None  # for "eta": a Home Assistant zone ("home", "work") or "lat,lon"
     hours: float = 24.0
 
 
 def _clean_target_name(target_str: str | None, default_user: str | None = None) -> str:
     if not target_str:
-        return (default_user or "jeremiah").strip().lower()
+        return (default_user or "").strip().lower()
     t = target_str.strip().lower()
     # Strip question phrasing
     t = re.sub(r"^(?:where\s+is|where's|where\s+am\s+i|where|who\s+is|how\s+fast\s+is|what\s+is)\s+", "", t)
     t = re.sub(r"[\?\.\,\!]+$", "", t).strip()
     if t in ("me", "myself", "i", ""):
-        return (default_user or "jeremiah").strip().lower()
+        return (default_user or "").strip().lower()
     return t
+
+
+def _minutes(seconds: float) -> str:
+    m = max(1, round(seconds / 60))
+    if m < 60:
+        return f"{m} minute{'s' if m != 1 else ''}"
+    return f"{m // 60} h {m % 60:02d} min"
+
+
+async def _eta(target_name: str, to: str | None, caller: str, is_admin: bool) -> ExecutionResult:
+    """ "When will X be home?": drive time by road from X's latest fix (geo /eta)."""
+    from services.common.http import get_client_insecure
+    from services.config import GEO_SVC_URL, INTERNAL_SECRET
+
+    name = target_name.title()
+    params = {"to": to or "home", "viewer": caller, "is_admin": "true" if is_admin else "false"}
+    try:
+        async with get_client_insecure() as client, client.get(
+            f"{GEO_SVC_URL.rstrip('/')}/people/{target_name}/eta", params=params,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=10.0),
+        ) as resp:
+            data = await resp.json(content_type=None)
+            status = resp.status
+    except Exception as e:
+        log.warning(f"[location] ETA lookup failed: {e}")
+        return ExecutionResult(status="FAILURE", message="I can't work out drive times right now.", service="location")
+    if status == 404 and "shared" in str(data.get("detail", "")):
+        return ExecutionResult(status="SUCCESS", message=f"I don't have a current location for {name} right now.",
+                               service="location")
+    if status != 200:
+        return ExecutionResult(status="FAILURE", message=str(data.get("detail") or "No drive time available."),
+                               service="location", detail=data)
+    place = data.get("to") or "there"
+    if data.get("arrived"):
+        msg = f"{name} is at {place} now."
+    else:
+        miles = data.get("distance_m", 0) * 0.000621371
+        msg = f"{name} is about {_minutes(data['duration_s'])} from {place} by road ({miles:.1f} miles)."
+        if not data.get("moving"):
+            msg += " They don't seem to be driving at the moment."
+        if (data.get("fix_age_s") or 0) > 900:
+            msg += f" (Their last location is {_minutes(data['fix_age_s'])} old.)"
+    return ExecutionResult(status="SUCCESS", message=msg, service="location", detail=data)
 
 
 async def handle_location(req: LocationRequest) -> ExecutionResult:
     ctx = req.user_context
-    caller_user = ctx.user if ctx else "jeremiah"
+    caller_user = (ctx.user if ctx else "") or ""
+    is_admin = bool(ctx and ctx.is_admin)
     raw_target = req.user or req.person or req.target or caller_user
     target_name = _clean_target_name(raw_target, caller_user)
+    if not target_name:
+        return ExecutionResult(status="FAILURE", message="Whose location do you mean?", service="location")
 
     log.info(f"[location] target={target_name} detail={req.detail} caller={caller_user}")
+    if (req.detail or "").lower() == "eta":
+        return await _eta(target_name, req.to, caller_user, is_admin)
 
     from services.common.http import get_client_insecure
     from services.config import GEO_SVC_URL, INTERNAL_SECRET
@@ -57,8 +106,10 @@ async def handle_location(req: LocationRequest) -> ExecutionResult:
         try:
             geo_url = GEO_SVC_URL.rstrip("/")
             async with get_client_insecure() as client:
+                # The asker as viewer: "where is X?" respects X's sharing choice.
                 async with client.get(
-                    f"{geo_url}/people/{target_name}/telemetry?hours={req.hours}",
+                    f"{geo_url}/people/{target_name}/telemetry",
+                    params={"hours": req.hours, "viewer": caller_user, "is_admin": "true" if is_admin else "false"},
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=aiohttp.ClientTimeout(total=5.0),
                 ) as resp:
