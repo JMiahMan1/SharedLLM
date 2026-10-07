@@ -433,3 +433,17 @@ def test_presence_alerts_are_your_own_setting(anon_client, make_client, monkeypa
     assert make_client(user="michele").put("/api/geo/presence-alerts", json={"enabled": False}).status_code == 200
     call = captured["calls"][-1]
     assert call["url"].endswith("/presence-alerts/michele") and call["json"] == {"enabled": False}
+
+
+def test_closest_and_routes_forward_the_viewer(anon_client, make_client, monkeypatch):
+    captured = _patch_geo(monkeypatch, payload={"people": []})
+    assert anon_client.get("/api/geo/closest", params={"to": "home"}).status_code == 401
+    assert make_client(user="kate").get("/api/geo/closest", params={"to": "1 Main St"}).status_code == 200
+    call = captured["calls"][-1]
+    assert call["url"].endswith("/closest")
+    assert call["params"]["viewer"] == "kate" and call["params"]["to"] == "1 Main St"
+    for path in ("/api/geo/trips/t1", "/api/geo/trips/t1/locations", "/api/geo/trips/t1/route",
+                 "/api/geo/workouts/w1/route"):
+        assert anon_client.get(path).status_code == 401
+        assert make_client(user="kate").get(path).status_code == 200
+        assert captured["calls"][-1]["params"]["viewer"] == "kate"
