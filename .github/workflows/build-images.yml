@@ -95,6 +95,7 @@ jobs:
               - 'services/workspace_sandbox.py'
               - 'tools/webscraper.py'
               - 'tools/vision_ocr.py'
+              - 'scripts/index_capabilities.py'
               - '.github/workflows/build-images.yml'
             storage:
               - 'services/storage/**'
