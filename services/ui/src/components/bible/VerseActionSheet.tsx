@@ -9,10 +9,13 @@ import {
   NotebookPen,
   ScrollText,
   Share2,
+  Sparkles,
   X,
 } from 'lucide-react';
 import BibleStudyNotes from './BibleStudyNotes';
+import JarvisStudyThread from './JarvisStudyThread';
 import { api } from '../../services/api';
+import { useHaptics } from '../../hooks/useHaptics';
 import type { BibleMark, BibleVerse } from '../../types/api';
 
 interface VerseActionSheetProps {
@@ -71,6 +74,8 @@ export default function VerseActionSheet({
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [studyOpen, setStudyOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  const { trigger } = useHaptics();
 
   const highlight = marks.find((m) => m.kind === 'highlight');
   const bookmark = marks.find((m) => m.kind === 'bookmark');
@@ -218,6 +223,20 @@ export default function VerseActionSheet({
           <button
             type="button"
             disabled={busy}
+            onClick={() => {
+              void trigger('light');
+              setAsking(true);
+            }}
+            className={ACTION_CLASS}
+            data-testid="bible-action-ask"
+          >
+            <Sparkles size={16} className="text-sky-300" />
+            <span className="flex-1">Ask about this verse</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={busy}
             onClick={() => void saveNote()}
             className={ACTION_CLASS}
             data-testid="bible-action-note"
@@ -287,6 +306,16 @@ export default function VerseActionSheet({
           onEditionChange={onEditionChange}
           onCrossVersionChange={onCrossVersionChange}
           onClose={() => setStudyOpen(false)}
+        />
+      )}
+
+      {askOpen && (
+        <JarvisStudyThread
+          passage={verse.reference}
+          version={version}
+          edition={edition}
+          crossVersion={crossVersion}
+          onClose={() => setAskOpen(false)}
         />
       )}
     </div>

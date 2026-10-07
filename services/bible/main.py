@@ -40,6 +40,7 @@ from services.config import (
     BIBLE_IMPORT_DIR,
     BLB_BASE_URL,
     EXECUTION_SVC_URL,
+    GATEWAY_INTERNAL_URL,
     GEO_SVC_URL,
     IDENTITY_SVC_URL,
     INTERNAL_SECRET,
@@ -56,6 +57,7 @@ from services.bible import (
     provider_cache,
     providers,
     study,
+    study_ask,
     votd,
 )
 from services.bible.corpus import CorpusError
@@ -401,6 +403,91 @@ def study_notes(
         "notes": notes,
         "count": len(notes),
         "note": None if notes else _no_notes_message(session, resolved, chosen, other, cross_version),
+    }
+
+
+class StudyAskPayload(BaseModel):
+    question: str = Field(..., description="What the reader wants to know")
+    ref: str = Field(..., description="The passage being read, e.g. 'John 3:16'")
+    version: str | None = None
+    edition: str | None = None
+    cross_version: bool = False
+
+
+@app.post("/study/ask")
+async def study_ask_route(
+    payload: StudyAskPayload,
+    username: str = Query(...),
+    session: Session = Depends(get_session),
+):
+    """Ask about the passage on screen, with that passage in front of the model.
+
+    The reader's own question plus the verses they are reading plus whatever
+    study notes are stored for those verses. Nothing else is fetched, so the
+    answer can be checked against what is on the screen, and the same passage
+    and study Bible choices they made for the notes apply here.
+
+    A question the passage does not answer comes back as an answer saying so:
+    the prompt asks for that rather than a guess, because a reader cannot tell
+    a confident invention from the text afterwards.
+
+    The reading event is recorded (``assistant_ask``) but never the question or
+    the answer, because reading events are metadata only.
+    """
+    resolved = _require_version(session, payload.version) if payload.version else _default_version(session)
+    try:
+        spans = parse_reference(payload.ref)
+    except ReferenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    verses = corpus.fetch_passage(session, resolved, spans)
+    chosen = _require_edition(session, resolved, payload.edition)
+
+    notes: list[dict] = []
+    seen: set[tuple] = set()
+    for span in spans:
+        for record in study.notes_for_span(
+            session,
+            resolved,
+            span,
+            kinds=study.DEFAULT_KINDS,
+            edition=chosen,
+            cross_version=payload.cross_version,
+        ):
+            if record.identity in seen:
+                continue
+            seen.add(record.identity)
+            notes.append(record.as_dict())
+
+    reference = format_reference(spans)
+    try:
+        prompt = study_ask.build_prompt(
+            reference=reference,
+            verses=verses,
+            notes=notes,
+            question=payload.question,
+        )
+        answer = await study_ask.ask(
+            prompt=prompt,
+            user=username,
+            gateway_url=GATEWAY_INTERNAL_URL,
+            internal_secret=INTERNAL_SECRET,
+        )
+    except study_ask.StudyAskError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except study_ask.StudyAskUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    _record_event(session, username, "assistant_ask", ref=reference)
+    return {
+        "reference": reference,
+        "version": resolved,
+        "edition": chosen,
+        "edition_name": _edition_name(session, chosen, resolved),
+        "question": payload.question,
+        "answer": answer,
+        "verses_used": len(verses),
+        "notes_used": len(notes),
     }
 
 

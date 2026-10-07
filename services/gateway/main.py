@@ -9408,6 +9408,41 @@ async def proxy_bible_blb_link(request: Request, ref: str, tool: str = ""):
 _BIBLE_NARRATION_TIMEOUT = aiohttp.ClientTimeout(total=300.0)
 
 
+_BIBLE_STUDY_TIMEOUT = aiohttp.ClientTimeout(total=300.0)
+
+
+@app.post("/api/bible/study/ask")
+async def proxy_bible_study_ask(request: Request):
+    """Ask about the passage being read, with that passage in front of the model.
+
+    The caller is resolved here and sent as the username, so the question is
+    answered for that reader and the reading event lands on their own row. The
+    passage, the translation and the study Bible come from the body; the bible
+    service chooses the verses and the notes, so the client cannot ask about a
+    passage other than the one it names.
+
+    A slow answer is expected -- a cold model load plus a long passage can pass
+    two minutes -- so this waits far longer than the reading routes do. A model
+    that cannot answer is reported as such rather than as an empty string.
+    """
+    username = await _bible_caller(request)
+    body = await request.json()
+    return await _bible_json(
+        "POST",
+        "/study/ask",
+        label="Study help unavailable",
+        params={"username": username},
+        json={
+            "question": body.get("question"),
+            "ref": body.get("ref"),
+            "version": body.get("version"),
+            "edition": body.get("edition"),
+            "cross_version": bool(body.get("cross_version", False)),
+        },
+        timeout=_BIBLE_STUDY_TIMEOUT,
+    )
+
+
 @app.get("/api/bible/voices")
 async def proxy_bible_voices(request: Request):
     """Voice list for read-aloud. No username: these are engine voices, not user data."""
