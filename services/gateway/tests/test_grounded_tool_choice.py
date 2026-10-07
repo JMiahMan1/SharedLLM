@@ -24,12 +24,13 @@ def test_grounding_removes_the_retrieval_tools_from_the_guide():
 
     assert "### ContextSearchRequest" not in grounded
     assert "### WebSearchRequest" not in grounded
+    assert "### CalibreRequest" not in grounded
 
 
-def test_grounding_removes_exactly_the_two_search_tools():
+def test_grounding_removes_exactly_the_three_search_tools():
     grounded = orchestrator._grounded_tool_guide(GUIDE)
 
-    assert GUIDE.count("### ") - grounded.count("### ") == 2
+    assert GUIDE.count("### ") - grounded.count("### ") == 3
 
 
 def test_grounding_leaves_every_other_tool_advertised():
@@ -50,7 +51,11 @@ def test_grounding_says_why_the_tools_are_gone():
 
 def test_the_guide_without_context_is_left_alone():
     """Nothing to answer from means the tools are still the right way to find out."""
-    assert orchestrator._GROUNDED_OMITTED_ACTIONS == ("contextsearchrequest", "websearchrequest")
+    assert orchestrator._GROUNDED_OMITTED_ACTIONS == (
+        "contextsearchrequest",
+        "websearchrequest",
+        "calibrerequest",
+    )
 
 
 async def test_a_grounded_turn_refuses_a_retrieval_tool_call(monkeypatch):

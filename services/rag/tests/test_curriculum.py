@@ -332,3 +332,22 @@ async def test_benchmark_insights(tmp_path):
     assert "proven_capabilities" in insights
     assert "priority_gaps" in insights
     assert "guidance" in insights
+
+
+def test_the_library_protocol_lesson_teaches_calibre_before_the_web():
+    """Raven's mission prompt must know the shelf exists and prefer it.
+
+    The 2026-10 Macbeth incident: a book question answered from the web while
+    the household's own library held the answer. The lesson is pinned into
+    every mission, so it is the lever that stops the repeat.
+    """
+    lesson = next(
+        (l for l in rag_main._PROTOCOL_LESSONS if l["id"] == "lesson-proto-library"),
+        None,
+    )
+    assert lesson is not None, "lesson-proto-library is missing from the protocol curriculum"
+    assert "protocol" in lesson["tags"]
+    assert "calibre_files" in lesson["rule"]
+    assert "CalibreRequest" in lesson["rule"]
+    assert "WebSearchRequest" in lesson["rule"], "the lesson must say when the web is the fallback"
+    assert lesson["rule"].index("FIRST") < lesson["rule"].index("WebSearchRequest")
