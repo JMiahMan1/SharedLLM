@@ -41,15 +41,50 @@ def _start(event: dict) -> datetime | None:
     return start if start.tzinfo else None
 
 
+def belongs_to(event: dict, user: str, creds: dict) -> bool:
+    """Whether the event is this person's to drive to.
+
+    A household calendar (Skylight) is shared: everyone reads everyone's
+    events, so "Work at Discount Tire" is not a reason to remind the whole
+    family. Theirs is: a Skylight event filed under their name, an event on a
+    calendar account mapped to them in calendar settings ("people"), or one
+    from their own Nextcloud or iCal calendars. Household-wide events are left
+    out -- who drives is not knowable.
+    """
+    names = {user.lower()}
+    names.update(str(n).strip().lower() for n in (creds.get("display_name"),) if n)
+    integration = event.get("integration")
+    if integration == "ical":
+        return True  # this person's own iCal subscriptions
+    if integration == "nextcloud":
+        return (creds.get("credential_sources") or {}).get("nextcloud") == "own"
+    person = str(event.get("person") or "").strip().lower()
+    if person and (person in names or person.split()[0] in names):
+        return True
+    calendar = event.get("calendar")
+    for p in ((creds.get("calendar_settings") or {}).get("people") or []):
+        if str(p.get("name") or "").strip().lower() in names and calendar and calendar in (p.get("accounts") or []):
+            return True
+    return False
+
+
+def destination(event: dict) -> str:
+    """Where to route to: the calendar's own coordinates when it has them,
+    else the location text (geo geocodes it)."""
+    if event.get("lat") is not None and event.get("lon") is not None:
+        return f"{float(event['lat']):.6f},{float(event['lon']):.6f}"
+    return event["location"].strip()
+
+
 def candidates(events: list[dict], now: float) -> list[dict]:
     """Events with a location starting within the horizon, not all-day."""
     out = []
     for ev in events:
         start = _start(ev)
         where = (ev.get("location") or "").strip()
-        if not start or not where:
+        if not start or not where or ev.get("all_day"):
             continue
-        # All-day events come through as local midnight
+        # All-day events from calendars without the flag come through as local midnight
         if (start.hour, start.minute, start.second) == (0, 0, 0):
             continue
         if 0 < start.timestamp() - now <= HORIZON_S:
@@ -90,6 +125,7 @@ async def _json(session, method: str, url: str, **kw):
 
 
 async def _events_for(user: str) -> list[dict]:
+    """This person's own upcoming events (see belongs_to)."""
     from services.execution.handlers.calendar import handle_calendar
     from services.execution.main import resolve_internal_user
     from services.execution.schemas import CalendarRequest, UserContext
@@ -98,7 +134,7 @@ async def _events_for(user: str) -> list[dict]:
     if not creds:
         return []
     result = await handle_calendar(CalendarRequest(user_context=UserContext(**creds), action="read"))
-    return list(getattr(result, "events", None) or [])
+    return [ev for ev in (getattr(result, "events", None) or []) if belongs_to(ev, user, creds)]
 
 
 async def remind_once() -> int:
@@ -125,7 +161,7 @@ async def remind_once() -> int:
                 continue
             for ev in events:
                 status, eta = await _json(session, "GET", f"{GEO_SVC_URL.rstrip('/')}/people/{user}/eta", headers=hdr,
-                                          params={"to": ev["location"], "viewer": user, "is_admin": "false"})
+                                          params={"to": destination(ev), "viewer": user, "is_admin": "false"})
                 if status != 200 or not isinstance(eta, dict):
                     continue  # place not found, or no drive time right now
                 leave_ts = leave_at(ev, eta)

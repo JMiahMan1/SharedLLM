@@ -237,13 +237,21 @@ async def _read_skylight(req: CalendarRequest, lo, hi) -> list[dict]:
     if not result:
         return []
     data = result.get("data", []) if isinstance(result, dict) else []
+    # Skylight files each event under a category: a family member's name
+    # ("Michele"), the household, or an account. Its label says whose it is.
+    categories = {
+        inc.get("id"): (inc.get("attributes") or {}).get("label")
+        for inc in (result.get("included") or [] if isinstance(result, dict) else [])
+        if inc.get("type") == "category"
+    }
     out: list[dict] = []
     for ev in data:
         attrs = ev.get("attributes", {}) or {}
         start = attrs.get("starts_at")
         if not start:
             continue
-        out.append({
+        category = (((ev.get("relationships") or {}).get("category") or {}).get("data") or {}).get("id")
+        item = {
             "id": ev.get("id"),
             "integration": "skylight",
             "summary": attrs.get("summary") or "Event",
@@ -251,7 +259,12 @@ async def _read_skylight(req: CalendarRequest, lo, hi) -> list[dict]:
             "end_time": attrs.get("ends_at"),
             "location": attrs.get("location"),
             "calendar": attrs.get("calendar_id"),
-        })
+            "person": categories.get(category),
+            "all_day": bool(attrs.get("all_day")),
+        }
+        if attrs.get("lat") is not None and attrs.get("lng") is not None:
+            item["lat"], item["lon"] = attrs["lat"], attrs["lng"]
+        out.append(item)
     return out
 
 

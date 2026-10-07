@@ -42,3 +42,27 @@ def test_reminder_text_and_once_key():
     assert note["once"].startswith("leave_by:abc:")
     late = leave_by.reminder(e, {"duration_s": 4000}, NOW - 60, NOW, TZ)
     assert late["title"] == "Leave now for Dentist" and late["body"].startswith("1 h 07 min drive")
+
+
+def test_only_your_own_events_remind_you():
+    shared = {"credential_sources": {"skylight": "shared", "nextcloud": "absent"}}
+    mine = ev(1, integration="skylight", person="Michele")
+    kalebs = ev(1, integration="skylight", person="Kaleb", calendar="kaleb@example.com")
+    household = ev(1, integration="skylight", person="The Summers")
+    assert leave_by.belongs_to(mine, "michele", shared)
+    assert not leave_by.belongs_to(kalebs, "michele", shared)
+    assert not leave_by.belongs_to(household, "michele", shared)
+    # A calendar account mapped to you in calendar settings
+    mapped = {**shared, "calendar_settings": {"people": [{"name": "Michele", "accounts": ["kaleb@example.com"]}]}}
+    assert leave_by.belongs_to(kalebs, "michele", mapped)
+    # Your own Nextcloud is yours; a borrowed one is not
+    nc = ev(1, integration="nextcloud")
+    assert leave_by.belongs_to(nc, "jeremiah", {"credential_sources": {"nextcloud": "own"}})
+    assert not leave_by.belongs_to(nc, "michele", {"credential_sources": {"nextcloud": "granted"}})
+
+
+def test_flagged_all_day_events_and_calendar_coordinates():
+    allday = ev(1, all_day=True)
+    assert leave_by.candidates([allday], NOW) == []
+    assert leave_by.destination(ev(1, lat=33.42, lon=-111.83)) == "33.420000,-111.830000"
+    assert leave_by.destination(ev(1)) == "12 Oak St, Mesa"
