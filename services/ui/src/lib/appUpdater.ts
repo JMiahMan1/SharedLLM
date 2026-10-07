@@ -1,4 +1,4 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { App } from '@capacitor/app';
 import { getServerOrigin } from './serverUrl';
@@ -441,16 +441,44 @@ export interface ApkDownloadResult {
   bytes: number;
 }
 
-/** The native installer plugin, or null where it is not registered. */
-async function getApkInstallPlugin(): Promise<ApkInstallPlugin | null> {
+let apkInstallPlugin: ApkInstallPlugin | null | undefined;
+
+/**
+ * The native installer plugin, or null where it is not registered.
+ *
+ * Synchronous on purpose, and never awaited: a Capacitor plugin is a Proxy
+ * that answers *every* property with a method wrapper, `then` included, so
+ * returning it from an async function (or awaiting it) makes JavaScript treat
+ * it as a promise and wait on `plugin.then(...)` -- a native call that never
+ * settles. That is how every install step used to hang: no permission, no
+ * download button, and before that only the browser link was ever offered.
+ */
+function getApkInstallPlugin(): ApkInstallPlugin | null {
   if (!Capacitor.isNativePlatform()) return null;
+  if (apkInstallPlugin !== undefined) return apkInstallPlugin;
   try {
-    const { registerPlugin } = await import('@capacitor/core');
-    return registerPlugin<ApkInstallPlugin>('ApkInstall');
+    apkInstallPlugin = registerPlugin<ApkInstallPlugin>('ApkInstall');
   } catch (err) {
     console.warn('[AppUpdater] Could not reach the ApkInstall plugin:', err);
-    return null;
+    apkInstallPlugin = null;
   }
+  return apkInstallPlugin;
+}
+
+/** The methods the installed APK's ApkInstall plugin really has, from the
+ *  plugin headers the native side registers (the Proxy cannot tell: it
+ *  claims every name). Null when the headers cannot be read. */
+function nativeApkInstallMethods(): Set<string> | null {
+  const headers = (globalThis as { Capacitor?: { PluginHeaders?: Array<{ name: string; methods?: Array<{ name: string }> }> } })
+    .Capacitor?.PluginHeaders;
+  if (!Array.isArray(headers)) return null;
+  const header = headers.find((h) => h.name === 'ApkInstall');
+  return new Set((header?.methods ?? []).map((m) => m.name));
+}
+
+/** Test seam: forget the cached plugin. */
+export function __resetApkInstallPlugin(): void {
+  apkInstallPlugin = undefined;
 }
 
 export interface ApkInstallPermission {
@@ -472,7 +500,7 @@ export interface ApkInstallPermission {
  * confusing mid-flow jump into Settings into a single deliberate step.
  */
 export async function getApkInstallPermission(): Promise<ApkInstallPermission> {
-  const ApkInstall = await getApkInstallPlugin();
+  const ApkInstall = getApkInstallPlugin();
   if (!ApkInstall) return { allowed: false, known: false };
   try {
     const can = await ApkInstall.canInstall();
@@ -492,8 +520,11 @@ export async function getApkInstallPermission(): Promise<ApkInstallPermission> {
  * is honest about when it is actually happening.
  */
 export async function hasVerifiedInstallFlow(): Promise<boolean> {
-  const ApkInstall = await getApkInstallPlugin();
-  return !!ApkInstall && typeof ApkInstall.downloadApk === 'function';
+  if (!getApkInstallPlugin()) return false;
+  const methods = nativeApkInstallMethods();
+  // Without headers to read, assume the verified flow: every APK since build
+  // 24 has it, and an older one reports the missing method as an error.
+  return methods ? methods.has('downloadApk') && methods.has('installDownloadedApk') : true;
 }
 
 /**
@@ -506,7 +537,7 @@ export async function downloadApkWithProgress(
   sha256: string,
   onProgress: (p: ApkDownloadProgress) => void,
 ): Promise<ApkDownloadResult> {
-  const ApkInstall = await getApkInstallPlugin();
+  const ApkInstall = getApkInstallPlugin();
   if (!ApkInstall || typeof ApkInstall.downloadApk !== 'function') {
     throw new Error('This build cannot download updates in-app.');
   }
@@ -520,7 +551,7 @@ export async function downloadApkWithProgress(
 
 /** Hand the verified, downloaded APK to the system installer. */
 export async function installVerifiedApk(): Promise<void> {
-  const ApkInstall = await getApkInstallPlugin();
+  const ApkInstall = getApkInstallPlugin();
   if (!ApkInstall || typeof ApkInstall.installDownloadedApk !== 'function') {
     throw new Error('This build cannot install a downloaded update.');
   }
@@ -529,7 +560,7 @@ export async function installVerifiedApk(): Promise<void> {
 
 /** Open the OS screen where "Install unknown apps" is granted. */
 export async function openApkInstallSettings(): Promise<boolean> {
-  const ApkInstall = await getApkInstallPlugin();
+  const ApkInstall = getApkInstallPlugin();
   if (!ApkInstall) return false;
   try {
     await ApkInstall.openInstallSettings();
@@ -560,7 +591,7 @@ export async function downloadAndInstallApk(apkUrl: string): Promise<void> {
     return;
   }
 
-  const ApkInstall = await getApkInstallPlugin();
+  const ApkInstall = getApkInstallPlugin();
   if (!ApkInstall) {
     console.warn('[AppUpdater] ApkInstall plugin is not available on this build.');
     toast('This build cannot install updates in-app. Use the download link instead.', {
