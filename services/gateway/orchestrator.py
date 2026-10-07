@@ -557,8 +557,9 @@ async def _fetch_rag_context(
     """Assemble the retrieved context for one turn.
 
     ``include_curriculum=False`` drops the workspace protocol lessons, the CLI
-    toolchain inventory and the Nextcloud/Home Assistant inventories, and the
-    answer must then be grounded in the retrieved passages alone.
+    toolchain inventory, the Nextcloud/Home Assistant inventories and the DREAM
+    validation checklist, and the answer must then be grounded in the retrieved
+    passages alone.
 
     It exists because ``TOTAL_CHARS_LIMIT`` bounds only the search hits: the
     always-on curriculum is appended after that budget is spent, so a turn could
@@ -640,13 +641,18 @@ async def _fetch_rag_context(
 
                             # Compact lesson rendering: prefer the structured RULE
                             # (the reusable takeaway) over verbose content. Falls
-                            # back to content when no rule was captured.
-                            _meta = {}
-                            try:
-                                _meta = json.loads(content) if isinstance(content, str) and content.strip().startswith("{") else (content if isinstance(content, dict) else {})
-                            except Exception:
-                                _meta = {}
+                            # back to content when no rule was captured. This only
+                            # applies to lessons, whose content IS the JSON: doing
+                            # it unconditionally threw away the _as_meta_dict above
+                            # and left every prose hit with an empty citation, so a
+                            # book passage reached the model with no title, author
+                            # or chapter to attribute it to.
                             if coll == "system_learnings":
+                                _meta = {}
+                                try:
+                                    _meta = json.loads(content) if isinstance(content, str) and content.strip().startswith("{") else (content if isinstance(content, dict) else {})
+                                except Exception:
+                                    _meta = {}
                                 _lid = _meta.get("id") or ""
                                 _rule = _meta.get("rule") or content
                                 _conf = _meta.get("confidence", _meta.get("confidence", ""))
@@ -816,8 +822,12 @@ async def _fetch_rag_context(
     #    POST /rag/dream/validate so future dreaming can weight them.
     # 2. PRIORITY HITS: top-scoring lessons (by applied_count +
     #    confidence + recency) for quick reference during the mission.
-    # This creates a verify→learn→re-verify RSI cycle.
-    if workspace_id or workspace_id == "":
+    # This creates a verify→learn→re-verify RSI cycle. It is curriculum, so it
+    # answers to skip_curriculum like the protocol lessons do: a research turn
+    # has no mission to validate on, and returning this as its only context
+    # while grounding removed the search tools is how a question about a
+    # library became a confident answer about Macbeth.
+    if not skip_curriculum and (workspace_id or workspace_id == ""):
         try:
             from services.gateway.main import shared_http_client as _gw_client
             async with _gw_client() as _dc:
