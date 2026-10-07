@@ -33,6 +33,7 @@ import type {
   SmokeTestResult,
   StorageEntry,
   RagStats,
+  StorageStatus,
   RavenMission,
   WorkspaceAskMode,
   WorkspaceAskResult,
@@ -181,6 +182,7 @@ export type {
   AiCapability,
   DiscoveredUser,
   RagStats,
+  StorageStatus,
   TelemetryEnrollment,
   ExecutionResponse,
   ArcadeGamesResponse,
@@ -1647,6 +1649,11 @@ export const api = {
 
   async getRagStats(): Promise<RagStats> {
     const resp = await apiClient.get('/api/storage/stats');
+    return resp.data;
+  },
+
+  async getStorageStatus(): Promise<StorageStatus> {
+    const resp = await apiClient.get('/api/storage/status');
     return resp.data;
   },
 

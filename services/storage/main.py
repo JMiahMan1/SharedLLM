@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from services.common.http import get_client
 from services.config import INTERNAL_SECRET, RAG_SVC_URL
 from services.shared.info_endpoint import info_router
-from services.storage.indexer import CheckpointManager, build_content_index, extract_and_chunk_contents, is_indexer_paused, set_indexer_pause
+from services.storage.indexer import CheckpointManager, build_content_index, crawl_begin, crawl_end, crawl_phase, crawl_snapshot, extract_and_chunk_contents, is_indexer_paused, set_indexer_pause
 from services.storage.models import ProviderFetchRequest, ProviderMirrorRequest, ProviderWriteRequest
 from services.storage.models import IndexScanRequest
 from services.storage.providers import ProviderConfig, build_provider
@@ -118,6 +118,7 @@ async def get_storage_status():
     return {
         "status": "SUCCESS",
         "indexer": indexer_state,
+        "crawl": crawl_snapshot(),
         "checkpointed_files": checkpoint_count,
         "rag_index": rag_stats,
         "message": "Storage system healthy. Ready for discovery." if indexer_state == "IDLE" else "Indexing paused."
@@ -134,24 +135,29 @@ async def sync_folder_to_chroma(req: IndexScanRequest, background_tasks: Backgro
 
 async def _run_full_index_task(req: IndexScanRequest):
     """Internal task for background indexing."""
+    crawl_begin(req.provider.kind, req.path)
     try:
         log.info(f"Background indexing started for user: {req.provider.settings.get('username')} at {req.provider.settings.get('url')}")
         try:
             provider = build_provider(req.provider)
         except (KeyError, ValueError) as exc:
             log.error(f"Failed to build provider: {exc}")
+            crawl_end(error=f"Failed to build provider: {exc}")
             return
 
         # 1. Scan structure
         log.info(f"Starting background scan for path: {req.path}")
+        crawl_phase("listing")
         entries = await provider.list_entries(path=req.path, recursive=req.recursive)
         log.info(f"Scan complete. Found {len(entries)} raw entries.")
         items = build_content_index(entries)
 
         # 2. Extract and chunk with checkpointing
+        crawl_phase("extracting", 0, len(items))
         checkpoint = None if req.force else CheckpointManager(_checkpoint_path() or "")
         chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
         log.info(f"Extracted {len(chunks)} total chunks from {len(items)} files.")
+        crawl_phase("syncing", 0, len(chunks))
 
         # 3. Sync to RAG in batches to avoid timeout on large payloads
         user_id = (req.user_id or req.provider.settings.get("username") or "admin").lower()
@@ -168,6 +174,7 @@ async def _run_full_index_task(req: IndexScanRequest):
         total_synced = 0
         scanned_paths = {c["metadata"]["path"] for c in chunks if c["metadata"].get("path")}
 
+        failure: str | None = None
         async with get_client() as client:
             try:
                 await _purge_stale_paths(client, collection_name, user_id, scanned_paths)
@@ -195,17 +202,28 @@ async def _run_full_index_task(req: IndexScanRequest):
                             f"RAG sync failed (batch {batch_num}/{total_batches}): {resp.status}"
                         )
                     total_synced += len(batch)
+                    crawl_phase("syncing", min(i + BATCH_SIZE, len(chunks)), len(chunks))
                     log.info(f"RAG batch {batch_num}/{total_batches} synced: {len(batch)} chunks")
 
                 log.info(f"Background index complete for {user_id}. Synced {total_synced}/{len(chunks)} chunks.")
             except aiohttp.ClientResponseError as e:
+                failure = f"RAG sync failed: HTTP {e.status} - {e.message}"
                 log.error(f"Failed to sync background index to RAG: HTTP {e.status} - {e.message}")
             except Exception as e:
+                failure = f"RAG sync failed: {type(e).__name__}: {e}"
                 log.error(f"Failed to sync background index to RAG: {type(e).__name__}: {e}")
+
+        crawl_end(
+            files=len(items),
+            chunks=len(chunks),
+            synced=total_synced,
+            **({"error": failure} if failure else {}),
+        )
     except Exception as e:
         log.error(f"Background index task failed: {e}")
         import traceback
         log.error(traceback.format_exc())
+        crawl_end(error=f"{type(e).__name__}: {e}")
 
 async def _purge_stale_paths(
     client,

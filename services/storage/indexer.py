@@ -34,6 +34,82 @@ def is_indexer_paused():
             _indexer_state["paused"] = False
     return _indexer_state["paused"]
 
+
+_crawl_state: dict = {"active": False}
+
+
+def crawl_begin(kind: str, path: str):
+    """Record that a crawl has started, so ``/status`` can report it.
+
+    ``POST /index/full`` answers 202 and runs in a background task, so before
+    this existed there was no way for an operator or the UI to tell a running
+    crawl from an idle service: ``indexer`` only ever read IDLE or PAUSED. The
+    state is in-memory and honest -- it dies with the process, which is exactly
+    when a crawl dies with it. A second crawl supersedes the first's record
+    (they were always free to overlap) and says so with a warning, because one
+    active row cannot describe two runs truthfully.
+    """
+    import time
+
+    if _crawl_state.get("active"):
+        log.warning(
+            "crawl state for an earlier %s run is being superseded",
+            _crawl_state.get("kind"),
+        )
+    _crawl_state.clear()
+    _crawl_state.update(
+        {
+            "active": True,
+            "kind": kind,
+            "path": path,
+            "phase": "starting",
+            "done": 0,
+            "total": 0,
+            "started_at": time.time(),
+            "updated_at": time.time(),
+        }
+    )
+
+
+def crawl_phase(phase: str, done: int | None = None, total: int | None = None):
+    """Advance the reported phase of the active crawl.
+
+    A no-op when no crawl is running: extraction runs in tests and in callers
+    that never began one, and writing phase ticks into an idle state would make
+    ``/status`` claim a crawl nobody started.
+    """
+    if not _crawl_state.get("active"):
+        return
+    import time
+
+    _crawl_state["phase"] = phase
+    if done is not None:
+        _crawl_state["done"] = done
+    if total is not None:
+        _crawl_state["total"] = total
+    _crawl_state["updated_at"] = time.time()
+
+
+def crawl_end(**result):
+    """Close the crawl and record what it produced (or why it failed).
+
+    Failures pass ``error=``; swallowing them would leave ``/status`` reading
+    a crawl that will never finish, which is the operator question this whole
+    record exists to answer.
+    """
+    import time
+
+    _crawl_state["active"] = False
+    _crawl_state["phase"] = "idle"
+    _crawl_state["updated_at"] = time.time()
+    _crawl_state.update(result)
+
+
+def crawl_snapshot() -> dict:
+    """A detached copy for readers, so a half-updated state is never served."""
+    return dict(_crawl_state)
+
+
 GLOBAL_SKIP_LIST = [
     "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache",
     ".cache", ".local", ".vscode", ".idea", "dist", "build", ".tox", ".nox",
@@ -179,9 +255,10 @@ async def extract_and_chunk_contents(
     checkpoint: CheckpointManager | None = None
 ) -> list[dict]:
     chunks = []
-    for item in items:
+    for position, item in enumerate(items, start=1):
         # Checkpoint skip
         if checkpoint and item.mtime and checkpoint.is_indexed(item.path, item.mtime):
+            crawl_phase("extracting", position, len(items))
             continue
 
         # Resource Prioritization: Pause
@@ -225,6 +302,8 @@ async def extract_and_chunk_contents(
         if checkpoint and item.mtime:
             checkpoint.mark_indexed(item.path, item.mtime)
             checkpoint.save()
+
+        crawl_phase("extracting", position, len(items))
 
     return chunks
 
