@@ -5884,23 +5884,53 @@ async def get_collection_docs(collection_name: str, request: Request, limit: int
 
 @app.post("/api/storage/purge/{collection_name}")
 async def purge_storage_collection(collection_name: str, request: Request):
-    try:
-        creds_data = await _resolve_identity_from_request(request)
-        user_id = creds_data.get("user") or ""
-    except Exception:
-        first_user = await resolve_first_user()
-        user_id = first_user.get("user") or ""
+    """Purge one user's rows in a RAG collection, optionally filtered.
+
+    The body shape sent upstream must be ``{user_id, filter}``: sending the
+    filter dict as the bare body lost the user_id (so the purge ran as
+    "default") and RAG's ``payload.get("filter")`` found nothing, turning
+    every scoped purge from the UI into a whole-collection delete. Identity
+    resolution is strict (401) with no fallback user: a delete must never
+    run as somebody else because the key could not be verified.
+    """
+    creds_data = await _resolve_identity_from_request(request)
+    user_id = creds_data.get("user") or ""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing user identity")
 
     body = await request.json()
 
     async with borrow_http_client() as client:
-        # The shape must match RAG's contract: {user_id, filter}. Sending the
-        # filter dict as the bare body lost the user_id (so the purge ran as
-        # "default") and RAG's payload.get("filter") found nothing, turning
-        # every scoped purge from the UI into a whole-collection delete.
         resp = await client.post(
             f"{RAG_SVC}/rag/purge/{collection_name}",
             json={"user_id": user_id, "filter": body.get("filter") or {}},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.post("/api/storage/maintenance")
+async def rag_maintenance(request: Request):
+    """Report or remove duplicate/expired/invalid rows for the caller.
+
+    Defaults to report mode (nothing is deleted). The caller's identity is
+    taken from the resolved credentials, never from the payload, and a
+    failed resolution is a 401 rather than a fallback user: a maintenance
+    run must never sweep somebody else's rows.
+    """
+    creds_data = await _resolve_identity_from_request(request)
+    user_id = creds_data.get("user") or ""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing user identity")
+
+    body = await request.json()
+    body = body if isinstance(body, dict) else {}
+    body["user_id"] = user_id
+
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{RAG_SVC}/rag/maintenance",
+            json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         return await _proxy_json_response(resp)

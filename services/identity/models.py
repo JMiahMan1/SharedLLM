@@ -506,6 +506,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "llama_server_proxy_url", "value": "", "description": "Legacy llama.cpp server proxy URL (deprecated)"},
     {"key": "timezone", "value": "America/Phoenix", "description": "System timezone"},
     {"key": "embedding_model", "value": "nomic-ai/nomic-embed-text-v1.5", "description": "Embedding model for RAG"},
+    {"key": "rag_retention_days", "value": "{\"telemetry_alerts\": 30, \"conversation_memory\": 90}", "description": "Retention in days per time-bound RAG collection (JSON). Blank keeps everything; only collections named here are ever expired by the maintenance purge."},
     {"key": "phrasebook_path", "value": "", "description": "Path to phrasebook file"},
     {"key": "huggingface_token", "value": "", "description": "Hugging Face Hub API Token (read-access, for private models and fast downloads)"},
     {"key": "bible_svc_url", "value": "http://bible:8010", "description": "Bible service URL (reading app, verse of the day, devotionals)"},
