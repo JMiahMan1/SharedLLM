@@ -22,6 +22,7 @@ import type {
   GatewayConfig,
   EsphomeDevice,
   CompanionDevice,
+  BatteryReading,
   PairDeviceRequest,
   ExecutionResponse,
   ArcadeGamesResponse,
@@ -156,6 +157,7 @@ export type {
   HealthStatus,
   EsphomeDevice,
   CompanionDevice,
+  BatteryReading,
   PairDeviceRequest,
   DiscoveredDevice,
   LogEntry,
@@ -2273,6 +2275,14 @@ export const api = {
   // on login; watches and assistants are added with pairDevice).
   async getCompanionDevices(): Promise<CompanionDevice[]> {
     const resp = await apiClient.get('/api/user-panel/devices');
+    return resp.data;
+  },
+
+  // A device's battery reports, oldest first (its owner's, or any for an admin).
+  async getDeviceBattery(deviceKey: string, hours = 24): Promise<BatteryReading[]> {
+    const resp = await apiClient.get(`/api/user-panel/devices/${encodeURIComponent(deviceKey)}/battery`, {
+      params: { hours },
+    });
     return resp.data;
   },
 

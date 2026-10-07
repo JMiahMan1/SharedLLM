@@ -11,11 +11,11 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from datetime import datetime as dt
 
 import aiohttp
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import inspect, text
@@ -55,6 +55,7 @@ from services.identity.schemas import (
     DeviceClaim,
     DeviceAssignmentCreate,
     DeviceAssignmentRead,
+    BatteryReading,
     DeviceRead,
     DeviceSelfRegister,
     TelemetryIngest,
@@ -4246,6 +4247,47 @@ def _device_to_read(d: Device) -> DeviceRead:
     )
 
 
+#: Battery reports kept per device. A watch reports every few minutes, so
+#: without a limit the table grows by a few hundred rows a day per device.
+BATTERY_RETENTION_DAYS = 30
+
+
+def _battery_reading(event: DeviceEvent) -> BatteryReading | None:
+    try:
+        extra = json.loads(event.extra or "{}")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(extra, dict):
+        return None
+
+    def num(key):
+        value = extra.get(key)
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    usb = extra.get("usb")
+    return BatteryReading(at=event.at, pct=num("pct"), usb=usb if isinstance(usb, bool) else None,
+                          cell_v=num("cell_v"))
+
+
+def _latest_batteries(session: Session, device_keys: list[str]) -> dict[str, BatteryReading]:
+    """Each device's newest battery report (looking back a week)."""
+    if not device_keys:
+        return {}
+    since = (datetime.now() - timedelta(days=7)).isoformat()
+    rows = session.exec(
+        select(DeviceEvent)
+        .where(DeviceEvent.event == "battery", DeviceEvent.device_key.in_(device_keys), DeviceEvent.at >= since)
+        .order_by(DeviceEvent.at.desc())
+    ).all()
+    latest: dict[str, BatteryReading] = {}
+    for row in rows:
+        if row.device_key not in latest:
+            reading = _battery_reading(row)
+            if reading:
+                latest[row.device_key] = reading
+    return latest
+
+
 def _client_ip(request: Request) -> str | None:
     """The caller's address, from the request rather than the body.
 
@@ -4314,7 +4356,37 @@ def list_devices(
     stmt = select(Device)
     if not caller.is_admin:
         stmt = stmt.where(Device.owner_username == caller.username)
-    return [_device_to_read(d) for d in session.exec(stmt).all()]
+    devices = session.exec(stmt).all()
+    batteries = _latest_batteries(session, [d.device_key for d in devices])
+    out = []
+    for d in devices:
+        read = _device_to_read(d)
+        read.battery = batteries.get(d.device_key)
+        out.append(read)
+    return out
+
+
+@app.get("/api/user-panel/devices/{device_key}/battery", response_model=list[BatteryReading])
+def device_battery_history(
+    device_key: str,
+    hours: int = Query(24, ge=1, le=BATTERY_RETENTION_DAYS * 24),
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """A device's battery reports over the last ``hours``, oldest first.
+    Its owner's, or any device for an admin."""
+    device = session.exec(select(Device).where(Device.device_key == device_key)).first()
+    if device is None:
+        raise HTTPException(status_code=404, detail="No such device")
+    if device.owner_username != caller.username and not caller.is_admin:
+        raise HTTPException(status_code=403, detail="Not your device")
+    since = (datetime.now() - timedelta(hours=hours)).isoformat()
+    rows = session.exec(
+        select(DeviceEvent)
+        .where(DeviceEvent.device_key == device_key, DeviceEvent.event == "battery", DeviceEvent.at >= since)
+        .order_by(DeviceEvent.at)
+    ).all()
+    return [r for r in (_battery_reading(row) for row in rows) if r]
 
 
 @app.post("/api/user-panel/devices", response_model=DeviceRead)
@@ -4500,7 +4572,16 @@ def ingest_telemetry(
 
     device.last_seen_at = now
     device.last_ip_address = _client_ip(request)
+    if body.app_version:
+        device.app_version = body.app_version.strip()
     session.add(device)
+    if any(str(raw.get("event", "")).strip() == "battery" for raw in body.events[:200]):
+        cutoff = (datetime.now() - timedelta(days=BATTERY_RETENTION_DAYS)).isoformat()
+        for old in session.exec(
+            select(DeviceEvent).where(DeviceEvent.device_key == device.device_key,
+                                      DeviceEvent.event == "battery", DeviceEvent.at < cutoff)
+        ).all():
+            session.delete(old)
     session.commit()
     if rejected:
         log.warning(

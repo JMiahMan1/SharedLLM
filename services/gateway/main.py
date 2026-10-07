@@ -3589,6 +3589,19 @@ async def proxy_report_capabilities(device_key: str, request: Request):
         return await _proxy_json_response(resp)
 
 
+@app.get("/api/user-panel/devices/{device_key}/battery")
+async def proxy_device_battery(device_key: str, request: Request, hours: int = 24):
+    """A device's battery history (its owner's, or any for an admin)."""
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/user-panel/devices/{device_key}/battery",
+            headers=_panel_headers(request),
+            params={"hours": hours},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.patch("/api/user-panel/devices/{device_key}")
 async def proxy_assign_device(device_key: str, request: Request):
     async with shared_http_client() as client:

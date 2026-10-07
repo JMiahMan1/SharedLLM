@@ -412,3 +412,50 @@ class TestCompanionClaim:
             assert resp.status_code in (401, 403)
         finally:
             app.dependency_overrides = {}
+
+
+class TestBatteryReports:
+    """Battery telemetry is shown back: the latest report on each device, a
+    history, and the reported firmware version kept current."""
+
+    def _watch(self, client: TestClient) -> str:
+        client.post(REGISTER, json=_phone_payload())
+        return "phone-abc12345"
+
+    def _report(self, client, key, **extra):
+        return client.post("/api/user-panel/devices/telemetry",
+                           json={"device_key": key, "app_version": "1.4.1",
+                                 "events": [{"event": "battery", "extra": extra}]})
+
+    def test_the_device_list_carries_the_latest_battery(self, client: TestClient):
+        key = self._watch(client)
+        self._report(client, key, pct=80.0, usb=False, cell_v=3.4)
+        self._report(client, key, pct=79.0, usb=False, cell_v=3.39)
+        device = next(d for d in client.get("/api/user-panel/devices").json() if d["device_key"] == key)
+        assert device["battery"]["pct"] == 79.0 and device["battery"]["usb"] is False
+        assert device["app_version"] == "1.4.1"
+
+    def test_charging_has_no_percentage(self, client: TestClient):
+        key = self._watch(client)
+        self._report(client, key, usb=True, sense_v=4.47)
+        device = next(d for d in client.get("/api/user-panel/devices").json() if d["device_key"] == key)
+        assert device["battery"]["usb"] is True and device["battery"]["pct"] is None
+
+    def test_history_is_oldest_first_and_owner_only(self, client: TestClient, session: Session):
+        key = self._watch(client)
+        for pct in (90.0, 85.0, 80.0):
+            self._report(client, key, pct=pct, usb=False)
+        history = client.get(f"/api/user-panel/devices/{key}/battery?hours=24").json()
+        assert [h["pct"] for h in history] == [90.0, 85.0, 80.0]
+        assert login(session, "kate").get(f"/api/user-panel/devices/{key}/battery").status_code == 403
+        assert login(session, "jeremiah").get(f"/api/user-panel/devices/{key}/battery").status_code == 200
+
+    def test_old_reports_are_pruned(self, client: TestClient, session: Session):
+        key = self._watch(client)
+        session.add(DeviceEvent(device_key=key, username="michele", event="battery", extra="{}",
+                                at="2020-01-01T00:00:00"))
+        session.commit()
+        self._report(client, key, pct=50.0, usb=False)
+        session.expire_all()
+        left = session.exec(select(DeviceEvent).where(DeviceEvent.event == "battery")).all()
+        assert len(left) == 1 and not left[0].at.startswith("2020")
