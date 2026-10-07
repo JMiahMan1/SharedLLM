@@ -45,6 +45,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(n
 DEFAULT_EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 DEFAULT_EMBEDDING_DIM = 768
 
+EMBED_BATCH_SIZE: int = 128
+
 # Globals populated in the lifespan
 conn = None
 adapter: VectorStoreAdapter | None = None
@@ -71,6 +73,24 @@ def embed(texts: list[str]) -> list[list[float]]:
     if embedder is None:
         raise RuntimeError("Embedder not initialized")
     return [v.tolist() for v in embedder.embed(texts)]
+
+
+def embed_batched(texts: list[str], batch_size: int = EMBED_BATCH_SIZE) -> list[list[float]]:
+    """Embed ``texts`` in bounded batches so peak memory stays flat.
+
+    ONNX inference memory grows with batch size: a single 684-entity Home
+    Assistant sync batch needed more than the container's 6 GiB limit, so the
+    service was OOM-killed roughly every six minutes by its own cleanup loop
+    (each kill restarts it, then the next user's sync repeats the batch).
+    Chunking keeps any one call inside the budget ``reindex_all`` already
+    relies on for the same reason.
+    """
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), batch_size):
+        vectors.extend(embed(texts[start : start + batch_size]))
+    return vectors
 
 
 @asynccontextmanager
@@ -1005,7 +1025,7 @@ async def dream_learnings(
         # so the event loop stays responsive during the compaction pass.
         if pending_reembed:
             try:
-                vectors = await asyncio.to_thread(embed, [p[1] for p in pending_reembed])
+                vectors = await asyncio.to_thread(embed_batched, [p[1] for p in pending_reembed])
             except Exception as ex:
                 log.warning(f"Dream re-embed failed for {len(pending_reembed)} doc(s): {ex}")
             else:
@@ -1722,7 +1742,7 @@ async def sync_files(payload: dict):
     # Embedding is CPU-bound ONNX inference; run it in a worker thread so the
     # event loop stays responsive while file chunks are being indexed.
     try:
-        vectors = await asyncio.to_thread(embed, [p[1] for p in pending])
+        vectors = await asyncio.to_thread(embed_batched, [p[1] for p in pending])
     except Exception as ex:
         log.error(f"File chunk embedding failed for {len(pending)} chunks: {ex}")
         return JSONResponse(
@@ -1893,7 +1913,11 @@ async def sync_ha(payload: dict, user_id: str | None = None):
     # event loop stays responsive (health checks, searches) while HA entities
     # are being (re-)indexed.
     try:
-        vectors = await asyncio.to_thread(embed, [p[1] for p in pending])
+        log.info(
+            f"[ha_sync] embedding {len(pending)} texts for {resolved_user} "
+            f"in batches of {EMBED_BATCH_SIZE}"
+        )
+        vectors = await asyncio.to_thread(embed_batched, [p[1] for p in pending])
     except Exception as ex:
         log.error(f"[ha_sync] embedding {len(pending)} entities failed: {ex}")
         return JSONResponse(
@@ -1972,7 +1996,7 @@ async def sync_capabilities(payload: dict):
     # Embedding is CPU-bound ONNX inference; run it in a worker thread so the
     # event loop stays responsive while capabilities are being indexed.
     try:
-        vectors = await asyncio.to_thread(embed, [p[1] for p in pending])
+        vectors = await asyncio.to_thread(embed_batched, [p[1] for p in pending])
     except Exception as ex:
         log.error(f"Capability embedding failed for {len(pending)} entries: {ex}")
         return JSONResponse(
