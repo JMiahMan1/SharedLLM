@@ -592,7 +592,8 @@ services:
     image: ghcr.io/jmiahman1/sharedllm-osrm-foot:latest
     container_name: sharedllm_osrm_foot
     restart: unless-stopped
-    mem_limit: 1536m
+    # The foot graph is bigger than the road one (paths, sidewalks): ~1.2 GB idle
+    mem_limit: 2g
     networks:
       - sharedllm
 
