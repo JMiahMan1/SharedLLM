@@ -1762,6 +1762,25 @@ export interface BibleBlbLink {
 }
 
 /**
+ * An answer about the passage being read.
+ *
+ * The model is given the verses on screen and the study notes stored for them
+ * and nothing else, so the answer can be checked against what the reader can
+ * see. A question the passage does not answer comes back saying so rather than
+ * guessing -- the counts say how much material the answer had to work with.
+ */
+export interface BibleStudyAnswer {
+  reference: string;
+  version: string;
+  edition: string;
+  edition_name: string;
+  question: string;
+  answer: string;
+  verses_used: number;
+  notes_used: number;
+}
+
+/**
  * Study apparatus for a passage, kept out of the verse text itself.
  *
  * A study Bible carries commentary, footnotes and introductions next to the

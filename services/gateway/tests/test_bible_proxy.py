@@ -43,6 +43,7 @@ ROUTES = [
     ("get", "/api/bible/blb/link?ref=John+3:16"),
     ("get", "/api/bible/voices"),
     ("get", "/api/bible/narration?ref=John+3:16"),
+    ("post", "/api/bible/study/ask"),
     ("get", "/api/bible/admin/imports"),
     ("get", "/api/bible/admin/providers/api.bible/estimate?translation_id=niv"),
     ("post", "/api/bible/admin/imports"),
@@ -651,3 +652,71 @@ def test_a_shelf_import_refusal_reaches_the_operator_as_422(make_client, monkeyp
     )
     assert resp.status_code == 422
     assert "Exodus" in resp.json()["message"]
+
+
+# ── asking about the passage being read ─────────────────────────────────────
+def test_asking_about_a_passage_is_scoped_to_its_reader(make_client, monkeypatch):
+    """The caller names the question; the username never comes from the body."""
+    captured = _patch_bible(monkeypatch, payload={"answer": "It is about love.", "reference": "John 3:16"})
+    resp = make_client(user="jeremiah").post(
+        "/api/bible/study/ask",
+        json={"ref": "John 3:16", "question": "What does this mean?", "username": "michele"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["answer"] == "It is about love."
+    call = captured["calls"][-1]
+    assert call["params"]["username"] == "jeremiah"
+    assert "username" not in call["json"]
+    assert call["json"]["ref"] == "John 3:16"
+    assert call["json"]["question"] == "What does this mean?"
+
+
+def test_the_passage_choice_travels_with_the_question(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={"answer": "ok"})
+    make_client(user="jeremiah").post(
+        "/api/bible/study/ask",
+        json={
+            "ref": "John 3",
+            "question": "Why?",
+            "version": "nkjv",
+            "edition": "nkjv-tmn",
+            "cross_version": True,
+        },
+    )
+    body = captured["calls"][-1]["json"]
+    assert body["version"] == "nkjv"
+    assert body["edition"] == "nkjv-tmn"
+    assert body["cross_version"] is True
+
+
+def test_a_default_ask_does_not_opt_into_other_translations(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={"answer": "ok"})
+    make_client(user="jeremiah").post("/api/bible/study/ask", json={"ref": "John 3", "question": "Why?"})
+    assert captured["calls"][-1]["json"]["cross_version"] is False
+
+
+def test_a_model_that_cannot_answer_keeps_its_own_sentence(make_client, monkeypatch):
+    _patch_bible(
+        monkeypatch,
+        status=503,
+        payload={"detail": "Study help could not reach the language model: gateway down"},
+    )
+    resp = make_client(user="jeremiah").post(
+        "/api/bible/study/ask", json={"ref": "John 3", "question": "Why?"}
+    )
+    assert resp.status_code == 503
+    assert "gateway down" in resp.json()["detail"]
+
+
+def test_an_anonymous_question_is_refused_before_the_model_is_asked(anon_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={"answer": "ok"})
+    resp = anon_client.post("/api/bible/study/ask", json={"ref": "John 3", "question": "Why?"})
+    assert resp.status_code == 401
+    assert captured["calls"] == []
+
+
+def test_the_ask_waits_longer_than_a_reading_route(
+    make_client, monkeypatch
+):
+    """A cold model load takes minutes; a 10s ceiling would abort a good answer."""
+    assert gateway_main._BIBLE_STUDY_TIMEOUT.total >= 300.0

@@ -142,6 +142,7 @@ import type {
   BibleBlbLink,
   BibleStudyNoteKind,
   BibleStudyNotesResponse,
+  BibleStudyAnswer,
   BibleDailyResponse,
   BibleVoicesResponse,
   BibleNarration,
@@ -161,8 +162,8 @@ export type {
   EsphomeDevice,
   CompanionDevice,
   BatteryReading,
-  DeviceActivity,
   EtaResponse,
+  DeviceActivity,
   DeviceEventRead,
   StepSources,
   PairDeviceRequest,
@@ -958,7 +959,6 @@ export const api = {
    * Last known GPS position for every user whose app has location sharing on.
    * Users with tracking off simply have no entry (or a stale one).
    */
-  async getAllUserLocations(): Promise<Record<string, UserLiveLocation>> {
   // Drive time by road from someone's latest position to a place (an HA zone,
   // "home" by default), subject to location-sharing consent.
   async getEta(userId: string, to = 'home'): Promise<EtaResponse> {
@@ -966,6 +966,7 @@ export const api = {
     return resp.data;
   },
 
+  async getAllUserLocations(): Promise<Record<string, UserLiveLocation>> {
     const resp = await apiClient.get('/api/users/location/all');
     return resp.data || {};
   },
@@ -2965,9 +2966,35 @@ export const api = {
     const resp = await apiClient.get('/api/bible/voices');
     return resp.data;
   },
-
   async getBibleNarration(ref: string, version?: string, voice?: string): Promise<BibleNarration> {
     const resp = await apiClient.get('/api/bible/narration', { params: { ref, version, voice } });
+    return resp.data;
+  },
+
+  /**
+   * Ask about the passage being read.
+   *
+   * The bible service picks the verses and study notes itself, so the question
+   * cannot be asked about a passage other than the one named here. A cold model
+   * load can take minutes, hence the long timeout: the reading routes abort at
+   * 15s and this one must not.
+   */
+  async askBibleStudy(
+    ref: string,
+    question: string,
+    opts: { version?: string; edition?: string; crossVersion?: boolean } = {},
+  ): Promise<BibleStudyAnswer> {
+    const resp = await apiClient.post(
+      '/api/bible/study/ask',
+      {
+        ref,
+        question,
+        version: opts.version,
+        edition: opts.edition,
+        cross_version: opts.crossVersion ?? false,
+      },
+      { timeout: 320_000 },
+    );
     return resp.data;
   },
 
