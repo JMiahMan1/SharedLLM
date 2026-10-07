@@ -966,6 +966,17 @@ export const api = {
     return resp.data;
   },
 
+  // Family arrival / departure notices for the signed-in user (on by default).
+  async getPresenceAlerts(): Promise<{ enabled: boolean }> {
+    const resp = await apiClient.get('/api/geo/presence-alerts');
+    return resp.data;
+  },
+
+  async setPresenceAlerts(enabled: boolean): Promise<{ enabled: boolean }> {
+    const resp = await apiClient.put('/api/geo/presence-alerts', { enabled });
+    return resp.data;
+  },
+
   async getAllUserLocations(): Promise<Record<string, UserLiveLocation>> {
     const resp = await apiClient.get('/api/users/location/all');
     return resp.data || {};

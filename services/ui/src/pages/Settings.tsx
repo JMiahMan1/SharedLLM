@@ -11,6 +11,7 @@ import { api } from '../services/api';
 import type { GlobalSetting } from '../services/api';
 import LocationPanel from '../components/location/LocationPanel';
 import ActivitySharingPanel from '../components/settings/ActivitySharingPanel';
+import PresenceAlertsToggle from '../components/settings/PresenceAlertsToggle';
 import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
 import Toggle from '../components/ui/Toggle';
@@ -98,6 +99,7 @@ const Settings = () => {
       <SiteThemePanel />
 
       <ActivitySharingPanel />
+      <PresenceAlertsToggle />
 
       <TelemetryReportsPanel />
 

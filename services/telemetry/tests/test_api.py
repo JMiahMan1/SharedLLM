@@ -129,3 +129,24 @@ def test_notifications_endpoint(client, rc):
     anyio.run(seed)
     body = client.get("/api/telemetry/notifications/jeremiah", headers=HEADERS).json()
     assert body["notifications"][-1]["kind"] == "report_ready"
+
+
+def test_another_service_can_notify_a_user(client, rc, monkeypatch):
+    sent = []
+
+    async def send(user, title, body, data=None):
+        sent.append((user, title, body, data))
+        return {"webpush": 1, "fcm": False, "pruned": 0}
+    monkeypatch.setattr("services.telemetry.main.push.send_to_user", send)
+    resp = client.post("/api/telemetry/notify", headers=HEADERS,
+                       json={"user": "Michele", "kind": "presence", "title": "Jeremiah left Work",
+                             "body": "Home in about 22 minutes.", "data": {"person": "jeremiah"}})
+    assert resp.status_code == 200
+    assert sent == [("michele", "Jeremiah left Work", "Home in about 22 minutes.", {"person": "jeremiah"})]
+    inbox = client.get("/api/telemetry/notifications/michele", headers=HEADERS).json()["notifications"]
+    assert inbox[-1]["kind"] == "presence" and inbox[-1]["title"] == "Jeremiah left Work"
+
+
+def test_notify_needs_a_user_and_a_title(client, rc):
+    assert client.post("/api/telemetry/notify", headers=HEADERS, json={"title": "x"}).status_code == 422
+    assert client.post("/api/telemetry/notify", json={"user": "a", "title": "x"}).status_code == 401
