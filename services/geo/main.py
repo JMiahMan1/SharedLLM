@@ -384,6 +384,14 @@ def _format_duration(seconds: float) -> str:
 #: and a network cluster 800 m away. The current position (Identity) still
 #: takes every fix.
 MAX_BREADCRUMB_ACCURACY_M = 100.0
+#: A trip whose road match OSRM is less sure of than this is a phantom.
+MIN_TRIP_MATCH_CONFIDENCE = 0.05
+#: Fixes this far from the last one are checked against the road network: a
+#: place you could not have driven to in the time since is a position jump.
+JUMP_CHECK_M = 300.0
+#: No vehicle here moves faster than this (m/s, ~157 mph); beyond it no
+#: road check is needed.
+MAX_GROUND_SPEED_MPS = 70.0
 
 
 async def record_point(
@@ -404,6 +412,8 @@ async def record_point(
         return
     ts = timestamp or time.time()
     clean_id = entity_id.split(".")[-1].lower()
+    if await _is_impossible_jump(r, clean_id, lat, lon, ts):
+        return
     point = {
         "t": ts,
         "lat": lat,
@@ -425,6 +435,37 @@ async def record_point(
         await process_trip_point(clean_id, lat, lon, speed, ts)
     except Exception as e:
         log.warning(f"[Geo] Failed to process trip point: {e}")
+
+
+async def _is_impossible_jump(r, clean_id: str, lat: float, lon: float, ts: float) -> bool:
+    """True when the fix could not have been reached from the previous
+    breadcrumb in the time between them: faster than any vehicle, or (for a
+    jump of JUMP_CHECK_M or more) quicker than the road route allows. Such a
+    fix is a position jump; drawn, it is a line across the map, and it read as
+    a phantom drive. Late fixes, and an OSRM that cannot answer, pass."""
+    try:
+        last = await r.zrevrange(f"geo:history:{clean_id}", 0, 0)
+        if not last:
+            return False
+        prev = json.loads(last[0])
+        dt = ts - float(prev.get("t", 0))
+        if dt <= 0:
+            return False
+        dist = _haversine_distance(prev["lat"], prev["lon"], lat, lon)
+        if dist < JUMP_CHECK_M:
+            return False
+        if dist / dt > MAX_GROUND_SPEED_MPS:
+            log.info(f"[Geo] Dropping jump for {clean_id}: {dist:.0f} m in {dt:.0f} s")
+            return True
+        route = await map_match.route((prev["lat"], prev["lon"]), (lat, lon), OSRM_URL, timeout_s=2.0)
+        # half the fastest road time, with slack for fix-time error and a
+        # fast driver: anything quicker is not a drive
+        if route and route["duration_s"] * 0.5 > dt + 30:
+            log.info(f"[Geo] Dropping jump for {clean_id}: {route['duration_s']:.0f} s by road in {dt:.0f} s")
+            return True
+    except Exception as e:
+        log.debug(f"[Geo] Jump check skipped for {clean_id}: {e}")
+    return False
 
 
 STEP_SOURCES = ("phone", "watch", "ha", "health_connect", "intervals")
@@ -1697,6 +1738,26 @@ async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -
     dist = float(trip.get("distance_miles", 0.0))
     end_t = float(trip.get("last_moving_time", now_ts))
     dur = max(60, int(end_t - float(trip.get("start_time", now_ts))))
+
+    # The road path, when OSRM can match the trail: its length is the trip's
+    # distance (breadcrumbs joined by straight lines cut every corner), and a
+    # trail that fits no road at all is a phantom made of position jumps, not
+    # a drive. OSRM unreachable (None) keeps the breadcrumb figure.
+    road = None
+    try:
+        crumbs = [json.loads(p) for p in await r.zrangebyscore(
+            f"geo:history:{clean_user}", float(trip.get("start_time", now_ts)) - 30, end_t + 30)]
+        road = await map_match.match(crumbs, OSRM_URL)
+    except Exception as e:
+        log.warning(f"[Geo] Road match failed for {trip.get('id')}: {e}")
+    if road is not None and not road.get("matched"):
+        log.info(f"[Geo] Discarding phantom trip {trip.get('id')}: its fixes fit no road")
+        return None
+    if road and road.get("confidence", 1.0) < MIN_TRIP_MATCH_CONFIDENCE:
+        log.info(f"[Geo] Discarding phantom trip {trip.get('id')}: road match confidence {road['confidence']:.2f}")
+        return None
+    if road:
+        dist = round(road["distance_m"] * 0.000621371, 2)
     if dist < 0.2:
         return None
     mpg = max(1.0, float(trip.get("mpg", 25.0)))
@@ -1727,6 +1788,9 @@ async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -
         "updated_at": now_ts,
         "updated_by": None,
     }
+    if road:
+        completed["distance_source"] = "road"
+        completed["road_match_confidence"] = round(road["confidence"], 2)
     await r.set(f"geo:trip:{completed['id']}", json.dumps(completed))
     await r.zadd(f"geo:trips:user:{clean_user}", {completed["id"]: completed["start_time"]})
     await r.zadd("geo:trips:all", {completed["id"]: completed["start_time"]})
@@ -2237,7 +2301,7 @@ async def get_trip_route(trip_id: str):
     # joined by straight lines cut corners and cross fields, and a gap in the
     # trail drew as a straight shot. Raw points (snapped: false) otherwise.
     matched = await map_match.match(points, OSRM_URL) if trip.get("activity_type", "driving") == "driving" else None
-    if matched:
+    if matched and matched.get("matched"):
         coords = matched["coordinates"]
         t0 = float(points[0].get("t", trip.get("start_time", 0)))
         t1 = float(points[-1].get("t", trip.get("end_time", t0)))
