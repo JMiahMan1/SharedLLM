@@ -150,3 +150,18 @@ def test_another_service_can_notify_a_user(client, rc, monkeypatch):
 def test_notify_needs_a_user_and_a_title(client, rc):
     assert client.post("/api/telemetry/notify", headers=HEADERS, json={"title": "x"}).status_code == 422
     assert client.post("/api/telemetry/notify", json={"user": "a", "title": "x"}).status_code == 401
+
+
+def test_a_once_notice_is_sent_only_once(client, rc, monkeypatch):
+    sent = []
+
+    async def send(user, title, body, data=None):
+        sent.append(title)
+        return {}
+
+    monkeypatch.setattr("services.telemetry.main.push.send_to_user", send)
+    body = {"user": "jeremiah", "kind": "leave_by", "title": "Leave by 2:40 for Dentist", "once": "leave:abc"}
+    first = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
+    again = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
+    assert "duplicate" not in first and again["duplicate"] is True
+    assert sent == ["Leave by 2:40 for Dentist"]

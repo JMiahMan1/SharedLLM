@@ -384,7 +384,8 @@ def create_app():
     async def notify(body: dict = Body(...), _: bool = Depends(require_internal)):
         """Send one notification to a user from another service (arrivals,
         leave-by reminders): the in-app outbox first, then push to their
-        devices, best effort. body: {user, kind, title, body, data?}."""
+        devices, best effort. body: {user, kind, title, body, data?, once?} --
+        a notice with a ``once`` key already sent to the user is not sent again."""
         user = str(body.get("user") or "").strip().lower()
         title = str(body.get("title") or "").strip()
         if not user or not title:
@@ -392,6 +393,9 @@ def create_app():
         text = str(body.get("body") or "")[:180]
         data = body.get("data") if isinstance(body.get("data"), dict) else {}
         rc = _redis()
+        once = str(body.get("once") or "").strip()[:200]
+        if once and not await rc.set(f"telemetry:notify_once:{user}:{once}", "1", nx=True, ex=3 * 86400):
+            return {"status": "SUCCESS", "duplicate": True}
         await store.push_notification(rc, user, {
             "id": store.new_id(),
             "kind": str(body.get("kind") or "notice"),

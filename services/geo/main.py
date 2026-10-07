@@ -1290,9 +1290,52 @@ async def _zones() -> list[dict]:
     return out
 
 
-async def _destination(to: str) -> dict | None:
-    """A destination by HA zone (entity id or name, "home" by default) or
-    "lat,lon": {"name", "latitude", "longitude", "radius"}."""
+#: Forward-geocoded places are kept this long (misses for a day).
+GEOCODE_TTL_S = 30 * 86400
+GEOCODE_MISS_TTL_S = 86400
+#: How far around the person a place name is looked for first (degrees).
+GEOCODE_BIAS_DEG = 0.75
+
+
+async def _geocode_place(text: str, near: tuple[float, float] | None = None) -> dict | None:
+    """An address or place name ("Dr. Lee, 12 Oak St") to coordinates via
+    Nominatim, preferring matches near ``near``; cached in Redis."""
+    query = " ".join(text.split())[:200]
+    if len(query) < 3:
+        return None
+    r = await get_redis()
+    key = f"geo:geocode:{query.lower()}"
+    cached = await r.get(key) if r else None
+    if cached is not None:
+        hit = json.loads(cached)
+        return hit or None
+    params = {"q": query, "format": "json", "limit": "1"}
+    if near:
+        lat, lon = near
+        d = GEOCODE_BIAS_DEG
+        params["viewbox"] = f"{lon - d},{lat + d},{lon + d},{lat - d}"
+    try:
+        client = get_client_insecure()
+        async with client.get("https://nominatim.openstreetmap.org/search", params=params,
+                              headers={"User-Agent": "SharedLLM/1.0"},
+                              timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            data = await resp.json(content_type=None)
+    except Exception as e:
+        log.warning(f"[Geo] Nominatim search failed for {query!r}: {e}")
+        return None  # not cached: try again next time
+    hit = None
+    if isinstance(data, list) and data:
+        top = data[0]
+        hit = {"name": query, "latitude": float(top["lat"]), "longitude": float(top["lon"]), "radius": 100.0}
+    if r:
+        await r.set(key, json.dumps(hit), ex=GEOCODE_TTL_S if hit else GEOCODE_MISS_TTL_S)
+    return hit
+
+
+async def _destination(to: str, near: tuple[float, float] | None = None) -> dict | None:
+    """A destination by HA zone (entity id or name, "home" by default),
+    "lat,lon", or else an address / place name (geocoded near ``near``):
+    {"name", "latitude", "longitude", "radius"}."""
     key = (to or "home").strip()
     if re.fullmatch(r"-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?", key):
         lat, lon = (float(v) for v in key.split(","))
@@ -1301,7 +1344,7 @@ async def _destination(to: str) -> dict | None:
     for z in await _zones():
         if want in (z["entity_id"].lower().removeprefix("zone."), z["name"].lower()):
             return z
-    return None
+    return await _geocode_place(key, near)
 
 
 async def _latest_fix(r, clean: str) -> dict | None:
@@ -1316,9 +1359,9 @@ async def compute_eta(clean: str, to: str = "home") -> dict:
     fix = await _latest_fix(r, clean)
     if not fix:
         raise HTTPException(status_code=404, detail=f"No location for {clean}")
-    dest = await _destination(to)
+    dest = await _destination(to, (fix["lat"], fix["lon"]))
     if not dest:
-        raise HTTPException(status_code=404, detail=f"No place called '{to}' (a Home Assistant zone or lat,lon)")
+        raise HTTPException(status_code=404, detail=f"No place called '{to}' (a zone, an address or lat,lon)")
     straight = _haversine_distance(fix["lat"], fix["lon"], dest["latitude"], dest["longitude"])
     out = {
         "user_id": clean,
