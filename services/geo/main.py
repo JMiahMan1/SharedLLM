@@ -36,7 +36,17 @@ from pydantic import BaseModel
 _STATIC = Path(__file__).resolve().parent / "static"
 
 from services.common.http import get_client, get_client_insecure
-from services.config import HA_TOKEN, HA_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, OSRM_FOOT_URL, OSRM_URL, REDIS_URL, TELEMETRY_SVC_URL
+from services.config import (
+    HA_TOKEN,
+    HA_URL,
+    IDENTITY_SVC_URL,
+    INTERNAL_SECRET,
+    NOMINATIM_URL,
+    OSRM_FOOT_URL,
+    OSRM_URL,
+    REDIS_URL,
+    TELEMETRY_SVC_URL,
+)
 from services.geo import map_match, map_regions
 from services.shared.info_endpoint import info_router
 
@@ -1293,6 +1303,34 @@ async def _zones() -> list[dict]:
     return out
 
 
+NOMINATIM_PUBLIC_URL = "https://nominatim.openstreetmap.org"
+
+
+async def _nominatim(path: str, params: dict, timeout_s: float = 6.0):
+    """GET Nominatim's ``search`` or ``reverse``: the self-hosted one
+    (NOMINATIM_URL, docker-compose ``nominatim``) first, so positions stay on
+    the server; the public service when it is not set, not ready (still
+    importing), or has no answer -- a place outside the imported regions.
+    Raises when neither answers."""
+    bases = [b.rstrip("/") for b in (NOMINATIM_URL, NOMINATIM_PUBLIC_URL) if b]
+    answer, error = None, None
+    for base in bases:
+        try:
+            client = get_client_insecure()
+            async with client.get(f"{base}/{path}", params={**params, "format": "json"},
+                                  headers={"User-Agent": "SharedLLM/1.0"},
+                                  timeout=aiohttp.ClientTimeout(total=timeout_s)) as resp:
+                answer = await resp.json(content_type=None)
+        except Exception as e:
+            error = e
+            continue
+        if answer and not (isinstance(answer, dict) and answer.get("error")):
+            return answer
+    if answer is not None:
+        return answer
+    raise error or RuntimeError("no geocoder")
+
+
 #: Forward-geocoded places are kept this long (misses for a day).
 GEOCODE_TTL_S = 30 * 86400
 GEOCODE_MISS_TTL_S = 86400
@@ -1312,17 +1350,13 @@ async def _geocode_place(text: str, near: tuple[float, float] | None = None) -> 
     if cached is not None:
         hit = json.loads(cached)
         return hit or None
-    params = {"q": query, "format": "json", "limit": "1"}
+    params = {"q": query, "limit": "1"}
     if near:
         lat, lon = near
         d = GEOCODE_BIAS_DEG
         params["viewbox"] = f"{lon - d},{lat + d},{lon + d},{lat - d}"
     try:
-        client = get_client_insecure()
-        async with client.get("https://nominatim.openstreetmap.org/search", params=params,
-                              headers={"User-Agent": "SharedLLM/1.0"},
-                              timeout=aiohttp.ClientTimeout(total=8)) as resp:
-            data = await resp.json(content_type=None)
+        data = await _nominatim("search", params, timeout_s=8)
     except Exception as e:
         log.warning(f"[Geo] Nominatim search failed for {query!r}: {e}")
         return None  # not cached: try again next time
@@ -1704,12 +1738,7 @@ _PLACE_RADIUS_M = 200.0
 async def _nominatim_reverse_details(lat: float, lon: float) -> dict | None:
     """Reverse-geocode via OSM Nominatim. Returns raw dict (addressdetails on)."""
     try:
-        url = (f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}"
-               f"&format=json&zoom=18&addressdetails=1")
-        client = get_client_insecure()
-        async with client.get(url, headers={"User-Agent": "SharedLLM/1.0"},
-                              timeout=aiohttp.ClientTimeout(total=6)) as resp:
-            data = await resp.json(content_type=None)
+        data = await _nominatim("reverse", {"lat": lat, "lon": lon, "zoom": 18, "addressdetails": 1})
         if not isinstance(data, dict) or not data.get("display_name"):
             return None
         return data
@@ -4582,18 +4611,12 @@ async def _nominatim_resolve(location: str) -> dict:
     """Resolve a location string to city + state via Nominatim."""
     location = location.strip()
     if re.match(r"^\d{5}$", location):
-        url = f"https://nominatim.openstreetmap.org/search?postalcode={location}&country=us&format=json"
+        data = await _nominatim("search", {"postalcode": location, "country": "us"})
     elif re.match(r"^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$", location):
         lat, lon = [p.strip() for p in location.split(",")]
-        url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json"
+        data = await _nominatim("reverse", {"lat": lat, "lon": lon})
     else:
-        q = urllib.parse.quote(location)
-        url = f"https://nominatim.openstreetmap.org/search?q={q}&countrycodes=us&format=json"
-
-    client = get_client_insecure()
-    async with client.get(url, headers={"User-Agent": "SharedLLM/1.0"},
-                          timeout=aiohttp.ClientTimeout(total=6)) as resp:
-        data = await resp.json(content_type=None)
+        data = await _nominatim("search", {"q": location, "countrycodes": "us"})
 
     if isinstance(data, list):
         if not data:

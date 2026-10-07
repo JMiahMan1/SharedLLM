@@ -18,7 +18,8 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
 
 ## Bigger
 - [x] 8. Walking/foot road network: snap workout routes (walk, run, hike, ride) to paths and trails
-- [ ] 9. Self-hosted place names (Nominatim) instead of the public service, if the server can hold it
+- [x] 9. Self-hosted place names (Nominatim) instead of the public service, if the server can hold it
+  (Arizona import, Postgres tuned for a shared host; the public service only for places outside it)
 
 ## Bugs found and fixed on the way
 - Assistant location answers ignored location-sharing consent: "where is X?"
@@ -35,3 +36,6 @@ pushed and deployed when done; bugs found on the way are fixed and listed.
 - Trip and workout routes (the GPS trail itself) were served to any signed-in
   user who had the id, ignoring the owner's location-sharing consent; the
   viewer is now checked against the owner like every other location read.
+- Every trip's start and end, and every stop, sent its exact coordinates to the
+  public nominatim.openstreetmap.org for a place name; they now stay on the
+  server (self-hosted Nominatim) unless the place is outside the imported region.

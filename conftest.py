@@ -119,6 +119,7 @@ _TEST_ENV_DEFAULTS = {
     "HA_URL": "http://localhost:8123",
     "OSRM_URL": "",
     "OSRM_FOOT_URL": "",
+    "NOMINATIM_URL": "",
     "HA_TOKEN": "test-ha-token",
     "ABS_URL": "http://localhost:13378/",
     "ABS_API_KEY": "test-abs-key",
