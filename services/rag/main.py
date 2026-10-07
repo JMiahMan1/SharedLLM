@@ -88,8 +88,15 @@ def embed_batched(texts: list[str], batch_size: int = EMBED_BATCH_SIZE) -> list[
     if batch_size < 1:
         raise ValueError(f"batch_size must be >= 1, got {batch_size}")
     vectors: list[list[float]] = []
-    for start in range(0, len(texts), batch_size):
-        vectors.extend(embed(texts[start : start + batch_size]))
+    for index, start in enumerate(range(0, len(texts), batch_size), start=1):
+        batch = texts[start : start + batch_size]
+        batch_started = time.monotonic()
+        vectors.extend(embed(batch))
+        log.info(
+            f"[embed_batched] batch {index}/{-(-len(texts) // batch_size)} "
+            f"({len(batch)} texts) in {time.monotonic() - batch_started:.1f}s "
+            f"rss={_self_rss_mib()}MiB"
+        )
     return vectors
 
 
