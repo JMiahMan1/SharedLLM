@@ -961,6 +961,25 @@ class AudiobookshelfRequest(BaseRequest):
     limit: int = Field(10, ge=1, le=50, description="Max results to return")
 
 
+class CalibreRequest(BaseRequest):
+    """Read-only actions over the family's Calibre library.
+
+    The action set is a closed ``Literal`` on purpose: there is no approval
+    gate anywhere in this codebase's tool path, and a Calibre delete or
+    overwrite of ``metadata.db`` cannot be undone, so the irreversible verbs
+    are not nameable here at all. Mutating the library is done through
+    Calibre itself, which owns the database.
+    """
+
+    user_context: UserContext
+    action: Literal["list", "search", "get_book", "fetch_text"]
+    query: str | None = Field(None, description="Words from a title, author or tag; required for action=search")
+    book_id: int | None = Field(None, description="Calibre book id; preferred locator for get_book and fetch_text")
+    path: str | None = Field(None, description="Shelf path locator (ends in ' (<id>).txt'); alternative to book_id")
+    limit: int = Field(20, ge=1, le=100, description="Max books returned by list and search")
+    max_chars: int = Field(20000, ge=500, le=100000, description="Characters of text returned by fetch_text before honest truncation")
+
+
 class DocumentBroadcastRequest(BaseRequest):
     """
     Reads a document from Nextcloud storage and broadcasts it as TTS

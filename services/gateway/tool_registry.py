@@ -566,6 +566,10 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("AudiobookshelfRequest", SVC_EXECUTION, "POST", "/execute/audiobookshelf", False,
      "Audiobookshelf: libraries, search, status.",
      "payload fields: action, query, book_id, episode_id, entity_id, library_id, limit."),
+    ("CalibreRequest", SVC_EXECUTION, "POST", "/execute/calibre", False,
+     "Calibre library, read-only: list or search the shelf, fetch one book's "
+     "metadata or text. No delete or write actions exist.",
+     "payload fields: action, query, book_id, path, limit, max_chars."),
     ("LLMInfoRequest", SVC_EXECUTION, "POST", "/execute/llm/info", False,
      "LLM backend info: loaded models, VRAM, Ollama state.",
      "payload fields: (none required)."),

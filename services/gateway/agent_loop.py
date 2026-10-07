@@ -550,7 +550,7 @@ ALLOWED_TOOLS = {
     "workspacecreaterequest", "workspacesettingsupdaterequest",
     "systemlearningrequest", "redisinspectrequest", "discoverysyncrequest", "storageindexrequest",
     "dockercomposerequest", "identityrequest", "identitymanagerequest", "controlplanerequest", "restart_service",
-    "audiobookshelfrequest", "llminforequest", "contextsearchrequest", "haconfigrequest",
+    "audiobookshelfrequest", "calibrerequest", "llminforequest", "contextsearchrequest", "haconfigrequest",
     "entitysearchrequest", "logbookrequest", "executionlogrequest",
     "documentbroadcastrequest", "nightmoderequest", "ttsrequest", "sttrequest", "storagetexttorequest",
     "audiobookregeneraterequest",
@@ -3821,6 +3821,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     (r'.*discovery.*sync.*', "discoverysyncrequest"),
                     (r'.*identity.*', "identityrequest"),
                     (r'.*audiobookshelf.*', "audiobookshelfrequest"),
+                    (r'.*calibre.*', "calibrerequest"),
                     (r'.*llm.*info.*', "llminforequest"),
                     (r'.*context.*search.*', "contextsearchrequest"),
                     (r'.*ha.*config.*', "haconfigrequest"),
@@ -3856,7 +3857,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         "HA Tools": ["lightcontrolrequest", "haservicerequest", "climaterequest", "securityrequest", "announcementrequest", "entitysearchrequest", "logbookrequest", "executionlogrequest", "haconfigrequest"],
                         "Image Tools": ["imagegenerationrequest", "imageeditrequest", "ocrrequest"],
                         "Voice Tools": ["podcastrenderrequest", "speakeridentifyrequest", "listvoicesrequest", "ttsrequest", "sttrequest"],
-                        "Other": ["calendarrequest", "noterequest", "timerrequest", "talkrequest", "tvcastrequest", "systemlearningrequest", "discoverysyncrequest", "identityrequest", "identitymanagerequest", "audiobookshelfrequest", "llminforequest", "contextsearchrequest", "deploymentrequest", "capabilityindexrequest", "volumeinventoryrequest", "controlplanerequest", "ravenmissionrequest", "ravenrecallrequest", "redisinspectrequest"],
+                        "Other": ["calendarrequest", "noterequest", "timerrequest", "talkrequest", "tvcastrequest", "systemlearningrequest", "discoverysyncrequest", "identityrequest", "identitymanagerequest", "audiobookshelfrequest", "calibrerequest", "llminforequest", "contextsearchrequest", "deploymentrequest", "capabilityindexrequest", "volumeinventoryrequest", "controlplanerequest", "ravenmissionrequest", "ravenrecallrequest", "redisinspectrequest"],
                     }
                     tool_table = "\n".join(f"  {cat}: {', '.join(tools)}" for cat, tools in tool_categories.items())
                     closest = difflib.get_close_matches(action_name, list(ALLOWED_TOOLS), n=3, cutoff=0.4)
@@ -3945,6 +3946,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "identityrequest": (EXECUTION_SVC, "/execute/identity"),
                 "identitymanagerequest": (EXECUTION_SVC, "/execute/identity/manage"),
                 "audiobookshelfrequest": (EXECUTION_SVC, "/execute/audiobookshelf"),
+                "calibrerequest": (EXECUTION_SVC, "/execute/calibre"),
                 "llminforequest": (EXECUTION_SVC, "/execute/llm/info"),
                 "contextsearchrequest": (RAG_SVC, "/rag/search"),
                 "haconfigrequest": (EXECUTION_SVC, "/execute/ha_config"),

@@ -79,6 +79,14 @@ _TOOLS: tuple[_Tool, ...] = (
          "git add", "git status"),
     ),
     _Tool(
+        "CalibreRequest",
+        "Browse, search and read books from the Calibre library "
+        "(list/search/get_book/fetch_text; read-only).",
+        ("search books", "find a book", "list books", "read the book",
+         "fetch book text", "book library", "calibre", "ebook"),
+        3,
+    ),
+    _Tool(
         "WorkspaceBootstrapRequest",
         "Bootstrap/clone an existing repo into a workspace.",
         ("bootstrap", "clone repo", "checkout repo", "clone the"),
