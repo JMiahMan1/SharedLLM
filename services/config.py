@@ -95,6 +95,11 @@ GIT_USER = os.getenv("GIT_USER")
 GIT_TOKEN = os.getenv("GIT_TOKEN")
 REDIS_URL = os.getenv(f"{NETWORK_MODE.upper()}_REDIS_URL") or os.getenv("REDIS_URL", "redis://redis:6379/0")
 LOG_RETENTION_DAYS = 30
+# Per-collection retention for time-bound RAG collections, as JSON days
+# ({"telemetry_alerts": 30}). Deliberately no code default: a retention
+# policy is an operator decision, and blank means keep everything -- the
+# maintenance purge must never delete on a guessed schedule.
+RAG_RETENTION_DAYS = os.getenv("RAG_RETENTION_DAYS")
 LOG_MAX_ENTRIES = 10000
 # Hard wall-clock cap for one Raven mission. Must stay in sync with the
 # Identity seed (services/identity/models.py) and orchestrator._DEFAULTS;
@@ -264,6 +269,7 @@ async def resolve_runtime_config():
         # redis_url is infrastructure-dependent (Docker vs host networking) — read from env only
         "log_retention_days": "LOG_RETENTION_DAYS",
         "log_max_entries": "LOG_MAX_ENTRIES",
+        "rag_retention_days": "RAG_RETENTION_DAYS",
         "raven_max_total_seconds": "RAVEN_MAX_TOTAL_SECONDS",
         "raven_iteration_timeout": "RAVEN_ITERATION_TIMEOUT",
         "raven_heartbeat_interval": "RAVEN_HEARTBEAT_INTERVAL",

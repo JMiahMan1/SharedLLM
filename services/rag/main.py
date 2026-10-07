@@ -1846,22 +1846,36 @@ async def sync_files(payload: dict):
     return {"status": "SUCCESS", "count": count}
 
 
+def _purge_ids(collection_name: str, user_id: str, filter_meta: dict) -> list[str]:
+    """Resolve the row ids a purge will delete, applying the metadata filter.
+
+    Shared by both purge forms so they cannot drift: the legacy GET once
+    *demanded* a ``filter`` and then ignored it, deleting the caller's whole
+    collection while they watched. An empty filter means "the whole
+    collection for this user", which is an explicit, scoped operation --
+    never a way to smuggle a broad delete through a missing parameter.
+    """
+    if filter_meta and not isinstance(filter_meta, dict):
+        raise HTTPException(status_code=400, detail="filter must be a JSON object of metadata keys")
+    sql = "SELECT id FROM rag_items WHERE collection_name = ? AND user_id = ?"
+    params: list[Any] = [collection_name, user_id]
+    for k, v in (filter_meta or {}).items():
+        sql += " AND json_extract(metadata, ?) = ?"
+        params.extend([f"$.{k}", v])
+    return [r["id"] for r in _conn().execute(sql, params).fetchall()]
+
+
 @app.post("/rag/purge/{collection_name}", dependencies=[Depends(require_internal)])
 async def purge_collection_endpoint(collection_name: str, payload: dict):
-    user_id = payload.get("user_id", "default").lower()
-    filter_meta = payload.get("filter", {})
+    user_id = str(payload.get("user_id", "default")).lower()
+    filter_meta = payload.get("filter") or {}
     try:
-        sql = "SELECT id FROM rag_items WHERE collection_name = ? AND user_id = ?"
-        params: list[Any] = [collection_name, user_id]
-        if filter_meta:
-            for k, v in filter_meta.items():
-                sql += " AND json_extract(metadata, ?) = ?"
-                params.extend([f"$.{k}", v])
-        rows = _conn().execute(sql, params).fetchall()
-        ids = [r["id"] for r in rows]
+        ids = _purge_ids(collection_name, user_id, filter_meta)
         _delete_items(ids)
         log.info(f"Purged {len(ids)} entries from {collection_name} for user {user_id}")
-        return {"status": "SUCCESS", "message": f"Purged entries from {collection_name}"}
+        return {"status": "SUCCESS", "message": f"Purged entries from {collection_name}", "removed": len(ids)}
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Purge failed: {e}")
         raise HTTPException(status_code=500, detail="Purge failed") from e
@@ -1874,23 +1888,215 @@ async def purge_rag_collection(
     filter: str | None = None,
     x_internal_secret: str | None = Header(default=None),
 ):
-    """Purge entries via query parameters (legacy interface)."""
+    """Purge entries via query parameters (legacy interface).
+
+    ``filter`` is a JSON object of metadata keys, e.g.
+    ``{"path": "/Notes/gone.md"}``. Missing it is refused (403); malformed or
+    non-object JSON is a 400 naming the expected shape. Neither may delete
+    anything: this route used to require a filter and then purge the entire
+    collection regardless of what it said.
+    """
     if filter is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     require_internal(x_internal_secret or "")
     try:
+        filter_meta = json.loads(filter)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f'filter must be a JSON object like {{"path": "/file.md"}}: {exc.msg}',
+        ) from exc
+    if not isinstance(filter_meta, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=f'filter must be a JSON object like {{"path": "/file.md"}}, got {type(filter_meta).__name__}',
+        )
+    try:
         user_id = user_id.lower()
-        rows = _conn().execute(
-            "SELECT id FROM rag_items WHERE collection_name = ? AND user_id = ?",
-            [collection_name, user_id],
-        ).fetchall()
-        ids = [r["id"] for r in rows]
+        ids = _purge_ids(collection_name, user_id, filter_meta)
         _delete_items(ids)
-        log.info(f"Purged collection {collection_name} for user {user_id}")
-        return {"status": "SUCCESS", "message": f"Collection {collection_name} purged for user {user_id}"}
+        log.info(f"Purged {len(ids)} entries from {collection_name} for user {user_id}")
+        return {"status": "SUCCESS", "message": f"Collection {collection_name} purged for user {user_id}", "removed": len(ids)}
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Purge failed for {collection_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+def _retention_map() -> dict[str, int]:
+    """Parse the ``rag_retention_days`` setting: collection name -> days.
+
+    The seed carries the default policy (telemetry alerts 30 days,
+    conversation memory 90 days); blank keeps everything, so nothing is ever
+    expired on a guessed schedule. A malformed value fails loudly at the
+    point of use naming the setting -- a typo like ``"30d"`` must not
+    silently mean "keep forever", which is exactly how a retention policy
+    rots.
+    """
+    from services import config as cfg
+
+    raw = (cfg.RAG_RETENTION_DAYS or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"rag_retention_days is not valid JSON: {exc.msg}",
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=500,
+            detail=f"rag_retention_days must be a JSON object of collection->days, got {type(parsed).__name__}",
+        )
+    out: dict[str, int] = {}
+    for name, value in parsed.items():
+        try:
+            days = int(value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"rag_retention_days[{name!r}] must be a whole number of days, got {value!r}",
+            ) from exc
+        if days <= 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"rag_retention_days[{name!r}] must be at least 1 day, got {days}",
+            )
+        out[str(name)] = days
+    return out
+
+
+def _maintenance_plan(user_id: str, retention: dict[str, int], now: int, only: set[str] | None = None):
+    """Compute what maintenance would remove, without deleting anything.
+
+    Returns ``(collections_report, ids_to_remove)``. A row is removable when
+    it duplicates a kept sibling (identical content without ``path``
+    metadata -- file chunks are path-identified, so identical text in two
+    files is two books, not one duplicated row), is expired against its
+    collection's retention, or has empty content. The survivor of a
+    duplicate group is the most-used row, then the oldest, so accumulated
+    ``usage_count`` stays with the row that has history.
+    """
+    names = sorted(
+        r["collection_name"]
+        for r in _conn().execute(
+            "SELECT DISTINCT collection_name FROM rag_items WHERE user_id = ?",
+            [user_id],
+        ).fetchall()
+    )
+    if only is not None:
+        names = [n for n in names if n in only]
+    report: dict[str, dict] = {}
+    remove: list[str] = []
+    for name in names:
+        rows = _conn().execute(
+            "SELECT id, content, metadata, usage_count, created_at FROM rag_items"
+            " WHERE collection_name = ? AND user_id = ?",
+            [name, user_id],
+        ).fetchall()
+        days = retention.get(name)
+        cutoff = now - days * 86400 if days else None
+        by_content: dict[str, list] = {}
+        dup_groups = 0
+        dup_ids: list[str] = []
+        expired_ids: list[str] = []
+        invalid_ids: list[str] = []
+        for row in rows:
+            content = (row["content"] or "").strip()
+            if not content:
+                invalid_ids.append(row["id"])
+                continue
+            try:
+                meta = json.loads(row["metadata"] or "{}")
+            except json.JSONDecodeError:
+                meta = {}
+            if cutoff is not None and (row["created_at"] or 0) < cutoff:
+                expired_ids.append(row["id"])
+            if "path" in meta:
+                continue
+            by_content.setdefault(content, []).append(row)
+        for group in by_content.values():
+            if len(group) < 2:
+                continue
+            dup_groups += 1
+            ordered = sorted(
+                group, key=lambda r: (-(r["usage_count"] or 0), r["created_at"] or 0)
+            )
+            dup_ids.extend(r["id"] for r in ordered[1:])
+        report[name] = {
+            "rows": len(rows),
+            "duplicate_groups": dup_groups,
+            "duplicate_rows": len(dup_ids),
+            "expired_rows": len(expired_ids),
+            "invalid_rows": len(invalid_ids),
+        }
+        remove.extend(dup_ids)
+        remove.extend(expired_ids)
+        remove.extend(invalid_ids)
+    # A row can be both expired and a duplicate; count deletions by row.
+    return report, list(dict.fromkeys(remove))
+
+
+@app.post("/rag/maintenance", dependencies=[Depends(require_internal)])
+async def maintenance_endpoint(payload: dict):
+    """Report or remove duplicate, expired and invalid rows for one user.
+
+    ``mode`` defaults to ``report``, which computes and returns counts while
+    deleting nothing: the report is the admin visibility -- read it first,
+    then re-send with ``mode="purge"`` to delete exactly what the report
+    listed. ``collections`` narrows the sweep (unknown names are refused,
+    not ignored). Expiry follows ``rag_retention_days``; collections the
+    setting does not name are never expired.
+    """
+    user_id = str(payload.get("user_id", "default")).lower()
+    mode = str(payload.get("mode", "report")).lower()
+    if mode not in ("report", "purge"):
+        raise HTTPException(status_code=400, detail="mode must be 'report' or 'purge'")
+    requested = payload.get("collections")
+    if requested is not None and (
+        not isinstance(requested, list)
+        or not all(isinstance(c, str) and c for c in requested)
+    ):
+        raise HTTPException(status_code=400, detail="collections must be a list of collection names")
+    retention = _retention_map()
+    only = None
+    if requested is not None:
+        present = {
+            r["collection_name"]
+            for r in _conn().execute(
+                "SELECT DISTINCT collection_name FROM rag_items WHERE user_id = ?",
+                [user_id],
+            ).fetchall()
+        }
+        unknown = set(requested) - present
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown collections for user {user_id}: {sorted(unknown)}",
+            )
+        only = set(requested)
+    report, remove = _maintenance_plan(user_id, retention, int(time.time()), only=only)
+    removed = 0
+    if mode == "purge" and remove:
+        _delete_items(remove)
+        removed = len(remove)
+    body: dict = {
+        "status": "SUCCESS",
+        "mode": mode,
+        "user_id": user_id,
+        "collections": report,
+        "totals": {
+            "collections": len(report),
+            "removable": len(remove),
+        },
+        "retention": retention,
+    }
+    if mode == "purge":
+        body["removed"] = removed
+    return body
 
 
 # ─────────────────────────────────────────────────────────────────────────────

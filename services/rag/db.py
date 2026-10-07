@@ -39,14 +39,16 @@ STRUCTURED_COLLECTIONS = {
 }
 
 
-def get_db_connection(db_path: str = RAG_DB_PATH) -> sqlite3.Connection:
+def get_db_connection(
+    db_path: str = RAG_DB_PATH, *, check_same_thread: bool = True
+) -> sqlite3.Connection:
     """Open a SQLite connection with WAL mode and the sqlite-vec extension.
 
     If the ``sqlite_vec`` extension cannot be loaded (e.g. Python's ``sqlite3``
     was built without extension support), the connection is still returned — the
     store layer will fall back to the numpy adapter which does not need it.
     """
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
 
     # 1. WAL mode: allow concurrent reads while writing.
