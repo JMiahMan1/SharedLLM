@@ -394,6 +394,7 @@ folder as an empty library, which is worse than saying nothing.
 | Extra translations | Family-supplied PDF/EPUB **or** the api.bible provider, declared in `corpus_manifest.json` and installed from Admin › Bible | Publisher text is read inside the household, never redistributed. The provider is configuration, not code, and needs a key before it is offered — an unconfigured provider is shown with the setting to set rather than hidden |
 | Primary translation | Manifest marks one translation `primary`; reading and the verse of the day both default to it | "Whichever translation sorts first" is not a decision anyone made. One marked translation makes the default explicit, and `default_version_code()` falls back to the richest installed rather than to a guess |
 | Study material (commentary, footnotes, introductions) | Separate `StudyNote` table, joined to verses on demand via `GET /study/notes`. A verse that carries notes is marked in the reader; the notes themselves load only when asked | A reading app that mixes a commentary into the text is worse at reading. Keeping them apart is what lets one reader serve both a plain KJV and a study NKJV |
+| A verse that has a note of your own | A mark of its own (`kind: "note"`, alongside `highlight`/`bookmark`) pointing at the Nextcloud path the note handler reported | Writing a note is not highlighting. A reader must be able to see which verses they have written about without opening each one, and the pointer must not be a guess at the filename — the server reports the path it actually wrote |
 | Several study Bibles per translation | Translation and study Bible are separate columns (`BibleVersion.code` vs `BibleEdition.code`); the reader picks which one explains the text | The Nelson and MacArthur study Bibles are both NKJV and disagree. Collapsing them into one `version_code` would make re-importing one delete the other's notes |
 | Notes from another translation | Opt-in `cross_version`, default **off**, remembered per user as `cross_version_notes`. Off means only notes written for the translation in hand; on adds the others, each labelled with its translation and study Bible | A note on the NIV wording is not a note on the NKJV wording. Merging them silently would put arguments about different words under the same verse. Off by default; the toggle names exactly which study Bibles it would add |
 | Study depth (Strong's/lexicon/interlinear) | blb.org deep links + ScriptTagger-style hover | BLB explicitly offers this; reproducing their content is not |
@@ -406,9 +407,9 @@ folder as an empty library, which is worse than saying nothing.
 | Family plans | New `PlanGroup` table (host + members, per-day per-member progress); discussion rides **Nextcloud Talk** via the typed chat envelope | Play happens where the family already is; no second inbox |
 | Quizzes/games | Templated deterministic generators as data (`services/bible/games/*.json`, like `family_games.py`); Jarvis-generated questions only when the server can verify the answer key against the corpus | A game that hallucinates a wrong answer breaks trust; the server is the validator |
 | Memorization | SRS-lite interval ladder + recall levels, per-verse state | Simple, explainable, no ML needed |
-| Jarvis study assist | Existing gateway `/v1/chat/completions` with a study system prompt; answers post-processed to resolve scripture references into chips | Reuses Raven/LLM plumbing; reference chips give the ScriptTagger experience |
+| Jarvis study assist | Existing gateway `/v1/chat/completions` with a study system prompt, called by the bible service. The prompt is **the passage and its `StudyNote` rows plus the reader's question** — nothing else — and the model is asked to say plainly when they do not answer. Limits refuse rather than truncate; failure is a 503 with the upstream's own words, never a placeholder answer | The answer can always be traced to something on screen, and a question the passage does not answer is a real answer rather than a hallucination. Reuses Raven/LLM plumbing, so the provider can change without a bible deploy |
 | Read-aloud | **Existing** `POST /execute/tts` (Kokoro + Edge-TTS) — `_expand_scripture_refs()` already narrates "John 3:16" as prose, and SSMD single- and double-pipe pauses give a good reading cadence. Gateway gains a thin `/api/bible/speak` proxy that returns cached WAV bytes | We own no new engine and no audio licenses; the one missing piece is a gateway route. "Play on the kitchen speaker" rides the existing `/execute/ha_service` `tts.piper` path |
-| Note storage | **Nextcloud, via the Notes handler.** `VerseMark.note` stores only a ref + the Nextcloud path; the body is written by the existing `/execute/note` handler into `Notes/{Title}.md` or `{category}/{Title}.md` | Bible notes are visible in Notes, searchable in RAG, shareable with the family folder, and editable by hand. Two copies of a note is how they drift apart |
+| Note storage | **Nextcloud, via the Notes handler.** The note body is written by the existing `/execute/note` handler into `Notes/{Title}.md` or `{category}/{Title}.md`; the `note` mark stores the path the handler reported (`note_path`) plus a one-line preview. If the server does not report a path, the verse is **not** marked and the reader is told, rather than being pointed at a filename the client guessed | Bible notes are visible in Notes, searchable in RAG, shareable with the family folder, and editable by hand. Two copies of a note is how they drift apart |
 | Sharing controls | Extend `ActivitySharingPanel` with a `bible` scope (4th checkbox next to `totals`/`workouts`/`achievements`) | Private by default; audience `circle`/`users` already enforced server-side |
 | Reminders | **Automation** daily job per user + **telemetry** `send_to_user` for delivery, in-app outbox as the durable record | No new notification infra; the 7pm nudge and the reminder are the same code path as every other notification |
 | Study memory | **RAG** ingest of promoted notes and study threads, with a stable citable `id` per lesson (`handlers/learning.py` pattern) | "Show me where we already talked about this" is the study superpower, and the assistant should not re-teach what the family already covered |
@@ -510,9 +511,11 @@ documented in [`docs/CALIBRE_LIBRARY.md`](CALIBRE_LIBRARY.md).
 ```
 UserBibleState        username PK          last_read {book,chapter,verse}, last_open_day,
                                            font_scale, line_height, theme(serif|sans), default_version,
+                                           default_edition, favorite_version, compare_version,
+                                           cross_version_notes, show_notes,
                                            read_aloud_voice, split_view(parallel|compare)
-VerseMark             id, username, ref, kind(highlight|bookmark), color, note_path(nextcloud),
-                                           note_preview, created_at, updated_at
+ VerseMark             id, username, ref, kind(highlight|bookmark|note), color,
+                                           note_path(nextcloud), note_preview, created_at, updated_at
 Plan                  id, slug, title, description, days JSON[{day, refs[], title, note}], duration, source(builtin|family), owner
 PlanProgress          username, plan_id, day, completed_at        (one row per completed day)
 PlanGroup             id, plan_id, host, started_on, status       (family plan)
@@ -632,7 +635,7 @@ opt-in scopes.
 | `GET /activity/feed?window=` | Opt-in activity of others (feed omits non-consented, never errors) |
 | `GET /study/notes?ref=&version=&kind=&edition=&cross_version=` | Study apparatus for a passage (commentary, footnotes, introductions), fetched on demand. `edition` picks which study Bible; `cross_version` (default off) adds notes written for other translations. Returns every installed edition and every other translation that carries notes, so the client can render the choices |
 | `GET /editions?version=` | Study Bibles installed for a translation, the default one, and which other translations carry notes |
-| `GET /study/ask?ref=&q=` | Jarvis study answer (streaming via gateway LLM path; references post-processed to chips) |
+| `POST /study/ask` (`{question, ref, version?, edition?, cross_version?}`) | **Jarvis study answer, grounded in what is on screen.** The server assembles the prompt from the passage's verses and its own `StudyNote` rows and asks the gateway LLM; the reader's question is the only free text. Refuses rather than truncating (empty question, >2,000 characters, >150 verses, >40 notes is a 400 naming the number). Only the reading event is recorded — `kind`, `ref`, `value`, `day` — **never the question**, so a study question cannot resurface in activity. Answered in the same voice as `GET /study/notes` (400 for the reader's mistake, 503 for the operator's) and **never a placeholder answer**: an unreachable model, an HTTP error, a non-JSON body or an empty reply each raise a named 503 carrying the upstream's own words. Gateway: `POST /api/bible/study/ask`, caller-scoped (no `user_id`), 300s timeout |
 | `GET /blb/link?ref=&tool=search\|lexicon\|concordance` | Pre-built blb.org deep URL (never proxies BLB content) |
 | `GET /voices` | Narration voices from the execution TTS engine; an absent engine is a 503 naming `EXECUTION_SVC_URL` |
 | `GET /narration?ref=&version=&voice=` | The passage as speech, cached per translation+reference+voice. Refuses rather than truncating: over 120 verses or 12,000 characters is a 400 naming the number |
@@ -745,25 +748,34 @@ outage is logged and never breaks a game in progress.
 
 ### Jarvis study assist
 
-- **Ask panel**: every Reader/Study surface has "Ask Jarvis about this
-  passage" → `GET /api/bible/study/ask?ref=&q=` (streaming). System
-  prompt constrains answers to the passage + cross-references, with three
-  explain-depths (child / teen / adult) selectable in UI. Each question
-  logs `assistant_ask`.
-- **Reference chips**: answers (and notes, and Jarvis chat anywhere) are
-  post-processed by a scripture-reference regex → tappable chips; tap
-  opens the reader at that ref; hover/tap-hold shows a popover with the
-  verse text (our ScriptTagger analog). Every chip carries a "Study at
-  Blue Letter Bible" link (deep URL from `/blb/link`).
-- **Intent engine**: route "read john 3", "quiz me on the beatitudes",
-  "what does this verse mean", "test me on my memory verses" to the
-  matching bible feature (existing sentence-transformer intent flow).
-- **Study aids Jarvis can generate** (server-validated): cross-reference
-  lists, discussion questions for a plan day, a quiz from any passage,
-  memory-verse suggestions from reading history, "explain like I'm 5".
-- **Fail-fast**: no LLM provider configured → the ask panel shows the
-  standard unconfigured-assistant message (same as everywhere else in the
-  app), never a canned answer.
+- **Ask panel** (shipped): a verse's action sheet has "Ask about this
+  verse" → `POST /api/bible/study/ask` with the question, the reference and
+  the translation in hand. The server assembles the prompt from **that
+  passage's verses and its own `StudyNote` rows** — the reader's question is
+  the only free text — and returns `verses_used` / `notes_used` so the panel
+  can say what the answer was built from. Turns are kept as a thread, so a
+  follow-up keeps the context. Each question logs `assistant_ask` with the
+  reference and **not** the question, so what a reader asked never leaves the
+  reader's own history.
+- **Three depths (child / teen / adult)** and reference chips are **not built
+  yet**: the shipped prompt is one voice and answers in plain prose. Chips
+  remain the plan (a scripture-reference regex over the answer → tappable
+  chips that open the reader at that ref, each with a "Study at Blue Letter
+  Bible" link from `/blb/link`).
+- **Limits refuse rather than truncate**: an empty question, over 2,000
+  characters, over 150 verses or over 40 notes is a 400 naming the number,
+  because a silently shortened passage would produce a confident answer about
+  different words.
+- **Still planned** (phases 6–7, not built): the intent engine routing "read
+  john 3" / "quiz me on the beatitudes" / "explain like I'm 5" into the
+  matching feature, and Jarvis *authoring* study aids — cross-reference lists,
+  plan-day discussion questions, a quiz from any passage — with the server
+  validating every generated answer key against the corpus before it is
+  offered.
+- **Fail-fast**: no gateway URL, an HTTP error, a non-JSON body, an
+  unreachable model or an empty reply each become a named 503 carrying the
+  upstream's own sentence. The panel shows it verbatim and keeps the question
+  in the box — never a canned answer.
 
 ## UI / UX architecture
 
@@ -852,10 +864,28 @@ images with photo backgrounds (camera-roll import is a later polish item).
   Study tab with the current passage pre-loaded rather than opening a
   second app).
 - **Verse action sheet** (tap / tap-hold): **Highlight** (colors),
-  **Bookmark**, **Note** (inline editor → Nextcloud), **Copy**,
+  **Bookmark**, **Note** (inline editor → Nextcloud, then the verse is
+  marked as having one), **Copy**,
   **Share** (native sheet via Capacitor → Verse Image card),
-  **Study notes**, **Study at BLB** (deep link), **Add to memory set**,
-  **Add to plan day**.
+  **Study notes**, **Ask about this verse** (Jarvis, grounded in this
+  passage), **Study at BLB** (deep link), **Add to memory set**,
+  **Add to plan day**. *(Highlight, bookmark, note, copy, share, study
+  notes, ask and the BLB link are shipped; the memory-set and plan-day rows
+  belong to phases 2 and 4.)*
+- **Your own notes reach back into the text** (shipped): a verse with a
+  written note carries its own glyph (`bible-verse-noted-...`, announced as
+  "Has your note"), and the action sheet offers **Open your note**, which
+  reads the body back from Nextcloud by the path the note handler reported.
+  If the server did not report a path, the verse is **not** marked and the
+  sheet says so — pointing a reader at a filename the client guessed would
+  be worse than showing nothing.
+- **Focus mode** (shipped, `components/bible/FocusReader.tsx`): a full-screen
+  reading page reachable from the reader header. It is a *way of looking at
+  the chapter*, not a second copy of it — the same verses, marks and
+  previous/next actions — so nothing can drift. Chrome fades out on a tap and
+  back in on the next, and the page tint follows the hour
+  (`components/bible/focusAmbience.ts`, a pure `ambienceFor(hour)` kept in its
+  own module so the component file exports only a component).
 - **Study notes** (`components/bible/BibleStudyNotes.tsx`) — the sheet's
   "Study notes" row opens a panel that asks `/study/notes` for *that verse*
   in *that translation*. Verses carrying material are marked in the reader
@@ -866,9 +896,9 @@ images with photo backgrounds (camera-roll import is a later polish item).
   (`Commentary · 12055`), and hiding a kind is a toggle rather than a
   reload. Chapter-level material (introductions, headings) is shown once
   above the verse notes. When the translation carries none — KJV, ASV,
-  WEB — the panel says so in one sentence and names
-  `python -m services.bible.import_epub --import-notes`, rather than
-  showing an empty box. It names the study Bible it actually loaded, and
+  WEB — the panel says so in one sentence pointing at **Admin › Bible**,
+  rather than showing an empty box or naming a command a reader cannot run.
+  It names the study Bible it actually loaded, and
   offers the two choices the reader owns:
 
   - **Study Bible** — chips appear only when more than one edition is
@@ -924,11 +954,15 @@ images with photo backgrounds (camera-roll import is a later polish item).
 
 **3. Study** (`components/bible/StudyPanel.tsx`)
 - Passage pane (any ref, parallel versions, cross-references list).
-- **Jarvis thread** scoped to the passage (`ChatPanel`-style bubbles,
-  streaming, reference chips inline, depth selector child/teen/adult,
-  "Generate quiz", "Suggest memory verse", "Discussion questions").
+- **Jarvis thread** scoped to the passage — **shipped as
+  `JarvisStudyThread.tsx`, reached from a verse's action sheet.** A thread of
+  turns, each answer built only from the passage and its study notes, with a
+  provenance line (`Read 1 verse and 3 notes`). Still planned: streaming,
+  reference chips inline, a depth selector (child/teen/adult), "Generate
+  quiz", "Suggest memory verse", "Discussion questions".
 - **BLB tools row**: Strong's/lexicon/concordance/dictionary buttons →
-  blb.org deep links (new tab on desktop, InAppBrowser on native).
+  blb.org deep links (new tab on desktop, InAppBrowser on native). *(The
+  per-verse BLB and interlinear links ship today; the tools row is planned.)*
 - Notes for the passage listed under the text; note editor with the
   reference chip composer.
 
@@ -1032,7 +1066,10 @@ src/components/bible/FamilyPlanBoard.tsx
 src/components/bible/StudyPanel.tsx
 src/components/bible/BibleStudyNotes.tsx           # commentary/footnotes per verse,
                                                     # study-Bible picker + cross-version
-src/components/bible/JarvisStudyThread.tsx
+src/components/bible/JarvisStudyThread.tsx       # ask about this passage: question,
+                                                 # thread, provenance, failures verbatim
+src/components/bible/FocusReader.tsx             # full-screen reading page
+src/components/bible/focusAmbience.ts            # hour -> page tint (pure function)
 src/components/bible/Memorize.tsx
 src/components/bible/RecallFlow.tsx
 src/components/bible/Play.tsx
@@ -1053,8 +1090,20 @@ src/components/admin/BibleAdminPanel.tsx         # Admin › Bible: catalogue,
 Tests: `src/pages/Bible.test.tsx` (including comparing two translations: the
 picker never offers the translation being read, the second column renders, a
 verse the second translation lacks says so, and turning the comparison off
-leaves the reader's own text alone),
-`src/components/bible/BibleStudyNotes.test.tsx`,
+leaves the reader's own text alone; and the Focus button opening the
+full-screen page),
+`src/components/bible/FocusReader.test.tsx` (chrome fades on a tap, prev/next,
+the loading line rather than a blank page, a highlight tinting its own verse
+and not its neighbour, and `ambienceFor` being a pure function of the hour),
+`src/test/ReferenceBarPhone.test.tsx` (the one-line phone header, the full
+controls absent until the sheet is opened, choosing a chapter closing it, and
+jsdom's default landing on the desktop bar),
+`src/components/bible/BibleStudyNotes.test.tsx` (including the note pointer
+using the path the server reported, and no pointer at all when none was
+reported),
+`services/bible/tests/test_bible_study_ask.py` (prompt assembly, every refusal
+by name, `_extract_answer` shapes, and a parametrised "no failure becomes an
+answer"),
 `services/bible/tests/test_bible_editions.py` (two study Bibles over one
 translation, cross-version gating, re-import scoping, recounting a stale note
 cache),
@@ -1183,14 +1232,14 @@ parity with the Bible App" passes on desktop **and** phone.
 
 | Phase | Scope | Definition of done |
 |---|---|---|
-| **0** Config + corpus + reading + study ✅ | `services/bible/` service (port 8010), compose + Caddy + `BRIDGE_BIBLE_SVC_URL` + Identity `GlobalSetting`s, reference resolver, `corpus_manifest.json`, PDF + EPUB importers, `StudyNote` table with the two-axis `BibleEdition` corpus, `migrations.py` for existing databases, `editions.py` CLI, gateway `/api/bible/*`, `/books`, `/versions`, `/passages`, `/search`, `/editions`, `/study/notes`, `/verse-of-day`, `/devotional`, `/marks`, `/state`, `/events`, `/stats`, `/streaks`, `/achievements`, `/activity/*`, `/blb/link`, `/daily`, `/narration`, `/voices`, `/admin/imports*`; `/bible` page (Read/Today/Progress), `bible_daily` dashboard widget, Android Verse-of-the-Day home-screen widget, `bible` sharing scope, Admin › Bible import surface, one primary translation, long-term per-chapter provider cache with cost estimate, request budget and one-book dry run; `bible` added to the image CI matrix | **Shipped.** Service boots in compose; corpus imported (KJV/ASV/WEB + NKJV with 44k study notes under the Nelson study Bible); multiple study Bibles per translation and opt-in notes from other translations both work end to end; every unconfigured path returns a message naming the setting; proxy is caller-scoped with the family 404 intact |
+| **0** Config + corpus + reading + study ✅ | `services/bible/` service (port 8010), compose + Caddy + `BRIDGE_BIBLE_SVC_URL` + Identity `GlobalSetting`s, reference resolver, `corpus_manifest.json`, PDF + EPUB importers, `StudyNote` table with the two-axis `BibleEdition` corpus, `migrations.py` for existing databases, `editions.py` CLI, gateway `/api/bible/*`, `/books`, `/versions`, `/passages`, `/search`, `/editions`, `/study/notes`, `/study/ask`, `/verse-of-day`, `/devotional`, `/marks`, `/state`, `/events`, `/stats`, `/streaks`, `/achievements`, `/activity/*`, `/blb/link`, `/daily`, `/narration`, `/voices`, `/admin/imports*`; `/bible` page (Read/Today/Progress), `bible_daily` dashboard widget, Android Verse-of-the-Day home-screen widget, `bible` sharing scope, Admin › Bible import surface, one primary translation, long-term per-chapter provider cache with cost estimate, request budget and one-book dry run; **the mobile reference sheet** (one-line passage header with prev/next, every other control in a sheet), **the `note` mark kind** with a verse-note glyph and read-back from Nextcloud, **Ask about this verse** (grounded Jarvis answers), **Focus mode** with hour-tinted chrome, `favorite_version`/`compare_version`/`show_notes` preferences; `bible` added to the image CI matrix | **Shipped.** Service boots in compose; corpus imported (KJV/ASV/WEB + NKJV with 44k study notes under the Nelson study Bible); multiple study Bibles per translation and opt-in notes from other translations both work end to end; every unconfigured path returns a message naming the setting; proxy is caller-scoped with the family 404 intact. Live-verified: `/study/ask` answered a John 3:16 question in 83s citing 1 verse and 3 notes |
 | **1** **The reader** (full parity checklist) | `BookPicker`, `ReaderToolbar`, `TypographyControls`, `CompareView`, HA speaker playback (read-aloud itself ships in Phase 0 via `BibleReadAloud.tsx`), `NoteEditor` → Nextcloud, `ContinueReadingCard`, `VerseImageCard` share, `ReferencePopover`, offline cache | A user opens the app and is reading, where they left off, on desktop and phone; marks/notes/position sync; chapters read offline; read-aloud speaks a chapter and states its errors honestly |
 | **2** Plans + daily rhythm | Plan model + built-in catalog, day completion, "catch me up", per-day reminders (automation + telemetry), plan-dashboard widget | Completing a plan day advances the plan, the streak, and fires the reminder; missed days are catchable |
 | **3** Achievements + points | Rules engine already shipped in Phase 0 (reading/streak rules); plan, memory and quiz rules land with those features; banking to `POST /api/geo/stars`, Talk announcement cards, `AchievementsPanel` reuse in Progress | Unlock → points land in the one ledger, `earned_on` is stable across re-reads, family card posts when configured |
 | **4** Family sharing | `PlanGroup` + family plan board, per-day discussion cards in Talk, in-chat Bible trivia (`services/games/bible_trivia.json`); the `bible` sharing scope already ships in Phase 0 | Non-consented user gets 404; feed omits; family plan board and Talk round work for members only |
 | **5** Memorization | Memory sets, recall flow, SRS ladder, challenges, due queue | Recall session advances levels; due queue respects intervals; due count drives a widget line |
 | **6** Quizzes + games | Generators, `QuizEngine`, daily quiz, leaderboard, Jarvis-authored (validated) questions, family leaderboard in cards | Daily quiz identical per family member; server rejects a bad generated batch (test); scores bank to geo |
-| **7** Jarvis study | Study panel, streaming ask, reference chips, intent routing, study-aid generation, **study memory** (RAG ingest with citable ids + `StudyMemorySearch`), **workspace export** (opt-in), 7pm nudge | Ask a question on a passage → streaming answer with chips; "where did we discuss this?" returns prior family notes with citations; export writes to the workspace when enabled |
+| **7** Jarvis study | Streaming ask, reference chips, depth selector (child/teen/adult), intent routing, study-aid generation with server-validated answer keys, **study memory** (RAG ingest with citable ids + `StudyMemorySearch`), **workspace export** (opt-in), 7pm nudge. *(The grounded ask panel ships in Phase 0; this phase adds streaming, chips and the rest.)* | Ask a question on a passage → streaming answer with chips; "where did we discuss this?" returns prior family notes with citations; export writes to the workspace when enabled |
 | **8** Polish | Verse images with camera-roll backgrounds, widget sizing pass, Android shortcuts, offline audio cache warming, quiet hours | Native share sheet verified; quiet hours honored |
 
 Each phase: co-located service tests + UI vitest + mobile layout check
