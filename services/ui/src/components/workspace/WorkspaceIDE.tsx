@@ -70,6 +70,11 @@ import { OdfViewer } from './viewers/OdfViewer';
 import { ExcelViewer } from './viewers/ExcelViewer';
 import { TerminalPane } from './viewers/TerminalPane';
 import { WorkspaceSecrets } from './WorkspaceSecrets';
+import {
+  readWorkspaceSession,
+  writeWorkspaceSession,
+  type WorkspaceSession,
+} from './workspaceSession';
 import { cn } from '../../lib/utils';
 import { useHaptics } from '../../hooks/useHaptics';
 import { Capacitor } from '@capacitor/core';
@@ -209,10 +214,17 @@ function FileCtxMenuItem({ icon, label, onClick, danger }: FileCtxMenuItemProps)
 }
 
 export default function WorkspaceIDE({ workspace, onClose, initialPath }: WorkspaceIDEProps) {
-  const [activeView, setActiveView] = useState<View>('explorer');
-  const [terminalOpen, setTerminalOpen] = useState(false);
-  const [terminalPosition, setTerminalPosition] = useState<'sidebar' | 'bottom'>('bottom');
-  const [terminalHeight, setTerminalHeight] = useState(250);
+  // Where the reader left off last time. Read once so the lazy initialisers
+  // below can use it; the open files are restored after the first render
+  // because re-opening one means fetching it.
+  const savedSession = useMemo(() => readWorkspaceSession(workspace.id), [workspace.id]);
+
+  const [activeView, setActiveView] = useState<View>(savedSession?.view ?? 'explorer');
+  const [terminalOpen, setTerminalOpen] = useState(savedSession?.terminalOpen ?? false);
+  const [terminalPosition, setTerminalPosition] = useState<'sidebar' | 'bottom'>(
+    savedSession?.terminalPosition ?? 'bottom',
+  );
+  const [terminalHeight, setTerminalHeight] = useState(savedSession?.terminalHeight ?? 250);
 
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -249,7 +261,7 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
     [workspace.capabilities],
   );
 
-  const [currentPath, setCurrentPath] = useState('.');
+  const [currentPath, setCurrentPath] = useState(savedSession?.currentPath ?? '.');
   const [entries, setEntries] = useState<WorkspaceFileEntry[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
 
@@ -304,7 +316,7 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
   }, [gitStatus]);
 
   const loadDir = useCallback(
-    async (path: string) => {
+    async (path: string): Promise<boolean> => {
       setLoadingFiles(true);
       try {
         const res = await api.listWorkspaceFiles(workspace.id, path, false, 1);
@@ -312,8 +324,10 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
         list.sort((a, b) => Number(b.is_dir) - Number(a.is_dir) || a.name.localeCompare(b.name));
         setEntries(list);
         setCurrentPath(path);
+        return true;
       } catch (e: unknown) {
         toast.error(`Failed to list files: ${apiErr(e)}`);
+        return false;
       } finally {
         setLoadingFiles(false);
       }
@@ -401,11 +415,16 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
 
   useEffect(() => {
     void (async () => {
-      await loadDir('.');
+      // Return to the folder they left, and fall back to the root if it has
+      // gone -- loadDir has already said why by then, so an empty pane is never
+      // left pointing at a folder that is not there.
+      const wanted = savedSession?.currentPath ?? '.';
+      const opened = await loadDir(wanted);
+      if (!opened && wanted !== '.') await loadDir('.');
       await refreshGit();
       await refreshBranches();
     })();
-  }, [loadDir, refreshGit, refreshBranches]);
+  }, [loadDir, refreshGit, refreshBranches, savedSession]);
 
   const [imageModels, setImageModels] = useState<string[]>([]);
   const [sdModel, setSdModel] = useState('');
@@ -695,6 +714,63 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
       await Promise.all([loadDir(dir), openByPath(initialPath)]);
     })();
   }, [workspace.id, initialPath, baseDirOf, loadDir, openByPath]);
+
+  // Re-open the files they had open. Every tab is re-read, which is what
+  // opening it would do, and an unsaved buffer is then laid back on top of the
+  // freshly read file so the typed text survives and "modified" still means
+  // modified rather than comparing against nothing.
+  const sessionRestoredRef = useRef(false);
+  useEffect(() => {
+    if (sessionRestoredRef.current) return;
+    sessionRestoredRef.current = true;
+    if (!savedSession || savedSession.tabs.length === 0) return;
+    void (async () => {
+      for (const tab of savedSession.tabs) {
+        await openByPath(tab.path);
+      }
+      for (const tab of savedSession.tabs) {
+        if (tab.content === undefined) continue;
+        setTabs((prev) =>
+          prev.map((open) =>
+            open.path === tab.path ? { ...open, content: tab.content as string, dirty: true } : open,
+          ),
+        );
+      }
+      if (savedSession.activeTab) setActiveTab(savedSession.activeTab);
+    })();
+  }, [openByPath, savedSession]);
+
+  // Save the session as it changes, so leaving the workspace -- by navigating
+  // away or by closing the IDE -- always leaves the latest state behind.
+  const sessionSnapshot = useMemo<WorkspaceSession>(
+    () => ({
+      view: activeView,
+      currentPath,
+      terminalOpen,
+      terminalPosition,
+      terminalHeight,
+      activeTab,
+      tabs: tabs
+        .filter((tab) => tab.kind !== 'terminal')
+        .map((tab) => ({
+          path: tab.path,
+          kind: tab.kind,
+          dirty: tab.dirty,
+          ...(tab.dirty ? { content: tab.content, language: tab.language } : {}),
+        })),
+    }),
+    [activeView, currentPath, terminalOpen, terminalPosition, terminalHeight, activeTab, tabs],
+  );
+  const sessionSavedRef = useRef(false);
+  useEffect(() => {
+    // The first pass is skipped so the empty render before the restore lands
+    // cannot overwrite the tabs that are about to be put back.
+    if (!sessionSavedRef.current) {
+      sessionSavedRef.current = true;
+      return;
+    }
+    writeWorkspaceSession(workspace.id, sessionSnapshot);
+  }, [workspace.id, sessionSnapshot]);
 
   // Revoke all blob/image URLs on unmount to prevent memory leaks.
   // Uses a ref updated in an effect so cleanup always sees the current tabs.

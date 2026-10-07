@@ -760,6 +760,7 @@ const Workspaces = () => {
 
       {ideWs && (
         <WorkspaceIDE
+          key={ideWs.id}
           workspace={ideWs}
           initialPath={ideInitialPath}
           onClose={() => {
