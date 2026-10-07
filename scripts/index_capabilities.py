@@ -47,6 +47,7 @@ def index_capabilities():
         "TVCastRequest": "Powers on a TV and casts media content.",
         "CalendarRequest": "Manages calendar events (list, add, delete, update).",
         "NoteRequest": "Manages personal notes and checklists.",
+        "CalibreRequest": "Read-only personal Calibre book library: list the shelf, search by title/author/tag words, fetch one book's metadata or its text (actions: list, search, get_book, fetch_text). No delete or write actions exist.",
         "TimerRequest": "Sets, lists, or deletes timers and alarms.",
         "TalkRequest": "Manages messaging, voice messages, and user presence via Nextcloud Talk.",
         "WebSearchRequest": "Performs a web search via the private search engine.",

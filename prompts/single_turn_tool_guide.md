@@ -62,7 +62,17 @@ Read or write files in user cloud storage (Nextcloud).
 
 ### ContextSearchRequest
 Search semantic memories, documents, and indexed knowledge.
-- Fields: `tool`, `query`.
+- Fields: `tool`, `query`, `collection_name` (REQUIRED — an omitted collection is refused, not guessed: `calibre_files` for the book library, `nextcloud_files` for files, `system_learnings` for past lessons, `ha_entities` for the house), optional `k` (number of results, default 5).
+- Example: `{"tool": "ContextSearchRequest", "query": "Macduff trusting God in trial", "collection_name": "calibre_files"}`
+
+### CalibreRequest
+Read-only access to the personal Calibre book library. Use it when you need a specific book's metadata or its actual text; for short matching passages across many books, prefer ContextSearchRequest with `collection_name` `calibre_files`.
+- Fields: `tool`, `action` (`list`, `search`, `get_book`, `fetch_text`).
+- Optional: `query` (words from a title, author, or tag), `book_id`, `path`, `limit` (1-100), `max_chars` (500-100000).
+- Examples:
+  - `{"tool": "CalibreRequest", "action": "search", "query": "wesley sermons"}`
+  - `{"tool": "CalibreRequest", "action": "fetch_text", "book_id": 617, "max_chars": 20000}`
+- This tool has NO delete or write action — never invent one. If a fetch is refused because a book is stored only as PDF, say so instead of guessing its text.
 
 ### ClimateRequest
 Control thermostat/climate.

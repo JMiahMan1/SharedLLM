@@ -72,14 +72,15 @@ def _collection_header(collection: str) -> str:
     return COLLECTION_HEADERS.get(collection, collection.upper())
 
 
-_GROUNDED_OMITTED_TOOLS = ("### ContextSearchRequest", "### WebSearchRequest")
+_GROUNDED_OMITTED_TOOLS = ("### ContextSearchRequest", "### WebSearchRequest", "### CalibreRequest")
 
-_GROUNDED_OMITTED_ACTIONS = ("contextsearchrequest", "websearchrequest")
+_GROUNDED_OMITTED_ACTIONS = ("contextsearchrequest", "websearchrequest", "calibrerequest")
 
 _GROUNDING_NOTICE = (
-    "Note: retrieval and web-search tools are deliberately omitted for this "
-    "turn. The retrieved context for this question is already included below, "
-    "so answer from it and cite it rather than looking anything up.\n\n"
+    "Note: retrieval, library-fetch, and web-search tools are deliberately "
+    "omitted for this turn. The retrieved context for this question is already "
+    "included below, so answer from it and cite it rather than looking "
+    "anything up.\n\n"
 )
 
 

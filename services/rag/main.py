@@ -470,6 +470,12 @@ _PROTOCOL_LESSONS: list[dict] = [
         "rule": "Multi-source tasks that cross domains: query Home Assistant for current state (temperature, device status), fetch related web information with WebSearchRequest, then synthesize everything into a combined workspace artifact (status report, dashboard JSON, etc.). Pull resources from Nextcloud as needed. Each domain feeds into the next — show the logical chain in your plan and Apply: citations.",
         "tags": ["protocol", "orchestration", "ha", "web", "resources"],
     },
+    {
+        "id": "lesson-proto-library",
+        "topic": "Raven protocol: answer book questions from the Calibre library",
+        "rule": "For questions about books, authors, sermons, commentaries, or theology, search the household's own library FIRST: ContextSearchRequest with collection_name 'calibre_files' returns matching passages (cite them as `Source: Title by Author, chapter`), and CalibreRequest (actions: list, search, get_book, fetch_text) finds a book or reads its text. Only fall back to WebSearchRequest when the library plainly has nothing on the subject — a web answer about a book this shelf holds is a wrong-source answer.",
+        "tags": ["protocol", "library", "calibre", "research"],
+    },
 ]
 
 
