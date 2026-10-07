@@ -62,3 +62,14 @@ describe('LocationContext stationary upload', () => {
     expect(source).toMatch(/isInsideGeofence\(/);
   });
 });
+
+describe('LocationContext uploads the fix time and filters noisy fixes', () => {
+  it('sends the fix time, not the send time', () => {
+    expect(source).toMatch(/timestamp: \(fixTs \?\? Date\.now\(\)\) \/ 1000/);
+    expect(source).toMatch(/syncToGateway\(latitude, longitude, accuracy \?\? null, speedMps, fixTs\)/);
+  });
+  it('runs every fix through classifyFix before uploading', () => {
+    expect(source).toMatch(/const verdict = classifyFix\(/);
+    expect(source).toMatch(/if \(verdict !== 'ok'\) return;/);
+  });
+});

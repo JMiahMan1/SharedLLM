@@ -375,6 +375,15 @@ def _format_duration(seconds: float) -> str:
     return f"{hours} hr {rem_mins} min" if hours == 1 else f"{hours} hrs {rem_mins} min"
 
 
+#: Fixes less accurate than this (metres) are not breadcrumbs. Phones mix
+#: GPS fixes (a few metres) with network/cell fixes (100-1000 m, often a
+#: fixed point well off the road), and a route drawn through both zig-zags
+#: across the map; in production one drive alternated between a GPS cluster
+#: and a network cluster 800 m away. The current position (Identity) still
+#: takes every fix.
+MAX_BREADCRUMB_ACCURACY_M = 100.0
+
+
 async def record_point(
     entity_id: str,
     lat: float,
@@ -387,6 +396,9 @@ async def record_point(
 ):
     r = await get_redis()
     if not r:
+        return
+    if accuracy is not None and accuracy > MAX_BREADCRUMB_ACCURACY_M:
+        log.debug(f"[Geo] Not a breadcrumb: {accuracy:.0f} m fix for {entity_id}")
         return
     ts = timestamp or time.time()
     clean_id = entity_id.split(".")[-1].lower()
@@ -1765,6 +1777,16 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
     active_key = f"geo:active_trip:{clean_user}"
     active_raw = await r.get(active_key)
 
+    # A fix older than the trip's newest one arrived late (phones flush a
+    # backlog of fixes at once); it must not move the trip backwards or be
+    # measured against a newer position.
+    if active_raw:
+        try:
+            if ts < float(json.loads(active_raw).get("last_point_time", 0)) - 1.0:
+                return
+        except (ValueError, TypeError):
+            pass
+
     # 0. An active trip that went idle (>= 5 min) belongs to the previous
     #    drive — finalize it before considering new movement, otherwise a
     #    later drive keeps advancing the stale trip.
@@ -1794,6 +1816,7 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
                 "user_name": clean_user.title(),
                 "start_time": ts,
                 "last_moving_time": ts,
+                "last_point_time": ts,
                 "last_lat": lat,
                 "last_lon": lon,
                 "start_location": dict(start_loc),
@@ -1820,6 +1843,7 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
                     trip["last_lon"] = lon
                 trip["top_speed_mph"] = max(trip.get("top_speed_mph", 0.0), round(spd_mph, 1))
                 trip["last_moving_time"] = ts
+                trip["last_point_time"] = ts
                 # Only re-resolve destination when the point moves ~50 m+ so we
                 # don't call Nominatim on every breadcrumb.
                 prev_end = trip.get("end_location") or {}
