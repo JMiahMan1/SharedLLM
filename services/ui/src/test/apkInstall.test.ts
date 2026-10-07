@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { downloadAndInstallApk, getApkInstallPermission, openApkInstallSettings } from '../lib/appUpdater';
+import { downloadAndInstallApk, getApkInstallPermission, openApkInstallSettings, hasVerifiedInstallFlow, __resetApkInstallPlugin } from '../lib/appUpdater';
 
 const mocks = vi.hoisted(() => ({
   isNative: vi.fn(() => true),
@@ -28,6 +28,7 @@ const plugin = () => ({
 describe('APK install path', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetApkInstallPlugin();
     mocks.isNative.mockReturnValue(true);
     mocks.registerPlugin.mockReturnValue(plugin());
     mocks.canInstall.mockResolvedValue({ allowed: true });
@@ -116,5 +117,34 @@ describe('APK install path', () => {
   it('reports failure to open install settings instead of pretending', async () => {
     mocks.openInstallSettings.mockRejectedValue(new Error('no activity'));
     await expect(openApkInstallSettings()).resolves.toBe(false);
+  });
+
+  // The real plugin is a Proxy that answers every property, `then` included.
+  // Returned from an async function (or awaited) it is taken for a promise and
+  // waited on forever, which hung every install step on the phone.
+  describe('with a plugin that behaves like Capacitor\'s Proxy', () => {
+    const capacitorLike = (methods: Record<string, unknown>) =>
+      new Proxy({}, {
+        get: (_t, prop: string) =>
+          prop in methods ? methods[prop] : () => new Promise(() => {}),  // an unimplemented native call never settles
+      });
+
+    it('still answers the permission check', async () => {
+      mocks.registerPlugin.mockReturnValue(capacitorLike({ canInstall: mocks.canInstall }));
+      const result = await Promise.race([
+        getApkInstallPermission(),
+        new Promise((resolve) => setTimeout(() => resolve('hung'), 200)),
+      ]);
+      expect(result).toEqual({ allowed: true, known: true });
+    });
+
+    it('reads the verified download from the plugin headers, not the Proxy', async () => {
+      mocks.registerPlugin.mockReturnValue(capacitorLike({}));
+      vi.stubGlobal('Capacitor', { PluginHeaders: [{ name: 'ApkInstall', methods: [{ name: 'canInstall' }, { name: 'installApk' }] }] });
+      expect(await hasVerifiedInstallFlow()).toBe(false);  // an APK without downloadApk
+      vi.stubGlobal('Capacitor', { PluginHeaders: [{ name: 'ApkInstall', methods: [
+        { name: 'downloadApk' }, { name: 'installDownloadedApk' }, { name: 'canInstall' }] }] });
+      expect(await hasVerifiedInstallFlow()).toBe(true);
+    });
   });
 });
