@@ -15,6 +15,24 @@ interface StreamEvent {
   data: string;
 }
 
+/**
+ * The text of one event, whatever arrived.
+ *
+ * The server flattens streamed content parts before it stores them, so this is
+ * normally already a string. It is still rendered defensively: a mission log is
+ * read while a mission is running, and a shape the viewer did not expect used to
+ * take the whole panel down with React error #31 ("objects are not valid as a
+ * React child") instead of showing one odd line.
+ */
+function logText(data: unknown): string {
+  if (typeof data === 'string') return data;
+  if (data && typeof data === 'object' && 'text' in data) {
+    const text = (data as { text?: unknown }).text;
+    if (typeof text === 'string') return text;
+  }
+  return typeof data === 'object' && data !== null ? JSON.stringify(data) : String(data);
+}
+
 export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLiveTraceProps) {
   const [logs, setLogs] = useState<StreamEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -29,7 +47,7 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
       allLogs.push({ type: 'system', data: '--- MISSION RESULT ---' });
       allLogs.push({ type: 'result_success', data: missionResult });
     }
-    const content = allLogs.map(l => `[${new Date().toISOString().split('T')[1].slice(0, -1)}] [${l.type}] ${l.data}`).join('\n');
+    const content = allLogs.map(l => `[${new Date().toISOString().split('T')[1].slice(0, -1)}] [${l.type}] ${logText(l.data)}`).join('\n');
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -142,7 +160,7 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
   const renderLogData = (log: StreamEvent) => {
     if (log.type === 'action_payload') {
       try {
-        const parsed = JSON.parse(log.data);
+        const parsed = JSON.parse(logText(log.data));
         return (
           <div className="pl-6 mt-1 mb-2">
             <div className="bg-white/5 border-l-2 border-yellow-500/50 p-3 rounded-r text-xs font-mono">
@@ -156,7 +174,7 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
         return (
           <div className="pl-6 mt-1 mb-2">
             <div className="bg-white/5 border-l-2 border-yellow-500/50 p-2 rounded-r text-xs">
-              {log.data}
+              {logText(log.data)}
             </div>
           </div>
         );
@@ -164,10 +182,10 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
     }
 
     if (log.type === 'reasoning') {
-      return <span className="italic opacity-80">{log.data}</span>;
+      return <span className="italic opacity-80">{logText(log.data)}</span>;
     }
 
-    return <span>{log.data}</span>;
+    return <span>{logText(log.data)}</span>;
   };
 
   const isTerminalState = missionStatus === 'completed' || missionStatus === 'failed' || missionStatus === 'cancelled';
