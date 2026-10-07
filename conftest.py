@@ -117,6 +117,7 @@ _TEST_ENV_DEFAULTS = {
     # Third-party integrations — dummies. The live URLs and tokens belong in
     # .env, never in a test run.
     "HA_URL": "http://localhost:8123",
+    "OSRM_URL": "",
     "HA_TOKEN": "test-ha-token",
     "ABS_URL": "http://localhost:13378/",
     "ABS_API_KEY": "test-abs-key",

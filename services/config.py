@@ -77,6 +77,9 @@ BIBLE_SVC_URL = _net_url("BIBLE", "http://bible:8010")
 CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
 SEARXNG_URL = os.getenv(f"{NETWORK_MODE.upper()}_SEARXNG_URL") or os.getenv("SEARXNG_URL", "")
 HA_URL = os.getenv("HA_URL")
+#: Self-hosted OSRM for snapping trip routes to roads (services/geo/map_match.py).
+#: Unset: routes are served as raw breadcrumbs.
+OSRM_URL = os.getenv("OSRM_URL")
 HA_TOKEN = os.getenv("HA_TOKEN")
 NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
 NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
