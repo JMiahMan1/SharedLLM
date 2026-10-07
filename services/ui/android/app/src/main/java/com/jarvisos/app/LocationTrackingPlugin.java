@@ -2,7 +2,10 @@ package com.jarvisos.app;
 
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
+import android.provider.Settings;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -60,6 +63,49 @@ public class LocationTrackingPlugin extends Plugin {
         } catch (Exception e) {
             call.reject(e.getMessage() != null ? e.getMessage() : "Could not stop tracking", e);
         }
+    }
+
+    /**
+     * Whether Android's battery optimisation leaves this app alone. While it
+     * does not, Doze stops location and network for hours with the screen off
+     * and the phone still -- the family map then shows someone "last seen"
+     * the evening before.
+     */
+    @PluginMethod
+    public void batteryUnrestricted(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("unrestricted", isUnrestricted());
+        call.resolve(ret);
+    }
+
+    /** Ask Android (its own dialog) to exempt the app from battery optimisation. */
+    @PluginMethod
+    public void requestBatteryUnrestricted(PluginCall call) {
+        if (isUnrestricted()) {
+            JSObject ret = new JSObject();
+            ret.put("unrestricted", true);
+            call.resolve(ret);
+            return;
+        }
+        try {
+            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+        } catch (Exception e) {
+            // Some builds hide that dialog: open the list instead.
+            Intent list = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+            list.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(list);
+        }
+        JSObject ret = new JSObject();
+        ret.put("unrestricted", false);
+        call.resolve(ret);
+    }
+
+    private boolean isUnrestricted() {
+        PowerManager pm = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+        return pm != null && pm.isIgnoringBatteryOptimizations(getContext().getPackageName());
     }
 
     @PluginMethod
