@@ -13,7 +13,7 @@ import contextlib
 import logging
 import os
 
-from aiohttp import BasicAuth, ClientSession, ClientTimeout, TCPConnector
+from aiohttp import BasicAuth, ClientSession, ClientTimeout, DummyCookieJar, TCPConnector
 
 log = logging.getLogger("execution.http")
 
@@ -178,7 +178,13 @@ async def get_session(host: str, verify: bool = True) -> ClientSession:
     if previous is not None:
         with contextlib.suppress(Exception):
             await previous[0].close()
-    session = ClientSession(connector=connector)
+    # No cookie jar. One session per host is shared by every user, and
+    # Nextcloud answers each request with session cookies; kept, they rode
+    # along on the next user's request beside its own Basic auth, so a
+    # request could run inside someone else's Nextcloud session (seen as
+    # chat thumbnails 404ing for the person who could see them). Every caller
+    # here sends its own credentials, so cookies are never needed.
+    session = ClientSession(connector=connector, cookie_jar=DummyCookieJar())
     _SESSION_CACHE[cache_key] = (session, now)
     return session
 

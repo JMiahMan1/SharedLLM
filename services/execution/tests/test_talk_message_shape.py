@@ -164,3 +164,18 @@ async def test_a_file_path_cannot_climb_out_of_the_users_files(monkeypatch):
         TalkFileRequest(user_context={"user": "jeremiah"}, path="Talk/../../etc/passwd")
     )
     assert status == 400
+
+
+async def test_pooled_sessions_keep_no_cookies():
+    """Sessions are shared by every user of a host; a cookie jar let one
+    user's Nextcloud session ride along on another user's request."""
+    from aiohttp import DummyCookieJar
+
+    from services.execution import http_client
+
+    session = await http_client.get_session("cloud.example.test")
+    try:
+        assert isinstance(session.cookie_jar, DummyCookieJar)
+    finally:
+        await session.close()
+        http_client._SESSION_CACHE.clear()
