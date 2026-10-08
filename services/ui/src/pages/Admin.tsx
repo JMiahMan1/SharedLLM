@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import SecretInput from '../components/ui/SecretInput';
+import SystemValueHint from '../components/ui/SystemValueHint';
 import AccountAuditPanel from '../components/admin/AccountAuditPanel';
 import { INTEGRATIONS, credentialPayload, inUse, missingFields, prefill, validateIntegrations, type Defaults } from '../lib/credentialForm';
 import { api } from '../services/api';
@@ -167,6 +168,8 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
   mass_token: '',
 });
 
+const NO_SERVICE_DEFAULTS = { urls: {} as Record<string, string | null>, source: {} as Record<string, string> };
+
 /** Every integration field the dialog edits, from the shared integration list. */
 const CREDENTIAL_KEYS = INTEGRATIONS.flatMap((i) => i.fields.map((f) => f.key));
 
@@ -183,7 +186,7 @@ const Admin = () => {
   const [userForm, setUserForm] = useState<UserFormState>(emptyUserForm);
   const [clearIntegrations, setClearIntegrations] = useState<string[]>([]);
   const [prefilled, setPrefilled] = useState<Defaults>({});
-  const { data: serviceDefaults = {} } = useQuery({
+  const { data: serviceDefaults = NO_SERVICE_DEFAULTS } = useQuery({
     queryKey: ['service-defaults'],
     queryFn: () => api.getServiceDefaults(),
     staleTime: 300_000,
@@ -621,7 +624,7 @@ const Admin = () => {
   const openCreateUser = () => {
     setEditingUser(null);
     setClearIntegrations([]);
-    const start = prefill(emptyUserForm, serviceDefaults);
+    const start = prefill(emptyUserForm, serviceDefaults.urls);
     setUserForm(start.values);
     setPrefilled(start.prefilled);
     setIsUserModalOpen(true);
@@ -631,7 +634,7 @@ const Admin = () => {
     setClearIntegrations([]);
     setEditingUser(user);
     // Blank addresses start from the household's; the Nextcloud username from theirs.
-    const start = prefill(toUserForm(user), serviceDefaults, user.username);
+    const start = prefill(toUserForm(user), serviceDefaults.urls, user.username);
     setUserForm(start.values);
     setPrefilled(start.prefilled);
     setIsUserModalOpen(true);
@@ -1989,8 +1992,18 @@ const Admin = () => {
                                 onChange={(event) => setUserForm((current) => ({ ...current, [field.key]: event.target.value }))}
                                 className="glass-input w-full"
                               />
-                              {prefilled[field.key] !== undefined && userForm[field.key as keyof UserFormState] === prefilled[field.key] && (
-                                <span className="block text-[10px] text-slate-500">Prefilled from the household setup</span>
+                              {serviceDefaults.urls[field.key] ? (
+                                <SystemValueHint
+                                  value={String(userForm[field.key as keyof UserFormState] ?? '')}
+                                  systemValue={String(serviceDefaults.urls[field.key])}
+                                  source={serviceDefaults.source[field.key]}
+                                  onReset={() => setUserForm((current) => ({ ...current, [field.key]: String(serviceDefaults.urls[field.key]) }))}
+                                />
+                              ) : (
+                                prefilled[field.key] !== undefined &&
+                                userForm[field.key as keyof UserFormState] === prefilled[field.key] && (
+                                  <span className="block text-[10px] text-slate-500">Suggested from the account name</span>
+                                )
                               )}
                             </>
                           )}
