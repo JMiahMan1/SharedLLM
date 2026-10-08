@@ -159,12 +159,18 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
     const total = Object.values(summaries).reduce((s, sum) => s + (sum.current_power_w || 0), 0);
     return Object.entries(summaries)
       .map(([entityId, sum]) => {
-        const current = sum.current_power_w || 0;
+        // Reported watts arrive as raw floats from the meters, and a row that
+        // reads "2.8517875717626W" is unreadable next to the whole-watt cards
+        // above it. Only the displayed number is rounded; the share is worked
+        // out from the real figure so a rounded numerator cannot push the
+        // percentages past a hundred.
+        const raw = sum.current_power_w || 0;
+        const current = Math.round(raw);
         return {
           entityId,
           name: entityId.split('.').slice(1).join('.') || entityId,
           current,
-          pct: total > 0 ? Math.round((current / total) * 100) : 0,
+          pct: total > 0 ? Math.round((raw / total) * 100) : 0,
         };
       })
       .sort((a, b) => b.current - a.current);
