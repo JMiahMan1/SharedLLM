@@ -1165,6 +1165,20 @@ def list_users(session: Session = Depends(get_session), _: bool = Depends(requir
     return session.exec(select(User)).all()
 
 
+# The service addresses a new login form starts from. Addresses only: they
+# are the same for the whole household and are not secrets.
+SERVICE_URL_FIELDS = ("ha_url", "nextcloud_url", "mass_url", "audiobookshelf_url", "github_url", "gitlab_url", "git_url")
+
+
+@app.get("/api/users/service-defaults")
+def service_defaults(session: Session = Depends(get_session), _caller: User = Depends(require_api_key)):
+    """The household's service URLs (from the system default user), so a login
+    form can be prefilled. Any signed-in user may read them; no credential is
+    included."""
+    owner = _system_default_user(session)
+    return {field: getattr(owner, field, None) for field in SERVICE_URL_FIELDS} if owner else {}
+
+
 @app.get("/api/users/sharing-recipients", response_model=list[ShareRecipient])
 def list_sharing_recipients(
     session: Session = Depends(get_session),

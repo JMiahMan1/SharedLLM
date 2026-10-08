@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INTEGRATIONS, credentialPayload, missingFields, validateIntegrations } from './credentialForm';
+import { INTEGRATIONS, credentialPayload, missingFields, prefill, validateIntegrations } from './credentialForm';
 
 const nextcloud = INTEGRATIONS.find((i) => i.id === 'nextcloud')!;
 const abs = INTEGRATIONS.find((i) => i.id === 'audiobookshelf')!;
@@ -32,5 +32,32 @@ describe('credential form rules', () => {
     expect(missingFields(abs, { audiobookshelf_url: 'u', audiobookshelf_api_key: 'k' }, none)).toEqual([]);
     expect(missingFields(abs, { audiobookshelf_url: 'u', audiobookshelf_user: 'a', audiobookshelf_pass: 'p' }, none)).toEqual([]);
     expect(missingFields(abs, { audiobookshelf_url: 'u' }, none)).toEqual(['Audiobookshelf API Key']);
+  });
+});
+
+describe('prefilled household URLs', () => {
+  const defaults = { nextcloud_url: 'https://cloud.example', ha_url: 'https://ha.example' };
+
+  it('fills blank addresses and suggests the Nextcloud username, leaving typed values alone', () => {
+    const { values, prefilled } = prefill({ nextcloud_url: '', nextcloud_user: '', ha_url: 'https://mine' }, defaults, 'michele');
+    expect(values).toEqual({ nextcloud_url: 'https://cloud.example', nextcloud_user: 'michele', ha_url: 'https://mine' });
+    expect(prefilled).toEqual({ nextcloud_url: 'https://cloud.example', nextcloud_user: 'michele' });
+  });
+
+  it('a prefilled URL alone is not a login anyone asked for', () => {
+    const { values, prefilled } = prefill({ nextcloud_url: '', nextcloud_user: '', nextcloud_pass: '' }, defaults, 'michele');
+    expect(missingFields(nextcloud, values, none, prefilled)).toEqual([]);
+    expect(credentialPayload(values, ['nextcloud_url', 'nextcloud_user', 'nextcloud_pass'], [], { prefilled })).toEqual({});
+  });
+
+  it('once a password is typed, the prefilled URL and username are saved with it', () => {
+    const { values, prefilled } = prefill({ nextcloud_url: '', nextcloud_user: '', nextcloud_pass: '' }, defaults, 'michele');
+    const typed = { ...values, nextcloud_pass: 'app-pw' };
+    expect(missingFields(nextcloud, typed, none, prefilled)).toEqual([]);
+    expect(credentialPayload(typed, ['nextcloud_url', 'nextcloud_user', 'nextcloud_pass'], [], { prefilled })).toEqual({
+      nextcloud_url: 'https://cloud.example',
+      nextcloud_user: 'michele',
+      nextcloud_pass: 'app-pw',
+    });
   });
 });

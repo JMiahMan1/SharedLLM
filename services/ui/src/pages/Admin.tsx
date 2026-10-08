@@ -38,7 +38,7 @@ import {
 import toast from 'react-hot-toast';
 import SecretInput from '../components/ui/SecretInput';
 import AccountAuditPanel from '../components/admin/AccountAuditPanel';
-import { INTEGRATIONS, credentialPayload, inUse, missingFields, validateIntegrations } from '../lib/credentialForm';
+import { INTEGRATIONS, credentialPayload, inUse, missingFields, prefill, validateIntegrations, type Defaults } from '../lib/credentialForm';
 import { api } from '../services/api';
 import type {
   DeviceAssignment,
@@ -182,6 +182,12 @@ const Admin = () => {
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [userForm, setUserForm] = useState<UserFormState>(emptyUserForm);
   const [clearIntegrations, setClearIntegrations] = useState<string[]>([]);
+  const [prefilled, setPrefilled] = useState<Defaults>({});
+  const { data: serviceDefaults = {} } = useQuery({
+    queryKey: ['service-defaults'],
+    queryFn: () => api.getServiceDefaults(),
+    staleTime: 300_000,
+  });
   const [deviceId, setDeviceId] = useState('');
   const [deviceUsername, setDeviceUsername] = useState('');
   const [settingsDrafts, setSettingsDrafts] = useState<Record<string, string>>({});
@@ -346,7 +352,10 @@ const Admin = () => {
         full_name: form.full_name,
         is_admin: form.is_admin,
         password: form.password || undefined,
-        ...credentialPayload(form as unknown as Record<string, unknown>, CREDENTIAL_KEYS, editingUser ? clear : []),
+        ...credentialPayload(form as unknown as Record<string, unknown>, CREDENTIAL_KEYS, editingUser ? clear : [], {
+          saved: new Set(editingUser?.saved_credentials ?? []),
+          prefilled,
+        }),
       };
 
       if (editingUser) {
@@ -611,14 +620,20 @@ const Admin = () => {
 
   const openCreateUser = () => {
     setEditingUser(null);
-    setUserForm(emptyUserForm);
+    setClearIntegrations([]);
+    const start = prefill(emptyUserForm, serviceDefaults);
+    setUserForm(start.values);
+    setPrefilled(start.prefilled);
     setIsUserModalOpen(true);
   };
 
   const openEditUser = (user: UserProfile) => {
     setClearIntegrations([]);
     setEditingUser(user);
-    setUserForm(toUserForm(user));
+    // Blank addresses start from the household's; the Nextcloud username from theirs.
+    const start = prefill(toUserForm(user), serviceDefaults, user.username);
+    setUserForm(start.values);
+    setPrefilled(start.prefilled);
     setIsUserModalOpen(true);
   };
 
@@ -1931,7 +1946,7 @@ const Admin = () => {
               const saved = new Set(editingUser?.saved_credentials ?? []);
               const removing = clearIntegrations.includes(integration.id);
               const configured = Boolean(editingUser) && inUse(integration, editingUser as unknown as Record<string, unknown>, saved);
-              const missing = removing ? [] : missingFields(integration, userForm as unknown as Record<string, unknown>, saved);
+              const missing = removing ? [] : missingFields(integration, userForm as unknown as Record<string, unknown>, saved, prefilled);
               return (
                 <fieldset key={integration.id} className={`rounded-2xl border p-4 ${removing ? 'border-rose-400/30 bg-rose-500/5' : 'border-white/10'}`}>
                   <legend className="flex items-center gap-3 px-1 text-xs font-black uppercase tracking-widest text-slate-400">
@@ -1966,13 +1981,18 @@ const Admin = () => {
                               onChange={(value) => setUserForm((current) => ({ ...current, [field.key]: value }))}
                             />
                           ) : (
-                            <input
-                              type="text"
-                              value={String(userForm[field.key as keyof UserFormState] ?? '')}
-                              aria-label={field.label}
-                              onChange={(event) => setUserForm((current) => ({ ...current, [field.key]: event.target.value }))}
-                              className="glass-input w-full"
-                            />
+                            <>
+                              <input
+                                type="text"
+                                value={String(userForm[field.key as keyof UserFormState] ?? '')}
+                                aria-label={field.label}
+                                onChange={(event) => setUserForm((current) => ({ ...current, [field.key]: event.target.value }))}
+                                className="glass-input w-full"
+                              />
+                              {prefilled[field.key] !== undefined && userForm[field.key as keyof UserFormState] === prefilled[field.key] && (
+                                <span className="block text-[10px] text-slate-500">Prefilled from the household setup</span>
+                              )}
+                            </>
                           )}
                         </label>
                       ))}
@@ -2003,7 +2023,7 @@ const Admin = () => {
                 }
                 const saved = new Set(editingUser?.saved_credentials ?? []);
                 const keep = INTEGRATIONS.filter((i) => !clearIntegrations.includes(i.id)).map((i) => i.id);
-                const problems = validateIntegrations(userForm as unknown as Record<string, unknown>, saved, keep);
+                const problems = validateIntegrations(userForm as unknown as Record<string, unknown>, saved, keep, prefilled);
                 if (problems.length) {
                   toast.error(`Finish or clear these logins first. ${problems.join('; ')}`);
                   return;

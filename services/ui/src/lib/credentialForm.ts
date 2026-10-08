@@ -98,23 +98,51 @@ export function isSecretKey(key: string): boolean {
 
 type Values = Record<string, unknown>;
 
+/** Values a form starts from (household URLs, a suggested username). */
+export type Defaults = Record<string, string | null | undefined>;
+
+/**
+ * Fill blank address fields from the household defaults, and suggest the
+ * Nextcloud username from the account's own (they are the same here).
+ */
+export function prefill<T extends Values>(values: T, defaults: Defaults, username?: string): { values: T; prefilled: Defaults } {
+  const out: Values = { ...values };
+  const prefilled: Defaults = {};
+  const suggestions: Defaults = { ...defaults, nextcloud_user: username || undefined };
+  for (const [key, suggestion] of Object.entries(suggestions)) {
+    if (!suggestion || !(key in out)) continue;
+    if (typeof out[key] === 'string' && (out[key] as string).trim() === '') {
+      out[key] = suggestion;
+      prefilled[key] = suggestion;
+    }
+  }
+  return { values: out as T, prefilled };
+}
+
 function present(key: string, values: Values, saved: ReadonlySet<string>): boolean {
   const value = values[key];
   if (typeof value === 'string' && value.trim() !== '') return true;
   return isSecretKey(key) && saved.has(key);
 }
 
-/** True when someone has started on (or already has) this integration. */
-export function inUse(integration: Integration, values: Values, saved: ReadonlySet<string>): boolean {
-  return integration.fields.some((f) => present(f.key, values, saved));
+/**
+ * True when someone has started on (or already has) this integration. A field
+ * still holding its prefilled value does not count: the household URL alone
+ * is not a login anyone asked for.
+ */
+export function inUse(integration: Integration, values: Values, saved: ReadonlySet<string>, prefilled: Defaults = {}): boolean {
+  return integration.fields.some((f) => {
+    if (prefilled[f.key] !== undefined && values[f.key] === prefilled[f.key]) return false;
+    return present(f.key, values, saved);
+  });
 }
 
 /**
  * Labels still needed for ``integration`` to be complete, or [] when it is
  * complete or untouched. Picks the closest way to complete it.
  */
-export function missingFields(integration: Integration, values: Values, saved: ReadonlySet<string>): string[] {
-  if (!inUse(integration, values, saved)) return [];
+export function missingFields(integration: Integration, values: Values, saved: ReadonlySet<string>, prefilled: Defaults = {}): string[] {
+  if (!inUse(integration, values, saved, prefilled)) return [];
   const gaps = integration.complete.map((keys) => keys.filter((k) => !present(k, values, saved)));
   if (gaps.some((g) => g.length === 0)) return [];
   const closest = gaps.reduce((a, b) => (b.length < a.length ? b : a));
@@ -122,9 +150,9 @@ export function missingFields(integration: Integration, values: Values, saved: R
 }
 
 /** Every incomplete integration in a form, as "Nextcloud: Nextcloud Password". */
-export function validateIntegrations(values: Values, saved: ReadonlySet<string>, only?: string[]): string[] {
+export function validateIntegrations(values: Values, saved: ReadonlySet<string>, only?: string[], prefilled: Defaults = {}): string[] {
   return INTEGRATIONS.filter((i) => !only || only.includes(i.id)).flatMap((i) => {
-    const missing = missingFields(i, values, saved);
+    const missing = missingFields(i, values, saved, prefilled);
     return missing.length ? [`${i.name}: ${missing.join(', ')}`] : [];
   });
 }
@@ -133,9 +161,18 @@ export function validateIntegrations(values: Values, saved: ReadonlySet<string>,
  * The PATCH body for a credentials form: only fields with something in them
  * (blank means keep), plus the integrations the user chose to remove.
  */
-export function credentialPayload(values: Values, keys: string[], clear: string[] = []): Record<string, unknown> {
+export function credentialPayload(
+  values: Values,
+  keys: string[],
+  clear: string[] = [],
+  context: { saved?: ReadonlySet<string>; prefilled?: Defaults } = {},
+): Record<string, unknown> {
   const body: Record<string, unknown> = {};
+  const saved = context.saved ?? new Set<string>();
   for (const key of keys) {
+    // An integration nobody touched keeps its prefilled URL out of the save.
+    const integration = integrationFor(key);
+    if (integration && context.prefilled && !inUse(integration, values, saved, context.prefilled)) continue;
     const value = values[key];
     if (typeof value === 'string' && value.trim() !== '') body[key] = value.trim();
   }
