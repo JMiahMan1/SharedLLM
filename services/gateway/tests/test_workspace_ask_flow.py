@@ -310,3 +310,31 @@ async def test_outside_a_workspace_a_result_stays_a_short_message():
         {"status": "SUCCESS", "message": "Note saved.", "detail": {"id": 7}},
     )
     assert text == "Note saved."
+
+
+
+@pytest.mark.asyncio
+async def test_a_hit_on_a_huge_line_is_reported_short(tmp_path, monkeypatch):
+    """A narrated HTML deck is one base64 line; reporting it whole made one
+    search a 51 MB response."""
+    import subprocess
+
+    from services.execution.handlers import workspace as ws_handler
+    from services.execution.schemas import WorkspaceSearchRequest
+
+    (tmp_path / "deck.html").write_text("mkv " + "A" * 100_000 + "\n")
+    monkeypatch.setattr(ws_handler, "_resolve_workspace_info", AsyncMock(return_value=(str(tmp_path), None)))
+
+    async def _run_locally(workspace_id, ws_root, cmd, cwd, timeout):
+        done = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        return done.returncode, done.stdout, done.stderr
+
+    monkeypatch.setattr(ws_handler, "_sandbox_run", _run_locally)
+    result = await ws_handler.handle_workspace_search(
+        WorkspaceSearchRequest(query="mkv", user_context={"user": "u", "is_admin": True})
+    )
+
+    detail = result.detail if hasattr(result, "detail") else result["detail"]
+    assert detail["matches"], "the line should still be found"
+    assert len(detail["matches"][0]["text"]) <= 300
+    assert detail["matches"][0]["path"] == "deck.html"
