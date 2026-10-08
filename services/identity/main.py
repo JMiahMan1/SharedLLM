@@ -1864,9 +1864,11 @@ def seed_credential(body: dict, request: Request, session: Session = Depends(get
     if not user:
         raise HTTPException(status_code=404, detail="Default user (ID 1) not found in database. Run full seed first.")
 
-    # Encrypt and store
+    # Encrypt credentials only. Plain fields (URLs, usernames) are stored as
+    # given: encrypting them stored ciphertext as User 1's Audiobookshelf URL.
+    secret = enc_field.endswith("_enc")
     if value:
-        setattr(user, enc_field, encrypt(value))
+        setattr(user, enc_field, encrypt(value) if secret else value)
         log.info(f"[seed-credential] Updated {field} for user {user.username}")
     else:
         setattr(user, enc_field, None)
@@ -1876,7 +1878,7 @@ def seed_credential(body: dict, request: Request, session: Session = Depends(get
     session.commit()
     session.refresh(user)
     _audit(request, session, "credential.seed", user.username,
-           changes=[{"field": field, "change": "set" if value else "cleared", "secret": True}])
+           changes=[{"field": field, "change": "set" if value else "cleared", **({"secret": True} if secret else {})}])
 
     return {
         "status": "SUCCESS",
