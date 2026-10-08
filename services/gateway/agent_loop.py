@@ -3958,13 +3958,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "ttsrequest": (EXECUTION_SVC, "/execute/tts"),
                 "sttrequest": (EXECUTION_SVC, "/execute/stt/transcribe_workspace"),
                 "audiobookregeneraterequest": (EXECUTION_SVC, "/execute/audiobook/regenerate"),
-                "storagetexttorequest": (STORAGE_SVC, "/text_to_audio"),
+                "storagetexttorequest": (EXECUTION_SVC, "/execute/storage_text_to_audio"),
                 # _RAVEN_TOOL_TABLE advertises StorageTextToAudioRequest, so it
                 # needs a row of its own. It reaches the same storage route as
                 # storagetexttorequest, but until now only by way of the fuzzy
                 # matcher, which is the hijack this file exists to prevent.
-                "storagetexttoaudiorequest": (STORAGE_SVC, "/text_to_audio"),
-                "networkdevicescanrequest": (EXECUTION_SVC, "/execute/network_scan"),
+                "storagetexttoaudiorequest": (EXECUTION_SVC, "/execute/storage_text_to_audio"),
+                "networkdevicescanrequest": (EXECUTION_SVC, "/discovery/network_scan"),
                 "ghrequest": (EXECUTION_SVC, "/execute/gh"),
                 "imagegenerationrequest": (ALPACA_SD_URL, "/v1/images/generations"),
                 "ocrrequest": (EXECUTION_SVC, "/execute/ocr"),

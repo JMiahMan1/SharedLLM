@@ -530,7 +530,10 @@ async def test_single_turn_inference_supports_capability_index_tool(monkeypatch)
         creds=creds,
     )
 
-    assert result == "Capability index refreshed."
+    # The model never stops calling the tool, so the closing turn cannot
+    # conclude; the reply says so and carries what the tool reported.
+    assert result.startswith("I ran out of steps")
+    assert "Capability index refreshed." in result
     assert captured["url"].endswith("/execute/index_capabilities")
     assert captured["json"]["scope"] == "full"
     assert captured["json"]["user_context"]["user"] == "alice"

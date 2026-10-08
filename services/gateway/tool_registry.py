@@ -609,10 +609,10 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("StorageIndexRequest", SVC_STORAGE, "POST", "/index/full", False,
      "Full storage re-index into RAG.",
      "payload fields: path/volume."),
-    ("StorageTextToAudioRequest", SVC_STORAGE, "POST", "/text_to_audio", False,
-     "Storage TTS: synthesize stored text to audio.",
-     "payload fields: text_path, voice."),
-    ("NetworkDeviceScanRequest", SVC_EXECUTION, "POST", "/execute/network_scan", False,
+    ("StorageTextToAudioRequest", SVC_EXECUTION, "POST", "/execute/storage_text_to_audio", False,
+     "Narrate a Nextcloud text file to an audio file (Storybook TTS).",
+     "payload fields: input_path, output_path, voice, storybook."),
+    ("NetworkDeviceScanRequest", SVC_EXECUTION, "POST", "/discovery/network_scan", False,
      "Scan the LAN for devices.",
      "payload fields: subnet, device_type, include_mac."),
     ("ImageEditRequest", SVC_EXECUTION, "POST", "/execute/image_edit", False,
@@ -647,7 +647,66 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("ListVoicesRequest", SVC_EXECUTION, "POST", "/execute/list_voices", False,
      "List enrolled speaker profiles and the curated podcast host pairs.",
      "payload fields: pair_id. Optional; omit to list all."),
+    # The four below were dispatched by agent_loop and by the single-turn path
+    # from hand-copied rows of their own; listing them here makes this table
+    # the one place a tool's route is written down.
+    ("OcrRequest", SVC_EXECUTION, "POST", "/execute/ocr", True,
+     "Read the text in a workspace image or scanned page with the vision model.",
+     "payload fields: image_path, task. task is general, document or price_scrape."),
+    ("GhRequest", SVC_EXECUTION, "POST", "/execute/gh", True,
+     "Run a GitHub CLI (gh) command in the workspace.",
+     "payload fields: args, cwd, timeout. args omits the leading 'gh'."),
+    ("GitOperationRequest", SVC_EXECUTION, "POST", "/execute/git", True,
+     "Git in the workspace: status, diff, add, commit, pull, push, log, branch, checkout.",
+     "payload fields: action, path, commit_message, branch."),
+    ("WebScraperRequest", SVC_EXECUTION, "POST", "/execute/web_scraper", False,
+     "Scrape product or page data from websites with a real browser.",
+     "payload fields: query, urls, output_file."),
 )
+
+
+# Rows the single-turn path (chat, voice, the workspace composer) must not
+# dispatch. Everything else in _RAVEN_TOOL_TABLE is reachable from it.
+SINGLE_TURN_EXCLUDED: dict[str, str] = {
+    "DeploymentRequest": "deploys and restarts production services; a Raven mission only",
+    "IdentityRequest": "returns credential context; never a chat turn's business",
+    "IdentityManageRequest": "creates users and API keys; the admin UI only",
+    "WorkspaceSettingsUpdateRequest": "a PATCH to a templated path; the single-turn executor only POSTs",
+    "ControlPlaneRequest": "the single-turn executor has a dedicated branch for it",
+    "StorageListRequest": "no service serves /execute/storage_list; it would always 404",
+}
+
+
+def single_turn_tools() -> dict[str, tuple[str, str]]:
+    """``{normalized name: (service, path)}`` for every single-turn tool.
+
+    The single-turn executor used to keep its own copy of this table. It drifted:
+    twelve tools (speech-to-text, OCR's siblings, podcasts, image edits) were
+    never copied over, the LLM-info path pointed at a route that does not exist,
+    and the storage re-index was sent to the wrong service.
+    """
+    return {
+        name.lower(): (service, path)
+        for name, service, method, path, *_rest in _RAVEN_TOOL_TABLE
+        if name not in SINGLE_TURN_EXCLUDED and method == "POST" and "{" not in path
+    }
+
+
+def tool_catalog(exclude: set[str] | None = None) -> str:
+    """One line per single-turn tool, from the same rows that route them.
+
+    ``exclude`` (lower-case names) leaves out tools the caller already describes
+    elsewhere, such as the ones the single-turn guide documents in full.
+    """
+    skip = exclude or set()
+    lines = []
+    for name, _svc, method, path, _ws, desc, hint in _RAVEN_TOOL_TABLE:
+        if name in SINGLE_TURN_EXCLUDED or method != "POST" or "{" in path:
+            continue
+        if name.lower() in skip:
+            continue
+        lines.append(f"- {name}: {desc} {hint}")
+    return "\n".join(lines)
 
 
 def get_raven_tool_schemas() -> list[dict]:

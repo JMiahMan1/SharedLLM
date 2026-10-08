@@ -67,6 +67,7 @@ def asks(monkeypatch):
     monkeypatch.setattr(gateway_main, "get_librarian_model", AsyncMock(return_value="lib-model"))
     monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value="assistant-model"))
     monkeypatch.setattr(gateway_main, "_build_raven_system_prompt", AsyncMock(return_value="RAVEN SYSTEM"))
+    monkeypatch.setattr(gateway_main, "_workspace_file_overview", AsyncMock(return_value=""))
     return seen
 
 
