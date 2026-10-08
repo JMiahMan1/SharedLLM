@@ -1606,7 +1606,11 @@ async def execute_index_capabilities():
         )
 
         if result.returncode == 0:
-            return _ok("Capabilities re-indexed successfully.", "capability_indexer", {"output": result.stdout})
+            return _ok(
+                "Capabilities re-indexed successfully.",
+                "capability_indexer",
+                {"output": result.stdout, "log": result.stderr[-4000:]},
+            )
         else:
             return _fail(f"Indexing failed (code {result.returncode})", "capability_indexer", {"error": result.stderr, "output": result.stdout})
 

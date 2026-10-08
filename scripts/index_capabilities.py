@@ -168,14 +168,17 @@ def index_capabilities():
             f"{RAG_SVC_URL}/rag/sync/capabilities",
             json={"capabilities": capabilities},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=30
+            timeout=300
         )
         if resp.status_code == 200:
             log.info(f"Successfully indexed {len(capabilities)} capabilities into RAG.")
         else:
-            log.error(f"Failed to index capabilities: {resp.status_code} {resp.text}")
+            raise RuntimeError(
+                f"RAG rejected the capability sync: {resp.status_code} {resp.text[:400]}"
+            )
     except Exception as e:
-        log.error(f"Error connecting to RAG service: {e}")
+        log.error(f"Capability sync failed: {e}")
+        raise
 
 if __name__ == "__main__":
     index_capabilities()

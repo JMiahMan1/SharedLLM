@@ -16,6 +16,14 @@ score 128 * 178**2 = 4.1M while the fatal one scores 57 * 1144**2 = 75M.
 ``EMBED_CHAR_BUDGET`` sits between them, and these tests pin both sides of
 that calibration so the constant cannot drift into the measured-fatal zone
 without a test naming the numbers.
+
+A second incident added the ``EMBED_MAX_CHARS`` clip: ``POST
+/rag/sync/capabilities`` embeds pretty-printed JSON schemas (tens of KB
+each), and the budget's never-drop valve delivered one such text to ONNX as
+a batch of one -- holding the live service at 5.08 GiB / 6 GiB and
+340-378% CPU long enough to starve the 5-second health checks and time out
+every waiting client, all without tripping the cgroup. The embedding view
+of an oversized text is now clipped; stored rows and FTS keep full content.
 """
 
 import pytest
@@ -75,9 +83,51 @@ def test_a_text_longer_than_the_budget_stands_alone_and_is_never_dropped(monkeyp
     huge = "h" * 10_000
     texts = ["fine", huge, "fine too"]
     seen, vectors = _run_embedded(texts, monkeypatch)
-    assert huge in [t for batch in seen for t in batch]
-    assert any(huge in batch and len(batch) == 1 for batch in seen)
+    flat = [t for batch in seen for t in batch]
+    assert huge[: rag_main.EMBED_MAX_CHARS] in flat
+    assert len(flat) == len(texts), "the clip must shorten, never drop"
+    assert any(flat[1] in batch and len(batch) == 1 for batch in seen)
     assert len(vectors) == len(texts)
+
+
+def test_every_text_over_the_embed_limit_is_clipped_before_embedding(monkeypatch):
+    schema = "Capability: CalibreRequest | " + '{"type": "object"}' * 4000
+    assert len(schema) > rag_main.EMBED_MAX_CHARS
+    texts = ["short", schema, "another short"]
+    seen, vectors = _run_embedded(texts, monkeypatch)
+    flat = [t for batch in seen for t in batch]
+    assert len(flat) == len(texts)
+    assert flat[0] == "short" and flat[2] == "another short"
+    assert flat[1] == schema[: rag_main.EMBED_MAX_CHARS]
+    assert all(len(t) <= rag_main.EMBED_MAX_CHARS for t in flat)
+    assert len(vectors) == len(texts)
+
+
+def test_texts_at_the_limit_are_left_exactly_as_they_are(monkeypatch):
+    exact = "x" * rag_main.EMBED_MAX_CHARS
+    seen, _ = _run_embedded([exact], monkeypatch)
+    assert seen == [[exact]]
+
+
+def test_the_clip_is_reported_rather_than_silent(monkeypatch, caplog):
+    caplog.set_level("WARNING")
+    schema = "y" * (rag_main.EMBED_MAX_CHARS + 1)
+    _run_embedded([schema, "z"], monkeypatch)
+    line = next(r.message for r in caplog.records if "clipping" in r.message)
+    assert "1 text(s)" in line
+    assert str(rag_main.EMBED_MAX_CHARS) in line
+    assert "stored content is unchanged" in line
+
+
+def test_no_clip_warning_when_nothing_is_oversized(monkeypatch, caplog):
+    caplog.set_level("WARNING")
+    _run_embedded(["fine", "also fine"], monkeypatch)
+    assert not [r for r in caplog.records if "clipping" in r.message]
+
+
+def test_an_invalid_embed_limit_fails_loudly(monkeypatch):
+    with pytest.raises(ValueError, match="max_chars"):
+        rag_main.embed_batched(["x"], max_chars=0)
 
 
 def test_the_hard_batch_cap_still_applies():
