@@ -236,3 +236,12 @@ def test_generating_and_revoking_an_api_key_is_recorded(client, session):
     key_id = client.post("/api/users/me/keys", json={"label": "phone"}).json()["id"]
     assert client.delete(f"/api/users/me/keys/{key_id}").status_code == 200
     assert [e.action for e in _events(session)][-2:] == ["api_key.create", "api_key.revoke"]
+
+
+def test_seeding_a_url_stores_it_plain(client, session):
+    """Seeding encrypted every value, so User 1's Audiobookshelf URL became ciphertext."""
+    assert client.post("/api/admin/seed-credential", json={"field": "audiobookshelf_url", "value": "https://abs.example"}).status_code == 200
+    owner = session.exec(select(User).where(User.username == "default")).first()
+    session.refresh(owner)
+    assert owner.audiobookshelf_url == "https://abs.example"
+    assert "secret" not in json.loads(_events(session)[-1].changes)[0]
