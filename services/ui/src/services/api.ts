@@ -10,6 +10,7 @@ import type {
   WorkspaceListResponse,
   UserProfileRaw,
   UserProfile,
+  AccountAuditEvent,
   CredentialShares,
   ShareableService,
   APIKey,
@@ -548,6 +549,25 @@ export const api = {
   async deleteUser(username: string): Promise<{ status?: string; success?: boolean }> {
     const resp = await apiClient.delete(`/api/users/${username}`);
     return resp.data;
+  },
+
+  /** A saved credential's value, for a password field's eye. Owner or admin; audited. */
+  async revealCredential(username: string, field: string): Promise<string> {
+    const resp = await apiClient.post(`/api/users/${encodeURIComponent(username)}/reveal`, { field });
+    return String(resp.data?.value ?? '');
+  },
+
+  /** Account audit trail (admin): who changed which account fields, never values. */
+  async getAccountAudit(params: { target?: string; actor?: string; action?: string; limit?: number } = {}): Promise<AccountAuditEvent[]> {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => v !== undefined && v !== '' && query.set(k, String(v)));
+    const resp = await apiClient.get(`/api/admin/audit?${query.toString()}`);
+    return resp.data?.events ?? [];
+  },
+
+  async getMyAccountAudit(): Promise<AccountAuditEvent[]> {
+    const resp = await apiClient.get('/api/users/me/audit');
+    return resp.data?.events ?? [];
   },
 
   async updateProfile(data: Partial<UserProfile>): Promise<UserProfile> {

@@ -114,6 +114,8 @@ export interface UserProfileRaw {
   role?: 'admin' | 'user';
   is_admin?: boolean;
   is_system_default?: boolean;
+  /** Credential fields that hold a saved value (names only, never values). */
+  saved_credentials?: string[];
   nextcloud_url?: string | null;
   nextcloud_user?: string | null;
   ha_url?: string | null;
@@ -2087,4 +2089,19 @@ export interface BibleProviderEstimate {
   cache_enabled: boolean;
   /** Why caching is off, when it is. */
   cache_warning?: string;
+}
+
+/** One account change from the audit trail. Never carries a credential value. */
+export interface AccountAuditEvent {
+  id: number;
+  at: string;
+  actor: string;
+  actor_kind: 'user' | 'internal' | 'anonymous' | string;
+  action: string;
+  target?: string | null;
+  changes: Array<{ field: string; change: string; secret?: boolean; to?: unknown }>;
+  source?: string | null;
+  client?: string | null;
+  user_agent?: string | null;
+  note?: string | null;
 }
