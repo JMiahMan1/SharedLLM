@@ -315,7 +315,6 @@ def test_the_operator_can_manage_every_bible_setting_from_the_config_database():
     # works without restarting the service. Everything else is a boot-time seed.
     live = {"bible_api_key"}
     for key in (
-        "bible_svc_url",
         "blb_base_url",
         "bible_devotional_dir",
         "bible_import_dir",
@@ -324,6 +323,29 @@ def test_the_operator_can_manage_every_bible_setting_from_the_config_database():
     ):
         assert key in seeded, f"{key} is not seeded, so Admin > Settings cannot show it"
         assert f'"{key}"' in source, f"{key} cannot be overridden from the config DB"
+
+    # The Bible URL is network-aware, like the six core service URLs: Identity
+    # carries the BRIDGE_/HOST_ pair seeded from .env, and each service reads the
+    # set matching its own NETWORK_MODE. A single bare key let the bridge value
+    # (http://bible:8010) override host-networked execution, whose client then
+    # refused to start because that name does not resolve outside compose.
+    assert 'f"{NETWORK_MODE}_bible_svc_url"' in source, (
+        "the Bible URL must be resolved per network mode, not as one global value"
+    )
+    assert '"bible_svc_url"' not in source, (
+        "the bare bible_svc_url key must stay out of settings_map; it would "
+        "override the host-networked value with an unresolvable Docker name"
+    )
+    from pathlib import Path as _Path
+
+    seed_source = (_Path(cfg.__file__).parent / "identity" / "seed.py").read_text()
+    assert '"BRIDGE_BIBLE_SVC_URL": "bridge_bible_svc_url"' in seed_source, (
+        "Identity must seed the bridge form of the Bible URL from .env"
+    )
+    assert '"HOST_BIBLE_SVC_URL": "host_bible_svc_url"' in seed_source, (
+        "Identity must seed the host-network form of the Bible URL from .env"
+    )
+    assert "bible_svc_url" in seeded, "the legacy bridge default row stays visible in Admin"
 
     assert "bible_api_key" in seeded, "the api key must be seeded to be editable"
     assert '"bible_api_key"' not in source, (

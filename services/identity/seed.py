@@ -374,6 +374,8 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         "HOST_LOGGING_SVC_URL": "host_logging_svc_url",
         "BRIDGE_WORKSPACE_RUNTIME_SVC_URL": "bridge_workspace_runtime_svc_url",
         "HOST_WORKSPACE_RUNTIME_SVC_URL": "host_workspace_runtime_svc_url",
+        "BRIDGE_BIBLE_SVC_URL": "bridge_bible_svc_url",
+        "HOST_BIBLE_SVC_URL": "host_bible_svc_url",
         "BRIDGE_REDIS_URL": "bridge_redis_url",
         "HOST_REDIS_URL": "host_redis_url",
         "BRIDGE_SEARXNG_URL": "bridge_searxng_url",
