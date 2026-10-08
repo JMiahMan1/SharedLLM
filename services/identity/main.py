@@ -48,6 +48,8 @@ from services.identity.models import (
     UserThemeSetting,
     UserWidget,
     UserWorkspaceSession,
+    WorkspaceChat,
+    WorkspaceChatMessage,
 )
 from services.identity.schemas import (
     CREDENTIAL_COLUMNS,
@@ -2844,6 +2846,131 @@ def update_calendar_settings(
 
 
 # ─── Where each user left off in a workspace (private, per user + workspace) ──
+
+
+# ─── Workspace chats (one conversation per tab, owned by its user) ────────────
+
+_CHAT_MAX_PARTS_BYTES = 512 * 1024
+_CHAT_ROLES = ("user", "assistant")
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _own_chat(session: Session, user: User, chat_id: str) -> WorkspaceChat:
+    chat = session.get(WorkspaceChat, chat_id)
+    # Someone else's chat is "not found", not "forbidden": its existence is private too.
+    if not chat or chat.username != user.username:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat
+
+
+def _chat_summary(chat: WorkspaceChat, count: int | None = None) -> dict:
+    data = {"id": chat.id, "workspace_id": chat.workspace_id, "title": chat.title,
+            "created_at": chat.created_at, "updated_at": chat.updated_at}
+    if count is not None:
+        data["message_count"] = count
+    return data
+
+
+def _message_dict(m: WorkspaceChatMessage) -> dict:
+    return {"id": m.id, "role": m.role, "parts": json.loads(m.parts or "[]"),
+            "meta": json.loads(m.meta or "{}"), "created_at": m.created_at}
+
+
+@app.get("/api/users/me/workspace-chats")
+def list_workspace_chats(workspace_id: str, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    chats = session.exec(
+        select(WorkspaceChat)
+        .where(WorkspaceChat.username == user.username, WorkspaceChat.workspace_id == workspace_id)
+        .order_by(WorkspaceChat.updated_at.desc())
+        .limit(100)
+    ).all()
+    out = []
+    for chat in chats:
+        count = len(session.exec(select(WorkspaceChatMessage.id).where(WorkspaceChatMessage.chat_id == chat.id)).all())
+        out.append(_chat_summary(chat, count))
+    return {"chats": out}
+
+
+@app.post("/api/users/me/workspace-chats")
+def create_workspace_chat(body: dict, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    workspace_id = str(body.get("workspace_id") or "").strip()
+    if not workspace_id:
+        raise HTTPException(status_code=422, detail="workspace_id is required")
+    now = _now_iso()
+    chat = WorkspaceChat(
+        id=uuid.uuid4().hex,
+        workspace_id=workspace_id,
+        username=user.username,
+        title=(str(body.get("title") or "").strip() or "New chat")[:120],
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(chat)
+    session.commit()
+    return _chat_summary(chat, 0)
+
+
+@app.get("/api/users/me/workspace-chats/{chat_id}")
+def get_workspace_chat(chat_id: str, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    chat = _own_chat(session, user, chat_id)
+    messages = session.exec(
+        select(WorkspaceChatMessage).where(WorkspaceChatMessage.chat_id == chat.id).order_by(WorkspaceChatMessage.id)
+    ).all()
+    return {**_chat_summary(chat, len(messages)), "messages": [_message_dict(m) for m in messages]}
+
+
+@app.patch("/api/users/me/workspace-chats/{chat_id}")
+def rename_workspace_chat(chat_id: str, body: dict, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    chat = _own_chat(session, user, chat_id)
+    title = str(body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title is required")
+    chat.title = title[:120]
+    chat.updated_at = _now_iso()
+    session.add(chat)
+    session.commit()
+    return _chat_summary(chat)
+
+
+@app.delete("/api/users/me/workspace-chats/{chat_id}")
+def delete_workspace_chat(chat_id: str, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    chat = _own_chat(session, user, chat_id)
+    for m in session.exec(select(WorkspaceChatMessage).where(WorkspaceChatMessage.chat_id == chat.id)).all():
+        session.delete(m)
+    session.delete(chat)
+    session.commit()
+    return {"status": "SUCCESS"}
+
+
+@app.post("/api/users/me/workspace-chats/{chat_id}/messages")
+def append_workspace_chat_message(chat_id: str, body: dict, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    chat = _own_chat(session, user, chat_id)
+    role = str(body.get("role") or "")
+    if role not in _CHAT_ROLES:
+        raise HTTPException(status_code=422, detail="role must be user or assistant")
+    parts = body.get("parts")
+    if not isinstance(parts, list):
+        raise HTTPException(status_code=422, detail="parts must be a list")
+    encoded = json.dumps(parts)
+    if len(encoded) > _CHAT_MAX_PARTS_BYTES:
+        raise HTTPException(status_code=413, detail="message too large")
+    message = WorkspaceChatMessage(
+        chat_id=chat.id, role=role, parts=encoded, meta=json.dumps(body.get("meta") or {}), created_at=_now_iso()
+    )
+    chat.updated_at = message.created_at
+    # The first thing asked names the chat, the way most chat apps title a thread.
+    if role == "user" and chat.title == "New chat":
+        first = next((p.get("text", "") for p in parts if isinstance(p, dict) and p.get("type") == "text"), "")
+        if first.strip():
+            chat.title = " ".join(first.split())[:60]
+    session.add(message)
+    session.add(chat)
+    session.commit()
+    session.refresh(message)
+    return _message_dict(message)
 
 
 @app.get("/api/users/me/workspace-sessions")

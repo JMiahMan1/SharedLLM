@@ -552,3 +552,34 @@ class AuditEvent(SQLModel, table=True):  # type: ignore
     client: str | None = None  # caller IP as seen through the proxy
     user_agent: str | None = None
     note: str | None = None
+
+
+class WorkspaceChat(SQLModel, table=True):  # type: ignore
+    """One conversation with Jarvis inside a workspace, owned by one user.
+
+    Opened as a tab in the workspace and continued turn by turn, like a
+    session in OpenCode or Pi. Never shared: it is the owner's conversation.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: str = Field(primary_key=True)
+    workspace_id: str = Field(index=True)
+    username: str = Field(index=True)
+    title: str = "New chat"
+    created_at: str = ""
+    updated_at: str = Field(default="", index=True)
+
+
+class WorkspaceChatMessage(SQLModel, table=True):  # type: ignore
+    """One message in a workspace chat, stored as typed parts.
+
+    ``parts`` is a JSON list in the shape OpenCode uses for a message: text,
+    reasoning (thinking), tool (a call and its result), mission (a Raven
+    dispatch), error. ``meta`` carries the turn's mode, model and status.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    chat_id: str = Field(index=True)
+    role: str  # user | assistant
+    parts: str = "[]"
+    meta: str = "{}"
+    created_at: str = ""

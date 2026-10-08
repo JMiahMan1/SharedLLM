@@ -5756,9 +5756,30 @@ async def _workspace_context(workspace_id: str, creds: dict, mode: str) -> str:
     )
     return f"{overview}\n\n{catalog}" if overview else catalog
 
-@app.post("/api/workspaces/{workspace_id}/ask")
-async def ask_in_workspace(workspace_id: str, request: Request):
-    """Run the workspace composer against an explicitly chosen execution mode.
+_WORKSPACE_ASK_MODES = ("auto", "librarian", "single_task", "raven")
+
+
+def _requested_workspace_mode(body: dict) -> str:
+    mode = (body.get("mode") or "auto").strip().lower()
+    if mode not in _WORKSPACE_ASK_MODES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown mode {mode!r}. Use one of: {', '.join(_WORKSPACE_ASK_MODES)}.",
+        )
+    return mode
+
+
+async def _run_workspace_turn(
+    workspace_id: str,
+    creds: dict,
+    query: str,
+    requested_mode: str,
+    *,
+    history: list[dict[str, str]] | None = None,
+    system_override: str | None = None,
+    event_callback=None,
+) -> dict:
+    """One workspace turn in whichever mode fits, shared by /ask and chat tabs.
 
     Three modes, because the three jobs are genuinely different shapes:
 
@@ -5775,34 +5796,19 @@ async def ask_in_workspace(workspace_id: str, request: Request):
     steps of temperature-0 inference, while a mission is queued and outlives the
     turn, so such a tool could only ever return a mission id with no result
     attached. Mixing is done by escalating a finished answer instead.
+
+    ``history`` is the conversation so far (a chat tab's earlier turns), and
+    ``event_callback`` streams the turn as it runs. Raises InferenceUnavailable
+    when the model server cannot take the turn.
     """
-    creds = await _resolve_identity_from_request(request)
-    if not creds:
-        raise HTTPException(status_code=401, detail="Authentication required.")
-
-    body = await request.json()
-    query = (body.get("query") or "").strip()
-    if not query:
-        raise HTTPException(status_code=400, detail="A query is required.")
-
-    requested_mode = (body.get("mode") or "auto").strip().lower()
-    allowed = ("auto", "librarian", "single_task", "raven")
-    if requested_mode not in allowed:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown mode {requested_mode!r}. Use one of: {', '.join(allowed)}.",
-        )
+    from services.gateway.orchestrator import _fetch_rag_context, _single_turn_inference
 
     mode, reason = _resolve_workspace_ask_mode(query, requested_mode)
-
-    from services.gateway.orchestrator import (
-        InferenceUnavailable,
-        _fetch_rag_context,
-        _single_turn_inference,
-    )
+    if event_callback:
+        await event_callback({"type": "start", "requested_mode": requested_mode, "resolved_mode": mode, "reason": reason})
 
     if mode == "raven":
-        system = body.get("system") or await _build_raven_system_prompt(query)
+        system = system_override or await _build_raven_system_prompt(query)
         context = await _fetch_rag_context(query, creds["user"], ResolvedCredentials(**creds), workspace_id=workspace_id)
         mission = await _enqueue_user_mission(
             query=query,
@@ -5811,6 +5817,8 @@ async def ask_in_workspace(workspace_id: str, request: Request):
             workspace_id=workspace_id,
             rag_context=context,
         )
+        if event_callback:
+            await event_callback({"type": "mission", "mission_id": mission.get("id")})
         return {
             "status": "SUCCESS",
             "requested_mode": requested_mode,
@@ -5841,24 +5849,21 @@ async def ask_in_workspace(workspace_id: str, request: Request):
     else:
         model = await get_assistant_model()
         context = ""
+    if event_callback:
+        await event_callback({"type": "model", "model": model, "context_chars": len(context or "")})
 
-    try:
-        answer = await _single_turn_inference(
-            query=query,
-            model=model,
-            system_prompt=body.get("system") or select_system_instruction_for_query(query, model),
-            rag_context=context,
-            history=[],
-            creds=ResolvedCredentials(**creds),
-            grounded=bool(context.strip()),
-            workspace_id=workspace_id,
-            workspace_context=await _workspace_context(workspace_id, creds, mode),
-        )
-    except InferenceUnavailable as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"The model did not answer: {exc}",
-        ) from exc
+    answer = await _single_turn_inference(
+        query=query,
+        model=model,
+        system_prompt=system_override or select_system_instruction_for_query(query, model),
+        rag_context=context,
+        history=history or [],
+        creds=ResolvedCredentials(**creds),
+        grounded=bool(context.strip()),
+        workspace_id=workspace_id,
+        workspace_context=await _workspace_context(workspace_id, creds, mode),
+        event_callback=event_callback,
+    )
     return {
         "status": "SUCCESS",
         "requested_mode": requested_mode,
@@ -5868,6 +5873,151 @@ async def ask_in_workspace(workspace_id: str, request: Request):
         "context_chars": len(context or ""),
         "answer": answer,
     }
+
+
+@app.post("/api/workspaces/{workspace_id}/ask")
+async def ask_in_workspace(workspace_id: str, request: Request):
+    """One workspace turn, answered as a single JSON reply (see _run_workspace_turn)."""
+    from services.gateway.orchestrator import InferenceUnavailable
+
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    body = await request.json()
+    query = (body.get("query") or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="A query is required.")
+    requested_mode = _requested_workspace_mode(body)
+    try:
+        return await _run_workspace_turn(workspace_id, creds, query, requested_mode, system_override=body.get("system"))
+    except InferenceUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"The model did not answer: {exc}") from exc
+
+
+# ─── Workspace chats: conversations that open as tabs and continue ────────────
+
+async def _chat_call(request: Request, method: str, path: str = "", json_body: dict | None = None, params: dict | None = None):
+    from services.gateway.workspace_chat import identity_chat
+
+    status, body = await identity_chat(
+        method, path, identity_url=IDENTITY_SVC, auth_header=request.headers.get("Authorization"),
+        json=json_body, params=params,
+    )
+    if status >= 400:
+        raise HTTPException(status_code=status, detail=(body or {}).get("detail", "Chat request failed"))
+    return body
+
+
+@app.get("/api/workspaces/{workspace_id}/chats")
+async def list_workspace_chats(workspace_id: str, request: Request):
+    return await _chat_call(request, "GET", params={"workspace_id": workspace_id})
+
+
+@app.post("/api/workspaces/{workspace_id}/chats")
+async def create_workspace_chat(workspace_id: str, request: Request):
+    body = await request.json() if await request.body() else {}
+    return await _chat_call(request, "POST", json_body={"workspace_id": workspace_id, "title": (body or {}).get("title")})
+
+
+@app.get("/api/workspaces/{workspace_id}/chats/{chat_id}")
+async def get_workspace_chat(workspace_id: str, chat_id: str, request: Request):
+    return await _chat_call(request, "GET", f"/{chat_id}")
+
+
+@app.patch("/api/workspaces/{workspace_id}/chats/{chat_id}")
+async def rename_workspace_chat(workspace_id: str, chat_id: str, request: Request):
+    return await _chat_call(request, "PATCH", f"/{chat_id}", json_body=await request.json())
+
+
+@app.delete("/api/workspaces/{workspace_id}/chats/{chat_id}")
+async def delete_workspace_chat(workspace_id: str, chat_id: str, request: Request):
+    return await _chat_call(request, "DELETE", f"/{chat_id}")
+
+
+@app.post("/api/workspaces/{workspace_id}/chats/{chat_id}/turn")
+async def workspace_chat_turn(workspace_id: str, chat_id: str, request: Request):
+    """Run one turn of a workspace chat, streamed as NDJSON events.
+
+    The person's message is stored first, the turn runs with the conversation
+    so far as context, and the reply is stored as typed parts when it ends --
+    finished, failed or stopped (closing the stream stops it).
+    """
+    from services.gateway.orchestrator import InferenceUnavailable
+    from services.gateway.workspace_chat import TurnTranscript, history_from
+
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    body = await request.json()
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="A message is required.")
+    requested_mode = _requested_workspace_mode(body)
+
+    chat = await _chat_call(request, "GET", f"/{chat_id}")
+    history = history_from(chat.get("messages", []))
+    await _chat_call(request, "POST", f"/{chat_id}/messages",
+                     json_body={"role": "user", "parts": [{"type": "text", "text": message}], "meta": {"mode": requested_mode}})
+
+    queue: asyncio.Queue = asyncio.Queue()
+    transcript = TurnTranscript()
+    meta: dict = {"requested_mode": requested_mode}
+
+    async def emit(event: dict) -> None:
+        transcript.add(event)
+        if event.get("type") == "start":
+            meta.update(resolved_mode=event.get("resolved_mode"), reason=event.get("reason"))
+        elif event.get("type") == "model":
+            meta.update(model=event.get("model"), context_chars=event.get("context_chars"))
+        await queue.put(event)
+
+    async def save(parts: list, status: str) -> dict | None:
+        try:
+            return await _chat_call(request, "POST", f"/{chat_id}/messages",
+                                    json_body={"role": "assistant", "parts": parts, "meta": {**meta, "status": status}})
+        except Exception as exc:
+            log.error(f"[workspace-chat] could not store the reply in {chat_id}: {exc}")
+            return None
+
+    async def run() -> None:
+        try:
+            result = await _run_workspace_turn(workspace_id, creds, message, requested_mode, history=history, event_callback=emit)
+            if result.get("mission_id"):
+                meta["mission_id"] = result["mission_id"]
+                answer = f"Raven mission #{result['mission_id']} is running in the background. Its progress shows here and in the Missions list."
+            else:
+                answer = result.get("answer") or ""
+            stored = await save(transcript.finish(answer), "done")
+            await queue.put({"type": "done", "message": stored})
+        except InferenceUnavailable as exc:
+            text = f"The model did not answer: {exc}"
+            stored = await save(transcript.finish(None, status="error", error=text), "error")
+            await queue.put({"type": "error", "text": text, "message": stored})
+        except asyncio.CancelledError:
+            await asyncio.shield(save(transcript.finish(None, status="aborted"), "aborted"))
+            raise
+        except Exception as exc:
+            log.exception(f"[workspace-chat] turn failed in {chat_id}")
+            stored = await save(transcript.finish(None, status="error", error=str(exc)), "error")
+            await queue.put({"type": "error", "text": str(exc), "message": stored})
+        finally:
+            await queue.put(None)
+
+    async def stream():
+        task = asyncio.create_task(run())
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield json.dumps(event) + "\n"
+        finally:
+            # The tab closed the stream (Stop, or the page went away): stop the turn.
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
 
 @app.post("/api/storage/mirror")
 async def mirror_storage(request: Request):

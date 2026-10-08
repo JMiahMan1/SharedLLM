@@ -1328,6 +1328,33 @@ def _is_capacity_refusal(error: Exception) -> bool:
     )
 
 
+_SECRET_INPUT_KEYS = ("pass", "token", "secret", "api_key", "apikey", "credential")
+
+
+def _public_tool_input(tool_data: dict) -> dict:
+    """A tool call's arguments as safe to show in a transcript.
+
+    The payload carries the caller's resolved credentials (user_context) and
+    may carry a password a tool was given; neither belongs in a chat log.
+    """
+    payload = tool_data.get("payload", tool_data)
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        k: v for k, v in payload.items()
+        if k not in ("user_context", "action", "tool") and not any(s in k.lower() for s in _SECRET_INPUT_KEYS)
+    }
+
+
+def _tool_preamble(raw: str) -> str:
+    """The prose a model wrote around a tool call, without the call itself."""
+    from services.gateway.llm_providers import strip_thinking_blocks
+
+    text = re.sub(r"```(?:json)?\s*\{.*?\}\s*```", "", raw or "", flags=re.DOTALL)
+    text = re.sub(r"\{[^{}]*\}", "", text)
+    return strip_thinking_blocks(text).strip()
+
+
 _CLOSING_TURN_INSTRUCTION = (
     "You have used all of your tool calls for this request; no more tools will run. "
     "Answer the user now in plain sentences, using only what the tool results above "
@@ -1372,8 +1399,13 @@ async def _closing_turn(
     )
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "") -> str:
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None) -> str:
     """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
+
+    ``event_callback`` receives the turn as it happens, in the part shapes a
+    session transcript stores (OpenCode's message parts): ``step``,
+    ``thinking`` and ``text`` deltas, ``tool_call`` and ``tool_result``. With it
+    every step streams; without it nothing about the old behaviour changes.
 
     ``workspace_id`` pins every workspace tool call to the workspace the user is
     asking from; without it the executor guesses from the wording of the query.
@@ -1402,7 +1434,14 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
 
-    options = {"temperature": 0.0, "num_predict": 2048, "show_thinking": show_thinking}
+    options = {"temperature": 0.0, "num_predict": 2048, "show_thinking": show_thinking or event_callback is not None}
+
+    def _step_stream(step: int | str):
+        """Forward a step's thinking and text deltas as events."""
+        async def forward(chunk):
+            if isinstance(chunk, dict) and chunk.get("type") in ("thinking", "content") and chunk.get("text"):
+                await event_callback({"type": "thinking" if chunk["type"] == "thinking" else "text", "text": chunk["text"], "step": step})
+        return forward
 
     MAX_INFERENCE_RETRIES = 3
     MAX_TURNS = 3
@@ -1412,6 +1451,8 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     for turn in range(MAX_TURNS):
         log.info(f"[_single_turn_inference] Turn {turn + 1}/{MAX_TURNS}")
         ans = ""
+        if event_callback:
+            await event_callback({"type": "step", "n": turn + 1})
 
         # In single-turn mode, do not stream intermediate tool emission (Turn 1) live
         # because the user/voice-assistant should never hear raw JSON tool calls.
@@ -1427,6 +1468,8 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 turn_callback = None
         else:
             turn_callback = chunk_callback
+        if event_callback:
+            turn_callback = _step_stream(turn + 1)
 
         for retry_count in range(MAX_INFERENCE_RETRIES):
             try:
@@ -1591,6 +1634,15 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
         # Append LLM's response to conversation
         messages.append({"role": "assistant", "content": ans})
+        if event_callback:
+            await event_callback({
+                "type": "tool_call",
+                "id": f"step{turn + 1}",
+                "name": tool_data.get("action") or action,
+                "input": _public_tool_input(tool_data),
+                # What the model said before the call ("Let me find the file...").
+                "preamble": _tool_preamble(ans),
+            })
 
         # Execute the tool
         if grounded and re.sub(r'[\s_]+', '', str(action or '')).lower() in _GROUNDED_OMITTED_ACTIONS:
@@ -1632,13 +1684,17 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
         # Append tool result to conversation for next turn
         messages.append({"role": "user", "content": f"Tool result:\n{tool_result}"})
+        if event_callback:
+            await event_callback({"type": "tool_result", "id": f"step{turn + 1}", "output": (tool_result or "")[:4000]})
 
         # Out of tool calls: one closing turn turns what the tools found into an
         # answer. Returning the last tool result as the answer is what showed the
         # user "Found 25 matches for 'sermon'" for "transcribe the mkv" -- a status
         # line from the third of three searches, not a reply to anything asked.
         if turn == MAX_TURNS - 1:
-            return await _closing_turn(messages, model, options, chunk_callback, tool_result)
+            if event_callback:
+                await event_callback({"type": "step", "n": "final"})
+            return await _closing_turn(messages, model, options, _step_stream("final") if event_callback else chunk_callback, tool_result)
 
     # Final answer processing — strip JSON/thinking artifacts for clean natural language
     log.info(f"[_single_turn_inference] Final answer length: {len(ans)} chars, preview: {ans[:200]}")
