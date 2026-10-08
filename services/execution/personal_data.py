@@ -19,6 +19,8 @@ class PersonalDataProvider(Protocol):
     async def ensure_directory(self, path: str) -> None: ...
     def file_url(self, path: str) -> str: ...
     async def upload_file(self, path: str, data: bytes, content_type: str) -> bool: ...
+    async def download_file(self, path: str) -> tuple[int, str, bytes]: ...
+    async def preview(self, file_id: int, size: int) -> tuple[int, str, bytes]: ...
     async def request(
         self,
         method: str,
@@ -76,6 +78,20 @@ class NextcloudPersonalDataProvider:
             verify=False,
         )
         return resp["ok"]
+
+    async def download_file(self, path: str) -> tuple[int, str, bytes]:
+        from .http_client import fetch_bytes
+        return await fetch_bytes(self.file_url(path), auth=(self.username, self.password), timeout=120, verify=False)
+
+    async def preview(self, file_id: int, size: int) -> tuple[int, str, bytes]:
+        """Nextcloud's own thumbnail of a file, ``size`` px on the long side."""
+        from .http_client import fetch_bytes
+        return await fetch_bytes(
+            f"{self.base_url.rstrip('/')}/index.php/core/preview",
+            auth=(self.username, self.password),
+            params={"fileId": str(file_id), "x": str(size), "y": str(size), "a": "1", "mode": "cover"},
+            verify=False,
+        )
 
     async def request(
         self,

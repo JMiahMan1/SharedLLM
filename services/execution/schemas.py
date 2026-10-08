@@ -426,14 +426,26 @@ class TimerRequest(BaseRequest):
     target_device: str | None = None
 
 
+class TalkFileRequest(BaseModel):
+    """A file shared in a chat, fetched as the requesting user."""
+    model_config = {"extra": "ignore"}
+    user_context: UserContext
+    path: str | None = None
+    file_id: int | None = None
+    preview: bool = False
+    size: int = Field(640, ge=32, le=2048)
+
+
 class TalkRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["list", "open", "messages", "send", "send_voice", "reactions", "react", "polls", "create_poll", "vote_poll", "mark_read", "post_card", "game", "call_join", "call_leave"]
+    action: Literal["list", "open", "messages", "send", "send_voice", "send_file", "edit_message", "delete_message", "mentions", "reactions", "react", "polls", "create_poll", "vote_poll", "mark_read", "post_card", "game", "call_join", "call_leave"]
     token: str | None = None
     target_user: str | None = None
     message: str | None = None
     limit: int = Field(50, ge=1, le=200)
     audio_base64: str | None = None
+    file_base64: str | None = Field(None, description="send_file: the attachment's bytes, base64")
+    search: str | None = Field(None, description="mentions: name typed after @")
     text_to_voice: str | None = Field(None, description="If provided, converts this text to a voice message (TTS).")
     mime_type: str | None = None
     file_name: str | None = None

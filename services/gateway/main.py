@@ -4701,6 +4701,74 @@ async def proxy_send_talk_voice(request: Request):
     }
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
+@app.post("/api/communication/talk/file")
+async def proxy_send_talk_file(request: Request):
+    """Share a photo or file into a conversation."""
+    body = await request.json()
+    payload = {
+        "action": "send_file",
+        "token": body.get("token"),
+        "file_base64": body.get("file_base64"),
+        "mime_type": body.get("mime_type"),
+        "file_name": body.get("file_name"),
+        "caption": body.get("caption"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+
+
+@app.get("/api/communication/talk/file")
+async def proxy_get_talk_file(request: Request):
+    """A chat attachment's bytes (or thumbnail), fetched as the caller.
+
+    The browser cannot hand Nextcloud the caller's credentials itself, so the
+    image and audio in a chat are streamed through here.
+    """
+    creds = await _resolve_acting_identity(request)
+    params = request.query_params
+    body = {
+        "user_context": creds,
+        "path": params.get("path"),
+        "file_id": int(params["file_id"]) if params.get("file_id", "").isdigit() else None,
+        "preview": params.get("preview") in ("1", "true"),
+        "size": int(params["size"]) if params.get("size", "").isdigit() else 640,
+    }
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/talk/file",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=180.0),
+        )
+        content = await resp.read()
+        content_type = resp.headers.get("Content-Type", "application/octet-stream")
+    return Response(
+        content=content,
+        status_code=resp.status,
+        media_type=content_type,
+        headers={"Cache-Control": "private, max-age=3600"} if resp.status == 200 else None,
+    )
+
+
+@app.post("/api/communication/talk/messages/edit")
+async def proxy_edit_talk_message(request: Request):
+    body = await request.json()
+    payload = {"action": "edit_message", "token": body.get("token"), "message_id": body.get("message_id"), "message": body.get("message")}
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+
+
+@app.post("/api/communication/talk/messages/delete")
+async def proxy_delete_talk_message(request: Request):
+    body = await request.json()
+    payload = {"action": "delete_message", "token": body.get("token"), "message_id": body.get("message_id")}
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+
+
+@app.get("/api/communication/talk/mentions")
+async def proxy_talk_mentions(request: Request):
+    payload = {"action": "mentions", "token": request.query_params.get("token"), "search": request.query_params.get("search", "")}
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
 @app.get("/api/communication/talk/reactions")
 async def proxy_get_talk_reactions(request: Request):
     payload = {

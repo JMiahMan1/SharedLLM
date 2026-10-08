@@ -90,6 +90,30 @@ async def request(
         }
 
 
+async def fetch_bytes(
+    url: str,
+    *,
+    auth: tuple[str, str] | None = None,
+    params: dict | None = None,
+    timeout: int = 60,
+    verify: bool = True,
+) -> tuple[int, str, bytes]:
+    """GET a binary body: (status, content type, bytes).
+
+    :func:`request` decodes every body as text, which corrupts images and
+    audio; this returns the bytes untouched.
+    """
+    session = await get_session(host_of(url), verify)
+    kwargs: dict = {"timeout": ClientTimeout(total=timeout)}
+    if auth:
+        kwargs["auth"] = BasicAuth(auth[0], auth[1])
+    if params:
+        kwargs["params"] = params
+    async with session.get(url, **kwargs) as resp:
+        body = await resp.read()
+        return resp.status, resp.headers.get("Content-Type", "application/octet-stream"), body
+
+
 _TLS_WARNED: set[tuple[str, str]] = set()
 
 
