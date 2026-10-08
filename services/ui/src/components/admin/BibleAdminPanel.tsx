@@ -39,11 +39,18 @@ const KIND_LABELS: Record<BibleImportKind, string> = {
  * and a path already on the server. Every one of them reports refusals in full
  * -- "Exodus is missing from that PDF" is the whole point of running the
  * importer rather than trusting a filename.
+ *
+ * The file doors prefill their fields from the file name and keep every field
+ * editable: a suggestion the operator can correct beats a blank form, and a
+ * value the operator typed is never overwritten by a later suggestion. The
+ * known-code list comes from the catalogue so a code the manifest will refuse
+ * is visible before the run, not only in the refusal log.
  */
 export default function BibleAdminPanel() {
   const { trigger } = useHaptics();
   const client = useQueryClient();
   const [notice, setNotice] = useState('');
+  const [noticeKind, setNoticeKind] = useState<'success' | 'error'>('success');
   const [log, setLog] = useState<string[]>([]);
 
   const catalogue = useQuery({
@@ -54,6 +61,7 @@ export default function BibleAdminPanel() {
 
   function report(run: BibleImportRun) {
     setNotice(run.message);
+    setNoticeKind(run.status === 'failed' ? 'error' : 'success');
     setLog(run.log ?? []);
     void trigger(run.status === 'failed' ? 'error' : 'success');
     void client.invalidateQueries({ queryKey: ['bible-imports'] });
@@ -63,6 +71,7 @@ export default function BibleAdminPanel() {
   function failed(error: unknown) {
     const text = error instanceof Error ? error.message : 'The import did not run.';
     setNotice(text);
+    setNoticeKind('error');
     void trigger('error');
   }
 
@@ -79,6 +88,7 @@ export default function BibleAdminPanel() {
   });
 
   const data = catalogue.data;
+  const knownCodes = (data?.versions ?? []).map((version) => version.code);
 
   return (
     <div className="space-y-6" data-testid="bible-admin">
@@ -186,28 +196,35 @@ export default function BibleAdminPanel() {
         setting={data?.library_setting ?? 'calibre_library_path'}
         error={data?.library_error ?? ''}
         busy={runImport.isPending}
+        knownCodes={knownCodes}
         onInstall={(payload) => runImport.mutate(payload)}
       />
 
       <UploadSection
         kinds={data?.kinds ?? ['json', 'pdf', 'epub']}
         busy={uploadImport.isPending}
+        knownCodes={knownCodes}
         onUpload={(form) => uploadImport.mutate(form)}
       />
 
-      <PathSection busy={runImport.isPending} onInstall={(payload) => runImport.mutate(payload)} />
+      <PathSection
+        busy={runImport.isPending}
+        knownCodes={knownCodes}
+        onInstall={(payload) => runImport.mutate(payload)}
+      />
 
       {notice ? (
         <div
           data-testid="bible-admin-notice"
+          data-notice={noticeKind}
           className={
-            notice
+            noticeKind === 'error'
               ? 'rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-xs text-amber-200'
               : 'rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5 text-xs text-emerald-200'
           }
         >
           <p className="flex items-start gap-1.5">
-            {notice ? (
+            {noticeKind === 'error' ? (
               <AlertTriangle size={13} className="shrink-0 mt-0.5" />
             ) : (
               <CheckCircle2 size={13} className="shrink-0 mt-0.5" />
@@ -440,22 +457,31 @@ function LibrarySection({
   setting,
   error,
   busy,
+  knownCodes,
   onInstall,
 }: {
   root: string;
   setting: string;
   error: string;
   busy: boolean;
+  knownCodes: string[];
   onInstall: (payload: {
     code: string;
     kind: BibleImportKind;
     library_path: string;
     name?: string;
+    edition?: string;
+    edition_name?: string;
     import_notes?: boolean;
   }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [path, setPath] = useState('');
+  const [confirming, setConfirming] = useState<BibleLibraryEntry | null>(null);
+  const [form, setForm] = useState<InstallForm>(freshForm);
+
+  const set = (key: InstallFieldKey, value: string | boolean) =>
+    setForm((previous) => setField(previous, key, value));
 
   const browse = useQuery({
     queryKey: ['bible-library', path],
@@ -471,13 +497,29 @@ function LibrarySection({
   const folders = (shown?.entries ?? []).filter((entry) => entry.is_dir);
   const files = (shown?.entries ?? []).filter((entry) => !entry.is_dir);
 
-  function install(entry: BibleLibraryEntry, kind: BibleImportKind) {
-    const suggestion = entry.name
-      .replace(/\.[^.]+$/, '')
-      .replace(/[^A-Za-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .toLowerCase();
-    onInstall({ code: suggestion, kind, library_path: entry.path, name: entry.name });
+  /**
+   * Installing from the shelf asks first instead of firing immediately.
+   *
+   * The old one-click install could not set the edition or the study-notes
+   * flag at all, so a commentary off the shelf had no way to be installed from
+   * here -- and a misclick started a multi-megabyte fetch with the file name
+   * as the translation code. The form arrives prefilled from the file name
+   * and every field stays editable.
+   */
+  function beginInstall(entry: BibleLibraryEntry) {
+    setConfirming(entry);
+    setForm(suggest(freshForm(), suggestionFor(entry.name)));
+  }
+
+  function confirmInstall() {
+    if (!confirming?.kind || !form.code.trim()) return;
+    onInstall({
+      code: form.code.trim(),
+      kind: confirming.kind,
+      library_path: confirming.path,
+      ...extrasOf(form),
+    });
+    setConfirming(null);
   }
 
   if (!open) {
@@ -586,25 +628,63 @@ function LibrarySection({
           ))}
 
           {files.map((entry) => (
-            <div
-              key={entry.path}
-              data-testid={`bible-admin-library-file-${entry.name}`}
-              className="flex min-h-11 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 text-xs"
-            >
-              <FileText size={13} className="shrink-0 text-slate-500" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-slate-300">{entry.name}</span>
-                <span className="block truncate text-[10px] text-slate-500">{entry.note}</span>
-              </span>
-              <button
-                type="button"
-                data-testid={`bible-admin-library-install-${entry.name}`}
-                disabled={!entry.installable || busy}
-                onClick={() => entry.kind && install(entry, entry.kind)}
-                className="min-h-11 shrink-0 rounded-lg border border-white/10 px-2 text-[11px] text-emerald-300 disabled:opacity-40"
+            <div key={entry.path} className="space-y-1.5">
+              <div
+                data-testid={`bible-admin-library-file-${entry.name}`}
+                className="flex min-h-11 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 text-xs"
               >
-                Install
-              </button>
+                <FileText size={13} className="shrink-0 text-slate-500" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-slate-300">{entry.name}</span>
+                  <span className="block truncate text-[10px] text-slate-500">{entry.note}</span>
+                </span>
+                <button
+                  type="button"
+                  data-testid={`bible-admin-library-install-${entry.name}`}
+                  disabled={!entry.installable || busy}
+                  onClick={() => entry.kind && beginInstall(entry)}
+                  className="min-h-11 shrink-0 rounded-lg border border-white/10 px-2 text-[11px] text-emerald-300 disabled:opacity-40"
+                >
+                  Install
+                </button>
+              </div>
+              {confirming?.path === entry.path ? (
+                <div
+                  className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2.5 space-y-2"
+                  data-testid="bible-admin-library-confirm"
+                >
+                  <p className="text-[11px] leading-relaxed text-slate-400">
+                    Names are suggested from the file and every field is editable. The
+                    translation code must be one the manifest knows, or the run is refused
+                    with the list of codes that would work.
+                  </p>
+                  <InstallFields
+                    idPrefix="bible-admin-library"
+                    form={form}
+                    set={set}
+                    knownCodes={knownCodes}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      data-testid="bible-admin-library-confirm-go"
+                      disabled={busy || !form.code.trim()}
+                      onClick={confirmInstall}
+                      className="flex-1 min-h-11 rounded-xl text-xs font-medium bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 disabled:opacity-50"
+                    >
+                      Install this file
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="bible-admin-library-cancel"
+                      onClick={() => setConfirming(null)}
+                      className="min-h-11 px-3 rounded-xl text-xs bg-white/5 text-slate-300 hover:bg-white/10"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ))}
 
@@ -622,30 +702,41 @@ function LibrarySection({
 function UploadSection({
   kinds,
   busy,
+  knownCodes,
   onUpload,
 }: {
   kinds: BibleImportKind[];
   busy: boolean;
+  knownCodes: string[];
   onUpload: (form: FormData) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [code, setCode] = useState('');
-  const [name, setName] = useState('');
-  const [edition, setEdition] = useState('');
-  const [withNotes, setWithNotes] = useState(false);
+  const [form, setForm] = useState<InstallForm>(freshForm);
+
+  const set = (key: InstallFieldKey, value: string | boolean) =>
+    setForm((previous) => setField(previous, key, value));
+
+  function onFile(next: File | null) {
+    setFile(next);
+    if (next) setForm((previous) => suggest(previous, suggestionFor(next.name)));
+  }
 
   function submit() {
-    if (!file || !code) return;
-    const form = new FormData();
-    form.append('file', file);
-    form.append('code', code);
-    form.append('kind', kindOf(file.name, kinds));
-    if (name) form.append('name', name);
-    if (edition) form.append('edition', edition);
-    form.append('import_notes', withNotes ? 'true' : 'false');
-    onUpload(form);
+    if (!file || !form.code.trim()) return;
+    const payload = new FormData();
+    payload.append('file', file);
+    payload.append('code', form.code.trim());
+    payload.append('kind', kindOf(file.name, kinds));
+    const extras = extrasOf(form);
+    if (extras.name) payload.append('name', extras.name);
+    if (extras.edition) payload.append('edition', extras.edition);
+    if (extras.edition_name) payload.append('edition_name', extras.edition_name);
+    payload.append('import_notes', form.notes ? 'true' : 'false');
+    onUpload(payload);
   }
+
+  const detected = file ? kindOf(file.name, kinds) : '';
 
   return (
     <section className="space-y-2">
@@ -662,28 +753,24 @@ function UploadSection({
           type="file"
           accept=".pdf,.epub,.json"
           data-testid="bible-admin-upload-file"
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          onChange={(event) => onFile(event.target.files?.[0] ?? null)}
           className="block w-full min-h-11 text-xs text-slate-300 file:mr-3 file:min-h-11 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:text-xs file:text-slate-200"
         />
-        <div className="grid gap-2 sm:grid-cols-3">
-          <Field label="Translation code" id="bible-admin-upload-code" value={code} onChange={setCode} placeholder="nkjv" testId="bible-admin-upload-code" />
-          <Field label="Display name" id="bible-admin-upload-name" value={name} onChange={setName} placeholder="NKJV" testId="bible-admin-upload-name" />
-          <Field label="Study Bible code (optional)" id="bible-admin-upload-edition" value={edition} onChange={setEdition} placeholder="nkjv-macarthur" testId="bible-admin-upload-edition" />
-        </div>
-        <label className="flex items-center gap-2 min-h-11 text-xs text-slate-300">
-          <input
-            type="checkbox"
-            checked={withNotes}
-            data-testid="bible-admin-upload-notes"
-            onChange={(event) => setWithNotes(event.target.checked)}
-            className="h-4 w-4 accent-amber-500"
-          />
-          Keep the study notes in this file
-        </label>
+        {file && detected ? (
+          <p className="text-[10px] text-slate-500" data-testid="bible-admin-upload-kind">
+            {file.name} will install as {KIND_LABELS[detected] ?? detected}.
+          </p>
+        ) : null}
+        <InstallFields
+          idPrefix="bible-admin-upload"
+          form={form}
+          set={set}
+          knownCodes={knownCodes}
+        />
         <button
           type="button"
           onClick={submit}
-          disabled={busy || !file || !code}
+          disabled={busy || !file || !form.code.trim()}
           data-testid="bible-admin-upload-go"
           className="w-full min-h-11 rounded-xl text-xs font-medium bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 disabled:opacity-50 flex items-center justify-center gap-1.5"
         >
@@ -703,23 +790,63 @@ function UploadSection({
 
 function PathSection({
   busy,
+  knownCodes,
   onInstall,
 }: {
   busy: boolean;
+  knownCodes: string[];
   onInstall: (payload: Parameters<typeof api.runBibleImport>[0]) => void;
 }) {
-  const [code, setCode] = useState('');
   const [path, setPath] = useState('');
   const [kind, setKind] = useState<BibleImportKind>('pdf');
+  const [kindTouched, setKindTouched] = useState(false);
+  const [form, setForm] = useState<InstallForm>(freshForm);
+
+  const set = (key: InstallFieldKey, value: string | boolean) =>
+    setForm((previous) => setField(previous, key, value));
+
+  /**
+   * The path is the only fact here, so everything else is derived from it.
+   *
+   * The file name carries the translation code and, for a study Bible, the
+   * notes name; the extension picks the file type. All of it is a suggestion:
+   * a value the operator has typed is left alone, and the kind select stops
+   * following the extension the moment it is touched by hand.
+   */
+  function onPath(value: string) {
+    setPath(value);
+    const base = value.split('/').pop() ?? '';
+    if (base) setForm((previous) => suggest(previous, suggestionFor(base)));
+    if (!kindTouched) {
+      const suffix = base.split('.').pop()?.toLowerCase() ?? '';
+      const match = ['json', 'pdf', 'epub'].find((option) => option === suffix);
+      if (match) setKind(match as BibleImportKind);
+    }
+  }
+
+  function submit() {
+    if (!form.code.trim() || !path) return;
+    onInstall({ code: form.code.trim(), kind, source_path: path, ...extrasOf(form) });
+  }
 
   return (
     <section className="space-y-2">
       <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">From a file on the server</h3>
       <div className="rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2.5 space-y-2">
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Field label="Translation code" id="bible-admin-path-code" value={code} onChange={setCode} placeholder="esv" testId="bible-admin-path-code" />
-          <Field label="Path on the server" id="bible-admin-path-file" value={path} onChange={setPath} placeholder="/data/bible/esv.pdf" testId="bible-admin-path-file" />
-        </div>
+        <Field
+          label="Path on the server"
+          id="bible-admin-path-file"
+          value={path}
+          onChange={onPath}
+          placeholder="/data/bible/esv.pdf"
+          testId="bible-admin-path-file"
+        />
+        <InstallFields
+          idPrefix="bible-admin-path"
+          form={form}
+          set={set}
+          knownCodes={knownCodes}
+        />
         <label htmlFor="bible-admin-path-kind" className="block text-[11px] text-slate-400">
           File type
         </label>
@@ -727,7 +854,10 @@ function PathSection({
           id="bible-admin-path-kind"
           data-testid="bible-admin-path-kind"
           value={kind}
-          onChange={(event) => setKind(event.target.value as BibleImportKind)}
+          onChange={(event) => {
+            setKindTouched(true);
+            setKind(event.target.value as BibleImportKind);
+          }}
           className="w-full min-h-11 rounded-xl bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-200"
         >
           <option value="pdf">PDF Bible</option>
@@ -736,9 +866,9 @@ function PathSection({
         </select>
         <button
           type="button"
-          disabled={busy || !code || !path}
+          disabled={busy || !form.code.trim() || !path}
           data-testid="bible-admin-path-go"
-          onClick={() => onInstall({ code, kind, source_path: path })}
+          onClick={submit}
           className="w-full min-h-11 rounded-xl text-xs font-medium bg-white/5 text-slate-200 hover:bg-white/10 disabled:opacity-50"
         >
           Install from this path
@@ -792,6 +922,7 @@ function Field({
   onChange,
   placeholder,
   testId,
+  list,
 }: {
   label: string;
   id: string;
@@ -799,6 +930,7 @@ function Field({
   onChange: (value: string) => void;
   placeholder?: string;
   testId: string;
+  list?: string;
 }) {
   return (
     <div>
@@ -810,6 +942,7 @@ function Field({
         data-testid={testId}
         value={value}
         placeholder={placeholder}
+        list={list}
         onChange={(event) => onChange(event.target.value)}
         className="mt-1 w-full min-h-11 rounded-xl bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-200 placeholder:text-slate-600"
       />
@@ -836,4 +969,206 @@ function kindOf(filename: string, kinds: BibleImportKind[]): BibleImportKind {
   const suffix = filename.split('.').pop()?.toLowerCase() ?? '';
   const match = kinds.find((kind) => kind === suffix);
   return match ?? 'pdf';
+}
+
+/**
+ * The shared install form: what every file door asks before installing.
+ *
+ * `touched` records which fields a person has edited. Suggestions only ever
+ * fill untouched fields, and a suggestion keeps its field untouched so a
+ * better one (a corrected file name, a re-picked file) can refine it -- the
+ * rule that keeps prefills helpful without letting them stomp typing.
+ */
+type InstallFieldKey = 'code' | 'name' | 'edition' | 'editionName' | 'notes';
+
+interface InstallForm {
+  code: string;
+  name: string;
+  edition: string;
+  editionName: string;
+  notes: boolean;
+  touched: Record<InstallFieldKey, boolean>;
+}
+
+function freshForm(): InstallForm {
+  return {
+    code: '',
+    name: '',
+    edition: '',
+    editionName: '',
+    notes: false,
+    touched: { code: false, name: false, edition: false, editionName: false, notes: false },
+  };
+}
+
+function setField(form: InstallForm, key: InstallFieldKey, value: string | boolean): InstallForm {
+  if (key === 'notes') {
+    return { ...form, notes: Boolean(value), touched: { ...form.touched, notes: true } };
+  }
+  return { ...form, [key]: String(value), touched: { ...form.touched, [key]: true } };
+}
+
+function suggest(
+  form: InstallForm,
+  patch: Partial<Pick<InstallForm, 'code' | 'name' | 'edition' | 'editionName' | 'notes'>>,
+): InstallForm {
+  const next: InstallForm = { ...form, touched: { ...form.touched } };
+  (Object.keys(patch) as InstallFieldKey[]).forEach((key) => {
+    if (next.touched[key]) return;
+    if (key === 'notes') next.notes = Boolean(patch.notes);
+    else next[key] = String(patch[key as 'code'] ?? '');
+    next.touched[key] = false;
+  });
+  return next;
+}
+
+/** A suggested translation code: the file name, made into a code. */
+function slugOf(filename: string): string {
+  const base = filename.split('/').pop() ?? filename;
+  const stem = base.replace(/\.[^.]+$/, '');
+  return stem.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+}
+
+/** A suggested display name: the file name a person would recognise. */
+function displayNameOf(filename: string): string {
+  const base = filename.split('/').pop() ?? filename;
+  return base.replace(/\.[^.]+$/, '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Names that read as a title rather than a code ("NKJV Study Bible.epub"). */
+function looksLikeTitle(filename: string): boolean {
+  const stem = (filename.split('/').pop() ?? filename).replace(/\.[^.]+$/, '');
+  return stem.trim().length >= 8 && stem.includes(' ');
+}
+
+/**
+ * Filenames that say the file is study material rather than plain scripture.
+ *
+ * Only used to prefill the study-notes checkbox, never to decide an import:
+ * the importer still proves what a file actually contains, and the operator
+ * can untick the box.
+ */
+function mentionsNotes(filename: string): boolean {
+  return /study\s*bible|commentary|study\s*notes|sermons?/i.test(filename);
+}
+
+/** What a file name can honestly suggest, before anyone has typed anything. */
+function suggestionFor(filename: string): Partial<InstallForm> {
+  const notes = mentionsNotes(filename);
+  // Both name slots are rewritten every time: an intermediate state while a
+  // path is typed can read as a plain title, and its suggestion must not
+  // survive into the payload once the real extension shows it is a commentary.
+  const patch: Partial<InstallForm> = { code: slugOf(filename), notes, name: '', editionName: '' };
+  if (notes) {
+    // A commentary's proper name belongs to the study notes, not the translation.
+    patch.editionName = displayNameOf(filename);
+  } else if (looksLikeTitle(filename)) {
+    patch.name = displayNameOf(filename);
+  }
+  return patch;
+}
+
+/** Optional fields, sent only when they carry a value. */
+function extrasOf(form: InstallForm): {
+  name?: string;
+  edition?: string;
+  edition_name?: string;
+  import_notes?: boolean;
+} {
+  const code = (value: string) => value.trim();
+  return {
+    ...(code(form.name) ? { name: code(form.name) } : {}),
+    ...(code(form.edition) ? { edition: code(form.edition) } : {}),
+    ...(code(form.editionName) ? { edition_name: code(form.editionName) } : {}),
+    ...(form.notes ? { import_notes: true } : {}),
+  };
+}
+
+/**
+ * The four names every file door shares, prefilled and editable.
+ *
+ * The translation code gets a datalist of what the catalogue knows because
+ * the importer refuses codes the manifest has never heard of; seeing the
+ * known codes next to the field turns that refusal from a surprise into a
+ * choice.
+ */
+function InstallFields({
+  idPrefix,
+  form,
+  set,
+  knownCodes,
+}: {
+  idPrefix: string;
+  form: InstallForm;
+  set: (key: InstallFieldKey, value: string | boolean) => void;
+  knownCodes: string[];
+}) {
+  const typed = form.code.trim();
+  const unknown = typed !== '' && knownCodes.length > 0 && !knownCodes.includes(typed);
+  return (
+    <>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div>
+          <Field
+            label="Translation code"
+            id={`${idPrefix}-code`}
+            value={form.code}
+            onChange={(value) => set('code', value)}
+            placeholder="nkjv"
+            testId={`${idPrefix}-code`}
+            list={`${idPrefix}-codes`}
+          />
+          <datalist id={`${idPrefix}-codes`}>
+            {knownCodes.map((code) => (
+              <option key={code} value={code} />
+            ))}
+          </datalist>
+          {unknown ? (
+            <p className="mt-1 text-[10px] leading-relaxed text-amber-300/90" data-testid={`${idPrefix}-code-hint`}>
+              {typed} is not a code the manifest knows, so the run would be refused. Known
+              codes: {knownCodes.join(', ')}.
+            </p>
+          ) : null}
+        </div>
+        <Field
+          label="Display name"
+          id={`${idPrefix}-name`}
+          value={form.name}
+          onChange={(value) => set('name', value)}
+          placeholder="New King James Version"
+          testId={`${idPrefix}-name`}
+        />
+        <Field
+          label="Study Bible code (optional)"
+          id={`${idPrefix}-edition`}
+          value={form.edition}
+          onChange={(value) => set('edition', value)}
+          placeholder="nkjv-tomholland"
+          testId={`${idPrefix}-edition`}
+        />
+        <Field
+          label="Study notes name (optional)"
+          id={`${idPrefix}-editionname`}
+          value={form.editionName}
+          onChange={(value) => set('editionName', value)}
+          placeholder="Romans: The Divine Marriage"
+          testId={`${idPrefix}-editionname`}
+        />
+      </div>
+      <label className="flex items-center gap-2 min-h-11 text-xs text-slate-300">
+        <input
+          type="checkbox"
+          checked={form.notes}
+          data-testid={`${idPrefix}-notes`}
+          onChange={(event) => set('notes', event.target.checked)}
+          className="h-4 w-4 accent-amber-500"
+        />
+        Keep the study notes in this file
+      </label>
+      <p className="text-[10px] leading-relaxed text-slate-500">
+        Tick this for a study Bible or commentary: its notes are filed against the study Bible
+        code above, and a source with no verse text installs as notes alone.
+      </p>
+    </>
+  );
 }

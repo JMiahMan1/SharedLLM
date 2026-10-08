@@ -269,6 +269,48 @@ def test_a_browse_error_from_the_shelf_is_a_bad_request(loaded_client, monkeypat
     assert response.status_code == 400
 
 
+def test_the_gateway_form_of_the_browse_route_lists_the_shelf(loaded_client, monkeypatch):
+    """The gateway and the admin page POST the folder as a JSON body.
+
+    The browse used to exist only as GET with a query parameter, so every real
+    call from the admin page answered 405 and the shelf looked unreadable.
+    """
+
+    async def browse(self, **kwargs):
+        return library.describe(listing(entry(f"{ROOT}/Bible.epub"))["entries"], path=ROOT, root=ROOT)
+
+    monkeypatch.setattr(library.LibraryClient, "browse", browse)
+
+    async def root():
+        return ROOT
+
+    monkeypatch.setattr(bible_main, "_library_root", root)
+    response = loaded_client.post(
+        "/admin/library",
+        json={"path": ""},
+        headers={"X-Internal-Secret": SECRET},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["root"] == ROOT
+    assert body["count"] == 1
+    assert body["entries"][0]["installable"] is True
+
+
+def test_a_body_that_is_not_an_object_is_refused(loaded_client, monkeypatch):
+    async def root():
+        return ROOT
+
+    monkeypatch.setattr(bible_main, "_library_root", root)
+    response = loaded_client.post(
+        "/admin/library",
+        json=["not", "an", "object"],
+        headers={"X-Internal-Secret": SECRET},
+    )
+    assert response.status_code == 400
+    assert "JSON object" in response.json()["detail"]
+
+
 async def test_the_catalogue_reports_where_the_shelf_is(loaded_client, monkeypatch):
     async def root():
         return ROOT
