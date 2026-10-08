@@ -43,6 +43,7 @@ from services.execution import hardware_router
 from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
 from services.execution.handlers import (
     audiobookshelf,
+    bible,
     browser,
     calendar,
     calibre,
@@ -75,6 +76,7 @@ from services.execution.schemas import (
     AnnouncementRequest,
     AudiobookshelfRequest,
     CalendarRequest,
+    BibleRequest,
     CalibreRequest,
     DeploymentRequest,
     DiagnosticRequest,
@@ -2867,6 +2869,15 @@ async def execute_audiobookshelf(req: AudiobookshelfRequest):
     if not is_local:
         _ensure_ha_creds(ctx)
     return await audiobookshelf.handle_audiobookshelf(req)
+
+@app.post("/execute/bible", response_model=ExecutionResult)
+async def execute_bible(req: BibleRequest):
+    """Read scripture, search verses or fetch study notes (no writes)."""
+    log.info(
+        f"[bible] user={req.user_context.user} action={req.action} "
+        f"ref={req.ref or req.q or '-'} version={req.version or 'default'}"
+    )
+    return await bible.handle_bible(req)
 
 @app.post("/execute/calibre", response_model=ExecutionResult)
 async def execute_calibre(req: CalibreRequest):

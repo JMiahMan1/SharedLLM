@@ -566,6 +566,10 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("AudiobookshelfRequest", SVC_EXECUTION, "POST", "/execute/audiobookshelf", False,
      "Audiobookshelf: libraries, search, status.",
      "payload fields: action, query, book_id, episode_id, entity_id, library_id, limit."),
+    ("BibleRequest", SVC_EXECUTION, "POST", "/execute/bible", False,
+     "Holy Bible, read-only: read passages, search verses, study notes by "
+     "edition, verse of the day, catalogue. No state or mark writes exist.",
+     "payload fields: action, ref, q, version, edition, kind, cross_version, book, limit, day, scope."),
     ("CalibreRequest", SVC_EXECUTION, "POST", "/execute/calibre", False,
      "Calibre library, read-only: list or search the shelf, fetch one book's "
      "metadata or text. No delete or write actions exist.",

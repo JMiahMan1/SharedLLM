@@ -45,7 +45,7 @@ def test_the_fuzzy_regex_falls_back_to_calibre():
 
 def test_the_schema_error_listing_advertises_it():
     source = _agent_loop_source()
-    assert '"audiobookshelfrequest", "calibrerequest",' in source
+    assert '"audiobookshelfrequest", "biblerequest", "calibrerequest",' in source
 
 
 def test_the_single_turn_path_can_reach_it():

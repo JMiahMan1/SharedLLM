@@ -351,3 +351,25 @@ def test_the_library_protocol_lesson_teaches_calibre_before_the_web():
     assert "CalibreRequest" in lesson["rule"]
     assert "WebSearchRequest" in lesson["rule"], "the lesson must say when the web is the fallback"
     assert lesson["rule"].index("FIRST") < lesson["rule"].index("WebSearchRequest")
+
+
+def test_the_scripture_protocol_lesson_points_at_bible_request():
+    """Raven's mission prompt must know scripture comes from the Bible service.
+
+    Scripture text is not in RAG (there is no bible collection), so the lesson
+    is the only thing that stops a mission quoting a paraphrase from the web
+    when the corpus holds the verse.
+    """
+    lesson = next(
+        (l for l in rag_main._PROTOCOL_LESSONS if l["id"] == "lesson-proto-scripture"),
+        None,
+    )
+    assert lesson is not None, "lesson-proto-scripture is missing from the protocol curriculum"
+    assert "protocol" in lesson["tags"]
+    assert "scripture" in lesson["tags"] and "bible" in lesson["tags"]
+    assert "BibleRequest" in lesson["rule"]
+    assert "study_notes" in lesson["rule"], "commentary questions must route to study notes"
+    assert "catalogue" in lesson["rule"], "installed translations must be discoverable"
+    assert "{reference} ({version})" in lesson["rule"], "citations must name reference and version"
+    assert "WebSearchRequest" in lesson["rule"], "the lesson must forbid quoting scripture from the web"
+    assert lesson["rule"].index("FIRST") < lesson["rule"].index("WebSearchRequest")
