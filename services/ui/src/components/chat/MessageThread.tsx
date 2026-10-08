@@ -88,8 +88,14 @@ export default function MessageThread({
   };
 
   // The panel remounts this per conversation (key). It opens at the "New
-  // messages" line when there is one, else at the latest message.
+  // messages" line when there is one, else at the latest message -- once the
+  // messages are there: they usually arrive just after the thread first draws,
+  // and positioning on mount alone left it parked at the top.
+  const positionedRef = useRef(false);
   useLayoutEffect(() => {
+    if (positionedRef.current || messages.length === 0) return;
+    positionedRef.current = true;
+    seenCountRef.current = messages.length;
     const feed = feedRef.current;
     if (!feed) return;
     if (dividerRef.current && typeof dividerRef.current.scrollIntoView === 'function') {
@@ -97,15 +103,15 @@ export default function MessageThread({
     } else {
       feed.scrollTop = feed.scrollHeight;
     }
-  }, []);
+  }, [messages.length]);
 
   // New messages follow you only if you were already at the bottom or sent
   // them yourself; otherwise they wait behind a "N new" pill.
   useEffect(() => {
+    if (!positionedRef.current) return;
     const added = messages.length - seenCountRef.current;
-    const firstLoad = seenCountRef.current === 0;
     seenCountRef.current = messages.length;
-    if (added <= 0 || firstLoad) return;
+    if (added <= 0) return;
     const last = messages[messages.length - 1];
     if (atBottomRef.current || last?.pending) scrollToBottom(true);
     else setUnseen((n) => n + added);
