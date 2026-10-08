@@ -101,8 +101,36 @@ class NextcloudPersonalDataProvider:
         return safe_filename(value, fallback)
 
 
+def _context_value(user_context: Any, key: str) -> Any:
+    if isinstance(user_context, dict):
+        return user_context.get(key)
+    return getattr(user_context, key, None)
+
+
 def resolve_personal_data_provider(user_context: Any) -> PersonalDataProvider | None:
+    """The Nextcloud account a user's Talk, notes and calendar act through.
+
+    When the context names a user, only that user's own login counts: Identity
+    already resolved it to their own account, or to the shared one when an admin
+    granted that. Filling the gaps from the server's NEXTCLOUD_USER (the Admin
+    account) made every action of a user without a login -- their chat
+    messages, their notes -- happen as Admin. Only the server URL, which is the
+    same for everyone, may still come from the environment. A context with no
+    user (a system job) keeps the environment account.
+    """
     base_url, username, password = resolve_credentials(user_context)
+    if _context_value(user_context, "user"):
+        username = _context_value(user_context, "nextcloud_user")
+        password = _context_value(user_context, "nextcloud_pass")
     if not (base_url and username and password):
         return None
     return NextcloudPersonalDataProvider(base_url=base_url, username=username, password=password)
+
+
+def missing_account_message(user_context: Any) -> str:
+    """What to tell a user whose Nextcloud account is not set up."""
+    user = _context_value(user_context, "user") or "this account"
+    return (
+        f"No Nextcloud account is set up for {user}. Add one under Settings > "
+        "Integrations, or ask an admin to share the household account with you."
+    )

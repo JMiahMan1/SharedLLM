@@ -7,11 +7,11 @@ from typing import Any
 from uuid import uuid4
 
 try:
-    from personal_data import resolve_personal_data_provider
+    from personal_data import missing_account_message, resolve_personal_data_provider
     from schemas import ExecutionResult, TalkRequest
     from tts import text_to_speech
 except ImportError:
-    from ..personal_data import resolve_personal_data_provider
+    from ..personal_data import missing_account_message, resolve_personal_data_provider
     from ..schemas import ExecutionResult, TalkRequest
     from ..tts import text_to_speech
 
@@ -375,7 +375,7 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
 async def handle_talk(req: TalkRequest) -> ExecutionResult:
     provider = resolve_personal_data_provider(req.user_context)
     if not provider:
-        return ExecutionResult(status="FAILURE", message="Nextcloud Talk credentials missing.", service="talk")
+        return ExecutionResult(status="FAILURE", message=missing_account_message(req.user_context), service="talk")
 
     action = req.action
     log.info("[talk] action=%s user=%s token=%s target=%s", action, req.user_context.user, req.token, req.target_user)
