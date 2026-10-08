@@ -1831,13 +1831,14 @@ SEEDABLE_CREDENTIALS = {
 }
 
 @app.post("/api/admin/seed-credential")
-def seed_credential(body: dict, session: Session = Depends(get_session), admin: User = Depends(require_admin_or_internal)):
+def seed_credential(body: dict, request: Request, session: Session = Depends(get_session), _allowed: bool = Depends(require_admin_or_internal)):
     """Seed a single credential for the default user (User 1) without re-seeding the entire DB.
 
     Accepts a credential field name and its plain text value. The value is encrypted and stored.
+    ``require_admin_or_internal`` admits only an admin or an internal caller; it
+    returns True, not a user, so the old ``admin.is_admin`` check here raised on
+    every call and the endpoint never worked.
     """
-    if not admin.is_admin:
-        raise HTTPException(status_code=403, detail="Admin only")
 
     field = body.get("field")
     value = body.get("value")

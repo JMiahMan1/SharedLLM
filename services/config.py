@@ -130,8 +130,6 @@ WORKSPACE_UPLOAD_MAX_BYTES = _safe_int("WORKSPACE_UPLOAD_MAX_BYTES", 1073741824)
 VOLUME_MANIFEST_PATH = os.getenv("VOLUME_MANIFEST_PATH")
 MASS_CONFIG_ENTRY_ID = os.getenv("MASS_CONFIG_ENTRY_ID")
 VOLUME_BACKUP_ROOT = os.getenv("VOLUME_BACKUP_ROOT")
-ABS_URL = os.getenv("ABS_URL")
-ABS_API_KEY = os.getenv("ABS_API_KEY")
 DNS_CONF_PATH = os.getenv("DNS_CONF_PATH")
 DNS_POLL_INTERVAL = _safe_int("DNS_POLL_INTERVAL", 30)
 UPSTREAM_DNS = os.getenv("UPSTREAM_DNS")
@@ -284,8 +282,6 @@ async def resolve_runtime_config():
         "workspace_root": "WORKSPACE_ROOT",
         "workspace_runtime_root": "WORKSPACE_RUNTIME_ROOT",
         "mass_config_entry_id": "MASS_CONFIG_ENTRY_ID",
-        "abs_url": "ABS_URL",
-        "abs_api_key": "ABS_API_KEY",
         "audiobookshelf_url": "AUDIOBOOKSHELF_URL",
         "audiobookshelf_user": "AUDIOBOOKSHELF_USER",
         "audiobookshelf_pass": "AUDIOBOOKSHELF_PASS",

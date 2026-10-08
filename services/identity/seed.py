@@ -29,7 +29,7 @@ def system_service_urls() -> dict[str, str | None]:
         "github_url": os.getenv("GITHUB_URL") or os.getenv("GIT_URL"),
         "gitlab_url": os.getenv("GITLAB_URL"),
         "git_url": os.getenv("GIT_URL"),
-        "audiobookshelf_url": os.getenv("AUDIOBOOKSHELF_URL") or os.getenv("ABS_URL"),
+        "audiobookshelf_url": os.getenv("AUDIOBOOKSHELF_URL"),
         "mass_url": os.getenv("MA_URL") or os.getenv("MUSIC_ASSISTANT_URL"),
     }
 
@@ -86,8 +86,8 @@ def _parse_env_users() -> dict:
         "github_token": os.getenv("GITHUB_TOKEN") or os.getenv("GIT_TOKEN"),
         "gitlab_user": os.getenv("GITLAB_USER"),
         "gitlab_token": os.getenv("GITLAB_TOKEN"),
-        "audiobookshelf_user": os.getenv("AUDIOBOOKSHELF_USER") or os.getenv("ABS_USER"),
-        "audiobookshelf_pass": os.getenv("AUDIOBOOKSHELF_PASS") or os.getenv("ABS_PASS"),
+        "audiobookshelf_user": os.getenv("AUDIOBOOKSHELF_USER"),
+        "audiobookshelf_pass": os.getenv("AUDIOBOOKSHELF_PASS"),
         "audiobookshelf_api_key": os.getenv("AUDIOBOOKSHELF_API_KEY"),
         "mass_token": os.getenv("MA_TOKEN") or os.getenv("MUSIC_ASSISTANT_TOKEN"),
         "skylight_url": os.getenv("SKYLIGHT_URL"),

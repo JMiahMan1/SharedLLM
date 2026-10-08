@@ -48,8 +48,6 @@ All other configuration is stored in the Identity service's database and fetched
 | `librarian_model` | `LIBRARIAN_MODEL` | Document/knowledge model |
 | `default_tts_voice` | `DEFAULT_TTS_VOICE` | Default TTS voice |
 | `mass_config_entry_id` | `MASS_CONFIG_ENTRY_ID` | Music Assistant config entry |
-| `abs_url` | `ABS_URL` | Audiobookshelf URL |
-| `abs_api_key` | `ABS_API_KEY` | Audiobookshelf API key |
 | `embedding_model` | `EMBEDDING_MODEL` | Embedding model name |
 | `fast_path_threshold` | `FAST_PATH_THRESHOLD` | Semantic router confidence |
 | `execution_external_host` | `EXECUTION_EXTERNAL_HOST` | External host for execution |
@@ -114,8 +112,6 @@ All other configuration is stored in the Identity service's database and fetched
 | `librarian_model` | `LIBRARIAN_MODEL` | Document/knowledge model |
 | `default_tts_voice` | `DEFAULT_TTS_VOICE` | Default TTS voice |
 | `mass_config_entry_id` | `MASS_CONFIG_ENTRY_ID` | Music Assistant config entry |
-| `abs_url` | `ABS_URL` | Audiobookshelf URL |
-| `abs_api_key` | `ABS_API_KEY` | Audiobookshelf API key |
 | `embedding_model` | `EMBEDDING_MODEL` | Embedding model name |
 | `fast_path_threshold` | `FAST_PATH_THRESHOLD` | Semantic router confidence |
 | `execution_external_host` | `EXECUTION_EXTERNAL_HOST` | External host for execution |

@@ -239,7 +239,7 @@ def test_config_sees_the_pinned_values_not_the_dotenv_ones():
     value, whatever the machine's .env says."""
     from services import config
 
-    for key in ("EXECUTION_EXTERNAL_HOST", "ABS_URL", "HA_URL", "GATEWAY_INTERNAL_URL", "TIMEZONE"):
+    for key in ("EXECUTION_EXTERNAL_HOST", "AUDIOBOOKSHELF_URL", "HA_URL", "GATEWAY_INTERNAL_URL", "TIMEZONE"):
         assert getattr(config, key) == os.environ[key], f"services.config.{key} came from .env, not the pin"
 
 
@@ -279,7 +279,7 @@ def test_internal_secret_agrees_across_the_e2e_stack():
     )
 
 
-@pytest.mark.parametrize("secret", ["ABS_API_KEY", "HA_TOKEN", "GITHUB_TOKEN", "GITLAB_TOKEN", "NEXTCLOUD_PASS"])
+@pytest.mark.parametrize("secret", ["AUDIOBOOKSHELF_API_KEY", "HA_TOKEN", "GITHUB_TOKEN", "GITLAB_TOKEN", "NEXTCLOUD_PASS"])
 def test_no_real_deployment_secret_reaches_the_test_environment(secret: str):
     """The real .env carries live credentials; _load_env_files() must not inject
     them into a test run now that every config var is pinned."""
@@ -314,7 +314,7 @@ def test_ast_reader_finds_every_env_read():
     test_config_env_reads_are_all_pinned vacuous."""
     reads = _config_env_reads()
     # spot-check names that appear in each of the three call styles
-    for known in ("HA_URL", "ABS_API_KEY", "INTERNAL_SECRET", "FERNET_KEY", "TIMEZONE"):
+    for known in ("HA_URL", "AUDIOBOOKSHELF_URL", "INTERNAL_SECRET", "FERNET_KEY", "TIMEZONE"):
         assert known in reads, f"the AST reader missed {known}; the coverage test is not trustworthy"
     assert len(reads) > 40, f"only found {len(reads)} env reads; the reader is probably broken"
 

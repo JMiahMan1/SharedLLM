@@ -78,7 +78,7 @@ os.environ.setdefault("TEST_MODE", "true")
 # single assertion failure that said nothing about the code it meant to cover.
 #
 # Pinning also stops _load_env_files() from injecting real deployment secrets
-# (ABS_API_KEY, HA_TOKEN, the Git tokens) into the test environment.
+# (AUDIOBOOKSHELF_API_KEY, HA_TOKEN, the Git tokens) into the test environment.
 #
 # tests/unit/test_config_env_isolation.py fails if this ever falls behind.
 _TEST_ENV_DEFAULTS = {
@@ -122,11 +122,10 @@ _TEST_ENV_DEFAULTS = {
     "OSRM_FOOT_URL": "",
     "NOMINATIM_URL": "",
     "HA_TOKEN": "test-ha-token",
-    "ABS_URL": "http://localhost:13378/",
-    "ABS_API_KEY": "test-abs-key",
     "AUDIOBOOKSHELF_URL": "http://localhost:13378",
     "AUDIOBOOKSHELF_USER": "test-user",
     "AUDIOBOOKSHELF_PASS": "test-pass",
+    "AUDIOBOOKSHELF_API_KEY": "test-abs-key",
     "NEXTCLOUD_URL": "http://localhost:8081",
     "NEXTCLOUD_USER": "test-user",
     "NEXTCLOUD_PASS": "test-pass",
@@ -199,7 +198,7 @@ _TEST_ENV_DEFAULTS = {
 #    exactly how five test_music_proxy tests kept returning 401 against a real
 #    INTERNAL_SECRET while services/config.py had captured a different one.
 #  * Pinning first with a plain assignment would let _load_env_files() overwrite
-#    the dummies with the developer's real ABS_API_KEY / HA_TOKEN / Git tokens
+#    the dummies with the developer's real AUDIOBOOKSHELF_API_KEY / HA_TOKEN / Git tokens
 #    moments later.
 #
 # So: load, then ASSIGN. After this block, every var above holds its listed
