@@ -3,7 +3,9 @@
 Pydantic schemas for the Identity Service API.
 """
 
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
 
 # ─── Internal inter-service schema ────────────────────────────────────────────
 
@@ -157,6 +159,9 @@ class UserUpdate(BaseModel):
     voice_fingerprint: str | None = None
     is_admin: bool | None = None
     is_system_default: bool | None = None
+    # Erase these fields. A blank value never erases anything (it means "leave
+    # it"), so removing a saved login has to be asked for by name.
+    clear_fields: list[str] | None = None
 
 
 class ShareRecipient(BaseModel):
@@ -171,6 +176,24 @@ class ShareRecipient(BaseModel):
 
     username: str
     display_name: str
+
+
+# Plain credential field -> its encrypted column on User. The one map the
+# update, reveal and read paths all use.
+CREDENTIAL_COLUMNS: dict[str, str] = {
+    "nextcloud_pass": "nextcloud_pass_enc",
+    "ha_token": "ha_token_enc",
+    "github_token": "github_token_enc",
+    "gitlab_token": "gitlab_token_enc",
+    "audiobookshelf_pass": "audiobookshelf_pass_enc",
+    "audiobookshelf_api_key": "audiobookshelf_api_key_enc",
+    "mailcow_api_key": "mailcow_api_key_enc",
+    "mail_pass": "mail_pass_enc",
+    "mass_token": "mass_token_enc",
+    "git_token": "git_token_enc",
+    "huggingface_token": "huggingface_token_enc",
+    "skylight_pass": "skylight_pass_enc",
+}
 
 
 class UserRead(BaseModel):
@@ -203,7 +226,25 @@ class UserRead(BaseModel):
     preferred_tts_voice: str | None = "af_heart"
     calendar_settings: dict = {}  # per-user calendar integration prefs (default/disabled/priority/ical_urls)
     api_key: str | None = None
-    # NOTE: Encrypted fields (pass/token) are intentionally omitted from read responses
+    # NOTE: Encrypted fields (pass/token) are intentionally omitted from read responses.
+    # Which of them hold a value, by plain field name: without this a saved
+    # password looked identical to a missing one, and the forms showed blanks.
+    saved_credentials: list[str] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def _list_saved_credentials(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # FastAPI dumps the User row to a dict first; the *_enc keys are
+            # still there (and dropped below as unknown fields).
+            if "saved_credentials" not in data:
+                data = {**data, "saved_credentials": [p for p, enc in CREDENTIAL_COLUMNS.items() if data.get(enc)]}
+            return data
+        saved = [plain for plain, enc in CREDENTIAL_COLUMNS.items() if getattr(data, enc, None)]
+        values = {name: getattr(data, name, None) for name in cls.model_fields if name != "saved_credentials"}
+        values = {k: v for k, v in values.items() if v is not None}
+        values["saved_credentials"] = saved
+        return values
 
 
 class DeviceAssignmentCreate(BaseModel):

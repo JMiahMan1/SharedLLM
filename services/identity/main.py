@@ -23,6 +23,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common.http import get_client, get_client_insecure
 from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
+from services.identity import audit
 from services.identity.crypto import decrypt, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
@@ -30,6 +31,7 @@ from services.identity.models import (
     DEVICE_KINDS,
     NO_OPT_IN_EVENTS,
     APIKey,
+    AuditEvent,
     CapabilityInventory,
     Device,
     DeviceAssignment,
@@ -48,6 +50,7 @@ from services.identity.models import (
     UserWorkspaceSession,
 )
 from services.identity.schemas import (
+    CREDENTIAL_COLUMNS,
     ChangePasswordRequest,
     CredentialSharesRead,
     CredentialSharesUpdate,
@@ -565,7 +568,7 @@ def require_admin_or_internal(
     return True
 
 @app.post("/api/users/{username}/password")
-def admin_set_password(username: str, req: dict, session: Session = Depends(get_session), admin: User = Depends(require_admin_or_internal)):
+def admin_set_password(username: str, req: dict, request: Request, session: Session = Depends(get_session), admin: User = Depends(require_admin_or_internal)):
     new_password = req.get("new_password")
     if not new_password:
         raise HTTPException(status_code=400, detail="new_password is required")
@@ -577,6 +580,7 @@ def admin_set_password(username: str, req: dict, session: Session = Depends(get_
     user.password_hash = hash_password(new_password)
     session.add(user)
     session.commit()
+    _audit(request, session, "user.password_reset", user.username, changes=[{"field": "password", "change": "changed", "secret": True}])
     return {"status": "SUCCESS", "message": f"Password for @{username} updated"}
 
 def require_api_key(authorization: str = Header(None), session: Session = Depends(get_session)) -> User:
@@ -804,57 +808,126 @@ async def enroll_voice(
         log.error(f"Enrollment failed: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from None
 
+
+
+def _client_of(request: Request | None) -> tuple[str | None, str | None]:
+    if request is None:
+        return None, None
+    forwarded = request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP") or ""
+    client = forwarded.split(",")[0].strip() or (request.client.host if request.client else None)
+    return client, request.headers.get("User-Agent")
+
+
+def _actor_of(request: Request | None, session: Session, fallback: User | None = None) -> tuple[str, str]:
+    """Who is acting: the API key's user, an internal service, or nobody."""
+    if fallback is not None:
+        return fallback.username, "user"
+    if request is None:
+        return "internal", "internal"
+    if _matches_internal_secret(request.headers.get("X-Internal-Secret")):
+        return "internal", "internal"
+    auth = request.headers.get("Authorization") or ""
+    if auth.startswith("Bearer "):
+        found = _find_user_for_api_key(session, auth.split(" ", 1)[1])
+        if found:
+            return found.username, "user"
+    return "anonymous", "anonymous"
+
+
+def _audit(
+    request: Request | None,
+    session: Session,
+    action: str,
+    target: str | None,
+    *,
+    actor: User | None = None,
+    before: dict | None = None,
+    after: dict | None = None,
+    changes: list[dict] | None = None,
+    note: str | None = None,
+) -> None:
+    """Record an account action. Never raises: losing an audit line must not
+    undo the change it describes (the log line still records the failure)."""
+    try:
+        who, kind = _actor_of(request, session, actor)
+        client, agent = _client_of(request)
+        audit.record(
+            session,
+            actor=who,
+            actor_kind=kind,
+            action=action,
+            target=target,
+            changes=changes if changes is not None else audit.diff(before or {}, after or {}),
+            source=f"{request.method} {request.url.path}" if request is not None else None,
+            client=client,
+            user_agent=agent,
+            note=note,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log.error(f"[audit] could not record {action} on {target}: {exc}")
+
+
+def _apply_user_update(user: User, update_data: dict, clear_fields: list[str] | None) -> None:
+    """Apply a profile/credential update with the rules both PATCH routes share.
+
+    A blank value means "leave it alone", never "erase it": every form loads
+    secrets blank (they are never sent to the browser), so treating blank as
+    erase wiped a saved password whenever anyone saved the form for any other
+    reason. Erasing is explicit -- the field is named in ``clear_fields``.
+    """
+    for field in clear_fields or []:
+        if field in CREDENTIAL_COLUMNS:
+            setattr(user, CREDENTIAL_COLUMNS[field], None)
+        elif field in User.model_fields and field not in ("id", "username", "password_hash", "is_admin", "is_system_default"):
+            setattr(user, field, None)
+
+    for plain, enc in CREDENTIAL_COLUMNS.items():
+        if plain in update_data:
+            val = update_data.pop(plain)
+            val = val.strip() if isinstance(val, str) else val
+            if val:
+                setattr(user, enc, encrypt(val))
+
+    for key, value in update_data.items():
+        value = _coerce_profile_value(key, value)
+        if value is None and key != "display_name":
+            continue  # blank: unchanged (use clear_fields to erase)
+        setattr(user, key, value)
+
+
+def _redacted(update_data: dict) -> list[str]:
+    """Field names only, for logging what a request touched."""
+    return sorted(update_data)
+
+
 @app.patch("/api/users/me", response_model=UserRead)
-def update_me(body: UserUpdate, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
-    log.info(f"[update_me] Received update for {user.username}: {body.model_dump(exclude_unset=True)}")
+def update_me(body: UserUpdate, request: Request, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     update_data = body.model_dump(exclude_unset=True)
+    clear_fields = update_data.pop("clear_fields", None)
+    # Field names only: this line used to print the whole body, passwords included.
+    log.info(f"[update_me] {user.username} updating {_redacted(update_data)} clearing {clear_fields or []}")
 
     # Privilege fields are never self-assignable here; admins use
     # PATCH /api/users/{username} which enforces is_admin.
     for privilege_field in ("is_admin", "is_system_default"):
         if privilege_field in update_data:
-            log.warning(
-                f"[update_me] {user.username} attempted self-update of "
-                f"'{privilege_field}'; ignored"
-            )
+            log.warning(f"[update_me] {user.username} attempted self-update of '{privilege_field}'; ignored")
             del update_data[privilege_field]
 
     # Prevent non-default users from changing system skylight integration credentials
     if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]) and user.id != 1 and user.username != "default":
         raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
 
-    # Handle encrypted fields
-    crypto_map = {
-        "nextcloud_pass": "nextcloud_pass_enc",
-        "ha_token": "ha_token_enc",
-        "github_token": "github_token_enc",
-        "gitlab_token": "gitlab_token_enc",
-        "audiobookshelf_pass": "audiobookshelf_pass_enc",
-        "audiobookshelf_api_key": "audiobookshelf_api_key_enc",
-        "mass_token": "mass_token_enc",
-        "git_token": "git_token_enc",
-        "huggingface_token": "huggingface_token_enc",
-        "skylight_pass": "skylight_pass_enc"
-    }
-
-    for plain, enc in crypto_map.items():
-        if plain in update_data:
-            val = update_data.pop(plain)
-            if isinstance(val, str):
-                val = val.strip()
-            val = val if val else None
-            setattr(user, enc, encrypt(val) if val else None)
-
-    for key, value in update_data.items():
-        setattr(user, key, _coerce_profile_value(key, value))
-
+    before = audit.snapshot(user)
+    _apply_user_update(user, update_data, clear_fields)
     session.add(user)
     session.commit()
     session.refresh(user)
+    _audit(request, session, "user.self_update", user.username, actor=user, before=before, after=audit.snapshot(user))
     return user
 
 @app.patch("/api/users/{username}", response_model=UserRead)
-def update_user(username: str, body: UserUpdate, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
+def update_user(username: str, body: UserUpdate, request: Request, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
 
@@ -863,42 +936,72 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
         raise HTTPException(status_code=404, detail="User not found")
 
     update_data = body.model_dump(exclude_unset=True)
+    clear_fields = update_data.pop("clear_fields", None)
 
-# Prevent non-default users from changing system skylight integration credentials
+    # Prevent non-default users from changing system skylight integration credentials
     if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]) and user.id != 1 and user.username != "default":
         raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
 
-    # Handle encrypted fields
-    crypto_map = {
-        "nextcloud_pass": "nextcloud_pass_enc",
-        "ha_token": "ha_token_enc",
-        "github_token": "github_token_enc",
-        "gitlab_token": "gitlab_token_enc",
-        "audiobookshelf_pass": "audiobookshelf_pass_enc",
-        "audiobookshelf_api_key": "audiobookshelf_api_key_enc",
-        "mailcow_api_key": "mailcow_api_key_enc",
-        "mail_pass": "mail_pass_enc",
-        "mass_token": "mass_token_enc",
-        "git_token": "git_token_enc",
-        "huggingface_token": "huggingface_token_enc",
-        "skylight_pass": "skylight_pass_enc"
-    }
-
-    for plain, enc in crypto_map.items():
-        if plain in update_data:
-            val = update_data.pop(plain)
-            if isinstance(val, str):
-                val = val.strip()
-            val = val if val else None
-            setattr(user, enc, encrypt(val) if val else None)
-
-    for key, value in update_data.items():
-        setattr(user, key, _coerce_profile_value(key, value))
-
+    before = audit.snapshot(user)
+    _apply_user_update(user, update_data, clear_fields)
     session.add(user)
     session.commit()
     session.refresh(user)
+    _audit(request, session, "user.update", user.username, actor=admin, before=before, after=audit.snapshot(user))
     return user
+
+
+@app.post("/api/users/{username}/reveal")
+def reveal_credential(username: str, body: dict, request: Request, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A saved credential's value, for the show/hide eye on a password field.
+
+    Only the account's owner or an admin may ask, one field at a time, and
+    every reveal is audited (the value never is).
+    """
+    target = session.exec(select(User).where(User.username == username.lower())).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not caller.is_admin and caller.username != target.username:
+        raise HTTPException(status_code=403, detail="Only the account owner or an admin can reveal a credential")
+    field = str(body.get("field") or "")
+    if field not in CREDENTIAL_COLUMNS:
+        raise HTTPException(status_code=422, detail=f"field must be one of {', '.join(sorted(CREDENTIAL_COLUMNS))}")
+    stored = getattr(target, CREDENTIAL_COLUMNS[field], None)
+    value = decrypt(stored) if stored else ""
+    _audit(request, session, "credential.reveal", target.username, actor=caller, changes=[{"field": field, "change": "revealed", "secret": True}])
+    return {"field": field, "value": value or ""}
+
+
+@app.get("/api/admin/audit")
+def list_audit(
+    target: str | None = None,
+    actor: str | None = None,
+    action: str | None = None,
+    limit: int = Query(200, ge=1, le=1000),
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """The account audit trail, newest first. Admin only."""
+    if not caller.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    query = select(AuditEvent)
+    if target:
+        query = query.where(AuditEvent.target == target.lower())
+    if actor:
+        query = query.where(AuditEvent.actor == actor.lower())
+    if action:
+        query = query.where(AuditEvent.action == action)
+    rows = session.exec(query.order_by(AuditEvent.id.desc()).limit(limit)).all()
+    return {"events": [audit.as_dict(r) for r in rows]}
+
+
+@app.get("/api/users/me/audit")
+def my_audit(limit: int = Query(100, ge=1, le=500), session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    """What has been done to your account, and by whom."""
+    rows = session.exec(
+        select(AuditEvent).where(AuditEvent.target == user.username).order_by(AuditEvent.id.desc()).limit(limit)
+    ).all()
+    return {"events": [audit.as_dict(r) for r in rows]}
 
 @app.get("/api/users/{username}/credential-shares")
 def get_credential_shares(
@@ -929,6 +1032,7 @@ def get_credential_shares(
 def update_credential_shares(
     username: str,
     body: CredentialSharesUpdate,
+    request: Request,
     session: Session = Depends(get_session),
     caller: User = Depends(require_api_key),
 ):
@@ -993,6 +1097,8 @@ def update_credential_shares(
             f"the shared {', '.join(services)} credentials"
         )
 
+    _audit(request, session, "credential.share", target.username, actor=caller,
+           changes=[{"field": "shared_services", "change": "set" if services else "cleared", "to": services}])
     shared_owner = _system_default_user(session)
     return CredentialSharesRead(
         username=target.username,
@@ -1005,7 +1111,7 @@ def update_credential_shares(
 
 
 @app.delete("/api/users/{username}")
-def delete_user(username: str, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
+def delete_user(username: str, request: Request, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
 
@@ -1050,6 +1156,8 @@ def delete_user(username: str, session: Session = Depends(get_session), admin: U
     if stale_grant:
         session.delete(stale_grant)
         session.commit()
+    _audit(request, session, "user.delete", username.lower(), actor=admin,
+           changes=[{"field": "account", "change": "cleared"}])
     return {"status": "SUCCESS"}
 
 @app.get("/api/users", response_model=list[UserRead])
@@ -1083,7 +1191,7 @@ def list_sharing_recipients(
     ]
 
 @app.post("/api/users", response_model=UserRead)
-def create_user(body: UserCreate, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
+def create_user(body: UserCreate, request: Request, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
 
@@ -1132,6 +1240,7 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
     session.add(user)
     session.commit()
     session.refresh(user)
+    _audit(request, session, "user.create", user.username, actor=admin, before={}, after=audit.snapshot(user))
     return user
 
 def _require_assignment_admin(user: User = Depends(require_api_key)) -> User:
@@ -1742,6 +1851,8 @@ def seed_credential(body: dict, session: Session = Depends(get_session), admin: 
     session.add(user)
     session.commit()
     session.refresh(user)
+    _audit(request, session, "credential.seed", user.username,
+           changes=[{"field": field, "change": "set" if value else "cleared", "secret": True}])
 
     return {
         "status": "SUCCESS",
@@ -1789,7 +1900,7 @@ def get_my_keys(session: Session = Depends(get_session), user: User = Depends(re
         ]
 
 @app.post("/api/users/me/keys")
-def generate_key(body: dict, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+def generate_key(body: dict, request: Request, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     """Generate a new API key for the current user."""
     import secrets
     new_key_value = "sk-" + secrets.token_hex(24)
@@ -1798,16 +1909,20 @@ def generate_key(body: dict, session: Session = Depends(get_session), user: User
     session.add(new_key)
     session.commit()
     session.refresh(new_key)
+    _audit(request, session, "api_key.create", user.username, actor=user,
+           changes=[{"field": "api_key", "change": "set", "secret": True}], note=f"label: {new_key.label}")
     return {"id": new_key.id, "label": new_key.label, "key": new_key_value} # Only show full key once!
 
 @app.delete("/api/users/me/keys/{key_id}")
-def revoke_key(key_id: int, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+def revoke_key(key_id: int, request: Request, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     """Revoke an API key."""
     key = session.exec(select(APIKey).where(APIKey.id == key_id, APIKey.user_id == user.id)).first()
     if not key:
         raise HTTPException(status_code=404, detail="Key not found")
     session.delete(key)
     session.commit()
+    _audit(request, session, "api_key.revoke", user.username, actor=user,
+           changes=[{"field": "api_key", "change": "cleared", "secret": True}], note=f"label: {key.label}")
     return {"success": True}
 
 @app.get("/api/auth/discover", response_model=DiscoverResponse)
@@ -2159,6 +2274,7 @@ async def _create_nextcloud_app_password(admin: User, nc_username: str) -> str:
 async def create_service_token(
     username: str,
     body: dict,
+    request: Request,
     session: Session = Depends(get_session),
     admin: User = Depends(require_api_key),
 ):
@@ -2205,6 +2321,8 @@ async def create_service_token(
 
     session.add(target)
     session.commit()
+    _audit(request, session, "credential.service_token", target.username, actor=admin,
+           changes=[{"field": f"{service}_token", "change": "set", "secret": True}])
 
     return {
         "success": True,
@@ -3195,6 +3313,9 @@ async def import_nextcloud_users(x_internal_secret: str | None = Header(default=
             })
 
         session.commit()
+        for row in imported:
+            _audit(None, session, "user.import", row["username"], changes=[{"field": "account", "change": "set"}],
+                   note=f"imported from {row['source']}")
         return {
             "status": "SUCCESS",
             "message": f"Imported {len(imported)} users",
