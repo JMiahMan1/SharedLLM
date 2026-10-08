@@ -13,6 +13,7 @@ const apiMock = vi.hoisted(() => ({
   getBibleProviderEstimate: vi.fn(),
   runBibleImport: vi.fn(),
   uploadBibleImport: vi.fn(),
+  getBibleLibrary: vi.fn(),
 }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -236,9 +237,13 @@ describe('BibleAdminPanel', () => {
     });
     renderPanel();
     const input = (await screen.findByTestId('bible-admin-upload-file')) as HTMLInputElement;
-    const file = new File(['PK'], 'nkjv.epub', { type: 'application/epub+zip' });
+    const file = new File(['PK'], 'nkjv.epub', { type: 'application/epub+zip' });
     await userEvent.upload(input, file);
-    await userEvent.type(screen.getByTestId('bible-admin-upload-code'), 'nkjv');
+    // The code is prefilled from the file name; the operator may still edit it.
+    expect(screen.getByTestId('bible-admin-upload-code')).toHaveValue('nkjv');
+    expect(screen.getByTestId('bible-admin-upload-kind')).toHaveTextContent(
+      'nkjv.epub will install as e-book (EPUB)',
+    );
     await userEvent.type(screen.getByTestId('bible-admin-upload-edition'), 'nkjv-tmn');
     await userEvent.click(screen.getByTestId('bible-admin-upload-notes'));
     await userEvent.click(screen.getByTestId('bible-admin-upload-go'));
@@ -262,6 +267,7 @@ describe('BibleAdminPanel', () => {
     await userEvent.type(screen.getByTestId('bible-admin-path-file'), '/data/bible/esv.pdf');
     await userEvent.click(screen.getByTestId('bible-admin-path-go'));
     const notice = await screen.findByTestId('bible-admin-notice');
+    expect(notice).toHaveAttribute('data-notice', 'success');
     expect(notice.textContent).toContain('31,102 verses across 66 books');
     expect(screen.getByTestId('bible-admin-log').textContent).toContain('Exodus: 40 chapters');
   });
@@ -287,7 +293,9 @@ describe('BibleAdminPanel', () => {
     await userEvent.type(await screen.findByTestId('bible-admin-path-code'), 'nkjv');
     await userEvent.type(screen.getByTestId('bible-admin-path-file'), '/data/bible/nkjv.pdf');
     await userEvent.click(screen.getByTestId('bible-admin-path-go'));
-    expect(await screen.findByTestId('bible-admin-notice')).toHaveTextContent('Exodus is missing');
+    const notice = await screen.findByTestId('bible-admin-notice');
+    expect(notice).toHaveAttribute('data-notice', 'error');
+    expect(notice).toHaveTextContent('Exodus is missing');
     expect(screen.getByTestId('bible-admin-log')).toHaveTextContent('Refused:');
   });
 
@@ -418,5 +426,209 @@ describe('what a provider import will cost', () => {
         dry_run: true,
       }),
     );
+  });
+});
+
+describe('prefilled install fields', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMock.getBibleImports.mockResolvedValue(catalogue());
+    apiMock.runBibleImport.mockResolvedValue({
+      source: 'x.epub',
+      kind: 'epub',
+      code: 'nkjv',
+      name: '',
+      provider: '',
+      provider_id: '',
+      status: 'succeeded',
+      message: 'Installed.',
+      verse_count: 1,
+      book_count: 1,
+      note_count: null,
+      log: [],
+      duration_ms: 1,
+      created_at: '2026-01-05T00:00:00',
+    });
+    apiMock.uploadBibleImport.mockResolvedValue({
+      source: 'x.epub',
+      kind: 'epub',
+      code: 'nkjv',
+      name: '',
+      provider: '',
+      provider_id: '',
+      status: 'succeeded',
+      message: 'Installed.',
+      verse_count: 1,
+      book_count: 1,
+      note_count: null,
+      log: [],
+      duration_ms: 1,
+      created_at: '2026-01-05T00:00:00',
+    });
+  });
+
+  it('prefills a study-Bible upload from its file name, every field editable', async () => {
+    renderPanel();
+    const input = await screen.findByTestId('bible-admin-upload-file');
+    await userEvent.upload(input, new File(['PK'], 'The NKJV Study Bible.epub'));
+    expect(screen.getByTestId('bible-admin-upload-code')).toHaveValue('the-nkjv-study-bible');
+    // The title belongs to the study notes, not to the translation's display name.
+    expect(screen.getByTestId('bible-admin-upload-name')).toHaveValue('');
+    expect(screen.getByTestId('bible-admin-upload-editionname')).toHaveValue(
+      'The NKJV Study Bible',
+    );
+    expect(screen.getByTestId('bible-admin-upload-notes')).toBeChecked();
+    expect(screen.getByTestId('bible-admin-upload-kind')).toHaveTextContent(
+      'The NKJV Study Bible.epub will install as e-book (EPUB)',
+    );
+    const code = screen.getByTestId('bible-admin-upload-code');
+    await userEvent.clear(code);
+    await userEvent.type(code, 'nkjv');
+    expect(screen.getByTestId('bible-admin-upload-code')).toHaveValue('nkjv');
+  });
+
+  it('a code the operator typed survives choosing a different file', async () => {
+    renderPanel();
+    const input = await screen.findByTestId('bible-admin-upload-file');
+    await userEvent.upload(input, new File(['PK'], 'kjv.epub'));
+    const code = screen.getByTestId('bible-admin-upload-code');
+    await userEvent.clear(code);
+    await userEvent.type(code, 'nkjv');
+    await userEvent.upload(input, new File(['PK'], 'web.epub'));
+    expect(screen.getByTestId('bible-admin-upload-code')).toHaveValue('nkjv');
+  });
+
+  it('warns before a code the manifest will refuse and lists the known ones', async () => {
+    renderPanel();
+    const input = await screen.findByTestId('bible-admin-upload-file');
+    await userEvent.upload(input, new File(['PK'], 'weird file.epub'));
+    expect(screen.getByTestId('bible-admin-upload-code')).toHaveValue('weird-file');
+    const hint = await screen.findByTestId('bible-admin-upload-code-hint');
+    expect(hint).toHaveTextContent('weird-file is not a code the manifest knows');
+    expect(hint).toHaveTextContent('nkjv, esv');
+    expect(screen.getByTestId('bible-admin-upload-code')).toHaveAttribute(
+      'list',
+      'bible-admin-upload-codes',
+    );
+    expect(document.getElementById('bible-admin-upload-codes')).toBeTruthy();
+  });
+
+  it('prefills a path import from the file name and follows the extension', async () => {
+    renderPanel();
+    await userEvent.type(
+      await screen.findByTestId('bible-admin-path-file'),
+      '/data/imports/The NKJV Study Bible.epub',
+    );
+    expect(screen.getByTestId('bible-admin-path-code')).toHaveValue('the-nkjv-study-bible');
+    expect(screen.getByTestId('bible-admin-path-kind')).toHaveValue('epub');
+    expect(screen.getByTestId('bible-admin-path-editionname')).toHaveValue(
+      'The NKJV Study Bible',
+    );
+    expect(screen.getByTestId('bible-admin-path-notes')).toBeChecked();
+    const code = screen.getByTestId('bible-admin-path-code');
+    await userEvent.clear(code);
+    await userEvent.type(code, 'nkjv');
+    await userEvent.click(screen.getByTestId('bible-admin-path-go'));
+    await waitFor(() =>
+      expect(apiMock.runBibleImport).toHaveBeenCalledWith({
+        code: 'nkjv',
+        kind: 'epub',
+        source_path: '/data/imports/The NKJV Study Bible.epub',
+        edition_name: 'The NKJV Study Bible',
+        import_notes: true,
+      }),
+    );
+  });
+
+  it('a kind picked by hand stops following the extension', async () => {
+    renderPanel();
+    await userEvent.type(
+      await screen.findByTestId('bible-admin-path-file'),
+      '/data/imports/first.epub',
+    );
+    expect(screen.getByTestId('bible-admin-path-kind')).toHaveValue('epub');
+    await userEvent.selectOptions(screen.getByTestId('bible-admin-path-kind'), 'pdf');
+    await userEvent.type(screen.getByTestId('bible-admin-path-file'), '/data/imports/second.pdf');
+    expect(screen.getByTestId('bible-admin-path-kind')).toHaveValue('pdf');
+  });
+});
+
+describe('installing from the shelf', () => {
+  const ENTRY = {
+    path: '/Books/Text/Thomas Nelson/The NKJV Study Bible (3198)/The NKJV Study Bible - Thomas Nelson.epub',
+    name: 'The NKJV Study Bible - Thomas Nelson.epub',
+    is_dir: false,
+    size: 1024,
+    kind: 'epub' as const,
+    installable: true,
+    note: 'Ready to import as a epub',
+  };
+  const SHELF = {
+    path: '',
+    root: '/Books/Text',
+    parent: '',
+    entries: [ENTRY],
+    count: 1,
+    installable: 1,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMock.getBibleImports.mockResolvedValue(catalogue({ library_root: '/Books/Text' }));
+    apiMock.getBibleLibrary.mockResolvedValue(SHELF);
+    apiMock.runBibleImport.mockResolvedValue({
+      source: ENTRY.path,
+      kind: 'epub',
+      code: 'nkjv',
+      name: '',
+      provider: '',
+      provider_id: '',
+      status: 'succeeded',
+      message: 'Filed 12 study notes.',
+      verse_count: null,
+      book_count: null,
+      note_count: 12,
+      log: [],
+      duration_ms: 1,
+      created_at: '2026-01-06T00:00:00',
+    });
+  });
+
+  it('prefills the shelf install from the file name and sends it only on confirm', async () => {
+    renderPanel(catalogue({ library_root: '/Books/Text' }));
+    await userEvent.click(await screen.findByTestId('bible-admin-library-open'));
+    await userEvent.click(await screen.findByTestId(`bible-admin-library-install-${ENTRY.name}`));
+    await screen.findByTestId('bible-admin-library-confirm');
+    expect(screen.getByTestId('bible-admin-library-code')).toHaveValue(
+      'the-nkjv-study-bible-thomas-nelson',
+    );
+    expect(screen.getByTestId('bible-admin-library-editionname')).toHaveValue(
+      'The NKJV Study Bible - Thomas Nelson',
+    );
+    expect(screen.getByTestId('bible-admin-library-notes')).toBeChecked();
+    expect(apiMock.runBibleImport).not.toHaveBeenCalled();
+    const code = screen.getByTestId('bible-admin-library-code');
+    await userEvent.clear(code);
+    await userEvent.type(code, 'nkjv');
+    await userEvent.click(screen.getByTestId('bible-admin-library-confirm-go'));
+    await waitFor(() =>
+      expect(apiMock.runBibleImport).toHaveBeenCalledWith({
+        code: 'nkjv',
+        kind: 'epub',
+        library_path: ENTRY.path,
+        edition_name: 'The NKJV Study Bible - Thomas Nelson',
+        import_notes: true,
+      }),
+    );
+  });
+
+  it('cancelling the shelf install sends nothing', async () => {
+    renderPanel(catalogue({ library_root: '/Books/Text' }));
+    await userEvent.click(await screen.findByTestId('bible-admin-library-open'));
+    await userEvent.click(await screen.findByTestId(`bible-admin-library-install-${ENTRY.name}`));
+    await screen.findByTestId('bible-admin-library-confirm');
+    await userEvent.click(screen.getByTestId('bible-admin-library-cancel'));
+    expect(screen.queryByTestId('bible-admin-library-confirm')).toBeNull();
+    expect(apiMock.runBibleImport).not.toHaveBeenCalled();
   });
 });

@@ -28,7 +28,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import aiohttp
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
@@ -1698,8 +1698,7 @@ def _library_client(root: str) -> library.LibraryClient:
     return library.LibraryClient(storage_url=url, internal_secret=str(INTERNAL_SECRET or ""))
 
 
-@app.get("/admin/library")
-async def admin_library(path: str = Query(default="")):
+async def _library_listing(path: str) -> dict:
     """List one folder of the Nextcloud book library.
 
     Returns the folder, its parent and every entry it holds, including the files
@@ -1730,6 +1729,35 @@ async def admin_library(path: str = Query(default="")):
         "setting": library.LIBRARY_SETTING,
         **listing.as_dict(),
     }
+
+
+@app.get("/admin/library")
+async def admin_library(path: str = Query(default="")):
+    """List one folder of the Nextcloud book library, path in the query string."""
+    return await _library_listing(path)
+
+
+@app.post("/admin/library")
+async def admin_library_post(request: Request):
+    """The same listing as a POST, which is how the gateway asks for it.
+
+    The operator picks the folder, so the path arrives as a JSON body rather
+    than a query string; the GET form remains for curl and anything that
+    already has the path encoded.
+    """
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail='The body must be a JSON object such as {"path": "Author/Work"}.',
+        ) from exc
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail='The body must be a JSON object such as {"path": "Author/Work"}.',
+        )
+    return await _library_listing(str(body.get("path") or ""))
 
 
 @app.get("/admin/imports")
