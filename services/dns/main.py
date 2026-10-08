@@ -482,6 +482,10 @@ class _DNSClient:
         return '.'.join(names), ret_offset
 
 
+QTYPE_A = 1
+RCODE_SERVFAIL = 2
+
+
 class DNSQuery:
     """Parsed DNS query"""
 
@@ -508,7 +512,16 @@ class UDPServer(asyncio.DatagramProtocol):
         asyncio.ensure_future(self._handle_query(data, addr))
 
     async def _handle_query(self, data: bytes, addr: tuple[str, int]):
-        """Handle a DNS query"""
+        """Answer one DNS query -- always, and at once when there is nothing to find.
+
+        The stack runs IPv4 only. An AAAA (or any non-A) question used to be
+        forwarded and then dropped, because only A records can be encoded and
+        a query with nothing to send got no reply at all. Every lookup asks for
+        both A and AAAA, so every new connection from a container waited ~4s
+        for the AAAA to time out. Now non-A questions get an immediate empty
+        answer (NOERROR, no records: "no IPv6 address here"), and an A
+        question with no answer gets SERVFAIL instead of silence.
+        """
         try:
             logger.debug(f"Processing DNS query from {addr}")
             query = self._parse_query(data)
@@ -516,12 +529,17 @@ class UDPServer(asyncio.DatagramProtocol):
                 logger.debug(f"Failed to parse query from {addr}")
                 return
 
-            logger.debug(f"Resolved {query.question_name} -> {addr}")
+            if query.question_type != QTYPE_A:
+                self.transport.sendto(self._build_response(query, []), addr)
+                return
+
             records = await self.resolver.resolve(query)
             if records:
                 response = self._build_response(query, records)
-                self.transport.sendto(response, addr)
-                logger.debug(f"Sent response to {addr}: {len(response)} bytes")
+            else:
+                response = self._build_response(query, [], rcode=RCODE_SERVFAIL)
+            self.transport.sendto(response, addr)
+            logger.debug(f"Sent response to {addr}: {len(response)} bytes")
         except Exception as e:
             logger.error(f"Error handling DNS query: {e}")
 
@@ -548,11 +566,12 @@ class UDPServer(asyncio.DatagramProtocol):
         except Exception:
             return None
 
-    def _build_response(self, query: DNSQuery, records: list) -> bytes:
-        """Build a DNS response"""
+    def _build_response(self, query: DNSQuery, records: list, rcode: int = 0) -> bytes:
+        """Build a DNS response (A records only; ``rcode`` 0 = NOERROR)."""
         transaction_id = query.transaction_id
-        flags = 0x8180  # Response, recursion desired, recursion available
+        flags = 0x8180 | (rcode & 0xF)  # Response, recursion desired/available, rcode
         qdcount = 1
+        records = [r for r in records if r['rtype'] == QTYPE_A and len(r['rdata']) == 4]
         ancount = len(records)
 
         header = struct.pack('!HHHHHH', transaction_id, flags, qdcount, ancount, 0, 0)
