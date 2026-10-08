@@ -4683,6 +4683,7 @@ async def proxy_send_talk_message(request: Request):
         "action": "send",
         "token": body.get("token"),
         "message": body.get("message"),
+        "reply_to": body.get("reply_to"),
     }
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 

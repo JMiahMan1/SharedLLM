@@ -1,46 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BarChart3, Loader2, MessageSquare, Mic, Phone, Plus, RefreshCw, Send, Square } from 'lucide-react';
+import { ChevronLeft, Loader2, Phone, PhoneOff, Plus, RefreshCw, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
-import SendAsSelector from './SendAsSelector';
-import { useSendAsPref } from './sendAsPref';
-import EnvelopeBody from './EnvelopeBody';
-
-interface TalkConversation {
-  token: string;
-  display_name: string;
-  description?: string;
-  last_message?: string;
-  unread_messages?: number;
-}
-
-interface TalkPollOption {
-  id: number;
-  label: string;
-  numVotes?: number;
-}
-
-interface TalkPoll {
-  id: number;
-  question: string;
-  options?: TalkPollOption[];
-  status?: number;
-}
-
-interface TalkReaction {
-  reaction?: string;
-  actor_display_name?: string;
-}
-
-interface TalkMessage {
-  id?: number | string;
-  actor_display_name?: string;
-  message?: string;
-  system_message?: string;
-  timestamp?: number;
-}
+import { useConversationSendAs } from './sendAsPref';
+import ConversationList from './ConversationList';
+import MessageThread from './MessageThread';
+import Composer from './Composer';
+import PollStrip, { type TalkPoll } from './PollStrip';
+import {
+  avatarTint,
+  initials,
+  reactionCounts,
+  sortMessages,
+  type TalkConversation,
+  type TalkMessage,
+} from './chatModel';
 
 const EMPTY_ARRAY: never[] = [];
 
@@ -50,56 +26,41 @@ function detailList<T>(response: ExecutionResponse | undefined, key: string): T[
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-/** Stable per-person tint so a family member is recognisable at a glance. */
-function avatarTint(name: string): string {
-  const palette = ['#863BFF', '#0EA5E9', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#14B8A6', '#F43F5E'];
-  let hash = 0;
-  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  return palette[hash % palette.length];
-}
-
 interface ChatPanelProps {
-  /** Current user's display name, used to align "my" messages to the right. */
-  currentUser?: string;
   className?: string;
 }
 
 /**
  * Family chat on Nextcloud Talk.
  *
- * Text and voice messages go through Talk, so conversations are the same ones
- * the family already uses in Nextcloud (and on the Skylight board). Voice and
- * video calls need Talk WebRTC signalling and are the next slice; this panel
- * is deliberately room-based so a call button can be added without a rewrite.
+ * Laid out like the messengers people already know (WhatsApp, Messenger,
+ * iMessage): an inbox and a thread, which on a phone are two screens with a
+ * back button and on a wide screen sit side by side. Text, voice notes,
+ * replies, reactions, polls and calls all go through Talk, so these are the
+ * same conversations the family uses in Nextcloud.
  */
-export default function ChatPanel({ currentUser = '', className = '' }: ChatPanelProps) {
+export default function ChatPanel({ className = '' }: ChatPanelProps) {
   const queryClient = useQueryClient();
   const [selectedToken, setSelectedToken] = useState('');
-  const [targetUser, setTargetUser] = useState('');
-  const [draft, setDraft] = useState('');
-  const [recording, setRecording] = useState(false);
-  const [clip, setClip] = useState<{ url: string; base64: string; mimeType: string } | null>(null);
-  const [caption, setCaption] = useState('');
-  const [reactingFor, setReactingFor] = useState<number | null>(null);
-  const [reactions, setReactions] = useState<Record<number, TalkReaction[]>>({});
+  const [mobileView, setMobileView] = useState<'list' | 'thread'>('list');
+  const [replyTo, setReplyTo] = useState<TalkMessage | null>(null);
+  const [pending, setPending] = useState<Record<string, TalkMessage[]>>({});
+  const [reactionOverrides, setReactionOverrides] = useState<Record<string, Record<string, number>>>({});
   const [showPollForm, setShowPollForm] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const feedRef = useRef<HTMLDivElement | null>(null);
+  const [inCall, setInCall] = useState(false);
+  const [callError, setCallError] = useState<string | null>(null);
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
-  const [sendAs, setSendAs] = useSendAsPref(isAdmin);
-  const asUser = isAdmin && sendAs === 'admin' ? ('admin' as const) : undefined;
+  const myActorIds = useMemo(
+    () =>
+      new Set(
+        [me?.nextcloud_user, me?.username].filter((v): v is string => Boolean(v)).map((v) => v.toLowerCase()),
+      ),
+    [me?.nextcloud_user, me?.username],
+  );
 
   const { data: conversations = EMPTY_ARRAY, isFetching: loadingConversations } = useQuery<
     ExecutionResponse,
@@ -112,15 +73,15 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
     select: (response) => detailList<TalkConversation>(response, 'conversations'),
   });
 
-  // Fall back to the first conversation so the panel is usable on open
-  // without an effect that writes state during render.
+  // Fall back to the first conversation so a wide screen is never blank.
   const activeToken = selectedToken || conversations[0]?.token || '';
+  const activeConversation = conversations.find((c) => c.token === activeToken);
+  const isGroup = activeConversation?.type !== 1;
 
-  const { data: polls = EMPTY_ARRAY, refetch: refetchPolls } = useQuery<
-    ExecutionResponse,
-    Error,
-    TalkPoll[]
-  >({
+  const [sendAs, setSendAs] = useConversationSendAs(isAdmin, activeToken);
+  const asUser = sendAs === 'admin' ? ('admin' as const) : undefined;
+
+  const { data: polls = EMPTY_ARRAY, refetch: refetchPolls } = useQuery<ExecutionResponse, Error, TalkPoll[]>({
     queryKey: ['talk-polls', activeToken],
     queryFn: () => api.getTalkPolls(activeToken),
     enabled: Boolean(activeToken),
@@ -128,29 +89,102 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
     select: (response) => detailList<TalkPoll>(response, 'polls'),
   });
 
-  const { data: messages = EMPTY_ARRAY, isFetching: loadingMessages } = useQuery<
-    ExecutionResponse,
-    Error,
-    TalkMessage[]
-  >({
+  const { data: fetched = EMPTY_ARRAY, isFetching: loadingMessages } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
     queryKey: ['talk-messages', activeToken],
     queryFn: () => api.getTalkMessages(activeToken),
     enabled: Boolean(activeToken),
     refetchInterval: 10000,
-    select: (response) => detailList<TalkMessage>(response, 'messages'),
+    select: (response) => sortMessages(detailList<TalkMessage>(response, 'messages')),
   });
 
-  useEffect(() => {
-    // Keep the newest message in view as the feed grows.
-    if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
-  }, [messages]);
+  const messages = useMemo(() => [...fetched, ...(pending[activeToken] || [])], [fetched, pending, activeToken]);
 
-  const [inCall, setInCall] = useState(false);
-  const [callError, setCallError] = useState<string | null>(null);
+  const markRead = useMutation({
+    mutationFn: (token: string) => api.markTalkRead(token, asUser),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['talk-conversations'] }),
+  });
+
+  // Opening a conversation clears its badge -- that is the read marker.
+  useEffect(() => {
+    if (!activeToken || markRead.isPending) return;
+    if ((activeConversation?.unread_messages ?? 0) > 0) markRead.mutate(activeToken);
+  }, [activeToken, activeConversation?.unread_messages, markRead]);
+
+  const select = (token: string) => {
+    setSelectedToken(token);
+    setMobileView('thread');
+    setReplyTo(null);
+    setShowPollForm(false);
+    setInCall(false);
+    setCallError(null);
+  };
+
+  const openConversation = useMutation({
+    mutationFn: (user: string) => api.openTalkConversation({ target_user: user, as_user: asUser }),
+    onSuccess: (data) => {
+      const token = (data.detail as { conversation?: TalkConversation } | undefined)?.conversation?.token;
+      if (token) select(token);
+      queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
+    },
+    onError: (error: Error) => toast.error(error.message || 'Could not open that conversation'),
+  });
+
+  const updatePending = (token: string, fn: (list: TalkMessage[]) => TalkMessage[]) =>
+    setPending((current) => ({ ...current, [token]: fn(current[token] || []) }));
+
+  // Optimistic send: the bubble appears at once and is replaced by the real
+  // message on the next fetch; a failure stays in the feed with Retry.
+  const deliver = async (token: string, local: TalkMessage) => {
+    updatePending(token, (list) => [...list.filter((m) => m.id !== local.id), { ...local, pending: 'sending' }]);
+    try {
+      const res = await api.sendTalkMessage({
+        token,
+        message: local.message || '',
+        as_user: asUser,
+        reply_to: local.reply_to,
+      });
+      if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Message failed to send');
+      await queryClient.invalidateQueries({ queryKey: ['talk-messages', token] });
+      updatePending(token, (list) => list.filter((m) => m.id !== local.id));
+      queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
+    } catch (error) {
+      updatePending(token, (list) => list.map((m) => (m.id === local.id ? { ...m, pending: 'failed' } : m)));
+      toast.error(error instanceof Error ? error.message : 'Message failed to send');
+    }
+  };
+
+  const send = (text: string) => {
+    if (!activeToken) {
+      toast.error('Pick a conversation first');
+      return;
+    }
+    const local: TalkMessage = {
+      id: `local-${Date.now()}`,
+      actor_display_name: 'You',
+      message: text,
+      timestamp: Math.floor(Date.now() / 1000),
+      reply_to: typeof replyTo?.id === 'number' ? replyTo.id : undefined,
+      parent:
+        typeof replyTo?.id === 'number'
+          ? { id: replyTo.id, actor_display_name: replyTo.actor_display_name, message: replyTo.message }
+          : null,
+    };
+    setReplyTo(null);
+    void deliver(activeToken, local);
+  };
+
+  const sendVoice = useMutation({
+    mutationFn: (payload: { audio_base64: string; mime_type: string; caption?: string }) =>
+      api.sendTalkVoice({ token: activeToken, ...payload, file_name: `voice-${Date.now()}.webm`, as_user: asUser }),
+    onSuccess: () => {
+      toast.success('Voice message sent');
+      queryClient.invalidateQueries({ queryKey: ['talk-messages', activeToken] });
+    },
+    onError: (error: Error) => toast.error(error.message || 'Voice message failed'),
+  });
 
   const call = useMutation({
-    mutationFn: (leave: boolean) =>
-      leave ? api.leaveTalkCall(activeToken, asUser) : api.joinTalkCall(activeToken, asUser),
+    mutationFn: (leave: boolean) => (leave ? api.leaveTalkCall(activeToken, asUser) : api.joinTalkCall(activeToken, asUser)),
     onSuccess: (res, leave) => {
       if (res.status === 'SUCCESS') {
         setInCall(!leave);
@@ -162,111 +196,21 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
     onError: (error: Error) => setCallError(error.message || 'Could not start the call'),
   });
 
-  const markRead = useMutation({
-    mutationFn: (token: string) => api.markTalkRead(token, asUser),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
-    },
-  });
-
-  // Opening a conversation clears its badge — that is the read marker.
-  useEffect(() => {
-    if (!activeToken || markRead.isPending) return;
-    const unread = conversations.find((c) => c.token === activeToken)?.unread_messages ?? 0;
-    if (unread > 0) markRead.mutate(activeToken);
-  }, [activeToken, conversations, markRead]);
-
-  const openConversation = useMutation({
-    mutationFn: (user: string) => api.openTalkConversation({ target_user: user, as_user: asUser }),
-    onSuccess: (data) => {
-      const token = (data.detail as { conversation?: TalkConversation } | undefined)?.conversation?.token;
-      if (token) setSelectedToken(token);
-      setTargetUser('');
-      queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
-    },
-    onError: (error: Error) => toast.error(error.message || 'Could not open that conversation'),
-  });
-
-  const sendMessage = useMutation({
-    mutationFn: (text: string) => api.sendTalkMessage({ token: activeToken, message: text, as_user: asUser }),
-    onSuccess: () => {
-      setDraft('');
-      queryClient.invalidateQueries({ queryKey: ['talk-messages', activeToken] });
-    },
-    onError: (error: Error) => toast.error(error.message || 'Message failed to send'),
-  });
-
-  const sendVoice = useMutation({
-    mutationFn: (payload: { audio_base64: string; mime_type: string; caption?: string }) =>
-      api.sendTalkVoice({ token: activeToken, ...payload, file_name: `voice-${Date.now()}.webm`, as_user: asUser }),
-    onSuccess: () => {
-      toast.success('Voice message sent');
-      if (clip) URL.revokeObjectURL(clip.url);
-      setClip(null);
-      setCaption('');
-      queryClient.invalidateQueries({ queryKey: ['talk-messages', activeToken] });
-    },
-    onError: (error: Error) => toast.error(error.message || 'Voice message failed'),
-  });
-
-  const activeConversation = useMemo(
-    () => conversations.find((c) => c.token === activeToken),
-    [conversations, selectedToken]
-  );
-
-  const submit = () => {
-    const text = draft.trim();
-    if (!activeToken) {
-      toast.error('Pick a conversation first');
-      return;
-    }
-    if (!text) return;
-    sendMessage.mutate(text);
-  };
-
-  const startRecording = async () => {
-    if (!activeToken) {
-      toast.error('Pick a conversation first');
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      toast.error('Recording is not available on this device');
-      return;
-    }
+  const react = async (message: TalkMessage, emoji: string) => {
+    if (typeof message.id !== 'number') return;
+    const key = String(message.id);
+    const before = reactionOverrides[key] ?? reactionCounts(message.reactions);
+    setReactionOverrides((current) => ({ ...current, [key]: { ...before, [emoji]: (before[emoji] || 0) + 1 } }));
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
-        if (blob.size === 0) return;
-        const buffer = await blob.arrayBuffer();
-        let binary = '';
-        const bytes = new Uint8Array(buffer);
-        for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-        // Preview before sending: recording is easy to do by accident, and a
-        // caption often carries the point of a voice note.
-        setClip({ url: URL.createObjectURL(blob), base64: btoa(binary), mimeType: blob.type });
-      };
-      recorderRef.current = recorder;
-      recorder.start();
-      setRecording(true);
+      const res = await api.reactToTalkMessage({ token: activeToken, message_id: message.id, reaction: emoji, as_user: asUser });
+      const raw = (res.detail as { reactions?: unknown } | undefined)?.reactions;
+      const counts = reactionCounts(raw);
+      if (Object.keys(counts).length > 0) setReactionOverrides((current) => ({ ...current, [key]: counts }));
     } catch {
-      toast.error('Microphone permission is needed to record a voice message');
+      setReactionOverrides((current) => ({ ...current, [key]: before }));
+      toast.error('Could not react. Try again.');
     }
   };
-
-  const stopRecording = () => {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    setRecording(false);
-  };
-
-  const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '🙏', '😮'];
 
   const submitPoll = async () => {
     const question = pollQuestion.trim();
@@ -296,140 +240,102 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
     }
   };
 
-  const loadReactions = async (messageId: number) => {
-    try {
-      const res = await api.getTalkReactions(activeToken, messageId);
-      const list = (res.detail as { reactions?: TalkReaction[] } | undefined)?.reactions ?? [];
-      setReactions((prev) => ({ ...prev, [messageId]: list }));
-    } catch {
-      // Reactions are additive; failing to load them must not break chat.
-    }
-  };
-
-  const react = async (messageId: number, reaction: string) => {
-    setReactingFor(null);
-    try {
-      const res = await api.reactToTalkMessage({ token: activeToken, message_id: messageId, reaction, as_user: asUser });
-      const list = (res.detail as { reactions?: TalkReaction[] } | undefined)?.reactions;
-      if (Array.isArray(list)) setReactions((prev) => ({ ...prev, [messageId]: list }));
-      else void loadReactions(messageId);
-    } catch {
-      toast.error('Could not react — try again');
-    }
-  };
-
-  const openReactionBar = (messageId: number) => {
-    setReactingFor((current) => (current === messageId ? null : messageId));
-    if (!reactions[messageId]) void loadReactions(messageId);
-  };
+  const name = activeConversation?.display_name || 'Select a conversation';
 
   return (
-    <div className={`grid gap-4 lg:grid-cols-[280px_1fr] ${className}`} data-testid="chat-panel">
-      {/* Conversations */}
-      <div className="space-y-2 min-w-0">
-        <div className="flex items-center gap-2">
-          <input
-            value={targetUser}
-            onChange={(event) => setTargetUser(event.target.value)}
-            placeholder="Start a chat (username)"
-            aria-label="Start a conversation with"
-            className="glass-input flex-1 text-sm"
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && targetUser.trim()) openConversation.mutate(targetUser.trim());
-            }}
-          />
+    <div
+      className={`grid h-[calc(100dvh-13rem)] min-h-[440px] overflow-hidden rounded-3xl border border-white/5 bg-black/20 lg:h-[680px] lg:grid-cols-[320px_1fr] ${className}`}
+      data-testid="chat-panel"
+    >
+      {/* Inbox */}
+      <aside className={`min-h-0 flex-col border-white/5 p-3 lg:flex lg:border-r ${mobileView === 'list' ? 'flex' : 'hidden'}`}>
+        <ConversationList
+          conversations={conversations}
+          activeToken={activeToken}
+          myActorIds={myActorIds}
+          loading={loadingConversations}
+          opening={openConversation.isPending}
+          onSelect={select}
+          onStart={(user) => openConversation.mutate(user)}
+        />
+      </aside>
+
+      {/* Thread */}
+      <section className={`min-h-0 min-w-0 flex-col lg:flex ${mobileView === 'thread' ? 'flex' : 'hidden'}`}>
+        <header className="flex shrink-0 items-center gap-2 border-b border-white/5 px-2 py-2 sm:px-3">
           <button
             type="button"
-            aria-label="Open conversation"
-            className="glass-button p-2.5"
-            onClick={() => {
-              if (!targetUser.trim()) {
-                toast.error('Enter a username first');
-                return;
-              }
-              openConversation.mutate(targetUser.trim());
-            }}
+            className="flex min-h-10 min-w-10 items-center justify-center rounded-full text-slate-300 hover:bg-white/10 lg:hidden"
+            aria-label="Back to chats"
+            onClick={() => setMobileView('list')}
           >
-            <Plus size={16} />
+            <ChevronLeft size={22} />
           </button>
-        </div>
-
-        <div className="flex max-h-24 gap-2 overflow-x-auto overscroll-contain pb-1 lg:max-h-none lg:block lg:space-y-2 lg:overflow-visible lg:pb-0 lg:max-h-[60vh] lg:overflow-y-auto lg:pr-1">
-          {conversations.map((conversation) => (
-            <button
-              key={conversation.token}
-              type="button"
-              onClick={() => setSelectedToken(conversation.token)}
-              className={`flex shrink-0 items-center gap-2 rounded-2xl border p-2.5 text-left transition min-h-11 lg:w-full lg:gap-3 lg:p-3 lg:shrink ${
-                activeToken === conversation.token
-                  ? 'border-purple-400/40 bg-purple-500/10'
-                  : 'border-white/5 bg-white/5 hover:border-white/10 hover:bg-white/10'
-              }`}
+          {activeConversation && (
+            <span
+              aria-hidden
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+              style={{ background: avatarTint(name) }}
             >
-              <span
-                aria-hidden
-                className="h-9 w-9 shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-white"
-                style={{ background: avatarTint(conversation.display_name || conversation.token) }}
-              >
-                {initials(conversation.display_name || conversation.token)}
-              </span>
-              <span className="hidden min-w-0 lg:block">
-                <span className="block font-semibold text-slate-100 truncate">{conversation.display_name}</span>
-                <span className="block text-xs text-slate-400 truncate">
-                  {conversation.last_message || 'No messages yet'}
-                </span>
-              </span>
-              <span className="max-w-24 truncate text-xs font-semibold text-slate-200 lg:hidden">
-                {(conversation.display_name || conversation.token).split(/\s+/)[0]}
-              </span>
-              {(conversation.unread_messages ?? 0) > 0 && activeToken !== conversation.token && (
-                <span
-                  data-testid={`unread-badge-${conversation.token}`}
-                  aria-label={`${conversation.unread_messages} unread`}
-                  className="ml-auto shrink-0 rounded-full bg-purple-500 px-2 py-0.5 text-[10px] font-bold text-white"
-                >
-                  {conversation.unread_messages}
-                </span>
-              )}
-            </button>
-          ))}
-          {conversations.length === 0 && (
-            <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
-              {loadingConversations ? 'Loading conversations…' : 'No conversations yet — start one above.'}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Feed + composer */}
-      <div className="flex h-[calc(100dvh-17rem)] min-h-[360px] flex-col overflow-hidden rounded-2xl border border-white/5 bg-black/20 lg:h-[560px]">
-        <div className="flex items-center justify-between gap-2 border-b border-white/5 px-4 py-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <MessageSquare size={16} className="text-fuchsia-300 shrink-0" />
-            <span className="font-semibold text-slate-100 truncate">
-              {activeConversation?.display_name || 'Select a conversation'}
+              {initials(name)}
             </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-semibold text-slate-100">{name}</p>
+            <p className="truncate text-[11px] text-slate-500">
+              {callError ?? (inCall ? 'In call' : activeConversation?.description || (isGroup ? 'Group chat' : 'Direct message'))}
+            </p>
           </div>
+          {activeToken && (
+            <button
+              type="button"
+              className={`flex min-h-10 min-w-10 items-center justify-center rounded-full ${
+                inCall ? 'bg-rose-500 text-white' : 'text-slate-300 hover:bg-white/10'
+              }`}
+              onClick={() => call.mutate(inCall)}
+              disabled={call.isPending}
+              aria-pressed={inCall}
+              aria-label={inCall ? 'Leave the call' : 'Join the call'}
+              title={callError ?? (inCall ? 'Leave the call' : 'Join the call')}
+            >
+              {call.isPending ? <Loader2 size={17} className="animate-spin" /> : inCall ? <PhoneOff size={17} /> : <Phone size={17} />}
+            </button>
+          )}
           <button
             type="button"
-            className="glass-button p-2"
-            aria-label={showPollForm ? 'Close poll form' : 'New poll'}
-            onClick={() => setShowPollForm((v) => !v)}
-          >
-            <BarChart3 size={14} />
-          </button>
-          <button
-            type="button"
-            className="glass-button p-2"
+            className="flex min-h-10 min-w-10 items-center justify-center rounded-full text-slate-400 hover:bg-white/10"
             aria-label="Refresh messages"
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['talk-messages', selectedToken] })}
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['talk-messages', activeToken] })}
           >
-            <RefreshCw size={14} className={loadingMessages ? 'animate-spin' : ''} />
+            <RefreshCw size={15} className={loadingMessages ? 'animate-spin' : ''} />
           </button>
-        </div>
+        </header>
+
+        <PollStrip polls={polls} onVote={(pollId, optionId) => void vote(pollId, optionId)} />
+
+        <MessageThread
+          key={activeToken}
+          messages={messages}
+          myActorIds={myActorIds}
+          isGroup={isGroup}
+          reactionCounts={(message) =>
+            (typeof message.id === 'number' && reactionOverrides[String(message.id)]) || reactionCounts(message.reactions)
+          }
+          onReact={(message, emoji) => void react(message, emoji)}
+          onReply={setReplyTo}
+          onRetry={(message) => void deliver(activeToken, message)}
+          onDiscard={(message) => updatePending(activeToken, (list) => list.filter((m) => m.id !== message.id))}
+          emptyText={activeToken ? 'No messages yet. Say hello!' : 'Pick a conversation to see messages.'}
+        />
 
         {showPollForm && (
-          <div className="shrink-0 space-y-2 border-b border-white/5 bg-white/[0.03] p-3" data-testid="poll-form">
+          <div className="shrink-0 space-y-2 border-t border-white/5 bg-white/[0.03] p-3" data-testid="poll-form">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-slate-100">New poll</p>
+              <button type="button" aria-label="Close poll form" className="p-1 text-slate-400" onClick={() => setShowPollForm(false)}>
+                <X size={15} />
+              </button>
+            </div>
             <input
               value={pollQuestion}
               onChange={(event) => setPollQuestion(event.target.value)}
@@ -441,9 +347,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
               <div key={index} className="flex gap-2">
                 <input
                   value={option}
-                  onChange={(event) =>
-                    setPollOptions((prev) => prev.map((o, i) => (i === index ? event.target.value : o)))
-                  }
+                  onChange={(event) => setPollOptions((prev) => prev.map((o, i) => (i === index ? event.target.value : o)))}
                   placeholder={`Option ${index + 1}`}
                   aria-label={`Poll option ${index + 1}`}
                   className="glass-input flex-1 text-base sm:text-sm"
@@ -473,188 +377,26 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
           </div>
         )}
 
-        {polls.length > 0 && (
-          <div className="shrink-0 space-y-2 border-b border-white/5 p-3" data-testid="poll-list">
-            {polls.slice(0, 3).map((poll) => (
-              <div key={poll.id} className="rounded-xl border border-white/10 bg-white/5 p-2">
-                <p className="text-sm font-semibold text-slate-100">{poll.question}</p>
-                <div className="mt-1 space-y-1">
-                  {(poll.options || []).map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => void vote(poll.id, option.id)}
-                      className="flex w-full items-center justify-between rounded-lg border border-white/10 px-2 py-1.5 text-left text-xs text-slate-200 min-h-9"
-                    >
-                      <span>{option.label}</span>
-                      <span className="text-slate-400">{option.numVotes ?? 0}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div ref={feedRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4" data-testid="chat-feed">
-          {messages.map((message, index) => {
-            const author = message.actor_display_name || 'Someone';
-            const mine = currentUser && author.toLowerCase() === currentUser.toLowerCase();
-            return (
-              <div key={message.id ?? `${message.timestamp}-${index}`} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] sm:max-w-[80%] ${mine ? 'text-right' : ''}`}>
-                  <div className={`flex items-center gap-2 ${mine ? 'justify-end' : ''}`}>
-                    <span className="text-[11px] font-semibold text-slate-300">{mine ? 'You' : author}</span>
-                    {message.timestamp && (
-                      <span className="text-[10px] text-slate-500">
-                        {new Date(message.timestamp * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => typeof message.id === 'number' && openReactionBar(message.id)}
-                    className={`mt-1 inline-block rounded-2xl px-3 py-2 text-sm break-words text-left ${
-                      mine ? 'bg-purple-500/25 text-slate-100' : 'bg-white/10 text-slate-100'
-                    }`}
-                    title="Tap to react"
-                  >
-                    <EnvelopeBody raw={message.message} fallback={message.system_message} />
-                  </button>
-
-                  {typeof message.id === 'number' && (reactions[message.id]?.length ?? 0) > 0 && (
-                    <div className={`mt-1 flex flex-wrap gap-1 ${mine ? 'justify-end' : ''}`} data-testid="reaction-chips">
-                      {Object.entries(
-                        (reactions[message.id] || []).reduce<Record<string, number>>((acc, item) => {
-                          const key = item.reaction || '👍';
-                          acc[key] = (acc[key] || 0) + 1;
-                          return acc;
-                        }, {})
-                      ).map(([emoji, count]) => (
-                        <span key={emoji} className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[11px]">
-                          {emoji} {count > 1 ? count : ''}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {reactingFor === message.id && (
-                    <div className={`mt-1 flex gap-1 ${mine ? 'justify-end' : ''}`} data-testid="reaction-bar">
-                      {QUICK_REACTIONS.map((emoji) => (
-                        <button
-                          key={emoji}
-                          type="button"
-                          aria-label={`React ${emoji}`}
-                          className="min-h-9 min-w-9 rounded-full border border-white/10 bg-white/5 text-base"
-                          onClick={() => typeof message.id === 'number' && void react(message.id, emoji)}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-          {messages.length === 0 && (
-            <p className="text-sm text-slate-500">
-              {selectedToken ? 'No messages yet — say hello!' : 'Pick a conversation to see messages.'}
-            </p>
-          )}
-        </div>
-
-        <div className="shrink-0 space-y-2 border-t border-white/5 bg-slate-950/80 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
-          {isAdmin && <SendAsSelector value={sendAs} onChange={setSendAs} />}
-          <div className="flex items-end gap-2">
-            <textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  submit();
-                }
-              }}
-              rows={2}
-              placeholder="Write a message…"
-              aria-label="Message"
-              className="glass-input flex-1 resize-none text-base sm:text-sm"
-            />
-            <button
-              type="button"
-              className="glass-button min-h-11 min-w-11 px-4 py-3"
-              onClick={submit}
-              disabled={sendMessage.isPending || !draft.trim()}
-              aria-label="Send message"
-            >
-              {sendMessage.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-            </button>
-            <button
-              type="button"
-              className={`glass-button min-h-11 min-w-11 px-4 py-3 ${recording ? 'text-rose-300' : ''}`}
-              onClick={() => (recording ? stopRecording() : void startRecording())}
-              disabled={sendVoice.isPending}
-              aria-label={recording ? 'Stop recording' : 'Record a voice message'}
-              aria-pressed={recording}
-            >
-              {recording ? <Square size={16} /> : <Mic size={16} />}
-            </button>
-            {activeToken && (
-              <button
-                type="button"
-                className={`glass-button min-h-11 min-w-11 px-4 py-3 ${inCall ? 'text-emerald-300' : ''}`}
-                onClick={() => call.mutate(inCall)}
-                disabled={call.isPending}
-                aria-pressed={inCall}
-                aria-label={inCall ? 'Leave the call' : 'Join the call'}
-                title={callError ?? (inCall ? 'Leave the call' : 'Join the call')}
-              >
-                {call.isPending ? <Loader2 size={16} className="animate-spin" /> : <Phone size={16} />}
-              </button>
-            )}
-          </div>
-          {clip && (
-            <div className="rounded-xl border border-white/10 bg-white/5 p-2 space-y-2" data-testid="voice-preview">
-              <p className="text-[11px] text-slate-300">Recorded clip ready</p>
-              <audio controls src={clip.url} className="w-full h-9" />
-              <input
-                value={caption}
-                onChange={(event) => setCaption(event.target.value)}
-                placeholder="Optional caption for voice message"
-                aria-label="Voice message caption"
-                className="glass-input w-full text-sm"
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className="glass-button flex-1 min-h-11 px-3 py-2 text-sm"
-                  disabled={sendVoice.isPending}
-                  onClick={() =>
-                    sendVoice.mutate({ audio_base64: clip.base64, mime_type: clip.mimeType, caption: caption.trim() })
-                  }
-                >
-                  {sendVoice.isPending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} Send voice
-                </button>
-                <button
-                  type="button"
-                  className="glass-button px-3 py-2 text-sm"
-                  onClick={() => {
-                    URL.revokeObjectURL(clip.url);
-                    setClip(null);
-                    setCaption('');
-                  }}
-                >
-                  Discard
-                </button>
-              </div>
-            </div>
-          )}
-          <p className="text-[10px] text-slate-500">
-            {callError ?? 'Enter sends · Shift+Enter adds a line · voice messages post straight into Talk.'}
-          </p>
-        </div>
-      </div>
+        <Composer
+          disabled={!activeToken}
+          replyTo={replyTo}
+          onCancelReply={() => setReplyTo(null)}
+          onSend={send}
+          onSendVoice={async (payload) => {
+            try {
+              await sendVoice.mutateAsync(payload);
+              return true;
+            } catch {
+              return false;
+            }
+          }}
+          sendingVoice={sendVoice.isPending}
+          onNewPoll={() => setShowPollForm(true)}
+          isAdmin={isAdmin}
+          sendAs={sendAs}
+          onSendAsChange={setSendAs}
+        />
+      </section>
     </div>
   );
 }
