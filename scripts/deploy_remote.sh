@@ -251,6 +251,27 @@ if ssh $SSH_OPTS "$HOST" << EOF
     # had not changed at all throw connection errors while they restart.
     # shellcheck disable=SC2086
     docker compose pull $SERVICES
+
+    # Pin each named service to the image CI built for this exact commit, when
+    # that tag exists. Tagging is not ordered: a build for an older commit can
+    # finish after this commit's build and leave ":latest" pointing at the
+    # older image, which is how a deploy can pull the previous build while
+    # reporting success. The SHA tag cannot be overwritten that way, so it is
+    # what we go by; "latest" is only a fallback for services this commit did
+    # not change, which CI therefore never retagged.
+    SHA_TAG=\$(git rev-parse --short=8 HEAD 2>/dev/null || true)
+    if [ -n "\$SHA_TAG" ] && [ -n "$SERVICES" ]; then
+        for service in $SERVICES; do
+            repo="ghcr.io/jmiahman1/sharedllm-\$service"
+            if docker pull -q "\$repo:\$SHA_TAG" >/dev/null 2>&1; then
+                docker tag "\$repo:\$SHA_TAG" "\$repo:latest"
+                echo "Pinned \$service to \$SHA_TAG"
+            else
+                echo "[WARN] No image tagged \$SHA_TAG for \$service; using whatever :latest holds."
+            fi
+        done
+    fi
+
     # shellcheck disable=SC2086
     # NO --remove-orphans: see deploy_local_build.sh. It deletes any container
     # missing from this checkout's compose file, including another author's
