@@ -58,11 +58,13 @@ ROUTES = [
 ]
 
 
-def _patch_bible(monkeypatch, status=200, payload=None, captured=None):
+def _patch_bible(monkeypatch, status=200, payload=None, captured=None, raw=None):
     """Capture whatever the gateway forwards to the bible service.
 
     ``shared_http_client`` is also how the gateway ships request logs, and that
     POST lands after the bible call, so only bible-bound calls are recorded.
+    ``raw`` makes the upstream answer with bytes instead of JSON, which is what
+    an unhandled crash in the bible service actually looks like on the wire.
     """
     captured = captured if captured is not None else {}
     captured["calls"] = []
@@ -71,13 +73,15 @@ def _patch_bible(monkeypatch, status=200, payload=None, captured=None):
     class _Resp:
         def __init__(self):
             self.status = status
-            self.text = json.dumps(payload or {})
+            self.text = raw.decode("utf-8", errors="replace") if raw else json.dumps(payload or {})
 
         async def json(self, **kwargs):
+            if raw is not None:
+                raise json.JSONDecodeError("Expecting value", self.text, 0)
             return payload if payload is not None else {}
 
         async def read(self):
-            return json.dumps(payload or {}).encode()
+            return raw if raw is not None else json.dumps(payload or {}).encode()
 
     class _Client:
         async def _record(self, verb, url, **kwargs):
@@ -575,6 +579,25 @@ def test_an_upload_without_a_file_is_refused_before_the_service(make_client, mon
     )
     assert resp.status_code == 400
     assert captured["calls"] == []
+
+
+def test_a_bible_crash_is_reported_with_its_status_and_text(make_client, monkeypatch):
+    """An unhandled importer crash answers plain text, and the operator sees it.
+
+    Decoding that body as JSON used to raise a JSONDecodeError inside this
+    middleware, so a 500 from the bible service reached the admin page as an
+    opaque failure with no hint that the importer had crashed at all.
+    """
+    _patch_bible(monkeypatch, status=500, raw=b"Internal Server Error")
+    resp = make_client(user="jeremiah", is_admin=True).post(
+        "/api/bible/admin/imports/upload",
+        files={"file": ("nkjv.epub", b"PK\x03\x04fake", "application/epub+zip")},
+        data={"code": "nkjv", "kind": "epub"},
+    )
+    assert resp.status_code == 500
+    detail = resp.json()["detail"]
+    assert "non-JSON response" in detail
+    assert "Internal Server Error" in detail
 
 
 def test_the_cost_estimate_reports_what_would_still_be_requested(make_client, monkeypatch):

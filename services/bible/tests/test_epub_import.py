@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from services.bible import epub_import
+from services.bible import epub_import, importer
 from services.bible.books import BOOKS
 from services.bible.corpus import fetch_passage, list_versions
 from services.bible.epub_import import (
@@ -61,13 +61,18 @@ def build_epub(
     append_to: str | None = None,
     markup: str = "",
     skip_verses: frozenset[tuple[int, int]] = frozenset(),
+    numbered: bool = False,
+    extra_files: dict[str, str] | None = None,
 ) -> Path:
     """Write a minimal but structurally valid epub.
 
     ``documents`` replaces generated documents by filename, so a test can
     hand-write the markup for the layout cases it cares about. Book numbers in
     the anchors are always the real canonical positions, because that is what
-    the extractor trusts.
+    the extractor trusts. ``numbered`` emits the anchor-less layout instead --
+    a chapter heading paragraph and the verse number inside the prose -- which
+    is how a typeset commercial EPUB reaches the reader, and ``extra_files``
+    writes additional members such as a stylesheet.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     generated: dict[str, str] = {}
@@ -77,16 +82,30 @@ def build_epub(
         name = f"OEBPS/book{position:02d}.html"
         if documents is not None and name in documents:
             continue
-        body = [f'<div class="chap" id="bk{position:02d}"><p class="ct">{entry["name"]}</p></div>']
+        body: list[str] = []
+        if not numbered:
+            body.append(f'<div class="chap" id="bk{position:02d}"><p class="ct">{entry["name"]}</p></div>')
         for chapter in range(1, entry["chapters"] + 1):
-            body.append(f'<div class="chap" id="ch{position:02d}{chapter:03d}"><p class="cn">{chapter}</p></div>')
+            if numbered:
+                body.append(
+                    f'<p class="hd" id="hd{position:02d}{chapter:03d}">'
+                    f'<a href="book{position:02d}.html">{entry["name"]}</a> '
+                    f'<a href="book{position:02d}.html">{chapter}</a></p>'
+                )
+            else:
+                body.append(f'<div class="chap" id="ch{position:02d}{chapter:03d}"><p class="cn">{chapter}</p></div>')
             for verse in range(1, per_chapter + 1):
                 if (position, chapter) in skip_verses:
                     continue
-                body.append(
-                    f'<p class="sl1" id="{anchor(position, chapter, verse)}">'
-                    f'{entry["name"]} {chapter}:{verse}</p>'
-                )
+                if numbered:
+                    body.append(
+                        f'<p class="v"><span>{verse}</span>{entry["name"]} {chapter}:{verse}</p>'
+                    )
+                else:
+                    body.append(
+                        f'<p class="sl1" id="{anchor(position, chapter, verse)}">'
+                        f'{entry["name"]} {chapter}:{verse}</p>'
+                    )
         generated[name] = "<html><body>" + "".join(body) + "</body></html>"
         if name == append_to:
             generated[name] = generated[name].replace("</body>", markup + "</body>")
@@ -108,8 +127,10 @@ def build_epub(
             'media-type="application/oebps-package+xml"/></rootfiles></container>',
         )
         archive.writestr("OEBPS/content.opf", OPF.format(title=title, items=items, spine=spine))
-        for name, markup in all_docs.items():
-            archive.writestr(name, markup)
+        for name, markup_text in all_docs.items():
+            archive.writestr(name, markup_text)
+        for name, text in (extra_files or {}).items():
+            archive.writestr(name, text)
     return path
 
 
@@ -379,6 +400,24 @@ def test_to_source_uses_canonical_book_names(complete_epub: Path) -> None:
     assert len(payload) == 66
 
 
+def test_a_complete_epub_installs_as_a_translation(complete_epub: Path, session: Session) -> None:
+    """The whole install path, not just the extractor.
+
+    The importer used to stage ``to_corpus_source``'s tuple output rather than
+    ``to_source``'s list-of-dicts, so the staged JSON began with the
+    empty-string name and every real translation died inside ``parse_source``
+    with ``'str' object has no attribute 'get'`` -- a 500 the admin page could
+    only show as a generic failure. ``to_source``'s shape was tested; this
+    pins the wiring from extraction to an installed corpus.
+    """
+    report = importer.run(
+        session,
+        importer.ImportPlan(code="kjv", kind="epub", source_path=str(complete_epub)),
+    )
+    assert report.status == "succeeded", f"{report.message} :: {report.log}"
+    assert report.verse_count == sum(entry["chapters"] for entry in BOOKS)
+
+
 @pytest.fixture
 def db_url(tmp_path: Path) -> str:
     return f"sqlite:///{tmp_path / 'corpus.db'}"
@@ -558,3 +597,157 @@ def test_an_unknown_code_is_never_assumed_public_domain(complete_epub: Path, db_
     out = capsys.readouterr().out
     assert '"license_class": "licensed"' in out
     assert "study notes were not requested" in out
+
+def test_numbered_paragraphs_extract_when_anchors_are_absent(tmp_path: Path) -> None:
+    """A typeset EPUB numbers its verses in the prose instead of anchoring them.
+
+    The NLT file an admin uploaded carried no ``v`` anchors at all, so the
+    anchor reader found nothing and the import died. Chapter headings,
+    in-text verse numbers, section titles and editorial boxes all have to be
+    told apart from scripture for that file to install.
+    """
+    path = build_epub(
+        tmp_path / "numbered.epub",
+        book_filter={"Gen"},
+        extra_files={"OEBPS/style.css": ".hd {font-weight: bold;}"},
+        documents={
+            "OEBPS/book01.html": (
+                "<html><body>"
+                '<p class="hd"><a href="book01.html">Genesis</a> <a href="book01.html">1</a></p>'
+                '<p class="v"><span>1</span>In the beginning<a epub:type="noteref" href="n.xhtml">*</a> God created</p>'
+                '<div class="box"><p>listen to the Word</p></div>'
+                '<p class="hd" id="a1">The creation numbered</p>'
+                '<p class="v"><span>2</span>And the earth was without form</p>'
+                '<p class="v"><span>3</span>And God said</p>'
+                "<p>Let there be light</p>"
+                '<p class="hd"><a href="book01.html">Genesis</a> <a href="book01.html">2</a></p>'
+                '<p class="v"><span>1</span>Thus the heavens were finished</p>'
+                "</body></html>"
+            )
+        },
+    )
+    result = extract(str(path))
+    assert result["mode"] == "verse"
+    assert verse_text(result, "Gen", 1, 1) == "In the beginning God created"
+    assert verse_text(result, "Gen", 1, 2) == "And the earth was without form"
+    assert verse_text(result, "Gen", 1, 3) == "And God said Let there be light"
+    assert verse_text(result, "Gen", 2, 1) == "Thus the heavens were finished"
+    joined = " ".join(result["flat"].values())
+    assert "listen to the Word" not in joined
+    assert "The creation numbered" not in joined
+    assert any("not kept as verse text" in warning for warning in result["warnings"])
+
+
+def test_a_numbered_translation_still_installs_as_a_whole(tmp_path: Path) -> None:
+    path = build_epub(tmp_path / "numbered-full.epub", numbered=True)
+    result = extract(str(path))
+    assert [r.name for r in result["reports"] if not r.ok] == []
+    assert verse_text(result, "Gen", 1, 1) == "Genesis 1:1"
+    assert verse_text(result, "Rev", 22, 1) == "Revelation 22:1"
+    payload = to_source(result)
+    assert len(payload) == 66
+    assert result["verse_count"] == sum(entry["chapters"] for entry in BOOKS)
+    assert not any("not kept as verse text" in warning for warning in result["warnings"])
+
+
+def test_a_verse_number_out_of_sequence_is_declined_not_guessed(tmp_path: Path) -> None:
+    """Sequential numbering is the trust this mode rests on.
+
+    A number far ahead of the sequence is either damaged markup or a fixture
+    for a later verse; either way guessing its text onto the wrong verse would
+    install a confident lie, so the paragraph is declined and the report says
+    so. A number only one or two ahead is left out of sequence by the
+    translation itself and is taken at face value (that case has its own test).
+    """
+    path = build_epub(
+        tmp_path / "gapped.epub",
+        book_filter={"Gen"},
+        documents={
+            "OEBPS/book01.html": (
+                "<html><body>"
+                '<p class="hd"><a href="book01.html">Genesis</a> <a href="book01.html">1</a></p>'
+                '<p class="v"><span>1</span>First verse</p>'
+                '<p class="v"><span>15</span>Fifteenth verse arrived early</p>'
+                "</body></html>"
+            )
+        },
+    )
+    result = extract(str(path))
+    assert verse_text(result, "Gen", 1, 1) == "First verse"
+    assert (1, 1, 15) not in result["flat"]
+    assert any("out of sequence" in warning for warning in result["warnings"])
+
+
+def test_without_css_a_numbered_heading_is_still_dropped_by_its_id(tmp_path: Path) -> None:
+    """A stylesheet-less archive still has to keep titles out of the verses."""
+    path = build_epub(
+        tmp_path / "numbered-nostyles.epub",
+        book_filter={"Gen"},
+        documents={
+            "OEBPS/book01.html": (
+                "<html><body>"
+                '<p class="hd"><a href="book01.html">Genesis</a> <a href="book01.html">1</a></p>'
+                '<p class="v"><span>1</span>In the beginning</p>'
+                '<p id="a77">A section title</p>'
+                '<p class="v"><span>2</span>God created</p>'
+                "</body></html>"
+            )
+        },
+    )
+    result = extract(str(path))
+    assert verse_text(result, "Gen", 1, 1) == "In the beginning"
+    assert verse_text(result, "Gen", 1, 2) == "God created"
+    assert "A section title" not in " ".join(result["flat"].values())
+
+
+def test_a_ranged_paragraph_files_every_number_it_names(tmp_path: Path) -> None:
+    """Typeset prose numbers several verses as "3-4" over one paragraph.
+
+    NLT Numbers 2 sets pairs of verses this way; splitting by single numbers
+    would leave 3 and 4 empty and glue their text onto verse 2.
+    """
+    path = build_epub(
+        tmp_path / "ranged.epub",
+        book_filter={"Gen"},
+        documents={
+            "OEBPS/book01.html": (
+                "<html><body>"
+                '<p class="hd"><a href="book01.html">Genesis</a> <a href="book01.html">1</a></p>'
+                '<p class="v"><span>1</span>First verse</p>'
+                '<p class="v"><span>2</span>Second verse</p>'
+                '<p class="v"><span>3-4</span>Shared prose for the paired verses</p>'
+                '<p class="v"><span>5</span>Fifth verse</p>'
+                "</body></html>"
+            )
+        },
+    )
+    result = extract(str(path))
+    assert verse_text(result, "Gen", 1, 3) == "Shared prose for the paired verses"
+    assert verse_text(result, "Gen", 1, 4) == "Shared prose for the paired verses"
+    assert verse_text(result, "Gen", 1, 5) == "Fifth verse"
+    assert (1, 1, 2) not in result["flat"].values()
+
+
+def test_a_translation_that_skips_a_number_keeps_the_verse_that_follows(tmp_path: Path) -> None:
+    """The NLT has no John 5:4, so the next paragraph reads 5 where 4 is due.
+
+    Declining that jump would cascade and abandon the rest of the chapter;
+    the skipped number is reported instead.
+    """
+    path = build_epub(
+        tmp_path / "skipped.epub",
+        book_filter={"Gen"},
+        documents={
+            "OEBPS/book01.html": (
+                "<html><body>"
+                '<p class="hd"><a href="book01.html">Genesis</a> <a href="book01.html">1</a></p>'
+                '<p class="v"><span>1</span>First verse</p>'
+                '<p class="v"><span>3</span>Third verse, the second is gone</p>'
+                "</body></html>"
+            )
+        },
+    )
+    result = extract(str(path))
+    assert verse_text(result, "Gen", 1, 3) == "Third verse, the second is gone"
+    assert (1, 1, 2) not in result["flat"]
+    assert any("absent from this translation" in warning for warning in result["warnings"])

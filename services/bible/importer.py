@@ -363,7 +363,7 @@ def _materialise(
                 "It carries no verse text, so nothing is staged for a translation install."
             )
             return Materialised(path=source, notes=notes, notes_only=True)
-        payload = epub_import.to_corpus_source(extracted)
+        payload = epub_import.to_source(extracted)
 
     staged = source.with_suffix(source.suffix + ".source.json")
     staged.parent.mkdir(parents=True, exist_ok=True)
