@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowDown, Copy, CornerUpLeft, RotateCcw, SmilePlus, Trash2 } from 'lucide-react';
+import { ArrowDown, Check, CheckCheck, Copy, CornerUpLeft, Pencil, RotateCcw, SmilePlus, Sparkles, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import EnvelopeBody from './EnvelopeBody';
 import {
@@ -8,7 +8,10 @@ import {
   groupIntoRuns,
   initials,
   isEmojiOnly,
+  JARVIS_ID,
+  plainText,
   QUICK_REACTIONS,
+  receiptFor,
   sameDay,
   timeLabel,
   type MessageRun,
@@ -22,9 +25,16 @@ interface MessageThreadProps {
   messages: TalkMessage[];
   myActorIds: ReadonlySet<string>;
   isGroup: boolean;
+  /** Everyone has read up to this id: drives "Read" under your latest message. */
+  lastCommonRead?: number;
+  /** Your read marker when the conversation was opened: the "New messages" line. */
+  unreadAfter?: number;
+  jarvisThinking: boolean;
   reactionCounts: (message: TalkMessage) => Record<string, number>;
   onReact: (message: TalkMessage, emoji: string) => void;
   onReply: (message: TalkMessage) => void;
+  onEdit: (message: TalkMessage) => void;
+  onDelete: (message: TalkMessage) => void;
   onRetry: (message: TalkMessage) => void;
   onDiscard: (message: TalkMessage) => void;
   emptyText: string;
@@ -34,55 +44,77 @@ export default function MessageThread({
   messages,
   myActorIds,
   isGroup,
+  lastCommonRead,
+  unreadAfter,
+  jarvisThinking,
   reactionCounts,
   onReact,
   onReply,
+  onEdit,
+  onDelete,
   onRetry,
   onDiscard,
   emptyText,
 }: MessageThreadProps) {
   const feedRef = useRef<HTMLDivElement | null>(null);
+  const dividerRef = useRef<HTMLDivElement | null>(null);
   const atBottomRef = useRef(true);
   const seenCountRef = useRef(0);
   const [unseen, setUnseen] = useState(0);
-  const [reactingFor, setReactingFor] = useState<string | null>(null);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
 
   const runs = groupIntoRuns(messages, myActorIds);
+
+  // The first message from someone else after your read marker.
+  const firstUnreadId =
+    unreadAfter === undefined
+      ? undefined
+      : runs
+          .filter((run) => !run.mine && !run.system)
+          .flatMap((run) => run.messages)
+          .find((m) => typeof m.id === 'number' && m.id > unreadAfter)?.id;
+
+  // "Read"/"Sent" goes under your most recent message only, as in iMessage.
+  const mineInOrder = runs.filter((run) => run.mine).flatMap((run) => run.messages);
+  const myLatest = mineInOrder[mineInOrder.length - 1];
 
   const scrollToBottom = (smooth = false) => {
     const feed = feedRef.current;
     if (!feed) return;
-    if (typeof feed.scrollTo === 'function') {
-      feed.scrollTo({ top: feed.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
-    } else {
-      feed.scrollTop = feed.scrollHeight;
-    }
+    if (typeof feed.scrollTo === 'function') feed.scrollTo({ top: feed.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    else feed.scrollTop = feed.scrollHeight;
     atBottomRef.current = true;
     setUnseen(0);
   };
 
-  // The panel remounts this per conversation (key), so each one opens at its
-  // latest message with fresh state.
+  // The panel remounts this per conversation (key). It opens at the "New
+  // messages" line when there is one, else at the latest message.
   useLayoutEffect(() => {
     const feed = feedRef.current;
-    if (feed) feed.scrollTop = feed.scrollHeight;
+    if (!feed) return;
+    if (dividerRef.current && typeof dividerRef.current.scrollIntoView === 'function') {
+      dividerRef.current.scrollIntoView({ block: 'start' });
+    } else {
+      feed.scrollTop = feed.scrollHeight;
+    }
   }, []);
 
   // New messages follow you only if you were already at the bottom or sent
-  // them yourself; otherwise they wait behind a "new messages" pill instead
-  // of yanking you away from what you were reading.
+  // them yourself; otherwise they wait behind a "N new" pill.
   useEffect(() => {
     const added = messages.length - seenCountRef.current;
+    const firstLoad = seenCountRef.current === 0;
     seenCountRef.current = messages.length;
-    if (added <= 0) return;
+    if (added <= 0 || firstLoad) return;
     const last = messages[messages.length - 1];
-    if (atBottomRef.current || last?.pending) {
-      scrollToBottom(true);
-    } else {
-      setUnseen((n) => n + added);
-    }
+    if (atBottomRef.current || last?.pending) scrollToBottom(true);
+    else setUnseen((n) => n + added);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on growth
   }, [messages.length]);
+
+  useEffect(() => {
+    if (jarvisThinking && atBottomRef.current) scrollToBottom(true);
+  }, [jarvisThinking]);
 
   const onScroll = () => {
     const feed = feedRef.current;
@@ -98,6 +130,11 @@ export default function MessageThread({
     } catch {
       toast.error('Could not copy');
     }
+  };
+
+  const done = (fn: (message: TalkMessage) => void) => (message: TalkMessage) => {
+    setActiveKey(null);
+    fn(message);
   };
 
   return (
@@ -116,6 +153,7 @@ export default function MessageThread({
           const prevRun = runs[index - 1];
           const prevStamp = prevRun?.messages[prevRun.messages.length - 1]?.timestamp;
           const newDay = first.timestamp && (!prevRun || !sameDay(prevStamp, first.timestamp));
+          const unreadHere = firstUnreadId !== undefined && run.messages.some((m) => m.id === firstUnreadId);
           return (
             <Fragment key={run.key}>
               {newDay && (
@@ -125,26 +163,35 @@ export default function MessageThread({
                   </span>
                 </div>
               )}
+              {unreadHere && (
+                <div ref={dividerRef} className="my-3 flex items-center gap-3" role="separator" data-testid="unread-divider">
+                  <span className="h-px flex-1 bg-purple-400/40" />
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-purple-300">New messages</span>
+                  <span className="h-px flex-1 bg-purple-400/40" />
+                </div>
+              )}
               {run.system ? (
                 <p className="my-2 text-center text-[11px] text-slate-500">
-                  {first.system_message ? <EnvelopeBody raw={first.message} fallback={first.system_message} /> : null}
+                  <EnvelopeBody raw={first.message} fallback={first.system_message} parameters={first.parameters} />
                 </p>
               ) : (
                 <Run
                   run={run}
                   isGroup={isGroup}
-                  reactingFor={reactingFor}
+                  myActorIds={myActorIds}
+                  activeKey={activeKey}
+                  receiptMessage={myLatest}
+                  lastCommonRead={lastCommonRead}
                   reactionCounts={reactionCounts}
-                  onToggleReact={(key) => setReactingFor((current) => (current === key ? null : key))}
+                  onToggle={(key) => setActiveKey((current) => (current === key ? null : key))}
                   onReact={(message, emoji) => {
-                    setReactingFor(null);
+                    setActiveKey(null);
                     onReact(message, emoji);
                   }}
-                  onReply={(message) => {
-                    setReactingFor(null);
-                    onReply(message);
-                  }}
-                  onCopy={copy}
+                  onReply={done(onReply)}
+                  onEdit={done(onEdit)}
+                  onDelete={done(onDelete)}
+                  onCopy={done((message) => void copy(message))}
                   onRetry={onRetry}
                   onDiscard={onDiscard}
                 />
@@ -152,7 +199,22 @@ export default function MessageThread({
             </Fragment>
           );
         })}
-        {messages.length === 0 && <p className="py-10 text-center text-sm text-slate-500">{emptyText}</p>}
+
+        {jarvisThinking && (
+          <div className="mb-2 flex items-end gap-2" data-testid="jarvis-thinking">
+            <JarvisAvatar />
+            <div className="rounded-3xl rounded-bl-md border border-fuchsia-400/30 bg-gradient-to-br from-fuchsia-500/15 to-indigo-500/15 px-4 py-3">
+              <span className="flex items-center gap-1" aria-hidden>
+                {[0, 150, 300].map((delay) => (
+                  <span key={delay} className="h-2 w-2 animate-bounce rounded-full bg-fuchsia-300" style={{ animationDelay: `${delay}ms` }} />
+                ))}
+              </span>
+            </div>
+            <span className="mb-1 text-[11px] text-slate-500">Jarvis is thinking…</span>
+          </div>
+        )}
+
+        {messages.length === 0 && !jarvisThinking && <p className="py-10 text-center text-sm text-slate-500">{emptyText}</p>}
       </div>
 
       {unseen > 0 && (
@@ -169,14 +231,30 @@ export default function MessageThread({
   );
 }
 
+function JarvisAvatar() {
+  return (
+    <span
+      aria-hidden
+      className="mb-5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-indigo-500 text-white shadow"
+    >
+      <Sparkles size={14} />
+    </span>
+  );
+}
+
 interface RunProps {
   run: MessageRun;
   isGroup: boolean;
-  reactingFor: string | null;
+  myActorIds: ReadonlySet<string>;
+  activeKey: string | null;
+  receiptMessage?: TalkMessage;
+  lastCommonRead?: number;
   reactionCounts: (message: TalkMessage) => Record<string, number>;
-  onToggleReact: (key: string) => void;
+  onToggle: (key: string) => void;
   onReact: (message: TalkMessage, emoji: string) => void;
   onReply: (message: TalkMessage) => void;
+  onEdit: (message: TalkMessage) => void;
+  onDelete: (message: TalkMessage) => void;
   onCopy: (message: TalkMessage) => void;
   onRetry: (message: TalkMessage) => void;
   onDiscard: (message: TalkMessage) => void;
@@ -186,52 +264,91 @@ function messageKey(message: TalkMessage, index: number): string {
   return String(message.id ?? `${message.timestamp}-${index}`);
 }
 
-function Run({ run, isGroup, reactingFor, reactionCounts, onToggleReact, onReact, onReply, onCopy, onRetry, onDiscard }: RunProps) {
+function Run({
+  run,
+  isGroup,
+  myActorIds,
+  activeKey,
+  receiptMessage,
+  lastCommonRead,
+  reactionCounts,
+  onToggle,
+  onReact,
+  onReply,
+  onEdit,
+  onDelete,
+  onCopy,
+  onRetry,
+  onDiscard,
+}: RunProps) {
   const { mine } = run;
-  const showName = !mine && isGroup;
+  const jarvis = run.authorId === JARVIS_ID;
+  const showName = !mine && (isGroup || jarvis);
   const lastIndex = run.messages.length - 1;
-  const lastStamp = run.messages[lastIndex].timestamp;
+  const last = run.messages[lastIndex];
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   return (
     <div className={`mb-2 flex items-end gap-2 ${mine ? 'justify-end' : 'justify-start'}`}>
-      {!mine && (
-        <span
-          aria-hidden
-          className="mb-5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
-          style={{ background: avatarTint(run.author) }}
-        >
-          {initials(run.author)}
-        </span>
-      )}
-      <div className={`flex min-w-0 max-w-[80%] flex-col sm:max-w-[70%] ${mine ? 'items-end' : 'items-start'}`}>
-        {showName && <span className="mb-0.5 ml-3 text-[11px] font-semibold text-slate-400">{run.author}</span>}
+      {!mine &&
+        (jarvis ? (
+          <JarvisAvatar />
+        ) : (
+          <span
+            aria-hidden
+            className="mb-5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+            style={{ background: avatarTint(run.author) }}
+          >
+            {initials(run.author)}
+          </span>
+        ))}
+      <div className={`flex min-w-0 max-w-[82%] flex-col sm:max-w-[70%] ${mine ? 'items-end' : 'items-start'}`}>
+        {showName && (
+          <span className={`mb-0.5 ml-3 inline-flex items-center gap-1 text-[11px] font-semibold ${jarvis ? 'text-fuchsia-300' : 'text-slate-400'}`}>
+            {run.author}
+            {jarvis && <span className="rounded-full bg-fuchsia-500/20 px-1.5 text-[9px] uppercase tracking-wider">AI</span>}
+          </span>
+        )}
         {run.messages.map((message, index) => {
           const key = messageKey(message, index);
           const isLast = index === lastIndex;
           const counts = reactionCounts(message);
           const hasReactions = Object.keys(counts).length > 0;
-          const emojiOnly = isEmojiOnly(message.message) && !message.parent;
-          const canAct = typeof message.id === 'number' && !message.pending;
-          const corner = mine
-            ? isLast ? 'rounded-br-md' : 'rounded-br-lg'
-            : isLast ? 'rounded-bl-md' : 'rounded-bl-lg';
+          const hasFile = Object.values(message.parameters || {}).some((p) => p.type === 'file');
+          const emojiOnly = isEmojiOnly(message.message) && !message.parent && !hasFile;
+          const canAct = typeof message.id === 'number' && !message.pending && !message.deleted;
+          const canChange = canAct && mine && !hasFile;
+          const corner = mine ? (isLast ? 'rounded-br-md' : 'rounded-br-lg') : isLast ? 'rounded-bl-md' : 'rounded-bl-lg';
+          const tone = message.deleted
+            ? 'border border-dashed border-white/15 bg-transparent italic text-slate-500'
+            : mine
+              ? message.pending === 'failed'
+                ? 'bg-rose-500/20 text-slate-100'
+                : 'bg-gradient-to-br from-purple-600 to-violet-600 text-white'
+              : jarvis
+                ? 'border border-fuchsia-400/30 bg-gradient-to-br from-fuchsia-500/15 to-indigo-500/15 text-slate-100'
+                : 'bg-white/10 text-slate-100';
+          const open = activeKey === key;
           return (
             <div key={key} className={`group relative flex w-full flex-col ${mine ? 'items-end' : 'items-start'} ${index > 0 ? 'mt-0.5' : ''}`}>
               <div className={`flex max-w-full items-center gap-1 ${mine ? 'flex-row-reverse' : ''}`}>
-                <button
-                  type="button"
-                  onClick={() => canAct && onToggleReact(key)}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => canAct && onToggle(key)}
+                  onKeyDown={(event) => {
+                    if ((event.key === 'Enter' || event.key === ' ') && canAct && event.target === event.currentTarget) {
+                      event.preventDefault();
+                      onToggle(key);
+                    }
+                  }}
                   title="Tap to react"
                   className={
                     emojiOnly
-                      ? 'text-4xl leading-tight'
-                      : `max-w-full rounded-3xl px-3.5 py-2 text-left text-[15px] leading-snug break-words whitespace-pre-wrap ${corner} ${
-                          mine
-                            ? message.pending === 'failed'
-                              ? 'bg-rose-500/20 text-slate-100'
-                              : 'bg-purple-600 text-white'
-                            : 'bg-white/10 text-slate-100'
-                        } ${message.pending === 'sending' ? 'opacity-70' : ''}`
+                      ? 'cursor-pointer select-text text-4xl leading-tight'
+                      : `max-w-full cursor-pointer select-text whitespace-pre-wrap break-words rounded-3xl px-3.5 py-2 text-left text-[15px] leading-snug ${corner} ${tone} ${
+                          message.pending === 'sending' ? 'opacity-70' : ''
+                        } ${open ? 'ring-2 ring-purple-400/50' : ''}`
                   }
                 >
                   {message.parent && (
@@ -241,16 +358,22 @@ function Run({ run, isGroup, reactingFor, reactionCounts, onToggleReact, onReact
                       }`}
                     >
                       <span className="block font-semibold">{message.parent.actor_display_name}</span>
-                      <span className="line-clamp-2">{message.parent.message}</span>
+                      <span className="line-clamp-2">{plainText(message.parent.message)}</span>
                     </span>
                   )}
-                  <EnvelopeBody raw={message.message} fallback={message.system_message} />
-                </button>
+                  <EnvelopeBody
+                    raw={message.message}
+                    fallback={message.system_message}
+                    parameters={message.parameters}
+                    myActorIds={myActorIds}
+                    voice={message.message_type === 'voice-message'}
+                  />
+                  {message.last_edit_time && !message.deleted && <span className="ml-1.5 text-[10px] opacity-60">(edited)</span>}
+                </div>
                 {canAct && (
                   <span className="hidden shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 md:flex">
-                    <IconAction label="React" onClick={() => onToggleReact(key)}><SmilePlus size={15} /></IconAction>
+                    <IconAction label="React" onClick={() => onToggle(key)}><SmilePlus size={15} /></IconAction>
                     <IconAction label="Reply" onClick={() => onReply(message)}><CornerUpLeft size={15} /></IconAction>
-                    <IconAction label="Copy" onClick={() => onCopy(message)}><Copy size={15} /></IconAction>
                   </span>
                 )}
               </div>
@@ -264,9 +387,7 @@ function Run({ run, isGroup, reactingFor, reactionCounts, onToggleReact, onReact
                       onClick={() => canAct && onReact(message, emoji)}
                       aria-label={`${emoji} ${count}`}
                       className={`rounded-full border px-1.5 py-0.5 text-[12px] shadow ${
-                        message.reactions_self?.includes(emoji)
-                          ? 'border-purple-400/60 bg-purple-500/30'
-                          : 'border-white/10 bg-slate-800'
+                        message.reactions_self?.includes(emoji) ? 'border-purple-400/60 bg-purple-500/30' : 'border-white/10 bg-slate-800'
                       }`}
                     >
                       {emoji}
@@ -276,9 +397,9 @@ function Run({ run, isGroup, reactingFor, reactionCounts, onToggleReact, onReact
                 </div>
               )}
 
-              {reactingFor === key && (
+              {open && (
                 <div
-                  className={`mt-1 flex items-center gap-1 rounded-full border border-white/10 bg-slate-900/95 p-1 shadow-lg ${mine ? 'self-end' : 'self-start'}`}
+                  className={`z-10 mt-1 flex flex-wrap items-center gap-1 rounded-3xl border border-white/10 bg-slate-900/95 p-1 shadow-xl ${mine ? 'self-end' : 'self-start'}`}
                   data-testid="reaction-bar"
                 >
                   {QUICK_REACTIONS.map((emoji) => (
@@ -295,6 +416,31 @@ function Run({ run, isGroup, reactingFor, reactionCounts, onToggleReact, onReact
                   <span className="mx-0.5 h-6 w-px bg-white/10" aria-hidden />
                   <IconAction label="Reply" onClick={() => onReply(message)}><CornerUpLeft size={16} /></IconAction>
                   <IconAction label="Copy" onClick={() => onCopy(message)}><Copy size={16} /></IconAction>
+                  {canChange && (
+                    <>
+                      <IconAction label="Edit" onClick={() => onEdit(message)}><Pencil size={16} /></IconAction>
+                      <IconAction label="Delete" onClick={() => setConfirmDelete(key)}><Trash2 size={16} /></IconAction>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {confirmDelete === key && (
+                <div className="mt-1 flex items-center gap-2 rounded-full border border-rose-400/30 bg-rose-500/10 px-3 py-1 text-xs text-rose-200" role="alert">
+                  Delete for everyone?
+                  <button
+                    type="button"
+                    className="font-semibold underline"
+                    onClick={() => {
+                      setConfirmDelete(null);
+                      onDelete(message);
+                    }}
+                  >
+                    Delete
+                  </button>
+                  <button type="button" className="text-slate-300" onClick={() => setConfirmDelete(null)}>
+                    Cancel
+                  </button>
                 </div>
               )}
 
@@ -312,11 +458,30 @@ function Run({ run, isGroup, reactingFor, reactionCounts, onToggleReact, onReact
             </div>
           );
         })}
-        <span className={`mt-0.5 px-2 text-[10px] text-slate-500 ${mine ? 'text-right' : ''}`}>
-          {run.messages[lastIndex].pending === 'sending' ? 'Sending…' : lastStamp ? timeLabel(lastStamp) : ''}
+        <span className={`mt-0.5 flex items-center gap-1.5 px-2 text-[10px] text-slate-500 ${mine ? 'justify-end' : ''}`}>
+          {last.timestamp && last.pending !== 'sending' ? timeLabel(last.timestamp) : ''}
+          {mine && receiptMessage && run.messages.includes(receiptMessage) && (
+            <Receipt state={receiptFor(receiptMessage, lastCommonRead)} />
+          )}
         </span>
       </div>
     </div>
+  );
+}
+
+function Receipt({ state }: { state: ReturnType<typeof receiptFor> }) {
+  if (state === 'failed') return null;
+  if (state === 'sending') return <span data-testid="receipt">Sending…</span>;
+  if (state === 'read')
+    return (
+      <span className="inline-flex items-center gap-0.5 font-semibold text-purple-300" data-testid="receipt">
+        <CheckCheck size={12} /> Read
+      </span>
+    );
+  return (
+    <span className="inline-flex items-center gap-0.5" data-testid="receipt">
+      <Check size={12} /> Sent
+    </span>
   );
 }
 
