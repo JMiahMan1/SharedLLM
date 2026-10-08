@@ -18,9 +18,9 @@ if env_path.exists():
 
 
 async def test():
-    abs_url = os.getenv("AUDIOBOOKSHELF_URL") or os.getenv("ABS_URL")
-    username = os.getenv("AUDIOBOOKSHELF_USER") or os.getenv("ABS_USER")
-    password = os.getenv("AUDIOBOOKSHELF_PASS") or os.getenv("ABS_PASS")
+    abs_url = os.getenv("AUDIOBOOKSHELF_URL")
+    username = os.getenv("AUDIOBOOKSHELF_USER")
+    password = os.getenv("AUDIOBOOKSHELF_PASS")
 
     print(f"ABS URL: {abs_url}")
     print(f"Username: {username}")

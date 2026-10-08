@@ -220,3 +220,19 @@ def test_prefill_urls_come_from_the_system_config_first(client, session, monkeyp
     assert body["source"]["nextcloud_url"] == "system_config"
     assert body["ha_url"] == "https://ha.from-user1"
     assert body["source"]["ha_url"] == "default_user"
+
+
+def test_seeding_a_system_credential_works_and_is_recorded(client, session):
+    resp = client.post("/api/admin/seed-credential", json={"field": "audiobookshelf_api_key", "value": "new-key"})
+    assert resp.status_code == 200, resp.text
+    owner = session.exec(select(User).where(User.username == "default")).first()
+    session.refresh(owner)
+    assert decrypt(owner.audiobookshelf_api_key_enc) == "new-key"
+    event = _events(session)[-1]
+    assert event.action == "credential.seed" and "new-key" not in event.model_dump_json()
+
+
+def test_generating_and_revoking_an_api_key_is_recorded(client, session):
+    key_id = client.post("/api/users/me/keys", json={"label": "phone"}).json()["id"]
+    assert client.delete(f"/api/users/me/keys/{key_id}").status_code == 200
+    assert [e.action for e in _events(session)][-2:] == ["api_key.create", "api_key.revoke"]
