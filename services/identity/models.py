@@ -530,3 +530,25 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "dns_health_path", "value": "", "description": "Optional HTTP path (e.g. /api/health) probed instead of a raw TCP port to check device health. Empty = use TCP port probes only."},
 ]
 
+
+
+class AuditEvent(SQLModel, table=True):  # type: ignore
+    """One action that changed an account: who, what, to whom, which fields.
+
+    Never a credential value. ``changes`` is a JSON list of
+    ``{"field": name, "change": "set"|"changed"|"cleared"}`` (plus ``"to"`` for
+    plain flags such as is_admin), so the trail answers "who wiped Michele's
+    Nextcloud login, and when" without itself holding a login.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    at: str = Field(index=True)
+    actor: str = Field(index=True)  # username, "internal", or "anonymous"
+    actor_kind: str = "user"  # user | internal | anonymous
+    action: str = Field(index=True)  # e.g. user.update, credential.reveal
+    target: str | None = Field(default=None, index=True)  # affected username
+    changes: str = "[]"
+    source: str | None = None  # the endpoint that did it
+    client: str | None = None  # caller IP as seen through the proxy
+    user_agent: str | None = None
+    note: str | None = None
