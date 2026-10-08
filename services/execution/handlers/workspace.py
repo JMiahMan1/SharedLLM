@@ -598,6 +598,10 @@ async def handle_workspace_write(req: WorkspaceFileWriteRequest) -> ExecutionRes
         return _fail(str(e))
 
 _FILE_NAME_MATCH_LIMIT = 50
+# A match is reported as its whole line, and a single-line file (a narrated HTML
+# deck with base64 slides) made one search a 51 MB response. Nobody reads past
+# a few hundred characters of a hit.
+_MATCH_TEXT_MAX_CHARS = 300
 _FILE_NAME_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv"}
 
 
@@ -685,7 +689,7 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
                     matches.append({
                         "path": _workspace_relative(match_data.get("path", {}).get("text", ""), abs_search_path, ws_root),
                         "line": match_data.get("line_number"),
-                        "text": match_data.get("lines", {}).get("text", "").strip()
+                        "text": match_data.get("lines", {}).get("text", "").strip()[:_MATCH_TEXT_MAX_CHARS]
                     })
             except Exception:
                 # Basic grep fallback parsing
@@ -694,7 +698,7 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
                     matches.append({
                         "path": _workspace_relative(parts[0], abs_search_path, ws_root),
                         "line": parts[1],
-                        "text": parts[2].strip()
+                        "text": parts[2].strip()[:_MATCH_TEXT_MAX_CHARS]
                     })
 
         files = _matching_file_names(abs_search_path, ws_root, req.query)
