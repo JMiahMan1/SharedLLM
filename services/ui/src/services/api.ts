@@ -1533,7 +1533,7 @@ export const api = {
     return resp.data;
   },
 
-  async sendTalkMessage(payload: { token: string; message: string; as_user?: 'admin' }): Promise<ExecutionResponse> {
+  async sendTalkMessage(payload: { token: string; message: string; as_user?: 'admin'; reply_to?: number }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/messages', payload);
     return resp.data;
   },

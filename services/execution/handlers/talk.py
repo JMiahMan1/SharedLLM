@@ -65,6 +65,14 @@ def _conversation_summary(conversation: dict[str, Any]) -> dict[str, Any]:
         "unread_messages": conversation.get("unreadMessages", 0),
         "last_activity": conversation.get("lastActivity"),
         "last_message": last_message.get("message"),
+        # Who said it and when, so a conversation list can read
+        # "Michele: Dinner at 6 · 5:02 PM" the way every messenger does.
+        "last_message_actor": last_message.get("actorDisplayName"),
+        "last_message_actor_id": last_message.get("actorId"),
+        "last_message_timestamp": last_message.get("timestamp"),
+        # Talk room type: 1 one-to-one, 2 group, 3 public, 4 changelog.
+        "type": conversation.get("type"),
+        "unread_mention": bool(conversation.get("unreadMention", False)),
     }
 
 
@@ -80,6 +88,22 @@ def _message_summary(message: dict[str, Any]) -> dict[str, Any]:
         "system_message": message.get("systemMessage"),
         "message": message.get("message"),
         "is_replyable": message.get("isReplyable", False),
+        # Talk sends both with every message, so the feed can show reaction
+        # chips without a request per message.
+        "reactions": message.get("reactions") or {},
+        "reactions_self": message.get("reactionsSelf") or [],
+        "parent": _parent_summary(message.get("parent")),
+    }
+
+
+def _parent_summary(parent: Any) -> dict[str, Any] | None:
+    """The message a reply quotes, cut down to what a quote bubble shows."""
+    if not isinstance(parent, dict) or not parent.get("id"):
+        return None
+    return {
+        "id": parent.get("id"),
+        "actor_display_name": parent.get("actorDisplayName") or parent.get("actorId") or "Unknown",
+        "message": (parent.get("message") or "")[:280],
     }
 
 def validate_jarvis_mention(message: str | None) -> bool:
@@ -601,7 +625,7 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 provider,
                 "POST",
                 f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}",
-                data={"message": req.message},
+                data={"message": req.message, **({"replyTo": str(req.reply_to)} if req.reply_to else {})},
             )
             if not ok:
                 return ExecutionResult(status="FAILURE", message=message or "Failed to send message.", service="talk_send")

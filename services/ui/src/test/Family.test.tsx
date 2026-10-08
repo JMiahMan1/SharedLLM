@@ -32,6 +32,7 @@ describe('Family hub', () => {
     const user = userEvent.setup();
     renderWithProviders(<Family />);
 
+    await user.click(await screen.findByRole('button', { name: /new conversation/i }));
     await user.type(await screen.findByLabelText('Start a conversation with'), 'jeremiah');
     await user.click(screen.getByRole('button', { name: /open conversation/i }));
     await waitFor(() => expect(screen.getByTestId('chat-feed')).toBeInTheDocument());
@@ -80,7 +81,9 @@ describe('Family hub', () => {
     const user = userEvent.setup();
     renderWithProviders(<Family />);
 
-    await user.click(await screen.findByRole('button', { name: /new poll/i }));
+    // Polls live in the composer's + menu, as in WhatsApp and Telegram.
+    await user.click(await screen.findByRole('button', { name: /more options/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /new poll/i }));
     await user.type(await screen.findByLabelText('Poll question'), 'Movie night?');
     await user.type(screen.getByLabelText('Poll option 1'), 'Inside Out');
     await user.type(screen.getByLabelText('Poll option 2'), 'Paddington');

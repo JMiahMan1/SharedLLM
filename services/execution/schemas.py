@@ -439,6 +439,7 @@ class TalkRequest(BaseRequest):
     file_name: str | None = None
     caption: str | None = None
     message_id: int | None = Field(None, description="Target message for reactions")
+    reply_to: int | None = Field(None, description="Message id this one replies to (send)")
     reaction: str | None = Field(None, description="Emoji reaction, e.g. \u2764\ufe0f")
     question: str | None = None
     options: list[str] | None = None
