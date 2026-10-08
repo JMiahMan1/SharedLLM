@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ImageIcon, Loader2, Phone, PhoneOff, Plus, RefreshCw, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -74,6 +75,10 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
   const [pollOptions, setPollOptions] = useState(['', '']);
   const [inCall, setInCall] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
+
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // Keep the composer above the phone keyboard (iOS does not resize the page for it).
+  const keyboardHeight = useKeyboardSafeHeight(panelRef);
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
@@ -345,6 +350,8 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
 
   return (
     <div
+      ref={panelRef}
+      style={keyboardHeight ? { height: keyboardHeight, minHeight: 0 } : undefined}
       className={`grid h-[calc(100dvh-13rem)] min-h-[440px] overflow-hidden rounded-3xl border border-white/5 bg-black/20 lg:h-[680px] lg:grid-cols-[320px_1fr] ${className}`}
       data-testid="chat-panel"
     >

@@ -161,3 +161,25 @@ describe('family chat features', () => {
     expect(feed.textContent?.match(/@Jarvis breakfast\?/g)?.length).toBe(2); // the message and its quote
   });
 });
+
+describe('opening a conversation', () => {
+  it('lands on the latest message once the messages arrive', async () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 5000 });
+    try {
+      server.use(
+        http.get('/api/communication/talk/conversations', () =>
+          HttpResponse.json({ status: 'SUCCESS', detail: { conversations: [{ ...room, unread_messages: 0 }] } }),
+        ),
+        http.get('/api/communication/talk/messages', () => HttpResponse.json({ status: 'SUCCESS', detail: { messages } })),
+        http.get('/api/communication/talk/polls', () => HttpResponse.json({ status: 'SUCCESS', detail: { polls: [] } })),
+      );
+      renderWithProviders(<Family />);
+      const feed = await loadedFeed();
+      await waitFor(() => expect(feed.scrollTop).toBe(5000));
+    } finally {
+      if (original) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', original);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight;
+    }
+  });
+});
