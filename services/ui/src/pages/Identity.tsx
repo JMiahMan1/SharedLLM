@@ -32,6 +32,7 @@ import type { UserProfile, APIKey } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import SecretInput from '../components/ui/SecretInput';
+import SystemValueHint from '../components/ui/SystemValueHint';
 import { credentialPayload, inUse, integrationFor, isSecretKey, missingFields, prefill, type Defaults } from '../lib/credentialForm';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
@@ -63,6 +64,8 @@ const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
   );
 };
 
+const NO_SERVICE_DEFAULTS = { urls: {} as Record<string, string | null>, source: {} as Record<string, string> };
+
 interface IntegrationTileProps {
   name: string;
   icon: LucideIcon;
@@ -82,7 +85,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
   const [isTesting, setIsTesting] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [prefilled, setPrefilled] = useState<Defaults>({});
-  const { data: serviceDefaults = {} } = useQuery({
+  const { data: serviceDefaults = NO_SERVICE_DEFAULTS } = useQuery({
     queryKey: ['service-defaults'],
     queryFn: () => api.getServiceDefaults(),
     staleTime: 300_000,
@@ -155,7 +158,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
     });
     setConfirmDisconnect(false);
     // Blank addresses start from the household's; the Nextcloud username from yours.
-    const start = prefill(initialForm, serviceDefaults, userData?.username);
+    const start = prefill(initialForm, serviceDefaults.urls, userData?.username);
     Object.assign(initialForm, start.values);
     setPrefilled(start.prefilled);
     if (name === 'Skylight') {
@@ -250,8 +253,16 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                         className={`glass-input w-full text-sm py-3 bg-black/20 focus:bg-black/40 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
                         placeholder={isReadOnly ? 'Configured by system administrator' : `Enter ${label}...`}
                       />
-                      {prefilled[key] !== undefined && form[key] === prefilled[key] && (
-                        <p className="mt-1 text-[10px] text-slate-500">Prefilled from the household setup</p>
+                      {serviceDefaults.urls[key] ? (
+                        <SystemValueHint
+                          value={String(form[key] ?? '')}
+                          systemValue={String(serviceDefaults.urls[key])}
+                          source={serviceDefaults.source[key]}
+                          onReset={() => setForm({ ...form, [key]: String(serviceDefaults.urls[key]) })}
+                        />
+                      ) : (
+                        prefilled[key] !== undefined &&
+                        form[key] === prefilled[key] && <p className="mt-1 text-[10px] text-slate-500">Suggested from your account name</p>
                       )}
                     </>
                   )}

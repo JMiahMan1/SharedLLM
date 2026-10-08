@@ -551,10 +551,11 @@ export const api = {
     return resp.data;
   },
 
-  /** The household's service URLs (from User 1), to prefill login forms. No secrets. */
-  async getServiceDefaults(): Promise<Record<string, string | null>> {
+  /** The household's service URLs (system config first), to prefill login forms. No secrets. */
+  async getServiceDefaults(): Promise<{ urls: Record<string, string | null>; source: Record<string, string> }> {
     const resp = await apiClient.get('/api/users/service-defaults');
-    return resp.data ?? {};
+    const { source = {}, ...urls } = (resp.data ?? {}) as Record<string, unknown> & { source?: Record<string, string> };
+    return { urls: urls as Record<string, string | null>, source };
   },
 
   /** A saved credential's value, for a password field's eye. Owner or admin; audited. */

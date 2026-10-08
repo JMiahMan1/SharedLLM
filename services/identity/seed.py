@@ -17,6 +17,23 @@ from services.identity.crypto import encrypt
 from services.identity.models import DEFAULT_GLOBAL_SETTINGS, DnsRecord, GlobalSetting, User
 
 
+def system_service_urls() -> dict[str, str | None]:
+    """The household's service addresses from the system config (.env).
+
+    The one place their precedence is written down: the default user is seeded
+    from it, and login forms are prefilled from it.
+    """
+    return {
+        "nextcloud_url": os.getenv("NEXTCLOUD_URL"),
+        "ha_url": os.getenv("HA_URL") or os.getenv("HOME_ASSISTANT_URL"),
+        "github_url": os.getenv("GITHUB_URL") or os.getenv("GIT_URL"),
+        "gitlab_url": os.getenv("GITLAB_URL"),
+        "git_url": os.getenv("GIT_URL"),
+        "audiobookshelf_url": os.getenv("AUDIOBOOKSHELF_URL") or os.getenv("ABS_URL"),
+        "mass_url": os.getenv("MA_URL") or os.getenv("MUSIC_ASSISTANT_URL"),
+    }
+
+
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     pwd_hash = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260000)
@@ -61,22 +78,17 @@ def _parse_env_users() -> dict:
         "username": "default",
         "display_name": "Shared/Default User",
         "is_system_default": True,
-        "nextcloud_url": os.getenv("NEXTCLOUD_URL"),
+        **system_service_urls(),
         "nextcloud_user": os.getenv("NEXTCLOUD_USER"),
         "nextcloud_pass": os.getenv("NEXTCLOUD_PASS"),
-        "ha_url": os.getenv("HA_URL") or os.getenv("HOME_ASSISTANT_URL"),
         "ha_token": os.getenv("HA_TOKEN") or os.getenv("HOME_ASSISTANT_TOKEN"),
-        "github_url": os.getenv("GITHUB_URL") or os.getenv("GIT_URL"),
         "github_user": os.getenv("GITHUB_USER") or os.getenv("GIT_USER"),
         "github_token": os.getenv("GITHUB_TOKEN") or os.getenv("GIT_TOKEN"),
-        "gitlab_url": os.getenv("GITLAB_URL"),
         "gitlab_user": os.getenv("GITLAB_USER"),
         "gitlab_token": os.getenv("GITLAB_TOKEN"),
-    "audiobookshelf_url": os.getenv("AUDIOBOOKSHELF_URL") or os.getenv("ABS_URL"),
         "audiobookshelf_user": os.getenv("AUDIOBOOKSHELF_USER") or os.getenv("ABS_USER"),
         "audiobookshelf_pass": os.getenv("AUDIOBOOKSHELF_PASS") or os.getenv("ABS_PASS"),
         "audiobookshelf_api_key": os.getenv("AUDIOBOOKSHELF_API_KEY"),
-        "mass_url": os.getenv("MA_URL") or os.getenv("MUSIC_ASSISTANT_URL"),
         "mass_token": os.getenv("MA_TOKEN") or os.getenv("MUSIC_ASSISTANT_TOKEN"),
         "skylight_url": os.getenv("SKYLIGHT_URL"),
         "skylight_email": os.getenv("SKYLIGHT_EMAIL"),

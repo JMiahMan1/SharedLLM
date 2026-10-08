@@ -188,7 +188,10 @@ def test_a_user_read_says_which_secrets_are_saved_but_never_their_values(client,
     assert "nc-app-password" not in json.dumps(body)
 
 
-def test_any_signed_in_user_can_read_the_household_service_urls_but_no_secrets(client, session):
+def test_any_signed_in_user_can_read_the_household_service_urls_but_no_secrets(client, session, monkeypatch):
+    # No system config: the addresses fall back to the default user's.
+    for var in ("NEXTCLOUD_URL", "HA_URL", "HOME_ASSISTANT_URL"):
+        monkeypatch.delenv(var, raising=False)
     owner = session.exec(select(User).where(User.username == "default")).first()
     owner.nextcloud_url = "https://cloud.example"
     owner.ha_url = "https://ha.example"
@@ -201,3 +204,19 @@ def test_any_signed_in_user_can_read_the_household_service_urls_but_no_secrets(c
     assert body["ha_url"] == "https://ha.example"
     assert "admin-secret" not in json.dumps(body)
     assert not any(k.endswith(("_pass", "_token", "_enc")) for k in body)
+
+
+def test_prefill_urls_come_from_the_system_config_first(client, session, monkeypatch):
+    monkeypatch.setenv("NEXTCLOUD_URL", "https://cloud.from-config")
+    monkeypatch.delenv("HA_URL", raising=False)
+    monkeypatch.delenv("HOME_ASSISTANT_URL", raising=False)
+    owner = session.exec(select(User).where(User.username == "default")).first()
+    owner.nextcloud_url = "https://cloud.from-user1"
+    owner.ha_url = "https://ha.from-user1"
+    session.add(owner)
+    session.commit()
+    body = client.get("/api/users/service-defaults").json()
+    assert body["nextcloud_url"] == "https://cloud.from-config"
+    assert body["source"]["nextcloud_url"] == "system_config"
+    assert body["ha_url"] == "https://ha.from-user1"
+    assert body["source"]["ha_url"] == "default_user"

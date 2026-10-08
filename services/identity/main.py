@@ -88,7 +88,7 @@ ResolveRequest,
     UserWidgetUpdate,
     WidgetSettingsRead,
 )
-from services.identity.seed import hash_password, seed_from_env, verify_password
+from services.identity.seed import hash_password, seed_from_env, system_service_urls, verify_password
 from services.shared.info_endpoint import info_router
 
 # ─── Config ────────────────────────────────────────────────────────────────────
@@ -1165,18 +1165,27 @@ def list_users(session: Session = Depends(get_session), _: bool = Depends(requir
     return session.exec(select(User)).all()
 
 
-# The service addresses a new login form starts from. Addresses only: they
-# are the same for the whole household and are not secrets.
-SERVICE_URL_FIELDS = ("ha_url", "nextcloud_url", "mass_url", "audiobookshelf_url", "github_url", "gitlab_url", "git_url")
-
-
 @app.get("/api/users/service-defaults")
 def service_defaults(session: Session = Depends(get_session), _caller: User = Depends(require_api_key)):
-    """The household's service URLs (from the system default user), so a login
-    form can be prefilled. Any signed-in user may read them; no credential is
-    included."""
+    """The household's service URLs, to prefill login forms.
+
+    They come from the system config (.env, see seed.system_service_urls),
+    falling back to the system default user's for any the config leaves blank.
+    Addresses only, no credentials; any signed-in user may read them, and
+    ``source`` says where each came from so the form can warn about changing it.
+    """
+    config = {k: (v or "").strip() or None for k, v in system_service_urls().items()}
     owner = _system_default_user(session)
-    return {field: getattr(owner, field, None) for field in SERVICE_URL_FIELDS} if owner else {}
+    urls: dict[str, str | None] = {}
+    source: dict[str, str] = {}
+    for field, value in config.items():
+        if value:
+            urls[field], source[field] = value, "system_config"
+        elif owner is not None and getattr(owner, field, None):
+            urls[field], source[field] = getattr(owner, field), "default_user"
+        else:
+            urls[field] = None
+    return {**urls, "source": source}
 
 
 @app.get("/api/users/sharing-recipients", response_model=list[ShareRecipient])
