@@ -25,6 +25,7 @@ from services.gateway.intent_engine import is_raven_intent
 from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider, get_provider
 from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
+from services.gateway.tool_registry import single_turn_tools
 
 log = logging.getLogger("gateway.orchestrator")
 
@@ -387,69 +388,44 @@ def strip_json_from_response(text: str) -> str:
     # Last resort: return text stripped
     return text.strip()
 
+# Tool routing comes from services.gateway.tool_registry, the table Raven and
+# the OpenAI tool surface also read. This path used to keep a hand-copied table
+# that drifted from it (missing tools, a 404 path, a wrong service); only the
+# two tools Raven has no row for are added here.
+_SINGLE_TURN_ONLY_TOOLS: dict[str, tuple[str, str]] = {
+    # Raven does not dispatch a mission from inside a mission.
+    "ravenmissionrequest": ("identity", "/api/raven/missions"),
+    # Location is answered for chat and voice; Raven has no use for it.
+    "locationrequest": ("execution", "/execute/location"),
+}
+_SERVICE_SETTINGS_KEY = {
+    "execution": "execution_svc_url",
+    "workspace_runtime": "workspace_runtime_svc_url",
+    "rag": "rag_svc_url",
+    "storage": "storage_svc_url",
+    "identity": "identity_svc_url",
+}
+_SINGLE_TURN_TOOLS = {**single_turn_tools(), **_SINGLE_TURN_ONLY_TOOLS}
+
 # Tool endpoint map (service base URL resolved at runtime from Identity)
-SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {
-    "lightcontrolrequest": "/execute/light",
-    "mediaplayrequest": "/execute/media/play",
-    "mediatransportrequest": "/execute/media/transport",
-    "mediastatusrequest": "/execute/media/status",
-    "videoplayrequest": "/execute/video/play",
-    "tvcastrequest": "/execute/tv_cast",
-    "climaterequest": "/execute/climate",
-    "securityrequest": "/execute/security",
-    "announcementrequest": "/execute/announce",
-    "ttsrequest": "/execute/tts",
-    "audiobookregeneraterequest": "/execute/audiobook/regenerate",
-    "haservicerequest": "/execute/ha_service",
-    "entitysearchrequest": "/execute/entity_search",
-    "calendarrequest": "/execute/calendar",
-    "noterequest": "/execute/note",
-    "timerrequest": "/execute/timer",
-    "talkrequest": "/execute/talk",
-    "websearchrequest": "/execute/web_search",
-    "webreadrequest": "/execute/web_read",
-    "webscraperrequest": "/execute/web_scraper",
-    "codesearchrequest": "/execute/code_search",
-    "dockerlogsrequest": "/execute/docker_logs",
-    "dockercomposerequest": "/execute/docker",
-    "gitoperationrequest": "/execute/git",
-    "capabilityindexrequest": "/execute/index_capabilities",
-    "volumeinventoryrequest": "/execute/volumes",
-    "workspacefilereadrequest": "/execute/workspace_file_read",
-    "workspacefilewriterequest": "/execute/workspace_file_write",
-    "workspacefilepatchrequest": "/execute/workspace_file_patch",
-    "workspacelintrequest": "/execute/workspace_lint",
-    "workspacesearchrequest": "/execute/workspace_search",
-    "workspaceshellrequest": "/execute/workspace_shell",
-    "storagefilereadrequest": "/execute/storage_file_read",
-    "storagefilewriterequest": "/execute/storage_file_write",
-    "storagelistrequest": "/execute/storage_list",
-    "workspacebootstraprequest": "/workspaces/bootstrap",
-    "workspacecreaterequest": "/workspaces",
-    "ravenmissionrequest": "/api/raven/missions",
-    "systemlearningrequest": "/execute/learning",
-    "redisinspectrequest": "/execute/redis",
-    "discoverysyncrequest": "/execute/discovery_sync",
-    "storageindexrequest": "/index/full",
-    "logbookrequest": "/execute/ha_logbook",
-    "executionlogrequest": "/execute/logs",
-    "audiobookshelfrequest": "/execute/audiobookshelf",
-    "calibrerequest": "/execute/calibre",
-    "documentbroadcastrequest": "/execute/composite/broadcast",
-    "nightmoderequest": "/execute/composite/night_mode",
-    "contextsearchrequest": "/rag/search",
-    "haconfigrequest": "/execute/ha_config",
-    "llminforequest": "/execute/llm_info",
-    "networkdevicescanrequest": "/execute/network_scan",
-    "locationrequest": "/execute/location",
+SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {name: path for name, (_svc, path) in _SINGLE_TURN_TOOLS.items()}
+
+# Tool -> service settings key, for every tool not on the execution service.
+_TOOL_SERVICE_MAP = {
+    name: _SERVICE_SETTINGS_KEY[svc]
+    for name, (svc, _path) in _SINGLE_TURN_TOOLS.items()
+    if svc != "execution"
 }
 
-# Tool → service mapping (resolved at runtime)
-_TOOL_SERVICE_MAP = {
-    "workspacebootstraprequest": "workspace_runtime_svc_url",
-    "workspacecreaterequest": "workspace_runtime_svc_url",
-    "ravenmissionrequest": "identity_svc_url",
-    "contextsearchrequest": "rag_svc_url",
+# Tools that legitimately run for minutes. Everything else gets 60 seconds.
+_SLOW_TOOL_TIMEOUTS = {
+    "sttrequest": 600.0,
+    "podcastrenderrequest": 600.0,
+    "audiobookregeneraterequest": 600.0,
+    "imageeditrequest": 300.0,
+    "ttsrequest": 300.0,
+    "ocrrequest": 180.0,
+    "webscraperrequest": 180.0,
 }
 
 
@@ -997,8 +973,48 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
     hits = sorted(hits, key=lambda h: not h.get("is_active", False), reverse=True)
     return hits
 
-async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: ResolvedCredentials) -> str:
-    """Execute a single tool call and return the result string."""
+_SEARCH_RESULT_MAX_LINES = 30
+_DETAIL_MAX_CHARS = 6000
+
+
+def _compact_detail(detail: Any) -> str:
+    """A tool's ``detail`` as JSON, cut to a size a small model can still read."""
+    text = json.dumps(detail, indent=1, default=str, ensure_ascii=False)
+    if len(text) > _DETAIL_MAX_CHARS:
+        text = text[:_DETAIL_MAX_CHARS] + f"\n... ({len(text) - _DETAIL_MAX_CHARS} more characters not shown)"
+    return text
+
+
+def _format_workspace_search(result: dict) -> str:
+    """Render a workspace search with its hits, not just how many there were.
+
+    Only the ``message`` used to reach the model, so it read "Found 3 matches for
+    'mkv'" with no paths and searched again, three times, never learning a file
+    name.
+    """
+    detail = result.get("detail") or {}
+    files = detail.get("files") or []
+    matches = detail.get("matches") or []
+    lines = [result.get("message", "")]
+    if files:
+        lines.append("File names that match:")
+        lines.extend(f"- {f}" for f in files[:_SEARCH_RESULT_MAX_LINES])
+    if matches:
+        lines.append("Lines that match (path:line: text):")
+        for m in matches[:_SEARCH_RESULT_MAX_LINES]:
+            text = str(m.get("text", ""))[:200]
+            lines.append(f"- {m.get('path')}:{m.get('line')}: {text}")
+        if len(matches) > _SEARCH_RESULT_MAX_LINES:
+            lines.append(f"- ... {len(matches) - _SEARCH_RESULT_MAX_LINES} more")
+    return "\n".join(lines)
+
+
+async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: ResolvedCredentials, workspace_id: str | None = None) -> str:
+    """Execute a single tool call and return the result string.
+
+    ``workspace_id``, when the turn belongs to a workspace, overrides whatever
+    workspace the model named or the query implied for workspace file tools.
+    """
     settings = await get_all_settings()
     control_plane = _get(settings, "control_plane_url")
 
@@ -1145,7 +1161,12 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                 "workspaceshellrequest",
                 "workspacelintrequest",
             }
-            if action in _ws_file_actions:
+            if workspace_id and action != "workspacecreaterequest":
+                # A workspace turn acts on that workspace, whatever the model
+                # named: transcription, OCR, TTS output and git all land there.
+                # (Creating a workspace reads workspace_id as the NEW id.)
+                payload["workspace_id"] = workspace_id
+            elif action in _ws_file_actions:
                 if not payload.get("workspace_id"):
                     try:
                         from services.gateway.main import shared_http_client
@@ -1201,7 +1222,7 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
 
             from services.gateway.main import shared_http_client
             async with shared_http_client() as client:
-                resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=60.0))
+                resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=_SLOW_TOOL_TIMEOUTS.get(action, 60.0)))
                 if resp.status == 200:
                     result = await resp.json()
                     if action == "workspacecreaterequest":
@@ -1212,6 +1233,8 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                         detail = result.get("detail") or {}
                         content = detail.get("content", "")
                         return f"File content of '{payload.get('path', '')}':\n\n{content}"
+                    if action == "workspacesearchrequest" and result.get("status") != "FAILURE":
+                        return _format_workspace_search(result)
                     if action == "noterequest":
                         detail = result.get("detail") or {}
                         if "notes" in detail:
@@ -1251,6 +1274,11 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     status = result.get("status", "SUCCESS")
                     if status == "FAILURE":
                         return f"Sorry, I couldn't complete that action: {msg}"
+                    if workspace_id and result.get("detail"):
+                        # In a workspace the result IS the work (a transcript, the
+                        # OCR text, the voices available); a bare "Transcribed x"
+                        # leaves the model nothing to answer with.
+                        return f"{msg}\n\nDetail:\n{_compact_detail(result['detail'])}"
                     return msg
                 else:
                     err_body = await resp.text()
@@ -1300,13 +1328,73 @@ def _is_capacity_refusal(error: Exception) -> bool:
     )
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False) -> str:
+_CLOSING_TURN_INSTRUCTION = (
+    "You have used all of your tool calls for this request; no more tools will run. "
+    "Answer the user now in plain sentences, using only what the tool results above "
+    "showed. Say what you found and what you did. If the request is not finished, "
+    "say so plainly, say what is still needed, and name the exact files or details "
+    "involved. Do not output JSON or a tool call."
+)
+
+
+async def _closing_turn(
+    messages: list[dict[str, str]],
+    model: str,
+    options: dict[str, Any],
+    chunk_callback: Callable[[str], Awaitable[None]] | None,
+    last_tool_result: str,
+) -> str:
+    """Ask the model for a final answer once the tool budget is spent."""
+    from services.gateway.agent_loop import extract_action_json
+    from services.gateway.llm_providers import strip_thinking_blocks
+
+    closing = [*messages, {"role": "user", "content": _CLOSING_TURN_INSTRUCTION}]
+    try:
+        data = await call_ollama(
+            {"model": model, "messages": closing, "options": options, "chunk_callback": chunk_callback},
+            use_chat=True,
+        )
+        raw = data.get("message", {}).get("content", "")
+        # "Let me search once more: {tool call}" is another step, not an answer.
+        answer = "" if extract_action_json(raw) else strip_thinking_blocks(strip_json_from_response(raw)).strip()
+    except Exception as exc:
+        if _is_capacity_refusal(exc):
+            raise InferenceUnavailable(str(exc)) from exc
+        log.warning(f"[_single_turn_inference] closing turn failed: {exc}")
+        answer = ""
+    if answer:
+        return answer
+    # The model would not conclude. Say so, rather than presenting a tool's
+    # status line as though it were the answer.
+    return (
+        "I ran out of steps before I could finish this. The last thing I did "
+        f"reported: {last_tool_result.strip()[:500]}"
+    )
+
+
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "") -> str:
+    """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
+
+    ``workspace_id`` pins every workspace tool call to the workspace the user is
+    asking from; without it the executor guesses from the wording of the query.
+    ``workspace_context`` (that workspace's file listing) is shown to the model
+    so it can name files instead of searching their contents for them.
+    """
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
     single_turn_guide = load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE)
     if grounded and rag_context.strip():
         single_turn_guide = _grounded_tool_guide(single_turn_guide)
         log.info("[_single_turn_inference] grounded turn: retrieval tools omitted from the tool guide")
-    system = f"{system_prompt.strip()}\n\nCurrent Date/Time: {now}\n\nSystem Capability Context:\n{single_turn_guide}\n\nRetrieved Context:\n{rag_context}"
+    system = f"{system_prompt.strip()}\n\nCurrent Date/Time: {now}\n\nSystem Capability Context:\n{single_turn_guide}"
+    if workspace_context.strip():
+        system += (
+            f"\n\nWorkspace:\n{workspace_context.strip()}\n"
+            "This turn allows only a few quick tool calls. A long job -- transcribing "
+            "audio or video, converting media, a multi-step build -- cannot finish "
+            "here: say so plainly, name the file it would use, and suggest sending "
+            "it to Raven as a mission."
+        )
+    system += f"\n\nRetrieved Context:\n{rag_context}"
     log.info(f"[_single_turn_inference] RAG context length: {len(rag_context)} chars")
     if rag_context:
         log.info(f"[_single_turn_inference] RAG context preview: {rag_context[:300]}")
@@ -1514,7 +1602,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             )
             log.info("[_single_turn_inference] grounded turn refused a retrieval tool call")
         else:
-            tool_result = await _execute_single_tool(action, tool_data, query, creds)
+            tool_result = await _execute_single_tool(action, tool_data, query, creds, workspace_id=workspace_id)
         log.info(f"[_single_turn_inference] Tool result: {tool_result[:300] if tool_result else 'empty'}")
 
         # Post-write lint hook: auto-lint after file write/patch to catch syntax errors
@@ -1545,15 +1633,12 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         # Append tool result to conversation for next turn
         messages.append({"role": "user", "content": f"Tool result:\n{tool_result}"})
 
-        # If this was the last turn, return the tool result directly
+        # Out of tool calls: one closing turn turns what the tools found into an
+        # answer. Returning the last tool result as the answer is what showed the
+        # user "Found 25 matches for 'sermon'" for "transcribe the mkv" -- a status
+        # line from the third of three searches, not a reply to anything asked.
         if turn == MAX_TURNS - 1:
-            try:
-                res_obj = json.loads(tool_result)
-                if isinstance(res_obj, dict) and res_obj.get("message"):
-                    return res_obj["message"]
-            except Exception:
-                pass
-            return tool_result
+            return await _closing_turn(messages, model, options, chunk_callback, tool_result)
 
     # Final answer processing — strip JSON/thinking artifacts for clean natural language
     log.info(f"[_single_turn_inference] Final answer length: {len(ans)} chars, preview: {ans[:200]}")

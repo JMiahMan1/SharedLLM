@@ -62,7 +62,7 @@ async def test_a_grounded_turn_refuses_a_retrieval_tool_call(monkeypatch):
     calls: list[str] = []
     seen_messages: list[list[dict]] = []
 
-    async def _execute(action, tool_data, query, creds):
+    async def _execute(action, tool_data, query, creds, workspace_id=None):
         calls.append(action)
         return "executed"
 
@@ -107,7 +107,7 @@ async def test_an_ungrounded_turn_still_uses_the_search_tool(monkeypatch):
     calls: list[str] = []
     seen_messages: list[list[dict]] = []
 
-    async def _execute(action, tool_data, query, creds):
+    async def _execute(action, tool_data, query, creds, workspace_id=None):
         calls.append(action)
         return "Search results for 'anything': some results"
 

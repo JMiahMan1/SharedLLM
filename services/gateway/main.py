@@ -89,13 +89,14 @@ from services.gateway.prompts import (
     PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION,
     PROMPT_MEDIA_TROUBLESHOOTING,
     PROMPT_RAVEN_AUTONOMOUS_PROTOCOL,
+    PROMPT_SINGLE_TURN_TOOL_GUIDE,
     load_prompt,
     load_prompt_sync,
 )
 from services.gateway.redact import redact_url
 from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, StorageListRequest
 from services.gateway.skylight_scope import ChoreScopeError, resolve_chore_scope
-from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas
+from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas, tool_catalog
 from services.gateway.external_agent import run_external_agent
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
@@ -5553,6 +5554,24 @@ _WORKSPACE_ASK_QUESTION_OPENERS = (
     "search", "look up", "tell me about", "what's", "whats",
 )
 
+# "Can you transcribe the mkv?" ends in a question mark and opens with "can ",
+# but it asks for a job, not an answer. Routed to the Librarian it was handed
+# fifteen thousand characters of book passages, never saw the workspace's file
+# names, and answered "Found 25 matches for 'sermon'". The polite opener is
+# peeled off and what follows decides: "could you explain X" is still a question.
+_WORKSPACE_ASK_POLITE_OPENERS = (
+    "can you please ", "could you please ", "would you please ",
+    "can you ", "could you ", "would you ", "will you ", "can u ", "please ",
+)
+
+
+def _strip_polite_opener(text: str) -> str | None:
+    """Return ``text`` without a leading request opener, or None if it has none."""
+    for opener in _WORKSPACE_ASK_POLITE_OPENERS:
+        if text.startswith(opener):
+            return text[len(opener):].lstrip()
+    return None
+
 def _resolve_workspace_ask_mode(query: str, requested: str) -> tuple[str, str]:
     """Pick how the workspace composer should answer ``query``.
 
@@ -5577,9 +5596,94 @@ def _resolve_workspace_ask_mode(query: str, requested: str) -> tuple[str, str]:
     if is_raven_intent(query):
         return "raven", "the prompt names Raven and asks for a command"
     stripped = (query or "").strip().lower()
+    request_body = _strip_polite_opener(stripped)
+    if request_body is not None:
+        if request_body.startswith(_WORKSPACE_ASK_QUESTION_OPENERS):
+            return "librarian", "a request to explain or look something up, so it is grounded in retrieved sources"
+        return "single_task", "a request to do something, so it runs as one job with the workspace's files in view"
     if stripped.endswith("?") or stripped.startswith(_WORKSPACE_ASK_QUESTION_OPENERS):
         return "librarian", "shaped like a question, so it is grounded in retrieved sources"
     return "single_task", "shaped like a command, so it runs as one job without retrieval"
+
+_WORKSPACE_OVERVIEW_MAX_ENTRIES = 200
+
+
+def _human_size(size: int | None) -> str:
+    if size is None:
+        return ""
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return ""
+
+
+async def _workspace_file_overview(workspace_id: str, creds: dict) -> str:
+    """List the workspace's files for the model, or "" if the runtime can't.
+
+    Without this the model only knows a workspace by grepping its contents: asked
+    to transcribe "the mkv", it searched file *contents* for "mkv" four times and
+    then guessed a file name that did not exist. The names are what the user
+    refers to, so they go in front of the model before the first turn.
+    """
+    try:
+        resp = await get_http_client().post(
+            f"{WORKSPACE_RUNTIME_SVC}/files/list",
+            json={
+                "workspace_id": workspace_id,
+                "relative_path": ".",
+                "recursive": True,
+                "include_dirs": False,
+                "max_entries": _WORKSPACE_OVERVIEW_MAX_ENTRIES,
+                "user_context": {"user": creds.get("user"), "is_admin": bool(creds.get("is_admin"))},
+            },
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status != 200:
+            log.warning(f"[workspace ask] file listing for {workspace_id} returned HTTP {resp.status}")
+            return ""
+        data = await resp.json()
+    except Exception as exc:
+        log.warning(f"[workspace ask] file listing for {workspace_id} failed: {exc}")
+        return ""
+    entries = [e for e in data.get("entries") or [] if not str(e.get("name", "")).startswith(".")]
+    if not entries:
+        return f"The workspace '{workspace_id}' is empty."
+    lines = [f"- {e.get('path')} ({_human_size(e.get('size'))})" for e in entries]
+    if data.get("truncated"):
+        lines.append(f"- ... more files not shown (listing stops at {_WORKSPACE_OVERVIEW_MAX_ENTRIES})")
+    return (
+        f"You are working in the workspace '{workspace_id}'. Every workspace tool call "
+        "acts on this workspace. Its files (paths are relative to the workspace root; "
+        "use them exactly as written):\n" + "\n".join(lines)
+    )
+
+async def _workspace_context(workspace_id: str, creds: dict, mode: str) -> str:
+    """What a workspace turn is shown besides the user's words.
+
+    A task also gets every tool it may call, generated from the registry rows
+    that route them, so the catalog cannot list a tool that does not dispatch.
+    A Librarian turn is not given the catalog: it already carries the retrieved
+    passages, and the extra text is what pushes it past the model's window.
+    """
+    overview = await _workspace_file_overview(workspace_id, creds)
+    if mode != "single_task":
+        return overview
+    # The guide already documents some tools in full; list only the rest.
+    try:
+        guide = load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE)
+    except Exception as exc:  # no guide means list every tool, not fail the turn
+        log.warning(f"[workspace ask] single-turn guide unavailable: {exc}")
+        guide = ""
+    documented = {name.lower() for name in re.findall(r"\b([A-Z][A-Za-z]+Request)\b", guide)}
+    catalog = (
+        "More tools you can call in this workspace, besides the ones described above "
+        '(emit one JSON object such as {"tool": "STTRequest", "file_path": "talk.wav"}; '
+        "paths are workspace-relative):\n" + tool_catalog(exclude=documented)
+    )
+    return f"{overview}\n\n{catalog}" if overview else catalog
 
 @app.post("/api/workspaces/{workspace_id}/ask")
 async def ask_in_workspace(workspace_id: str, request: Request):
@@ -5676,6 +5780,8 @@ async def ask_in_workspace(workspace_id: str, request: Request):
             history=[],
             creds=ResolvedCredentials(**creds),
             grounded=bool(context.strip()),
+            workspace_id=workspace_id,
+            workspace_context=await _workspace_context(workspace_id, creds, mode),
         )
     except InferenceUnavailable as exc:
         raise HTTPException(

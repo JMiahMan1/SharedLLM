@@ -597,6 +597,46 @@ async def handle_workspace_write(req: WorkspaceFileWriteRequest) -> ExecutionRes
         log.error(f"Workspace write failed: {e}")
         return _fail(str(e))
 
+_FILE_NAME_MATCH_LIMIT = 50
+_FILE_NAME_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv"}
+
+
+def _workspace_relative(path: str, search_root: str, ws_root: str) -> str:
+    """A search hit's path relative to the workspace root.
+
+    The search runs with ``search_root`` as its cwd and reports ``./name``;
+    resolving that against the process cwd instead produced paths like
+    ``../../../app/name``.
+    """
+    if not os.path.isabs(path):
+        path = os.path.join(search_root, path)
+    return os.path.relpath(os.path.normpath(path), ws_root)
+
+
+def _matching_file_names(search_root: str, ws_root: str, query: str) -> list[str]:
+    """Workspace paths whose name contains ``query`` (case-insensitive).
+
+    Content search alone cannot find a video or an audio file: asked for "the
+    mkv", it matched three lines of a script that mentioned one.
+    """
+    needle = (query or "").strip().lower()
+    if not needle:
+        return []
+    try:
+        pattern = re.compile(query, re.IGNORECASE)
+    except re.error:
+        pattern = None
+    found: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(search_root):
+        dirnames[:] = sorted(d for d in dirnames if d not in _FILE_NAME_SKIP_DIRS and not d.startswith("."))
+        for name in sorted(filenames):
+            if needle in name.lower() or (pattern is not None and pattern.search(name)):
+                found.append(os.path.relpath(os.path.join(dirpath, name), ws_root))
+                if len(found) >= _FILE_NAME_MATCH_LIMIT:
+                    return found
+    return found
+
+
 async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResult:
     """Performs a ripgrep search in the workspace."""
     try:
@@ -643,7 +683,7 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
                 if data.get("type") == "match":
                     match_data = data.get("data", {})
                     matches.append({
-                        "path": os.path.relpath(match_data.get("path", {}).get("text", ""), ws_root),
+                        "path": _workspace_relative(match_data.get("path", {}).get("text", ""), abs_search_path, ws_root),
                         "line": match_data.get("line_number"),
                         "text": match_data.get("lines", {}).get("text", "").strip()
                     })
@@ -652,15 +692,19 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
                 parts = line.split(":", 2)
                 if len(parts) >= 3:
                     matches.append({
-                        "path": os.path.relpath(parts[0], ws_root),
+                        "path": _workspace_relative(parts[0], abs_search_path, ws_root),
                         "line": parts[1],
                         "text": parts[2].strip()
                     })
 
-        if not matches:
-            return _ok(f"No matches found for '{req.query}' in {req.path}", {"matches": []})
+        files = _matching_file_names(abs_search_path, ws_root, req.query)
+        if not matches and not files:
+            return _ok(f"No matches found for '{req.query}' in {req.path}", {"matches": [], "files": []})
 
-        return _ok(f"Found {len(matches)} matches for '{req.query}'", {"matches": matches})
+        return _ok(
+            f"Found {len(files)} file names and {len(matches)} lines matching '{req.query}'",
+            {"matches": matches, "files": files},
+        )
     except HTTPException:
         raise
     except Exception as e:

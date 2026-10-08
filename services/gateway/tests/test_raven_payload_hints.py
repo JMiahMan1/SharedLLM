@@ -32,7 +32,6 @@ NON_EXECUTION_TOOLS = {
     "WorkspaceBootstrapRequest",
     "ContextSearchRequest",
     "StorageIndexRequest",
-    "StorageTextToAudioRequest",
     "ControlPlaneRequest",
 }
 

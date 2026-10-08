@@ -74,7 +74,7 @@ async def test_a_grounded_turn_refuses_the_calibre_fetch(monkeypatch):
     calls: list[str] = []
     seen_messages: list[list[dict]] = []
 
-    async def _execute(action, tool_data, query, creds):
+    async def _execute(action, tool_data, query, creds, workspace_id=None):
         calls.append(action)
         return "executed"
 
@@ -117,7 +117,7 @@ async def test_a_grounded_turn_refuses_the_calibre_fetch(monkeypatch):
 async def test_an_ungrounded_turn_may_still_read_a_book(monkeypatch):
     calls: list[str] = []
 
-    async def _execute(action, tool_data, query, creds):
+    async def _execute(action, tool_data, query, creds, workspace_id=None):
         calls.append(action)
         return "Memories of Bethany by John R. Macduff (617)"
 
