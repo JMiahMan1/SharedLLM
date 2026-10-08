@@ -294,6 +294,7 @@ export const server = setupServer(
   ...mediaHandlers,
   http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
   http.get('/api/users/me', () => HttpResponse.json(users[0])),
+  http.get('/api/users/service-defaults', () => HttpResponse.json({ ha_url: 'https://ha.example.com', nextcloud_url: 'https://cloud.example.com' })),
   http.get('/api/users/me/theme', () => HttpResponse.json({
     status: 'SUCCESS',
     ...userThemePref,

@@ -551,6 +551,12 @@ export const api = {
     return resp.data;
   },
 
+  /** The household's service URLs (from User 1), to prefill login forms. No secrets. */
+  async getServiceDefaults(): Promise<Record<string, string | null>> {
+    const resp = await apiClient.get('/api/users/service-defaults');
+    return resp.data ?? {};
+  },
+
   /** A saved credential's value, for a password field's eye. Owner or admin; audited. */
   async revealCredential(username: string, field: string): Promise<string> {
     const resp = await apiClient.post(`/api/users/${encodeURIComponent(username)}/reveal`, { field });

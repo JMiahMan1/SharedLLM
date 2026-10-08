@@ -186,3 +186,18 @@ def test_a_user_read_says_which_secrets_are_saved_but_never_their_values(client,
     michele = next(u for u in body if u["username"] == "michele")
     assert sorted(michele["saved_credentials"]) == ["ha_token", "nextcloud_pass"]
     assert "nc-app-password" not in json.dumps(body)
+
+
+def test_any_signed_in_user_can_read_the_household_service_urls_but_no_secrets(client, session):
+    owner = session.exec(select(User).where(User.username == "default")).first()
+    owner.nextcloud_url = "https://cloud.example"
+    owner.ha_url = "https://ha.example"
+    owner.nextcloud_pass_enc = encrypt("admin-secret")
+    session.add(owner)
+    session.commit()
+    _act_as("michele")
+    body = client.get("/api/users/service-defaults").json()
+    assert body["nextcloud_url"] == "https://cloud.example"
+    assert body["ha_url"] == "https://ha.example"
+    assert "admin-secret" not in json.dumps(body)
+    assert not any(k.endswith(("_pass", "_token", "_enc")) for k in body)

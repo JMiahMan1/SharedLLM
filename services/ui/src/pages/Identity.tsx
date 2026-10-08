@@ -32,7 +32,7 @@ import type { UserProfile, APIKey } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import SecretInput from '../components/ui/SecretInput';
-import { credentialPayload, inUse, integrationFor, isSecretKey, missingFields } from '../lib/credentialForm';
+import { credentialPayload, inUse, integrationFor, isSecretKey, missingFields, prefill, type Defaults } from '../lib/credentialForm';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
@@ -81,6 +81,12 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
   const [testResult, setTestResult] = useState<{ status: 'SUCCESS' | 'ERROR', message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [prefilled, setPrefilled] = useState<Defaults>({});
+  const { data: serviceDefaults = {} } = useQuery({
+    queryKey: ['service-defaults'],
+    queryFn: () => api.getServiceDefaults(),
+    staleTime: 300_000,
+  });
   const isAdmin = useAuth().role === 'admin';
   const savedSecrets = new Set(userData?.saved_credentials ?? []);
   const fieldKeys = Object.values(configKeys);
@@ -92,9 +98,9 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
   // (Audiobookshelf takes an API key *or* a username and password); anything
   // else needs every field. An untouched card has nothing to save.
   const missingList: string[] = known
-    ? inUse(known, values, savedSecrets)
-      ? missingFields(known, values, savedSecrets)
-      : known.complete[0].map(labelOf)
+    ? inUse(known, values, savedSecrets, prefilled)
+      ? missingFields(known, values, savedSecrets, prefilled)
+      : known.complete[0].filter((k) => !filled(k)).map(labelOf)
     : fieldKeys.filter((k) => k !== 'skylight_enabled' && !filled(k)).map(labelOf);
   const queryClient = useQueryClient();
 
@@ -148,6 +154,10 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
       initialForm[key] = isSecretKey(key) ? '' : (userData as Record<string, string | boolean>)?.[key] || '';
     });
     setConfirmDisconnect(false);
+    // Blank addresses start from the household's; the Nextcloud username from yours.
+    const start = prefill(initialForm, serviceDefaults, userData?.username);
+    Object.assign(initialForm, start.values);
+    setPrefilled(start.prefilled);
     if (name === 'Skylight') {
       initialForm.skylight_enabled = userData?.skylight_enabled !== false;
     }
@@ -230,15 +240,20 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                       className="text-sm py-3 bg-black/20 focus:bg-black/40"
                     />
                   ) : (
-                    <input
-                      type="text"
-                      value={String(form[key] ?? '')}
-                      aria-label={label}
-                      onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                      disabled={isReadOnly}
-                      className={`glass-input w-full text-sm py-3 bg-black/20 focus:bg-black/40 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
-                      placeholder={isReadOnly ? 'Configured by system administrator' : `Enter ${label}...`}
-                    />
+                    <>
+                      <input
+                        type="text"
+                        value={String(form[key] ?? '')}
+                        aria-label={label}
+                        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                        disabled={isReadOnly}
+                        className={`glass-input w-full text-sm py-3 bg-black/20 focus:bg-black/40 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        placeholder={isReadOnly ? 'Configured by system administrator' : `Enter ${label}...`}
+                      />
+                      {prefilled[key] !== undefined && form[key] === prefilled[key] && (
+                        <p className="mt-1 text-[10px] text-slate-500">Prefilled from the household setup</p>
+                      )}
+                    </>
                   )}
                 </div>
               );
@@ -354,7 +369,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                 }
                 // Only filled fields: blank keeps what is saved.
                 const finalForm: Record<string, unknown> = {
-                  ...credentialPayload(form as Record<string, unknown>, fieldKeys),
+                  ...credentialPayload(form as Record<string, unknown>, fieldKeys, [], { saved: savedSecrets, prefilled }),
                   ...listForm,
                 };
                 if (typeof form.skylight_enabled === 'boolean') finalForm.skylight_enabled = form.skylight_enabled;
