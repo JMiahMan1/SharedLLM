@@ -28,8 +28,6 @@ import {
   Pencil,
   AlertTriangle,
   MessageSquare,
-  Send,
-  Bot,
   Image as ImageIcon,
   Music,
   KeyRound,
@@ -47,9 +45,8 @@ import type {
   AiCapability,
   GitLogEntry,
   GitStatusResponse,
-  ResolvedWorkspaceAskMode,
   WorkspaceAskMode,
-  WorkspaceAskResult,
+  WorkspaceChatSummary,
   WorkspaceFileEntry,
 } from '../../types/api';
 import { detectLanguage } from '../../lib/editorLanguages';
@@ -75,6 +72,8 @@ import {
   writeWorkspaceSession,
   type WorkspaceSession,
 } from './workspaceSession';
+import ChatComposer from './chat/ChatComposer';
+import WorkspaceChatTab from './chat/WorkspaceChatTab';
 import { cn } from '../../lib/utils';
 import { useHaptics } from '../../hooks/useHaptics';
 import { Capacitor } from '@capacitor/core';
@@ -104,7 +103,7 @@ type View = 'explorer' | 'git' | 'tools' | 'chat' | 'terminal';
 // preserves edits; image tabs cache an object URL for preview.
 interface OpenTab {
   path: string;
-  kind: 'text' | 'image' | 'markdown' | 'pdf' | 'docx' | 'xlsx' | 'odf' | 'audio' | 'video' | 'terminal';
+  kind: 'text' | 'image' | 'markdown' | 'pdf' | 'docx' | 'xlsx' | 'odf' | 'audio' | 'video' | 'terminal' | 'chat';
   content: string;
   imageUrl: string | null;
   blobUrl?: string | null;
@@ -135,57 +134,6 @@ function apiErr(e: unknown): string {
     message?: string;
   };
   return err?.response?.data?.detail || err?.message || 'Unknown error';
-}
-
-/**
- * The three workspace-composer jobs, in the order a person reads them.
- *
- * `auto` is first on purpose: it is the default, and it resolves server-side
- * from the shape of the query. The other three are the escape hatch, for when
- * the guess is wrong — which it will be, because a keyword classifier cannot
- * tell "read the logs" (a systems task) from "what did Macduff say about
- * poverty" (a library question).
- */
-const ASK_MODES: {
-  id: WorkspaceAskMode;
-  label: string;
-  blurb: string;
-  placeholder: string;
-}[] = [
-  {
-    id: 'auto',
-    label: 'Auto',
-    blurb: 'Pick from the question',
-    placeholder: 'Ask something, or describe a task to run in this workspace…',
-  },
-  {
-    id: 'librarian',
-    label: 'Ask',
-    blurb: 'Answer from your books, files and notes',
-    placeholder: 'Ask a question. Raven searches your library, Nextcloud and lessons first…',
-  },
-  {
-    id: 'single_task',
-    label: 'Task',
-    blurb: 'One job, one answer, no retrieval',
-    placeholder: 'Describe one job for the assistant…',
-  },
-  {
-    id: 'raven',
-    label: 'Raven',
-    blurb: 'Autonomous mission, runs in the background',
-    placeholder: 'Describe a task for Raven to run in this workspace…',
-  },
-];
-
-const ASK_MODE_CHIPS: Record<ResolvedWorkspaceAskMode, string> = {
-  librarian: 'bg-teal-500/15 text-teal-300 border-teal-500/40',
-  single_task: 'bg-sky-500/15 text-sky-300 border-sky-500/40',
-  raven: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/40',
-};
-
-function askModeMeta(mode: WorkspaceAskMode) {
-  return ASK_MODES.find((m) => m.id === mode) ?? ASK_MODES[0];
 }
 
 const ACTIVITY: { id: View; icon: typeof FolderOpen; label: string }[] = [
@@ -402,11 +350,12 @@ export default function WorkspaceIDE({
   const [missionsLoading, setMissionsLoading] = useState(false);
   const [refineInput, setRefineInput] = useState('');
   const [refineBusy, setRefineBusy] = useState(false);
-  const [chatInput, setChatInput] = useState('');
-  const [chatBusy, setChatBusy] = useState(false);
-  const [askMode, setAskMode] = useState<WorkspaceAskMode>('auto');
-  const [askResult, setAskResult] = useState<WorkspaceAskResult | null>(null);
-  const [askQuestion, setAskQuestion] = useState('');
+  // Workspace chats: each opens as a tab (`chat:<id>`) and keeps its own turn running.
+  const [chats, setChats] = useState<WorkspaceChatSummary[]>([]);
+  const [chatsLoading, setChatsLoading] = useState(false);
+  const [runningChats, setRunningChats] = useState<Set<string>>(() => new Set());
+  // A chat started from the sidebar sends its first message once its tab is open.
+  const [pendingChatMessages, setPendingChatMessages] = useState<Record<string, { message: string; mode: WorkspaceAskMode }>>({});
   const haptics = useHaptics();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -636,10 +585,24 @@ export default function WorkspaceIDE({
   );
 
   // Programmatic open by path (e.g. a freshly generated image from Stable Diffusion).
+  const openChatTab = useCallback((chatId: string, title = 'Chat') => {
+    const path = `chat:${chatId}`;
+    setTabs((prev) =>
+      prev.some((t) => t.path === path)
+        ? prev
+        : [...prev, { path, kind: 'chat', content: title, imageUrl: null, dirty: false, language: 'plaintext', baseContent: '' }],
+    );
+    setActiveTab(path);
+  }, []);
+
   const openByPath = useCallback(
     async (path: string) => {
       if (tabs.some((t) => t.path === path)) {
         setActiveTab(path);
+        return;
+      }
+      if (path.startsWith('chat:')) {
+        openChatTab(path.slice('chat:'.length));
         return;
       }
       if (isImagePath(path)) {
@@ -712,7 +675,7 @@ export default function WorkspaceIDE({
         /* open optional */
       }
     },
-    [workspace.id, isImagePath, isAudioPath, isVideoPath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, isOdfPath, loadImageModels, tabs],
+    [workspace.id, isImagePath, isAudioPath, isVideoPath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, isOdfPath, loadImageModels, tabs, openChatTab],
   );
 
   // Open a file programmatically on mount (e.g. an artifact from the
@@ -1263,66 +1226,68 @@ export default function WorkspaceIDE({
     }
   }, [activeView, loadMissions]);
 
-  const sendChat = useCallback(async () => {
-    const question = chatInput.trim();
-    if (!question) {
-      toast.error('Describe a task for Raven');
-      return;
-    }
-    setChatBusy(true);
-    setAskQuestion(question);
+  const loadChats = useCallback(async () => {
+    setChatsLoading(true);
     try {
-      const res = await api.askWorkspace(workspace.id, question, askMode);
-      setAskResult(res);
-      if (res.resolved_mode === 'raven') {
-        toast.success(`Raven mission #${res.mission_id ?? '?'} dispatched`);
-        await loadMissions();
-      } else {
-        void haptics.trigger('success');
-      }
+      setChats(await api.listWorkspaceChats(workspace.id));
     } catch (e: unknown) {
-      setAskResult(null);
-      toast.error(`Dispatch failed: ${apiErr(e)}`);
+      toast.error(`Failed to load chats: ${apiErr(e)}`);
     } finally {
-      setChatBusy(false);
-      setChatInput('');
+      setChatsLoading(false);
     }
-  }, [askMode, chatInput, workspace.id, loadMissions, haptics]);
+  }, [workspace.id]);
 
-  /**
-   * Hand a finished answer to Raven as a mission brief.
-   *
-   * This is how the two modes mix. The Librarian's turn is synchronous and
-   * short, so it cannot wait on a mission that runs for minutes; escalating
-   * instead means the mission is briefed with the question, the answer and the
-   * context length that produced it, rather than with a bare question that
-   * would have to be researched all over again.
-   */
-  const escalateToRaven = useCallback(async () => {
-    const current = askResult;
-    if (!current || current.resolved_mode === 'raven') return;
-    const brief = [
-      `A librarian pass answered this and its sources should be reused:`,
-      ``,
-      `Question: ${askQuestion}`,
-      ``,
-      `Answer: ${(current.answer ?? '').slice(0, 4000)}`,
-      ``,
-      `${current.context_chars} characters of retrieved context were available to the librarian.`,
-      `Re-derive anything the answer left uncertain, then carry out the task.`,
-    ].join('\n');
-    setChatBusy(true);
-    try {
-      const res = await api.askWorkspace(workspace.id, brief, 'raven');
-      setAskResult(res);
-      toast.success(`Raven mission #${res.mission_id ?? '?'} dispatched`);
-      await loadMissions();
-    } catch (e: unknown) {
-      toast.error(`Could not hand off to Raven: ${apiErr(e)}`);
-    } finally {
-      setChatBusy(false);
+  useEffect(() => {
+    if (activeView === 'chat') {
+      void (async () => {
+        await loadChats();
+      })();
     }
-  }, [askQuestion, askResult, workspace.id, loadMissions]);
+  }, [activeView, loadChats]);
+
+  /** Start a chat from the sidebar: it opens as a tab and sends its first message there. */
+  const startChat = useCallback(
+    async (message: string, mode: WorkspaceAskMode) => {
+      try {
+        const chat = await api.createWorkspaceChat(workspace.id);
+        setPendingChatMessages((prev) => ({ ...prev, [chat.id]: { message, mode } }));
+        openChatTab(chat.id, message.slice(0, 60));
+        void haptics.trigger('light');
+        void loadChats();
+      } catch (e: unknown) {
+        toast.error(`Could not start a chat: ${apiErr(e)}`);
+      }
+    },
+    [workspace.id, openChatTab, haptics, loadChats],
+  );
+
+  const deleteChat = useCallback(
+    async (chatId: string) => {
+      try {
+        await api.deleteWorkspaceChat(workspace.id, chatId);
+        setTabs((prev) => prev.filter((t) => t.path !== `chat:${chatId}`));
+        setChats((prev) => prev.filter((c) => c.id !== chatId));
+      } catch (e: unknown) {
+        toast.error(`Could not delete the chat: ${apiErr(e)}`);
+      }
+    },
+    [workspace.id],
+  );
+
+  const setChatTitle = useCallback((chatId: string, title: string) => {
+    setTabs((prev) => prev.map((t) => (t.path === `chat:${chatId}` && t.content !== title ? { ...t, content: title } : t)));
+    setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, title } : c)));
+  }, []);
+
+  const setChatRunning = useCallback((chatId: string, running: boolean) => {
+    setRunningChats((prev) => {
+      if (prev.has(chatId) === running) return prev;
+      const next = new Set(prev);
+      if (running) next.add(chatId);
+      else next.delete(chatId);
+      return next;
+    });
+  }, []);
 
   const refineLastMission = useCallback(async () => {
     const last = missions[0];
@@ -1943,147 +1908,95 @@ export default function WorkspaceIDE({
           {activeView === 'chat' && (
             <div className="flex-1 min-h-0 flex flex-col">
               <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
-                <Bot size={15} className="text-indigo-400" />
-                <span className="text-xs font-semibold text-slate-200">Raven Chat</span>
-                <span className="text-[10px] text-slate-500">tasks run in this workspace</span>
+                <MessageSquare size={15} className="text-fuchsia-300" />
+                <span className="text-xs font-semibold text-slate-200">Chats</span>
+                <span className="text-[10px] text-slate-500">each opens as a tab</span>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-                {missionsLoading ? (
-                  <div className="flex items-center justify-center py-8 text-slate-500 text-sm">
+              <div className="border-b border-white/10 p-2">
+                <ChatComposer onSend={(message, mode) => void startChat(message, mode)} compact />
+              </div>
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1" aria-label="Chats in this workspace">
+                {chatsLoading && chats.length === 0 ? (
+                  <div className="flex items-center justify-center py-6 text-slate-500 text-sm">
                     <Loader2 size={16} className="animate-spin mr-2" /> Loading…
                   </div>
-                ) : missions.length === 0 ? (
-                  <div className="px-3 py-8 text-center text-slate-600 text-xs">
-                    No missions yet. Pick a mode above — Ask for a cited answer,
-                    or Raven for an autonomous task.
-                  </div>
+                ) : chats.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-slate-600 text-xs">No chats yet. Ask something above to start one.</p>
                 ) : (
-                  missions.map((m) => (
-                    <div key={m.id} className={cn('rounded border border-white/10 p-2 text-xs', m.id === statusMission?.id && 'border-indigo-500/40 bg-indigo-500/5')}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-semibold text-slate-200">#{m.id}</span>
-                        <span className="text-[10px] uppercase text-slate-500">{m.status}</span>
-                      </div>
-                      <div className="text-slate-400 line-clamp-2">{m.proposed_mission}</div>
-                      {m.last_llm_reply && (
-                        <div className="mt-1.5 text-[11px] text-slate-300 bg-black/30 rounded p-1.5 max-h-24 overflow-y-auto custom-scrollbar whitespace-pre-wrap">
-                          {m.last_llm_reply.slice(0, 400)}
-                          {m.last_llm_reply.length > 400 && '…'}
-                        </div>
+                  chats.map((c) => (
+                    <div
+                      key={c.id}
+                      className={cn(
+                        'group flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs cursor-pointer',
+                        activeTab === `chat:${c.id}` ? 'bg-fuchsia-500/10 text-white' : 'text-slate-300 hover:bg-white/5',
                       )}
+                      onClick={() => openChatTab(c.id, c.title)}
+                    >
+                      {runningChats.has(c.id) ? (
+                        <Loader2 size={12} className="shrink-0 animate-spin text-fuchsia-300" />
+                      ) : (
+                        <MessageSquare size={12} className="shrink-0 text-slate-500" />
+                      )}
+                      <span className="flex-1 truncate">{c.title}</span>
+                      <span className="shrink-0 text-[10px] text-slate-600">{c.message_count ?? 0}</span>
+                      <button
+                        type="button"
+                        aria-label={`Delete chat ${c.title}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void deleteChat(c.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-500 hover:text-red-400 rounded"
+                      >
+                        <X size={12} />
+                      </button>
                     </div>
                   ))
                 )}
-              </div>
-              <div className="border-t border-white/10 p-2 space-y-2">
-                <div
-                  role="group"
-                  aria-label="Response mode"
-                  className="flex gap-1 rounded-lg bg-black/40 p-0.5"
-                >
-                  {ASK_MODES.map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => {
-                        setAskMode(m.id);
-                        void haptics.trigger('light');
-                      }}
-                      aria-pressed={askMode === m.id}
-                      title={m.blurb}
-                      className={cn(
-                        'flex-1 rounded-md px-2 min-h-9 pointer-coarse:min-h-11 text-[11px] font-medium transition-colors',
-                        askMode === m.id
-                          ? 'bg-indigo-600 text-white'
-                          : 'text-slate-400 hover:bg-white/10 hover:text-slate-200',
-                      )}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[10px] text-slate-500 leading-tight">
-                  {askModeMeta(askMode).blurb}
-                </p>
-                <div className="flex gap-2">
-                  <textarea
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    aria-label="Workspace prompt"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault();
-                        void sendChat();
-                      }
-                    }}
-                    placeholder={`${askModeMeta(askMode).placeholder}  (⌘/Ctrl+Enter to send)`}
-                    rows={2}
-                    className="flex-1 bg-black/50 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none resize-none"
-                  />
-                  <button
-                    onClick={sendChat}
-                    disabled={chatBusy || !chatInput.trim()}
-                    aria-label={`Send as ${askModeMeta(askMode).label}`}
-                    className="px-3 self-stretch flex items-center justify-center rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white"
-                  >
-                    {chatBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                  </button>
-                </div>
-                {askResult && (
-                  <div className="rounded-lg border border-white/10 bg-black/30 p-2 space-y-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span
-                        className={cn(
-                          'text-[10px] uppercase tracking-wide border rounded px-1.5 py-0.5',
-                          ASK_MODE_CHIPS[askResult.resolved_mode],
-                        )}
-                      >
-                        {askResult.resolved_mode === 'librarian'
-                          ? 'Ask'
-                          : askResult.resolved_mode === 'single_task'
-                            ? 'Task'
-                            : 'Raven'}
-                      </span>
-                      <span className="text-[10px] text-slate-500 truncate">
-                        {askResult.model ?? `mission #${askResult.mission_id ?? '?'}`}
-                        {askResult.context_chars > 0 && ` · ${askResult.context_chars} chars retrieved`}
-                      </span>
+
+                <div className="pt-3">
+                  <p className="px-1 pb-1 text-[10px] uppercase tracking-wide text-slate-500">Raven missions</p>
+                  {missionsLoading ? (
+                    <div className="flex items-center justify-center py-4 text-slate-500 text-xs">
+                      <Loader2 size={14} className="animate-spin mr-2" /> Loading…
                     </div>
-                    <p className="text-[10px] text-slate-500 leading-tight">{askResult.reason}</p>
-                    {askResult.answer && (
-                      <div className="text-[11px] text-slate-200 whitespace-pre-wrap max-h-56 overflow-y-auto custom-scrollbar">
-                        {askResult.answer}
+                  ) : missions.length === 0 ? (
+                    <p className="px-2 py-2 text-[11px] text-slate-600">No missions yet. Pick Raven in a chat to start one.</p>
+                  ) : (
+                    missions.map((m) => (
+                      <div key={m.id} className={cn('mb-1.5 rounded border border-white/10 p-2 text-xs', m.id === statusMission?.id && 'border-indigo-500/40 bg-indigo-500/5')}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-slate-200">#{m.id}</span>
+                          <span className="text-[10px] uppercase text-slate-500">{m.status}</span>
+                        </div>
+                        <div className="text-slate-400 line-clamp-2">{m.proposed_mission}</div>
+                        {m.last_llm_reply && (
+                          <div className="mt-1.5 text-[11px] text-slate-300 bg-black/30 rounded p-1.5 max-h-24 overflow-y-auto custom-scrollbar whitespace-pre-wrap">
+                            {m.last_llm_reply.slice(0, 400)}
+                            {m.last_llm_reply.length > 400 && '…'}
+                          </div>
+                        )}
                       </div>
-                    )}
-                    {askResult.resolved_mode !== 'raven' && (
+                    ))
+                  )}
+                  {missions.length > 0 && (
+                    <div className="flex gap-2 pt-1">
+                      <input
+                        value={refineInput}
+                        onChange={(e) => setRefineInput(e.target.value)}
+                        placeholder={`Refine last mission #${missions[0].id}…`}
+                        className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none"
+                      />
                       <button
-                        type="button"
-                        onClick={escalateToRaven}
-                        disabled={chatBusy}
-                        className="w-full rounded-md bg-indigo-600/20 hover:bg-indigo-600/30 disabled:opacity-40 text-indigo-200 text-[11px] px-2 min-h-9 pointer-coarse:min-h-11 flex items-center justify-center gap-1.5"
+                        onClick={refineLastMission}
+                        disabled={refineBusy || !refineInput.trim()}
+                        className="px-3 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-40 text-xs text-slate-200"
                       >
-                        <Bot size={12} /> Hand this to Raven
+                        Refine
                       </button>
-                    )}
-                  </div>
-                )}
-                {missions.length > 0 && (
-                  <div className="flex gap-2">
-                    <input
-                      value={refineInput}
-                      onChange={(e) => setRefineInput(e.target.value)}
-                      placeholder={`Refine last mission #${missions[0].id}…`}
-                      className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none"
-                    />
-                    <button
-                      onClick={refineLastMission}
-                      disabled={refineBusy || !refineInput.trim()}
-                      className="px-3 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-40 text-xs text-slate-200"
-                    >
-                      Refine
-                    </button>
-                  </div>
-                )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -2128,16 +2041,22 @@ export default function WorkspaceIDE({
                       'group flex items-center gap-1.5 pl-3 pr-2 py-2 text-xs cursor-pointer border-r border-white/10 whitespace-nowrap',
                       activeTab === t.path ? 'bg-[#0a0e1a] text-white' : 'text-slate-400 hover:bg-white/5',
                     )}
-                    title={t.path}
+                    title={t.kind === 'chat' ? t.content : t.path}
                   >
-                    {t.kind === 'image' ? (
+                    {t.kind === 'chat' ? (
+                      runningChats.has(t.path.slice(5)) ? (
+                        <Loader2 size={13} className="text-fuchsia-300 shrink-0 animate-spin" />
+                      ) : (
+                        <MessageSquare size={13} className="text-fuchsia-300 shrink-0" />
+                      )
+                    ) : t.kind === 'image' ? (
                       <ImageIcon size={13} className="text-indigo-400 shrink-0" />
                     ) : t.kind === 'audio' || t.kind === 'video' ? (
                       <Music size={13} className="text-indigo-400 shrink-0" />
                     ) : (
                       <FileText size={13} className="text-indigo-400 shrink-0" />
                     )}
-                    <span className="truncate max-w-[160px]">{t.path.split('/').pop()}</span>
+                    <span className="truncate max-w-[160px]">{t.kind === 'chat' ? t.content || 'Chat' : t.path.split('/').pop()}</span>
                     {t.dirty && (
                       <span className="text-amber-400 text-[10px] leading-none" title="Unsaved changes">
                         ●
@@ -2157,7 +2076,7 @@ export default function WorkspaceIDE({
                 ))}
               </div>
 
-              {active.kind === 'image' ? (
+              {active.kind === 'chat' ? null : active.kind === 'image' ? (
                 <>
                   <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
                     <div className="flex items-center gap-2 min-w-0">
@@ -2538,6 +2457,27 @@ export default function WorkspaceIDE({
               <p className="text-sm">Select a file from the Explorer to edit</p>
             </div>
           )}
+          {/* Chat tabs stay mounted while hidden, so a running turn keeps going
+              when another tab (or the diff) is in front of it. */}
+          {tabs
+            .filter((t) => t.kind === 'chat')
+            .map((t) => {
+              const chatId = t.path.slice('chat:'.length);
+              return (
+                <div key={t.path} className={cn('flex-1 min-h-0 flex-col', !showDiff && activeTab === t.path ? 'flex' : 'hidden')}>
+                  <WorkspaceChatTab
+                    workspaceId={workspace.id}
+                    chatId={chatId}
+                    initial={pendingChatMessages[chatId] ?? null}
+                    onInitialSent={() =>
+                      setPendingChatMessages((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => id !== chatId)))
+                    }
+                    onTitle={(title) => setChatTitle(chatId, title)}
+                    onRunningChange={(running) => setChatRunning(chatId, running)}
+                  />
+                </div>
+              );
+            })}
           </div>
           {terminalOpen && terminalPosition === 'bottom' && (
             <div

@@ -478,17 +478,6 @@ export type ResolvedWorkspaceAskMode = Exclude<WorkspaceAskMode, 'auto'>;
  * resolved mode was chosen, which is the only way the user can tell an
  * automatic decision from a deliberate one.
  */
-export interface WorkspaceAskResult {
-  status: string;
-  requested_mode: WorkspaceAskMode;
-  resolved_mode: ResolvedWorkspaceAskMode;
-  reason: string;
-  context_chars: number;
-  model?: string;
-  answer?: string;
-  mission_id?: number | null;
-  mission?: RavenMission;
-}
 
 export interface RavenMission {
   id: number;
@@ -2105,3 +2094,54 @@ export interface AccountAuditEvent {
   user_agent?: string | null;
   note?: string | null;
 }
+
+/** One stored piece of a chat message, in OpenCode's message-part shapes. */
+export type WorkspaceChatPart =
+  | { type: 'text'; text: string; step?: number | string }
+  | { type: 'reasoning'; text: string; step?: number | string }
+  | { type: 'tool'; id: string; name: string; input: Record<string, unknown>; output?: string; status: 'running' | 'done' | 'error' | 'aborted' }
+  | { type: 'mission'; mission_id: number; status?: string }
+  | { type: 'error'; text: string };
+
+export interface WorkspaceChatMessage {
+  id?: number;
+  role: 'user' | 'assistant';
+  parts: WorkspaceChatPart[];
+  meta?: {
+    mode?: string;
+    requested_mode?: string;
+    resolved_mode?: ResolvedWorkspaceAskMode;
+    reason?: string;
+    model?: string;
+    context_chars?: number;
+    status?: 'done' | 'error' | 'aborted';
+    mission_id?: number;
+  };
+  created_at?: string;
+}
+
+export interface WorkspaceChatSummary {
+  id: string;
+  workspace_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count?: number;
+}
+
+export interface WorkspaceChat extends WorkspaceChatSummary {
+  messages: WorkspaceChatMessage[];
+}
+
+/** What a streamed chat turn reports, one NDJSON line each. */
+export type WorkspaceChatEvent =
+  | { type: 'start'; requested_mode: WorkspaceAskMode; resolved_mode: ResolvedWorkspaceAskMode; reason: string }
+  | { type: 'model'; model: string; context_chars: number }
+  | { type: 'step'; n: number | 'final' }
+  | { type: 'thinking'; text: string; step: number | string }
+  | { type: 'text'; text: string; step: number | string }
+  | { type: 'tool_call'; id: string; name: string; input: Record<string, unknown>; preamble?: string }
+  | { type: 'tool_result'; id: string; output: string }
+  | { type: 'mission'; mission_id: number }
+  | { type: 'done'; message: WorkspaceChatMessage | null }
+  | { type: 'error'; text: string; message?: WorkspaceChatMessage | null };
