@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { FileText, Plus, Trash2, Loader2 } from 'lucide-react';
 import type { IWidgetProps } from '../../types/widget';
 import { api } from '../../services/api';
 import { WidgetCard } from './WidgetCard';
+import { useSendAsPref } from '../chat/sendAsPref';
 import toast from 'react-hot-toast';
 
 interface NoteItem {
@@ -14,6 +16,8 @@ interface NoteItem {
   category: string;
 }
 
+const STORAGE = 'nextcloud';
+
 const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
   const navigate = useNavigate();
   const [notes, setNotes] = useState<NoteItem[]>([]);
@@ -22,12 +26,17 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Same account choice as the Notes page, and the same default: your own
+  // notes. Admins who switched Notes to the shared account see it here too.
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
+  const [sendAs] = useSendAsPref(Boolean(me?.is_admin), 'notes');
+  const asUser = sendAs === 'admin' ? ('admin' as const) : undefined;
 
   const loadNotes = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await api.listNotes();
+      const data = await api.listNotes({ storage: STORAGE, as_user: asUser });
       let loaded: NoteItem[] = [];
       if (typeof data === 'object' && data !== null) {
         // /execute/note wraps the listing in `detail.notes` on SUCCESS.
@@ -61,7 +70,7 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [asUser]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount
@@ -75,7 +84,7 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
     }
     setSaving(true);
     try {
-      const resp = await api.createNote({ title: newTitle, content: newNote });
+      const resp = await api.createNote({ title: newTitle, content: newNote, storage: STORAGE, as_user: asUser });
       if (resp.status !== 'SUCCESS') {
         throw new Error(resp.message || 'Failed to save note');
       }
@@ -99,7 +108,7 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
     // Optimistic removal
     setNotes((prev) => prev.filter((n) => n.id !== id));
     try {
-      const resp = await api.deleteNote(note.title, undefined, note.path);
+      const resp = await api.deleteNote(note.title, STORAGE, note.path, asUser);
       if (resp.status !== 'SUCCESS') {
         throw new Error(resp.message || 'Failed to delete note');
       }
@@ -120,8 +129,11 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
       onRetry={loadNotes}
       settingsButton={settingsButton}
       actions={
-        notes.length > 0 ? (
-          <span className="text-[10px] text-slate-500 font-mono">{notes.length} note{notes.length !== 1 ? 's' : ''}</span>
+        notes.length > 0 || asUser ? (
+          <span className="text-[10px] text-slate-500 font-mono">
+            {asUser && <span className="text-amber-400 mr-1.5" title="Showing the shared Admin account's notes (change it on the Notes page)">Admin</span>}
+            {notes.length > 0 && `${notes.length} note${notes.length !== 1 ? 's' : ''}`}
+          </span>
         ) : undefined
       }
     >
@@ -152,7 +164,8 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
                     )}
                   </div>
                   <button
-                    onClick={() => deleteNote(note.id)}
+                    onClick={(e) => { e.stopPropagation(); deleteNote(note.id); }}
+                    onKeyDown={(e) => e.stopPropagation()}
                     className="shrink-0 p-1 text-slate-600 hover:text-red-400 transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                     aria-label="Delete note"
                   >
