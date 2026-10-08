@@ -1458,7 +1458,7 @@ export const api = {
     return resp.data;
   },
 
-  async createNote(payload: { title: string; content?: string; category?: string; storage?: string }): Promise<ExecutionResponse> {
+  async createNote(payload: { title: string; content?: string; category?: string; storage?: string; as_user?: 'admin' }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/create', payload);
     return resp.data;
   },

@@ -38,7 +38,7 @@ export default function Recipes() {
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
-  const [sendAs, setSendAs] = useSendAsPref(isAdmin);
+  const [sendAs, setSendAs] = useSendAsPref(isAdmin, 'notes');
   const asUser = isAdmin && sendAs === 'admin' ? ('admin' as const) : undefined;
 
   const { data, isLoading } = useQuery({
