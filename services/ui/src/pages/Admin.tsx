@@ -36,6 +36,9 @@ import {
   BookMarked,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import SecretInput from '../components/ui/SecretInput';
+import AccountAuditPanel from '../components/admin/AccountAuditPanel';
+import { INTEGRATIONS, credentialPayload, inUse, missingFields, validateIntegrations } from '../lib/credentialForm';
 import { api } from '../services/api';
 import type {
   DeviceAssignment,
@@ -164,6 +167,9 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
   mass_token: '',
 });
 
+/** Every integration field the dialog edits, from the shared integration list. */
+const CREDENTIAL_KEYS = INTEGRATIONS.flatMap((i) => i.fields.map((f) => f.key));
+
 const normalizeServiceKey = (name: string): string =>
   name.replace(/^sharedllm_/, '').replace(/_1$/, '');
 
@@ -175,6 +181,7 @@ const Admin = () => {
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [userForm, setUserForm] = useState<UserFormState>(emptyUserForm);
+  const [clearIntegrations, setClearIntegrations] = useState<string[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [deviceUsername, setDeviceUsername] = useState('');
   const [settingsDrafts, setSettingsDrafts] = useState<Record<string, string>>({});
@@ -331,28 +338,15 @@ const Admin = () => {
 
   const saveUserMutation = useMutation({
     mutationFn: async (form: UserFormState) => {
+      // Only what was typed: a blank field keeps what is saved, and removing a
+      // login is asked for by name (see lib/credentialForm).
+      const clear = INTEGRATIONS.filter((i) => clearIntegrations.includes(i.id)).flatMap((i) => i.fields.map((f) => f.key));
       const payload = {
         username: form.username.trim().toLowerCase(),
         full_name: form.full_name,
         is_admin: form.is_admin,
         password: form.password || undefined,
-        ha_url: form.ha_url,
-        ha_token: form.ha_token,
-        nextcloud_url: form.nextcloud_url,
-        nextcloud_user: form.nextcloud_user,
-        nextcloud_pass: form.nextcloud_pass,
-        github_url: form.github_url,
-        github_user: form.github_user,
-        github_token: form.github_token,
-        gitlab_url: form.gitlab_url,
-        gitlab_user: form.gitlab_user,
-        gitlab_token: form.gitlab_token,
-        audiobookshelf_url: form.audiobookshelf_url,
-        audiobookshelf_user: form.audiobookshelf_user,
-        audiobookshelf_pass: form.audiobookshelf_pass,
-        audiobookshelf_api_key: form.audiobookshelf_api_key,
-        mass_url: form.mass_url,
-        mass_token: form.mass_token,
+        ...credentialPayload(form as unknown as Record<string, unknown>, CREDENTIAL_KEYS, editingUser ? clear : []),
       };
 
       if (editingUser) {
@@ -361,6 +355,7 @@ const Admin = () => {
       return api.createUser(payload);
     },
     onSuccess: () => {
+      setClearIntegrations([]);
       queryClient.invalidateQueries({ queryKey: ['users'] });
       setEditingUser(null);
       setUserForm(emptyUserForm);
@@ -621,6 +616,7 @@ const Admin = () => {
   };
 
   const openEditUser = (user: UserProfile) => {
+    setClearIntegrations([]);
     setEditingUser(user);
     setUserForm(toUserForm(user));
     setIsUserModalOpen(true);
@@ -1503,6 +1499,8 @@ const Admin = () => {
 
       {activeTab === 'database' && (
         <div className="space-y-8">
+          <AccountAuditPanel users={users.map((u) => u.username)} />
+
           <div className="glass-panel p-6">
             <div className="mb-6 flex items-center justify-between">
               <div>
@@ -1928,40 +1926,62 @@ const Admin = () => {
             <span className="text-sm text-slate-300">Grant admin privileges</span>
           </label>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            {[
-              ['Home Assistant URL', 'ha_url'],
-              ['Home Assistant Token', 'ha_token'],
-              ['Nextcloud URL', 'nextcloud_url'],
-              ['Nextcloud Username', 'nextcloud_user'],
-              ['Nextcloud Password', 'nextcloud_pass'],
-              ['GitHub URL', 'github_url'],
-              ['GitHub Username', 'github_user'],
-              ['GitHub Token', 'github_token'],
-              ['GitLab URL', 'gitlab_url'],
-              ['GitLab Username', 'gitlab_user'],
-              ['GitLab Token', 'gitlab_token'],
-              ['Audiobookshelf URL', 'audiobookshelf_url'],
-              ['Audiobookshelf Username', 'audiobookshelf_user'],
-              ['Audiobookshelf Password', 'audiobookshelf_pass'],
-              ['Audiobookshelf API Key', 'audiobookshelf_api_key'],
-              ['Music Assistant URL', 'mass_url'],
-              ['Music Assistant Token', 'mass_token'],
-            ].map(([label, key]) => (
-              <label key={key} className="space-y-2">
-                <span className="text-xs font-black uppercase tracking-widest text-slate-500">{label}</span>
-                <input
-                  type={label.toLowerCase().includes('token') || label.toLowerCase().includes('password') || label.toLowerCase().includes('api_key') || key.includes('api_key') ? 'password' : 'text'}
-                  value={userForm[key as keyof UserFormState] as string}
-                  aria-label={label}
-                  onChange={(event) => setUserForm((current) => ({
-                    ...current,
-                    [key]: event.target.value,
-                  }))}
-                  className="glass-input w-full"
-                />
-              </label>
-            ))}
+          <div className="space-y-4">
+            {INTEGRATIONS.map((integration) => {
+              const saved = new Set(editingUser?.saved_credentials ?? []);
+              const removing = clearIntegrations.includes(integration.id);
+              const configured = Boolean(editingUser) && inUse(integration, editingUser as unknown as Record<string, unknown>, saved);
+              const missing = removing ? [] : missingFields(integration, userForm as unknown as Record<string, unknown>, saved);
+              return (
+                <fieldset key={integration.id} className={`rounded-2xl border p-4 ${removing ? 'border-rose-400/30 bg-rose-500/5' : 'border-white/10'}`}>
+                  <legend className="flex items-center gap-3 px-1 text-xs font-black uppercase tracking-widest text-slate-400">
+                    {integration.name}
+                    {configured && (
+                      <button
+                        type="button"
+                        className={`rounded-full px-2 py-0.5 text-[10px] normal-case tracking-normal ${removing ? 'bg-white/10 text-slate-200' : 'text-rose-300 hover:bg-rose-500/15'}`}
+                        onClick={() =>
+                          setClearIntegrations((current) =>
+                            current.includes(integration.id) ? current.filter((id) => id !== integration.id) : [...current, integration.id],
+                          )
+                        }
+                      >
+                        {removing ? 'Keep login' : 'Remove login'}
+                      </button>
+                    )}
+                  </legend>
+                  {removing ? (
+                    <p className="text-xs text-rose-200">This login will be removed when you save.</p>
+                  ) : (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {integration.fields.map((field) => (
+                        <label key={field.key} className="space-y-1.5">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{field.label}</span>
+                          {field.secret ? (
+                            <SecretInput
+                              label={field.label}
+                              value={String(userForm[field.key as keyof UserFormState] ?? '')}
+                              saved={saved.has(field.key)}
+                              onReveal={editingUser ? () => api.revealCredential(editingUser.username, field.key) : undefined}
+                              onChange={(value) => setUserForm((current) => ({ ...current, [field.key]: value }))}
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={String(userForm[field.key as keyof UserFormState] ?? '')}
+                              aria-label={field.label}
+                              onChange={(event) => setUserForm((current) => ({ ...current, [field.key]: event.target.value }))}
+                              className="glass-input w-full"
+                            />
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {missing.length > 0 && <p className="mt-2 text-[11px] text-amber-300">Still needed: {missing.join(', ')}</p>}
+                </fieldset>
+              );
+            })}
           </div>
 
           <div className="flex gap-3">
@@ -1979,6 +1999,13 @@ const Admin = () => {
               onClick={() => {
                 if (!userForm.username.trim()) {
                   toast.error('Username is required');
+                  return;
+                }
+                const saved = new Set(editingUser?.saved_credentials ?? []);
+                const keep = INTEGRATIONS.filter((i) => !clearIntegrations.includes(i.id)).map((i) => i.id);
+                const problems = validateIntegrations(userForm as unknown as Record<string, unknown>, saved, keep);
+                if (problems.length) {
+                  toast.error(`Finish or clear these logins first. ${problems.join('; ')}`);
                   return;
                 }
                 saveUserMutation.mutate(userForm);

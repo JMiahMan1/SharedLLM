@@ -31,6 +31,8 @@ import { api } from '../services/api';
 import type { UserProfile, APIKey } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
+import SecretInput from '../components/ui/SecretInput';
+import { credentialPayload, inUse, integrationFor, isSecretKey, missingFields } from '../lib/credentialForm';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
@@ -78,7 +80,22 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
   const [listInputs, setListInputs] = useState<Record<string, string>>({});
   const [testResult, setTestResult] = useState<{ status: 'SUCCESS' | 'ERROR', message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const isAdmin = useAuth().role === 'admin';
+  const savedSecrets = new Set(userData?.saved_credentials ?? []);
+  const fieldKeys = Object.values(configKeys);
+  const known = fieldKeys.map(integrationFor).find(Boolean);
+  const values = form as Record<string, unknown>;
+  const labelOf = (key: string) => Object.keys(configKeys).find((label) => configKeys[label] === key) ?? key;
+  const filled = (key: string) => String(values[key] ?? '').trim() !== '' || (isSecretKey(key) && savedSecrets.has(key));
+  // What still blocks saving. A known integration follows the shared rules
+  // (Audiobookshelf takes an API key *or* a username and password); anything
+  // else needs every field. An untouched card has nothing to save.
+  const missingList: string[] = known
+    ? inUse(known, values, savedSecrets)
+      ? missingFields(known, values, savedSecrets)
+      : known.complete[0].map(labelOf)
+    : fieldKeys.filter((k) => k !== 'skylight_enabled' && !filled(k)).map(labelOf);
   const queryClient = useQueryClient();
 
   const connectionKey = Object.values(configKeys)[0];
@@ -126,8 +143,11 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
   const handleOpen = () => {
     const initialForm: Record<string, string | boolean> = {};
     Object.values(configKeys).forEach((key) => {
-      initialForm[key] = (userData as Record<string, string | boolean>)?.[key] || '';
+      // Secrets are never sent to the browser: their field starts empty and
+      // shows "Saved"; empty on save means keep (see lib/credentialForm).
+      initialForm[key] = isSecretKey(key) ? '' : (userData as Record<string, string | boolean>)?.[key] || '';
     });
+    setConfirmDisconnect(false);
     if (name === 'Skylight') {
       initialForm.skylight_enabled = userData?.skylight_enabled !== false;
     }
@@ -189,30 +209,37 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
 
           <div className="grid gap-4">
             {Object.entries(configKeys).map(([label, key]) => {
-              const isSecret = label.toLowerCase().includes('pass') || label.toLowerCase().includes('token') || label.toLowerCase().includes('secret');
-              const hasValue = !!(userData as Record<string, unknown>)?.[key];
-              const displayValue = form[key] === undefined && hasValue ? 'Saved ••••••••' : (form[key] as string) || '';
+              const isSecret = isSecretKey(key);
               const isReadOnly = name === 'Skylight' && !userData?.is_system_default;
-              
+
               return (
                 <div key={key}>
                   <div className="flex items-center mb-2">
                     <label className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</label>
                     <HelpTooltip docName="integrations.md" sectionTitle={name} label={label} />
                   </div>
-                  <input 
-                    type={isSecret ? 'password' : 'text'}
-                    value={displayValue}
-                    onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                    disabled={isReadOnly}
-                    onFocus={(e) => {
-                      if (e.target.value === 'Saved ••••••••' && !isReadOnly) {
-                        setForm({ ...form, [key]: '' });
-                      }
-                    }}
-                    className={`glass-input w-full text-sm py-3 bg-black/20 focus:bg-black/40 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    placeholder={isReadOnly ? 'Configured by system administrator' : `Enter ${label}...`}
-                  />
+                  {isSecret ? (
+                    <SecretInput
+                      label={label}
+                      value={String(form[key] ?? '')}
+                      saved={savedSecrets.has(key)}
+                      disabled={isReadOnly}
+                      onReveal={userData?.username ? () => api.revealCredential(userData.username, key) : undefined}
+                      onChange={(value) => setForm({ ...form, [key]: value })}
+                      placeholder={isReadOnly ? 'Configured by system administrator' : `Enter ${label}...`}
+                      className="text-sm py-3 bg-black/20 focus:bg-black/40"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={String(form[key] ?? '')}
+                      aria-label={label}
+                      onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                      disabled={isReadOnly}
+                      className={`glass-input w-full text-sm py-3 bg-black/20 focus:bg-black/40 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      placeholder={isReadOnly ? 'Configured by system administrator' : `Enter ${label}...`}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -321,7 +348,16 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             )}
             <button 
               onClick={() => {
-                const finalForm = { ...form, ...listForm };
+                if (missingList.length) {
+                  toast.error(`Fill in ${missingList.join(', ')} before saving`);
+                  return;
+                }
+                // Only filled fields: blank keeps what is saved.
+                const finalForm: Record<string, unknown> = {
+                  ...credentialPayload(form as Record<string, unknown>, fieldKeys),
+                  ...listForm,
+                };
+                if (typeof form.skylight_enabled === 'boolean') finalForm.skylight_enabled = form.skylight_enabled;
                 if (name === 'Skylight' && !userData?.is_system_default) {
                   delete finalForm.skylight_url;
                   delete finalForm.skylight_email;
@@ -329,13 +365,40 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                 }
                 updateMutation.mutate(finalForm as Partial<UserProfile>);
               }}
-              disabled={updateMutation.isPending}
+              disabled={updateMutation.isPending || missingList.length > 0}
+              title={missingList.length ? `Still needed: ${missingList.join(', ')}` : undefined}
               className="glass-button flex-1 py-3 bg-purple-600/40 border-purple-500/30 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
             >
               <Save size={18} />
               {updateMutation.isPending ? 'Syncing Vault...' : 'Commit Changes'}
             </button>
           </div>
+          {missingList.length > 0 && (
+            <p className="text-[11px] text-amber-300">Still needed: {missingList.join(', ')}</p>
+          )}
+          {isConnected && !(name === 'Skylight' && !userData?.is_system_default) && (
+            <div className="border-t border-white/5 pt-3">
+              {confirmDisconnect ? (
+                <div className="flex items-center gap-3 text-xs text-rose-200" role="alert">
+                  Remove your {name} login from Jarvis?
+                  <button
+                    type="button"
+                    className="font-semibold underline"
+                    onClick={() => updateMutation.mutate({ clear_fields: fieldKeys.filter((k) => k !== 'skylight_enabled') } as Partial<UserProfile>)}
+                  >
+                    Remove
+                  </button>
+                  <button type="button" className="text-slate-300" onClick={() => setConfirmDisconnect(false)}>
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="text-xs text-rose-300 hover:underline" onClick={() => setConfirmDisconnect(true)}>
+                  Disconnect {name}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </Modal>
     </>
