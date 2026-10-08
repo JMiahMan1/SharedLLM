@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import binascii
 import json
 import logging
 import urllib.parse
@@ -18,6 +19,7 @@ except ImportError:
 log = logging.getLogger("execution.talk")
 
 TALK_UPLOAD_DIR = "Talk Uploads"
+_JARVIS_TASKS: set[asyncio.Task] = set()
 _TALK_RETRIES = 3
 _TALK_RETRY_DELAY = 2
 
@@ -73,6 +75,10 @@ def _conversation_summary(conversation: dict[str, Any]) -> dict[str, Any]:
         # Talk room type: 1 one-to-one, 2 group, 3 public, 4 changelog.
         "type": conversation.get("type"),
         "unread_mention": bool(conversation.get("unreadMention", False)),
+        # Read receipts: everyone has read up to last_common_read; you have
+        # read up to last_read (where the "new messages" line goes).
+        "last_common_read": conversation.get("lastCommonReadMessage"),
+        "last_read": conversation.get("lastReadMessage"),
     }
 
 
@@ -93,6 +99,28 @@ def _message_summary(message: dict[str, Any]) -> dict[str, Any]:
         "reactions": message.get("reactions") or {},
         "reactions_self": message.get("reactionsSelf") or [],
         "parent": _parent_summary(message.get("parent")),
+        "parameters": _parameters_summary(message.get("messageParameters")),
+        "last_edit_time": message.get("lastEditTimestamp"),
+        "deleted": message.get("messageType") == "comment_deleted",
+    }
+
+
+_PARAMETER_FIELDS = ("type", "id", "name", "mimetype", "size", "path", "link", "preview-available", "mention-id")
+
+
+def _parameters_summary(parameters: Any) -> dict[str, dict[str, Any]]:
+    """The rich objects a message's {placeholders} stand for.
+
+    A shared file arrives as the text "{file}" and a mention as
+    "{mention-user1}"; the objects say what to draw in their place. Talk sends
+    an empty list instead of an empty object when there are none.
+    """
+    if not isinstance(parameters, dict):
+        return {}
+    return {
+        key: {field: value[field] for field in _PARAMETER_FIELDS if field in value}
+        for key, value in parameters.items()
+        if isinstance(value, dict)
     }
 
 
@@ -110,7 +138,7 @@ def validate_jarvis_mention(message: str | None) -> bool:
     """Parses real-time text input configurations looking for the identifier prefix: @Jarvis."""
     if not message:
         return False
-    return message.startswith("@Jarvis")
+    return message.lstrip().lower().startswith("@jarvis")
 
 
 async def _get_talk_model_from_settings() -> str:
@@ -135,7 +163,19 @@ async def _get_talk_model_from_settings() -> str:
     raise RuntimeError("No assistant/librarian model configured in Identity settings")
 
 
-async def run_jarvis_orchestration(query: str, token: str, user_context: Any):
+def _assistant_post(answer: str) -> str:
+    """Mark an answer as Jarvis's own words.
+
+    Talk has no bot account here, so the answer is posted with the asker's
+    login; without a mark it read as if they had written it. The envelope
+    (same wire format as cards, see services/ui/src/lib/chatEnvelope.ts) lets
+    the panel draw it as Jarvis while other Talk clients still show the text.
+    """
+    body = json.dumps({"kind": "assistant", "title": "Jarvis"})
+    return f"{answer.strip()}\n\n{ENVELOPE_FENCE}\n{body}\n{ENVELOPE_FENCE}"
+
+
+async def run_jarvis_orchestration(query: str, token: str, user_context: Any, reply_to: int | None = None):
     """Invokes the execution loop orchestrator and delivers the result back to NextCloud Talk."""
     try:
         from services.gateway.orchestrator import process_full_orchestration, strip_json_from_response
@@ -184,7 +224,8 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any):
             provider,
             "POST",
             f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(token)}",
-            data={"message": cleaned_ans},
+            # A reply to the question, so the answer sits under what was asked.
+            data={"message": _assistant_post(cleaned_ans), **({"replyTo": str(reply_to)} if reply_to else {})},
         )
         if not ok:
             log.error(f"[Jarvis] Failed to post answer to Nextcloud Talk: {message}")
@@ -394,6 +435,61 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
         board = ", ".join(f"{p.name} {p.stars} ⭐" for p in state.leaderboard)
         await say(f"🏆 All pairs found! {board}")
     return ExecutionResult(status="SUCCESS", message="Flip processed.", service="talk_game", detail=result)
+
+
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+
+
+async def _share_into_room(
+    provider: Any,
+    token: str,
+    data: bytes,
+    *,
+    mime_type: str,
+    file_name: str,
+    metadata: dict[str, Any],
+    service: str,
+    sent: str,
+) -> ExecutionResult:
+    """Upload ``data`` to the caller's Talk folder and share it into the room.
+
+    This is how Talk itself posts a voice note, a photo or a file: the bytes
+    live in the sender's Nextcloud and the room gets a share of them.
+    """
+    safe_name = provider.sanitize_filename(file_name, f"attachment-{uuid4().hex[:8]}")
+    remote_path = f"{TALK_UPLOAD_DIR}/{uuid4().hex[:6]}-{safe_name}"
+    await provider.ensure_directory(TALK_UPLOAD_DIR)
+    if not await provider.upload_file(remote_path, data, mime_type):
+        return ExecutionResult(status="FAILURE", message="Failed to upload the file to Nextcloud.", service=service)
+    share_data = {"shareType": "10", "shareWith": token, "path": f"/{remote_path}", "referenceId": uuid4().hex}
+    if metadata:
+        share_data["talkMetaData"] = json.dumps(metadata)
+    ok, result, message = await _talk_request_with_retry(
+        provider, "POST", "/ocs/v2.php/apps/files_sharing/api/v1/shares", data=share_data
+    )
+    if not ok:
+        return ExecutionResult(status="FAILURE", message=message or "Failed to share the file into the chat.", service=service)
+    return ExecutionResult(status="SUCCESS", message=sent, service=service, detail={"share": result, "path": f"/{remote_path}"})
+
+
+async def fetch_talk_file(req: Any) -> tuple[int, str, bytes]:
+    """The bytes of a file shared in a chat, as the requesting user sees it.
+
+    ``path`` is where the share sits in that user's own files (Talk sends it
+    with every file message); ``preview`` asks Nextcloud for a thumbnail
+    instead, which also works for files with no path.
+    """
+    provider = resolve_personal_data_provider(req.user_context)
+    if not provider:
+        return 403, "text/plain", missing_account_message(req.user_context).encode()
+    if req.preview:
+        if not req.file_id:
+            return 400, "text/plain", b"file_id is required for a preview"
+        return await provider.preview(int(req.file_id), int(req.size or 640))
+    path = (req.path or "").strip().lstrip("/")
+    if not path or ".." in path.split("/"):
+        return 400, "text/plain", b"A file path inside your Nextcloud is required"
+    return await provider.download_file(path)
 
 
 async def handle_talk(req: TalkRequest) -> ExecutionResult:
@@ -632,8 +728,13 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
 
             # Check for @Jarvis mention and run background task
             if validate_jarvis_mention(req.message):
-                query = req.message[len("@Jarvis"):].strip()
-                asyncio.create_task(run_jarvis_orchestration(query, req.token, req.user_context))
+                query = req.message.lstrip()[len("@Jarvis"):].strip()
+                question_id = data.get("id") if isinstance(data, dict) else None
+                # Keep a reference: an unreferenced task can be garbage-collected
+                # mid-answer, and Jarvis would silently never reply.
+                task = asyncio.create_task(run_jarvis_orchestration(query, req.token, req.user_context, reply_to=question_id))
+                _JARVIS_TASKS.add(task)
+                task.add_done_callback(_JARVIS_TASKS.discard)
 
             return ExecutionResult(
                 status="SUCCESS",
@@ -665,43 +766,85 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 return ExecutionResult(status="FAILURE", message="Failed to generate or decode audio.", service="talk_send_voice")
 
             extension = ".mp3" if (req.mime_type or "").endswith("mpeg") else (".m4a" if (req.mime_type or "").endswith("mp4") else ".webm")
-            file_name = provider.sanitize_filename(req.file_name or f"voice-{uuid4().hex}{extension}", f"voice-{uuid4().hex}{extension}")
-            remote_path = f"{TALK_UPLOAD_DIR}/{file_name}"
-            await provider.ensure_directory(TALK_UPLOAD_DIR)
+            return await _share_into_room(
+                provider,
+                req.token,
+                audio_bytes,
+                mime_type=req.mime_type or "audio/webm",
+                file_name=req.file_name or f"voice-{uuid4().hex}{extension}",
+                metadata={"messageType": "voice-message", **({"caption": req.caption} if req.caption else {})},
+                service="talk_send_voice",
+                sent="Voice message sent to Nextcloud Talk.",
+            )
 
-            upload_ok = await provider.upload_file( remote_path, audio_bytes, req.mime_type or "audio/webm")
-            if not upload_ok:
+        if action == "send_file":
+            if not req.token or not req.file_base64:
+                return ExecutionResult(status="FAILURE", message="Conversation token and file_base64 are required.", service="talk_send_file")
+            try:
+                file_bytes = base64.b64decode(req.file_base64, validate=True)
+            except (binascii.Error, ValueError):
+                return ExecutionResult(status="FAILURE", message="The attachment is not valid base64.", service="talk_send_file")
+            if not file_bytes:
+                return ExecutionResult(status="FAILURE", message="The attachment is empty.", service="talk_send_file")
+            if len(file_bytes) > MAX_ATTACHMENT_BYTES:
                 return ExecutionResult(
                     status="FAILURE",
-                    message="Failed to upload audio.",
-                    service="talk_send_voice",
+                    message=f"Attachments are limited to {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB.",
+                    service="talk_send_file",
                 )
+            return await _share_into_room(
+                provider,
+                req.token,
+                file_bytes,
+                mime_type=req.mime_type or "application/octet-stream",
+                file_name=req.file_name or f"attachment-{uuid4().hex[:8]}",
+                metadata={"caption": req.caption} if req.caption else {},
+                service="talk_send_file",
+                sent="File shared to Nextcloud Talk.",
+            )
 
-            metadata = {"messageType": "voice-message"}
-            if req.caption:
-                metadata["caption"] = req.caption
-
+        if action == "edit_message":
+            if not req.token or req.message_id is None or not req.message:
+                return ExecutionResult(status="FAILURE", message="Conversation token, message_id and message are required.", service="talk_edit")
             ok, data, message = await _talk_request_with_retry(
                 provider,
-                "POST",
-                "/ocs/v2.php/apps/files_sharing/api/v1/shares",
-                data={
-                    "shareType": "10",
-                    "shareWith": req.token,
-                    "path": f"/{remote_path}",
-                    "referenceId": uuid4().hex,
-                    "talkMetaData": json.dumps(metadata),
-                },
+                "PUT",
+                f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}/{int(req.message_id)}",
+                data={"message": req.message},
             )
             if not ok:
-                return ExecutionResult(status="FAILURE", message=message or "Failed to send voice message.", service="talk_send_voice")
+                return ExecutionResult(status="FAILURE", message=message or "Could not edit the message.", service="talk_edit")
+            return ExecutionResult(status="SUCCESS", message="Message edited.", service="talk_edit", detail={"message_record": _message_summary(data or {})})
 
-            return ExecutionResult(
-                status="SUCCESS",
-                message="Voice message sent to Nextcloud Talk.",
-                service="talk_send_voice",
-                detail={"share": data, "path": f"/{remote_path}"},
+        if action == "delete_message":
+            if not req.token or req.message_id is None:
+                return ExecutionResult(status="FAILURE", message="Conversation token and message_id are required.", service="talk_delete")
+            ok, _data, message = await _talk_request_with_retry(
+                provider,
+                "DELETE",
+                f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}/{int(req.message_id)}",
             )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Could not delete the message.", service="talk_delete")
+            return ExecutionResult(status="SUCCESS", message="Message deleted.", service="talk_delete")
+
+        if action == "mentions":
+            if not req.token:
+                return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_mentions")
+            ok, data, message = await _talk_request_with_retry(
+                provider,
+                "GET",
+                f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}/mentions",
+                params={"search": req.search or "", "limit": "10"},
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Could not load mentions.", service="talk_mentions")
+            people = [
+                {"id": item.get("id"), "label": item.get("label"), "source": item.get("source"), "mention_id": item.get("mentionId") or item.get("id")}
+                for item in (data or [])
+                if isinstance(item, dict)
+            ]
+            return ExecutionResult(status="SUCCESS", message=f"{len(people)} match(es).", service="talk_mentions", detail={"mentions": people})
 
         return ExecutionResult(status="FAILURE", message=f"Action {action} not implemented.", service="talk")
 

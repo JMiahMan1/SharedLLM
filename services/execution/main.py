@@ -21,7 +21,7 @@ from uuid import uuid4
 
 import aiohttp
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from urllib3.exceptions import InsecureRequestWarning
 
@@ -114,6 +114,7 @@ from services.execution.schemas import (
     StorageFileWriteRequest,
     StorageTextToAudioRequest,
     SystemLearningRequest,
+    TalkFileRequest,
     TalkRequest,
     TimerRequest,
     TTSRequest,
@@ -951,6 +952,13 @@ async def execute_timer(req: TimerRequest):
 @app.post("/execute/talk", response_model=ExecutionResult)
 async def execute_talk(req: TalkRequest):
     return await talk.handle_talk(req)
+
+
+@app.post("/execute/talk/file")
+async def execute_talk_file(req: TalkFileRequest):
+    """Raw bytes of a chat attachment (or its thumbnail) for the chat panel."""
+    status, content_type, body = await talk.fetch_talk_file(req)
+    return Response(content=body, status_code=status, media_type=content_type)
 
 @app.post("/execute/identity", response_model=ExecutionResult)
 async def execute_identity(req: IdentityRequest):
