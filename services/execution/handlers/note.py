@@ -8,7 +8,7 @@ from services.config import LOCAL_NOTES_ROOT as _LOCAL_NOTES_ROOT
 from services.execution.schemas import ExecutionResult, NoteRequest
 
 from ..http_client import request as http_request
-from ..personal_data import resolve_personal_data_provider
+from ..personal_data import missing_account_message, resolve_personal_data_provider
 
 log = logging.getLogger("execution.note")
 
@@ -96,7 +96,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
     from ..http_client import request as http_request
     provider = resolve_personal_data_provider(req.user_context)
     if not provider:
-        return ExecutionResult(status="FAILURE", message="Nextcloud credentials missing.", service="note")
+        return ExecutionResult(status="FAILURE", message=missing_account_message(req.user_context), service="note")
 
     action = req.action
 
