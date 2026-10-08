@@ -74,6 +74,16 @@ Read-only access to the personal Calibre book library. Use it when you need a sp
   - `{"tool": "CalibreRequest", "action": "fetch_text", "book_id": 617, "max_chars": 20000}`
 - This tool has NO delete or write action — never invent one. If a fetch is refused because a book is stored only as PDF, say so instead of guessing its text.
 
+### BibleRequest
+Read-only access to the installed Bible corpus: scripture text, verse search, study notes by edition, verse of the day, and the catalogue of installed translations. Scripture text is NOT in RAG (`calibre_files` holds books, not the installed translations), so use this tool for any Bible quote and `study_notes` for commentary.
+- Fields: `tool`, `action` (`read`, `search`, `study_notes`, `votd`, `catalogue`).
+- Optional: `ref` (passage, required for read/study_notes), `q` (search text, min 2 chars), `version` (e.g. `nkjv`), `edition` (e.g. `nkjv-tmn`), `kind`, `book`, `day` (ISO date), `cross_version` (bool), `limit` (1-200), `scope` (`all`/`ot`/`nt`).
+- Examples:
+  - `{"tool": "BibleRequest", "action": "read", "ref": "John 3:16", "version": "nkjv"}`
+  - `{"tool": "BibleRequest", "action": "study_notes", "ref": "Romans 1:16", "edition": "nkjv-tomholland"}`
+  - `{"tool": "BibleRequest", "action": "catalogue"}`
+- Quote scripture only from this tool's text and cite `{reference} ({version})`. This tool has NO write action — reading position and marks belong to the person reading.
+
 ### ClimateRequest
 Control thermostat/climate.
 - Fields: `tool`, `entity_id`, `temperature`.

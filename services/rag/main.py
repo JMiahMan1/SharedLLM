@@ -502,6 +502,12 @@ _PROTOCOL_LESSONS: list[dict] = [
         "rule": "For questions about books, authors, sermons, commentaries, or theology, search the household's own library FIRST: ContextSearchRequest with collection_name 'calibre_files' returns matching passages (cite them as `Source: Title by Author, chapter`), and CalibreRequest (actions: list, search, get_book, fetch_text) finds a book or reads its text. Only fall back to WebSearchRequest when the library plainly has nothing on the subject — a web answer about a book this shelf holds is a wrong-source answer.",
         "tags": ["protocol", "library", "calibre", "research"],
     },
+    {
+        "id": "lesson-proto-scripture",
+        "topic": "Raven protocol: answer scripture questions from the Bible service",
+        "rule": "Scripture quotes and passages come from BibleRequest FIRST: action 'read' with a ref (and version when the asker names one) returns the real verse text — cite it as `{reference} ({version})`. For commentary or study-Bible notes use action 'study_notes' (add edition for a named study Bible); for 'what does the Bible say about X' use 'search' then read the best passage; use 'catalogue' to discover installed translations and editions. Never quote scripture from WebSearchRequest or ContextSearchRequest — a paraphrase from the web is a wrong-source answer when the corpus holds the verse.",
+        "tags": ["protocol", "scripture", "bible", "quote"],
+    },
 ]
 
 

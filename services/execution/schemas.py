@@ -961,6 +961,31 @@ class AudiobookshelfRequest(BaseRequest):
     limit: int = Field(10, ge=1, le=50, description="Max results to return")
 
 
+class BibleRequest(BaseRequest):
+    """Read-only actions over the family's Bible service.
+
+    The action set is a closed ``Literal`` on purpose: there is no approval
+    gate anywhere in this codebase's tool path, and reading position, marks
+    and achievements belong to the person holding the phone -- an agent
+    writing them would silently overwrite a human's place in a book. Scripture
+    text itself is served by reads only; the irreversible verbs are not
+    nameable here at all.
+    """
+
+    user_context: UserContext
+    action: Literal["read", "search", "study_notes", "votd", "catalogue"]
+    ref: str | None = Field(None, description="Passage reference; required for read and study_notes (for example: John 3:16, Romans 1:16-18, Psalm 23)")
+    q: str | None = Field(None, description="Verse search text, at least 2 characters; required for action=search")
+    version: str | None = Field(None, description="Translation code (for example: nkjv, kjv); catalogue lists what is installed")
+    edition: str | None = Field(None, description="Study Bible edition code for study_notes (for example: nkjv-tmn); catalogue lists them")
+    kind: str | None = Field(None, description="Comma-separated note kinds to include for study_notes (for example: commentary, cross_reference)")
+    book: str | None = Field(None, description="Restrict action=search to one book name (for example: John)")
+    day: str | None = Field(None, description="ISO date for action=votd (for example: 2026-10-07); defaults to today")
+    cross_version: bool = Field(False, description="Include notes from other translations in study_notes, labelled with their source edition")
+    limit: int = Field(50, ge=1, le=200, description="Max verses returned by action=search")
+    scope: Literal["all", "ot", "nt"] = Field("all", description="Book scope for action=votd: all, ot or nt")
+
+
 class CalibreRequest(BaseRequest):
     """Read-only actions over the family's Calibre library.
 

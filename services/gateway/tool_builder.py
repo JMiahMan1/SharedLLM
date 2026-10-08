@@ -79,6 +79,15 @@ _TOOLS: tuple[_Tool, ...] = (
          "git add", "git status"),
     ),
     _Tool(
+        "BibleRequest",
+        "Read scripture, search verses and fetch study notes from the Bible "
+        "service (read/search/study_notes/votd/catalogue; read-only).",
+        ("read the bible", "bible verse", "verse of the day", "study notes",
+         "bible passage", "what does scripture say", "read scripture",
+         "bible reading", "scripture says"),
+        3,
+    ),
+    _Tool(
         "CalibreRequest",
         "Browse, search and read books from the Calibre library "
         "(list/search/get_book/fetch_text; read-only).",
