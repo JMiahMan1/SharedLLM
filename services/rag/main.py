@@ -48,6 +48,7 @@ DEFAULT_EMBEDDING_DIM = 768
 
 EMBED_BATCH_SIZE: int = 128
 EMBED_CHAR_BUDGET: int = 5_000_000
+EMBED_MAX_CHARS: int = 4000
 
 # Globals populated in the lifespan
 conn = None
@@ -111,6 +112,7 @@ def embed_batched(
     texts: list[str],
     batch_size: int = EMBED_BATCH_SIZE,
     char_budget: int = EMBED_CHAR_BUDGET,
+    max_chars: int = EMBED_MAX_CHARS,
 ) -> list[list[float]]:
     """Embed ``texts`` in cost-bounded batches so peak memory stays flat.
 
@@ -127,12 +129,36 @@ def embed_batched(
     the former and splits the latter to three texts per call. Batches also
     stay capped at ``batch_size``. An invalid budget fails loudly instead of
     silently disabling the ceiling.
+
+    A third bound was needed after ``POST /rag/sync/capabilities`` wedged the
+    service: its content embeds pretty-printed JSON schemas, tens of KB per
+    text, and the budget's never-drop valve delivers such a text to ONNX as a
+    batch of one. Measured live, one capability-schema embed held rag at
+    5.08 GiB / 6 GiB and 340-378% CPU for minutes -- long enough to starve
+    the 5-second health checks and time out every waiting client -- without
+    ever tripping the cgroup. ``max_chars`` therefore clips the *embedding
+    view* of a text before batching; stored rows and the FTS index keep the
+    full content, exactly as a chunk window does. The clip is logged rather
+    than silent so an unexpectedly large source is visible to the operator.
     """
     if batch_size < 1:
         raise ValueError(f"batch_size must be >= 1, got {batch_size}")
     if char_budget < 1:
         raise ValueError(f"char_budget must be >= 1, got {char_budget}")
-    batches = list(_batch_by_cost(texts, batch_size, char_budget))
+    if max_chars < 1:
+        raise ValueError(f"max_chars must be >= 1, got {max_chars}")
+    clipped = [
+        text if len(text) <= max_chars else text[:max_chars] for text in texts
+    ]
+    clipped_count = sum(
+        1 for short, long in zip(clipped, texts) if len(short) < len(long)
+    )
+    if clipped_count:
+        log.warning(
+            f"[embed_batched] clipping {clipped_count} text(s) to "
+            f"{max_chars} chars for embedding; stored content is unchanged"
+        )
+    batches = list(_batch_by_cost(clipped, batch_size, char_budget))
     vectors: list[list[float]] = []
     for index, batch in enumerate(batches, start=1):
         batch_started = time.monotonic()
