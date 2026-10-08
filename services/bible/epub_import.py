@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from xml.etree import ElementTree as ET
 
-from services.bible.books import BOOKS, BOOK_BY_OSIS, BOOK_ORDER
+from services.bible.books import BOOKS, BOOK_BY_OSIS, BOOK_ORDER, resolve_book
 from services.bible.corpus import CorpusError
 
 EPUB_KIND = "jarvis.bible.epub"
@@ -78,6 +78,21 @@ _DC_NS = "{http://purl.org/dc/elements/1.1/}"
 # none exist this is the only canonical position such a source carries.
 _SECTION_REF = re.compile(r"\((\d{1,3}):(\d{1,3})(?:\s*[\u2013\u2014-]\s*\d{0,3}:?\s*(\d{1,3}))?\)\s*$")
 _HEADING_CHAPTER = re.compile(r"^(.*?)\s+(\d{1,3})$")
+# How far ahead of the expected number a verse may legitimately appear: a
+# translation can leave a number out of sequence entirely (the NLT has no
+# John 5:4), and the next verse is then simply the next one it does have.
+_MAX_VERSE_JUMP = 10
+# Verse numbers set as a range ("3-4") share one paragraph of prose; the
+# numbers appear in the same superscript span the single numbers use.
+_RANGE_SPAN = re.compile(r"^(\d{1,3})-(\d{1,3})$")
+# A range may span a whole census listing ("6-19"), which is much wider than
+# a single omitted number but still bounded by a chapter.
+_MAX_RANGE_SPAN = 30
+# Some layouts set the number as plain text at the head of the paragraph
+# rather than inside the superscript span ("5-8 The divisions of Judah...").
+_LEADING_NUMBER = re.compile(r"^(\d{1,3})(?:-(\d{1,3}))?(?=\s|$)")
+_TABLE_TAGS = frozenset({"table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption"})
+
 _BOOK_NUMBER_BY_NAME = {
     str(entry["name"]).casefold(): position
     for position, entry in enumerate(BOOKS, start=1)
@@ -512,6 +527,399 @@ class _CommentaryHarvester(HTMLParser):
         self._close_section()
 
 
+# Paragraph-level css classes that mark a heading rather than prose. The
+# obfuscated class names of a converted epub mean the only stable signal is the
+# declaration itself: a bold or large-font paragraph between two verses is a
+# section title, and keeping it would file the title as the previous verse's
+# tail.
+_CSS_RULE = re.compile(r"\.([A-Za-z][\w-]*)\s*\{([^{}]*)\}")
+_CSS_BOLD = re.compile(r"font-weight\s*:\s*(bold|[6-9]00)\b", re.I)
+_CSS_EM_SIZE = re.compile(r"font-size\s*:\s*([\d.]+)\s*(em|rem)", re.I)
+_CSS_PX_SIZE = re.compile(r"font-size\s*:\s*([\d.]+)\s*px", re.I)
+
+
+def _strip_numbered_label(text: str) -> str:
+    """Remove the ``11:1`` chapter label a pre-heading verse carries.
+
+    Some typeset chapters open with their first verse *before* the heading
+    paragraph, and that paragraph starts with a chapter-label span ("11:")
+    followed by the verse number span, so the deferred text arrives as
+    "11:1And you should..." -- the navigation is stripped so the verse reads
+    the way it prints.
+    """
+    text = re.sub(r"^\d{1,3}:\s*", "", text)
+    if text.startswith("1"):
+        text = text[1:]
+    return text.lstrip()
+
+
+def _heading_classes(path: str) -> set[str]:
+    """Lowercased paragraph classes the archive's stylesheets mark as headings.
+
+    Only the paragraph classes are collected, and only when their declaration
+    is bold or at least 1.2em, which is exactly how the observed layouts mark
+    chapter and section titles. Class names are folded to lowercase because
+    ``_class_of`` folds the class attribute the same way -- a mismatch here
+    would disable heading detection in complete silence.
+    """
+    with zipfile.ZipFile(path) as archive:
+        heading: set[str] = set()
+        for name in archive.namelist():
+            if not name.lower().endswith(".css"):
+                continue
+            text = archive.read(name).decode("utf-8", "replace")
+            for rule in _CSS_RULE.finditer(text):
+                css_class, body = rule.group(1), rule.group(2)
+                bold = _CSS_BOLD.search(body)
+                em = _CSS_EM_SIZE.search(body)
+                px = _CSS_PX_SIZE.search(body)
+                if bold or (em and float(em.group(1)) >= 1.2) or (px and float(px.group(1)) >= 19):
+                    heading.add(css_class.lower())
+        return heading
+
+
+class _NumberedHarvester(HTMLParser):
+    """Collects verse text from a translation that numbers verses in the prose.
+
+    Many commercial EPUBs -- converted from typesetting rather than exported
+    from a bible database -- carry no ``v`` anchors at all. What they do carry
+    is structure: a chapter opens with a heading paragraph reading
+    ``"<Book> <chapter>"`` as links, every verse begins with its number inside
+    a small superscript span, and the paragraphs that follow continue the last
+    verse started. A single paragraph often holds several verses, and some
+    chapters open with a ``"8:"`` chapter label span, so the number spans are
+    resolved the moment they close rather than at the paragraph boundary --
+    that is where a verse boundary actually lives.
+
+    Rules, in the order they apply:
+
+    * anything nested in a ``<div>`` is an editorial box or cross-reference
+      list, never scripture, so its content is declined before any other test;
+    * a digit span equal to the next expected number splits the text there --
+      the paragraph's text so far belongs to the open verse, everything after
+      belongs to the new one. Sequential numbering is the whole reason this
+      mode can be trusted, so a *leading* number out of sequence declines the
+      paragraph rather than guessing; the same number in the middle of prose
+      keeps its text, because losing scripture is worse than a stray numeral;
+    * a heading paragraph re-anchors position to its book and chapter;
+    * a heading class (from the stylesheet, or an id when the archive ships no
+      stylesheet) is a section title and is declined;
+    * anything else continues the open verse, or is declined when no verse is
+      open so unsolicited prose can never silently become scripture.
+
+    Two further shapes this reader meets: a paragraph numbered as a range
+    ("3-4") is one piece of prose that *is* every verse it names, and a
+    number set as plain text ("6-19 The divisions...") opens its verse the
+    same way a span would. Tables and figures (camp diagrams) are apparatus
+    whose cells must not glue onto the open verse -- but a table that *is*
+    scripture (the census of Revelation 7) still opens verses from its own
+    leading numbers; it just never continues one.
+
+    Every decline is counted in ``declined`` so the report can name exactly
+    what this reader did not keep, and chapters that end up empty still fail
+    the per-book report rather than installing a short book.
+    """
+
+    def __init__(self, heading_classes: set[str]) -> None:
+        super().__init__(convert_charrefs=True)
+        self.verses: dict[tuple[int, int, int], str] = {}
+        self.declined: Counter[str] = Counter()
+        self._headings = set(heading_classes)
+        self._div = 0
+        self._hidden = 0
+        self._sup = 0
+        self._noterefs: list[bool] = []
+        self._book: int | None = None
+        self._chapter: int | None = None
+        self._next_verse = 1
+        self._open: tuple[int, int, int] | None = None
+        self._open_parts: list[str] = []
+        self._in_paragraph = False
+        self._p_class = ""
+        self._p_ident = ""
+        self._p_div = 0
+        self._p_links = 0
+        self._buffer: list[str] = []
+        self._seen = False
+        self._number_parts: list[str] | None = None
+        self._span_leading = False
+        self._declined_p = False
+        self._split_p = False
+        self._p_first_digits: int | None = None
+        self._stashed: dict[int, str] = {}
+        self.absent_verses = 0
+        self._table = 0
+        self._range_end: int | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        data = dict(attrs)
+        if tag == "div":
+            self._div += 1
+        elif tag in _TABLE_TAGS:
+            self._table += 1
+        elif tag in _DROP_TAGS:
+            self._hidden += 1
+        elif tag == "sup":
+            self._sup += 1
+        elif tag == "a":
+            media = (data.get("epub:type") or "").lower()
+            self._noterefs.append("noteref" in media)
+            if self._in_paragraph:
+                self._p_links += 1
+        elif tag == "span":
+            if self._in_paragraph and self._number_parts is None:
+                self._number_parts = []
+                self._span_leading = not self._seen
+        elif tag == "p":
+            if self._in_paragraph:
+                self._close_paragraph()
+            self._in_paragraph = True
+            self._p_class = _class_of(data)
+            self._p_ident = (data.get("id") or "").strip()
+            self._p_div = self._div
+            self._p_links = 0
+            self._buffer = []
+            self._seen = False
+            self._number_parts = None
+            self._span_leading = False
+            self._declined_p = False
+            self._split_p = False
+            self._p_first_digits = None
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        if tag in _DROP_TAGS or tag in {"sup", "a", "span", "p", "div"}:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "div":
+            self._div = max(0, self._div - 1)
+        elif tag in _TABLE_TAGS:
+            self._table = max(0, self._table - 1)
+        elif tag in _DROP_TAGS:
+            self._hidden = max(0, self._hidden - 1)
+        elif tag == "sup":
+            self._sup = max(0, self._sup - 1)
+        elif tag == "a":
+            if self._noterefs:
+                self._noterefs.pop()
+        elif tag == "span":
+            self._resolve_number_span()
+        elif tag == "p":
+            self._close_paragraph()
+
+    def handle_data(self, data: str) -> None:
+        if not self._in_paragraph or self._hidden or self._sup or self._declined_p:
+            return
+        if self._noterefs and any(self._noterefs):
+            return
+        if self._number_parts is not None:
+            self._number_parts.append(data)
+            return
+        if not self._seen and not data.strip():
+            return
+        self._seen = True
+        self._buffer.append(data)
+
+    def _resolve_number_span(self) -> None:
+        """Judge a closing span: a verse number, or just prose in a span."""
+        if self._number_parts is None:
+            return
+        parts, self._number_parts = self._number_parts, None
+        text = "".join(parts).strip()
+        if self._declined_p:
+            return
+        if self._p_div > 0:
+            return
+        number: int | None = None
+        range_end: int | None = None
+        if text.isdigit():
+            number = int(text)
+        else:
+            span = _RANGE_SPAN.match(text)
+            if span and int(span.group(2)) - int(span.group(1)) <= _MAX_RANGE_SPAN:
+                number, range_end = int(span.group(1)), int(span.group(2))
+        if number is None:
+            self._buffer.extend(parts)
+            self._seen = True
+            return
+        if self._p_first_digits is None:
+            self._p_first_digits = number
+        context = self._book is not None and self._chapter is not None
+        # A translation may simply not have the next number (NLT leaves out
+        # John 5:4), so a small forward jump is the number itself, not damage.
+        # A large jump means a paragraph was lost somewhere and guessing would
+        # misfile the text, so it declines like any other out-of-sequence lead.
+        if context and self._next_verse < number <= self._next_verse + _MAX_VERSE_JUMP:
+            self.absent_verses += number - self._next_verse
+        elif not context or number != self._next_verse:
+            if self._span_leading and number != 1:
+                self._declined_p = True
+                self.declined["a verse number out of sequence"] += 1
+                self._buffer = []
+            else:
+                self._buffer.extend(parts)
+                self._seen = True
+            return
+        if self._open is not None:
+            if self._buffer:
+                if self._open_parts:
+                    self._open_parts.append(" ")
+                self._open_parts.extend(self._buffer)
+            self._flush_open()
+        elif self._buffer:
+            self.declined["prose with no position"] += 1
+        self._buffer = []
+        self._open = (self._book, self._chapter, number)
+        self._range_end = range_end
+        self._next_verse = (range_end if range_end is not None else number) + 1
+        self._open_parts = []
+        self._split_p = True
+
+    def _close_paragraph(self) -> None:
+        if not self._in_paragraph:
+            return
+        self._resolve_number_span()
+        text = _WHITESPACE.sub(" ", "".join(self._buffer)).strip()
+        css_class, ident = self._p_class, self._p_ident
+        p_div, links, declined_p, split_p = self._p_div, self._p_links, self._declined_p, self._split_p
+        first_digits = self._p_first_digits
+        self._in_paragraph = False
+        self._p_class = self._p_ident = ""
+        self._p_div = self._p_links = 0
+        self._buffer = []
+        self._seen = False
+        self._number_parts = None
+        self._span_leading = False
+        self._declined_p = False
+        self._split_p = False
+        self._p_first_digits = None
+
+        if declined_p:
+            return
+        if p_div > 0:
+            self.declined["editorial boxes"] += 1
+            return
+        if split_p:
+            if text and self._open is not None:
+                if self._open_parts:
+                    self._open_parts.append(" ")
+                self._open_parts.append(text)
+            return
+        if not text:
+            return
+        match = _HEADING_CHAPTER.match(text)
+        if match and (links or self._heading_like(css_class, ident)):
+            osis = resolve_book(str(match.group(1)))
+            if osis:
+                self._place(int(match.group(2)), BOOK_ORDER[osis])
+                return
+        if self._opens_from_leading_text(text):
+            return
+        if self._table > 0:
+            self.declined["tables and figures"] += 1
+            return
+        if self._heading_like(css_class, ident):
+            self.declined["section headings"] += 1
+            return
+        if self._open is None:
+            if first_digits == 1:
+                self._stashed.setdefault(1, _strip_numbered_label(text))
+            else:
+                self.declined["prose with no position"] += 1
+            return
+        if self._open_parts:
+            self._open_parts.append(" ")
+        self._open_parts.append(text)
+
+    def _opens_from_leading_text(self, text: str) -> bool:
+        """Open a verse when the paragraph *starts* with its number as text.
+
+        The same judgement the superscript span gets, for layouts that set
+        "5-8 The divisions..." as ordinary prose; the number is navigation and
+        is stripped, the rest is the verse. Returns False when the text is not
+        a usable leading number so the ordinary heading/prose rules apply.
+        """
+        lead = _LEADING_NUMBER.match(text)
+        if not lead:
+            return False
+        first = int(lead.group(1))
+        last = int(lead.group(2)) if lead.group(2) else first
+        if last < first or last - first > _MAX_RANGE_SPAN:
+            return False
+        if self._book is None or self._chapter is None:
+            return False
+        if not self._next_verse <= first <= self._next_verse + _MAX_VERSE_JUMP:
+            return False
+        if first > self._next_verse:
+            self.absent_verses += first - self._next_verse
+        self._flush_open()
+        self._open = (self._book, self._chapter, first)
+        self._range_end = last if last > first else None
+        self._next_verse = last + 1
+        rest = text[lead.end():].strip()
+        self._open_parts = [rest] if rest else []
+        return True
+
+    def _heading_like(self, css_class: str, ident: str) -> bool:
+        """Is this paragraph a heading rather than prose?
+
+        The stylesheet is the authority. When the archive ships no stylesheet
+        at all the classes say nothing, so an id-bearing paragraph stands in --
+        section titles carry their own id while verse text carries none; the
+        observed continuation ids all start with "page" and are exempt.
+        """
+        if css_class and css_class in self._headings:
+            return True
+        if not self._headings and ident and not ident.lower().startswith("page"):
+            return True
+        return False
+
+    def _place(self, chapter: int, book: int) -> None:
+        self._flush_open()
+        self._book = book
+        self._chapter = chapter
+        self._next_verse = 1
+        opening = self._stashed.pop(1, None)
+        self._stashed.clear()
+        if opening:
+            self._open = (book, chapter, 1)
+            self._range_end = None
+            self._open_parts = [opening]
+            self._next_verse = 2
+
+    def _flush_open(self) -> None:
+        if self._open is None:
+            self._range_end = None
+            return
+        key, parts = self._open, self._open_parts
+        last = self._range_end if self._range_end is not None else key[2]
+        self._open = None
+        self._range_end = None
+        self._open_parts = []
+        text = _WHITESPACE.sub(" ", "".join(parts)).strip()
+        if not text:
+            self.declined["a verse that carried no text"] += 1
+            return
+        # A ranged paragraph ("3-4") is the whole text of every number it
+        # names, so each number gets it rather than leaving a hole behind.
+        for number in range(key[2], last + 1):
+            verse_key = (key[0], key[1], number)
+            if verse_key in self.verses:
+                self.declined["a repeated verse"] += 1
+                continue
+            self.verses[verse_key] = text
+
+    def close(self) -> None:
+        super().close()
+        if self._in_paragraph:
+            self._close_paragraph()
+        self._flush_open()
+        if self._stashed:
+            self.declined["a verse waiting for a heading that never came"] += len(self._stashed)
+            self._stashed.clear()
+
+
 def _documents(path: str) -> list[tuple[str, str]]:
     """Every html document in the archive paired with its decoded text."""
     try:
@@ -528,12 +936,16 @@ def _documents(path: str) -> list[tuple[str, str]]:
 def extract(path: str) -> dict:
     """Read every verse and every study note out of the epub and report gaps.
 
-    When the archive carries no verse anchors at all, the same bytes are then
+    When the archive carries no verse anchors at all, the same bytes are first
     read as a commentary: section titles that name a passage become notes keyed
     to that passage, and the result is ``mode="commentary"`` so the importer
-    knows there is no translation to install. An anchored study Bible never
-    takes that path, and a file with neither anchors nor sections keeps the
-    ordinary empty result so the importer refuses it by name.
+    knows there is no translation to install. If that finds nothing either, the
+    bytes are read once more as a numbered translation -- chapters headed
+    ``"<Book> <chapter>"`` with the verse number inside the text -- because a
+    typeset EPUB has structure even when it has no anchors. Only a file with
+    anchors, sections or a consistent verse numbering keeps the ordinary
+    verse-mode result; anything less is refused by name with its per-book
+    report rather than imported as a partial or guessed text.
     """
     verses: dict[tuple[int, int, int], str] = {}
     links: dict[tuple[int, int, int], list[str]] = {}
@@ -564,6 +976,47 @@ def extract(path: str) -> dict:
     reports: list[BookReport] = []
     warnings: list[str] = []
     total_books = len(BOOKS)
+
+    if not verses:
+        commentary = _CommentaryHarvester()
+        for name, markup in documents:
+            commentary.feed(markup)
+            commentary.close()
+        if commentary.notes:
+            if commentary.unanchored_paragraphs:
+                warnings.append(
+                    f"{commentary.unanchored_paragraphs} paragraphs carry no passage heading "
+                    "(introductions and prefaces), so they were not filed as notes"
+                )
+            return {
+                "path": path,
+                "title": _title_of(path),
+                "books": {},
+                "flat": {},
+                "notes": commentary.notes,
+                "study": StudyReport(),
+                "reports": [],
+                "warnings": warnings,
+                "verse_count": 0,
+                "mode": "commentary",
+            }
+        numbered = _NumberedHarvester(_heading_classes(path))
+        for name, markup in documents:
+            numbered.feed(markup)
+            numbered.close()
+        if numbered.verses:
+            verses = numbered.verses
+            if numbered.absent_verses:
+                warnings.append(
+                    f"{numbered.absent_verses} verse numbers are absent from this translation "
+                    "(the next numbered verse was taken at face value)"
+                )
+            if numbered.declined:
+                named = ", ".join(f"{reason}: {count}" for reason, count in sorted(numbered.declined.items()))
+                warnings.append(
+                    f"{sum(numbered.declined.values())} paragraphs were not kept as verse text "
+                    f"while reading numbered paragraphs ({named})"
+                )
 
     for number, entry in enumerate(BOOKS, start=1):
         osis = entry["osis"]
@@ -596,30 +1049,6 @@ def extract(path: str) -> dict:
 
     for number in sorted({b for b, _, _ in verses} - set(range(1, total_books + 1))):
         warnings.append(f"verse anchors reference book position {number}, which is not in the 66-book canon")
-
-    if not verses:
-        commentary = _CommentaryHarvester()
-        for name, markup in documents:
-            commentary.feed(markup)
-            commentary.close()
-        if commentary.notes:
-            if commentary.unanchored_paragraphs:
-                warnings.append(
-                    f"{commentary.unanchored_paragraphs} paragraphs carry no passage heading "
-                    "(introductions and prefaces), so they were not filed as notes"
-                )
-            return {
-                "path": path,
-                "title": _title_of(path),
-                "books": {},
-                "flat": {},
-                "notes": commentary.notes,
-                "study": StudyReport(),
-                "reports": [],
-                "warnings": warnings,
-                "verse_count": 0,
-                "mode": "commentary",
-            }
 
     return {
         "path": path,
@@ -725,8 +1154,3 @@ def to_source(result: dict) -> list[dict]:
         {"name": BOOK_BY_OSIS[osis]["name"], "chapters": chapters}
         for osis, chapters in result["books"].items()
     ]
-
-
-def to_corpus_source(result: dict) -> tuple[str, list[tuple[str, list[list[str]]]]]:
-    """Return the canonical payload ``import_corpus`` parses."""
-    return "", [(BOOK_BY_OSIS[osis]["name"], chapters) for osis, chapters in result["books"].items()]

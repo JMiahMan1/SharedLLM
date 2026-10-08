@@ -9991,8 +9991,21 @@ async def _bible_import_response(resp) -> JSONResponse:
     A refusal is a 422 whether it arrived as one or as a report body saying
     ``status: "failed"``, so a browser fetch cannot treat "that PDF is missing
     Exodus" as a success and clear the form.
+
+    A body that is not JSON at all -- an unhandled crash in the bible service
+    answers plain ``Internal Server Error`` -- is reported with its status and
+    its text instead of raising a decode error here, because the admin page
+    shows ``detail`` and a JSONDecodeError in this middleware shows the
+    operator nothing about what actually broke.
     """
-    body = await resp.json(content_type=None)
+    try:
+        body = await resp.json(content_type=None)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raw = (await resp.read()).decode("utf-8", errors="replace").strip()
+        raise HTTPException(
+            status_code=resp.status if resp.status >= 400 else 502,
+            detail=f"The bible service returned a non-JSON response: {raw[:400] or 'empty body'}",
+        ) from None
     if isinstance(body, dict) and body.get("status") == "failed":
         return JSONResponse(status_code=422, content=body)
     if resp.status >= 400:
