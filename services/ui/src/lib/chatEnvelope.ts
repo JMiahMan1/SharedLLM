@@ -11,7 +11,8 @@
  * must never blank out a conversation.
  */
 
-export type EnvelopeKind = 'text' | 'activity' | 'game' | 'creation' | 'system';
+/** `assistant` marks a Jarvis answer: drawn as Jarvis's own bubble, no card. */
+export type EnvelopeKind = 'text' | 'activity' | 'game' | 'creation' | 'system' | 'assistant';
 
 export interface ChatEnvelope {
   kind: EnvelopeKind;
@@ -30,7 +31,7 @@ export interface ChatEnvelope {
 
 const FENCE = '```jarvis-envelope';
 
-const KINDS: EnvelopeKind[] = ['text', 'activity', 'game', 'creation', 'system'];
+const KINDS: EnvelopeKind[] = ['text', 'activity', 'game', 'creation', 'system', 'assistant'];
 
 /** Append an envelope to human-readable text. */
 export function encodeEnvelope(text: string, envelope: ChatEnvelope): string {

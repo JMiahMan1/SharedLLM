@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  asksJarvis,
   dayLabel,
+  isAssistant,
+  receiptFor,
+  splitRichText,
   groupIntoRuns,
   isEmojiOnly,
   isMine,
@@ -66,5 +70,33 @@ describe('chat model', () => {
     expect(reactionCounts({ '❤️': [{ actorId: 'a' }, { actorId: 'b' }] })).toEqual({ '❤️': 2 });
     expect(reactionCounts([{ reaction: '🎉' }, { reaction: '🎉' }])).toEqual({ '🎉': 2 });
     expect(reactionCounts(undefined)).toEqual({});
+  });
+
+  it('fills placeholders: a file becomes an attachment, a mention a chip, a URL a link', () => {
+    const parts = splitRichText('Hi {mention-user1}, see {file} at https://example.com/x.', {
+      'mention-user1': { type: 'user', id: 'michele', name: 'Michele' },
+      file: { type: 'file', id: '9', name: 'a.jpg', mimetype: 'image/jpeg' },
+    });
+    expect(parts.map((p) => p.kind)).toEqual(['text', 'mention', 'text', 'file', 'text', 'link', 'text']);
+    expect(parts[5]).toMatchObject({ href: 'https://example.com/x' });
+  });
+
+  it('knows a Jarvis answer and a Jarvis question', () => {
+    expect(isAssistant({ message: 'Hi\n\n```jarvis-envelope\n{"kind":"assistant","title":"Jarvis"}\n```jarvis-envelope' })).toBe(true);
+    expect(isAssistant({ message: 'Hi' })).toBe(false);
+    expect(isMine({ actor_id: 'jeremiah', message: 'A\n\n```jarvis-envelope\n{"kind":"assistant","title":"Jarvis"}\n```jarvis-envelope' }, me)).toBe(false);
+    expect(asksJarvis('  @jarvis hi')).toBe(true);
+    expect(asksJarvis('hi @Jarvis')).toBe(false);
+  });
+
+  it('says Sent until everyone has read it, then Read', () => {
+    expect(receiptFor({ id: 10 }, 9)).toBe('sent');
+    expect(receiptFor({ id: 10 }, 10)).toBe('read');
+    expect(receiptFor({ id: 'local-1', pending: 'sending' }, 99)).toBe('sending');
+  });
+
+  it('previews attachments and Jarvis answers readably in the inbox', () => {
+    expect(previewLine({ token: 'a', display_name: 'Fam', type: 2, last_message: '{file}', last_message_actor: 'Michele', last_message_actor_id: 'michele' }, me)).toBe('Michele: 📎 Attachment');
+    expect(previewLine({ token: 'a', display_name: 'Fam', type: 2, last_message: 'Tacos\n\n```jarvis-envelope\n{"kind":"assistant","title":"Jarvis"}\n```jarvis-envelope', last_message_actor_id: 'jeremiah' }, me)).toBe('Jarvis: Tacos');
   });
 });

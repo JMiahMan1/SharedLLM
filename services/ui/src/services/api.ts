@@ -1597,6 +1597,47 @@ export const api = {
     return resp.data;
   },
 
+  /** Share a photo or file into a conversation (base64, up to 25 MB). */
+  async sendTalkFile(payload: {
+    token: string;
+    file_base64: string;
+    mime_type: string;
+    file_name: string;
+    caption?: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/file', payload, { timeout: 180_000 });
+    return resp.data;
+  },
+
+  /** A chat attachment's bytes (or its thumbnail), fetched as the caller. */
+  async getTalkFileBlob(params: { path?: string; file_id?: string | number; preview?: boolean; size?: number }): Promise<Blob> {
+    const query = new URLSearchParams();
+    if (params.path) query.set('path', params.path);
+    if (params.file_id !== undefined) query.set('file_id', String(params.file_id));
+    if (params.preview) query.set('preview', '1');
+    if (params.size) query.set('size', String(params.size));
+    const resp = await apiClient.get(`/api/communication/talk/file?${query.toString()}`, { responseType: 'blob', timeout: 180_000 });
+    return resp.data;
+  },
+
+  async editTalkMessage(payload: { token: string; message_id: number; message: string; as_user?: 'admin' }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/messages/edit', payload);
+    return resp.data;
+  },
+
+  async deleteTalkMessage(payload: { token: string; message_id: number; as_user?: 'admin' }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/messages/delete', payload);
+    return resp.data;
+  },
+
+  async getTalkMentions(token: string, search: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.get(
+      `/api/communication/talk/mentions?token=${encodeURIComponent(token)}&search=${encodeURIComponent(search)}`,
+    );
+    return resp.data;
+  },
+
   async getArcadeGames(): Promise<ArcadeGamesResponse> {
     const resp = await apiClient.get('/api/arcade/games');
     return resp.data;

@@ -1,5 +1,9 @@
 import { Activity, Gamepad2, Palette, Sparkles, Info } from 'lucide-react';
 import { decodeEnvelope, type ChatEnvelope } from '../../lib/chatEnvelope';
+import RichText from './RichText';
+import type { TalkParameter } from './chatModel';
+
+const NOBODY: ReadonlySet<string> = new Set();
 
 const KIND_STYLE: Record<ChatEnvelope['kind'], { icon: typeof Activity; ring: string; tint: string }> = {
   text: { icon: Info, ring: 'border-white/10', tint: 'text-slate-200' },
@@ -7,6 +11,7 @@ const KIND_STYLE: Record<ChatEnvelope['kind'], { icon: typeof Activity; ring: st
   game: { icon: Gamepad2, ring: 'border-purple-400/30', tint: 'text-purple-200' },
   creation: { icon: Palette, ring: 'border-pink-400/30', tint: 'text-pink-200' },
   system: { icon: Info, ring: 'border-white/10', tint: 'text-slate-300' },
+  assistant: { icon: Sparkles, ring: 'border-white/10', tint: 'text-slate-200' },
 };
 
 /**
@@ -14,18 +19,36 @@ const KIND_STYLE: Record<ChatEnvelope['kind'], { icon: typeof Activity; ring: st
  * an envelope. A malformed envelope falls back to the readable text, so a bad
  * card can never blank out a conversation.
  */
-export default function EnvelopeBody({ raw, fallback }: { raw?: string | null; fallback?: string | null }) {
+export default function EnvelopeBody({
+  raw,
+  fallback,
+  parameters,
+  myActorIds = NOBODY,
+  voice = false,
+}: {
+  raw?: string | null;
+  fallback?: string | null;
+  parameters?: Record<string, TalkParameter>;
+  myActorIds?: ReadonlySet<string>;
+  voice?: boolean;
+}) {
   const { text, envelope } = decodeEnvelope(raw);
+  const body = text || fallback || 'Empty message';
 
-  if (!envelope) {
-    return <>{text || fallback || 'Empty message'}</>;
+  // A Jarvis answer is plain text; who said it is shown by the bubble.
+  if (!envelope || envelope.kind === 'assistant') {
+    return <RichText text={body} parameters={parameters} myActorIds={myActorIds} voice={voice} />;
   }
 
   const { icon: Icon, ring, tint } = KIND_STYLE[envelope.kind] ?? KIND_STYLE.text;
 
   return (
     <span className="block space-y-2" data-testid={`envelope-${envelope.kind}`}>
-      {text && <span className="block whitespace-pre-wrap">{text}</span>}
+      {text && (
+        <span className="block whitespace-pre-wrap">
+          <RichText text={text} parameters={parameters} myActorIds={myActorIds} />
+        </span>
+      )}
       <span className={`block rounded-xl border ${ring} bg-white/5 p-3 space-y-2`}>
         <span className="flex items-center gap-2">
           <Icon size={15} className={tint} />

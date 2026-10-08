@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, Loader2, Phone, PhoneOff, Plus, RefreshCw, X } from 'lucide-react';
+import { ChevronLeft, ImageIcon, Loader2, Phone, PhoneOff, Plus, RefreshCw, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
@@ -10,8 +10,11 @@ import MessageThread from './MessageThread';
 import Composer from './Composer';
 import PollStrip, { type TalkPoll } from './PollStrip';
 import {
+  asksJarvis,
   avatarTint,
   initials,
+  isAssistant,
+  MAX_ATTACHMENT_BYTES,
   reactionCounts,
   sortMessages,
   type TalkConversation,
@@ -20,10 +23,22 @@ import {
 
 const EMPTY_ARRAY: never[] = [];
 
+/** How long to show "Jarvis is thinking" before giving up on an answer. */
+const JARVIS_WAIT_MS = 3 * 60 * 1000;
+
 function detailList<T>(response: ExecutionResponse | undefined, key: string): T[] {
   const detail = response?.detail as Record<string, unknown> | undefined;
   const value = detail?.[key];
   return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',', 2)[1] || '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
 interface ChatPanelProps {
@@ -31,21 +46,29 @@ interface ChatPanelProps {
 }
 
 /**
- * Family chat on Nextcloud Talk.
+ * Family chat on Nextcloud Talk, with Jarvis in the room.
  *
  * Laid out like the messengers people already know (WhatsApp, Messenger,
  * iMessage): an inbox and a thread, which on a phone are two screens with a
- * back button and on a wide screen sit side by side. Text, voice notes,
- * replies, reactions, polls and calls all go through Talk, so these are the
- * same conversations the family uses in Nextcloud.
+ * back button and on a wide screen sit side by side. Text, photos, files,
+ * voice notes, replies, reactions, edits, polls and calls all go through
+ * Talk, so these are the same conversations the family uses in Nextcloud.
+ * Starting a message with @Jarvis asks the assistant, which answers in the
+ * thread.
  */
 export default function ChatPanel({ className = '' }: ChatPanelProps) {
   const queryClient = useQueryClient();
   const [selectedToken, setSelectedToken] = useState('');
   const [mobileView, setMobileView] = useState<'list' | 'thread'>('list');
   const [replyTo, setReplyTo] = useState<TalkMessage | null>(null);
+  const [editing, setEditing] = useState<TalkMessage | null>(null);
   const [pending, setPending] = useState<Record<string, TalkMessage[]>>({});
   const [reactionOverrides, setReactionOverrides] = useState<Record<string, Record<string, number>>>({});
+  const [staged, setStaged] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [jarvisAsked, setJarvisAsked] = useState<Record<string, number>>({});
+  const [now, setNow] = useState(() => Date.now());
+  const [unreadMarkers, setUnreadMarkers] = useState<Record<string, number | undefined>>({});
   const [showPollForm, setShowPollForm] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
@@ -55,10 +78,7 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
   const myActorIds = useMemo(
-    () =>
-      new Set(
-        [me?.nextcloud_user, me?.username].filter((v): v is string => Boolean(v)).map((v) => v.toLowerCase()),
-      ),
+    () => new Set([me?.nextcloud_user, me?.username].filter((v): v is string => Boolean(v)).map((v) => v.toLowerCase())),
     [me?.nextcloud_user, me?.username],
   );
 
@@ -81,6 +101,9 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
   const [sendAs, setSendAs] = useConversationSendAs(isAdmin, activeToken);
   const asUser = sendAs === 'admin' ? ('admin' as const) : undefined;
 
+  const askedAt = jarvisAsked[activeToken];
+  const waitingForJarvis = askedAt !== undefined && now - askedAt < JARVIS_WAIT_MS;
+
   const { data: polls = EMPTY_ARRAY, refetch: refetchPolls } = useQuery<ExecutionResponse, Error, TalkPoll[]>({
     queryKey: ['talk-polls', activeToken],
     queryFn: () => api.getTalkPolls(activeToken),
@@ -93,27 +116,55 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
     queryKey: ['talk-messages', activeToken],
     queryFn: () => api.getTalkMessages(activeToken),
     enabled: Boolean(activeToken),
-    refetchInterval: 10000,
+    // Poll briskly while Jarvis is working so the answer lands promptly.
+    refetchInterval: waitingForJarvis ? 2500 : 10000,
     select: (response) => sortMessages(detailList<TalkMessage>(response, 'messages')),
   });
 
   const messages = useMemo(() => [...fetched, ...(pending[activeToken] || [])], [fetched, pending, activeToken]);
 
+  // Jarvis has answered once an assistant message newer than the question shows up.
+  const jarvisAnswered =
+    askedAt !== undefined && fetched.some((m) => isAssistant(m) && (m.timestamp ?? 0) * 1000 >= askedAt - 5000);
+  const jarvisThinking = waitingForJarvis && !jarvisAnswered;
+
+  // A clock for the thinking indicator's timeout, ticking only while it shows.
+  useEffect(() => {
+    if (!jarvisThinking) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 5000);
+    return () => window.clearInterval(timer);
+  }, [jarvisThinking]);
+
   const markRead = useMutation({
     mutationFn: (token: string) => api.markTalkRead(token, asUser),
+    // Remember where you were before this visit, for the "New messages" line.
+    onMutate: (token: string) => {
+      const conversation = conversations.find((c) => c.token === token);
+      setUnreadMarkers((current) => (token in current ? current : { ...current, [token]: conversation?.last_read }));
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['talk-conversations'] }),
   });
 
-  // Opening a conversation clears its badge -- that is the read marker.
+  // Opening a conversation clears its badge -- that is the read marker. Once
+  // per conversation per new activity: the mutation object changes every
+  // render, and the unread count lags the request, so keying on either alone
+  // re-sent the read in a loop.
+  const markedRef = useRef<string>('');
+  const unread = activeConversation?.unread_messages ?? 0;
+  const readKey = `${activeToken}:${activeConversation?.last_message_timestamp ?? activeConversation?.last_activity ?? ''}`;
+  const { mutate: markReadNow } = markRead;
   useEffect(() => {
-    if (!activeToken || markRead.isPending) return;
-    if ((activeConversation?.unread_messages ?? 0) > 0) markRead.mutate(activeToken);
-  }, [activeToken, activeConversation?.unread_messages, markRead]);
+    if (!activeToken || unread <= 0 || markedRef.current === readKey) return;
+    markedRef.current = readKey;
+    markReadNow(activeToken);
+  }, [activeToken, unread, readKey, markReadNow]);
 
   const select = (token: string) => {
     setSelectedToken(token);
     setMobileView('thread');
     setReplyTo(null);
+    setEditing(null);
+    setStaged([]);
     setShowPollForm(false);
     setInCall(false);
     setCallError(null);
@@ -132,18 +183,22 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
   const updatePending = (token: string, fn: (list: TalkMessage[]) => TalkMessage[]) =>
     setPending((current) => ({ ...current, [token]: fn(current[token] || []) }));
 
+  const refreshThread = (token: string) => {
+    queryClient.invalidateQueries({ queryKey: ['talk-messages', token] });
+    queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
+  };
+
   // Optimistic send: the bubble appears at once and is replaced by the real
   // message on the next fetch; a failure stays in the feed with Retry.
   const deliver = async (token: string, local: TalkMessage) => {
     updatePending(token, (list) => [...list.filter((m) => m.id !== local.id), { ...local, pending: 'sending' }]);
     try {
-      const res = await api.sendTalkMessage({
-        token,
-        message: local.message || '',
-        as_user: asUser,
-        reply_to: local.reply_to,
-      });
+      const res = await api.sendTalkMessage({ token, message: local.message || '', as_user: asUser, reply_to: local.reply_to });
       if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Message failed to send');
+      if (asksJarvis(local.message || '')) {
+        setNow(Date.now());
+        setJarvisAsked((current) => ({ ...current, [token]: Date.now() }));
+      }
       await queryClient.invalidateQueries({ queryKey: ['talk-messages', token] });
       updatePending(token, (list) => list.filter((m) => m.id !== local.id));
       queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
@@ -158,27 +213,74 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
       toast.error('Pick a conversation first');
       return;
     }
+    const parentId = typeof replyTo?.id === 'number' ? replyTo.id : undefined;
     const local: TalkMessage = {
       id: `local-${Date.now()}`,
       actor_display_name: 'You',
       message: text,
       timestamp: Math.floor(Date.now() / 1000),
-      reply_to: typeof replyTo?.id === 'number' ? replyTo.id : undefined,
-      parent:
-        typeof replyTo?.id === 'number'
-          ? { id: replyTo.id, actor_display_name: replyTo.actor_display_name, message: replyTo.message }
-          : null,
+      reply_to: parentId,
+      parent: parentId ? { id: parentId, actor_display_name: replyTo?.actor_display_name, message: replyTo?.message } : null,
     };
     setReplyTo(null);
     void deliver(activeToken, local);
   };
+
+  const saveEdit = async (text: string) => {
+    const target = editing;
+    setEditing(null);
+    if (!target || typeof target.id !== 'number') return;
+    try {
+      const res = await api.editTalkMessage({ token: activeToken, message_id: target.id, message: text, as_user: asUser });
+      if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Could not edit the message');
+      refreshThread(activeToken);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not edit the message');
+    }
+  };
+
+  const remove = async (message: TalkMessage) => {
+    if (typeof message.id !== 'number') return;
+    try {
+      const res = await api.deleteTalkMessage({ token: activeToken, message_id: message.id, as_user: asUser });
+      if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Could not delete the message');
+      refreshThread(activeToken);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not delete the message');
+    }
+  };
+
+  const sendFiles = useMutation({
+    mutationFn: async (caption: string) => {
+      const files = [...staged];
+      for (const [index, file] of files.entries()) {
+        const res = await api.sendTalkFile({
+          token: activeToken,
+          file_base64: await fileToBase64(file),
+          mime_type: file.type || 'application/octet-stream',
+          file_name: file.name,
+          // The caption rides on the first file, like a photo album's.
+          caption: index === 0 && caption ? caption : undefined,
+          as_user: asUser,
+        });
+        if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || `Could not send ${file.name}`);
+      }
+      return files.length;
+    },
+    onSuccess: (count) => {
+      setStaged([]);
+      toast.success(count === 1 ? 'Sent' : `Sent ${count} files`);
+      refreshThread(activeToken);
+    },
+    onError: (error: Error) => toast.error(error.message || 'Could not send the attachment'),
+  });
 
   const sendVoice = useMutation({
     mutationFn: (payload: { audio_base64: string; mime_type: string; caption?: string }) =>
       api.sendTalkVoice({ token: activeToken, ...payload, file_name: `voice-${Date.now()}.webm`, as_user: asUser }),
     onSuccess: () => {
       toast.success('Voice message sent');
-      queryClient.invalidateQueries({ queryKey: ['talk-messages', activeToken] });
+      refreshThread(activeToken);
     },
     onError: (error: Error) => toast.error(error.message || 'Voice message failed'),
   });
@@ -203,8 +305,7 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
     setReactionOverrides((current) => ({ ...current, [key]: { ...before, [emoji]: (before[emoji] || 0) + 1 } }));
     try {
       const res = await api.reactToTalkMessage({ token: activeToken, message_id: message.id, reaction: emoji, as_user: asUser });
-      const raw = (res.detail as { reactions?: unknown } | undefined)?.reactions;
-      const counts = reactionCounts(raw);
+      const counts = reactionCounts((res.detail as { reactions?: unknown } | undefined)?.reactions);
       if (Object.keys(counts).length > 0) setReactionOverrides((current) => ({ ...current, [key]: counts }));
     } catch {
       setReactionOverrides((current) => ({ ...current, [key]: before }));
@@ -261,7 +362,33 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
       </aside>
 
       {/* Thread */}
-      <section className={`min-h-0 min-w-0 flex-col lg:flex ${mobileView === 'thread' ? 'flex' : 'hidden'}`}>
+      <section
+        className={`relative min-h-0 min-w-0 flex-col lg:flex ${mobileView === 'thread' ? 'flex' : 'hidden'}`}
+        onDragOver={(event) => {
+          if (!activeToken || !event.dataTransfer.types.includes('Files')) return;
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={(event) => {
+          if (event.currentTarget === event.target) setDragging(false);
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer.files.length) return;
+          event.preventDefault();
+          setDragging(false);
+          const files = Array.from(event.dataTransfer.files).filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
+          if (files.length < event.dataTransfer.files.length) toast.error('Files over 25 MB were left out');
+          setStaged((current) => [...current, ...files]);
+        }}
+      >
+        {dragging && (
+          <div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed border-purple-400/70 bg-purple-500/15 backdrop-blur-sm">
+            <p className="flex items-center gap-2 text-sm font-semibold text-purple-100">
+              <ImageIcon size={18} /> Drop to send to {name}
+            </p>
+          </div>
+        )}
+
         <header className="flex shrink-0 items-center gap-2 border-b border-white/5 px-2 py-2 sm:px-3">
           <button
             type="button"
@@ -282,16 +409,16 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
           )}
           <div className="min-w-0 flex-1">
             <p className="truncate font-semibold text-slate-100">{name}</p>
-            <p className="truncate text-[11px] text-slate-500">
-              {callError ?? (inCall ? 'In call' : activeConversation?.description || (isGroup ? 'Group chat' : 'Direct message'))}
+            <p className={`truncate text-[11px] ${jarvisThinking ? 'text-fuchsia-300' : 'text-slate-500'}`}>
+              {jarvisThinking
+                ? 'Jarvis is thinking…'
+                : callError ?? (inCall ? 'In call' : activeConversation?.description || (isGroup ? 'Group chat · @Jarvis to ask' : 'Direct message'))}
             </p>
           </div>
           {activeToken && (
             <button
               type="button"
-              className={`flex min-h-10 min-w-10 items-center justify-center rounded-full ${
-                inCall ? 'bg-rose-500 text-white' : 'text-slate-300 hover:bg-white/10'
-              }`}
+              className={`flex min-h-10 min-w-10 items-center justify-center rounded-full ${inCall ? 'bg-rose-500 text-white' : 'text-slate-300 hover:bg-white/10'}`}
               onClick={() => call.mutate(inCall)}
               disabled={call.isPending}
               aria-pressed={inCall}
@@ -305,7 +432,7 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
             type="button"
             className="flex min-h-10 min-w-10 items-center justify-center rounded-full text-slate-400 hover:bg-white/10"
             aria-label="Refresh messages"
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['talk-messages', activeToken] })}
+            onClick={() => refreshThread(activeToken)}
           >
             <RefreshCw size={15} className={loadingMessages ? 'animate-spin' : ''} />
           </button>
@@ -318,14 +445,25 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
           messages={messages}
           myActorIds={myActorIds}
           isGroup={isGroup}
+          lastCommonRead={activeConversation?.last_common_read}
+          unreadAfter={unreadMarkers[activeToken]}
+          jarvisThinking={jarvisThinking}
           reactionCounts={(message) =>
             (typeof message.id === 'number' && reactionOverrides[String(message.id)]) || reactionCounts(message.reactions)
           }
           onReact={(message, emoji) => void react(message, emoji)}
-          onReply={setReplyTo}
+          onReply={(message) => {
+            setEditing(null);
+            setReplyTo(message);
+          }}
+          onEdit={(message) => {
+            setReplyTo(null);
+            setEditing(message);
+          }}
+          onDelete={(message) => void remove(message)}
           onRetry={(message) => void deliver(activeToken, message)}
           onDiscard={(message) => updatePending(activeToken, (list) => list.filter((m) => m.id !== message.id))}
-          emptyText={activeToken ? 'No messages yet. Say hello!' : 'Pick a conversation to see messages.'}
+          emptyText={activeToken ? 'No messages yet. Say hello, or ask @Jarvis something.' : 'Pick a conversation to see messages.'}
         />
 
         {showPollForm && (
@@ -378,9 +516,13 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
         )}
 
         <Composer
+          token={activeToken}
           disabled={!activeToken}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
+          editing={editing}
+          onCancelEdit={() => setEditing(null)}
+          onSaveEdit={(text) => void saveEdit(text)}
           onSend={send}
           onSendVoice={async (payload) => {
             try {
@@ -391,6 +533,18 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
             }
           }}
           sendingVoice={sendVoice.isPending}
+          staged={staged}
+          onStage={(files) => setStaged((current) => [...current, ...files])}
+          onUnstage={(index) => setStaged((current) => current.filter((_, i) => i !== index))}
+          onSendFiles={async (caption) => {
+            try {
+              await sendFiles.mutateAsync(caption);
+              return true;
+            } catch {
+              return false;
+            }
+          }}
+          sendingFiles={sendFiles.isPending}
           onNewPoll={() => setShowPollForm(true)}
           isAdmin={isAdmin}
           sendAs={sendAs}
