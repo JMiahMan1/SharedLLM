@@ -37,7 +37,9 @@ import type {
   StorageStatus,
   RavenMission,
   WorkspaceAskMode,
-  WorkspaceAskResult,
+  WorkspaceChat,
+  WorkspaceChatEvent,
+  WorkspaceChatSummary,
   RavenConfig,
   MediaGroup,
   LightCluster,
@@ -246,6 +248,24 @@ const normalizeUser = (raw: UserProfileRaw): UserProfile => ({
   is_admin: Boolean(raw.is_admin),
   voice_id: raw.voice_id ?? raw.voice_fingerprint ?? null,
 });
+
+/**
+ * Base URL and auth headers for a request that bypasses `apiClient` -- one that
+ * needs its own timeout, or a streamed body `fetch` can read but axios cannot.
+ */
+function directRequestConfig(): { baseURL: string; headers: Record<string, string> } {
+  let baseURL = getBaseUrl();
+  if (Capacitor.isNativePlatform()) {
+    const serverUrl = storageGetSync('jarvis_server_url');
+    if (serverUrl) baseURL = serverUrl;
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = storageGetSync('jarvis_api_key');
+  const internalSecret = storageGetSync('internal_secret');
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (internalSecret) headers['X-Internal-Secret'] = internalSecret;
+  return { baseURL, headers };
+}
 
 const mapUserPayload = (data: Partial<UserProfile>) => {
   const payload: Record<string, unknown> = { ...data };
@@ -1823,30 +1843,64 @@ export const api = {
     return resp.data;
   },
 
-  /**
-   * Run the workspace composer against one of the three execution modes.
-   *
-   * `librarian` and `single_task` answer inline; `raven` dispatches a mission
-   * and returns its id instead. `auto` resolves server-side and reports which
-   * mode it chose in `resolved_mode`/`reason`.
-   */
-  // The turn is billed to the model, so it runs for far longer than the 15s
-  // axios default: every question was aborted client-side before the server had
-  // answered, which is exactly why the composer looked broken. The server keeps
-  // working after a client gives up, so the short timeout also orphaned real
-  // work. 640s follows the OCR and image-edit calls, the other two places a
-  // workspace waits on a model.
-  async askWorkspace(
-    workspaceId: string,
-    query: string,
-    mode: WorkspaceAskMode = 'auto',
-  ): Promise<WorkspaceAskResult> {
-    const resp = await apiClient.post(
-      `/api/workspaces/${workspaceId}/ask`,
-      { query, mode },
-      { timeout: 640_000 },
-    );
+  // Workspace chats: conversations that open as tabs and continue turn by turn.
+  async listWorkspaceChats(workspaceId: string): Promise<WorkspaceChatSummary[]> {
+    const resp = await apiClient.get(`/api/workspaces/${workspaceId}/chats`);
+    return resp.data?.chats ?? [];
+  },
+
+  async createWorkspaceChat(workspaceId: string, title?: string): Promise<WorkspaceChatSummary> {
+    const resp = await apiClient.post(`/api/workspaces/${workspaceId}/chats`, { title });
     return resp.data;
+  },
+
+  async getWorkspaceChat(workspaceId: string, chatId: string): Promise<WorkspaceChat> {
+    const resp = await apiClient.get(`/api/workspaces/${workspaceId}/chats/${chatId}`);
+    return resp.data;
+  },
+
+  async deleteWorkspaceChat(workspaceId: string, chatId: string): Promise<void> {
+    await apiClient.delete(`/api/workspaces/${workspaceId}/chats/${chatId}`);
+  },
+
+  /**
+   * Run one chat turn and hand each streamed event to `onEvent` as it arrives.
+   * Aborting `signal` stops the turn on the server too (it sees the stream close).
+   */
+  async streamWorkspaceChatTurn(
+    workspaceId: string,
+    chatId: string,
+    body: { message: string; mode: WorkspaceAskMode },
+    onEvent: (event: WorkspaceChatEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const { baseURL, headers } = directRequestConfig();
+    const resp = await fetch(`${baseURL || ''}/api/workspaces/${workspaceId}/chats/${chatId}/turn`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!resp.ok || !resp.body) {
+      const detail = await resp.json().catch(() => ({}));
+      throw new Error((detail as { detail?: string }).detail || `Chat turn failed (${resp.status})`);
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newline = buffer.indexOf('\n');
+      while (newline >= 0) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (line) onEvent(JSON.parse(line) as WorkspaceChatEvent);
+        newline = buffer.indexOf('\n');
+      }
+    }
+    if (buffer.trim()) onEvent(JSON.parse(buffer) as WorkspaceChatEvent);
   },
 
   async killRavenMission(id: number): Promise<{ status: string; message: string }> {
@@ -2631,16 +2685,7 @@ export const api = {
   // `face_image_path` is the donor face copied onto it. The server rejects a
   // swap prompt with no donor, so both images are required for a swap.
   async workspaceEditImage(workspaceId: string, payload: { prompt: string; image_path: string; face_image_path?: string; output_path?: string; model?: string; size?: string }): Promise<{ status: string; message?: string; detail?: { output_path?: string; face_swapped?: boolean; face_image_path?: string | null } }> {
-    let baseURL = getBaseUrl();
-    if (Capacitor.isNativePlatform()) {
-      const serverUrl = storageGetSync('jarvis_server_url');
-      if (serverUrl) baseURL = serverUrl;
-    }
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const token = storageGetSync('jarvis_api_key');
-    const internalSecret = storageGetSync('internal_secret');
-    if (token) headers.Authorization = `Bearer ${token}`;
-    if (internalSecret) headers['X-Internal-Secret'] = internalSecret;
+    const { baseURL, headers } = directRequestConfig();
     const resp = await axios.post(`/api/workspaces/${workspaceId}/images/edit`, payload, {
       baseURL,
       headers,
@@ -2671,16 +2716,7 @@ export const api = {
     message?: string;
     detail?: { full_text?: string; headline?: string; subtext?: string; badge?: string };
   }> {
-    let baseURL = getBaseUrl();
-    if (Capacitor.isNativePlatform()) {
-      const serverUrl = storageGetSync('jarvis_server_url');
-      if (serverUrl) baseURL = serverUrl;
-    }
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const token = storageGetSync('jarvis_api_key');
-    const internalSecret = storageGetSync('internal_secret');
-    if (token) headers.Authorization = `Bearer ${token}`;
-    if (internalSecret) headers['X-Internal-Secret'] = internalSecret;
+    const { baseURL, headers } = directRequestConfig();
     const resp = await axios.post(`/api/workspaces/${workspaceId}/ocr`, payload, {
       baseURL,
       headers,
