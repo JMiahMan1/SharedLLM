@@ -62,6 +62,39 @@ _STUDY_IDS = re.compile(r"^(comx?\d{8}|fn\d{4,6})$")
 # navigation, not prose, and it is stripped before the note is stored.
 _LEADING_REFS = re.compile(r"^[\d\s:;,.\u2013\u2014\-]+")
 
+# Inline markers that ride along with the verse text: the verse number itself,
+# cross-reference and footnote letters, chapter apparatus ("GENESIS 1" spans at
+# the head of a verse paragraph), and in-verse index terms. Measured across the
+# ESV, NIV and NKJV study-Bible exports; every name is a generic class, never a
+# translation code, so a new export that reuses these names is absorbed for
+# free. Suppressed the same way superscripts are -- spans and bare links alike.
+_MARKER_SPANS = frozenset({
+    "verse-num", "crossref", "footnote",
+    "ver", "ver-b", "book-name", "chapter-num",
+    "enref", "fnref", "idx",
+})
+
+# Headings (h1-h6) are pericope titles, never scripture. An export that sets
+# them inside an open verse would otherwise glue the title onto the verse text.
+_HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
+
+# Some exports glue the verse's own number to the first word of its text
+# ("1In the beginning"). The digits are only stripped when they equal the
+# verse's canonical position and are immediately followed by a letter or a
+# quote, so "20 men" (verse 2) and "1,600" are never mangled.
+_OWN_NUMBER_FOLLOW = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ\u2018\u201c\"'([")
+
+
+def _strip_own_number(text: str, verse: int) -> str:
+    digits = str(verse)
+    if (
+        text[: len(digits)] == digits
+        and len(text) > len(digits)
+        and text[len(digits)] in _OWN_NUMBER_FOLLOW
+    ):
+        return text[len(digits):].lstrip()
+    return text
+
 # Paragraph classes that are back matter or apparatus rather than verse text.
 # They are counted and reported so nothing disappears without being named.
 _BACK_MATTER = frozenset({
@@ -242,6 +275,17 @@ class _VerseHarvester(HTMLParser):
     commentary and footnotes are later attached to the verse they explain.
     ``skipped`` counts every paragraph class that was declined so the report can
     name material this extractor did not keep.
+
+    Three export shapes are absorbed here, all keyed on markup structure and
+    class names rather than any translation: a section heading that *carries*
+    the verse anchor (the ESV Study Bible parks ``id`` on ``<p class="heading">``
+    and puts the verse in the next paragraph) defers to that paragraph rather
+    than storing the heading as scripture; inline marker spans and bare marker
+    links (verse numbers, cross-reference and footnote letters, chapter
+    apparatus, index terms -- see ``_MARKER_SPANS``) are dropped like
+    superscripts; and h1-h6 pericope titles end the verse instead of gluing
+    their text onto it. A verse's own number glued to its first word is
+    stripped at flush when it matches the canonical position.
     """
 
     def __init__(self) -> None:
@@ -258,12 +302,16 @@ class _VerseHarvester(HTMLParser):
         self._in_paragraph = False
         self._paragraph_open = False
         self._after_verse = False
+        self._marker = 0
+        self._heading_anchor = False
+        self._after_heading = False
 
-    def _start(self, match: re.Match[str]) -> None:
+    def _start(self, match: re.Match[str], heading_anchor: bool = False) -> None:
         self._flush()
         self._verse = (int(match[1]), int(match[2]), int(match[3]))
         self._buffer = []
         self._targets = []
+        self._heading_anchor = heading_anchor
         if self._in_paragraph:
             self._after_verse = True
 
@@ -276,7 +324,10 @@ class _VerseHarvester(HTMLParser):
         if tag == "p":
             self._in_paragraph = True
             css = _class_of(data)
-            if not css and self._after_verse:
+            if self._after_heading and self._verse is not None:
+                self._paragraph_open = True
+                self._after_heading = False
+            elif not css and self._after_verse:
                 self._paragraph_open = True
             else:
                 self._paragraph_open = css in _CONTINUES_VERSE
@@ -287,10 +338,14 @@ class _VerseHarvester(HTMLParser):
                 self._after_verse = False
             elif self._verse is not None and self._buffer:
                 self._buffer.append(" ")
-        if tag in _DROP_TAGS:
+        if tag in _DROP_TAGS or tag in _HEADING_TAGS:
             self._hidden += 1
+            if tag in _HEADING_TAGS:
+                self._flush()
         elif tag == "sup":
             self._sup += 1
+        elif tag in {"span", "a"} and _class_of(data) in _MARKER_SPANS:
+            self._marker += 1
         href = (data.get("href") or "").strip()
         if "#" in href:
             self._target(href.split("#", 1)[1])
@@ -299,26 +354,38 @@ class _VerseHarvester(HTMLParser):
             self._target(ident[:-1])
         match = VERSE_ANCHOR.match(ident)
         if match:
-            self._start(match)
+            self._start(match, heading_anchor=(tag == "p" and _class_of(data) == "heading"))
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.handle_starttag(tag, attrs)
-        if tag in _DROP_TAGS or tag in {"sup", "p"}:
+        if tag in _DROP_TAGS or tag in {"sup", "p", "span", "a"}:
             self.handle_endtag(tag)
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "sup" and self._sup:
             self._sup -= 1
-        elif tag in _DROP_TAGS and self._hidden:
+        elif (tag in _DROP_TAGS or tag in _HEADING_TAGS) and self._hidden:
             self._hidden -= 1
+        elif tag in {"span", "a"} and self._marker:
+            self._marker -= 1
         elif tag == "p":
             self._in_paragraph = False
-            if not self._paragraph_open:
+            if self._heading_anchor:
+                self._heading_anchor = False
+                self._after_heading = True
+            elif not self._paragraph_open:
                 self._flush()
             self._paragraph_open = False
 
     def handle_data(self, data: str) -> None:
-        if self._verse is None or self._sup or self._hidden or not self._in_paragraph:
+        if (
+            self._verse is None
+            or self._sup
+            or self._hidden
+            or self._marker
+            or self._heading_anchor
+            or not self._in_paragraph
+        ):
             return
         self._buffer.append(data)
 
@@ -326,6 +393,7 @@ class _VerseHarvester(HTMLParser):
         if self._verse is None:
             return
         text = _WHITESPACE.sub(" ", "".join(self._buffer)).strip()
+        text = _strip_own_number(text, self._verse[2])
         if text:
             self.verses.setdefault(self._verse, text)
             if self._targets:

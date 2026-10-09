@@ -751,3 +751,125 @@ def test_a_translation_that_skips_a_number_keeps_the_verse_that_follows(tmp_path
     assert verse_text(result, "Gen", 1, 3) == "Third verse, the second is gone"
     assert (1, 1, 2) not in result["flat"]
     assert any("absent from this translation" in warning for warning in result["warnings"])
+
+
+def test_a_heading_that_carries_the_anchor_defers_to_the_verse(tmp_path: Path) -> None:
+    """A section title that *carries* the verse id is apparatus, not scripture.
+
+    The ESV study-Bible export parks the anchor on ``<p class="heading">`` and
+    sets the verse in the next paragraph, whose own class is not a verse
+    class. Storing the heading as the verse text made every section-leading
+    verse a title instead of a quotation.
+    """
+    path = build_epub(
+        tmp_path / "heading-anchor.epub",
+        book_filter={"John"},
+        documents={
+            "OEBPS/book43.html": (
+                "<html><body>"
+                "<h2>John</h2>"
+                f'<p id="{anchor(43, 3, 16)}" class="heading">For God So Loved the World</p>'
+                '<p class="no-indent">'
+                '<span class="book-name"><a href="main.html">JOHN</a></span>'
+                '<span class="chapter-num"> 3 </span>'
+                '<span class="verse-num">16</span>'
+                'For God so loved the world'
+                '<span class="crossref"><small> </small><a id="cr1" href="xrefs.html#c1">a</a></span>'
+                ", that he gave his only Son"
+                '<span class="footnote"><a href="notes.html#f1">[8]</a></span>'
+                "</p>"
+                "</body></html>"
+            )
+        },
+    )
+    result = extract(str(path))
+    text = verse_text(result, "John", 3, 16)
+    assert text == "For God so loved the world, that he gave his only Son"
+    assert "For God So Loved the World" not in result["flat"].values()
+    assert "JOHN" not in text
+    assert "John 3" not in text
+
+
+def test_marker_spans_and_bare_marker_links_are_dropped(tmp_path: Path) -> None:
+    """Verse numbers, apparatus letters and index terms never enter the text.
+
+    The NIV and NKJV exports put the verse digit in a ``ver`` span and the
+    footnote/cross-reference letters on bare ``enref``/``fnref`` links, with
+    study index terms glued to the end of the verse -- all measured from real
+    files, all told apart by class name rather than by translation.
+    """
+    path = build_epub(
+        tmp_path / "markers.epub",
+        book_filter={"Gen"},
+        documents={
+            "OEBPS/book01.html": (
+                "<html><body>"
+                '<p class="pf">'
+                f'<span class="ver" id="{anchor(1, 1, 1)}"><a class="calibre3" href="com.html">1</a></span>'
+                "In the beginning"
+                '<a id="rx1" class="enref" href="part0027.html#x01001001a">a</a>'
+                " God created"
+                '<a class="enref" href="part0027.html#x01001001b">b</a>'
+                " the heavens and the earth."
+                '<span class="idx"><a class="xref" href="idx.html#s1">God the Creator</a></span>'
+                "</p>"
+                '<p><span class="ver-b" id="' + anchor(1, 1, 2) + '">2</span>The earth was '
+                'without form<a class="fnref" href="notes.html#f01001002">a</a>.</p>'
+                "</body></html>"
+            )
+        },
+    )
+    result = extract(str(path))
+    assert verse_text(result, "Gen", 1, 1) == "In the beginning God created the heavens and the earth."
+    assert verse_text(result, "Gen", 1, 2) == "The earth was without form."
+
+
+def test_a_heading_tag_ends_the_verse_instead_of_gluing_its_text(tmp_path: Path) -> None:
+    """h1-h6 are pericope titles. An open verse must end at one, not absorb it."""
+    path = build_epub(
+        tmp_path / "htags.epub",
+        book_filter={"Gen"},
+        documents={
+            "OEBPS/book01.html": (
+                "<html><body>"
+                "<h2>Genesis</h2>"
+                f'<p class="pf" id="{anchor(1, 1, 1)}">In the beginning<h2>The Beginning</h2>God created</p>'
+                f'<p class="pf" id="{anchor(1, 1, 2)}">The earth was without form</p>'
+                "<h3>Light Created</h3>"
+                f'<p class="pf" id="{anchor(1, 1, 3)}">Then God said</p>'
+                "</body></html>"
+            )
+        },
+    )
+    result = extract(str(path))
+    assert verse_text(result, "Gen", 1, 1) == "In the beginning"
+    assert verse_text(result, "Gen", 1, 2) == "The earth was without form"
+    assert verse_text(result, "Gen", 1, 3) == "Then God said"
+    joined = " ".join(result["flat"].values())
+    assert "The Beginning" not in joined
+    assert "Light Created" not in joined
+
+
+def test_a_verse_own_number_is_only_stripped_when_it_matches_the_position(tmp_path: Path) -> None:
+    """Some exports glue the number to the first word ("1In the beginning").
+
+    The strip only fires on the verse's own canonical digits followed by a
+    letter or quote, so "20 men" (verse 2) and "1,600" are never mangled.
+    """
+    path = build_epub(
+        tmp_path / "own-number.epub",
+        book_filter={"Gen"},
+        documents={
+            "OEBPS/book01.html": (
+                "<html><body>"
+                f'<p class="pf"><span class="ver" id="{anchor(1, 1, 1)}">1</span>1In the beginning God created</p>'
+                f'<p class="pf"><span class="ver" id="{anchor(1, 1, 2)}">2</span>20 men and 1,600 camels</p>'
+                f'<p class="pf"><span class="ver" id="{anchor(1, 1, 16)}">16</span>16\u201cFor God so loved</p>'
+                "</body></html>"
+            )
+        },
+    )
+    result = extract(str(path))
+    assert verse_text(result, "Gen", 1, 1) == "In the beginning God created"
+    assert verse_text(result, "Gen", 1, 2) == "20 men and 1,600 camels"
+    assert verse_text(result, "Gen", 1, 16) == "\u201cFor God so loved"
