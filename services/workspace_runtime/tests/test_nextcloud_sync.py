@@ -400,3 +400,22 @@ def test_webdav_exists_distinguishes_missing_from_broken():
 def test_webdav_client_requires_complete_settings(url, user, pw):
     with pytest.raises(NextcloudSyncError):
         WebDavClient(url, user, pw, timeout_seconds=5)
+
+
+def test_the_sync_session_refuses_http3_and_retries_a_broken_connection():
+    """The Nextcloud server advertises HTTP/3, and QUIC never gets through here.
+
+    Every attempt raised MustDowngradeError, and with requests' default
+    Retry(0) the five-minute sync simply failed: the log said "Max retries
+    exceeded" against /Documents/JoG/Sermons every five minutes and nothing
+    moved. The session must therefore not offer HTTP/3 to its pool, and must
+    allow a retry so a connection that dies anyway gets a second chance.
+    """
+    from services.workspace_runtime import nextcloud_sync
+
+    session = nextcloud_sync._dav_session()
+    adapter = session.get_adapter("https://cloud.example.com")
+    pool_kwargs = adapter.poolmanager.connection_pool_kw
+    assert adapter.max_retries.total >= 1
+    if nextcloud_sync.HttpVersion is not None:
+        assert nextcloud_sync.HttpVersion.h3 in pool_kwargs["disabled_svn"]

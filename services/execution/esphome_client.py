@@ -43,6 +43,15 @@ from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, JARVIS_HOST
 
 log = logging.getLogger("execution.esphome")
 
+# A companion watch sleeps between wakes, so a connection attempt that fails is
+# the expected answer rather than a problem, and the caller already treats it as
+# one: watch_glance logs it at debug ("asleep or out of range: next round").
+# aioesphomeapi logs its own WARNING for every attempt, which for a watch that
+# is re-polled every two minutes filled the log with hundreds of lines a day and
+# buried anything real. Its errors still surface -- the client raises them and
+# the callers report them.
+logging.getLogger("aioesphomeapi").setLevel(logging.ERROR)
+
 DEFAULT_ESPHOME_PORT = 6053
 _SETTINGS_TTL_SECONDS = 60.0
 _CONNECT_TIMEOUT_SECONDS = 10.0
