@@ -11,6 +11,7 @@ import hmac
 import json
 import logging
 import os
+import random
 import socket
 import struct
 import time
@@ -213,17 +214,10 @@ class DNSResolver:
 
     async def resolve(self, query: 'DNSQuery') -> list | None:
         """Resolve a DNS query"""
-        print(f"DEBUG: Resolver called for: {query.question_name}", flush=True)
         logger.debug(f"Resolver called for: {query.question_name}")
-        print("DEBUG: Entering try block", flush=True)
-        logger.debug("Entering try block")
         name = query.question_name.rstrip('.')
-        print(f"DEBUG: After rstrip, name={name}", flush=True)
 
         try:
-            print(f"DEBUG: Inside try block, name={name}", flush=True)
-            logger.debug(f"After try block, name={name}")
-
             # Check static mappings first (for external LAN hosts, e.g. a local Ollama server)
             if name in self.static_mappings:
                 entry = self.static_mappings[name]
@@ -266,10 +260,7 @@ class DNSResolver:
 
             # Forward to upstream DNS
             logger.debug(f"Forwarding {name} to upstream DNS {self.upstream_dns}")
-            logger.debug(f"upstream_client server: {self.upstream_client.server}, port: {self.upstream_client.port}")
-            logger.debug(f"About to call upstream_client.resolve for {name}")
             records = await self.upstream_client.resolve(name, query.question_type)
-            logger.debug(f"upstream_client.resolve returned for {name}")
             if records:
                 logger.debug(f"Upstream DNS returned {len(records)} records for {name}")
                 for record in records:
@@ -340,56 +331,104 @@ class DNSResolver:
 
 
 class _DNSClient:
-    """DNS client for upstream queries"""
+    """Forwards lookups the resolver cannot answer itself.
+
+    ``server`` may list several upstreams ("192.168.2.1,8.8.8.8"). Each query
+    goes to all of them at once and the first answer wins, so one slow or
+    lossy upstream no longer turns into a timeout for the container asking --
+    the LAN upstream drops roughly one lookup in ten. Answers are cached for
+    their TTL, and when every upstream fails a recently expired answer is
+    served instead of nothing.
+    """
+
+    #: Bounds on how long an answer is kept, whatever TTL the upstream gave.
+    MIN_TTL = 30
+    MAX_TTL = 300
+    #: How long "no such name" is remembered.
+    NEGATIVE_TTL = 30
+    #: How long past expiry an answer may still stand in for a failed lookup.
+    STALE_FOR = 3600
+    MAX_ENTRIES = 4096
 
     def __init__(self, server: str, port: int = 53):
-        self.server = server
+        self.servers = [s.strip() for s in str(server).split(',') if s.strip()]
+        self.server = self.servers[0] if self.servers else ''
         self.port = port
+        self._cache: dict[tuple[str, int], tuple[list, float]] = {}
 
     async def resolve(self, name: str, qtype: int = 1) -> list | None:
-        """Resolve a name via upstream DNS"""
+        """Resolve a name via upstream DNS; None when no upstream answered."""
+        key = (name.lower(), qtype)
+        now = time.monotonic()
+        cached = self._cache.get(key)
+        if cached and cached[1] > now:
+            return self._with_ttl(cached[0], cached[1] - now)
         try:
-            logger.debug(f"Sending DNS query for {name} to {self.server}")
-            packet = self._build_query(name, qtype)
-            result = await asyncio.to_thread(self._send_query, packet)
-            logger.debug(f"DNS query result for {name}: {len(result) if result else 0} records")
-            return result
+            records = await asyncio.to_thread(self._send_query, self._build_query(name, qtype))
         except Exception as e:
-            logger.error(f"Upstream DNS resolution failed for {name}: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
+            if cached and now - cached[1] < self.STALE_FOR:
+                logger.info(f"Upstream DNS failed for {name} ({e or type(e).__name__}); serving the last answer")
+                return self._with_ttl(cached[0], self.MIN_TTL)
+            logger.warning(f"Upstream DNS failed for {name} via {','.join(self.servers)}: {e or type(e).__name__}")
             return None
+        self._remember(key, records, now)
+        return records
+
+    def _remember(self, key: tuple[str, int], records: list, now: float) -> None:
+        if records:
+            ttl = min(max(min(r.get('ttl', 0) for r in records), self.MIN_TTL), self.MAX_TTL)
+        else:
+            ttl = self.NEGATIVE_TTL
+        if len(self._cache) >= self.MAX_ENTRIES:
+            # Drop whatever expires soonest; the cache only has to stay bounded.
+            for old in sorted(self._cache, key=lambda k: self._cache[k][1])[: self.MAX_ENTRIES // 4]:
+                del self._cache[old]
+        self._cache[key] = (records, now + ttl)
+
+    @staticmethod
+    def _with_ttl(records: list, remaining: float) -> list:
+        return [{**r, 'ttl': max(1, int(remaining))} for r in records]
 
     def _build_query(self, name: str, qtype: int) -> bytes:
         """Build a DNS query packet"""
-        transaction_id = 0x1234
+        transaction_id = random.randint(0, 0xFFFF)
         flags = 0x0100  # Standard query, recursion desired
-        questions = 1
-        ancount = 0
-        nscount = 0
-        arcount = 0
+        header = struct.pack('!HHHHHH', transaction_id, flags, 1, 0, 0, 0)
 
-        header = struct.pack('!HHHHHH', transaction_id, flags, questions, ancount, nscount, arcount)
-
-        # Encode name
         name_bytes = b''
         for part in name.split('.'):
-            name_bytes += bytes([len(part)]) + part.encode()
+            if part:
+                name_bytes += bytes([len(part)]) + part.encode()
         name_bytes += b'\x00'
 
-        # Question section
-        question = name_bytes + struct.pack('!HH', qtype, 1)
+        return header + name_bytes + struct.pack('!HH', qtype, 1)
 
-        return header + question
+    def _send_query(self, packet: bytes) -> list:
+        """Ask every upstream at once; return the first matching answer.
 
-    def _send_query(self, packet: bytes) -> list | None:
-        """Send DNS query and parse response"""
+        Raises ``TimeoutError`` when none answers within DNS_UPSTREAM_TIMEOUT.
+        """
+        addresses = {(s, self.port) for s in self.servers}
+        deadline = time.monotonic() + DNS_UPSTREAM_TIMEOUT
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.settimeout(DNS_UPSTREAM_TIMEOUT)
-            sock.sendto(packet, (self.server, self.port))
-
-            response, _ = sock.recvfrom(512)
-            return self._parse_response(response)
+            for address in addresses:
+                try:
+                    sock.sendto(packet, address)
+                except OSError as e:
+                    logger.debug(f"Could not send to upstream {address[0]}: {e}")
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('timed out')
+                sock.settimeout(remaining)
+                try:
+                    response, sender = sock.recvfrom(4096)
+                except ConnectionRefusedError:
+                    continue  # one upstream is down; another may still answer
+                # Ignore strays: an answer must come from an upstream we asked
+                # and carry the id we sent.
+                if sender in addresses and response[:2] == packet[:2]:
+                    return self._parse_response(response)
 
     def _parse_response(self, data: bytes) -> list:
         """Parse DNS response"""
