@@ -38,6 +38,13 @@ from typing import Protocol
 from urllib.parse import quote, unquote, urlparse
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
+
+try:  # pragma: no cover - the guard is for a plain urllib3 install
+    from urllib3.backend import HttpVersion
+except ImportError:  # pragma: no cover
+    HttpVersion = None  # type: ignore[assignment]
 
 log = logging.getLogger("workspace_runtime.nextcloud_sync")
 
@@ -55,6 +62,38 @@ _PROPFIND_BODY = (
     "<d:resourcetype/><d:getetag/><d:getcontentlength/><d:getlastmodified/>"
     "</d:prop></d:propfind>"
 )
+
+
+class _DavAdapter(HTTPAdapter):
+    """An adapter that stays on HTTP/1.1 or /2 and gives a failure a second try.
+
+    The Nextcloud server advertises HTTP/3 through ``Alt-Svc``. Where QUIC
+    cannot get through -- which is every attempt from this host -- the client
+    raises ``MustDowngradeError``, and with requests' default ``Retry(0)`` that
+    ends the request: the five-minute sync logged "Max retries exceeded" and
+    did nothing, over and over. HTTP/3 buys a WebDAV sync nothing, so it is not
+    offered to the pool at all, and a connection that still fails is retried
+    once before the sync gives up.
+
+    ``disabled_svn`` is an urllib3-future pool argument; on a plain urllib3 it
+    is simply not passed, because there is no HTTP/3 to disable there.
+    """
+
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        if HttpVersion is not None:
+            pool_kwargs["disabled_svn"] = {HttpVersion.h3}
+        return super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
+
+
+def _dav_session() -> requests.Session:
+    session = requests.Session()
+    adapter = _DavAdapter(
+        max_retries=Retry(total=2, connect=2, read=False, backoff_factor=0.3)
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
 
 
 class NextcloudSyncError(RuntimeError):
@@ -171,7 +210,7 @@ class WebDavClient:
         self.base_path = base_path
         self.base_url = f"{parsed.scheme}://{parsed.netloc}"
         self.timeout = timeout_seconds
-        self.session = requests.Session()
+        self.session = _dav_session()
         self.session.auth = (username, password)
         self.session.headers["User-Agent"] = "SharedLLM-WorkspaceSync/1.0"
 
