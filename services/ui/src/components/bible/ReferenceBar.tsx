@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Columns2, Minus, Plus, Settings2, Star, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Columns2, LayoutGrid, Minus, Plus, Settings2, Star, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
 import { PAGE_TONES, PAGE_TONE_ORDER, toneOf } from './readingPage';
+import BookPicker from './BookPicker';
 import type {
   BibleBookInfo,
   BibleEditionInfo,
@@ -55,6 +56,7 @@ export default function ReferenceBar({
   const { trigger } = useHaptics();
   const [displayOpen, setDisplayOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const isPhone = useMediaQuery(PHONE_QUERY);
 
   const book = books.find((b) => b.osis === position.book) ?? books[0];
@@ -136,14 +138,15 @@ export default function ReferenceBar({
       </form>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <label className="col-span-2 sm:col-span-1 flex flex-col gap-1 min-w-0">
+        <div className="col-span-2 sm:col-span-1 flex flex-col gap-1 min-w-0">
           <span className="text-[10px] uppercase tracking-wider text-slate-500">Book</span>
+          <span className="flex gap-1">
           <select
             value={position.book}
             onChange={(e) => choosePosition({ book: e.target.value, chapter: 1, verse: 1 })}
             aria-label="Book"
             data-testid="bible-book-select"
-            className="min-h-11 rounded-xl bg-black/25 border border-white/10 text-sm text-slate-100 px-2 py-2"
+            className="min-h-11 flex-1 min-w-0 rounded-xl bg-black/25 border border-white/10 text-sm text-slate-100 px-2 py-2"
           >
             {books.map((b) => (
               <option key={b.osis} value={b.osis}>
@@ -151,7 +154,31 @@ export default function ReferenceBar({
               </option>
             ))}
           </select>
-        </label>
+          <button
+            type="button"
+            onClick={() => {
+              void trigger('light');
+              setPickerOpen(true);
+            }}
+            aria-label="Browse books and chapters"
+            data-testid="bible-book-picker-open"
+            className="min-h-11 min-w-11 shrink-0 rounded-xl glass-button flex items-center justify-center"
+          >
+            <LayoutGrid size={15} />
+          </button>
+          </span>
+          {pickerOpen && (
+            <BookPicker
+              books={books}
+              current={position.book}
+              onClose={() => setPickerOpen(false)}
+              onPick={(osis, chapter) => {
+                setPickerOpen(false);
+                choosePosition({ book: osis, chapter, verse: 1 });
+              }}
+            />
+          )}
+        </div>
 
         <div className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wider text-slate-500">Chapter</span>

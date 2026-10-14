@@ -18,6 +18,7 @@ import ReferenceBar from '../components/bible/ReferenceBar';
 import ChapterReader from '../components/bible/ChapterReader';
 import FocusReader from '../components/bible/FocusReader';
 import { pageStyle, toneOf } from '../components/bible/readingPage';
+import { useSwipe } from '../lib/useSwipe';
 import VerseActionSheet from '../components/bible/VerseActionSheet';
 import BibleReadAloud from '../components/bible/BibleReadAloud';
 import ChapterNotes from '../components/bible/ChapterNotes';
@@ -218,6 +219,14 @@ function BibleReaderPane({
     setSearchTerm(value);
   };
 
+  const applyPosition = (patch: Partial<BiblePosition>) => {
+    const next = { ...displayPosition, ...patch };
+    setSearchTerm(null);
+    setPosition(next);
+    setInput(chapterRef(next));
+    onRequestRef(chapterRef(next));
+  };
+
   /**
    * Next/Previous reads as "the next chapter", so it steps the chapter and only
    * rolls into the neighbouring book at the edges -- the same thing every printed
@@ -239,13 +248,8 @@ function BibleReaderPane({
     });
   };
 
-  const applyPosition = (patch: Partial<BiblePosition>) => {
-    const next = { ...displayPosition, ...patch };
-    setSearchTerm(null);
-    setPosition(next);
-    setInput(chapterRef(next));
-    onRequestRef(chapterRef(next));
-  };
+  // Swiping the page turns it: left for the next chapter, right for the last.
+  const swipe = useSwipe(() => step(1), () => step(-1));
 
   const toggleMark = async (kind: 'highlight' | 'bookmark', color: string) => {
     if (!activeVerse) return;
@@ -336,12 +340,18 @@ function BibleReaderPane({
             style={pageStyle(preferences.page)}
             data-testid="bible-page-surface"
             data-page={toneOf(preferences.page)}
+            {...swipe}
           >
             <div className="flex items-baseline justify-between gap-3 mb-3">
               <h2 className="font-serif text-xl text-[var(--page-ink)] truncate" data-testid="bible-chapter-heading">
                 {shownChapter ? `${shownChapter.book_name} ${shownChapter.chapter_start}` : 'Reading'}
               </h2>
               <div className="flex items-center gap-2 shrink-0">
+                {passage?.offline && (
+                  <span className="text-[11px] text-[var(--page-muted)]" data-testid="bible-offline-copy" title="The server could not be reached; this is the copy saved on this device.">
+                    Offline copy
+                  </span>
+                )}
                 <span className="text-[11px] text-[var(--page-muted)] tabular-nums">{passage?.version}</span>
                 <button
                   type="button"
@@ -418,6 +428,7 @@ function BibleReaderPane({
           verse={activeVerse}
           marks={marks}
           version={version}
+          page={preferences.page}
           edition={preferences.default_edition}
           crossVersion={preferences.cross_version_notes}
           onEditionChange={(code) => onPreferences({ default_edition: code })}

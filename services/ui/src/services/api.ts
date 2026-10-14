@@ -1,5 +1,6 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import { storageGetSync } from '../lib/storage';
+import { isUnreachable, recallPassage, rememberPassage, type OfflinePassage } from '../lib/bibleOffline';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
 import type {
@@ -128,7 +129,6 @@ import type {
   WorkspaceUploadResponse,
   BibleVersionInfo,
   BibleBookInfo,
-  BiblePassage,
   BibleSearchResult,
   BibleVerseOfDay,
   BibleDevotionalSourceInfo,
@@ -2977,9 +2977,21 @@ export const api = {
     return resp.data;
   },
 
-  async getBiblePassage(ref: string, version?: string): Promise<BiblePassage> {
-    const resp = await apiClient.get('/api/bible/passages', { params: { ref, version } });
-    return resp.data;
+  /**
+   * A passage, kept on the device as it is read so it still opens offline. Only
+   * an unreachable server falls back to the device copy: an answer from the
+   * server (a bad reference, a missing translation) is always shown as itself.
+   */
+  async getBiblePassage(ref: string, version?: string): Promise<OfflinePassage> {
+    try {
+      const resp = await apiClient.get('/api/bible/passages', { params: { ref, version } });
+      rememberPassage(ref, version, resp.data);
+      return resp.data;
+    } catch (error) {
+      const saved = isUnreachable(error) ? recallPassage(ref, version) : null;
+      if (saved) return saved;
+      throw error;
+    }
   },
 
   async searchBible(q: string, options: { version?: string; book?: string; limit?: number } = {}): Promise<BibleSearchResult> {
