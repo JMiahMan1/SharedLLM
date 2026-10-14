@@ -1,6 +1,7 @@
 import { BookMarked, NotebookPen } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { BibleMark, BibleVerse } from '../../types/api';
+import { MARK_EDGE, MARK_WASH } from './readingPage';
 
 interface ChapterReaderProps {
   verses: BibleVerse[];
@@ -28,14 +29,6 @@ interface ChapterReaderProps {
   onVerseTap: (verse: BibleVerse) => void;
   onRetry?: () => void;
 }
-
-const MARK_TINTS: Record<string, string> = {
-  yellow: 'bg-amber-400/15 border-amber-300/40',
-  green: 'bg-emerald-400/15 border-emerald-300/40',
-  blue: 'bg-sky-400/15 border-sky-300/40',
-  pink: 'bg-pink-400/15 border-pink-300/40',
-  purple: 'bg-purple-400/15 border-purple-300/40',
-};
 
 function markFor(marks: BibleMark[], verse: BibleVerse): BibleMark | undefined {
   return marks.find(
@@ -98,10 +91,10 @@ export default function ChapterReader({
   if (error) {
     return (
       <div
-        className="glass-panel rounded-2xl p-6 text-center space-y-3"
+        className="rounded-2xl p-6 text-center space-y-3"
         data-testid="bible-reader-error"
       >
-        <p className="text-sm text-amber-300/90 leading-relaxed">{error}</p>
+        <p className="text-sm leading-relaxed text-[var(--page-ink)]">{error}</p>
         {onRetry && (
           <button
             type="button"
@@ -117,25 +110,25 @@ export default function ChapterReader({
 
   if (verses.length === 0) {
     return (
-      <div className="glass-panel rounded-2xl p-6 text-center" data-testid="bible-reader-empty">
-        <p className="text-sm text-slate-400">That passage is not in the imported text.</p>
+      <div className="rounded-2xl p-6 text-center" data-testid="bible-reader-empty">
+        <p className="text-sm text-[var(--page-muted)]">That passage is not in the imported text.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-1" data-testid="bible-reader">
+    <div className={`space-y-1 ${comparing ? '' : 'mx-auto max-w-[68ch]'}`} data-testid="bible-reader">
       {comparing && (
         <p
           data-testid="bible-compare-legend"
-          className="pb-2 text-[11px] uppercase tracking-wider text-slate-500"
+          className="pb-2 text-[11px] uppercase tracking-wider text-[var(--page-muted)]"
         >
           {compareName ? `${compareName} alongside` : 'A second translation alongside'}
         </p>
       )}
       {verses.map((verse) => {
         const mark = markFor(marks, verse);
-        const tint = mark ? (MARK_TINTS[mark.color] ?? MARK_TINTS.yellow) : '';
+        const color = mark && MARK_WASH[mark.color] ? mark.color : 'yellow';
         const studied = studiedVerses?.has(`${verse.chapter}:${verse.verse}`) ?? false;
         const noted = notedVerses?.has(`${verse.chapter}:${verse.verse}`) ?? false;
         const compareText = comparing ? byVerse.get(verse.verse) : undefined;
@@ -151,36 +144,35 @@ export default function ChapterReader({
               noted ? '. Has your note.' : ''
             }${comparing && !compareText ? '. Not in the compared translation.' : ''}`}
             data-testid={`bible-verse-${verse.chapter}-${verse.verse}`}
-            className={`w-full text-left rounded-lg px-2 py-1 min-h-11 pointer-coarse:min-h-11 hover:bg-white/[0.04] transition-colors ${
-              mark ? `border-l-2 ${tint}` : 'border-l-2 border-transparent'
-            }`}
+            className="w-full text-left rounded-lg px-2 py-1 min-h-11 pointer-coarse:min-h-11 border-l-2 border-transparent hover:bg-[var(--page-hover)] transition-colors"
+            style={mark ? { backgroundColor: MARK_WASH[color], borderLeftColor: MARK_EDGE[color] } : undefined}
           >
             <span className={`flex gap-2 items-baseline ${comparing ? 'sm:grid sm:grid-cols-2 sm:gap-4' : ''}`}>
               <span className="flex gap-2 items-baseline min-w-0">
-                <sup className="text-[0.6em] text-amber-400/80 font-sans select-none shrink-0">
+                <sup className="text-[0.6em] text-[var(--page-number)] font-sans font-semibold select-none shrink-0">
                   {verse.verse}
                 </sup>
                 <span
-                  className={`text-slate-100 ${
+                  className={`text-[var(--page-ink)] ${
                     theme === 'serif' ? 'font-serif' : 'font-sans'
                   }`}
-                  style={{ fontSize: `${1 * fontScale}rem`, lineHeight }}
+                  style={{ fontSize: `${1.125 * fontScale}rem`, lineHeight }}
                 >
                   {verse.text}
                 </span>
               </span>
               {comparing && (
-                <span className="min-w-0 pl-5 sm:pl-0 sm:border-l sm:border-white/10 sm:pl-4">
+                <span className="min-w-0 pl-5 sm:pl-0 sm:border-l sm:border-[var(--page-rule)] sm:pl-4">
                   <span
-                    className={`block text-slate-300/80 ${
+                    className={`block text-[var(--page-muted)] ${
                       theme === 'serif' ? 'font-serif' : 'font-sans'
                     }`}
-                    style={{ fontSize: `${0.95 * fontScale}rem`, lineHeight }}
+                    style={{ fontSize: `${1.05 * fontScale}rem`, lineHeight }}
                     data-testid={`bible-compare-${verse.chapter}-${verse.verse}`}
                   >
                     {compareText ?? (
                       <em
-                        className="text-slate-500 not-italic"
+                        className="opacity-70 not-italic"
                         data-testid={`bible-compare-missing-${verse.chapter}-${verse.verse}`}
                       >
                         Not in this translation.
@@ -193,7 +185,7 @@ export default function ChapterReader({
                 <span className="ml-auto shrink-0 self-center flex items-center gap-1 font-sans">
                   {studied && (
                     <span
-                      className="text-amber-400/70"
+                      className="text-[var(--page-number)]"
                       title="Has study notes"
                       data-testid={`bible-verse-studied-${verse.chapter}-${verse.verse}`}
                     >
@@ -202,7 +194,7 @@ export default function ChapterReader({
                   )}
                   {noted && (
                     <span
-                      className="text-sky-300/80"
+                      className="text-sky-500"
                       title="You wrote a note about this verse"
                       data-testid={`bible-verse-noted-${verse.chapter}-${verse.verse}`}
                     >

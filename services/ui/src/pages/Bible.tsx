@@ -17,6 +17,7 @@ import type {
 import ReferenceBar from '../components/bible/ReferenceBar';
 import ChapterReader from '../components/bible/ChapterReader';
 import FocusReader from '../components/bible/FocusReader';
+import { pageStyle, toneOf } from '../components/bible/readingPage';
 import VerseActionSheet from '../components/bible/VerseActionSheet';
 import BibleReadAloud from '../components/bible/BibleReadAloud';
 import ChapterNotes from '../components/bible/ChapterNotes';
@@ -41,6 +42,7 @@ const DEFAULT_PREFERENCES: BiblePreferences = {
   font_scale: 1,
   line_height: 1.6,
   theme: 'serif',
+  page: 'dark',
   read_aloud_voice: '',
   split_view: 'compare',
 };
@@ -329,19 +331,24 @@ function BibleReaderPane({
         </section>
       ) : (
         <div className={notesAlongside ? 'lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-4 lg:items-start' : ''}>
-          <section className="glass-panel rounded-2xl p-4 sm:p-5 border border-white/10">
+          <section
+            className="rounded-2xl p-4 sm:p-6 border border-[var(--page-rule)] shadow-lg"
+            style={pageStyle(preferences.page)}
+            data-testid="bible-page-surface"
+            data-page={toneOf(preferences.page)}
+          >
             <div className="flex items-baseline justify-between gap-3 mb-3">
-              <h2 className="font-serif text-lg text-white truncate" data-testid="bible-chapter-heading">
+              <h2 className="font-serif text-xl text-[var(--page-ink)] truncate" data-testid="bible-chapter-heading">
                 {shownChapter ? `${shownChapter.book_name} ${shownChapter.chapter_start}` : 'Reading'}
               </h2>
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[11px] text-slate-500 tabular-nums">{passage?.version}</span>
+                <span className="text-[11px] text-[var(--page-muted)] tabular-nums">{passage?.version}</span>
                 <button
                   type="button"
                   onClick={() => setFocusing(true)}
                   aria-label="Read this chapter without the controls"
                   data-testid="bible-focus-open"
-                  className="min-h-11 pointer-coarse:min-h-11 px-2 rounded-xl border border-white/10 bg-white/5 text-[11px] text-slate-300 flex items-center gap-1.5"
+                  className="min-h-11 pointer-coarse:min-h-11 px-2 rounded-xl border border-[var(--page-rule)] text-[11px] text-[var(--page-muted)] hover:bg-[var(--page-hover)] flex items-center gap-1.5"
                 >
                   <Maximize2 size={13} />
                   Focus
@@ -411,6 +418,7 @@ function BibleReaderPane({
           fontScale={preferences.font_scale}
           lineHeight={preferences.line_height}
           theme={preferences.theme}
+          page={preferences.page}
           loading={isFetching}
           onPrev={() => step(-1)}
           onNext={() => step(1)}

@@ -924,6 +924,7 @@ class StatePayload(BaseModel):
     font_scale: float | None = Field(default=None, ge=0.6, le=2.5)
     line_height: float | None = Field(default=None, ge=1.0, le=3.0)
     theme: str | None = Field(default=None, pattern="^(serif|sans)$")
+    page: str | None = Field(default=None, pattern="^(dark|sepia|light)$")
     read_aloud_voice: str | None = None
     split_view: str | None = Field(default=None, pattern="^(compare|parallel)$")
 
@@ -954,6 +955,7 @@ def _default_preferences(session: Session) -> dict:
         "font_scale": 1.0,
         "line_height": 1.6,
         "theme": "serif",
+        "page": "dark",
         "read_aloud_voice": "",
         "split_view": "compare",
     }
@@ -970,6 +972,7 @@ def _preferences(state: UserBibleState) -> dict:
         "font_scale": state.font_scale,
         "line_height": state.line_height,
         "theme": state.theme,
+        "page": state.page,
         "read_aloud_voice": state.read_aloud_voice,
         "split_view": state.split_view,
     }
@@ -1037,7 +1040,7 @@ def put_state(
             state.compare_version = _require_version(session, payload.compare_version)
     if payload.cross_version_notes is not None:
         state.cross_version_notes = payload.cross_version_notes
-    for attr in ("show_notes", "font_scale", "line_height", "theme", "read_aloud_voice", "split_view"):
+    for attr in ("show_notes", "font_scale", "line_height", "theme", "page", "read_aloud_voice", "split_view"):
         value = getattr(payload, attr)
         if value is not None:
             setattr(state, attr, value)

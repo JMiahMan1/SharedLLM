@@ -102,8 +102,8 @@ describe('reading a chapter as a page', () => {
         },
       ],
     });
-    expect(screen.getByTestId('bible-focus-verse-23-2').className).toContain('emerald');
-    expect(screen.getByTestId('bible-focus-verse-23-1').className).not.toContain('emerald');
+    expect(screen.getByTestId('bible-focus-verse-23-2').dataset.mark).toBe('green');
+    expect(screen.getByTestId('bible-focus-verse-23-1').dataset.mark).toBeUndefined();
   });
 });
 

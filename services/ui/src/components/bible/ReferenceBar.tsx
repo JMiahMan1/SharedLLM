@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Columns2, Minus, Plus, Settings2, Star, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
+import { PAGE_TONES, PAGE_TONE_ORDER, toneOf } from './readingPage';
 import type {
   BibleBookInfo,
   BibleEditionInfo,
@@ -422,6 +423,30 @@ export default function ReferenceBar({
             >
               {preferences.show_notes ? 'Alongside' : 'Hidden'}
             </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-400">Page</span>
+            <div className="flex gap-2" role="group" aria-label="Page colour">
+              {PAGE_TONE_ORDER.map((tone) => {
+                const selected = toneOf(preferences.page) === tone;
+                return (
+                  <button
+                    key={tone}
+                    type="button"
+                    onClick={() => onPreferences({ page: tone })}
+                    aria-pressed={selected}
+                    data-testid={`bible-page-${tone}`}
+                    className={`min-h-11 px-3 rounded-xl border text-sm font-serif ${
+                      selected ? 'ring-2 ring-amber-400 border-transparent' : 'border-white/10'
+                    }`}
+                    style={{ backgroundColor: PAGE_TONES[tone].paper, color: PAGE_TONES[tone].ink }}
+                  >
+                    {PAGE_TONES[tone].label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="flex items-center justify-between gap-3">
