@@ -27,6 +27,11 @@ def _games_source() -> list[dict]:
             rows.append("Placeholder.")
         w = [_WORDS[(n + k) % len(_WORDS)] for k in range(4)]
         rows[verse - 1] = f"The {w[0]} of the Lord brings {w[1]} and {w[2]} to every {w[3]} number{n}."
+        # The verse after it, for the next-verse game (unless it is curated too).
+        if len(rows) <= verse:
+            rows.append(f"And then the {w[3]} answered with {w[0]} again, verse after {n}.")
+        elif rows[verse] == "Placeholder.":
+            rows[verse] = f"And then the {w[3]} answered with {w[0]} again, verse after {n}."
     return source
 
 
@@ -46,7 +51,7 @@ def _key(client: TestClient, mode: str, seed: str) -> list[str]:
 
 def test_the_catalogue_lists_the_games(game_client: TestClient):
     modes = {m["mode"] for m in game_client.get("/games").json()["modes"]}
-    assert {"daily", "verse_race", "which_book", "fill_blank", "books"} <= modes
+    assert {"daily", "verse_race", "which_book", "fill_blank", "books", "next_verse"} <= modes
 
 
 def test_a_game_never_sends_its_answers(game_client: TestClient):
@@ -157,3 +162,15 @@ def test_quizzes_feed_the_quiz_badges(game_client: TestClient, monkeypatch):
 def test_too_little_text_is_named_not_faked(loaded_client: TestClient):
     resp = loaded_client.get("/games/which_book", params={"username": "sam"})
     assert resp.status_code == 503 and "well-known verses" in resp.json()["detail"]
+
+
+def test_what_comes_next_offers_real_following_verses(game_client: TestClient):
+    with Session(bible_main.app.state.engine) as session:
+        questions = games.build(session, "next_verse", "nv-1", "kjv")
+        for q in questions:
+            assert q.kind == "next_verse" and q.answer in q.options and len(set(q.options)) == 4
+            book, cv = q.reference.rsplit(" ", 1)
+            chapter, verse = (int(x) for x in cv.split(":"))
+            osis = next(b["osis"] for b in games.corpus.list_books(session, "kjv") if b["name"] == book)
+            row = session.get(games.BibleVerse, {"version_code": "kjv", "osis": osis, "chapter": chapter, "verse": verse + 1})
+            assert row.text.strip() == q.answer

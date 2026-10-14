@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Check, Crown, Gamepad2, Library, Loader2, PenLine, RotateCcw, Star, Timer, Trophy, X, Zap } from 'lucide-react';
+import { BookOpen, Check, Crown, Gamepad2, Library, ListOrdered, Loader2, PenLine, RotateCcw, Star, Timer, Trophy, X, Zap } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { BibleGame, BibleGameInfo, BibleGameMode, BibleGameResult } from '../../types/api';
@@ -11,6 +11,7 @@ const ICONS: Record<BibleGameMode, typeof Gamepad2> = {
   verse_race: Zap,
   which_book: BookOpen,
   fill_blank: PenLine,
+  next_verse: ListOrdered,
   books: Library,
 };
 

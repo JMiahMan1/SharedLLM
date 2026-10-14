@@ -1765,7 +1765,7 @@ export interface BibleAchievementsResponse {
   announced: { posted: number; status: string };
 }
 
-export type BibleGameMode = 'daily' | 'verse_race' | 'which_book' | 'fill_blank' | 'books';
+export type BibleGameMode = 'daily' | 'verse_race' | 'which_book' | 'fill_blank' | 'next_verse' | 'books';
 
 export interface BibleGameInfo {
   mode: BibleGameMode;
@@ -1778,7 +1778,7 @@ export interface BibleGameInfo {
 
 export interface BibleGameQuestion {
   id: number;
-  kind: 'which_book' | 'fill_blank' | 'book_after' | 'chapter_count';
+  kind: 'which_book' | 'fill_blank' | 'next_verse' | 'book_after' | 'chapter_count';
   prompt: string;
   options: string[];
   /** The verse, for verse questions; a fill-the-gap verse carries the blank. */
