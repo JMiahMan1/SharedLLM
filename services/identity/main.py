@@ -753,6 +753,23 @@ def _load_calendar_settings(session: Session, username: str) -> dict:
     return {}
 
 
+def normalize_abs_url(value: str | None) -> str | None:
+    """The Audiobookshelf server root, however it was pasted.
+
+    ABS logs in at ``{root}/login`` and serves its API at ``{root}/api/...``,
+    so a URL saved with ``/api`` or ``/login`` on the end (or a trailing slash)
+    breaks every call built from it. A path prefix such as
+    ``https://host/audiobookshelf`` is a real deployment and is kept.
+    """
+    if not value:
+        return value
+    url = value.strip().rstrip("/")
+    for suffix in ("/login", "/api"):
+        if url.lower().endswith(suffix):
+            url = url[: -len(suffix)].rstrip("/")
+    return url or None
+
+
 def _coerce_profile_value(key: str, value):
     """Normalize a profile update field without nulling valid falsy values.
 
@@ -763,6 +780,8 @@ def _coerce_profile_value(key: str, value):
         value = value.strip()
         if value == "" and key != "display_name":
             return None
+        if key == "audiobookshelf_url":
+            return normalize_abs_url(value)
         return value
     return value
 
@@ -1245,7 +1264,7 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
         gitlab_url=_coerce(body.gitlab_url),
         gitlab_user=_coerce(body.gitlab_user),
         gitlab_token_enc=encrypt(_coerce(body.gitlab_token)) if _coerce(body.gitlab_token) else None,
-        audiobookshelf_url=_coerce(body.audiobookshelf_url),
+        audiobookshelf_url=normalize_abs_url(_coerce(body.audiobookshelf_url)),
         audiobookshelf_user=_coerce(body.audiobookshelf_user),
         audiobookshelf_pass_enc=encrypt(_coerce(body.audiobookshelf_pass)) if _coerce(body.audiobookshelf_pass) else None,
         audiobookshelf_api_key_enc=encrypt(_coerce(body.audiobookshelf_api_key)) if _coerce(body.audiobookshelf_api_key) else None,

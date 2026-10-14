@@ -3,6 +3,8 @@
 Audiobookshelf (ABS) REST API client.
 Handles authentication, library search, playback progress, and streaming.
 """
+import base64
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -69,6 +71,19 @@ def resolve_abs_credentials(user_context: Any) -> tuple[str | None, str | None, 
     return abs_url, abs_key, username, password
 
 
+def _token_ttl(token: str) -> int:
+    """Seconds to cache a login token: until a minute before a JWT's ``exp``,
+    and never longer than the usual cache TTL. A legacy opaque token has no
+    expiry to read, so it gets the usual TTL."""
+    try:
+        payload = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        remaining = int(claims["exp"] - time.time()) - 60
+    except Exception:  # noqa: BLE001 - not a JWT
+        return _CACHE_TTL
+    return max(0, min(_CACHE_TTL, remaining))
+
+
 async def abs_login(abs_url: str, username: str, password: str, force: bool = False) -> str | None:
     """Login to ABS with username/password and return API token.
 
@@ -90,9 +105,13 @@ async def abs_login(abs_url: str, username: str, password: str, force: bool = Fa
             async with client.post(url, json={"username": username, "password": password}, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
-                token = data.get("user", {}).get("token")
+                user = data.get("user", {})
+                # ABS 2.26+ issues a short-lived JWT ``accessToken`` and keeps
+                # ``token`` only as a deprecated legacy key; prefer the JWT and
+                # cache it no longer than it lives.
+                token = user.get("accessToken") or user.get("token")
                 if token:
-                    _cache_set(abs_url, cache_key, token)
+                    _cache_set(abs_url, cache_key, token, ttl=_token_ttl(token))
                 return token
         except Exception as e:
             log.error(f"[abs_client] Login failed: {e}")
