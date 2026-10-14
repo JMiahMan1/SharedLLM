@@ -7,6 +7,8 @@ import hmac
 import json
 import logging
 import os
+import base64
+import binascii
 import re
 import time
 import uuid
@@ -17,6 +19,7 @@ from datetime import datetime as dt
 import aiohttp
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -43,6 +46,7 @@ from services.identity.models import (
     RavenMission,
     User,
     UserActivitySharing,
+    UserAvatarImage,
     UserCalendarSetting,
     UserCredentialShare,
     UserThemeSetting,
@@ -175,6 +179,7 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "mass_token_enc", "ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR")
         _add_column("user", "skylight_enabled", "ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1")
         _add_column("user", "skylight_url", "ALTER TABLE user ADD COLUMN skylight_url VARCHAR")
+        _add_column("user", "avatar", "ALTER TABLE user ADD COLUMN avatar VARCHAR")
         _add_column("user", "skylight_email", "ALTER TABLE user ADD COLUMN skylight_email VARCHAR")
         _add_column("user", "skylight_pass_enc", "ALTER TABLE user ADD COLUMN skylight_pass_enc VARCHAR")
         _add_column("user", "git_url", "ALTER TABLE user ADD COLUMN git_url VARCHAR")
@@ -799,8 +804,127 @@ def health():
 # ─── Public/Admin API ──────────────────────────────────────────────────────────
 
 @app.get("/api/users/me", response_model=UserRead)
-def get_me(user: User = Depends(require_api_key)):
-    return user
+def get_me(user: User = Depends(require_api_key), session: Session = Depends(get_session)):
+    me = UserRead.model_validate(user)
+    me.skylight_status = skylight_status(session, user)
+    return me
+
+
+def skylight_status(session: Session, user: User) -> str:
+    """Whether Skylight works for this user.
+
+    Skylight is one household account kept on the system user (ID 1, the same
+    account execution logs in with); each user can only switch it on or off
+    for themselves. A normal user's own skylight_url is therefore always
+    empty, which is why the account page showed everyone but the admin as
+    "not linked".
+    """
+    system = session.get(User, 1)
+    if not (system and system.skylight_email and system.skylight_pass_enc):
+        return "not_set_up"
+    return "connected" if user.skylight_enabled else "off"
+
+
+# ── profile pictures ────────────────────────────────────────────────────────
+
+AVATAR_MAX_BYTES = 1_500_000
+_AVATAR_PRESET = re.compile(r"^[a-z0-9-]{1,40}$")
+_IMAGE_MAGIC = {
+    b"\x89PNG\r\n\x1a\n": "image/png",
+    b"\xff\xd8\xff": "image/jpeg",
+    b"RIFF": "image/webp",
+}
+
+
+class AvatarChoice(BaseModel):
+    preset: str
+
+
+class AvatarUpload(BaseModel):
+    #: A data URL ("data:image/png;base64,...") as a canvas or file reader makes it.
+    data_url: str
+
+
+def _image_type(data: bytes) -> str | None:
+    for magic, mime in _IMAGE_MAGIC.items():
+        if data.startswith(magic):
+            if mime == "image/webp" and data[8:12] != b"WEBP":
+                return None
+            return mime
+    return None
+
+
+@app.put("/api/users/me/avatar", response_model=UserRead)
+def choose_avatar(
+    body: AvatarChoice,
+    request: Request,
+    user: User = Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Pick one of the built-in pictures. An uploaded photo is kept until the
+    user removes it, so switching back to it later needs no re-upload."""
+    if not _AVATAR_PRESET.match(body.preset):
+        raise HTTPException(status_code=422, detail="Unknown picture.")
+    user.avatar = f"preset:{body.preset}"
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    _audit(request, session, "user.avatar", user.username, actor=user, note=f"preset {body.preset}")
+    return get_me(user, session)
+
+
+@app.post("/api/users/me/avatar/image", response_model=UserRead)
+def upload_avatar(
+    body: AvatarUpload,
+    request: Request,
+    user: User = Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Keep an uploaded photo as the profile picture (PNG, JPEG or WebP)."""
+    head, _, payload = body.data_url.partition(",")
+    if not head.startswith("data:") or ";base64" not in head:
+        raise HTTPException(status_code=422, detail="Send the picture as a base64 data URL.")
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise HTTPException(status_code=422, detail="That picture could not be read.") from exc
+    if len(data) > AVATAR_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="That picture is too large; the limit is 1.5 MB.")
+    mime = _image_type(data)
+    if mime is None:
+        raise HTTPException(status_code=415, detail="Use a PNG, JPEG or WebP picture.")
+    row = session.get(UserAvatarImage, user.username) or UserAvatarImage(username=user.username, mime=mime, data=data)
+    row.mime, row.data, row.updated_at = mime, data, datetime.now(UTC)
+    session.add(row)
+    user.avatar = f"upload:{int(time.time())}"
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    _audit(request, session, "user.avatar", user.username, actor=user, note=f"uploaded {mime}, {len(data)} bytes")
+    return get_me(user, session)
+
+
+@app.delete("/api/users/me/avatar", response_model=UserRead)
+def remove_avatar(request: Request, user: User = Depends(require_api_key), session: Session = Depends(get_session)):
+    """Back to initials; an uploaded photo is deleted, not just hidden."""
+    row = session.get(UserAvatarImage, user.username)
+    if row is not None:
+        session.delete(row)
+    user.avatar = None
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    _audit(request, session, "user.avatar", user.username, actor=user, note="removed")
+    return get_me(user, session)
+
+
+@app.get("/api/users/{username}/avatar/image")
+def avatar_image(username: str, _viewer: User = Depends(require_api_key), session: Session = Depends(get_session)):
+    """A family member's uploaded picture, for anyone signed in to the household."""
+    row = session.get(UserAvatarImage, username)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No uploaded picture.")
+    return Response(content=row.data, media_type=row.mime, headers={"Cache-Control": "private, max-age=86400"})
 
 @app.post("/api/users/me/enroll")
 async def enroll_voice(

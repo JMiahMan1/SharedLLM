@@ -222,6 +222,10 @@ class UserRead(BaseModel):
     skylight_url: str | None = None
     skylight_email: str | None = None
     skylight_enabled: bool = True
+    avatar: str | None = None
+    #: Skylight for this user: "connected" (the household account is set up
+    #: and they have it on), "off" (they turned it off) or "not_set_up".
+    skylight_status: str | None = None
     voice_fingerprint: str | None = None
     preferred_tts_voice: str | None = "af_heart"
     calendar_settings: dict = {}  # per-user calendar integration prefs (default/disabled/priority/ical_urls)
