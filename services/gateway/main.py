@@ -9805,6 +9805,47 @@ async def proxy_bible_activity_summary(request: Request, user_id: str | None = N
 
 
 
+@app.get("/api/bible/games")
+async def proxy_bible_games(request: Request):
+    await _bible_caller(request)
+    return await _bible_json("GET", "/games", label="Bible games unavailable")
+
+
+@app.get("/api/bible/games/leaderboard")
+async def proxy_bible_games_leaderboard(request: Request, day: str | None = None):
+    """Today's daily-quiz board: the caller plus members who share with them."""
+    viewer = await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/games/leaderboard", label="Failed to read the leaderboard", params={"viewer": viewer, "day": day}
+    )
+
+
+@app.get("/api/bible/games/{mode}")
+async def proxy_bible_game(request: Request, mode: str, seed: str | None = None, version: str | None = None):
+    """A game's questions. The answer key never leaves the bible service."""
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        f"/games/{mode}",
+        label="Bible game unavailable",
+        params={"username": username, "seed": seed, "version": version},
+    )
+
+
+@app.post("/api/bible/games/{mode}/attempt")
+async def proxy_bible_game_attempt(request: Request, mode: str):
+    """Score a game as the caller; stars for the daily quiz bank to geo."""
+    username = await _bible_caller(request)
+    body = await request.json()
+    return await _bible_json(
+        "POST",
+        f"/games/{mode}/attempt",
+        label="Failed to score the game",
+        params={"username": username},
+        json={k: body.get(k) for k in ("seed", "version", "answers", "duration_ms") if k in body},
+    )
+
+
 @app.get("/api/bible/activity/feed")
 async def proxy_bible_activity_feed(request: Request, limit: int = 20):
     viewer = await _bible_caller(request)

@@ -140,6 +140,11 @@ import type {
   BibleStreaks,
   BibleStats,
   BibleAchievementsResponse,
+  BibleGame,
+  BibleGameInfo,
+  BibleGameMode,
+  BibleGameResult,
+  BibleLeaderboard,
   BibleActivitySummary,
   BibleActivityFeed,
   BibleEditionsResponse,
@@ -3040,6 +3045,29 @@ export const api = {
 
   async getBibleAchievements(): Promise<BibleAchievementsResponse> {
     const resp = await apiClient.get('/api/bible/achievements');
+    return resp.data;
+  },
+
+  async getBibleGames(): Promise<{ modes: BibleGameInfo[]; today: string }> {
+    const resp = await apiClient.get('/api/bible/games');
+    return resp.data;
+  },
+
+  async getBibleGame(mode: BibleGameMode, opts: { seed?: string; version?: string } = {}): Promise<BibleGame> {
+    const resp = await apiClient.get(`/api/bible/games/${mode}`, { params: opts });
+    return resp.data;
+  },
+
+  async submitBibleGame(
+    mode: BibleGameMode,
+    body: { seed: string; version: string; answers: (string | null)[]; duration_ms: number },
+  ): Promise<BibleGameResult> {
+    const resp = await apiClient.post(`/api/bible/games/${mode}/attempt`, body);
+    return resp.data;
+  },
+
+  async getBibleLeaderboard(): Promise<BibleLeaderboard> {
+    const resp = await apiClient.get('/api/bible/games/leaderboard');
     return resp.data;
   },
 

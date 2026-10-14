@@ -1,0 +1,26 @@
+{
+  "_comment": "Well-known verses the verse games draw from. References only: the text always comes from the installed translation, so the answer key is the Bible itself. [osis, chapter, verse]",
+  "verses": [
+    ["Gen", 1, 1], ["Gen", 1, 27], ["Gen", 12, 2], ["Gen", 50, 20],
+    ["Exod", 14, 14], ["Exod", 20, 3], ["Num", 6, 24], ["Deut", 6, 5], ["Deut", 31, 6],
+    ["Josh", 1, 9], ["Josh", 24, 15], ["Ruth", 1, 16], ["1Sam", 16, 7], ["2Chr", 7, 14],
+    ["Neh", 8, 10], ["Job", 19, 25], ["Ps", 1, 1], ["Ps", 19, 14], ["Ps", 23, 1], ["Ps", 23, 4],
+    ["Ps", 27, 1], ["Ps", 34, 8], ["Ps", 37, 4], ["Ps", 46, 1], ["Ps", 46, 10], ["Ps", 51, 10],
+    ["Ps", 91, 1], ["Ps", 118, 24], ["Ps", 119, 105], ["Ps", 139, 14], ["Prov", 3, 5], ["Prov", 3, 6],
+    ["Prov", 16, 3], ["Prov", 22, 6], ["Eccl", 3, 1], ["Isa", 9, 6], ["Isa", 26, 3], ["Isa", 40, 31],
+    ["Isa", 41, 10], ["Isa", 53, 5], ["Jer", 29, 11], ["Lam", 3, 22], ["Lam", 3, 23], ["Mic", 6, 8],
+    ["Hab", 3, 19], ["Zeph", 3, 17], ["Matt", 5, 14], ["Matt", 5, 16], ["Matt", 6, 33], ["Matt", 11, 28],
+    ["Matt", 22, 37], ["Matt", 28, 19], ["Matt", 28, 20], ["Mark", 10, 45], ["Mark", 12, 31], ["Luke", 1, 37],
+    ["Luke", 6, 31], ["John", 1, 1], ["John", 1, 14], ["John", 3, 16], ["John", 8, 12], ["John", 10, 10],
+    ["John", 11, 25], ["John", 13, 34], ["John", 14, 6], ["John", 14, 27], ["John", 15, 5], ["John", 16, 33],
+    ["Acts", 1, 8], ["Acts", 2, 38], ["Acts", 4, 12], ["Rom", 3, 23], ["Rom", 5, 8], ["Rom", 6, 23],
+    ["Rom", 8, 28], ["Rom", 8, 38], ["Rom", 10, 9], ["Rom", 12, 2], ["Rom", 12, 12], ["Rom", 15, 13],
+    ["1Cor", 10, 13], ["1Cor", 13, 4], ["1Cor", 13, 13], ["1Cor", 16, 14], ["2Cor", 5, 17], ["2Cor", 12, 9],
+    ["Gal", 2, 20], ["Gal", 5, 22], ["Gal", 6, 9], ["Eph", 2, 8], ["Eph", 2, 10], ["Eph", 4, 32],
+    ["Eph", 6, 10], ["Phil", 1, 6], ["Phil", 4, 6], ["Phil", 4, 7], ["Phil", 4, 13], ["Phil", 4, 19],
+    ["Col", 3, 23], ["1Thess", 5, 16], ["1Thess", 5, 18], ["2Tim", 1, 7], ["2Tim", 3, 16], ["Heb", 4, 12],
+    ["Heb", 11, 1], ["Heb", 12, 1], ["Heb", 13, 8], ["Jas", 1, 2], ["Jas", 1, 5], ["Jas", 4, 8],
+    ["1Pet", 5, 7], ["2Pet", 3, 9], ["1John", 1, 9], ["1John", 4, 8], ["1John", 4, 19], ["Rev", 3, 20],
+    ["Rev", 21, 4], ["Rev", 22, 13]
+  ]
+}

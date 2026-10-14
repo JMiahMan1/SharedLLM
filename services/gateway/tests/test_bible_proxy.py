@@ -55,6 +55,10 @@ ROUTES = [
     ("delete", "/api/bible/marks/3"),
     ("put", "/api/bible/state"),
     ("post", "/api/bible/events"),
+    ("get", "/api/bible/games"),
+    ("get", "/api/bible/games/daily"),
+    ("get", "/api/bible/games/leaderboard"),
+    ("post", "/api/bible/games/daily/attempt"),
 ]
 
 
@@ -791,3 +795,29 @@ def test_the_ask_waits_longer_than_a_reading_route(
 ):
     """A cold model load takes minutes; a 10s ceiling would abort a good answer."""
     assert gateway_main._BIBLE_STUDY_TIMEOUT.total >= 300.0
+
+
+# ── games: the caller plays and is scored as themselves ──
+def test_a_game_attempt_is_scored_as_the_caller(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={})
+    make_client(user="michele").post(
+        "/api/bible/games/daily/attempt",
+        params={"username": "jeremiah"},
+        json={"username": "jeremiah", "seed": "2026-10-13", "answers": ["John"], "duration_ms": 900, "correct": 10},
+    )
+    sent = captured["calls"][-1]
+    assert sent["params"]["username"] == "michele"
+    assert sent["json"] == {"seed": "2026-10-13", "answers": ["John"], "duration_ms": 900}
+
+
+def test_the_leaderboard_is_read_as_the_caller(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={})
+    make_client(user="michele").get("/api/bible/games/leaderboard", params={"viewer": "jeremiah"})
+    assert captured["calls"][-1]["params"]["viewer"] == "michele"
+
+
+def test_a_game_is_fetched_as_the_caller(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={})
+    make_client(user="michele").get("/api/bible/games/which_book", params={"seed": "abc"})
+    sent = captured["calls"][-1]
+    assert sent["params"] == {"username": "michele", "seed": "abc"}
