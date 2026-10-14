@@ -90,7 +90,10 @@ wait_for_build() {
 }
 
 # SSH options for robustness: auto-accept new host keys, fail on broken pipe
-SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10"
+# Retry the connection and keep long pulls alive: a brief network drop (seen
+# repeatedly on 2026-10-13) used to fail the whole deploy at one ssh call, or
+# leave a remote docker pull running with nobody waiting for it.
+SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=4 -o ServerAliveInterval=15 -o ServerAliveCountMax=8"
 
 # Sync non-git files to remote to ensure config match
 for NON_GIT_FILE in "prompts/"; do
