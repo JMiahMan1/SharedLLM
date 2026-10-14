@@ -1701,6 +1701,8 @@ export interface BiblePreferences {
   theme: 'serif' | 'sans';
   /** The opaque page the text is set on. */
   page?: 'dark' | 'sepia' | 'light';
+  /** Daily reading reminder, "HH:MM" server-local time; empty is off. */
+  reminder_time?: string;
   read_aloud_voice: string;
   split_view: 'compare' | 'parallel';
 }

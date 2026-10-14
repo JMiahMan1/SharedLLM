@@ -50,6 +50,7 @@ const DEFAULT_PREFERENCES: BiblePreferences = {
   line_height: 1.6,
   theme: 'serif',
   page: 'dark',
+  reminder_time: '',
   read_aloud_voice: '',
   split_view: 'compare',
 };
@@ -621,7 +622,14 @@ export default function Bible() {
         )
       )}
 
-      {tab === 'today' && <BibleToday onOpenRef={openRef} page={effectivePreferences.page} />}
+      {tab === 'today' && (
+        <BibleToday
+          onOpenRef={openRef}
+          page={effectivePreferences.page}
+          reminderTime={effectivePreferences.reminder_time ?? ''}
+          onReminderTime={(reminder_time) => applyPreferences({ reminder_time })}
+        />
+      )}
 
       {tab === 'play' && <BibleGames page={effectivePreferences.page} />}
 

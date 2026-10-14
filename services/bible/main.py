@@ -19,6 +19,7 @@ instead of quietly showing a blank card.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -44,6 +45,7 @@ from services.config import (
     GEO_SVC_URL,
     IDENTITY_SVC_URL,
     INTERNAL_SECRET,
+    TELEMETRY_SVC_URL,
 )
 from services.bible import achievements as ach
 from services.bible import books as book_table
@@ -59,6 +61,7 @@ from services.bible import (
     narration as narration_mod,
     provider_cache,
     providers,
+    reminders,
     study,
     study_ask,
     votd,
@@ -122,7 +125,9 @@ async def lifespan(app: FastAPI):
         bool(BIBLE_DEVOTIONAL_DIR),
         bool(BLB_BASE_URL),
     )
+    reminder_task = asyncio.create_task(reminders.reminder_loop(_db, TELEMETRY_SVC_URL, INTERNAL_SECRET))
     yield
+    reminder_task.cancel()
 
 
 app = FastAPI(title="SOA Bible Service", lifespan=lifespan)
@@ -935,6 +940,7 @@ class StatePayload(BaseModel):
     line_height: float | None = Field(default=None, ge=1.0, le=3.0)
     theme: str | None = Field(default=None, pattern="^(serif|sans)$")
     page: str | None = Field(default=None, pattern="^(dark|sepia|light)$")
+    reminder_time: str | None = Field(default=None, pattern="^$|^([01][0-9]|2[0-3]):[0-5][0-9]$")
     read_aloud_voice: str | None = None
     split_view: str | None = Field(default=None, pattern="^(compare|parallel)$")
 
@@ -966,6 +972,7 @@ def _default_preferences(session: Session) -> dict:
         "line_height": 1.6,
         "theme": "serif",
         "page": "dark",
+        "reminder_time": "",
         "read_aloud_voice": "",
         "split_view": "compare",
     }
@@ -983,6 +990,7 @@ def _preferences(state: UserBibleState) -> dict:
         "line_height": state.line_height,
         "theme": state.theme,
         "page": state.page,
+        "reminder_time": state.reminder_time,
         "read_aloud_voice": state.read_aloud_voice,
         "split_view": state.split_view,
     }
@@ -1050,7 +1058,7 @@ def put_state(
             state.compare_version = _require_version(session, payload.compare_version)
     if payload.cross_version_notes is not None:
         state.cross_version_notes = payload.cross_version_notes
-    for attr in ("show_notes", "font_scale", "line_height", "theme", "page", "read_aloud_voice", "split_view"):
+    for attr in ("show_notes", "font_scale", "line_height", "theme", "page", "reminder_time", "read_aloud_voice", "split_view"):
         value = getattr(payload, attr)
         if value is not None:
             setattr(state, attr, value)
