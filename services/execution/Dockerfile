@@ -1,14 +1,12 @@
 ARG BASE_IMAGE=ghcr.io/jmiahman1/sharedllm-base:latest
 FROM ${BASE_IMAGE} AS base
-ARG GIT_SHA=unknown
-ARG BUILD_DATE=unknown
-ARG SERVICE_NAME=execution
-ENV GIT_SHA=${GIT_SHA}
-ENV BUILD_DATE=${BUILD_DATE}
-ENV SERVICE_NAME=${SERVICE_NAME}
+# Layer order matters for size. Everything heavy (apt, browsers, models) comes
+# first and depends on nothing in the repo, so CI reuses it from cache; the
+# per-commit build args and the source copy come LAST. With GIT_SHA declared up
+# here, every RUN carried it and every commit rebuilt ~8 GB of unchanged layers
+# that each deploy then had to pull.
 WORKDIR /app
 ENV PYTHONPATH=/app
-COPY . .
 # TTS runtime: pykokoro (Kokoro ONNX) replaces the legacy kokoro-onnx engine.
 # Installed explicitly here because the shared base image still ships kokoro-onnx.
 # Pinned exactly: 0.10 removed KokoroPipeline and SSMD support outright, and an
@@ -96,7 +94,12 @@ RUN mkdir -p /home/sharedllm/.cache && playwright install chromium && chmod -R a
 # this, docker auto-creates the /home/sharedllm volume-mount point as root:755,
 # and camoufox/firefox hang at startup (~180s) failing to create ~/.camoufox
 # and the fontconfig cache.
-RUN mkdir -p /home/sharedllm && chown -R 1000:1000 /home/sharedllm && chmod -R a+rwX /home/sharedllm
+# Not recursive: the browser caches below it were already made world-writable
+# in the steps that created them, and a recursive chown in its own layer
+# rewrote every one of their files -- a 3.2 GB duplicate of the browsers.
+RUN mkdir -p /home/sharedllm/.cache \
+    && chown 1000:1000 /home/sharedllm /home/sharedllm/.cache \
+    && chmod a+rwX /home/sharedllm /home/sharedllm/.cache
 
 # Pre-download the Whisper base model so realtime STT verification
 # (audiobook audio->text feedback loop, STTRequest tool) works offline at runtime.
@@ -105,6 +108,15 @@ RUN mkdir -p /home/sharedllm && chown -R 1000:1000 /home/sharedllm && chmod -R a
 RUN python3 -c \
     "import whisper; _ = whisper.load_model('base')" \
     && mkdir -p /home/sharedllm/.cache/whisper \
-    && chown -R 1000:1000 /home/sharedllm/.cache && chmod -R a+rwX /home/sharedllm/.cache
+    && chown -R 1000:1000 /home/sharedllm/.cache/whisper && chmod -R a+rwX /home/sharedllm/.cache/whisper
+
+# Per-commit layers last: the build stamp and the source (~14 MB).
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=unknown
+ARG SERVICE_NAME=execution
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_DATE=${BUILD_DATE}
+ENV SERVICE_NAME=${SERVICE_NAME}
+COPY . .
 
 CMD ["uvicorn", "services.execution.main:app", "--host", "0.0.0.0", "--port", "8003"]

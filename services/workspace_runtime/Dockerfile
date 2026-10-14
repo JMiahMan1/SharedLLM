@@ -1,10 +1,6 @@
 ARG BASE_IMAGE=ghcr.io/jmiahman1/sharedllm-base:latest
 FROM ${BASE_IMAGE} AS base
-ARG GIT_SHA=unknown
-ARG BUILD_DATE=unknown
 ARG SERVICE_NAME=workspace_runtime
-ENV GIT_SHA=${GIT_SHA}
-ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
@@ -246,5 +242,12 @@ RUN python -m playwright install chromium
 
 # Copy service source LAST so the (source-independent) toolchain layers above
 # stay cached across code changes — only this layer rebuilds on each push.
+# The per-commit build stamp must come down here with it: declared at the top,
+# GIT_SHA was in scope for every RUN above, so each commit still rebuilt (and
+# every deploy re-pulled) ~4.7 GB of toolchain layers.
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=unknown
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_DATE=${BUILD_DATE}
 COPY . .
 CMD ["uvicorn", "services.workspace_runtime.main:app", "--host", "0.0.0.0", "--port", "8007"]
