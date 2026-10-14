@@ -441,6 +441,7 @@ function BibleReaderPane({
             // only needs the marks refreshed so the verse shows the glyph.
             void onMarksChanged();
           }}
+          onOpenRef={onOpenRef}
           onShared={(target) => {
             void trigger('success');
             void api.recordBibleEvent('share_tap', activeVerse.reference, target === 'system' ? 1 : 0);

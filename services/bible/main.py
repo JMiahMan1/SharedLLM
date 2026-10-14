@@ -418,6 +418,7 @@ class StudyAskPayload(BaseModel):
     version: str | None = None
     edition: str | None = None
     cross_version: bool = False
+    depth: str = Field(default="adult", pattern="^(child|teen|adult)$")
 
 
 @app.post("/study/ask")
@@ -478,6 +479,7 @@ async def study_ask_route(
             user=username,
             gateway_url=GATEWAY_INTERNAL_URL,
             internal_secret=INTERNAL_SECRET,
+            depth=payload.depth,
         )
     except study_ask.StudyAskError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -492,6 +494,8 @@ async def study_ask_route(
         "edition_name": _edition_name(session, chosen, resolved),
         "question": payload.question,
         "answer": answer,
+        "depth": payload.depth,
+        "references": study_ask.find_references(answer),
         "verses_used": len(verses),
         "notes_used": len(notes),
     }

@@ -1943,9 +1943,15 @@ export interface BibleStudyAnswer {
   edition_name: string;
   question: string;
   answer: string;
+  /** Who the answer was pitched for. */
+  depth?: BibleStudyDepth;
+  /** References the answer names, each confirmed by the server's parser. */
+  references?: string[];
   verses_used: number;
   notes_used: number;
 }
+
+export type BibleStudyDepth = 'child' | 'teen' | 'adult';
 
 /**
  * Study apparatus for a passage, kept out of the verse text itself.

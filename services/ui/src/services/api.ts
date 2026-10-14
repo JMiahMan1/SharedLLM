@@ -147,6 +147,7 @@ import type {
   BibleLeaderboard,
   BibleMemoryOverview,
   BiblePlanDetail,
+  BibleStudyDepth,
   BiblePlanEnrollment,
   BiblePlanInfo,
   BibleMemoryVerse,
@@ -3253,7 +3254,7 @@ export const api = {
   async askBibleStudy(
     ref: string,
     question: string,
-    opts: { version?: string; edition?: string; crossVersion?: boolean } = {},
+    opts: { version?: string; edition?: string; crossVersion?: boolean; depth?: BibleStudyDepth } = {},
   ): Promise<BibleStudyAnswer> {
     const resp = await apiClient.post(
       '/api/bible/study/ask',
@@ -3263,6 +3264,7 @@ export const api = {
         version: opts.version,
         edition: opts.edition,
         cross_version: opts.crossVersion ?? false,
+        depth: opts.depth ?? 'adult',
       },
       { timeout: 320_000 },
     );

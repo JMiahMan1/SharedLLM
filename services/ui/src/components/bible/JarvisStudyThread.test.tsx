@@ -61,6 +61,7 @@ describe('asking about the passage on screen', () => {
       version: 'nkjv',
       edition: 'nkjv-tmn',
       crossVersion: false,
+      depth: 'adult',
     });
     expect(await screen.findByTestId('bible-ask-answer')).toHaveTextContent(
       'It is about love for the whole world.',
@@ -109,5 +110,23 @@ describe('asking about the passage on screen', () => {
   it('will not ask an empty question', () => {
     renderPanel();
     expect(screen.getByTestId('bible-ask-submit')).toBeDisabled();
+  });
+});
+
+describe('JarvisStudyThread depth and references', () => {
+  it('sends the chosen depth and turns named references into chips', async () => {
+    const user = userEvent.setup();
+    const onOpenRef = vi.fn();
+    apiMock.askBibleStudy.mockResolvedValue({
+      reference: 'John 3:16', version: 'kjv', edition: 'kjv', edition_name: '', question: 'q',
+      answer: 'See Romans 5:8.', depth: 'child', references: ['Romans 5:8'], verses_used: 1, notes_used: 0,
+    });
+    render(<JarvisStudyThread passage="John 3:16" version="kjv" onClose={vi.fn()} onOpenRef={onOpenRef} />);
+    await user.click(screen.getByTestId('bible-ask-depth-child'));
+    await user.type(screen.getByTestId('bible-ask-question'), 'Why?');
+    await user.click(screen.getByTestId('bible-ask-submit'));
+    expect(apiMock.askBibleStudy).toHaveBeenLastCalledWith('John 3:16', 'Why?', expect.objectContaining({ depth: 'child' }));
+    await user.click(await screen.findByRole('button', { name: /Romans 5:8/ }));
+    expect(onOpenRef).toHaveBeenCalledWith('Romans 5:8');
   });
 });
