@@ -404,8 +404,8 @@ def test_achievements_report_progress_toward_the_next_badge(loaded_client: TestC
 
 def test_achievements_name_the_rules_that_have_no_data_yet(loaded_client: TestClient):
     body = loaded_client.get("/achievements", params={"username": "sam"}).json()
-    assert "plan_completed" in body["pending_rules"]
-    assert "quiz_perfect" not in body["pending_rules"]
+    # Every badge rule is backed by a shipped feature now.
+    assert body["pending_rules"] == []
 
 
 def test_a_geo_outage_is_reported_not_hidden(loaded_client: TestClient, monkeypatch):

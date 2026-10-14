@@ -146,6 +146,9 @@ import type {
   BibleGameResult,
   BibleLeaderboard,
   BibleMemoryOverview,
+  BiblePlanDetail,
+  BiblePlanEnrollment,
+  BiblePlanInfo,
   BibleMemoryVerse,
   BibleRecallResult,
   BibleActivitySummary,
@@ -3096,6 +3099,41 @@ export const api = {
 
   async recallBibleMemory(id: number, typed: string): Promise<BibleRecallResult> {
     const resp = await apiClient.post(`/api/bible/memorize/${id}/recall`, { typed });
+    return resp.data;
+  },
+
+  async getBiblePlans(): Promise<{ catalogue: BiblePlanInfo[]; mine: BiblePlanEnrollment[] }> {
+    const resp = await apiClient.get('/api/bible/plans');
+    return resp.data;
+  },
+
+  async getBiblePlan(planId: string): Promise<BiblePlanDetail> {
+    const resp = await apiClient.get(`/api/bible/plans/${planId}`);
+    return resp.data;
+  },
+
+  async startBiblePlan(planId: string): Promise<BiblePlanEnrollment> {
+    const resp = await apiClient.post(`/api/bible/plans/${planId}/start`);
+    return resp.data;
+  },
+
+  async completeBiblePlanDay(planId: string, day: number): Promise<BiblePlanEnrollment> {
+    const resp = await apiClient.post(`/api/bible/plans/${planId}/days/${day}/complete`);
+    return resp.data;
+  },
+
+  async undoBiblePlanDay(planId: string, day: number): Promise<BiblePlanEnrollment> {
+    const resp = await apiClient.delete(`/api/bible/plans/${planId}/days/${day}`);
+    return resp.data;
+  },
+
+  async catchUpBiblePlan(planId: string): Promise<BiblePlanEnrollment> {
+    const resp = await apiClient.post(`/api/bible/plans/${planId}/catch-up`);
+    return resp.data;
+  },
+
+  async stopBiblePlan(planId: string): Promise<{ stopped: string }> {
+    const resp = await apiClient.delete(`/api/bible/plans/${planId}`);
     return resp.data;
   },
 

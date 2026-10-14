@@ -14,7 +14,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from . import achievements as ach
-from .models import GameScore, MemoryVerse, ReadingEvent, UserBibleState, VerseMark
+from .models import GameScore, MemoryVerse, PlanEnrollment, ReadingEvent, UserBibleState, VerseMark
 from .refs import ReferenceError, parse_one
 
 log = logging.getLogger("bible.metrics")
@@ -47,10 +47,10 @@ READING_KINDS = frozenset(
     }
 )
 
-#: Rules whose backing tables land in a later phase (plans, memorization).
-#: They read zero until that phase ships, which is honest progress rather than
-#: a fabricated number.
-PENDING_RULES = frozenset({"plan_days_total", "plan_completed"})
+#: Rules whose backing feature has not shipped yet. They read zero until it
+#: does, which is honest progress rather than a fabricated number. Every rule
+#: in achievements.json is live today.
+PENDING_RULES: frozenset[str] = frozenset()
 
 
 def _events(session: Session, username: str, kinds: frozenset[str] | None = None) -> list[ReadingEvent]:
@@ -102,6 +102,8 @@ def compute(session: Session, username: str, today: date | None = None) -> dict[
 
     chapters_total = len({row.ref for row in _events(session, username, frozenset({"chapter_complete"})) if row.ref})
     games = list(session.exec(select(GameScore).where(GameScore.username == username)))
+    enrollments = list(session.exec(select(PlanEnrollment).where(PlanEnrollment.username == username)))
+    plan_days = sum(len([d for d in e.completed_days.split(",") if d]) for e in enrollments)
     mastered = len(
         list(session.exec(select(MemoryVerse).where(MemoryVerse.username == username, MemoryVerse.level >= 5)))
     )
@@ -109,8 +111,8 @@ def compute(session: Session, username: str, today: date | None = None) -> dict[
         "chapters_total": float(chapters_total),
         "books_read": float(len(completed)),
         "read_streak": float(ach.longest_streak(reads)),
-        "plan_days_total": 0.0,
-        "plan_completed": 0.0,
+        "plan_days_total": float(plan_days),
+        "plan_completed": float(sum(1 for e in enrollments if e.finished_on)),
         "memory_mastered": float(mastered),
         "quizzes_total": float(len(games)),
         "quiz_perfect": float(sum(1 for g in games if g.total and g.correct == g.total)),

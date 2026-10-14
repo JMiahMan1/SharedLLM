@@ -9896,6 +9896,60 @@ async def proxy_bible_memory_recall(request: Request, verse_id: int):
     )
 
 
+@app.get("/api/bible/plans")
+async def proxy_bible_plans(request: Request):
+    username = await _bible_caller(request)
+    return await _bible_json("GET", "/plans", label="Failed to read reading plans", params={"username": username})
+
+
+@app.get("/api/bible/plans/{plan_id}")
+async def proxy_bible_plan(request: Request, plan_id: str):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET", f"/plans/{plan_id}", label="Failed to read the reading plan", params={"username": username}
+    )
+
+
+@app.post("/api/bible/plans/{plan_id}/start")
+async def proxy_bible_plan_start(request: Request, plan_id: str):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "POST", f"/plans/{plan_id}/start", label="Failed to start the plan", params={"username": username}
+    )
+
+
+@app.post("/api/bible/plans/{plan_id}/days/{day}/complete")
+async def proxy_bible_plan_day(request: Request, plan_id: str, day: int):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "POST", f"/plans/{plan_id}/days/{day}/complete", label="Failed to mark the day read", params={"username": username}
+    )
+
+
+@app.delete("/api/bible/plans/{plan_id}/days/{day}")
+async def proxy_bible_plan_day_undo(request: Request, plan_id: str, day: int):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "DELETE", f"/plans/{plan_id}/days/{day}", label="Failed to undo the day", params={"username": username}
+    )
+
+
+@app.post("/api/bible/plans/{plan_id}/catch-up")
+async def proxy_bible_plan_catch_up(request: Request, plan_id: str):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "POST", f"/plans/{plan_id}/catch-up", label="Failed to catch the plan up", params={"username": username}
+    )
+
+
+@app.delete("/api/bible/plans/{plan_id}")
+async def proxy_bible_plan_stop(request: Request, plan_id: str):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "DELETE", f"/plans/{plan_id}", label="Failed to stop the plan", params={"username": username}
+    )
+
+
 @app.get("/api/bible/activity/feed")
 async def proxy_bible_activity_feed(request: Request, limit: int = 20):
     viewer = await _bible_caller(request)

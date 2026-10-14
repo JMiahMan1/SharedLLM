@@ -55,6 +55,7 @@ from services.bible import (
     memorize,
     metrics,
     migrations,
+    plans,
     narration as narration_mod,
     provider_cache,
     providers,
@@ -73,6 +74,7 @@ from services.bible.models import (
     Devotional,
     GameScore,
     MemoryVerse,
+    PlanEnrollment,
     ReadingEvent,
     UserBibleState,
     VerseMark,
@@ -1440,6 +1442,157 @@ async def memory_recall(
         "level_before": was,
         "newly_earned": badges["newly_earned"],
     }
+
+
+# ── reading plans ───────────────────────────────────────────────────────────
+
+
+def _plan_days(row: PlanEnrollment) -> list[int]:
+    return sorted({int(d) for d in row.completed_days.split(",") if d.strip().isdigit()})
+
+
+def _active_plan(session: Session, username: str, plan_id: str) -> PlanEnrollment | None:
+    return session.exec(
+        select(PlanEnrollment).where(
+            PlanEnrollment.username == username, PlanEnrollment.plan_id == plan_id, PlanEnrollment.active == True  # noqa: E712
+        )
+    ).first()
+
+
+def _plan_or_404(plan_id: str) -> dict:
+    try:
+        return plans.find(plan_id)
+    except plans.PlanError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+def _enrollment_payload(row: PlanEnrollment) -> dict:
+    plan = plans.find(row.plan_id)
+    state = plans.progress(row.plan_id, row.started_on, _plan_days(row))
+    current = state["current_day"]
+    return {
+        "plan_id": row.plan_id,
+        "name": plan["name"],
+        "started_on": row.started_on,
+        "finished_on": row.finished_on or None,
+        **state,
+        "today": {"day": current, "readings": plans.day_readings(row.plan_id, current)} if current else None,
+    }
+
+
+@app.get("/plans")
+def list_plans(username: str = Query(...), session: Session = Depends(get_session)):
+    """The plan catalogue and the reader's plans in progress."""
+    mine = session.exec(
+        select(PlanEnrollment).where(PlanEnrollment.username == username, PlanEnrollment.active == True)  # noqa: E712
+    ).all()
+    return {"catalogue": plans.catalogue(), "mine": [_enrollment_payload(r) for r in mine]}
+
+
+@app.get("/plans/{plan_id}")
+def get_plan(plan_id: str, username: str = Query(...), session: Session = Depends(get_session)):
+    """Every day of a plan, with what the reader has done."""
+    plan = _plan_or_404(plan_id)
+    row = _active_plan(session, username, plan_id)
+    done = set(_plan_days(row)) if row else set()
+    return {
+        "id": plan["id"],
+        "name": plan["name"],
+        "blurb": plan["blurb"],
+        "days": [
+            {"day": i + 1, "readings": list(readings), "done": (i + 1) in done}
+            for i, readings in enumerate(plans.schedule(plan_id))
+        ],
+        "enrollment": _enrollment_payload(row) if row else None,
+    }
+
+
+@app.post("/plans/{plan_id}/start")
+def start_plan(plan_id: str, username: str = Query(...), session: Session = Depends(get_session)):
+    """Start a plan today. Starting one already under way starts it over."""
+    _plan_or_404(plan_id)
+    existing = _active_plan(session, username, plan_id)
+    if existing is not None:
+        existing.active = False
+        session.add(existing)
+    row = PlanEnrollment(username=username, plan_id=plan_id, started_on=date.today().isoformat())
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    _record_event(session, username, "plan_started", ref=plan_id)
+    return _enrollment_payload(row)
+
+
+@app.post("/plans/{plan_id}/days/{day}/complete")
+async def complete_plan_day(
+    plan_id: str, day: int, username: str = Query(...), session: Session = Depends(get_session)
+):
+    """Mark a day read. Idempotent; finishing the last open day finishes the plan."""
+    _plan_or_404(plan_id)
+    row = _active_plan(session, username, plan_id)
+    if row is None:
+        raise HTTPException(404, "Start this plan before marking days read.")
+    try:
+        plans.day_readings(plan_id, day)
+    except plans.PlanError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    done = set(_plan_days(row))
+    fresh = day not in done
+    done.add(day)
+    row.completed_days = ",".join(str(d) for d in sorted(done))
+    state = plans.progress(plan_id, row.started_on, sorted(done))
+    if state["finished"] and not row.finished_on:
+        row.finished_on = date.today().isoformat()
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    if fresh:
+        _record_event(session, username, "plan_day_completed", ref=f"{plan_id}:{day}", value=day)
+    badges = await get_achievements(username=username, session=session)
+    return {**_enrollment_payload(row), "newly_earned": badges["newly_earned"]}
+
+
+@app.delete("/plans/{plan_id}/days/{day}")
+def uncomplete_plan_day(plan_id: str, day: int, username: str = Query(...), session: Session = Depends(get_session)):
+    """Undo a day marked read by mistake."""
+    row = _active_plan(session, username, plan_id)
+    if row is None:
+        raise HTTPException(404, "You are not following this plan.")
+    row.completed_days = ",".join(str(d) for d in _plan_days(row) if d != day)
+    if row.finished_on and not plans.progress(plan_id, row.started_on, _plan_days(row))["finished"]:
+        row.finished_on = ""
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _enrollment_payload(row)
+
+
+@app.post("/plans/{plan_id}/catch-up")
+def catch_up_plan(plan_id: str, username: str = Query(...), session: Session = Depends(get_session)):
+    """Shift the plan so the next unread day is today; nothing read is lost."""
+    row = _active_plan(session, username, plan_id)
+    if row is None:
+        raise HTTPException(404, "You are not following this plan.")
+    state = plans.progress(plan_id, row.started_on, _plan_days(row))
+    if state["next_day"] is None:
+        raise HTTPException(400, "This plan is finished; there is nothing to catch up.")
+    row.started_on = plans.catch_up_start(state["next_day"])
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _enrollment_payload(row)
+
+
+@app.delete("/plans/{plan_id}")
+def stop_plan(plan_id: str, username: str = Query(...), session: Session = Depends(get_session)):
+    """Stop following a plan. The days already read still count."""
+    row = _active_plan(session, username, plan_id)
+    if row is None:
+        raise HTTPException(404, "You are not following this plan.")
+    row.active = False
+    session.add(row)
+    session.commit()
+    return {"stopped": plan_id}
 
 
 # ── stats / streaks / achievements ──────────────────────────────────────────

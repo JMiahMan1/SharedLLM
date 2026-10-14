@@ -2,9 +2,13 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, BookOpen, ExternalLink, Flame, Sparkles } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
+import BiblePlans from './BiblePlans';
+import { pageStyle } from './readingPage';
 
 interface BibleTodayProps {
   onOpenRef: (ref: string) => void;
+  /** The reader's page tone, so the verse reads the same as in the reader. */
+  page?: string;
 }
 
 /**
@@ -15,7 +19,7 @@ interface BibleTodayProps {
  * to fix rather than leaving an empty card -- an empty devotional looks like a
  * bug and reads as a broken product.
  */
-export default function BibleToday({ onOpenRef }: BibleTodayProps) {
+export default function BibleToday({ onOpenRef, page }: BibleTodayProps) {
   const { trigger } = useHaptics();
   const { data, isLoading, error } = useQuery({
     queryKey: ['bible-daily'],
@@ -63,15 +67,18 @@ export default function BibleToday({ onOpenRef }: BibleTodayProps) {
               void trigger('light');
               onOpenRef(verse.reference);
             }}
-            className="w-full text-left min-h-11 pointer-coarse:min-h-11 rounded-xl -mx-1 px-1 py-1 hover:bg-white/[0.03] transition-colors"
+            className="w-full text-left min-h-11 pointer-coarse:min-h-11 rounded-xl px-4 py-3 border border-[var(--page-rule)] transition-colors"
+            style={pageStyle(page)}
           >
-            <p className="text-xs font-semibold text-amber-300">{verse.reference}</p>
-            <p className="mt-2 font-serif text-lg sm:text-xl leading-relaxed text-slate-100">{verse.text}</p>
+            <p className="text-xs font-semibold text-[var(--page-number)]">{verse.reference}</p>
+            <p className="mt-2 font-serif text-lg sm:text-xl leading-relaxed text-[var(--page-ink)]">{verse.text}</p>
           </button>
         ) : (
           <p className="text-sm text-slate-400">No verse available for today.</p>
         )}
       </section>
+
+      <BiblePlans onOpenRef={onOpenRef} />
 
       <section className="glass-panel rounded-2xl p-4 sm:p-5 border border-white/10">
         <div className="flex items-center gap-2 mb-3">
