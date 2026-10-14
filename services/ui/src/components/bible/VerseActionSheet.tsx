@@ -6,6 +6,7 @@ import {
   Brain,
   ExternalLink,
   Highlighter,
+  ImageIcon,
   Link2,
   NotebookPen,
   ScrollText,
@@ -17,6 +18,7 @@ import BibleStudyNotes from './BibleStudyNotes';
 import JarvisStudyThread from './JarvisStudyThread';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
+import { renderVerseImage } from '../../lib/verseImage';
 import type { BibleMark, BibleVerse } from '../../types/api';
 
 interface VerseActionSheetProps {
@@ -24,6 +26,8 @@ interface VerseActionSheetProps {
   marks: BibleMark[];
   /** Translation the verse came from; the study panel reports what it carries. */
   version: string;
+  /** The reader's page tone, used for a shared verse image. */
+  page?: string;
   /** Which study Bible explains it; more than one can be installed per translation. */
   edition?: string;
   crossVersion?: boolean;
@@ -63,6 +67,7 @@ export default function VerseActionSheet({
   verse,
   marks,
   version,
+  page,
   edition,
   crossVersion = false,
   onEditionChange,
@@ -164,6 +169,25 @@ export default function VerseActionSheet({
       await navigator.share(payload);
       onShared?.('system');
       return 'Shared';
+    });
+
+  const shareImage = () =>
+    run('Shared', async () => {
+      const blob = await renderVerseImage(verse.text, verse.reference, version, page);
+      const file = new File([blob], `${verse.reference.replace(/[^A-Za-z0-9]+/g, '-')}.png`, { type: 'image/png' });
+      if (typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: verse.reference });
+        onShared?.('system');
+        return 'Shared';
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = file.name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      onShared?.('clipboard');
+      return 'Image saved to your downloads';
     });
 
   const openBlb = (tool?: string) =>
@@ -340,6 +364,17 @@ export default function VerseActionSheet({
           >
             <Share2 size={16} className="text-slate-400" />
             <span className="flex-1">Share</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void shareImage()}
+            className={ACTION_CLASS}
+            data-testid="bible-action-share-image"
+          >
+            <ImageIcon size={16} className="text-slate-400" />
+            <span className="flex-1">Share as image</span>
           </button>
 
           <button
