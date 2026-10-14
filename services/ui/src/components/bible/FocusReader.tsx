@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Minimize2 } from 'lucide-react';
 import type { BibleMark, BibleVerse } from '../../types/api';
 import { ambienceFor } from './focusAmbience';
 import { MARK_WASH, pageStyle, toneOf } from './readingPage';
+import { useSwipe } from '../../lib/useSwipe';
 
 /**
  * A chapter read as a page rather than a screen.
@@ -35,6 +36,8 @@ export interface FocusReaderProps {
   onPrev: () => void;
   onNext: () => void;
   onClose: () => void;
+  /** Open the verse's actions (highlight, note, share, ask), as in the reader. */
+  onVerseTap?: (verse: BibleVerse) => void;
 }
 
 function markFor(marks: BibleMark[], verse: BibleVerse): BibleMark | undefined {
@@ -59,9 +62,11 @@ export default function FocusReader({
   onPrev,
   onNext,
   onClose,
+  onVerseTap,
 }: FocusReaderProps) {
   const [chrome, setChrome] = useState(true);
   const tone = toneOf(page);
+  const swipe = useSwipe(onNext, onPrev);
 
   return (
     <div
@@ -112,12 +117,15 @@ export default function FocusReader({
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={() => setChrome((current) => !current)}
-        aria-label={chrome ? 'Hide the controls and read' : 'Show the controls'}
+      {/* A tap on a verse opens its actions; a tap anywhere else on the page
+          shows or hides the controls, the way e-readers do. */}
+      <div
+        onClick={(e) => {
+          if (!(e.target as HTMLElement).closest('[data-verse]')) setChrome((current) => !current);
+        }}
+        {...swipe}
         data-testid="bible-focus-text"
-        className="block w-full max-w-2xl mx-auto px-5 pb-[max(4rem,env(safe-area-inset-bottom))] pt-6 text-left"
+        className="block w-full max-w-2xl mx-auto px-5 pb-[max(4rem,env(safe-area-inset-bottom))] pt-6 text-left min-h-[80vh]"
       >
         {loading && verses.length === 0 && (
           <p className="py-10 text-center text-sm text-[var(--page-muted)]" data-testid="bible-focus-loading">
@@ -127,11 +135,15 @@ export default function FocusReader({
         {verses.map((verse) => {
           const mark = markFor(marks, verse);
           return (
-            <span
+            <button
+              type="button"
               key={`${verse.osis}-${verse.chapter}-${verse.verse}`}
-              className="block rounded-md px-1"
+              onClick={() => onVerseTap?.(verse)}
+              aria-label={`${verse.reference}. ${verse.text}`}
+              className="block w-full text-left rounded-md px-1 py-0.5 hover:bg-[var(--page-hover)] active:bg-[var(--page-hover)]"
               style={mark ? { backgroundColor: MARK_WASH[mark.color] ?? MARK_WASH.yellow } : undefined}
               data-mark={mark ? mark.color : undefined}
+              data-verse
               data-testid={`bible-focus-verse-${verse.chapter}-${verse.verse}`}
             >
               <sup
@@ -146,10 +158,10 @@ export default function FocusReader({
               >
                 {verse.text}
               </span>
-            </span>
+            </button>
           );
         })}
-      </button>
+      </div>
     </div>
   );
 }

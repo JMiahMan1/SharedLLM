@@ -124,3 +124,13 @@ describe('the wash behind the text', () => {
     expect(ambienceFor(12)).not.toBe(ambienceFor(22));
   });
 });
+
+describe('verses in focus mode', () => {
+  it('opens the verse actions on a tap, without toggling the controls', async () => {
+    const onVerseTap = vi.fn();
+    renderFocus({ onVerseTap });
+    await userEvent.click(screen.getByTestId('bible-focus-verse-23-2'));
+    expect(onVerseTap).toHaveBeenCalledWith(expect.objectContaining({ verse: 2 }));
+    expect(screen.getByTestId('bible-focus-reference').closest('.sticky')?.className).toContain('opacity-100');
+  });
+});
