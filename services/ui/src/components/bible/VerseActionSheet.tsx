@@ -38,6 +38,8 @@ interface VerseActionSheetProps {
   /** Called after a note and its pointer are both stored, to refresh the marks. */
   onNoteSaved?: () => void;
   onShared?: (target: 'clipboard' | 'system') => void;
+  /** Open a passage in the reader (from a reference Jarvis names). */
+  onOpenRef?: (ref: string) => void;
 }
 
 const COLORS: Array<{ id: string; label: string; className: string }> = [
@@ -76,6 +78,7 @@ export default function VerseActionSheet({
   onToggleMark,
   onNoteSaved,
   onShared,
+  onOpenRef,
 }: VerseActionSheetProps) {
   const [color, setColor] = useState('yellow');
   const [status, setStatus] = useState<string | null>(null);
@@ -433,6 +436,15 @@ export default function VerseActionSheet({
           edition={edition}
           crossVersion={crossVersion}
           onClose={() => setAskOpen(false)}
+          onOpenRef={
+            onOpenRef
+              ? (ref) => {
+                  setAskOpen(false);
+                  onClose();
+                  onOpenRef(ref);
+                }
+              : undefined
+          }
         />
       )}
     </div>

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { BookOpenCheck, Send, Sparkles, X } from 'lucide-react';
+import { BookOpen, BookOpenCheck, Send, Sparkles, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
+import type { BibleStudyDepth } from '../../types/api';
 
 /**
  * Ask about the passage being read, and see what the answer was built from.
@@ -23,7 +24,14 @@ interface Turn {
   failed: boolean;
   verses: number;
   notes: number;
+  references: string[];
 }
+
+const DEPTHS: { id: BibleStudyDepth; label: string }[] = [
+  { id: 'adult', label: 'Adult' },
+  { id: 'teen', label: 'Teen' },
+  { id: 'child', label: 'Child' },
+];
 
 interface JarvisStudyThreadProps {
   passage: string;
@@ -31,6 +39,8 @@ interface JarvisStudyThreadProps {
   edition?: string;
   crossVersion?: boolean;
   onClose: () => void;
+  /** Open a reference the answer names in the reader. */
+  onOpenRef?: (ref: string) => void;
 }
 
 const STARTERS = [
@@ -47,11 +57,13 @@ export default function JarvisStudyThread({
   edition,
   crossVersion = false,
   onClose,
+  onOpenRef,
 }: JarvisStudyThreadProps) {
   const { trigger } = useHaptics();
   const [question, setQuestion] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [asking, setAsking] = useState(false);
+  const [depth, setDepth] = useState<BibleStudyDepth>('adult');
 
   const ask = async (text: string) => {
     const wanted = text.trim();
@@ -63,6 +75,7 @@ export default function JarvisStudyThread({
         version,
         edition,
         crossVersion,
+        depth,
       });
       setTurns((prev) => [
         ...prev,
@@ -72,6 +85,7 @@ export default function JarvisStudyThread({
           failed: false,
           verses: answer.verses_used,
           notes: answer.notes_used,
+          references: answer.references ?? [],
         },
       ]);
       setQuestion('');
@@ -84,7 +98,7 @@ export default function JarvisStudyThread({
           : 'The question could not be answered just now.';
       setTurns((prev) => [
         ...prev,
-        { question: wanted, text: message, failed: true, verses: 0, notes: 0 },
+        { question: wanted, text: message, failed: true, verses: 0, notes: 0, references: [] },
       ]);
     } finally {
       setAsking(false);
@@ -165,6 +179,24 @@ export default function JarvisStudyThread({
                 >
                   {turn.text}
                 </p>
+                {!turn.failed && turn.references.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5" data-testid="bible-ask-references">
+                    {turn.references.map((ref) => (
+                      <button
+                        key={ref}
+                        type="button"
+                        disabled={!onOpenRef}
+                        onClick={() => {
+                          void trigger('light');
+                          onOpenRef?.(ref);
+                        }}
+                        className={`${TOUCH} rounded-xl border border-sky-400/30 bg-sky-500/10 px-2.5 text-[12px] text-sky-100 flex items-center gap-1`}
+                      >
+                        <BookOpen size={12} /> {ref}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {!turn.failed && (
                   <p
                     className="flex items-center gap-1.5 text-[11px] text-slate-500"
@@ -187,6 +219,25 @@ export default function JarvisStudyThread({
           }}
           className="space-y-2"
         >
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-slate-500">Pitched for</span>
+            <div role="group" aria-label="Who the answer is for" className="flex gap-1 rounded-lg bg-black/40 p-0.5">
+              {DEPTHS.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => setDepth(d.id)}
+                  aria-pressed={depth === d.id}
+                  data-testid={`bible-ask-depth-${d.id}`}
+                  className={`min-h-9 rounded-md px-2.5 text-[11px] font-medium ${
+                    depth === d.id ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <label className="block text-[11px] uppercase tracking-wide text-slate-500" htmlFor="bible-ask-question">
             Your question
           </label>

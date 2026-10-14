@@ -10011,6 +10011,7 @@ async def proxy_bible_study_ask(request: Request):
             "version": body.get("version"),
             "edition": body.get("edition"),
             "cross_version": bool(body.get("cross_version", False)),
+            "depth": body.get("depth") or "adult",
         },
         timeout=_BIBLE_STUDY_TIMEOUT,
     )

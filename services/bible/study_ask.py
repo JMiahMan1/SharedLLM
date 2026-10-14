@@ -18,8 +18,11 @@ provider can change without a bible deploy.
 from __future__ import annotations
 
 import logging
+import re
 
 import aiohttp
+
+from .refs import ReferenceError, parse_one
 
 log = logging.getLogger("bible.study_ask")
 
@@ -41,6 +44,63 @@ SYSTEM_PROMPT = (
     "Keep the answer short -- a few sentences, or a short list when the "
     "question asks for one. Write for someone reading the chapter right now."
 )
+
+
+#: How the answer is pitched. The passage and the rules do not change with the
+#: reader's age; only the words do.
+DEPTHS = {
+    "child": (
+        "The reader is a child of about 6 to 10. Use short sentences and everyday "
+        "words, explain any hard word, and keep it to three or four sentences."
+    ),
+    "teen": (
+        "The reader is a teenager. Be direct and concrete, connect it to everyday "
+        "life where the passage does, and keep it brief."
+    ),
+    "adult": "",
+}
+
+_REF_CANDIDATE = re.compile(
+    r"\b((?:[1-3]\s?)?[A-Z][a-z]+(?:\s(?:of\s)?[A-Z][a-z]+)?)\.?\s(\d{1,3})(?::(\d{1,3})(?:\s?[-\u2013]\s?(\d{1,3}))?)?"
+)
+MAX_REFERENCES = 8
+
+
+def system_prompt(depth: str = "adult") -> str:
+    if depth not in DEPTHS:
+        raise StudyAskError(f"Unknown depth {depth!r}; choose child, teen or adult.")
+    guidance = DEPTHS[depth]
+    return f"{SYSTEM_PROMPT} {guidance}".strip()
+
+
+def find_references(answer: str) -> list[str]:
+    """Scripture references the answer names, each confirmed by the parser.
+
+    Only references the reference parser accepts are returned, so a chip in the
+    reader always opens a real passage; "Chapter 3" or a stray capitalised word
+    followed by a number is dropped rather than offered.
+    """
+    out: list[str] = []
+    for match in _REF_CANDIDATE.finditer(answer or ""):
+        book, chapter, verse, end = match.groups()
+        tail = f" {chapter}" + (f":{verse}" if verse else "") + (f"-{end}" if end else "")
+        # The pattern can take the word before a book as part of its name
+        # ("Compare John 3:16"), so try the longest name first, then shorter.
+        words = book.split()
+        display = None
+        for i in range(len(words)):
+            try:
+                display = parse_one(" ".join(words[i:]) + tail).display()
+                break
+            except ReferenceError:
+                continue
+        if display is None:
+            continue
+        if display not in out:
+            out.append(display)
+        if len(out) >= MAX_REFERENCES:
+            break
+    return out
 
 
 class StudyAskError(ValueError):
@@ -151,6 +211,7 @@ async def ask(
     gateway_url: str,
     internal_secret: str,
     timeout: float = STUDY_ASK_TIMEOUT,
+    depth: str = "adult",
 ) -> str:
     """Send the assembled question to the gateway and return the answer.
 
@@ -168,7 +229,7 @@ async def ask(
     body = {
         "model": "assistant",
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt(depth)},
             {"role": "user", "content": prompt},
         ],
         "rag_user": user,

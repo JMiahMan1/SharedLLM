@@ -418,3 +418,40 @@ def test_the_route_requires_the_internal_secret(loaded_client: TestClient):
 def test_the_route_needs_a_question(loaded_client: TestClient):
     resp = loaded_client.post("/study/ask?username=jeremiah", json={"ref": "Gen 1:1"})
     assert resp.status_code == 422
+
+
+# ── depth and reference chips ──────────────────────────────────────────────
+
+
+def test_the_depth_changes_the_words_not_the_rules():
+    child = study_ask.system_prompt("child")
+    assert "child" in child and "Do not invent verse text" in child
+    assert study_ask.system_prompt("adult") == study_ask.SYSTEM_PROMPT
+    with pytest.raises(study_ask.StudyAskError):
+        study_ask.system_prompt("toddler")
+
+
+def test_only_real_references_become_chips():
+    answer = (
+        "Compare John 3:16 with Romans 5:8 and 1 John 4:9-10. See also Psalm 23. "
+        "Chapter 3 of the story, Version 2 of the app, and Hezekiah 4:1 are not references."
+    )
+    assert study_ask.find_references(answer) == ["John 3:16", "Romans 5:8", "1 John 4:9-10", "Psalms 23"]
+
+
+def test_the_route_sends_the_depth_and_returns_the_chips(loaded_client: TestClient, monkeypatch):
+    session = _patch_gateway(monkeypatch, "Like Romans 8:28 says, God works for good.")
+    resp = loaded_client.post(
+        "/study/ask?username=jeremiah",
+        json={"ref": "Gen 1:1", "question": "Why?", "depth": "child"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["depth"] == "child" and body["references"] == ["Romans 8:28"]
+    _url, sent, _headers = session.calls[-1]
+    assert "child" in sent["messages"][0]["content"]
+
+
+def test_an_unknown_depth_is_refused(loaded_client: TestClient):
+    resp = loaded_client.post("/study/ask?username=jeremiah", json={"ref": "Gen 1:1", "question": "Why?", "depth": "baby"})
+    assert resp.status_code == 422
