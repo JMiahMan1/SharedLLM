@@ -10,6 +10,7 @@ vi.mock('../../hooks/useHaptics', () => ({ useHaptics: () => ({ trigger: vi.fn()
 const apiMock = vi.hoisted(() => ({
   getBiblePlans: vi.fn(),
   getBiblePlan: vi.fn(),
+  getBiblePlanFamily: vi.fn(),
   startBiblePlan: vi.fn(),
   completeBiblePlanDay: vi.fn(),
   undoBiblePlanDay: vi.fn(),
@@ -45,6 +46,7 @@ function renderIt(onOpenRef = vi.fn()) {
 beforeEach(() => {
   vi.clearAllMocks();
   apiMock.getBiblePlans.mockResolvedValue({ catalogue: CATALOGUE, mine: [JOHN] });
+  apiMock.getBiblePlanFamily.mockResolvedValue({ plan_id: 'john-21', members: [] });
 });
 
 describe('Bible reading plans', () => {
@@ -87,5 +89,16 @@ describe('Bible reading plans', () => {
     renderIt();
     await user.click(await screen.findByTestId('bible-plan-complete-john-21'));
     expect(await screen.findByRole('status')).toHaveTextContent('New badge: A Week in the Word');
+  });
+});
+
+describe('reading along', () => {
+  it('shows family members on the same plan', async () => {
+    apiMock.getBiblePlanFamily.mockResolvedValue({
+      plan_id: 'john-21',
+      members: [{ username: 'mia', completed: 9, percent: 43, behind: 0, finished: false }],
+    });
+    renderIt();
+    expect(await screen.findByTestId('bible-plan-family-john-21')).toHaveTextContent('mia 43%');
   });
 });

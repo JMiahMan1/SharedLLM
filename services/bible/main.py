@@ -1539,6 +1539,38 @@ def get_plan(plan_id: str, username: str = Query(...), session: Session = Depend
     }
 
 
+@app.get("/plans/{plan_id}/family")
+async def plan_family(plan_id: str, viewer: str = Query(...), session: Session = Depends(get_session)):
+    """Who else in the family is reading this plan, and how far along.
+
+    Following the same plan is the reading group: there is nothing to join.
+    Only members who share their Bible activity with the viewer appear, the
+    same rule as the family feed; everyone else is simply absent.
+    """
+    _plan_or_404(plan_id)
+    rows = session.exec(
+        select(PlanEnrollment).where(
+            PlanEnrollment.plan_id == plan_id, PlanEnrollment.active == True, PlanEnrollment.username != viewer  # noqa: E712
+        )
+    ).all()
+    members = []
+    for row in rows:
+        if await _consent(row.username, viewer, "bible") is not True:
+            continue
+        state = plans.progress(plan_id, row.started_on, _plan_days(row))
+        members.append(
+            {
+                "username": row.username,
+                "completed": state["completed"],
+                "percent": state["percent"],
+                "behind": state["behind"],
+                "finished": state["finished"],
+            }
+        )
+    members.sort(key=lambda m: -m["completed"])
+    return {"plan_id": plan_id, "members": members}
+
+
 @app.post("/plans/{plan_id}/start")
 def start_plan(plan_id: str, username: str = Query(...), session: Session = Depends(get_session)):
     """Start a plan today. Starting one already under way starts it over."""

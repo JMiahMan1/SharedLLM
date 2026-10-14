@@ -66,6 +66,7 @@ ROUTES = [
     ("post", "/api/bible/memorize/4/recall"),
     ("get", "/api/bible/plans"),
     ("get", "/api/bible/plans/john-21"),
+    ("get", "/api/bible/plans/john-21/family"),
     ("post", "/api/bible/plans/john-21/start"),
     ("post", "/api/bible/plans/john-21/days/3/complete"),
     ("delete", "/api/bible/plans/john-21/days/3"),
