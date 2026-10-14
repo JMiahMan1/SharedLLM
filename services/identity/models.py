@@ -2,7 +2,7 @@
 """
 SQLModel database models for the Identity & Profile Service.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -39,6 +39,9 @@ class User(SQLModel, table=True):  # type: ignore
     skylight_url: str | None = None
     skylight_email: str | None = None
     skylight_enabled: bool = Field(default=True)
+    # "preset:<id>" for a built-in picture, "upload:<version>" for a photo kept
+    # in UserAvatarImage, or empty for initials.
+    avatar: str | None = None
     git_url: str | None = None
     git_user: str | None = None
 
@@ -583,3 +586,12 @@ class WorkspaceChatMessage(SQLModel, table=True):  # type: ignore
     parts: str = "[]"
     meta: str = "{}"
     created_at: str = ""
+
+
+class UserAvatarImage(SQLModel, table=True):  # type: ignore
+    """A user's uploaded profile picture, kept in the identity database."""
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True)
+    mime: str
+    data: bytes
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

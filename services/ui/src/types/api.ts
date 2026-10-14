@@ -136,6 +136,10 @@ export interface UserProfileRaw {
   voice_fingerprint?: string | null;
   voice_id?: string | null;
   avatar_url?: string | null;
+  /** "preset:<id>", "upload:<version>", or null for initials. */
+  avatar?: string | null;
+  /** Skylight for this user: household account set up and switched on for them. */
+  skylight_status?: 'connected' | 'off' | 'not_set_up' | null;
   [key: string]: unknown;
 }
 

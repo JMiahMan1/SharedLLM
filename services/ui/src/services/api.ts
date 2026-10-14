@@ -646,6 +646,27 @@ export const api = {
     return resp.data?.events ?? [];
   },
 
+  async chooseAvatar(preset: string): Promise<UserProfile> {
+    const resp = await apiClient.put('/api/users/me/avatar', { preset });
+    return normalizeUser(resp.data);
+  },
+
+  async uploadAvatar(dataUrl: string): Promise<UserProfile> {
+    const resp = await apiClient.post('/api/users/me/avatar/image', { data_url: dataUrl });
+    return normalizeUser(resp.data);
+  },
+
+  async removeAvatar(): Promise<UserProfile> {
+    const resp = await apiClient.delete('/api/users/me/avatar');
+    return normalizeUser(resp.data);
+  },
+
+  /** A family member's uploaded picture, fetched with the user's credentials. */
+  async getAvatarImage(username: string): Promise<Blob> {
+    const resp = await apiClient.get(`/api/users/${encodeURIComponent(username)}/avatar/image`, { responseType: 'blob' });
+    return resp.data;
+  },
+
   async updateProfile(data: Partial<UserProfile>): Promise<UserProfile> {
     const resp = await apiClient.patch('/api/users/me', mapUserPayload(data));
     return normalizeUser(resp.data);

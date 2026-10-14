@@ -37,6 +37,8 @@ import { credentialPayload, inUse, integrationFor, isSecretKey, missingFields, p
 import HelpTooltip from '../components/ui/HelpTooltip';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
+import UserAvatar from '../components/UserAvatar';
+import AvatarPicker from '../components/AvatarPicker';
 
 interface ModalProps {
   isOpen: boolean;
@@ -108,7 +110,19 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
   const queryClient = useQueryClient();
 
   const connectionKey = Object.values(configKeys)[0];
-  const isConnected = !!(userData && (userData as Record<string, unknown>)[connectionKey]);
+  // Skylight is one household account kept on the system user; everyone else
+  // only switches it on or off for themselves, so their own skylight_url is
+  // always empty. Their status comes from Identity instead.
+  const sharedSkylight = name === 'Skylight' && !userData?.is_system_default;
+  const skylightStatus = userData?.skylight_status ?? 'not_set_up';
+  const isConnected = sharedSkylight
+    ? skylightStatus === 'connected'
+    : !!(userData && (userData as Record<string, unknown>)[connectionKey]);
+  const statusLine = sharedSkylight
+    ? { connected: 'CONNECTED', off: 'TURNED OFF', not_set_up: 'NOT SET UP BY ADMIN' }[skylightStatus]
+    : isConnected
+      ? (userData as Record<string, string>)?.[connectionKey]?.replace(/^https?:\/\//, '')
+      : 'DISCONNECTED';
 
   const updateMutation = useMutation({
     mutationFn: (data: Partial<UserProfile>) => api.updateProfile(data),
@@ -185,17 +199,17 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
         </div>
         <div>
           <h3 className="font-bold text-white">{name}</h3>
-          <p className="text-[10px] text-slate-500 mt-1 truncate max-w-[150px] font-mono">
-            {isConnected ? ((userData as Record<string, string>)?.[connectionKey]?.replace(/^https?:\/\//, '')) : 'DISCONNECTED'}
+          <p className="text-[10px] text-slate-500 mt-1 truncate max-w-[150px] font-mono" data-testid={`integration-status-${name}`}>
+            {statusLine}
           </p>
         </div>
-        <button onClick={handleOpen} aria-label={`${isConnected ? 'Manage' : 'Connect'} ${name}`} className="glass-button w-full text-[10px] uppercase font-bold tracking-widest mt-2 py-2">
-          {isConnected ? 'Manage Integration' : 'Connect Service'}
+        <button onClick={handleOpen} aria-label={`${isConnected || sharedSkylight ? 'Manage' : 'Connect'} ${name}`} className="glass-button w-full text-[10px] uppercase font-bold tracking-widest mt-2 py-2">
+          {sharedSkylight ? (skylightStatus === 'not_set_up' ? 'Details' : 'Turn on or off') : isConnected ? 'Manage Integration' : 'Connect Service'}
         </button>
         <div className="flex items-center gap-2 mt-2">
           <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-slate-600'}`} />
           <span className="text-[9px] uppercase font-black tracking-tighter text-slate-500">
-            {isConnected ? 'Linked' : 'Not Linked'}
+            {sharedSkylight ? (isConnected ? 'Connected' : 'Not Connected') : isConnected ? 'Linked' : 'Not Linked'}
           </span>
         </div>
       </div>
@@ -588,6 +602,7 @@ const APIKeyRows = () => {
 };
 
 const Identity = () => {
+  const [pickingAvatar, setPickingAvatar] = useState(false);
   const { user } = useAuth();
   const queryClient = useQueryClient();
   
@@ -849,16 +864,24 @@ const Identity = () => {
              
              <div className="space-y-6">
                 <div className="flex flex-col items-center">
-                   <div className="w-24 h-24 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center relative group cursor-pointer overflow-hidden mb-4">
-                      {fullUser?.avatar_url ? (
-                        <img src={fullUser.avatar_url} className="w-full h-full object-cover" alt="Avatar" />
+                   <button
+                      type="button"
+                      onClick={() => setPickingAvatar(true)}
+                      disabled={!fullUser}
+                      aria-label="Change profile picture"
+                      data-testid="avatar-open"
+                      className="w-24 h-24 rounded-full flex items-center justify-center relative group overflow-hidden mb-4"
+                   >
+                      {fullUser ? (
+                        <UserAvatar username={fullUser.username} avatar={fullUser.avatar} name={fullUser.full_name || fullUser.username} size={96} />
                       ) : (
-                        <Plus size={32} className="text-slate-600 group-hover:text-purple-400 transition-colors" />
+                        <Plus size={32} className="text-slate-600" />
                       )}
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <span className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 flex items-center justify-center transition-opacity rounded-full">
                          <Edit3 size={20} className="text-white" />
-                      </div>
-                   </div>
+                      </span>
+                   </button>
+                   {pickingAvatar && fullUser && <AvatarPicker user={fullUser} onClose={() => setPickingAvatar(false)} />}
                    <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Avatar & Identity</p>
                    <p className="text-white font-bold">{fullUser?.full_name || 'Set Full Name'}</p>
                 </div>
