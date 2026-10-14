@@ -2321,11 +2321,16 @@ async def health():
     rag_url = RAG_SVC_URL.rstrip("/") if RAG_SVC_URL else ""
 
     async def _rag_health_check():
-        async with get_client() as client:
-            r = await client.get(
-                f"{rag_url.rstrip('/')}/health",
-                timeout=aiohttp.ClientTimeout(total=1.5),
-            )
+        # Its own session rather than the shared pooled client. That pool also
+        # carries the worker's bulk traffic to RAG, so a probe that has to wait
+        # for a slot reports "unreachable" for a service that answers in
+        # milliseconds -- the failures in the log carried no message at all,
+        # which is aiohttp's own timeout, not RAG's answer. A dedicated
+        # connection measures RAG rather than the queue in front of it.
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=1.5)
+        ) as client:
+            r = await client.get(f"{rag_url.rstrip('/')}/health")
             return {
                 "healthy": r.status == 200,
                 "status": "ok" if r.status == 200 else f"status {r.status}",
