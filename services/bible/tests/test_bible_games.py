@@ -174,3 +174,56 @@ def test_what_comes_next_offers_real_following_verses(game_client: TestClient):
             osis = next(b["osis"] for b in games.corpus.list_books(session, "kjv") if b["name"] == book)
             row = session.get(games.BibleVerse, {"version_code": "kjv", "osis": osis, "chapter": chapter, "verse": verse + 1})
             assert row.text.strip() == q.answer
+
+
+def test_an_attempt_can_be_reviewed_by_its_player(game_client: TestClient, monkeypatch):
+    async def fake_award(username, grants):
+        return {"granted": 0, "status": "ok"}
+
+    monkeypatch.setattr(bible_main, "_award_stars", fake_award)
+    seed = date.today().isoformat()
+    key = _key(game_client, "daily", seed)
+    game_client.post("/games/daily/attempt", params={"username": "sam"},
+                     json={"seed": seed, "answers": key[:9] + ["wrong"]})
+    board = game_client.get("/games/leaderboard", params={"viewer": "sam"}).json()["entries"]
+    review = game_client.get(f"/games/attempts/{board[0]['attempt_id']}", params={"viewer": "sam"}).json()
+    assert review["correct"] == 9 and len(review["results"]) == 10
+    missed = [r for r in review["results"] if not r["correct"]]
+    assert len(missed) == 1 and missed[0]["chosen"] == "wrong" and missed[0]["prompt"]
+
+
+def test_someone_elses_daily_review_waits_until_you_have_played(game_client: TestClient, monkeypatch):
+    async def fake_award(username, grants):
+        return {"granted": 0, "status": "ok"}
+
+    async def consent(owner, viewer, scope):
+        return True
+
+    monkeypatch.setattr(bible_main, "_award_stars", fake_award)
+    monkeypatch.setattr(bible_main, "_consent", consent)
+    seed = date.today().isoformat()
+    key = _key(game_client, "daily", seed)
+    game_client.post("/games/daily/attempt", params={"username": "mia"}, json={"seed": seed, "answers": key})
+    mia = game_client.get("/games/leaderboard", params={"viewer": "sam"}).json()["entries"][0]["attempt_id"]
+    early = game_client.get(f"/games/attempts/{mia}", params={"viewer": "sam"})
+    assert early.status_code == 409 and "Play today's quiz first" in early.json()["detail"]
+    game_client.post("/games/daily/attempt", params={"username": "sam"}, json={"seed": seed, "answers": [None] * 10})
+    assert game_client.get(f"/games/attempts/{mia}", params={"viewer": "sam"}).json()["correct"] == 10
+
+
+def test_a_non_sharers_attempt_is_not_found(game_client: TestClient, monkeypatch):
+    async def fake_award(username, grants):
+        return {"granted": 0, "status": "ok"}
+
+    async def consent(owner, viewer, scope):
+        return False
+
+    monkeypatch.setattr(bible_main, "_award_stars", fake_award)
+    monkeypatch.setattr(bible_main, "_consent", consent)
+    resp = game_client.post("/games/books/attempt", params={"username": "mia"},
+                            json={"seed": "x1", "answers": [None] * 8})
+    assert resp.status_code == 200
+    from sqlmodel import select
+    with Session(bible_main.app.state.engine) as s:
+        attempt = s.exec(select(bible_main.GameScore)).first().id
+    assert game_client.get(f"/games/attempts/{attempt}", params={"viewer": "sam"}).status_code == 404

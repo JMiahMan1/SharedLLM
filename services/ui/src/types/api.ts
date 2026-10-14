@@ -1806,14 +1806,37 @@ export interface BibleGameResult {
   duration_ms: number;
   /** Whether this was the day's first daily-quiz try (leaderboard + stars). */
   counted: boolean;
-  results: { id: number; correct: boolean; chosen: string | null; answer: string; reference: string; text: string }[];
+  results: BibleGameReviewItem[];
   stars: { granted: number; status: string };
   newly_earned: BibleEarnedAchievement[];
 }
 
+export interface BibleGameReviewItem {
+  id: number;
+  prompt: string;
+  correct: boolean;
+  chosen: string | null;
+  answer: string;
+  reference: string;
+  text: string;
+}
+
 export interface BibleLeaderboard {
   day: string;
-  entries: { username: string; correct: number; total: number; duration_ms: number; you: boolean }[];
+  entries: { attempt_id: number; username: string; correct: number; total: number; duration_ms: number; you: boolean }[];
+}
+
+/** One finished game, question by question. */
+export interface BibleGameReview {
+  attempt_id: number;
+  username: string;
+  mode: BibleGameMode;
+  name: string;
+  day: string;
+  correct: number;
+  total: number;
+  duration_ms: number;
+  results: BibleGameReviewItem[];
 }
 
 export type BibleMemoryStage = 'read' | 'cloze' | 'first_letters' | 'recall';

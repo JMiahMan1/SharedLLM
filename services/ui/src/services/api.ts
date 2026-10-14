@@ -144,6 +144,7 @@ import type {
   BibleGameInfo,
   BibleGameMode,
   BibleGameResult,
+  BibleGameReview,
   BibleLeaderboard,
   BibleMemoryOverview,
   BiblePlanDetail,
@@ -3116,6 +3117,11 @@ export const api = {
     body: { seed: string; version: string; answers: (string | null)[]; duration_ms: number },
   ): Promise<BibleGameResult> {
     const resp = await apiClient.post(`/api/bible/games/${mode}/attempt`, body);
+    return resp.data;
+  },
+
+  async getBibleGameReview(attemptId: number): Promise<BibleGameReview> {
+    const resp = await apiClient.get(`/api/bible/games/attempts/${attemptId}`);
     return resp.data;
   },
 

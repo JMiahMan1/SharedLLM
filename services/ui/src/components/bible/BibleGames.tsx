@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Check, Crown, Gamepad2, Library, ListOrdered, Loader2, PenLine, RotateCcw, Star, Timer, Trophy, X, Zap } from 'lucide-react';
+import { BookOpen, Check, ChevronRight, Crown, Gamepad2, Library, ListOrdered, Loader2, PenLine, RotateCcw, Star, Timer, Trophy, X, Zap } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
-import type { BibleGame, BibleGameInfo, BibleGameMode, BibleGameResult } from '../../types/api';
+import type { BibleGame, BibleGameInfo, BibleGameMode, BibleGameResult, BibleGameReviewItem } from '../../types/api';
 import { pageStyle } from './readingPage';
 
 const ICONS: Record<BibleGameMode, typeof Gamepad2> = {
@@ -84,18 +84,21 @@ export default function BibleGames({ page }: { page?: string }) {
       />
     );
   }
-  return <GameLobby onStart={(m) => void start(m)} loading={loading} error={error} />;
+  return <GameLobby onStart={(m) => void start(m)} loading={loading} error={error} page={page} />;
 }
 
 function GameLobby({
   onStart,
   loading,
   error,
+  page,
 }: {
   onStart: (mode: BibleGameMode) => void;
   loading: BibleGameMode | null;
   error: string | null;
+  page?: string;
 }) {
+  const [reviewing, setReviewing] = useState<{ id: number; mine: boolean } | null>(null);
   const { data: catalogue, error: catalogueError } = useQuery({
     queryKey: ['bible-games'],
     queryFn: () => api.getBibleGames(),
@@ -110,6 +113,10 @@ function GameLobby({
     queryKey: ['bible-leaderboard'],
     queryFn: () => api.getBibleLeaderboard(),
     retry: false,
+    // Family members finish the quiz on their own phones; keep the board
+    // current without anyone having to leave and come back.
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   });
 
   const modes = catalogue?.modes ?? [];
@@ -166,21 +173,32 @@ function GameLobby({
         ) : (
           <ol className="space-y-1.5">
             {board.entries.map((e, i) => (
-              <li
-                key={e.username}
-                className={`flex items-center gap-3 rounded-xl px-3 py-2 ${e.you ? 'bg-amber-500/10 border border-amber-400/30' : 'bg-white/[0.03]'}`}
-              >
+              <li key={e.username}>
+                <button
+                  type="button"
+                  onClick={() => setReviewing({ id: e.attempt_id, mine: e.you })}
+                  aria-label={`See ${e.you ? 'your' : `${e.username}'s`} answers`}
+                  data-testid={`bible-leaderboard-${e.username}`}
+                  className={`w-full min-h-11 flex items-center gap-3 rounded-xl px-3 py-2 text-left hover:border-amber-400/50 ${e.you ? 'bg-amber-500/10 border border-amber-400/30' : 'bg-white/[0.03] border border-transparent'}`}
+                >
                 <span className="w-6 text-center text-sm font-bold text-slate-400">{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span>
                 <span className="flex-1 truncate text-sm text-slate-100 capitalize">{e.you ? `${e.username} (you)` : e.username}</span>
                 <span className="text-sm font-semibold text-white tabular-nums">
                   {e.correct}/{e.total}
                 </span>
                 <span className="w-14 text-right text-xs text-slate-500 tabular-nums">{seconds(e.duration_ms)}</span>
+                <ChevronRight size={14} className="text-slate-500 shrink-0" />
+                </button>
               </li>
             ))}
           </ol>
         )}
+        {board?.entries.length ? <p className="mt-2 text-[11px] text-slate-500">Tap a score to see the answers.</p> : null}
       </section>
+
+      {reviewing && (
+        <AttemptReview attemptId={reviewing.id} mine={reviewing.mine} page={page} onClose={() => setReviewing(null)} />
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         {others.map((m) => (
@@ -416,32 +434,80 @@ function GameResults({
         </div>
       </section>
 
-      <section className="rounded-2xl p-4 sm:p-5 border border-[var(--page-rule)]" style={pageStyle(page)}>
-        <h2 className="text-sm font-bold mb-3 text-[var(--page-ink)]">Review</h2>
-        <ol className="space-y-3">
-          {result.results.map((r, i) => {
-            const q = game.questions[i];
-            return (
-              <li key={r.id} className="border-b border-[var(--page-rule)] pb-3 last:border-0">
-                <p className="flex items-start gap-2 text-sm text-[var(--page-ink)]">
-                  {r.correct ? (
-                    <Check size={16} className="mt-0.5 shrink-0 text-emerald-500" aria-label="Right" />
-                  ) : (
-                    <X size={16} className="mt-0.5 shrink-0 text-rose-500" aria-label="Wrong" />
-                  )}
-                  <span>
-                    {q?.prompt}{' '}
-                    <strong>{r.answer}</strong>
-                    {!r.correct && <span className="text-[var(--page-muted)]"> — you chose {r.chosen ?? 'nothing'}</span>}
+      <ReviewList results={result.results} page={page} />
+    </div>
+  );
+}
+
+/** A game question by question: right or wrong, the answer, and the verse. */
+function ReviewList({ results, page, who = 'you' }: { results: BibleGameReviewItem[]; page?: string; who?: string }) {
+  const missed = results.filter((r) => !r.correct).length;
+  return (
+    <section className="rounded-2xl p-4 sm:p-5 border border-[var(--page-rule)]" style={pageStyle(page)} data-testid="bible-game-review">
+      <h2 className="text-sm font-bold mb-3 text-[var(--page-ink)]">
+        Review{missed ? ` · ${missed} missed` : ' · all right'}
+      </h2>
+      <ol className="space-y-3">
+        {results.map((r) => (
+          <li key={r.id} className="border-b border-[var(--page-rule)] pb-3 last:border-0">
+            <p className="flex items-start gap-2 text-sm text-[var(--page-ink)]">
+              {r.correct ? (
+                <Check size={16} className="mt-0.5 shrink-0 text-emerald-500" aria-label="Right" />
+              ) : (
+                <X size={16} className="mt-0.5 shrink-0 text-rose-500" aria-label="Wrong" />
+              )}
+              <span>
+                {r.prompt} <strong>{r.answer}</strong>
+                {!r.correct && (
+                  <span className="text-[var(--page-muted)]">
+                    {' '}
+                    — {who} chose {r.chosen ?? 'nothing'}
                   </span>
-                </p>
-                {r.text && <p className="mt-1 pl-6 font-serif text-[15px] leading-relaxed text-[var(--page-ink)]">{r.text}</p>}
-                {r.reference && <p className="mt-0.5 pl-6 text-xs text-[var(--page-muted)]">{r.reference}</p>}
-              </li>
-            );
-          })}
-        </ol>
-      </section>
+                )}
+              </span>
+            </p>
+            {r.text && <p className="mt-1 pl-6 font-serif text-[15px] leading-relaxed text-[var(--page-ink)]">{r.text}</p>}
+            {r.reference && <p className="mt-0.5 pl-6 text-xs text-[var(--page-muted)]">{r.reference}</p>}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+/** Someone's finished game from the leaderboard, in a sheet over the lobby. */
+function AttemptReview({
+  attemptId,
+  mine,
+  page,
+  onClose,
+}: {
+  attemptId: number;
+  mine: boolean;
+  page?: string;
+  onClose: () => void;
+}) {
+  const { data, error, isLoading } = useQuery({
+    queryKey: ['bible-game-review', attemptId],
+    queryFn: () => api.getBibleGameReview(attemptId),
+    retry: false,
+  });
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label="Game answers">
+      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="relative w-full sm:max-w-xl max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/10 bg-slate-950 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3">
+        <div className="flex items-center gap-2">
+          <h2 className="flex-1 text-base font-bold text-white capitalize">
+            {data ? `${mine ? 'Your' : `${data.username}'s`} ${data.name} · ${data.correct}/${data.total}` : 'Answers'}
+          </h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-slate-400">
+            <X size={16} />
+          </button>
+        </div>
+        {isLoading && <Loader2 size={16} className="animate-spin text-slate-400" />}
+        {error && <p className="text-sm text-amber-300" role="alert">{errorText(error)}</p>}
+        {data && <ReviewList results={data.results} page={page} who={mine ? 'you' : data.username} />}
+      </div>
     </div>
   );
 }

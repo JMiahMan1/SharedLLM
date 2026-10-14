@@ -1203,6 +1203,7 @@ async def games_leaderboard(
             continue
         entries.append(
             {
+                "attempt_id": row.id,
                 "username": row.username,
                 "correct": row.correct,
                 "total": row.total,
@@ -1212,6 +1213,53 @@ async def games_leaderboard(
         )
     entries.sort(key=lambda e: (-e["correct"], e["duration_ms"]))
     return {"day": when, "entries": entries}
+
+
+@app.get("/games/attempts/{attempt_id}")
+async def review_attempt(attempt_id: int, viewer: str = Query(...), session: Session = Depends(get_session)):
+    """One finished game, question by question: what was chosen and what was right.
+
+    Your own attempts are always yours to review. Someone else's needs the same
+    consent as the leaderboard, and a daily quiz from today stays closed until
+    you have played it yourself -- otherwise the review is the answer key.
+    """
+    row = session.get(GameScore, attempt_id)
+    hidden = HTTPException(404, "That game is not one you can see.")
+    if row is None:
+        raise hidden
+    if row.username != viewer:
+        if await _consent(row.username, viewer, "bible") is not True:
+            raise hidden
+        if games.MODES.get(row.mode, {}).get("daily") and row.day == games.today():
+            played = session.exec(
+                select(GameScore).where(
+                    GameScore.username == viewer, GameScore.mode == row.mode, GameScore.day == row.day, GameScore.counted == True  # noqa: E712
+                )
+            ).first()
+            if played is None:
+                raise HTTPException(
+                    409, f"Play today's quiz first; then you can see how {row.username} answered."
+                )
+    if not row.answers:
+        raise HTTPException(
+            409, "This game was played before answers were kept, so there is nothing to review."
+        )
+    try:
+        questions = games.build(session, row.mode, row.seed, row.version_code)
+        results = games.score(questions, json.loads(row.answers))
+    except (games.GameError, ValueError) as exc:
+        raise HTTPException(409, f"This game can no longer be rebuilt: {exc}") from exc
+    return {
+        "attempt_id": row.id,
+        "username": row.username,
+        "mode": row.mode,
+        "name": games.MODES.get(row.mode, {}).get("name", row.mode),
+        "day": row.day,
+        "correct": row.correct,
+        "total": row.total,
+        "duration_ms": row.duration_ms,
+        "results": results,
+    }
 
 
 @app.get("/games/{mode}")
@@ -1292,6 +1340,7 @@ async def attempt_game(
             total=len(questions),
             duration_ms=payload.duration_ms,
             counted=counted,
+            answers=json.dumps(payload.answers),
         )
     )
     session.commit()

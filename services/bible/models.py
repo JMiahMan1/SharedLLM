@@ -363,6 +363,9 @@ class GameScore(SQLModel, table=True):
     total: int = Field(default=0)
     duration_ms: int = Field(default=0)
     counted: bool = Field(default=False)
+    #: The choices made, as a JSON list, so the attempt can be reviewed later
+    #: by regenerating the questions. Empty for attempts from before reviews.
+    answers: str = Field(default="")
     created_at: datetime = Field(default_factory=utcnow)
 
 

@@ -12,6 +12,7 @@ const apiMock = vi.hoisted(() => ({
   getBibleGame: vi.fn(),
   submitBibleGame: vi.fn(),
   getBibleLeaderboard: vi.fn(),
+  getBibleGameReview: vi.fn(),
 }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -139,5 +140,42 @@ describe('Bible games', () => {
     renderGames();
     await user.click(await screen.findByTestId('bible-game-start-which_book'));
     expect(await screen.findByRole('alert')).toHaveTextContent('Install a complete translation');
+  });
+});
+
+describe('leaderboard answers', () => {
+  it("opens a family member's answers from the leaderboard and shows what was missed", async () => {
+    const user = userEvent.setup();
+    apiMock.getBibleLeaderboard.mockResolvedValue({
+      day: '2026-10-13',
+      entries: [{ attempt_id: 42, username: 'michele', correct: 7, total: 10, duration_ms: 61000, you: false }],
+    });
+    apiMock.getBibleGameReview.mockResolvedValue({
+      attempt_id: 42, username: 'michele', mode: 'daily', name: 'Daily Quiz', day: '2026-10-13',
+      correct: 1, total: 2, duration_ms: 61000,
+      results: [
+        { id: 0, prompt: 'Which book is this verse from?', correct: true, chosen: 'John', answer: 'John', reference: 'John 3:16', text: 'For God so loved…' },
+        { id: 1, prompt: 'Which book comes right after Ruth?', correct: false, chosen: 'Judges', answer: '1 Samuel', reference: '', text: '' },
+      ],
+    });
+    renderGames();
+    await user.click(await screen.findByTestId('bible-leaderboard-michele'));
+    expect(apiMock.getBibleGameReview).toHaveBeenCalledWith(42);
+    const review = await screen.findByTestId('bible-game-review');
+    expect(review).toHaveTextContent('1 missed');
+    expect(review).toHaveTextContent('michele chose Judges');
+    expect(screen.getByRole('dialog', { name: 'Game answers' })).toHaveTextContent("michele's Daily Quiz · 1/2");
+  });
+
+  it('names why a review is closed', async () => {
+    const user = userEvent.setup();
+    apiMock.getBibleLeaderboard.mockResolvedValue({
+      day: '2026-10-13',
+      entries: [{ attempt_id: 42, username: 'michele', correct: 7, total: 10, duration_ms: 61000, you: false }],
+    });
+    apiMock.getBibleGameReview.mockRejectedValue({ response: { data: { detail: "Play today's quiz first; then you can see how michele answered." } } });
+    renderGames();
+    await user.click(await screen.findByTestId('bible-leaderboard-michele'));
+    expect(await screen.findByRole('alert')).toHaveTextContent("Play today's quiz first");
   });
 });
