@@ -183,6 +183,7 @@ def score(questions: list[Question], answers: list[str | None]) -> list[dict]:
         results.append(
             {
                 "id": question.id,
+                "prompt": question.prompt,
                 "correct": right,
                 "chosen": chosen,
                 "answer": question.answer,

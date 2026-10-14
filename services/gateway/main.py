@@ -9820,6 +9820,15 @@ async def proxy_bible_games_leaderboard(request: Request, day: str | None = None
     )
 
 
+@app.get("/api/bible/games/attempts/{attempt_id}")
+async def proxy_bible_game_review(request: Request, attempt_id: int):
+    """Review one finished game; another member's needs their consent."""
+    viewer = await _bible_caller(request)
+    return await _bible_json(
+        "GET", f"/games/attempts/{attempt_id}", label="Failed to read that game", params={"viewer": viewer}
+    )
+
+
 @app.get("/api/bible/games/{mode}")
 async def proxy_bible_game(request: Request, mode: str, seed: str | None = None, version: str | None = None):
     """A game's questions. The answer key never leaves the bible service."""

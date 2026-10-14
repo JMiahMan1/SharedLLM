@@ -59,6 +59,7 @@ ROUTES = [
     ("get", "/api/bible/games"),
     ("get", "/api/bible/games/daily"),
     ("get", "/api/bible/games/leaderboard"),
+    ("get", "/api/bible/games/attempts/7"),
     ("post", "/api/bible/games/daily/attempt"),
     ("get", "/api/bible/memorize"),
     ("post", "/api/bible/memorize"),
@@ -882,3 +883,9 @@ def test_a_refused_stream_becomes_one_error_event(make_client, monkeypatch):
     resp = make_client(user="michele").post("/api/bible/study/ask/stream", json={"ref": "John 3:16", "question": ""})
     events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
     assert events == [{"type": "error", "detail": "Ask a question about this passage.", "status": 400}]
+
+
+def test_a_game_review_is_read_as_the_caller(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={})
+    make_client(user="michele").get("/api/bible/games/attempts/7", params={"viewer": "jeremiah"})
+    assert captured["calls"][-1]["params"] == {"viewer": "michele"}
