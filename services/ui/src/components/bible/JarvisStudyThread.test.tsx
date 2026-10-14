@@ -2,41 +2,54 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import JarvisStudyThread from './JarvisStudyThread';
+import type { BibleStudyStreamEvent } from '../../types/api';
 
 vi.mock('../../hooks/useHaptics', () => ({ useHaptics: () => ({ trigger: vi.fn() }) }));
 
-const apiMock = vi.hoisted(() => ({ askBibleStudy: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ streamBibleStudy: vi.fn() }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
   api: { ...(await importOriginal<typeof import('../../services/api')>()).api, ...apiMock },
 }));
 
-function answer(over: Partial<Record<string, unknown>> = {}) {
-  return {
-    reference: 'John 3:16',
-    version: 'nkjv',
-    edition: 'nkjv-tmn',
-    edition_name: 'NKJV Study Bible',
-    question: 'What does this mean?',
-    answer: 'It is about love for the whole world.',
-    verses_used: 1,
-    notes_used: 3,
-    ...over,
-  };
+const START: BibleStudyStreamEvent = {
+  type: 'start',
+  reference: 'John 3:16',
+  version: 'nkjv',
+  edition: 'nkjv-tmn',
+  edition_name: 'NKJV Study Bible',
+  depth: 'adult',
+  verses_used: 1,
+  notes_used: 3,
+};
+
+type OnEvent = (e: BibleStudyStreamEvent) => void;
+
+/** A stream that sends these events, in order, then ends. */
+function streams(events: BibleStudyStreamEvent[]) {
+  apiMock.streamBibleStudy.mockImplementation(async (_ref: string, _q: string, _opts: unknown, onEvent: OnEvent) => {
+    for (const event of events) onEvent(event);
+  });
+}
+
+function answering(text: string, opts: { verses?: number; notes?: number; references?: string[] } = {}) {
+  streams([
+    { ...START, verses_used: opts.verses ?? 1, notes_used: opts.notes ?? 3 },
+    { type: 'text', text: text.slice(0, 10) },
+    { type: 'text', text: text.slice(10) },
+    { type: 'done', answer: text, references: opts.references ?? [] },
+  ]);
 }
 
 function renderPanel(props: Partial<React.ComponentProps<typeof JarvisStudyThread>> = {}) {
   const onClose = vi.fn();
-  render(
-    <JarvisStudyThread
-      passage="John 3:16"
-      version="nkjv"
-      edition="nkjv-tmn"
-      onClose={onClose}
-      {...props}
-    />,
-  );
+  render(<JarvisStudyThread passage="John 3:16" version="nkjv" edition="nkjv-tmn" onClose={onClose} {...props} />);
   return { onClose };
+}
+
+async function askIt(question: string) {
+  await userEvent.type(screen.getByTestId('bible-ask-question'), question);
+  await userEvent.click(screen.getByTestId('bible-ask-submit'));
 }
 
 beforeEach(() => {
@@ -50,55 +63,74 @@ describe('asking about the passage on screen', () => {
     expect(screen.getByTestId('bible-ask-panel')).toBeInTheDocument();
   });
 
-  it('asks with the reader\'s translation and study Bible', async () => {
-    apiMock.askBibleStudy.mockResolvedValue(answer());
+  it("asks with the reader's translation and study Bible, and shows the streamed answer", async () => {
+    answering('It is about love for the whole world.');
     renderPanel();
-    await userEvent.type(screen.getByTestId('bible-ask-question'), 'What does this mean?');
-    await userEvent.click(screen.getByTestId('bible-ask-submit'));
+    await askIt('What does this mean?');
 
-    await waitFor(() => expect(apiMock.askBibleStudy).toHaveBeenCalledTimes(1));
-    expect(apiMock.askBibleStudy).toHaveBeenCalledWith('John 3:16', 'What does this mean?', {
-      version: 'nkjv',
-      edition: 'nkjv-tmn',
-      crossVersion: false,
-      depth: 'adult',
-    });
-    expect(await screen.findByTestId('bible-ask-answer')).toHaveTextContent(
-      'It is about love for the whole world.',
+    await waitFor(() => expect(apiMock.streamBibleStudy).toHaveBeenCalledTimes(1));
+    expect(apiMock.streamBibleStudy).toHaveBeenCalledWith(
+      'John 3:16',
+      'What does this mean?',
+      { version: 'nkjv', edition: 'nkjv-tmn', crossVersion: false, depth: 'adult' },
+      expect.any(Function),
     );
+    expect(await screen.findByTestId('bible-ask-answer')).toHaveTextContent('It is about love for the whole world.');
+    expect(screen.queryByTestId('bible-ask-streaming')).not.toBeInTheDocument();
+  });
+
+  it('shows the answer as it is written, before it is finished', async () => {
+    let finish: () => void = () => {};
+    apiMock.streamBibleStudy.mockImplementation(
+      (_r: string, _q: string, _o: unknown, onEvent: OnEvent) =>
+        new Promise<void>((resolve) => {
+          onEvent(START);
+          onEvent({ type: 'text', text: 'God so ' });
+          finish = () => {
+            onEvent({ type: 'done', answer: 'God so loved.', references: [] });
+            resolve();
+          };
+        }),
+    );
+    renderPanel();
+    await askIt('Why?');
+    expect(await screen.findByTestId('bible-ask-answer')).toHaveTextContent('God so');
+    expect(screen.getByTestId('bible-ask-streaming')).toBeInTheDocument();
+    expect(screen.queryByTestId('bible-ask-provenance')).not.toBeInTheDocument();
+    finish();
+    expect(await screen.findByTestId('bible-ask-provenance')).toBeInTheDocument();
   });
 
   it('says how much the answer had to read, so "it does not say" is distinguishable', async () => {
-    apiMock.askBibleStudy.mockResolvedValue(answer({ verses_used: 4, notes_used: 0 }));
+    answering('The passage does not say.', { verses: 4, notes: 0 });
     renderPanel();
-    await userEvent.type(screen.getByTestId('bible-ask-question'), 'Why?');
-    await userEvent.click(screen.getByTestId('bible-ask-submit'));
-    const provenance = await screen.findByTestId('bible-ask-provenance');
-    expect(provenance).toHaveTextContent('Read 4 verses and 0 notes');
+    await askIt('Why?');
+    expect(await screen.findByTestId('bible-ask-provenance')).toHaveTextContent('Read 4 verses and 0 notes');
   });
 
-  it('shows a failure as the model\'s own sentence and keeps the question to retry', async () => {
-    apiMock.askBibleStudy.mockRejectedValue(
-      new Error('Study help could not reach the language model: gateway down'),
-    );
+  it("shows a failure as the model's own sentence and keeps the question to retry", async () => {
+    streams([START, { type: 'error', detail: 'Study help could not reach the language model: gateway down' }]);
     renderPanel();
-    await userEvent.type(screen.getByTestId('bible-ask-question'), 'Why?');
-    await userEvent.click(screen.getByTestId('bible-ask-submit'));
-
-    const failure = await screen.findByTestId('bible-ask-error');
-    expect(failure).toHaveTextContent('gateway down');
+    await askIt('Why?');
+    expect(await screen.findByTestId('bible-ask-error')).toHaveTextContent('gateway down');
     expect(screen.queryByTestId('bible-ask-answer')).not.toBeInTheDocument();
-    // The question stays in the box: the reader can press Ask again.
+    expect(screen.getByTestId('bible-ask-question')).toHaveValue('Why?');
+  });
+
+  it('reports a stream that could not start the same way', async () => {
+    apiMock.streamBibleStudy.mockRejectedValue(new Error('Study help unavailable (502)'));
+    renderPanel();
+    await askIt('Why?');
+    expect(await screen.findByTestId('bible-ask-error')).toHaveTextContent('Study help unavailable (502)');
     expect(screen.getByTestId('bible-ask-question')).toHaveValue('Why?');
   });
 
   it('offers starter questions that fill the box without asking on their own', async () => {
     renderPanel();
-    const starters = screen.getByTestId('bible-ask-starters');
-    const first = starters.querySelector('button')!;
+    const first = screen.getByTestId('bible-ask-starters').querySelector('button')!;
     await userEvent.click(first);
     expect(screen.getByTestId('bible-ask-question')).toHaveValue(first.textContent);
-    expect(apiMock.askBibleStudy).not.toHaveBeenCalled();
+    expect(apiMock.streamBibleStudy).not.toHaveBeenCalled();
   });
 
   it('closes from the scrim', async () => {
@@ -113,19 +145,20 @@ describe('asking about the passage on screen', () => {
   });
 });
 
-describe('JarvisStudyThread depth and references', () => {
+describe('depth and references', () => {
   it('sends the chosen depth and turns named references into chips', async () => {
     const user = userEvent.setup();
     const onOpenRef = vi.fn();
-    apiMock.askBibleStudy.mockResolvedValue({
-      reference: 'John 3:16', version: 'kjv', edition: 'kjv', edition_name: '', question: 'q',
-      answer: 'See Romans 5:8.', depth: 'child', references: ['Romans 5:8'], verses_used: 1, notes_used: 0,
-    });
-    render(<JarvisStudyThread passage="John 3:16" version="kjv" onClose={vi.fn()} onOpenRef={onOpenRef} />);
+    answering('See Romans 5:8 for more.', { references: ['Romans 5:8'] });
+    renderPanel({ onOpenRef });
     await user.click(screen.getByTestId('bible-ask-depth-child'));
-    await user.type(screen.getByTestId('bible-ask-question'), 'Why?');
-    await user.click(screen.getByTestId('bible-ask-submit'));
-    expect(apiMock.askBibleStudy).toHaveBeenLastCalledWith('John 3:16', 'Why?', expect.objectContaining({ depth: 'child' }));
+    await askIt('Why?');
+    expect(apiMock.streamBibleStudy).toHaveBeenLastCalledWith(
+      'John 3:16',
+      'Why?',
+      expect.objectContaining({ depth: 'child' }),
+      expect.any(Function),
+    );
     await user.click(await screen.findByRole('button', { name: /Romans 5:8/ }));
     expect(onOpenRef).toHaveBeenCalledWith('Romans 5:8');
   });

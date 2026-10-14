@@ -148,6 +148,7 @@ import type {
   BibleMemoryOverview,
   BiblePlanDetail,
   BibleStudyDepth,
+  BibleStudyStreamEvent,
   BiblePlanEnrollment,
   BiblePlanInfo,
   BibleMemoryVerse,
@@ -158,7 +159,6 @@ import type {
   BibleBlbLink,
   BibleStudyNoteKind,
   BibleStudyNotesResponse,
-  BibleStudyAnswer,
   BibleDailyResponse,
   BibleVoicesResponse,
   BibleNarration,
@@ -277,6 +277,42 @@ function directRequestConfig(): { baseURL: string; headers: Record<string, strin
   if (token) headers.Authorization = `Bearer ${token}`;
   if (internalSecret) headers['X-Internal-Secret'] = internalSecret;
   return { baseURL, headers };
+}
+
+/**
+ * POST a JSON body and hand each line of an NDJSON reply to ``onEvent`` as it
+ * arrives. axios buffers whole responses, so streams go through fetch with the
+ * same base URL and credentials axios would use.
+ */
+async function postNdjson<T>(
+  path: string,
+  body: unknown,
+  onEvent: (event: T) => void,
+  signal: AbortSignal | undefined,
+  failure: string,
+): Promise<void> {
+  const { baseURL, headers } = directRequestConfig();
+  const resp = await fetch(`${baseURL || ''}${path}`, { method: 'POST', headers, body: JSON.stringify(body), signal });
+  if (!resp.ok || !resp.body) {
+    const detail = await resp.json().catch(() => ({}));
+    throw new Error((detail as { detail?: string }).detail || `${failure} (${resp.status})`);
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newline = buffer.indexOf('\n');
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (line) onEvent(JSON.parse(line) as T);
+      newline = buffer.indexOf('\n');
+    }
+  }
+  if (buffer.trim()) onEvent(JSON.parse(buffer) as T);
 }
 
 const mapUserPayload = (data: Partial<UserProfile>) => {
@@ -1886,33 +1922,31 @@ export const api = {
     onEvent: (event: WorkspaceChatEvent) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    const { baseURL, headers } = directRequestConfig();
-    const resp = await fetch(`${baseURL || ''}/api/workspaces/${workspaceId}/chats/${chatId}/turn`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
+    await postNdjson(`/api/workspaces/${workspaceId}/chats/${chatId}/turn`, body, onEvent, signal, 'Chat turn failed');
+  },
+
+  /** A study answer as it is written: start, text pieces, then done or error. */
+  async streamBibleStudy(
+    ref: string,
+    question: string,
+    opts: { version?: string; edition?: string; crossVersion?: boolean; depth?: BibleStudyDepth },
+    onEvent: (event: BibleStudyStreamEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await postNdjson(
+      '/api/bible/study/ask/stream',
+      {
+        ref,
+        question,
+        version: opts.version,
+        edition: opts.edition,
+        cross_version: opts.crossVersion ?? false,
+        depth: opts.depth ?? 'adult',
+      },
+      onEvent,
       signal,
-    });
-    if (!resp.ok || !resp.body) {
-      const detail = await resp.json().catch(() => ({}));
-      throw new Error((detail as { detail?: string }).detail || `Chat turn failed (${resp.status})`);
-    }
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let newline = buffer.indexOf('\n');
-      while (newline >= 0) {
-        const line = buffer.slice(0, newline).trim();
-        buffer = buffer.slice(newline + 1);
-        if (line) onEvent(JSON.parse(line) as WorkspaceChatEvent);
-        newline = buffer.indexOf('\n');
-      }
-    }
-    if (buffer.trim()) onEvent(JSON.parse(buffer) as WorkspaceChatEvent);
+      'Study help unavailable',
+    );
   },
 
   async killRavenMission(id: number): Promise<{ status: string; message: string }> {
@@ -3258,25 +3292,7 @@ export const api = {
    * load can take minutes, hence the long timeout: the reading routes abort at
    * 15s and this one must not.
    */
-  async askBibleStudy(
-    ref: string,
-    question: string,
-    opts: { version?: string; edition?: string; crossVersion?: boolean; depth?: BibleStudyDepth } = {},
-  ): Promise<BibleStudyAnswer> {
-    const resp = await apiClient.post(
-      '/api/bible/study/ask',
-      {
-        ref,
-        question,
-        version: opts.version,
-        edition: opts.edition,
-        cross_version: opts.crossVersion ?? false,
-        depth: opts.depth ?? 'adult',
-      },
-      { timeout: 320_000 },
-    );
-    return resp.data;
-  },
+
 
   async getBibleImports(): Promise<BibleImportsResponse> {
     const resp = await apiClient.get('/api/bible/admin/imports');

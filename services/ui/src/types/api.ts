@@ -1940,22 +1940,14 @@ export interface BibleBlbLink {
  * see. A question the passage does not answer comes back saying so rather than
  * guessing -- the counts say how much material the answer had to work with.
  */
-export interface BibleStudyAnswer {
-  reference: string;
-  version: string;
-  edition: string;
-  edition_name: string;
-  question: string;
-  answer: string;
-  /** Who the answer was pitched for. */
-  depth?: BibleStudyDepth;
-  /** References the answer names, each confirmed by the server's parser. */
-  references?: string[];
-  verses_used: number;
-  notes_used: number;
-}
-
 export type BibleStudyDepth = 'child' | 'teen' | 'adult';
+
+/** One line of a streamed study answer. */
+export type BibleStudyStreamEvent =
+  | { type: 'start'; reference: string; version: string; edition: string; edition_name: string; depth: BibleStudyDepth; verses_used: number; notes_used: number }
+  | { type: 'text'; text: string }
+  | { type: 'done'; answer: string; references: string[] }
+  | { type: 'error'; detail: string; status?: number };
 
 /**
  * Study apparatus for a passage, kept out of the verse text itself.

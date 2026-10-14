@@ -455,3 +455,108 @@ def test_the_route_sends_the_depth_and_returns_the_chips(loaded_client: TestClie
 def test_an_unknown_depth_is_refused(loaded_client: TestClient):
     resp = loaded_client.post("/study/ask?username=jeremiah", json={"ref": "Gen 1:1", "question": "Why?", "depth": "baby"})
     assert resp.status_code == 422
+
+
+# ── streaming ──────────────────────────────────────────────────────────────
+
+
+class _StreamResp:
+    def __init__(self, lines, status=200):
+        self.status = status
+        self._lines = lines
+
+    @property
+    def content(self):
+        async def gen():
+            for line in self._lines:
+                yield line
+
+        return gen()
+
+    async def json(self):
+        return {"detail": "model asleep"}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+class _StreamSession:
+    def __init__(self, resp):
+        self.resp = resp
+        self.calls = []
+
+    def post(self, url, json=None, headers=None):
+        self.calls.append((url, json, headers))
+        return self.resp
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+def _sse(*pieces):
+    out = [b": keepalive\n"]
+    for p in pieces:
+        out.append(("data: " + json.dumps({"choices": [{"delta": {"content": p}}]}) + "\n").encode())
+    out.append(b"data: [DONE]\n")
+    return out
+
+
+async def test_ask_stream_yields_the_answer_as_it_arrives(monkeypatch):
+    session = _StreamSession(_StreamResp(_sse("God ", "so loved")))
+    monkeypatch.setattr(study_ask.aiohttp, "ClientSession", lambda **kw: session)
+    pieces = [p async for p in study_ask.ask_stream(prompt="p", user="u", gateway_url="http://gw", internal_secret="s")]
+    assert pieces == ["God ", "so loved"]
+    assert session.calls[0][1]["stream"] is True
+
+
+async def test_an_empty_stream_is_a_failure(monkeypatch):
+    session = _StreamSession(_StreamResp(_sse()))
+    monkeypatch.setattr(study_ask.aiohttp, "ClientSession", lambda **kw: session)
+    with pytest.raises(study_ask.StudyAskUnavailable, match="empty answer"):
+        [p async for p in study_ask.ask_stream(prompt="p", user="u", gateway_url="http://gw", internal_secret="s")]
+
+
+async def test_a_refused_stream_names_the_reason(monkeypatch):
+    session = _StreamSession(_StreamResp([], status=503))
+    monkeypatch.setattr(study_ask.aiohttp, "ClientSession", lambda **kw: session)
+    with pytest.raises(study_ask.StudyAskUnavailable, match=r"HTTP 503\): model asleep"):
+        [p async for p in study_ask.ask_stream(prompt="p", user="u", gateway_url="http://gw", internal_secret="s")]
+
+
+def _events(resp):
+    return [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+
+
+def test_the_stream_route_sends_start_text_and_done(loaded_client: TestClient, monkeypatch):
+    async def fake_stream(**kw):
+        for piece in ("See ", "Romans 8:28."):
+            yield piece
+
+    monkeypatch.setattr(study_ask, "ask_stream", fake_stream)
+    resp = loaded_client.post("/study/ask/stream?username=jeremiah", json={"ref": "Gen 1:1", "question": "Why?"})
+    assert resp.status_code == 200
+    events = _events(resp)
+    assert [e["type"] for e in events] == ["start", "text", "text", "done"]
+    assert events[0]["reference"] == "Genesis 1:1" and events[0]["verses_used"] >= 1
+    assert events[-1] == {"type": "done", "answer": "See Romans 8:28.", "references": ["Romans 8:28"]}
+
+
+def test_the_stream_route_reports_a_failure_as_an_event(loaded_client: TestClient, monkeypatch):
+    async def failing(**kw):
+        raise study_ask.StudyAskUnavailable("The model returned an empty answer.")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(study_ask, "ask_stream", failing)
+    events = _events(loaded_client.post("/study/ask/stream?username=jeremiah", json={"ref": "Gen 1:1", "question": "Why?"}))
+    assert events[-1] == {"type": "error", "detail": "The model returned an empty answer."}
+
+
+def test_a_bad_stream_request_is_a_plain_400(loaded_client: TestClient):
+    resp = loaded_client.post("/study/ask/stream?username=jeremiah", json={"ref": "Gen 1:1", "question": "  "})
+    assert resp.status_code == 400

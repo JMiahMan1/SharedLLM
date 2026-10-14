@@ -30,7 +30,7 @@ from pathlib import Path
 
 import aiohttp
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -426,25 +426,11 @@ class StudyAskPayload(BaseModel):
     depth: str = Field(default="adult", pattern="^(child|teen|adult)$")
 
 
-@app.post("/study/ask")
-async def study_ask_route(
-    payload: StudyAskPayload,
-    username: str = Query(...),
-    session: Session = Depends(get_session),
-):
-    """Ask about the passage on screen, with that passage in front of the model.
+def _study_context(session: Session, payload: "StudyAskPayload") -> dict:
+    """The passage, its notes and the assembled prompt for a study question.
 
-    The reader's own question plus the verses they are reading plus whatever
-    study notes are stored for those verses. Nothing else is fetched, so the
-    answer can be checked against what is on the screen, and the same passage
-    and study Bible choices they made for the notes apply here.
-
-    A question the passage does not answer comes back as an answer saying so:
-    the prompt asks for that rather than a guess, because a reader cannot tell
-    a confident invention from the text afterwards.
-
-    The reading event is recorded (``assistant_ask``) but never the question or
-    the answer, because reading events are metadata only.
+    Raises the reader's mistakes as 400s (a bad reference, an empty or
+    oversized question) before any model is called.
     """
     resolved = _require_version(session, payload.version) if payload.version else _default_version(session)
     try:
@@ -473,12 +459,86 @@ async def study_ask_route(
 
     reference = format_reference(spans)
     try:
-        prompt = study_ask.build_prompt(
-            reference=reference,
-            verses=verses,
-            notes=notes,
-            question=payload.question,
-        )
+        prompt = study_ask.build_prompt(reference=reference, verses=verses, notes=notes, question=payload.question)
+    except study_ask.StudyAskError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"reference": reference, "version": resolved, "edition": chosen, "verses": verses, "notes": notes, "prompt": prompt}
+
+
+@app.post("/study/ask/stream")
+async def study_ask_stream_route(
+    payload: StudyAskPayload,
+    username: str = Query(...),
+    session: Session = Depends(get_session),
+):
+    """The same grounded answer as ``/study/ask``, written as it arrives.
+
+    NDJSON events: ``start`` (what the answer is built from), ``text``
+    (a piece of the answer), then ``done`` (the whole answer and its reference
+    chips) or ``error`` (the reason, never a partial answer passed off as whole).
+    Mistakes in the request are still plain 400s before anything streams.
+    """
+    ctx = _study_context(session, payload)
+    _record_event(session, username, "assistant_ask", ref=ctx["reference"])
+    edition_name = _edition_name(session, ctx["edition"], ctx["version"])
+
+    async def events():
+        head = {
+            "type": "start",
+            "reference": ctx["reference"],
+            "version": ctx["version"],
+            "edition": ctx["edition"],
+            "edition_name": edition_name,
+            "depth": payload.depth,
+            "verses_used": len(ctx["verses"]),
+            "notes_used": len(ctx["notes"]),
+        }
+        yield json.dumps(head) + "\n"
+        parts: list[str] = []
+        try:
+            async for piece in study_ask.ask_stream(
+                prompt=ctx["prompt"],
+                user=username,
+                gateway_url=GATEWAY_INTERNAL_URL,
+                internal_secret=INTERNAL_SECRET,
+                depth=payload.depth,
+            ):
+                parts.append(piece)
+                yield json.dumps({"type": "text", "text": piece}) + "\n"
+        except study_ask.StudyAskUnavailable as exc:
+            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+            return
+        answer = "".join(parts).strip()
+        yield json.dumps({"type": "done", "answer": answer, "references": study_ask.find_references(answer)}) + "\n"
+
+    return StreamingResponse(events(), media_type="application/x-ndjson")
+
+
+@app.post("/study/ask")
+async def study_ask_route(
+    payload: StudyAskPayload,
+    username: str = Query(...),
+    session: Session = Depends(get_session),
+):
+    """Ask about the passage on screen, with that passage in front of the model.
+
+    The reader's own question plus the verses they are reading plus whatever
+    study notes are stored for those verses. Nothing else is fetched, so the
+    answer can be checked against what is on the screen, and the same passage
+    and study Bible choices they made for the notes apply here.
+
+    A question the passage does not answer comes back as an answer saying so:
+    the prompt asks for that rather than a guess, because a reader cannot tell
+    a confident invention from the text afterwards.
+
+    The reading event is recorded (``assistant_ask``) but never the question or
+    the answer, because reading events are metadata only.
+    """
+    ctx = _study_context(session, payload)
+    reference, resolved, chosen, verses, notes, prompt = (
+        ctx["reference"], ctx["version"], ctx["edition"], ctx["verses"], ctx["notes"], ctx["prompt"]
+    )
+    try:
         answer = await study_ask.ask(
             prompt=prompt,
             user=username,

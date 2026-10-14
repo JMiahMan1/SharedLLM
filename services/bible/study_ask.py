@@ -17,6 +17,7 @@ provider can change without a bible deploy.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 
@@ -204,6 +205,48 @@ def _extract_answer(data: object) -> str:
     return ""
 
 
+def _request(
+    *, prompt: str, user: str, gateway_url: str, internal_secret: str, depth: str, stream: bool
+) -> tuple[str, dict, dict]:
+    """The gateway call for a study question: URL, body and headers."""
+    if not gateway_url:
+        raise StudyAskUnavailable(
+            "The language model gateway is not configured, so study help is "
+            "unavailable. An administrator needs to set GATEWAY_INTERNAL_URL "
+            "(or gateway_internal_url)."
+        )
+    body = {
+        "model": "assistant",
+        "messages": [
+            {"role": "system", "content": system_prompt(depth)},
+            {"role": "user", "content": prompt},
+        ],
+        "rag_user": user,
+        # Reasoning models blend their thinking into `content` unless the
+        # caller opts out, and a thinking trace is not an answer to show a
+        # reader. Same opt-out the Wander insight card uses.
+        "think": False,
+        "enable_thinking": False,
+        "stream": stream,
+    }
+    headers = {"X-Internal-Secret": internal_secret} if internal_secret else {}
+    return f"{gateway_url.rstrip('/')}/v1/chat/completions", body, headers
+
+
+async def _refusal(resp) -> StudyAskUnavailable:
+    """The gateway's own reason for an HTTP error, as a named failure."""
+    detail = ""
+    try:
+        payload = await resp.json()
+        if isinstance(payload, dict):
+            detail = str(payload.get("detail") or payload.get("message") or "").strip()
+    except Exception:
+        detail = ""
+    return StudyAskUnavailable(
+        f"The model did not answer (HTTP {resp.status})" + (f": {detail}" if detail else ".")
+    )
+
+
 async def ask(
     *,
     prompt: str,
@@ -219,46 +262,14 @@ async def ask(
     attached, so the reader is told what went wrong rather than shown an empty
     panel. Failures are never turned into a placeholder answer.
     """
-    if not gateway_url:
-        raise StudyAskUnavailable(
-            "The language model gateway is not configured, so study help is "
-            "unavailable. An administrator needs to set GATEWAY_INTERNAL_URL "
-            "(or gateway_internal_url)."
-        )
-
-    body = {
-        "model": "assistant",
-        "messages": [
-            {"role": "system", "content": system_prompt(depth)},
-            {"role": "user", "content": prompt},
-        ],
-        "rag_user": user,
-        # Reasoning models blend their thinking into `content` unless the
-        # caller opts out, and a thinking trace is not an answer to show a
-        # reader. Same opt-out the Wander insight card uses.
-        "think": False,
-        "enable_thinking": False,
-    }
-    headers = {"X-Internal-Secret": internal_secret} if internal_secret else {}
-    url = f"{gateway_url.rstrip('/')}/v1/chat/completions"
-
+    url, body, headers = _request(
+        prompt=prompt, user=user, gateway_url=gateway_url, internal_secret=internal_secret, depth=depth, stream=False
+    )
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
             async with session.post(url, json=body, headers=headers) as resp:
                 if resp.status >= 400:
-                    detail = ""
-                    try:
-                        payload = await resp.json()
-                        if isinstance(payload, dict):
-                            detail = str(
-                                payload.get("detail") or payload.get("message") or ""
-                            ).strip()
-                    except Exception:
-                        detail = ""
-                    raise StudyAskUnavailable(
-                        f"The model did not answer (HTTP {resp.status})"
-                        + (f": {detail}" if detail else ".")
-                    )
+                    raise await _refusal(resp)
                 try:
                     data = await resp.json()
                 except Exception as exc:
@@ -274,3 +285,48 @@ async def ask(
     if not answer:
         raise StudyAskUnavailable("The model returned an empty answer.")
     return answer
+
+
+async def ask_stream(
+    *,
+    prompt: str,
+    user: str,
+    gateway_url: str,
+    internal_secret: str,
+    timeout: float = STUDY_ASK_TIMEOUT,
+    depth: str = "adult",
+):
+    """Yield the answer as it is written (OpenAI-style server-sent events).
+
+    The same failures as ``ask`` are raised as StudyAskUnavailable, including
+    a stream that ends without a word of answer.
+    """
+    url, body, headers = _request(
+        prompt=prompt, user=user, gateway_url=gateway_url, internal_secret=internal_secret, depth=depth, stream=True
+    )
+    wrote = False
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+            async with session.post(url, json=body, headers=headers) as resp:
+                if resp.status >= 400:
+                    raise await _refusal(resp)
+                async for raw in resp.content:
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                        delta = chunk["choices"][0].get("delta") or {}
+                    except (ValueError, KeyError, IndexError, TypeError):
+                        continue
+                    text = delta.get("content") or ""
+                    if text:
+                        wrote = True
+                        yield text
+    except aiohttp.ClientError as exc:
+        raise StudyAskUnavailable(f"Study help could not reach the language model: {exc}") from exc
+    if not wrote:
+        raise StudyAskUnavailable("The model returned an empty answer.")
