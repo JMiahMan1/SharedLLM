@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpenCheck, CalendarDays, Check, ChevronDown, ChevronRight, Loader2, Play, RotateCcw, Trophy, X } from 'lucide-react';
+import { BookOpenCheck, CalendarDays, Check, ChevronDown, ChevronRight, Loader2, Play, RotateCcw, Trophy, Users, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { BiblePlanEnrollment, BiblePlanInfo } from '../../types/api';
@@ -185,6 +185,8 @@ function PlanCard({
         </div>
       )}
 
+      <ReadingAlong planId={plan.plan_id} />
+
       <button
         type="button"
         onClick={() => setShowDays(!showDays)}
@@ -205,6 +207,28 @@ function PlanCard({
           Stop this plan
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Family members on the same plan who share their reading with you. */
+function ReadingAlong({ planId }: { planId: string }) {
+  const { data } = useQuery({
+    queryKey: ['bible-plan-family', planId],
+    queryFn: () => api.getBiblePlanFamily(planId),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  if (!data?.members.length) return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400" data-testid={`bible-plan-family-${planId}`}>
+      <Users size={13} className="text-sky-300" />
+      <span>Reading along:</span>
+      {data.members.map((m) => (
+        <span key={m.username} className="rounded-full bg-white/5 px-2 py-0.5 text-slate-200 capitalize">
+          {m.username} {m.finished ? '✓' : `${m.percent}%`}
+        </span>
+      ))}
     </div>
   );
 }

@@ -9910,6 +9910,15 @@ async def proxy_bible_plan(request: Request, plan_id: str):
     )
 
 
+@app.get("/api/bible/plans/{plan_id}/family")
+async def proxy_bible_plan_family(request: Request, plan_id: str):
+    """Family members on the same plan who share with the caller."""
+    viewer = await _bible_caller(request)
+    return await _bible_json(
+        "GET", f"/plans/{plan_id}/family", label="Failed to read who is reading along", params={"viewer": viewer}
+    )
+
+
 @app.post("/api/bible/plans/{plan_id}/start")
 async def proxy_bible_plan_start(request: Request, plan_id: str):
     username = await _bible_caller(request)

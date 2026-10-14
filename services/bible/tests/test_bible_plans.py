@@ -103,3 +103,16 @@ def test_another_readers_plan_is_their_own(loaded_client: TestClient):
     loaded_client.post("/plans/john-21/start", params={"username": "sam"})
     assert loaded_client.get("/plans", params={"username": "mia"}).json()["mine"] == []
     assert loaded_client.post("/plans/john-21/catch-up", params={"username": "mia"}).status_code == 404
+
+
+def test_reading_along_shows_only_members_who_share(loaded_client: TestClient, monkeypatch):
+    from services.bible import main as bible_main
+
+    async def consent(owner, viewer, scope):
+        return owner == "mia"
+
+    monkeypatch.setattr(bible_main, "_consent", consent)
+    for user in ("sam", "mia", "ben"):
+        loaded_client.post("/plans/john-21/start", params={"username": user})
+    members = loaded_client.get("/plans/john-21/family", params={"viewer": "sam"}).json()["members"]
+    assert [m["username"] for m in members] == ["mia"]

@@ -3125,6 +3125,13 @@ export const api = {
     return resp.data;
   },
 
+  async getBiblePlanFamily(
+    planId: string,
+  ): Promise<{ plan_id: string; members: { username: string; completed: number; percent: number; behind: number; finished: boolean }[] }> {
+    const resp = await apiClient.get(`/api/bible/plans/${planId}/family`);
+    return resp.data;
+  },
+
   async startBiblePlan(planId: string): Promise<BiblePlanEnrollment> {
     const resp = await apiClient.post(`/api/bible/plans/${planId}/start`);
     return resp.data;
