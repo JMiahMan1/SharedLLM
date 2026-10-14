@@ -64,6 +64,13 @@ ROUTES = [
     ("get", "/api/bible/memorize/due"),
     ("delete", "/api/bible/memorize/4"),
     ("post", "/api/bible/memorize/4/recall"),
+    ("get", "/api/bible/plans"),
+    ("get", "/api/bible/plans/john-21"),
+    ("post", "/api/bible/plans/john-21/start"),
+    ("post", "/api/bible/plans/john-21/days/3/complete"),
+    ("delete", "/api/bible/plans/john-21/days/3"),
+    ("post", "/api/bible/plans/john-21/catch-up"),
+    ("delete", "/api/bible/plans/john-21"),
 ]
 
 
@@ -836,3 +843,9 @@ def test_a_recall_is_graded_for_the_caller_and_sends_only_the_attempt(make_clien
     sent = captured["calls"][-1]
     assert sent["params"]["username"] == "michele"
     assert sent["json"] == {"typed": "Jesus wept"}
+
+
+def test_plan_progress_is_the_callers_own(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={})
+    make_client(user="michele").post("/api/bible/plans/john-21/days/3/complete", params={"username": "jeremiah"})
+    assert captured["calls"][-1]["params"]["username"] == "michele"

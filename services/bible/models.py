@@ -389,3 +389,22 @@ class MemoryVerse(SQLModel, table=True):
     lapses: int = Field(default=0)
     last_score: float = Field(default=0.0)
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class PlanEnrollment(SQLModel, table=True):
+    """A reader following a reading plan.
+
+    The plan itself is data (``games/plans.json``); this row is only when the
+    reader started and which days they have read. ``completed_days`` is a
+    comma-separated list of day numbers.
+    """
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    plan_id: str = Field(index=True)
+    started_on: str = Field(default="")
+    completed_days: str = Field(default="")
+    finished_on: str = Field(default="")
+    active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=utcnow)

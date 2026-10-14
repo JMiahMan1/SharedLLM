@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { BookOpen, Brain, Flame, Gamepad2, Maximize2, Search, Sparkles, Trophy, X } from 'lucide-react';
+import { BookOpen, Brain, Gamepad2, Maximize2, Search, Sparkles, Trophy, X } from 'lucide-react';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import type {
@@ -53,10 +53,6 @@ const DEFAULT_PREFERENCES: BiblePreferences = {
   split_view: 'compare',
 };
 
-const UPCOMING = [
-  { name: 'Reading plans', detail: 'Daily readings with friends, the way the Bible App does it' },
-  { name: 'Jarvis study help', detail: 'Ask a question about the passage you are reading' },
-];
 
 /** Something with digits in it is a passage; anything else is a search. */
 function looksLikeReference(value: string): boolean {
@@ -400,19 +396,6 @@ function BibleReaderPane({
         />
       ) : null}
 
-      <section className="glass-panel rounded-2xl p-4 border border-white/5">
-        <div className="flex items-center gap-2 mb-2">
-          <Flame size={14} className="text-orange-400" />
-          <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Coming next</h2>
-        </div>
-        <ul className="space-y-1.5">
-          {UPCOMING.map((item) => (
-            <li key={item.name} className="text-xs text-slate-500">
-              <span className="text-slate-300 font-medium">{item.name}</span> — {item.detail}
-            </li>
-          ))}
-        </ul>
-      </section>
 
       {focusing && (
         <FocusReader
@@ -626,7 +609,7 @@ export default function Bible() {
         )
       )}
 
-      {tab === 'today' && <BibleToday onOpenRef={openRef} />}
+      {tab === 'today' && <BibleToday onOpenRef={openRef} page={effectivePreferences.page} />}
 
       {tab === 'play' && <BibleGames page={effectivePreferences.page} />}
 

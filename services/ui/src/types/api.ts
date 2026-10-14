@@ -1861,6 +1861,49 @@ export interface BibleRecallResult {
   newly_earned: BibleEarnedAchievement[];
 }
 
+export interface BiblePlanReading {
+  ref: string;
+  osis: string;
+  chapter_start: number;
+  chapter_end: number;
+}
+
+export interface BiblePlanInfo {
+  id: string;
+  name: string;
+  blurb: string;
+  days: number;
+  category: string;
+  chapters: number;
+}
+
+export interface BiblePlanEnrollment {
+  plan_id: string;
+  name: string;
+  started_on: string;
+  finished_on: string | null;
+  days: number;
+  completed: number;
+  completed_days: number[];
+  percent: number;
+  calendar_day: number;
+  current_day: number | null;
+  next_day: number | null;
+  /** Days before today still unread. */
+  behind: number;
+  finished: boolean;
+  today: { day: number; readings: BiblePlanReading[] } | null;
+  newly_earned?: BibleEarnedAchievement[];
+}
+
+export interface BiblePlanDetail {
+  id: string;
+  name: string;
+  blurb: string;
+  days: { day: number; readings: BiblePlanReading[]; done: boolean }[];
+  enrollment: BiblePlanEnrollment | null;
+}
+
 export interface BibleActivitySummary {
   username: string;
   days_read: number;
