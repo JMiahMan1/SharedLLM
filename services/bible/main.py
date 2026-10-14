@@ -52,6 +52,7 @@ from services.bible import (
     games,
     importer,
     library,
+    memorize,
     metrics,
     migrations,
     narration as narration_mod,
@@ -71,6 +72,7 @@ from services.bible.models import (
     BibleVersion,
     Devotional,
     GameScore,
+    MemoryVerse,
     ReadingEvent,
     UserBibleState,
     VerseMark,
@@ -1242,6 +1244,200 @@ async def attempt_game(
         "counted": counted,
         "results": results,
         "stars": stars,
+        "newly_earned": badges["newly_earned"],
+    }
+
+
+# ── memorisation ────────────────────────────────────────────────────────────
+
+
+class MemoryAdd(BaseModel):
+    ref: str | None = Field(default=None, max_length=80)
+    set_id: str | None = Field(default=None, max_length=60)
+    version: str | None = None
+
+
+class MemoryRecall(BaseModel):
+    typed: str = Field(default="", max_length=4000)
+
+
+def _reader_version(session: Session, username: str, version: str | None) -> str:
+    """The translation to memorise in: the one asked for, else the reader's own."""
+    if version:
+        return _require_version(session, version)
+    state = session.get(UserBibleState, username)
+    if state is not None and state.default_version:
+        try:
+            return _require_version(session, state.default_version)
+        except HTTPException:
+            pass
+    return _game_version(session, None)
+
+
+def _memory_payload(row: MemoryVerse, today: str, text: str | None = None) -> dict:
+    out = {
+        "id": row.id,
+        "ref": row.ref,
+        "set_id": row.set_id,
+        "version": row.version_code,
+        "level": row.level,
+        "stage": memorize.STAGES[min(row.level, memorize.MASTERED)],
+        "mastered": row.level >= memorize.MASTERED,
+        "due_on": row.due_on,
+        "due": row.due_on <= today,
+        "reviews": row.reviews,
+        "lapses": row.lapses,
+        "last_score": row.last_score,
+    }
+    if text is not None:
+        out["text"] = text
+        out["cloze"] = memorize.cloze(text, row.reviews)
+        out["first_letters"] = memorize.first_letters(text)
+    return out
+
+
+def _my_memory(session: Session, username: str) -> list[MemoryVerse]:
+    return list(
+        session.exec(select(MemoryVerse).where(MemoryVerse.username == username).order_by(MemoryVerse.due_on, MemoryVerse.id))
+    )
+
+
+def _memory_overview(session: Session, username: str) -> dict:
+    today = date.today().isoformat()
+    rows = _my_memory(session, username)
+    by_set: dict[str, int] = {}
+    for row in rows:
+        if row.set_id:
+            by_set[row.set_id] = by_set.get(row.set_id, 0) + 1
+    return {
+        "verses": [_memory_payload(r, today) for r in rows],
+        "due_count": sum(1 for r in rows if r.due_on <= today),
+        "mastered": sum(1 for r in rows if r.level >= memorize.MASTERED),
+        "sets": [
+            {"id": s["id"], "name": s["name"], "blurb": s["blurb"], "count": len(s["refs"]), "added": by_set.get(s["id"], 0)}
+            for s in memorize.load_sets()
+        ],
+    }
+
+
+@app.get("/memorize")
+def memory_overview(username: str = Query(...), session: Session = Depends(get_session)):
+    """The reader's memory verses, what is due, and the built-in sets."""
+    return _memory_overview(session, username)
+
+
+@app.post("/memorize")
+def memory_add(payload: MemoryAdd, username: str = Query(...), session: Session = Depends(get_session)):
+    """Start memorising a verse, or every verse of a built-in set.
+
+    A verse already on the reader's list is left where it is on the ladder.
+    """
+    if bool(payload.ref) == bool(payload.set_id):
+        raise HTTPException(400, "Send either a verse reference or a memory set, not both.")
+    version = _reader_version(session, username, payload.version)
+    if payload.set_id:
+        found = memorize.find_set(payload.set_id)
+        if found is None:
+            raise HTTPException(404, f"There is no memory set called {payload.set_id!r}.")
+        refs, set_id = found["refs"], found["id"]
+    else:
+        refs, set_id = [payload.ref or ""], ""
+    existing = {r.ref for r in _my_memory(session, username)}
+    today = date.today().isoformat()
+    added, skipped = [], []
+    for ref in refs:
+        try:
+            span, display, _text = memorize.resolve(session, ref, version)
+        except (memorize.MemoryError_, ReferenceError) as exc:
+            if payload.ref:
+                raise HTTPException(400, str(exc)) from exc
+            skipped.append(f"{ref}: {exc}")
+            continue
+        if display in existing:
+            continue
+        session.add(
+            MemoryVerse(
+                username=username,
+                ref=display,
+                osis=span.book,
+                chapter=span.chapter_start,
+                verse_start=span.verse_start,
+                verse_end=span.verse_end or span.verse_start,
+                version_code=version,
+                set_id=set_id,
+                due_on=today,
+            )
+        )
+        existing.add(display)
+        added.append(display)
+    session.commit()
+    return {**_memory_overview(session, username), "added": added, "skipped": skipped}
+
+
+@app.delete("/memorize/{verse_id}")
+def memory_remove(verse_id: int, username: str = Query(...), session: Session = Depends(get_session)):
+    row = session.get(MemoryVerse, verse_id)
+    if row is None or row.username != username:
+        raise HTTPException(404, "That verse is not on your memory list.")
+    session.delete(row)
+    session.commit()
+    return _memory_overview(session, username)
+
+
+@app.get("/memorize/due")
+def memory_due(
+    username: str = Query(...),
+    limit: int = Query(default=20, ge=1, le=100),
+    session: Session = Depends(get_session),
+):
+    """Verses to practise now, each with its text and the help its stage gives."""
+    today = date.today().isoformat()
+    out = []
+    for row in _my_memory(session, username):
+        if row.due_on > today:
+            continue
+        try:
+            _span, _display, text = memorize.resolve(session, row.ref, row.version_code)
+        except (memorize.MemoryError_, ReferenceError, CorpusError):
+            continue
+        out.append(_memory_payload(row, today, text))
+        if len(out) >= limit:
+            break
+    return {"due": out, "count": len(out)}
+
+
+@app.post("/memorize/{verse_id}/recall")
+async def memory_recall(
+    verse_id: int,
+    payload: MemoryRecall,
+    username: str = Query(...),
+    session: Session = Depends(get_session),
+):
+    """Grade one recall against the text and move the verse on the ladder."""
+    row = session.get(MemoryVerse, verse_id)
+    if row is None or row.username != username:
+        raise HTTPException(404, "That verse is not on your memory list.")
+    try:
+        _span, _display, text = memorize.resolve(session, row.ref, row.version_code)
+    except (memorize.MemoryError_, ReferenceError) as exc:
+        raise HTTPException(503, f"{row.ref} cannot be read in {row.version_code}: {exc}") from exc
+    result = memorize.grade(text, payload.typed)
+    was = row.level
+    row.level, row.due_on = memorize.advance(row.level, result["passed"])
+    row.reviews += 1
+    if not result["passed"]:
+        row.lapses += 1
+    row.last_score = result["score"]
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    _record_event(session, username, "memory_recall", ref=row.ref, value=1 if result["passed"] else 0)
+    badges = await get_achievements(username=username, session=session)
+    return {
+        **result,
+        "text": text,
+        "verse": _memory_payload(row, date.today().isoformat()),
+        "level_before": was,
         "newly_earned": badges["newly_earned"],
     }
 

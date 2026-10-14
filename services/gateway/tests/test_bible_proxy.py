@@ -59,6 +59,11 @@ ROUTES = [
     ("get", "/api/bible/games/daily"),
     ("get", "/api/bible/games/leaderboard"),
     ("post", "/api/bible/games/daily/attempt"),
+    ("get", "/api/bible/memorize"),
+    ("post", "/api/bible/memorize"),
+    ("get", "/api/bible/memorize/due"),
+    ("delete", "/api/bible/memorize/4"),
+    ("post", "/api/bible/memorize/4/recall"),
 ]
 
 
@@ -821,3 +826,13 @@ def test_a_game_is_fetched_as_the_caller(make_client, monkeypatch):
     make_client(user="michele").get("/api/bible/games/which_book", params={"seed": "abc"})
     sent = captured["calls"][-1]
     assert sent["params"] == {"username": "michele", "seed": "abc"}
+
+
+def test_a_recall_is_graded_for_the_caller_and_sends_only_the_attempt(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={})
+    make_client(user="michele").post(
+        "/api/bible/memorize/4/recall", json={"typed": "Jesus wept", "username": "jeremiah", "passed": True}
+    )
+    sent = captured["calls"][-1]
+    assert sent["params"]["username"] == "michele"
+    assert sent["json"] == {"typed": "Jesus wept"}

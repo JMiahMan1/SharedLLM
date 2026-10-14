@@ -404,7 +404,7 @@ def test_achievements_report_progress_toward_the_next_badge(loaded_client: TestC
 
 def test_achievements_name_the_rules_that_have_no_data_yet(loaded_client: TestClient):
     body = loaded_client.get("/achievements", params={"username": "sam"}).json()
-    assert "memory_mastered" in body["pending_rules"]
+    assert "plan_completed" in body["pending_rules"]
     assert "quiz_perfect" not in body["pending_rules"]
 
 

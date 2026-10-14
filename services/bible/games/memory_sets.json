@@ -1,0 +1,17 @@
+{
+  "_comment": "Built-in memory sets. References only; the text comes from the reader's translation.",
+  "sets": [
+    {"id": "foundations", "name": "Foundations", "blurb": "Ten verses every Christian should carry.",
+     "refs": ["John 3:16", "Romans 3:23", "Romans 6:23", "Romans 5:8", "Ephesians 2:8", "Ephesians 2:9", "John 14:6", "1 John 1:9", "2 Corinthians 5:17", "Galatians 2:20"]},
+    {"id": "romans-road", "name": "The Romans Road", "blurb": "The gospel, one verse at a time, through Romans.",
+     "refs": ["Romans 3:10", "Romans 3:23", "Romans 5:8", "Romans 6:23", "Romans 10:9", "Romans 10:13", "Romans 5:1", "Romans 8:1"]},
+    {"id": "comfort", "name": "Comfort and Courage", "blurb": "For hard days and anxious nights.",
+     "refs": ["Psalm 23:1", "Psalm 46:1", "Isaiah 41:10", "Joshua 1:9", "Philippians 4:6", "Philippians 4:7", "Matthew 11:28", "1 Peter 5:7", "John 14:27", "Romans 8:28"]},
+    {"id": "kids", "name": "Kids' First Verses", "blurb": "Short verses for young memories.",
+     "refs": ["Genesis 1:1", "Psalm 118:24", "John 11:35", "1 John 4:19", "Ephesians 4:32", "Psalm 56:3", "1 Thessalonians 5:16", "Colossians 3:20", "Proverbs 3:5", "Philippians 4:13"]},
+    {"id": "fruit", "name": "Fruit of the Spirit", "blurb": "Character, from Galatians and beyond.",
+     "refs": ["Galatians 5:22", "Galatians 5:23", "1 Corinthians 13:4", "1 Corinthians 13:7", "Colossians 3:12", "James 1:19", "Micah 6:8"]},
+    {"id": "great-commission", "name": "Sent Out", "blurb": "The commission, and the power to carry it.",
+     "refs": ["Matthew 28:19", "Matthew 28:20", "Acts 1:8", "Romans 1:16", "Isaiah 6:8", "Matthew 5:16", "1 Peter 3:15"]}
+  ]
+}

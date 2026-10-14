@@ -9846,6 +9846,56 @@ async def proxy_bible_game_attempt(request: Request, mode: str):
     )
 
 
+@app.get("/api/bible/memorize")
+async def proxy_bible_memory(request: Request):
+    username = await _bible_caller(request)
+    return await _bible_json("GET", "/memorize", label="Failed to read memory verses", params={"username": username})
+
+
+@app.post("/api/bible/memorize")
+async def proxy_bible_memory_add(request: Request):
+    """Start memorising a verse or a built-in set, as the caller."""
+    username = await _bible_caller(request)
+    body = await request.json()
+    return await _bible_json(
+        "POST",
+        "/memorize",
+        label="Failed to add the memory verse",
+        params={"username": username},
+        json={k: body.get(k) for k in ("ref", "set_id", "version") if body.get(k)},
+    )
+
+
+@app.get("/api/bible/memorize/due")
+async def proxy_bible_memory_due(request: Request, limit: int = 20):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/memorize/due", label="Failed to read due verses", params={"username": username, "limit": limit}
+    )
+
+
+@app.delete("/api/bible/memorize/{verse_id}")
+async def proxy_bible_memory_remove(request: Request, verse_id: int):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "DELETE", f"/memorize/{verse_id}", label="Failed to remove the memory verse", params={"username": username}
+    )
+
+
+@app.post("/api/bible/memorize/{verse_id}/recall")
+async def proxy_bible_memory_recall(request: Request, verse_id: int):
+    """Grade a recall. Only the typed attempt travels; it is never stored."""
+    username = await _bible_caller(request)
+    body = await request.json()
+    return await _bible_json(
+        "POST",
+        f"/memorize/{verse_id}/recall",
+        label="Failed to grade the recall",
+        params={"username": username},
+        json={"typed": str(body.get("typed") or "")},
+    )
+
+
 @app.get("/api/bible/activity/feed")
 async def proxy_bible_activity_feed(request: Request, limit: int = 20):
     viewer = await _bible_caller(request)
