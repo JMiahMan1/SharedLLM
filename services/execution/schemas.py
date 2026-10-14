@@ -438,7 +438,7 @@ class TalkFileRequest(BaseModel):
 
 class TalkRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["list", "open", "messages", "send", "send_voice", "send_file", "edit_message", "delete_message", "mentions", "reactions", "react", "polls", "create_poll", "vote_poll", "mark_read", "post_card", "game", "call_join", "call_leave"]
+    action: Literal["list", "open", "messages", "send", "send_voice", "send_file", "edit_message", "delete_message", "mentions", "reactions", "react", "polls", "create_poll", "vote_poll", "mark_read", "post_card", "game", "call_join", "call_leave", "create_group", "delete_conversation", "participants", "add_participant", "remove_participant", "people"]
     token: str | None = None
     target_user: str | None = None
     message: str | None = None
@@ -465,6 +465,8 @@ class TalkRequest(BaseRequest):
     game_command: str | None = Field(None, description="start | answer | flip | stop")
     game_kind: str | None = Field(None, description="trivia | memory")
     game_words: str | None = None
+    participants: list[str] | None = Field(None, description="create_group: Nextcloud user ids to invite")
+    attendee_id: int | None = Field(None, description="remove_participant: the attendee to remove")
 
 # ─── File Operations (Workspace vs Storage) ───────────────────────────────────
 

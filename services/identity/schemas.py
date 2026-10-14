@@ -155,6 +155,8 @@ class UserUpdate(BaseModel):
     skylight_email: str | None = None
     skylight_pass: str | None = None
     skylight_enabled: bool | None = None
+    #: The family chat conversation to open on launch (clear with clear_fields).
+    chat_default_token: str | None = None
     preferred_tts_voice: str | None = None
     voice_fingerprint: str | None = None
     is_admin: bool | None = None
@@ -223,6 +225,7 @@ class UserRead(BaseModel):
     skylight_email: str | None = None
     skylight_enabled: bool = True
     avatar: str | None = None
+    chat_default_token: str | None = None
     #: Skylight for this user: "connected" (the household account is set up
     #: and they have it on), "off" (they turned it off) or "not_set_up".
     skylight_status: str | None = None

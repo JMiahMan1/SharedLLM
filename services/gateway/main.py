@@ -4666,6 +4666,44 @@ async def proxy_open_talk_conversation(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/communication/talk/conversations/group")
+async def proxy_create_talk_group(request: Request):
+    """Start a group conversation with a name and the people in it."""
+    body = await request.json()
+    payload = {"action": "create_group", "message": body.get("name"), "participants": body.get("participants") or []}
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+
+
+@app.delete("/api/communication/talk/conversations")
+async def proxy_delete_talk_conversation(request: Request, token: str):
+    """Delete a conversation (owners and moderators) or leave it (everyone else)."""
+    return await _proxy_execution_with_identity(request, "/execute/talk", {"action": "delete_conversation", "token": token})
+
+
+@app.get("/api/communication/talk/participants")
+async def proxy_talk_participants(request: Request, token: str):
+    return await _proxy_execution_with_identity(request, "/execute/talk", {"action": "participants", "token": token})
+
+
+@app.post("/api/communication/talk/participants")
+async def proxy_add_talk_participant(request: Request):
+    body = await request.json()
+    payload = {"action": "add_participant", "token": body.get("token"), "target_user": body.get("user")}
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
+@app.delete("/api/communication/talk/participants")
+async def proxy_remove_talk_participant(request: Request, token: str, attendee_id: int):
+    payload = {"action": "remove_participant", "token": token, "attendee_id": attendee_id}
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
+@app.get("/api/communication/talk/people")
+async def proxy_talk_people(request: Request, search: str = "", token: str | None = None):
+    """Nextcloud users to start a chat with, or add to one."""
+    return await _proxy_execution_with_identity(request, "/execute/talk", {"action": "people", "search": search, "token": token})
+
+
 @app.get("/api/communication/talk/messages")
 async def proxy_get_talk_messages(request: Request):
     payload = {

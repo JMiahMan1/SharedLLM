@@ -180,6 +180,7 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "skylight_enabled", "ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1")
         _add_column("user", "skylight_url", "ALTER TABLE user ADD COLUMN skylight_url VARCHAR")
         _add_column("user", "avatar", "ALTER TABLE user ADD COLUMN avatar VARCHAR")
+        _add_column("user", "chat_default_token", "ALTER TABLE user ADD COLUMN chat_default_token VARCHAR")
         _add_column("user", "skylight_email", "ALTER TABLE user ADD COLUMN skylight_email VARCHAR")
         _add_column("user", "skylight_pass_enc", "ALTER TABLE user ADD COLUMN skylight_pass_enc VARCHAR")
         _add_column("user", "git_url", "ALTER TABLE user ADD COLUMN git_url VARCHAR")

@@ -79,6 +79,19 @@ def _conversation_summary(conversation: dict[str, Any]) -> dict[str, Any]:
         # read up to last_read (where the "new messages" line goes).
         "last_common_read": conversation.get("lastCommonReadMessage"),
         "last_read": conversation.get("lastReadMessage"),
+        # Owners and moderators (1, 2) may delete a conversation and manage
+        # its members; everyone else can only leave it.
+        "can_moderate": conversation.get("participantType") in (1, 2),
+    }
+
+
+def _participant_summary(p: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "attendee_id": p.get("attendeeId"),
+        "actor_type": p.get("actorType"),
+        "actor_id": p.get("actorId"),
+        "display_name": p.get("displayName") or p.get("actorId"),
+        "is_moderator": p.get("participantType") in (1, 2),
     }
 
 
@@ -827,6 +840,104 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             if not ok:
                 return ExecutionResult(status="FAILURE", message=message or "Could not delete the message.", service="talk_delete")
             return ExecutionResult(status="SUCCESS", message="Message deleted.", service="talk_delete")
+
+        if action == "people":
+            # Nextcloud users to start a chat with or add to one.
+            ok, data, message = await _talk_request_with_retry(
+                provider,
+                "GET",
+                "/ocs/v2.php/core/autocomplete/get",
+                params={"search": req.search or "", "itemType": "call", "itemId": req.token or "new", "shareTypes[]": "0", "limit": "20"},
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Could not search people.", service="talk_people")
+            people = [
+                {"id": item.get("id"), "label": item.get("label") or item.get("id")}
+                for item in (data or [])
+                if isinstance(item, dict) and item.get("source") in (None, "users")
+            ]
+            return ExecutionResult(status="SUCCESS", message=f"{len(people)} match(es).", service="talk_people", detail={"people": people})
+
+        if action == "create_group":
+            name = (req.message or "").strip()
+            invite = [p for p in (req.participants or []) if p]
+            if not name:
+                return ExecutionResult(status="FAILURE", message="A group needs a name.", service="talk_create")
+            if not invite:
+                return ExecutionResult(status="FAILURE", message="Add at least one person to the group.", service="talk_create")
+            ok, data, message = await _talk_request_with_retry(
+                provider, "POST", "/ocs/v2.php/apps/spreed/api/v4/room", data={"roomType": "2", "roomName": name[:200]}
+            )
+            if not ok or not isinstance(data, dict):
+                return ExecutionResult(status="FAILURE", message=message or "Could not create the group.", service="talk_create")
+            token = data.get("token")
+            missed = []
+            for person in invite:
+                added, _d, why = await _talk_request_with_retry(
+                    provider,
+                    "POST",
+                    f"/ocs/v2.php/apps/spreed/api/v4/room/{urllib.parse.quote(token)}/participants",
+                    data={"newParticipant": person, "source": "users"},
+                )
+                if not added:
+                    missed.append(f"{person} ({why or 'refused'})")
+            return ExecutionResult(
+                status="SUCCESS",
+                message=f"Created {name}." + (f" Could not add: {', '.join(missed)}." if missed else ""),
+                service="talk_create",
+                detail={"conversation": _conversation_summary(data), "not_added": missed},
+            )
+
+        if action == "delete_conversation":
+            if not req.token:
+                return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_delete")
+            room = f"/ocs/v2.php/apps/spreed/api/v4/room/{urllib.parse.quote(req.token)}"
+            ok, _data, message = await _talk_request_with_retry(provider, "DELETE", room)
+            if ok:
+                return ExecutionResult(status="SUCCESS", message="Conversation deleted.", service="talk_delete", detail={"deleted": True})
+            # Only owners and moderators may delete; anyone else leaves, which
+            # removes it from their list and leaves it for everyone else.
+            left, _d, why = await _talk_request_with_retry(provider, "DELETE", f"{room}/participants/self")
+            if left:
+                return ExecutionResult(status="SUCCESS", message="You left the conversation.", service="talk_delete", detail={"deleted": False, "left": True})
+            return ExecutionResult(status="FAILURE", message=why or message or "Could not delete the conversation.", service="talk_delete")
+
+        if action == "participants":
+            if not req.token:
+                return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_participants")
+            ok, data, message = await _talk_request_with_retry(
+                provider, "GET", f"/ocs/v2.php/apps/spreed/api/v4/room/{urllib.parse.quote(req.token)}/participants"
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Could not load members.", service="talk_participants")
+            members = [_participant_summary(p) for p in (data or []) if isinstance(p, dict)]
+            return ExecutionResult(status="SUCCESS", message=f"{len(members)} member(s).", service="talk_participants", detail={"participants": members})
+
+        if action == "add_participant":
+            if not req.token or not req.target_user:
+                return ExecutionResult(status="FAILURE", message="A conversation and a person are required.", service="talk_add")
+            ok, _data, message = await _talk_request_with_retry(
+                provider,
+                "POST",
+                f"/ocs/v2.php/apps/spreed/api/v4/room/{urllib.parse.quote(req.token)}/participants",
+                data={"newParticipant": req.target_user, "source": "users"},
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or f"Could not add {req.target_user}.", service="talk_add")
+            return ExecutionResult(status="SUCCESS", message=f"Added {req.target_user}.", service="talk_add")
+
+        if action == "remove_participant":
+            if not req.token or req.attendee_id is None:
+                return ExecutionResult(status="FAILURE", message="A conversation and a member are required.", service="talk_remove")
+            ok, _data, message = await _talk_request_with_retry(
+                provider,
+                "DELETE",
+                f"/ocs/v2.php/apps/spreed/api/v4/room/{urllib.parse.quote(req.token)}/attendees",
+                params={"attendeeId": str(req.attendee_id)},
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Could not remove that member.", service="talk_remove")
+            return ExecutionResult(status="SUCCESS", message="Member removed.", service="talk_remove")
 
         if action == "mentions":
             if not req.token:
