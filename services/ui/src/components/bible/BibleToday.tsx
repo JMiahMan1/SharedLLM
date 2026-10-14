@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, BookOpen, ExternalLink, Flame, Sparkles } from 'lucide-react';
+import { AlertTriangle, Bell, BellOff, BookOpen, ExternalLink, Flame, Sparkles } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import BiblePlans from './BiblePlans';
@@ -9,6 +9,9 @@ interface BibleTodayProps {
   onOpenRef: (ref: string) => void;
   /** The reader's page tone, so the verse reads the same as in the reader. */
   page?: string;
+  /** Daily reminder time ("HH:MM"), empty when off. */
+  reminderTime?: string;
+  onReminderTime?: (value: string) => void;
 }
 
 /**
@@ -19,7 +22,7 @@ interface BibleTodayProps {
  * to fix rather than leaving an empty card -- an empty devotional looks like a
  * bug and reads as a broken product.
  */
-export default function BibleToday({ onOpenRef, page }: BibleTodayProps) {
+export default function BibleToday({ onOpenRef, page, reminderTime = '', onReminderTime }: BibleTodayProps) {
   const { trigger } = useHaptics();
   const { data, isLoading, error } = useQuery({
     queryKey: ['bible-daily'],
@@ -79,6 +82,38 @@ export default function BibleToday({ onOpenRef, page }: BibleTodayProps) {
       </section>
 
       <BiblePlans onOpenRef={onOpenRef} />
+
+      {onReminderTime && (
+        <section className="glass-panel rounded-2xl p-4 border border-white/10 flex flex-wrap items-center gap-3" data-testid="bible-reminder">
+          {reminderTime ? <Bell size={16} className="text-amber-300" /> : <BellOff size={16} className="text-slate-500" />}
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-white">Daily reminder</p>
+            <p className="text-xs text-slate-400">
+              {reminderTime
+                ? "If you haven't read by then, Jarvis sends one nudge with today's reading."
+                : 'Off. Pick a time to get one nudge on days you have not read yet.'}
+            </p>
+          </div>
+          <input
+            type="time"
+            value={reminderTime}
+            onChange={(e) => onReminderTime(e.target.value)}
+            aria-label="Reminder time"
+            data-testid="bible-reminder-time"
+            className="min-h-11 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-white"
+          />
+          {reminderTime && (
+            <button
+              type="button"
+              onClick={() => onReminderTime('')}
+              className="min-h-11 rounded-xl px-3 text-xs text-slate-300 hover:bg-white/5"
+              data-testid="bible-reminder-off"
+            >
+              Turn off
+            </button>
+          )}
+        </section>
+      )}
 
       <section className="glass-panel rounded-2xl p-4 sm:p-5 border border-white/10">
         <div className="flex items-center gap-2 mb-3">
