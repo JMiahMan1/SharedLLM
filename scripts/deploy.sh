@@ -88,8 +88,10 @@ if [ -n "$CHANGED_FILES" ]; then
         SHARED_FILE_CHANGE=true
     fi
     # Extract service names from paths like services/gateway/...
-    # Only match known service directories
-    KNOWN_SERVICES="automation|control_plane|dns_sync|execution|gateway|geo|identity|logging|rag|storage|telemetry|ui|workspace_runtime"
+    # Only match known service directories. bible was missing from this list,
+    # so a change to it was reported as "no service changes detected" and never
+    # deployed by this script.
+    KNOWN_SERVICES="automation|bible|control_plane|dns|dns-forwarder|dns-proxy|dns_sync|execution|gateway|geo|identity|logging|rag|storage|telemetry|ui|workspace_runtime"
     MODIFIED_SERVICES=$(printf '%s\n' "$CHANGED_FILES" | grep "^services/" | cut -d'/' -f2 | grep -E "^(${KNOWN_SERVICES})$" | sort | uniq || true)
 fi
 
@@ -108,9 +110,17 @@ elif [ "$SHARED_FILE_CHANGE" = true ]; then
     $COMPOSE up -d 2>&1 | tee -a "$LOG_FILE"
 elif [ -n "$MODIFIED_SERVICES" ]; then
     log "Service changes detected: $MODIFIED_SERVICES"
-    # Always pull all since base image changes affect all services
-    log "Pulling all images (base image may affect all services)."
-    $COMPOSE pull 2>&1 | tee -a "$LOG_FILE"
+    # The changed services only, and one at a time. Pulling everything was
+    # justified as "base image changes affect all services", but that is the
+    # case handled above; when only services moved, each one's image is the
+    # only thing that changed. The pulls are serial because this host's link
+    # to the registry fails layers when two pulls share it -- a parallel pull
+    # here once spent an hour restarting the same layers and ended in
+    # "unexpected EOF" without delivering anything.
+    for SVC in $MODIFIED_SERVICES; do
+        log "Pulling: $SVC"
+        $COMPOSE pull "$SVC" 2>&1 | tee -a "$LOG_FILE"
+    done
     for SVC in $MODIFIED_SERVICES; do
         log "Restarting: $SVC"
         $COMPOSE up -d "$SVC" 2>&1 | tee -a "$LOG_FILE"
