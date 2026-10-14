@@ -141,10 +141,14 @@ def collect(session: Session, username: str, today: date | None = None) -> dict[
 def _position(state: UserBibleState | None) -> dict[str, Any] | None:
     if state is None or not state.last_book:
         return None
+    from .books import BOOK_BY_OSIS
+
+    name = BOOK_BY_OSIS.get(state.last_book, {}).get("name", state.last_book)
     return {
         "book": state.last_book,
         "chapter": state.last_chapter,
         "verse": state.last_verse,
+        "reference": f"{name} {state.last_chapter}",
     }
 
 
