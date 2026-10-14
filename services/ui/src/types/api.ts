@@ -2054,6 +2054,10 @@ export interface BibleDailyResponse {
     chapters_read: number;
   };
   position?: BiblePosition | null;
+  /** Plans in progress: today's reading and how far along. */
+  plans?: Pick<BiblePlanEnrollment, 'plan_id' | 'name' | 'percent' | 'behind' | 'today' | 'finished'>[];
+  /** Memory verses due for review now. */
+  memory_due?: number;
 }
 
 // ── Reading aloud ───────────────────────────────────────────────────────────

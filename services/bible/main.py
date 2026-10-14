@@ -1241,8 +1241,25 @@ async def attempt_game(
         stars = {"granted": 0, "status": "practice: today's stars came from your first try"}
     else:
         stars = {"granted": 0, "status": "practice game: stars come from the daily quiz"}
+    announced = None
+    if counted:
+        announced = await _share_card(
+            username,
+            {
+                "message": f"{username} scored {correct}/{len(questions)} on today's Bible quiz",
+                "card_kind": "game",
+                "card_title": "Daily Bible Quiz",
+                "card_detail": f"{correct} of {len(questions)} right",
+                "card_stars": correct,
+                "card_stats": [
+                    {"label": "Score", "value": f"{correct}/{len(questions)}"},
+                    {"label": "Time", "value": f"{round(payload.duration_ms / 1000)}s"},
+                ],
+            },
+        )
     badges = await get_achievements(username=username, session=session)
     return {
+        "announced": announced,
         "mode": mode,
         "correct": correct,
         "total": len(questions),
@@ -1438,6 +1455,17 @@ async def memory_recall(
     session.commit()
     session.refresh(row)
     _record_event(session, username, "memory_recall", ref=row.ref, value=1 if result["passed"] else 0)
+    if was < memorize.MASTERED <= row.level:
+        await _share_card(
+            username,
+            {
+                "message": f"{username} memorised {row.ref}",
+                "card_kind": "activity",
+                "card_title": row.ref,
+                "card_detail": text[:280],
+                "card_stats": [{"label": "Reviews", "value": str(row.reviews)}],
+            },
+        )
     badges = await get_achievements(username=username, session=session)
     return {
         **result,
@@ -1552,6 +1580,18 @@ async def complete_plan_day(
     session.refresh(row)
     if fresh:
         _record_event(session, username, "plan_day_completed", ref=f"{plan_id}:{day}", value=day)
+    if fresh and row.finished_on == date.today().isoformat() and state["finished"]:
+        plan = plans.find(plan_id)
+        await _share_card(
+            username,
+            {
+                "message": f"{username} finished {plan['name']}",
+                "card_kind": "activity",
+                "card_title": plan["name"],
+                "card_detail": f"Every one of {plan['days']} days read",
+                "card_stats": [{"label": "Days", "value": str(plan["days"])}],
+            },
+        )
     badges = await get_achievements(username=username, session=session)
     return {**_enrollment_payload(row), "newly_earned": badges["newly_earned"]}
 
@@ -1742,16 +1782,17 @@ async def _award_stars(username: str, grants: list[dict]) -> dict:
     return {"granted": granted, "status": status}
 
 
-async def _announce(username: str, fresh: list[ach.Earned]) -> dict:
-    """Tell the family's chat room when a reader earns a badge.
+async def _post_cards(cards: list[dict]) -> dict:
+    """Post typed cards to the family chat room.
 
-    Reuses the typed card envelope the family hub already understands
-    (``card_kind="bible_achievement"``) so the message renders as a card on the
-    phone without a new client change. Off unless FAMILY_CHAT_TOKEN names a
-    room, and a failure is reported rather than raised: the badge is already
-    banked and losing it to a chat outage would be worse than silence.
+    Reuses the card envelope the family hub already renders. ``card_kind``
+    must be one of the envelope kinds the Talk handler accepts (``activity``,
+    ``game``, ``creation``, ``system``); anything else is refused there. Off unless FAMILY_CHAT_TOKEN names a
+    room, and a failure is reported rather than raised: whatever the card is
+    about is already saved, and losing it to a chat outage would be worse than
+    silence.
     """
-    if not fresh:
+    if not cards:
         return {"posted": 0, "status": "nothing to announce"}
     token = os.getenv("FAMILY_CHAT_TOKEN", "").strip()
     if not token:
@@ -1762,17 +1803,8 @@ async def _announce(username: str, fresh: list[ach.Earned]) -> dict:
     failures: list[str] = []
     try:
         async with aiohttp.ClientSession() as client:
-            for item in fresh:
-                body = {
-                    "action": "post_card",
-                    "token": token,
-                    "message": f"{username} unlocked {item.achievement.name}",
-                    "card_kind": "bible_achievement",
-                    "card_title": item.achievement.name,
-                    "card_detail": item.achievement.description or None,
-                    "card_stars": item.points,
-                    "card_stats": [{"label": "Points", "value": str(item.points)}],
-                }
+            for card in cards:
+                body = {"action": "post_card", "token": token, **card}
                 try:
                     async with client.post(
                         f"{EXECUTION_SVC_URL}/execute/talk",
@@ -1780,16 +1812,50 @@ async def _announce(username: str, fresh: list[ach.Earned]) -> dict:
                         headers={"X-Internal-Secret": INTERNAL_SECRET},
                         timeout=aiohttp.ClientTimeout(total=10.0),
                     ) as resp:
+                        result = await resp.json(content_type=None) if resp.status < 400 else None
                         if resp.status >= 400:
-                            failures.append(f"{item.achievement.id}: HTTP {resp.status}")
+                            failures.append(f"{card.get('card_title')}: HTTP {resp.status}")
+                        elif isinstance(result, dict) and result.get("status") == "FAILURE":
+                            # The handler refuses with a 200 and says why.
+                            failures.append(f"{card.get('card_title')}: {result.get('message')}")
                         else:
                             posted += 1
                 except Exception as exc:  # noqa: BLE001 - reported, never fatal
-                    failures.append(f"{item.achievement.id}: {exc}")
+                    failures.append(f"{card.get('card_title')}: {exc}")
     except Exception as exc:  # noqa: BLE001 - reported, never fatal
         failures.append(str(exc))
     status = f"{posted} card(s) posted" if not failures else "; ".join(failures)
     return {"posted": posted, "status": status}
+
+
+async def _announce(username: str, fresh: list[ach.Earned]) -> dict:
+    """Tell the family's chat room when a reader earns a badge."""
+    return await _post_cards(
+        [
+            {
+                "message": f"{username} unlocked {item.achievement.name}",
+                "card_kind": "activity",
+                "card_title": item.achievement.name,
+                "card_detail": item.achievement.description or None,
+                "card_stars": item.points,
+                "card_stats": [{"label": "Points", "value": str(item.points)}],
+            }
+            for item in fresh
+        ]
+    )
+
+
+#: Stand-in viewer for "the whole family": only a circle-wide share admits it.
+_FAMILY_VIEWER = "__family__"
+
+
+async def _share_card(username: str, card: dict) -> dict:
+    """Post an activity card only for a reader who shares Bible activity with
+    the whole family. A score or a finished plan is the reader's to share; one
+    who has not opted in is simply not announced."""
+    if await _consent(username, _FAMILY_VIEWER, "bible") is not True:
+        return {"posted": 0, "status": "not shared with the family"}
+    return await _post_cards([card])
 
 
 # ── family sharing ──────────────────────────────────────────────────────────
@@ -1837,39 +1903,20 @@ async def activity_summary(
 
 
 async def _consent(owner: str, viewer: str, scope: str) -> bool | None:
-    """Ask Identity whether ``viewer`` may read ``owner``'s sharing settings.
+    """Whether ``viewer`` may see ``owner``'s activity in ``scope``.
 
     Returns ``None`` when Identity cannot be reached, so callers can refuse
     rather than guess: an unreachable consent service must never widen access.
     """
-    if not IDENTITY_SVC_URL:
-        log.warning("[Bible] IDENTITY_SVC_URL is not resolved; refusing a cross-user read")
-        return False
-    try:
-        async with aiohttp.ClientSession() as client:
-            async with client.get(
-                f"{IDENTITY_SVC_URL}/api/internal/activity-sharing",
-                params={"username": owner, "viewer": viewer},
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=10.0),
-            ) as resp:
-                if resp.status == 404:
-                    return False
-                if resp.status >= 400:
-                    log.warning("[Bible] consent lookup for %s failed: HTTP %s", owner, resp.status)
-                    return None
-                data = await resp.json()
-    except Exception as exc:  # noqa: BLE001 - an unreachable consent service is not consent
-        log.warning("[Bible] consent lookup for %s errored: %s", owner, exc)
+    rows = await _sharing_rows()
+    if rows is None:
         return None
-    if not isinstance(data, dict):
-        return None
-    if not data.get("enabled"):
+    data = next((r for r in rows if r.get("username") == owner), None)
+    if data is None or not data.get("enabled"):
         return False
     if scope not in (data.get("share") or []):
         return False
-    audience = data.get("audience")
-    if audience == "users":
+    if data.get("audience") == "users":
         return viewer in (data.get("user_ids") or [])
     return True
 
@@ -1901,30 +1948,40 @@ async def activity_feed(
     return {"entries": entries[:limit], "members": [e["username"] for e in entries[:limit]], "count": len(entries[:limit])}
 
 
-async def _sharing_settings() -> list[dict]:
-    """Every sharing row that exists, from Identity."""
+async def _sharing_rows() -> list[dict] | None:
+    """Every stored sharing preference, from Identity; ``None`` if unreachable.
+
+    Identity answers ``{"users": [{"username", "enabled", "audience",
+    "user_ids", "share"}, ...]}`` for everyone at once (the same payload geo
+    reads); a user with no row has never opted in and is simply absent.
+    """
     if not IDENTITY_SVC_URL:
-        log.warning("[Bible] IDENTITY_SVC_URL is not resolved; family feed is unavailable")
-        return []
+        log.warning("[Bible] IDENTITY_SVC_URL is not resolved; sharing is unavailable")
+        return None
     try:
         async with aiohttp.ClientSession() as client:
             async with client.get(
                 f"{IDENTITY_SVC_URL}/api/internal/activity-sharing",
-                params={"all": "true"},
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=10.0),
             ) as resp:
                 if resp.status >= 400:
                     log.warning("[Bible] sharing lookup failed: HTTP %s", resp.status)
-                    return []
+                    return None
                 data = await resp.json()
-    except Exception as exc:  # noqa: BLE001 - reported to the caller via `note`
+    except Exception as exc:  # noqa: BLE001 - an unreachable consent service is not consent
         log.warning("[Bible] sharing lookup errored: %s", exc)
-        return []
-    rows = data.get("rows") if isinstance(data, dict) else data
+        return None
+    rows = data.get("users") if isinstance(data, dict) else None
     if not isinstance(rows, list):
-        return []
+        log.warning("[Bible] sharing lookup returned an unexpected shape")
+        return None
     return [r for r in rows if isinstance(r, dict) and r.get("username")]
+
+
+async def _sharing_settings() -> list[dict]:
+    """Every sharing row that exists (empty when Identity cannot be reached)."""
+    return await _sharing_rows() or []
 
 
 @app.get("/blb/link")
@@ -1984,6 +2041,17 @@ def daily(username: str | None = Query(default=None), session: Session = Depends
             "chapters_read": picture["metrics"]["chapters_total"],
         }
         payload["position"] = picture["position"]
+        # The plan line and the memory line on the home card: today's reading
+        # for each plan in progress, and how many verses are due.
+        enrolled = session.exec(
+            select(PlanEnrollment).where(PlanEnrollment.username == username, PlanEnrollment.active == True)  # noqa: E712
+        ).all()
+        payload["plans"] = [
+            {k: v for k, v in _enrollment_payload(row).items() if k in ("plan_id", "name", "percent", "behind", "today", "finished")}
+            for row in enrolled
+        ]
+        today = date.today().isoformat()
+        payload["memory_due"] = sum(1 for r in _my_memory(session, username) if r.due_on <= today)
     return payload
 
 
