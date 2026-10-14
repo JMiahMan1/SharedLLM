@@ -421,6 +421,7 @@ function BibleReaderPane({
           onPrev={() => step(-1)}
           onNext={() => step(1)}
           onClose={() => setFocusing(false)}
+          onVerseTap={setActiveVerse}
         />
       )}
 
