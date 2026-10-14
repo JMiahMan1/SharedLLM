@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Bell, BellOff, BookOpen, ExternalLink, Flame, Sparkles } from 'lucide-react';
+import { AlertTriangle, Bell, BellOff, BookOpen, BookOpenText, ChevronRight, ExternalLink, Flame, Sparkles } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import BiblePlans from './BiblePlans';
@@ -80,6 +80,25 @@ export default function BibleToday({ onOpenRef, page, reminderTime = '', onRemin
           <p className="text-sm text-slate-400">No verse available for today.</p>
         )}
       </section>
+
+      {data?.position?.reference && (
+        <button
+          type="button"
+          onClick={() => {
+            void trigger('light');
+            onOpenRef(data.position?.reference ?? '');
+          }}
+          data-testid="bible-continue"
+          className="w-full glass-panel rounded-2xl p-4 border border-white/10 flex items-center gap-3 text-left min-h-11 hover:border-amber-400/40"
+        >
+          <BookOpenText size={18} className="text-amber-300 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[11px] uppercase tracking-wider text-slate-500">Continue reading</span>
+            <span className="block text-base font-serif text-white">{data.position.reference}</span>
+          </span>
+          <ChevronRight size={16} className="text-slate-500" />
+        </button>
+      )}
 
       <BiblePlans onOpenRef={onOpenRef} />
 

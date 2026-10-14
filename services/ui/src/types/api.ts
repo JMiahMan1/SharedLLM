@@ -1667,6 +1667,8 @@ export interface BiblePosition {
   book: string;
   chapter: number;
   verse: number;
+  /** "John 3", present where the server names the saved chapter. */
+  reference?: string;
 }
 
 export interface BiblePreferences {
