@@ -1812,6 +1812,55 @@ export interface BibleLeaderboard {
   entries: { username: string; correct: number; total: number; duration_ms: number; you: boolean }[];
 }
 
+export type BibleMemoryStage = 'read' | 'cloze' | 'first_letters' | 'recall';
+
+export interface BibleMemoryVerse {
+  id: number;
+  ref: string;
+  set_id: string;
+  version: string;
+  /** 0 read, 1 fill the gaps, 2 first letters, 3-4 recall, 5 mastered. */
+  level: number;
+  stage: BibleMemoryStage;
+  mastered: boolean;
+  due_on: string;
+  due: boolean;
+  reviews: number;
+  lapses: number;
+  last_score: number;
+  /** Present on due verses: the text and the help its stage gives. */
+  text?: string;
+  cloze?: { word: string; hidden: boolean }[];
+  first_letters?: string;
+}
+
+export interface BibleMemorySet {
+  id: string;
+  name: string;
+  blurb: string;
+  count: number;
+  added: number;
+}
+
+export interface BibleMemoryOverview {
+  verses: BibleMemoryVerse[];
+  due_count: number;
+  mastered: number;
+  sets: BibleMemorySet[];
+  added?: string[];
+  skipped?: string[];
+}
+
+export interface BibleRecallResult {
+  score: number;
+  passed: boolean;
+  words: { word: string; ok: boolean }[];
+  text: string;
+  verse: BibleMemoryVerse;
+  level_before: number;
+  newly_earned: BibleEarnedAchievement[];
+}
+
 export interface BibleActivitySummary {
   username: string;
   days_read: number;

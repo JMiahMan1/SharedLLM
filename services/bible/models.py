@@ -362,3 +362,30 @@ class GameScore(SQLModel, table=True):
     duration_ms: int = Field(default=0)
     counted: bool = Field(default=False)
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class MemoryVerse(SQLModel, table=True):
+    """A verse (or short passage) a reader is memorising.
+
+    The text is never stored: it is read from the corpus in ``version_code``
+    each time, so a recall is always graded against the Bible on the server.
+    ``level`` climbs the recall ladder (0 read, 1 fill the gaps, 2 first
+    letters, 3-4 full recall, 5 mastered); ``due_on`` is the next review.
+    """
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    ref: str = Field(default="")
+    osis: str = Field(default="")
+    chapter: int = Field(default=1)
+    verse_start: int = Field(default=1)
+    verse_end: int = Field(default=1)
+    version_code: str = Field(default="")
+    set_id: str = Field(default="")
+    level: int = Field(default=0)
+    due_on: str = Field(default="", index=True)
+    reviews: int = Field(default=0)
+    lapses: int = Field(default=0)
+    last_score: float = Field(default=0.0)
+    created_at: datetime = Field(default_factory=utcnow)

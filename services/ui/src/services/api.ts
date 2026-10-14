@@ -145,6 +145,9 @@ import type {
   BibleGameMode,
   BibleGameResult,
   BibleLeaderboard,
+  BibleMemoryOverview,
+  BibleMemoryVerse,
+  BibleRecallResult,
   BibleActivitySummary,
   BibleActivityFeed,
   BibleEditionsResponse,
@@ -3068,6 +3071,31 @@ export const api = {
 
   async getBibleLeaderboard(): Promise<BibleLeaderboard> {
     const resp = await apiClient.get('/api/bible/games/leaderboard');
+    return resp.data;
+  },
+
+  async getBibleMemory(): Promise<BibleMemoryOverview> {
+    const resp = await apiClient.get('/api/bible/memorize');
+    return resp.data;
+  },
+
+  async addBibleMemory(body: { ref?: string; set_id?: string }): Promise<BibleMemoryOverview> {
+    const resp = await apiClient.post('/api/bible/memorize', body);
+    return resp.data;
+  },
+
+  async removeBibleMemory(id: number): Promise<BibleMemoryOverview> {
+    const resp = await apiClient.delete(`/api/bible/memorize/${id}`);
+    return resp.data;
+  },
+
+  async getBibleMemoryDue(limit = 20): Promise<{ due: BibleMemoryVerse[]; count: number }> {
+    const resp = await apiClient.get('/api/bible/memorize/due', { params: { limit } });
+    return resp.data;
+  },
+
+  async recallBibleMemory(id: number, typed: string): Promise<BibleRecallResult> {
+    const resp = await apiClient.post(`/api/bible/memorize/${id}/recall`, { typed });
     return resp.data;
   },
 

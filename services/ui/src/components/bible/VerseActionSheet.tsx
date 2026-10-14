@@ -3,6 +3,7 @@ import {
   Bookmark,
   BookmarkCheck,
   BookMarked,
+  Brain,
   ExternalLink,
   Highlighter,
   Link2,
@@ -173,6 +174,15 @@ export default function VerseActionSheet({
       return undefined;
     });
 
+  const memorise = () =>
+    run('Added to your memory verses', async () => {
+      const body = await api.addBibleMemory({ ref: verse.reference });
+      void trigger('success');
+      return body.added.length
+        ? `Added to your memory verses. Practise it from Bible › Memorize.`
+        : 'Already on your memory list.';
+    });
+
   const openStudy = () =>
     run('', async () => {
       setStudyOpen(true);
@@ -273,6 +283,17 @@ export default function VerseActionSheet({
           >
             <Sparkles size={16} className="text-sky-300" />
             <span className="flex-1">Ask about this verse</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void memorise()}
+            className={ACTION_CLASS}
+            data-testid="bible-action-memorize"
+          >
+            <Brain size={16} className="text-fuchsia-300" />
+            <span className="flex-1">Memorise this verse</span>
           </button>
 
           <button
