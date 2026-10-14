@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { BookOpen, ExternalLink, Flame, RefreshCw, Sparkles } from 'lucide-react';
+import { BookOpen, Brain, CalendarDays, ExternalLink, Flame, RefreshCw, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -138,6 +138,39 @@ export default function BibleDailyWidget({ settingsButton, userSettings }: IActi
                 <span className="block text-xs text-slate-300 truncate">{devotional}</span>
               </span>
               <ExternalLink size={12} className="text-slate-600 shrink-0 mt-0.5" />
+            </button>
+          )}
+          {data?.plans?.filter((p) => !p.finished && p.today).slice(0, 2).map((p) => (
+            <button
+              key={p.plan_id}
+              type="button"
+              onClick={() => openReader(p.today?.readings[0]?.ref)}
+              data-testid={`bible-daily-plan-${p.plan_id}`}
+              className="w-full flex items-center gap-2 text-left min-h-11 pointer-coarse:min-h-11 rounded-lg px-1 -mx-1 hover:bg-white/[0.03]"
+            >
+              <CalendarDays size={13} className="text-sky-300 shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[10px] uppercase tracking-wider text-slate-500 truncate">
+                  {p.name} · {p.percent}%{p.behind ? ` · ${p.behind} behind` : ''}
+                </span>
+                <span className="block text-xs text-slate-300 truncate">{p.today?.readings.map((r) => r.ref).join(', ')}</span>
+              </span>
+            </button>
+          ))}
+          {!!data?.memory_due && (
+            <button
+              type="button"
+              onClick={() => {
+                void trigger('light');
+                navigate('/bible?tab=memorize');
+              }}
+              data-testid="bible-daily-memory"
+              className="w-full flex items-center gap-2 text-left min-h-11 pointer-coarse:min-h-11 rounded-lg px-1 -mx-1 hover:bg-white/[0.03]"
+            >
+              <Brain size={13} className="text-fuchsia-300 shrink-0" />
+              <span className="text-xs text-slate-300">
+                {data.memory_due} memory verse{data.memory_due === 1 ? '' : 's'} to practise
+              </span>
             </button>
           )}
           <div className="flex items-center justify-between gap-2">

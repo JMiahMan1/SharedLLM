@@ -181,3 +181,25 @@ describe('BibleDailyWidget', () => {
     expect(await screen.findByTestId('bible-daily-streak')).toHaveTextContent('Reading streak unavailable');
   });
 });
+describe('BibleDailyWidget plans and memory', () => {
+  it("shows today's plan reading and the memory verses due, each one tap away", async () => {
+    mockedApi.getBibleDaily.mockResolvedValue(
+      daily({
+        plans: [
+          {
+            plan_id: 'john-21', name: 'John in 21 Days', percent: 24, behind: 1, finished: false,
+            today: { day: 6, readings: [{ ref: 'John 6', osis: 'John', chapter_start: 6, chapter_end: 6 }] },
+          },
+        ],
+        memory_due: 3,
+      }),
+    );
+    renderWidget();
+    const plan = await screen.findByTestId('bible-daily-plan-john-21');
+    expect(plan).toHaveTextContent('John in 21 Days · 24% · 1 behind');
+    fireEvent.click(plan);
+    expect(navigate).toHaveBeenCalledWith('/bible?ref=John%206');
+    fireEvent.click(screen.getByTestId('bible-daily-memory'));
+    expect(navigate).toHaveBeenCalledWith('/bible?tab=memorize');
+  });
+});
