@@ -631,6 +631,14 @@ export const server = setupServer(
     service: 'talk_list',
     detail: { conversations: talkConversations },
   })),
+  http.get('/api/communication/talk/people', ({ request }) => {
+    const q = (new URL(request.url).searchParams.get('search') || '').toLowerCase();
+    const people = [
+      { id: 'jeremiah', label: 'Jeremiah' },
+      { id: 'michele', label: 'Michele' },
+    ].filter((p) => p.label.toLowerCase().includes(q));
+    return HttpResponse.json({ status: 'SUCCESS', message: `${people.length} match(es).`, service: 'talk_people', detail: { people } });
+  }),
   http.post('/api/communication/talk/conversations/open', async ({ request }) => {
     const body = await request.json() as Record<string, unknown>;
     let conversation = talkConversations.find((item) => item.token === body.token);

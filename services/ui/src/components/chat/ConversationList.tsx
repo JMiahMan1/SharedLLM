@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Loader2, PenSquare, Search, X } from 'lucide-react';
+import { PenSquare, Pin, Search } from 'lucide-react';
 import { avatarTint, initials, listTimeLabel, previewLine, type TalkConversation } from './chatModel';
 
 interface ConversationListProps {
@@ -9,7 +9,10 @@ interface ConversationListProps {
   loading: boolean;
   opening: boolean;
   onSelect: (token: string) => void;
-  onStart: (username: string) => void;
+  /** Open the new-chat sheet (a direct message or a group). */
+  onNewChat: () => void;
+  /** The conversation that opens on launch, marked with a pin. */
+  defaultToken?: string;
 }
 
 /**
@@ -23,11 +26,10 @@ export default function ConversationList({
   loading,
   opening,
   onSelect,
-  onStart,
+  onNewChat,
+  defaultToken,
 }: ConversationListProps) {
   const [query, setQuery] = useState('');
-  const [composing, setComposing] = useState(false);
-  const [username, setUsername] = useState('');
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -40,14 +42,6 @@ export default function ConversationList({
     );
   }, [conversations, query]);
 
-  const start = () => {
-    const name = username.trim();
-    if (!name) return;
-    onStart(name);
-    setUsername('');
-    setComposing(false);
-  };
-
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between px-1 pb-2">
@@ -55,39 +49,14 @@ export default function ConversationList({
         <button
           type="button"
           className="glass-button min-h-10 min-w-10 p-2"
-          aria-label={composing ? 'Cancel new conversation' : 'New conversation'}
-          aria-expanded={composing}
-          onClick={() => setComposing((v) => !v)}
+          aria-label="New conversation"
+          onClick={onNewChat}
+          disabled={opening}
+          data-testid="chat-new"
         >
-          {composing ? <X size={16} /> : <PenSquare size={16} />}
+          <PenSquare size={16} />
         </button>
       </div>
-
-      {composing && (
-        <div className="mb-2 flex items-center gap-2">
-          <input
-            autoFocus
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') start();
-              if (event.key === 'Escape') setComposing(false);
-            }}
-            placeholder="Username to message"
-            aria-label="Start a conversation with"
-            className="glass-input flex-1 text-base sm:text-sm"
-          />
-          <button
-            type="button"
-            className="glass-button min-h-10 px-3 text-sm"
-            aria-label="Open conversation"
-            disabled={opening || !username.trim()}
-            onClick={start}
-          >
-            {opening ? <Loader2 size={14} className="animate-spin" /> : 'Chat'}
-          </button>
-        </div>
-      )}
 
       <label className="relative mb-2 block">
         <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -128,6 +97,9 @@ export default function ConversationList({
                     <span className={`truncate text-[15px] ${showBadge ? 'font-bold text-white' : 'font-semibold text-slate-100'}`}>
                       {name}
                     </span>
+                    {conversation.token === defaultToken && (
+                      <Pin size={12} className="shrink-0 text-purple-300" aria-label="Opens on launch" />
+                    )}
                     <span className={`ml-auto shrink-0 text-[11px] ${showBadge ? 'text-purple-300' : 'text-slate-500'}`}>
                       {listTimeLabel(conversation.last_message_timestamp ?? conversation.last_activity)}
                     </span>
