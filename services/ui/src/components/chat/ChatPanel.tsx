@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ImageIcon, Loader2, Phone, PhoneOff, Plus, RefreshCw, X } from 'lucide-react';
+import { ChevronLeft, ImageIcon, Info, Loader2, Phone, PhoneOff, Plus, RefreshCw, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
 import { useConversationSendAs } from './sendAsPref';
 import ConversationList from './ConversationList';
+import ConversationInfo from './ConversationInfo';
+import NewChatSheet from './NewChatSheet';
 import MessageThread from './MessageThread';
 import Composer from './Composer';
 import PollStrip, { type TalkPoll } from './PollStrip';
 import {
   asksJarvis,
   avatarTint,
+  detailList,
   initials,
   isAssistant,
   MAX_ATTACHMENT_BYTES,
@@ -26,12 +29,6 @@ const EMPTY_ARRAY: never[] = [];
 
 /** How long to show "Jarvis is thinking" before giving up on an answer. */
 const JARVIS_WAIT_MS = 3 * 60 * 1000;
-
-function detailList<T>(response: ExecutionResponse | undefined, key: string): T[] {
-  const detail = response?.detail as Record<string, unknown> | undefined;
-  const value = detail?.[key];
-  return Array.isArray(value) ? (value as T[]) : [];
-}
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -60,7 +57,11 @@ interface ChatPanelProps {
 export default function ChatPanel({ className = '' }: ChatPanelProps) {
   const queryClient = useQueryClient();
   const [selectedToken, setSelectedToken] = useState('');
-  const [mobileView, setMobileView] = useState<'list' | 'thread'>('list');
+  // 'auto' until the reader picks: a phone opens straight into the default
+  // conversation when one is set, otherwise on the list.
+  const [mobileView, setMobileView] = useState<'auto' | 'list' | 'thread'>('auto');
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [newChatOpen, setNewChatOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<TalkMessage | null>(null);
   const [editing, setEditing] = useState<TalkMessage | null>(null);
   const [pending, setPending] = useState<Record<string, TalkMessage[]>>({});
@@ -76,9 +77,9 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
   const [inCall, setInCall] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
 
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const threadRef = useRef<HTMLElement | null>(null);
   // Keep the composer above the phone keyboard (iOS does not resize the page for it).
-  const keyboardHeight = useKeyboardSafeHeight(panelRef);
+  const keyboardHeight = useKeyboardSafeHeight(threadRef);
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
@@ -98,8 +99,11 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
     select: (response) => detailList<TalkConversation>(response, 'conversations'),
   });
 
+  // The conversation set to open on launch, if it still exists.
+  const defaultToken = conversations.some((c) => c.token === me?.chat_default_token) ? (me?.chat_default_token ?? '') : '';
   // Fall back to the first conversation so a wide screen is never blank.
-  const activeToken = selectedToken || conversations[0]?.token || '';
+  const activeToken = selectedToken || defaultToken || conversations[0]?.token || '';
+  const showThread = mobileView === 'thread' || (mobileView === 'auto' && Boolean(defaultToken));
   const activeConversation = conversations.find((c) => c.token === activeToken);
   const isGroup = activeConversation?.type !== 1;
 
@@ -163,6 +167,28 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
     markedRef.current = readKey;
     markReadNow(activeToken);
   }, [activeToken, unread, readKey, markReadNow]);
+
+  const setDefault = useMutation({
+    mutationFn: (token: string | null) =>
+      api.updateProfile(token ? { chat_default_token: token } : ({ clear_fields: ['chat_default_token'] } as never)),
+    onSuccess: (_r, token) => {
+      void queryClient.invalidateQueries({ queryKey: ['me'] });
+      toast.success(token ? 'Chat will open here' : 'No conversation opens on launch');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Could not save that'),
+  });
+
+  const createGroup = useMutation({
+    mutationFn: ({ name, people }: { name: string; people: string[] }) => api.createTalkGroup(name, people),
+    onSuccess: (data) => {
+      const token = (data.detail as { conversation?: TalkConversation } | undefined)?.conversation?.token;
+      if (data.message) toast.success(data.message);
+      setNewChatOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
+      if (token) select(token);
+    },
+    onError: (error: Error) => toast.error(error.message || 'Could not create the group'),
+  });
 
   const select = (token: string) => {
     setSelectedToken(token);
@@ -350,13 +376,11 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
 
   return (
     <div
-      ref={panelRef}
-      style={keyboardHeight ? { height: keyboardHeight, minHeight: 0 } : undefined}
       className={`grid h-[calc(100dvh-13rem)] min-h-[440px] overflow-hidden rounded-3xl border border-white/5 bg-black/20 lg:h-[680px] lg:grid-cols-[320px_1fr] ${className}`}
       data-testid="chat-panel"
     >
       {/* Inbox */}
-      <aside className={`min-h-0 flex-col border-white/5 p-3 lg:flex lg:border-r ${mobileView === 'list' ? 'flex' : 'hidden'}`}>
+      <aside className={`min-h-0 flex-col border-white/5 p-3 lg:flex lg:border-r ${showThread ? 'hidden' : 'flex'}`}>
         <ConversationList
           conversations={conversations}
           activeToken={activeToken}
@@ -364,13 +388,23 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
           loading={loadingConversations}
           opening={openConversation.isPending}
           onSelect={select}
-          onStart={(user) => openConversation.mutate(user)}
+          onNewChat={() => setNewChatOpen(true)}
+          defaultToken={defaultToken}
         />
       </aside>
 
       {/* Thread */}
       <section
-        className={`relative min-h-0 min-w-0 flex-col lg:flex ${mobileView === 'thread' ? 'flex' : 'hidden'}`}
+        ref={threadRef}
+        style={keyboardHeight ? { height: keyboardHeight, minHeight: 0 } : undefined}
+        // On a phone an open conversation is the whole screen, over the app's
+        // header and tab bar, the way every messaging app shows one.
+        className={`relative min-h-0 min-w-0 flex-col lg:flex ${
+          showThread
+            ? 'flex max-lg:fixed max-lg:inset-x-0 max-lg:top-0 max-lg:z-[70] max-lg:h-[100dvh] max-lg:bg-slate-950 max-lg:pt-[env(safe-area-inset-top)] max-lg:pb-[env(safe-area-inset-bottom)]'
+            : 'hidden'
+        }`}
+        data-testid="chat-thread"
         onDragOver={(event) => {
           if (!activeToken || !event.dataTransfer.types.includes('Files')) return;
           event.preventDefault();
@@ -405,6 +439,14 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
           >
             <ChevronLeft size={22} />
           </button>
+          <button
+            type="button"
+            onClick={() => activeConversation && setInfoOpen(true)}
+            disabled={!activeConversation}
+            aria-label={`About ${name}`}
+            data-testid="chat-info-open"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-xl text-left"
+          >
           {activeConversation && (
             <span
               aria-hidden
@@ -422,6 +464,7 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
                 : callError ?? (inCall ? 'In call' : activeConversation?.description || (isGroup ? 'Group chat · @Jarvis to ask' : 'Direct message'))}
             </p>
           </div>
+          </button>
           {activeToken && (
             <button
               type="button"
@@ -443,6 +486,16 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
           >
             <RefreshCw size={15} className={loadingMessages ? 'animate-spin' : ''} />
           </button>
+          {activeConversation && (
+            <button
+              type="button"
+              className="flex min-h-10 min-w-10 items-center justify-center rounded-full text-slate-300 hover:bg-white/10"
+              aria-label="Conversation details"
+              onClick={() => setInfoOpen(true)}
+            >
+              <Info size={17} />
+            </button>
+          )}
         </header>
 
         <PollStrip polls={polls} onVote={(pollId, optionId) => void vote(pollId, optionId)} />
@@ -558,6 +611,33 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
           onSendAsChange={setSendAs}
         />
       </section>
+
+      {infoOpen && activeConversation && (
+        <ConversationInfo
+          conversation={activeConversation}
+          myActorIds={myActorIds}
+          isDefault={defaultToken === activeConversation.token}
+          onToggleDefault={() => setDefault.mutate(defaultToken === activeConversation.token ? null : activeConversation.token)}
+          onGone={() => {
+            setInfoOpen(false);
+            setSelectedToken('');
+            setMobileView('list');
+          }}
+          onClose={() => setInfoOpen(false)}
+        />
+      )}
+      {newChatOpen && (
+        <NewChatSheet
+          me={[...myActorIds]}
+          busy={openConversation.isPending || createGroup.isPending}
+          onDirect={(person) => {
+            setNewChatOpen(false);
+            openConversation.mutate(person.id);
+          }}
+          onGroup={(name, people) => createGroup.mutate({ name, people: people.map((p) => p.id) })}
+          onClose={() => setNewChatOpen(false)}
+        />
+      )}
     </div>
   );
 }

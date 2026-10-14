@@ -1640,6 +1640,36 @@ export const api = {
     return resp.data;
   },
 
+  async createTalkGroup(name: string, participants: string[]): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/conversations/group', { name, participants });
+    return resp.data;
+  },
+
+  async deleteTalkConversation(token: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.delete('/api/communication/talk/conversations', { params: { token } });
+    return resp.data;
+  },
+
+  async getTalkParticipants(token: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.get('/api/communication/talk/participants', { params: { token } });
+    return resp.data;
+  },
+
+  async addTalkParticipant(token: string, user: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/participants', { token, user });
+    return resp.data;
+  },
+
+  async removeTalkParticipant(token: string, attendeeId: number): Promise<ExecutionResponse> {
+    const resp = await apiClient.delete('/api/communication/talk/participants', { params: { token, attendee_id: attendeeId } });
+    return resp.data;
+  },
+
+  async searchTalkPeople(search: string, token?: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.get('/api/communication/talk/people', { params: { search, token } });
+    return resp.data;
+  },
+
   async openTalkConversation(payload: { token?: string; target_user?: string; as_user?: 'admin' }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/conversations/open', payload);
     return resp.data;

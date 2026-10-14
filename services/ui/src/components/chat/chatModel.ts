@@ -58,6 +58,21 @@ export interface TalkConversation {
   last_common_read?: number;
   /** You have read up to this message id. */
   last_read?: number;
+  /** You own or moderate it: you may delete it and manage its members. */
+  can_moderate?: boolean;
+}
+
+export interface TalkParticipant {
+  attendee_id: number;
+  actor_type: string;
+  actor_id: string;
+  display_name: string;
+  is_moderator: boolean;
+}
+
+export interface TalkPerson {
+  id: string;
+  label: string;
 }
 
 /** Talk returns history newest-first; a feed reads oldest-first. */
@@ -320,4 +335,11 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 /** A message's readable text, with any Jarvis envelope removed. */
 export function plainText(raw: string | null | undefined): string {
   return decodeEnvelope(raw).text.trim();
+}
+
+/** A list out of an execution response's ``detail`` (empty when absent). */
+export function detailList<T>(response: { detail?: unknown } | undefined, key: string): T[] {
+  const detail = response?.detail as Record<string, unknown> | undefined;
+  const value = detail?.[key];
+  return Array.isArray(value) ? (value as T[]) : [];
 }

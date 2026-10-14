@@ -28,13 +28,14 @@ describe('Family hub', () => {
     expect(await screen.findByTestId('family-create')).toHaveTextContent(/shared family space/i);
   });
 
-  it('opens a conversation from a username and sends a message', async () => {
+  it('starts a direct message by picking a person', async () => {
     const user = userEvent.setup();
     renderWithProviders(<Family />);
 
     await user.click(await screen.findByRole('button', { name: /new conversation/i }));
-    await user.type(await screen.findByLabelText('Start a conversation with'), 'jeremiah');
-    await user.click(screen.getByRole('button', { name: /open conversation/i }));
+    await user.type(await screen.findByLabelText('Search people'), 'jer');
+    await user.click(await screen.findByRole('button', { name: /Jeremiah/ }));
+    await user.click(screen.getByTestId('new-chat-start'));
     await waitFor(() => expect(screen.getByTestId('chat-feed')).toBeInTheDocument());
   });
 
