@@ -2,14 +2,16 @@ import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Minimize2 } from 'lucide-react';
 import type { BibleMark, BibleVerse } from '../../types/api';
 import { ambienceFor } from './focusAmbience';
+import { MARK_WASH, pageStyle, toneOf } from './readingPage';
 
 /**
  * A chapter read as a page rather than a screen.
  *
  * Everything the reader does not need while reading is gone: the toolbar, the
  * tabs, the chips. What is left is the text, at a comfortable measure and a
- * larger size, on a background that shifts with the hour so a late-night
- * reading is not a white glare.
+ * larger size, on the reader's own opaque page. A dark page takes a faint wash
+ * that shifts with the hour, painted over solid paper so nothing behind the
+ * overlay ever shows through the text.
  *
  * Tapping the text hides the little chrome that remains, because a reader who
  * wants no controls at all should be able to get there without leaving. The
@@ -27,19 +29,13 @@ export interface FocusReaderProps {
   fontScale: number;
   lineHeight: number;
   theme: 'serif' | 'sans';
+  /** The page tone: dark, sepia or light. */
+  page?: string;
   loading?: boolean;
   onPrev: () => void;
   onNext: () => void;
   onClose: () => void;
 }
-
-const MARK_TINTS: Record<string, string> = {
-  yellow: 'bg-amber-400/15',
-  green: 'bg-emerald-400/15',
-  blue: 'bg-sky-400/15',
-  pink: 'bg-pink-400/15',
-  purple: 'bg-violet-400/15',
-};
 
 function markFor(marks: BibleMark[], verse: BibleVerse): BibleMark | undefined {
   return marks.find(
@@ -58,16 +54,21 @@ export default function FocusReader({
   fontScale,
   lineHeight,
   theme,
+  page,
   loading = false,
   onPrev,
   onNext,
   onClose,
 }: FocusReaderProps) {
   const [chrome, setChrome] = useState(true);
+  const tone = toneOf(page);
 
   return (
     <div
-      className={`fixed inset-0 z-40 bg-gradient-to-b ${ambienceFor(new Date().getHours())} overflow-y-auto`}
+      className={`fixed inset-0 z-40 overflow-y-auto ${
+        tone === 'dark' ? `bg-gradient-to-b ${ambienceFor(new Date().getHours())}` : ''
+      }`}
+      style={pageStyle(tone)}
       data-testid="bible-focus"
     >
       <div
@@ -75,17 +76,17 @@ export default function FocusReader({
           chrome ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <div className="flex items-center justify-between gap-2 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] bg-black/30 backdrop-blur-sm">
+        <div className="flex items-center justify-between gap-2 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] border-b border-[var(--page-rule)] bg-[var(--page-paper)]">
           <button
             type="button"
             onClick={onPrev}
             aria-label="Previous chapter"
-            className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-slate-300"
+            className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-[var(--page-muted)]"
             data-testid="bible-focus-prev"
           >
             <ChevronLeft size={18} />
           </button>
-          <p className="truncate text-sm text-slate-200" data-testid="bible-focus-reference">
+          <p className="truncate text-sm text-[var(--page-ink)]" data-testid="bible-focus-reference">
             {reference}
           </p>
           <div className="flex items-center gap-1">
@@ -93,7 +94,7 @@ export default function FocusReader({
               type="button"
               onClick={onNext}
               aria-label="Next chapter"
-              className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-slate-300"
+              className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-[var(--page-muted)]"
               data-testid="bible-focus-next"
             >
               <ChevronRight size={18} />
@@ -102,7 +103,7 @@ export default function FocusReader({
               type="button"
               onClick={onClose}
               aria-label="Leave focus mode"
-              className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-slate-300"
+              className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-[var(--page-muted)]"
               data-testid="bible-focus-close"
             >
               <Minimize2 size={18} />
@@ -119,7 +120,7 @@ export default function FocusReader({
         className="block w-full max-w-2xl mx-auto px-5 pb-[max(4rem,env(safe-area-inset-bottom))] pt-6 text-left"
       >
         {loading && verses.length === 0 && (
-          <p className="py-10 text-center text-sm text-slate-400" data-testid="bible-focus-loading">
+          <p className="py-10 text-center text-sm text-[var(--page-muted)]" data-testid="bible-focus-loading">
             Opening the chapter…
           </p>
         )}
@@ -128,19 +129,19 @@ export default function FocusReader({
           return (
             <span
               key={`${verse.osis}-${verse.chapter}-${verse.verse}`}
-              className={`block rounded-md px-1 ${
-                mark ? (MARK_TINTS[mark.color] ?? MARK_TINTS.yellow) : ''
-              }`}
+              className="block rounded-md px-1"
+              style={mark ? { backgroundColor: MARK_WASH[mark.color] ?? MARK_WASH.yellow } : undefined}
+              data-mark={mark ? mark.color : undefined}
               data-testid={`bible-focus-verse-${verse.chapter}-${verse.verse}`}
             >
               <sup
-                className="mr-1 font-sans text-[0.5em] text-amber-300/60 select-none"
+                className="mr-1 font-sans text-[0.5em] font-semibold text-[var(--page-number)] select-none"
                 aria-hidden="true"
               >
                 {verse.verse}
               </sup>
               <span
-                className={theme === 'serif' ? 'font-serif' : 'font-sans'}
+                className={`text-[var(--page-ink)] ${theme === 'serif' ? 'font-serif' : 'font-sans'}`}
                 style={{ fontSize: `${1.3 * fontScale}rem`, lineHeight: lineHeight + 0.25 }}
               >
                 {verse.text}

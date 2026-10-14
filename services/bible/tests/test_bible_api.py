@@ -198,6 +198,15 @@ def test_state_stores_typographic_preferences(loaded_client: TestClient):
     assert prefs["split_view"] == "parallel"
 
 
+def test_the_page_tone_is_a_reader_preference(loaded_client: TestClient):
+    """The text sits on an opaque page; the reader picks dark, sepia or light."""
+    assert loaded_client.get("/state", params={"username": "new"}).json()["preferences"]["page"] == "dark"
+    body = loaded_client.put("/state", params={"username": "sam"}, json={"page": "sepia"}).json()
+    assert body["preferences"]["page"] == "sepia"
+    bad = loaded_client.put("/state", params={"username": "sam"}, json={"page": "glass"})
+    assert bad.status_code == 422
+
+
 def test_a_favourite_is_remembered(loaded_client: TestClient):
     body = loaded_client.put(
         "/state", params={"username": "reader"}, json={"favorite_version": "kjv"}

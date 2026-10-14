@@ -188,6 +188,8 @@ class UserBibleState(SQLModel, table=True):
     font_scale: float = Field(default=1.0)
     line_height: float = Field(default=1.6)
     theme: str = Field(default="serif")
+    # The paper the text is set on: an opaque page, never the app background.
+    page: str = Field(default="dark")
     read_aloud_voice: str = Field(default="")
     split_view: str = Field(default="compare")
 

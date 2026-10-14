@@ -1699,6 +1699,8 @@ export interface BiblePreferences {
   font_scale: number;
   line_height: number;
   theme: 'serif' | 'sans';
+  /** The opaque page the text is set on. */
+  page?: 'dark' | 'sepia' | 'light';
   read_aloud_voice: string;
   split_view: 'compare' | 'parallel';
 }
