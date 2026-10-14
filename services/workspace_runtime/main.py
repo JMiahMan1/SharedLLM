@@ -2903,6 +2903,19 @@ async def git_pull_webhook(
                 log.warning(f"Webhook pull attempted for workspace {workspace_id} but auto_pull_enabled is False")
                 raise HTTPException(status_code=403, detail="Webhook pulling is disabled for this workspace")
 
+            if match.sync_mode == "local_git_authoritative":
+                # In this mode the workspace's own git is the source of truth and
+                # the remote is a mirror of it, so a push to GitHub is not news
+                # this copy needs. Pulling anyway could not succeed either: the
+                # local branch carries commits the remote does not, so git
+                # reported "divergent branches" on every push and downloaded
+                # nothing. Saying so once per push is the honest answer.
+                log.info(f"Webhook pull skipped for {workspace_id}: local git is authoritative")
+                return {
+                    "status": "SKIPPED",
+                    "message": "This workspace's local git is authoritative, so it is not pulled from the remote.",
+                }
+
             resolved_path = resolve_safe_path(get_workspace_root(), str(match.local_path), must_exist=False)
             workspace_path = Path(resolved_path)
             workspace_path.mkdir(parents=True, exist_ok=True)
@@ -2973,7 +2986,11 @@ async def git_pull_webhook(
 
         log.info(f"Webhook triggered git pull for workspace {workspace_id} on {remote_name}/{default_branch}")
 
-        args = ["git", "pull", _git_webhook_pull_remote(remote_url, remote_name), default_branch]
+        # --ff-only is stated rather than left to git: an automatic pull must
+        # never merge or rebase a workspace that may be holding someone's work,
+        # and with no strategy configured git refuses the pull outright when the
+        # branches have diverged, which is not something a push can resolve.
+        args = ["git", "pull", "--ff-only", _git_webhook_pull_remote(remote_url, remote_name), default_branch]
         result = _run_command(workspace_path, args)
 
         if result["returncode"] == 0 and match.nextcloud_path and (match.auto_backup_enabled or match.sync_mode in ("nextcloud", "git_and_nextcloud")):
@@ -2981,11 +2998,18 @@ async def git_pull_webhook(
             background_tasks.add_task(_trigger_nextcloud_sync, workspace_id)
 
         if result["returncode"] != 0:
-            log.error(f"Git pull failed: {result['stderr']}")
+            detail = result["stderr"].strip()
+            log.error(f"Webhook pull failed for {workspace_id}: {detail}")
+            if "divergent" in detail or "Not possible to fast-forward" in detail:
+                detail = (
+                    f"{detail}\n\nThe workspace and the remote have each moved on. An "
+                    "automatic pull will not merge or rebase for you, so open the "
+                    "workspace and pull by hand to choose."
+                )
             return {
                 "status": "ERROR",
                 "message": "Git pull failed",
-                "detail": result["stderr"].strip()
+                "detail": detail
             }
 
         return {
