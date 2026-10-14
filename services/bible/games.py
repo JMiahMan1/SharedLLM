@@ -59,6 +59,12 @@ MODES: dict[str, dict] = {
         "kinds": ["fill_blank"],
         "count": 8,
     },
+    "next_verse": {
+        "name": "What Comes Next?",
+        "blurb": "Read a well-known verse and pick the one that follows it.",
+        "kinds": ["next_verse"],
+        "count": 6,
+    },
     "books": {
         "name": "Books of the Bible",
         "blurb": "What comes next, and how many chapters? Learn the library.",
@@ -117,6 +123,8 @@ class _Context:
     books: list[dict]
     used_verses: set[int] = field(default_factory=set)
     used_books: set[str] = field(default_factory=set)
+    #: reference -> the text of the verse after it, for the next-verse game.
+    followers: dict[str, str] = field(default_factory=dict)
 
 
 def today() -> str:
@@ -147,6 +155,8 @@ def build(session: Session, mode: str, seed: str, version: str) -> list[Question
         verses=_known_verses(session, version),
         books=corpus.list_books(session, version),
     )
+    if "next_verse" in spec["kinds"]:
+        ctx.followers = _followers(session, version, ctx.verses)
     if len(ctx.books) < 4:
         raise GameError(f"Translation {version!r} has too few books installed for a game.")
     questions: list[Question] = []
@@ -301,7 +311,39 @@ def _chapter_count(ctx: _Context, index: int) -> Question | None:
     )
 
 
+def _next_verse(ctx: _Context, index: int) -> Question | None:
+    """A verse and the one after it; the other options follow other verses.
+
+    Every option is a real verse from the installed text, so a wrong choice is
+    never a made-up sentence, only the wrong place in the Bible.
+    """
+    for _ in range(len(ctx.verses)):
+        verse = _take_verse(ctx)
+        if verse is None:
+            return None
+        answer = ctx.followers.get(verse["reference"])
+        if not answer:
+            continue
+        others = sorted({t for ref, t in ctx.followers.items() if ref != verse["reference"] and t != answer})
+        if len(others) < 3:
+            return None
+        options = [answer, *ctx.rng.sample(others, 3)]
+        ctx.rng.shuffle(options)
+        return Question(
+            id=index,
+            kind="next_verse",
+            prompt="Which verse comes next?",
+            text=verse["text"],
+            options=options,
+            answer=answer,
+            reference=verse["reference"],
+            show_reference=True,
+        )
+    return None
+
+
 _GENERATORS = {
+    "next_verse": _next_verse,
     "which_book": _which_book,
     "fill_blank": _fill_blank,
     "book_after": _book_after,
@@ -327,11 +369,25 @@ def _known_verses(session: Session, version: str) -> list[dict]:
         out.append(
             {
                 "osis": osis,
+                "chapter": chapter,
+                "verse": verse,
                 "book_name": name,
                 "reference": f"{name} {chapter}:{verse}",
                 "text": row.text.strip(),
             }
         )
+    return out
+
+
+def _followers(session: Session, version: str, verses: list[dict]) -> dict[str, str]:
+    """The verse after each curated verse, in the same chapter, from the corpus."""
+    out = {}
+    for v in verses:
+        nxt = session.get(
+            BibleVerse, {"version_code": version, "osis": v["osis"], "chapter": v["chapter"], "verse": v["verse"] + 1}
+        )
+        if nxt is not None and len(nxt.text.strip()) >= 20:
+            out[v["reference"]] = nxt.text.strip()
     return out
 
 
