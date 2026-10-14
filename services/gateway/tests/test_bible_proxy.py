@@ -46,6 +46,7 @@ ROUTES = [
     ("get", "/api/bible/narration/plan?ref=John+3:16"),
     ("get", "/api/bible/narration/chunk?ref=John+3:16&index=0"),
     ("post", "/api/bible/study/ask"),
+    ("post", "/api/bible/study/ask/stream"),
     ("get", "/api/bible/admin/imports"),
     ("get", "/api/bible/admin/providers/api.bible/estimate?translation_id=niv"),
     ("post", "/api/bible/admin/imports"),
@@ -99,6 +100,17 @@ def _patch_bible(monkeypatch, status=200, payload=None, captured=None, raw=None)
 
         async def read(self):
             return raw if raw is not None else json.dumps(payload or {}).encode()
+
+        @property
+        def content(self):
+            """A streamed body, line by line, as aiohttp's StreamReader yields it."""
+            body = raw if raw is not None else json.dumps(payload or {}).encode()
+
+            async def lines():
+                for line in body.splitlines(keepends=True):
+                    yield line
+
+            return lines()
 
     class _Client:
         async def _record(self, verb, url, **kwargs):
@@ -850,3 +862,23 @@ def test_plan_progress_is_the_callers_own(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
     make_client(user="michele").post("/api/bible/plans/john-21/days/3/complete", params={"username": "jeremiah"})
     assert captured["calls"][-1]["params"]["username"] == "michele"
+
+
+def test_a_streamed_study_answer_is_relayed_line_by_line(make_client, monkeypatch):
+    stream = b'{"type": "start", "reference": "John 3:16"}\n{"type": "text", "text": "Love"}\n{"type": "done", "answer": "Love"}\n'
+    captured = _patch_bible(monkeypatch, raw=stream)
+    resp = make_client(user="michele").post(
+        "/api/bible/study/ask/stream", json={"ref": "John 3:16", "question": "Why?", "username": "jeremiah", "depth": "teen"}
+    )
+    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    assert [e["type"] for e in events] == ["start", "text", "done"]
+    sent = captured["calls"][-1]
+    assert sent["params"] == {"username": "michele"}
+    assert "username" not in sent["json"] and sent["json"]["depth"] == "teen"
+
+
+def test_a_refused_stream_becomes_one_error_event(make_client, monkeypatch):
+    _patch_bible(monkeypatch, status=400, payload={"detail": "Ask a question about this passage."})
+    resp = make_client(user="michele").post("/api/bible/study/ask/stream", json={"ref": "John 3:16", "question": ""})
+    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    assert events == [{"type": "error", "detail": "Ask a question about this passage.", "status": 400}]

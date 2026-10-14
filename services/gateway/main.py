@@ -10008,22 +10008,56 @@ async def proxy_bible_study_ask(request: Request):
     that cannot answer is reported as such rather than as an empty string.
     """
     username = await _bible_caller(request)
-    body = await request.json()
     return await _bible_json(
         "POST",
         "/study/ask",
         label="Study help unavailable",
         params={"username": username},
-        json={
-            "question": body.get("question"),
-            "ref": body.get("ref"),
-            "version": body.get("version"),
-            "edition": body.get("edition"),
-            "cross_version": bool(body.get("cross_version", False)),
-            "depth": body.get("depth") or "adult",
-        },
+        json=_study_ask_body(await request.json()),
         timeout=_BIBLE_STUDY_TIMEOUT,
     )
+
+
+def _study_ask_body(body: dict) -> dict:
+    """Only the fields a study question carries; never a username."""
+    return {
+        "question": body.get("question"),
+        "ref": body.get("ref"),
+        "version": body.get("version"),
+        "edition": body.get("edition"),
+        "cross_version": bool(body.get("cross_version", False)),
+        "depth": body.get("depth") or "adult",
+    }
+
+
+@app.post("/api/bible/study/ask/stream")
+async def proxy_bible_study_ask_stream(request: Request):
+    """The study answer as it is written (NDJSON events from the bible service).
+
+    A refusal from the bible service arrives as one ``error`` event carrying its
+    own reason, so the reader sees the same sentence either way.
+    """
+    username = await _bible_caller(request)
+    payload = _study_ask_body(await request.json())
+
+    async def relay():
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{BIBLE_SVC}/study/ask/stream",
+                params={"username": username},
+                json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=_BIBLE_STUDY_TIMEOUT,
+            )
+            if resp.status >= 400:
+                detail = await _upstream_detail(resp) or "Study help unavailable"
+                yield json.dumps({"type": "error", "detail": detail, "status": resp.status}) + "\n"
+                return
+            async for line in resp.content:
+                if line.strip():
+                    yield line.decode("utf-8", errors="replace").rstrip("\n") + "\n"
+
+    return StreamingResponse(relay(), media_type="application/x-ndjson")
 
 
 @app.get("/api/bible/voices")

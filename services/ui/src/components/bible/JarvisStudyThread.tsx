@@ -25,6 +25,8 @@ interface Turn {
   verses: number;
   notes: number;
   references: string[];
+  /** The answer is still being written. */
+  streaming?: boolean;
 }
 
 const DEPTHS: { id: BibleStudyDepth; label: string }[] = [
@@ -65,41 +67,42 @@ export default function JarvisStudyThread({
   const [asking, setAsking] = useState(false);
   const [depth, setDepth] = useState<BibleStudyDepth>('adult');
 
+  // The answer streams into the newest turn as it is written; the turn is
+  // replaced as a whole on each event so React sees a new object.
+  const updateLast = (patch: Partial<Turn>) =>
+    setTurns((prev) => prev.map((t, i) => (i === prev.length - 1 ? { ...t, ...patch } : t)));
+
   const ask = async (text: string) => {
     const wanted = text.trim();
     if (!wanted || asking) return;
     void trigger('light');
     setAsking(true);
+    setTurns((prev) => [
+      ...prev,
+      { question: wanted, text: '', failed: false, verses: 0, notes: 0, references: [], streaming: true },
+    ]);
+    setQuestion('');
+    let written = '';
     try {
-      const answer = await api.askBibleStudy(passage, wanted, {
-        version,
-        edition,
-        crossVersion,
-        depth,
+      await api.streamBibleStudy(passage, wanted, { version, edition, crossVersion, depth }, (event) => {
+        if (event.type === 'start') updateLast({ verses: event.verses_used, notes: event.notes_used });
+        else if (event.type === 'text') {
+          written += event.text;
+          updateLast({ text: written });
+        } else if (event.type === 'done') updateLast({ text: event.answer, references: event.references, streaming: false });
+        else if (event.type === 'error') {
+          updateLast({ text: event.detail, failed: true, streaming: false });
+          setQuestion(wanted);
+        }
       });
-      setTurns((prev) => [
-        ...prev,
-        {
-          question: wanted,
-          text: answer.answer,
-          failed: false,
-          verses: answer.verses_used,
-          notes: answer.notes_used,
-          references: answer.references ?? [],
-        },
-      ]);
-      setQuestion('');
+      updateLast({ streaming: false });
     } catch (error) {
       // The server's own sentence: an unconfigured gateway, a passage with no
       // text, and a model that could not be reached each have their own fix.
       const message =
-        error instanceof Error && error.message
-          ? error.message
-          : 'The question could not be answered just now.';
-      setTurns((prev) => [
-        ...prev,
-        { question: wanted, text: message, failed: true, verses: 0, notes: 0, references: [] },
-      ]);
+        error instanceof Error && error.message ? error.message : 'The question could not be answered just now.';
+      updateLast({ text: message, failed: true, streaming: false });
+      setQuestion(wanted);
     } finally {
       setAsking(false);
     }
@@ -178,6 +181,11 @@ export default function JarvisStudyThread({
                   }`}
                 >
                   {turn.text}
+                  {turn.streaming && (
+                    <span className="text-sky-300" data-testid="bible-ask-streaming">
+                      {turn.text ? ' ▍' : 'Reading the passage…'}
+                    </span>
+                  )}
                 </p>
                 {!turn.failed && turn.references.length > 0 && (
                   <div className="flex flex-wrap gap-1.5" data-testid="bible-ask-references">
@@ -197,7 +205,7 @@ export default function JarvisStudyThread({
                     ))}
                   </div>
                 )}
-                {!turn.failed && (
+                {!turn.failed && !turn.streaming && (
                   <p
                     className="flex items-center gap-1.5 text-[11px] text-slate-500"
                     data-testid="bible-ask-provenance"
