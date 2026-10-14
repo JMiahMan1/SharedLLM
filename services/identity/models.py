@@ -42,6 +42,8 @@ class User(SQLModel, table=True):  # type: ignore
     # "preset:<id>" for a built-in picture, "upload:<version>" for a photo kept
     # in UserAvatarImage, or empty for initials.
     avatar: str | None = None
+    # The family chat conversation (Talk token) opened on launch.
+    chat_default_token: str | None = None
     git_url: str | None = None
     git_user: str | None = None
 

@@ -82,3 +82,12 @@ def test_skylight_reads_not_set_up_until_the_household_account_is(client, sessio
     assert client.get("/api/users/me").json()["skylight_status"] == "connected"
     client.patch("/api/users/me", json={"skylight_enabled": False})
     assert client.get("/api/users/me").json()["skylight_status"] == "off"
+
+
+def test_a_default_chat_is_remembered_and_cleared(client):
+    assert client.patch("/api/users/me", json={"chat_default_token": "abc123"}).json()["chat_default_token"] == "abc123"
+    assert client.get("/api/users/me").json()["chat_default_token"] == "abc123"
+    # Blank never erases (see _apply_user_update); clearing is explicit.
+    assert client.patch("/api/users/me", json={"chat_default_token": ""}).json()["chat_default_token"] == "abc123"
+    cleared = client.patch("/api/users/me", json={"clear_fields": ["chat_default_token"]}).json()
+    assert cleared["chat_default_token"] is None
