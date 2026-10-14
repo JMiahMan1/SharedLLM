@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { BookOpen, Flame, Maximize2, Search, Sparkles, Trophy, X } from 'lucide-react';
+import { BookOpen, Flame, Gamepad2, Maximize2, Search, Sparkles, Trophy, X } from 'lucide-react';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import type {
@@ -23,12 +23,14 @@ import BibleReadAloud from '../components/bible/BibleReadAloud';
 import ChapterNotes from '../components/bible/ChapterNotes';
 import BibleToday from '../components/bible/BibleToday';
 import BibleProgress from '../components/bible/BibleProgress';
+import BibleGames from '../components/bible/BibleGames';
 
-type Tab = 'read' | 'today' | 'progress';
+type Tab = 'read' | 'today' | 'play' | 'progress';
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof BookOpen }> = [
   { id: 'read', label: 'Read', icon: BookOpen },
   { id: 'today', label: 'Today', icon: Sparkles },
+  { id: 'play', label: 'Play', icon: Gamepad2 },
   { id: 'progress', label: 'Progress', icon: Trophy },
 ];
 
@@ -51,7 +53,6 @@ const UPCOMING = [
   { name: 'Reading plans', detail: 'Daily readings with friends, the way the Bible App does it' },
   { name: 'Jarvis study help', detail: 'Ask a question about the passage you are reading' },
   { name: 'Memorisation', detail: 'Fill-in-the-blank drills with spaced review' },
-  { name: 'Quizzes and games', detail: 'Trivia and memory verses for the whole family' },
 ];
 
 /** Something with digits in it is a passage; anything else is a search. */
@@ -466,7 +467,9 @@ export default function Bible() {
   const { trigger } = useHaptics();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState<Tab>(searchParams.get('tab') === 'devotional' ? 'today' : 'read');
+  const [tab, setTab] = useState<Tab>(
+    searchParams.get('tab') === 'devotional' ? 'today' : searchParams.get('tab') === 'play' ? 'play' : 'read'
+  );
   const [requestedRef, setRequestedRef] = useState<string | null>(searchParams.get('ref'));
 
   const { data: stateData, isLoading: stateLoading } = useQuery({
@@ -549,7 +552,7 @@ export default function Bible() {
           Read, mark and remember
           {version ? ` — ${version.toUpperCase()}` : ' — no translation loaded yet'}.
         </p>
-        <div className="mt-3 sm:mt-4 grid grid-cols-3 gap-2 sm:flex sm:flex-wrap" role="tablist" aria-label="Bible sections">
+        <div className="mt-3 sm:mt-4 grid grid-cols-4 gap-2 sm:flex sm:flex-wrap" role="tablist" aria-label="Bible sections">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -560,7 +563,7 @@ export default function Bible() {
                 setTab(id);
               }}
               data-testid={`bible-tab-${id}`}
-              className={`glass-button px-3 sm:px-4 py-2.5 text-sm min-h-11 pointer-coarse:min-h-11 justify-center ${tab === id ? 'text-purple-200 border-purple-400/50' : 'text-slate-300'}`}
+              className={`glass-button flex-col sm:flex-row gap-0.5 sm:gap-2 px-1 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm min-h-12 sm:min-h-11 pointer-coarse:min-h-12 justify-center ${tab === id ? 'text-purple-200 border-purple-400/50' : 'text-slate-300'}`}
             >
               <Icon size={15} /> {label}
             </button>
@@ -619,6 +622,8 @@ export default function Bible() {
       )}
 
       {tab === 'today' && <BibleToday onOpenRef={openRef} />}
+
+      {tab === 'play' && <BibleGames page={effectivePreferences.page} />}
 
       {tab === 'progress' && (
         <BibleProgress

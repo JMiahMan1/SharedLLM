@@ -14,7 +14,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from . import achievements as ach
-from .models import ReadingEvent, UserBibleState, VerseMark
+from .models import GameScore, ReadingEvent, UserBibleState, VerseMark
 from .refs import ReferenceError, parse_one
 
 log = logging.getLogger("bible.metrics")
@@ -47,12 +47,10 @@ READING_KINDS = frozenset(
     }
 )
 
-#: Rules whose backing tables land in a later phase (plans, memorization,
-#: quizzes). They read zero until that phase ships, which is honest progress
-#: rather than a fabricated number.
-PENDING_RULES = frozenset(
-    {"plan_days_total", "plan_completed", "memory_mastered", "quizzes_total", "quiz_perfect"}
-)
+#: Rules whose backing tables land in a later phase (plans, memorization).
+#: They read zero until that phase ships, which is honest progress rather than
+#: a fabricated number.
+PENDING_RULES = frozenset({"plan_days_total", "plan_completed", "memory_mastered"})
 
 
 def _events(session: Session, username: str, kinds: frozenset[str] | None = None) -> list[ReadingEvent]:
@@ -103,6 +101,7 @@ def compute(session: Session, username: str, today: date | None = None) -> dict[
     state = session.get(UserBibleState, username)
 
     chapters_total = len({row.ref for row in _events(session, username, frozenset({"chapter_complete"})) if row.ref})
+    games = list(session.exec(select(GameScore).where(GameScore.username == username)))
     metrics: dict[str, float] = {
         "chapters_total": float(chapters_total),
         "books_read": float(len(completed)),
@@ -110,8 +109,8 @@ def compute(session: Session, username: str, today: date | None = None) -> dict[
         "plan_days_total": 0.0,
         "plan_completed": 0.0,
         "memory_mastered": 0.0,
-        "quizzes_total": 0.0,
-        "quiz_perfect": 0.0,
+        "quizzes_total": float(len(games)),
+        "quiz_perfect": float(sum(1 for g in games if g.total and g.correct == g.total)),
     }
     return {
         "metrics": metrics,

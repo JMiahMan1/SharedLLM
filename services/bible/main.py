@@ -49,6 +49,7 @@ from services.bible import achievements as ach
 from services.bible import books as book_table
 from services.bible import (
     corpus,
+    games,
     importer,
     library,
     metrics,
@@ -69,6 +70,7 @@ from services.bible.models import (
     BibleVerse,
     BibleVersion,
     Devotional,
+    GameScore,
     ReadingEvent,
     UserBibleState,
     VerseMark,
@@ -1079,6 +1081,169 @@ def _record_event(session: Session, username: str, kind: str, ref: str = "", val
     session.commit()
     session.refresh(row)
     return row
+
+
+# ── games ───────────────────────────────────────────────────────────────────
+
+
+class GameAttempt(BaseModel):
+    seed: str = Field(..., min_length=1, max_length=40)
+    version: str | None = None
+    answers: list[str | None] = Field(..., max_length=50)
+    duration_ms: int = Field(default=0, ge=0, le=3_600_000)
+
+
+def _game_version(session: Session, version: str | None) -> str:
+    if version:
+        return _require_version(session, version)
+    code = _default_version(session)
+    if not code:
+        raise HTTPException(503, "No Bible text is installed, so there is nothing to build a game from. Load a translation in Admin > Bible.")
+    return code
+
+
+@app.get("/games")
+def list_games():
+    """The games on offer."""
+    return {"modes": games.catalogue(), "today": games.today()}
+
+
+@app.get("/games/leaderboard")
+async def games_leaderboard(
+    viewer: str = Query(...),
+    day: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+):
+    """Today's daily-quiz scores: the viewer's own, plus every family member
+    who shares their Bible activity with them. A member who does not share is
+    simply absent, exactly as the activity feed treats them."""
+    when = day or games.today()
+    rows = session.exec(
+        select(GameScore).where(GameScore.mode == "daily", GameScore.day == when, GameScore.counted == True)  # noqa: E712
+    ).all()
+    entries = []
+    for row in rows:
+        if row.username != viewer and await _consent(row.username, viewer, "bible") is not True:
+            continue
+        entries.append(
+            {
+                "username": row.username,
+                "correct": row.correct,
+                "total": row.total,
+                "duration_ms": row.duration_ms,
+                "you": row.username == viewer,
+            }
+        )
+    entries.sort(key=lambda e: (-e["correct"], e["duration_ms"]))
+    return {"day": when, "entries": entries}
+
+
+@app.get("/games/{mode}")
+def get_game(
+    mode: str,
+    username: str = Query(...),
+    seed: str | None = Query(default=None),
+    version: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+):
+    """A game's questions, without the answers."""
+    code = _game_version(session, version)
+    try:
+        resolved = games.resolve_seed(mode, seed)
+        questions = games.build(session, mode, resolved, code)
+    except games.GameError as exc:
+        raise HTTPException(400 if "Unknown game" in str(exc) or "seed" in str(exc) else 503, str(exc)) from exc
+    spec = games.MODES[mode]
+    played = None
+    if spec.get("daily"):
+        row = session.exec(
+            select(GameScore).where(
+                GameScore.username == username, GameScore.mode == mode, GameScore.day == resolved, GameScore.counted == True  # noqa: E712
+            )
+        ).first()
+        if row is not None:
+            played = {"correct": row.correct, "total": row.total, "duration_ms": row.duration_ms}
+    return {
+        "mode": mode,
+        "name": spec["name"],
+        "seed": resolved,
+        "version": code,
+        "seconds": spec.get("seconds"),
+        "questions": [q.public() for q in questions],
+        "played_today": played,
+    }
+
+
+@app.post("/games/{mode}/attempt")
+async def attempt_game(
+    mode: str,
+    payload: GameAttempt,
+    username: str = Query(...),
+    session: Session = Depends(get_session),
+):
+    """Score an attempt by regenerating the game; the client never holds the key.
+
+    The first daily-quiz attempt of the day counts: it goes on the family
+    leaderboard and banks one star per right answer. Anything else is practice.
+    """
+    code = _game_version(session, payload.version)
+    try:
+        questions = games.build(session, mode, payload.seed, code)
+        results = games.score(questions, payload.answers)
+    except games.GameError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    correct = sum(1 for r in results if r["correct"])
+    daily = bool(games.MODES[mode].get("daily"))
+    today = games.today()
+    counted = (
+        daily
+        and payload.seed == today
+        and session.exec(
+            select(GameScore).where(
+                GameScore.username == username, GameScore.mode == mode, GameScore.day == today, GameScore.counted == True  # noqa: E712
+            )
+        ).first()
+        is None
+    )
+    session.add(
+        GameScore(
+            username=username,
+            mode=mode,
+            day=today,
+            seed=payload.seed,
+            version_code=code,
+            correct=correct,
+            total=len(questions),
+            duration_ms=payload.duration_ms,
+            counted=counted,
+        )
+    )
+    session.commit()
+    _record_event(session, username, "quiz_played", ref=mode, value=len(questions))
+    if correct:
+        _record_event(session, username, "quiz_correct", ref=mode, value=correct)
+
+    if counted and correct:
+        stars = await _award_stars(
+            username, [{"stars": correct, "reason": "game", "detail": f"Bible daily quiz {correct}/{len(questions)}"}]
+        )
+    elif counted:
+        stars = {"granted": 0, "status": "no right answers, so no stars this time"}
+    elif daily:
+        stars = {"granted": 0, "status": "practice: today's stars came from your first try"}
+    else:
+        stars = {"granted": 0, "status": "practice game: stars come from the daily quiz"}
+    badges = await get_achievements(username=username, session=session)
+    return {
+        "mode": mode,
+        "correct": correct,
+        "total": len(questions),
+        "duration_ms": payload.duration_ms,
+        "counted": counted,
+        "results": results,
+        "stars": stars,
+        "newly_earned": badges["newly_earned"],
+    }
 
 
 # ── stats / streaks / achievements ──────────────────────────────────────────

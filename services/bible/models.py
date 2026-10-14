@@ -339,3 +339,26 @@ class AchievementEarned(SQLModel, table=True):
     achievement_id: str = Field(primary_key=True)
     points: int = Field(default=0)
     earned_on: date = Field(default_factory=date.today)
+
+class GameScore(SQLModel, table=True):
+    """One finished Bible game.
+
+    The questions are not stored: they are regenerated from ``(mode, seed,
+    version)``, which is also how the server scores an attempt without ever
+    sending the answer key to the client. Only the first daily-quiz attempt of
+    a day ``counts`` toward the family leaderboard and stars; replays are
+    practice.
+    """
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    mode: str = Field(index=True)
+    day: str = Field(index=True)
+    seed: str = Field(default="")
+    version_code: str = Field(default="")
+    correct: int = Field(default=0)
+    total: int = Field(default=0)
+    duration_ms: int = Field(default=0)
+    counted: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=utcnow)

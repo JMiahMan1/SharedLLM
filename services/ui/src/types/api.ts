@@ -1763,6 +1763,55 @@ export interface BibleAchievementsResponse {
   announced: { posted: number; status: string };
 }
 
+export type BibleGameMode = 'daily' | 'verse_race' | 'which_book' | 'fill_blank' | 'books';
+
+export interface BibleGameInfo {
+  mode: BibleGameMode;
+  name: string;
+  blurb: string;
+  count: number;
+  daily: boolean;
+  seconds: number | null;
+}
+
+export interface BibleGameQuestion {
+  id: number;
+  kind: 'which_book' | 'fill_blank' | 'book_after' | 'chapter_count';
+  prompt: string;
+  options: string[];
+  /** The verse, for verse questions; a fill-the-gap verse carries the blank. */
+  text?: string;
+  /** Shown only when it does not give the answer away. */
+  reference?: string;
+}
+
+export interface BibleGame {
+  mode: BibleGameMode;
+  name: string;
+  seed: string;
+  version: string;
+  seconds: number | null;
+  questions: BibleGameQuestion[];
+  played_today: { correct: number; total: number; duration_ms: number } | null;
+}
+
+export interface BibleGameResult {
+  mode: BibleGameMode;
+  correct: number;
+  total: number;
+  duration_ms: number;
+  /** Whether this was the day's first daily-quiz try (leaderboard + stars). */
+  counted: boolean;
+  results: { id: number; correct: boolean; chosen: string | null; answer: string; reference: string; text: string }[];
+  stars: { granted: number; status: string };
+  newly_earned: BibleEarnedAchievement[];
+}
+
+export interface BibleLeaderboard {
+  day: string;
+  entries: { username: string; correct: number; total: number; duration_ms: number; you: boolean }[];
+}
+
 export interface BibleActivitySummary {
   username: string;
   days_read: number;
