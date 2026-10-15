@@ -79,10 +79,9 @@ services:
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
-      - CHROMA_PERSIST_DIR=/tmp/chroma_test
       - TEST_MODE=true
     volumes:
-      - test_chroma_data:/tmp/chroma_test
+      - test_rag_data:/data
 
   storage:
     build:
@@ -240,4 +239,4 @@ services:
 
 volumes:
   test_execution_data:
-  test_chroma_data:
+  test_rag_data:

@@ -8,7 +8,6 @@ on:
       - 'docker/**'
       - 'docker-compose.yml'
       - 'Caddyfile'
-      - 'requirements.txt'
       - 'tools/**'
       - '.github/workflows/build-images.yml'
   pull_request:
@@ -18,7 +17,6 @@ on:
       - 'docker/**'
       - 'docker-compose.yml'
       - 'Caddyfile'
-      - 'requirements.txt'
       - 'tools/**'
       - '.github/workflows/build-images.yml'
   workflow_dispatch:
@@ -65,7 +63,6 @@ jobs:
           filters: |
             base:
               - 'docker/Dockerfile.base'
-              - 'requirements.txt'
               - 'services/common/**'
               - '.github/workflows/build-images.yml'
             caddy:
@@ -94,7 +91,6 @@ jobs:
               - 'services/config.py'
               - 'services/workspace_sandbox.py'
               - 'tools/webscraper.py'
-              - 'tools/vision_ocr.py'
               - 'scripts/index_capabilities.py'
               - '.github/workflows/build-images.yml'
             storage:

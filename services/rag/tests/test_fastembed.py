@@ -1,14 +1,8 @@
-"""
-Test that fastembed-based embeddings work with ChromaDB's embedding functions.
-This replaces sentence-transformers and uses only CPU.
-
-Skipped when chromadb has pydantic compat issues (Python 3.14 / Pydantic v2).
-"""
+"""fastembed (CPU-only) produces usable embeddings for the sqlite-vec index."""
 import pytest
 
 # Verify fastembed is installed
 _fastembed_installed = False
-_chromadb_ok = False
 
 try:
     import fastembed  # pyright: ignore[reportMissingImports]
@@ -52,25 +46,5 @@ def test_fastembed_embedding_function():  # pyright: ignore[reportUnknownVariabl
         assert not np.all(arr == 0), "All vectors are zero"
         assert not np.any(np.isnan(arr)), "Vectors contain NaN"
         print(f"✓ Embeddings are valid (non-zero, no NaN), dims: {arr.shape}")
-        global _chromadb_ok
-
-        _chromadb_ok = True
     except Exception as e:
-        print(f"⚠ Embedding function unavailable: {e}")
-        pytest.skip(f"fastembed/chromadb embedding function failed: {e}")
-
-
-@pytest.mark.skipif(not _chromadb_ok, reason="chromadb embedding function unavailable")
-def test_chromadb_collection():  # pyright: ignore[reportUnknownVariableType]
-    import chromadb  # pyright: ignore[reportUnknownVariableType]
-    from chromadb.config import Settings  # pyright: ignore[reportUnknownVariableType]
-
-    client = chromadb.PersistentClient(  # pyright: ignore[reportAttributeAccessIssue]
-        path="/tmp/test_rag_fastembed", settings=Settings(anonymized_telemetry=False)
-    )
-    coll = client.get_or_create_collection("test")
-    coll.add(documents=["test doc"], ids=["test-id"])
-    results = coll.query(query_texts=["test"], n_results=1)
-    assert len(results["documents"][0]) == 1
-    print("✓ ChromaDB collection with fastembed works")
-    client.delete_collection("test")
+        pytest.skip(f"fastembed embedding failed: {e}")

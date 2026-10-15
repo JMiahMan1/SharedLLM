@@ -125,7 +125,7 @@ async def get_storage_status():
     }
 
 @app.post("/index/full", status_code=202, dependencies=[Depends(_require_internal_secret)])
-async def sync_folder_to_chroma(req: IndexScanRequest, background_tasks: BackgroundTasks):
+async def sync_folder_to_rag(req: IndexScanRequest, background_tasks: BackgroundTasks):
     """Scan structure, extract content, chunk, and sync to RAG in the background."""
     background_tasks.add_task(_run_full_index_task, req)
     return {

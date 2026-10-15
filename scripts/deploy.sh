@@ -91,7 +91,7 @@ if [ -n "$CHANGED_FILES" ]; then
     # Only match known service directories. bible was missing from this list,
     # so a change to it was reported as "no service changes detected" and never
     # deployed by this script.
-    KNOWN_SERVICES="automation|bible|control_plane|dns|dns-forwarder|dns-proxy|dns_sync|execution|gateway|geo|identity|logging|rag|storage|telemetry|ui|workspace_runtime"
+    KNOWN_SERVICES="automation|bible|control_plane|dns|execution|gateway|geo|identity|logging|rag|storage|telemetry|ui|workspace_runtime"
     MODIFIED_SERVICES=$(printf '%s\n' "$CHANGED_FILES" | grep "^services/" | cut -d'/' -f2 | grep -E "^(${KNOWN_SERVICES})$" | sort | uniq || true)
 fi
 
