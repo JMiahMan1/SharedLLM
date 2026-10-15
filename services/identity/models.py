@@ -58,7 +58,8 @@ class User(SQLModel, table=True):  # type: ignore
     git_token_enc: str | None = None
     huggingface_token_enc: str | None = None
 
-    # Biometric voice profile (stored as a JSON string of embeddings)
+    # Label of the enrolled voice signature (``VoiceSignature``), set only by
+    # enrollment: "ge2e:<hash of the profile>", or None until enrolled.
     voice_fingerprint: str | None = None
     preferred_tts_voice: str | None = Field(default="af_heart")
 
@@ -588,6 +589,16 @@ class WorkspaceChatMessage(SQLModel, table=True):  # type: ignore
     parts: str = "[]"
     meta: str = "{}"
     created_at: str = ""
+
+
+class VoiceSignature(SQLModel, table=True):  # type: ignore
+    """A user's enrolled voice: their recent speaker-embedding samples (JSON,
+    ``[{embedding, speech_seconds, recorded_at}]``), never the audio itself."""
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True)
+    model: str
+    samples: str = "[]"
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class UserAvatarImage(SQLModel, table=True):  # type: ignore

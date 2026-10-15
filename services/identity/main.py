@@ -26,7 +26,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common.http import get_client, get_client_insecure
 from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
-from services.identity import audit
+from services.identity import audit, voice
 from services.identity.crypto import decrypt, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
@@ -47,6 +47,7 @@ from services.identity.models import (
     User,
     UserActivitySharing,
     UserAvatarImage,
+    VoiceSignature,
     UserCalendarSetting,
     UserCredentialShare,
     UserThemeSetting,
@@ -927,33 +928,186 @@ def avatar_image(username: str, _viewer: User = Depends(require_api_key), sessio
         raise HTTPException(status_code=404, detail="No uploaded picture.")
     return Response(content=row.data, media_type=row.mime, headers={"Cache-Control": "private, max-age=86400"})
 
+async def _voice_signature_of(file: UploadFile) -> dict:
+    """The upload's voice signature, computed by the execution service.
+
+    The audio goes no further than this server: execution decodes it and runs
+    the local model, and only the resulting vector comes back to be stored.
+    """
+    from services.config import EXECUTION_SVC_URL
+
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(status_code=400, detail="The recording is empty.")
+    form = aiohttp.FormData()
+    form.add_field("file", audio, filename=file.filename or "voice.webm",
+                   content_type=file.content_type or "application/octet-stream")
+    try:
+        async with aiohttp.ClientSession() as client:
+            resp = await client.post(
+                f"{EXECUTION_SVC_URL}/voice/signature",
+                data=form,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=120.0),
+            )
+            body = await resp.json(content_type=None)
+    except (TimeoutError, aiohttp.ClientError, ValueError) as e:
+        log.error(f"[voice] signature service unavailable: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail="The voice signature service is unavailable right now.") from None
+    if resp.status == 422:
+        raise HTTPException(status_code=422, detail=body.get("detail") or "That recording could not be used.")
+    if resp.status != 200 or body.get("model") != voice.MODEL:
+        log.error(f"[voice] signature service answered {resp.status}: {str(body)[:200]}")
+        raise HTTPException(status_code=502, detail="The voice signature service gave an unusable answer.")
+    try:
+        body["embedding"] = voice.valid_embedding(body.get("embedding"))
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=f"The voice signature service gave an unusable answer: {e}") from None
+    return body
+
+
+def _voice_profiles(session: Session) -> list[dict]:
+    names = {u.username: (u.display_name or u.username) for u in session.exec(select(User)).all()}
+    return [
+        {"username": row.username, "name": names[row.username], "samples": voice.load_samples(row.samples)}
+        for row in session.exec(select(VoiceSignature).where(VoiceSignature.model == voice.MODEL)).all()
+        if row.username in names
+    ]
+
+
+def _voice_status(row: VoiceSignature | None) -> dict:
+    samples = voice.load_samples(row.samples) if row and row.model == voice.MODEL else []
+    return {
+        "enrolled": len(samples) >= voice.MIN_SAMPLES,
+        "samples": len(samples),
+        "min_samples": voice.MIN_SAMPLES,
+        "max_samples": voice.MAX_SAMPLES,
+        "consistency": voice.consistency(samples),
+        "model": voice.MODEL,
+        "updated_at": row.updated_at.isoformat() if row and samples else None,
+    }
+
+
+@app.get("/api/users/me/voice")
+def my_voice(user: User = Depends(require_api_key), session: Session = Depends(get_session)):
+    """How far the caller's voice enrollment has got."""
+    return _voice_status(session.get(VoiceSignature, user.username))
+
+
 @app.post("/api/users/me/enroll")
 async def enroll_voice(
+    request: Request,
     file: UploadFile = File(...),
     user: User = Depends(require_api_key),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
 ):
+    """Add one recording to the caller's voice profile.
+
+    A take that does not sound like the person's earlier takes is refused
+    rather than averaged in: a profile polluted by someone else's voice (or a
+    noisy room) would make every later identification less certain.
     """
-    Receives an audio file and generates a voice fingerprint.
-    For now, we simulate this by hashing the file content.
+    signature = await _voice_signature_of(file)
+    row = session.get(VoiceSignature, user.username)
+    samples = voice.load_samples(row.samples) if row and row.model == voice.MODEL else []
+    if samples:
+        score = voice.cosine(signature["embedding"], voice.centroid(samples))
+        if score < voice.CONSISTENCY_FLOOR:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"That take does not sound like your earlier ones (similarity {score:.2f}). "
+                    "Record again somewhere quiet, or start over if the earlier takes were not you."
+                ),
+            )
+    samples.append({
+        "embedding": signature["embedding"],
+        "speech_seconds": signature.get("speech_seconds"),
+        "recorded_at": datetime.now(UTC).isoformat(),
+    })
+    samples = samples[-voice.MAX_SAMPLES:]
+    if row is None:
+        row = VoiceSignature(username=user.username, model=voice.MODEL)
+    row.model = voice.MODEL
+    row.samples = json.dumps(samples)
+    row.updated_at = datetime.now(UTC)
+    session.add(row)
+    user.voice_fingerprint = voice.fingerprint(samples) if len(samples) >= voice.MIN_SAMPLES else None
+    session.add(user)
+    session.commit()
+    _audit(request, session, "user.voice_enroll", user.username, actor=user,
+           changes=[{"field": "voice_samples", "change": str(len(samples))}])
+    log.info(f"[voice] {user.username} enrolled sample {len(samples)} ({signature.get('speech_seconds')}s of speech)")
+    return {"status": "SUCCESS", "speech_seconds": signature.get("speech_seconds"), **_voice_status(row)}
+
+
+@app.delete("/api/users/me/voice")
+def forget_my_voice(request: Request, user: User = Depends(require_api_key), session: Session = Depends(get_session)):
+    """Erase the caller's voice profile entirely."""
+    row = session.get(VoiceSignature, user.username)
+    if row is not None:
+        session.delete(row)
+    user.voice_fingerprint = None
+    session.add(user)
+    session.commit()
+    _audit(request, session, "user.voice_forget", user.username, actor=user,
+           changes=[{"field": "voice_samples", "change": "cleared"}])
+    return {"status": "SUCCESS", **_voice_status(None)}
+
+
+@app.post("/api/users/me/voice/check")
+async def check_my_voice(
+    file: UploadFile = File(...),
+    user: User = Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Say something and see who the household thinks is talking.
+
+    Scored against everyone enrolled, exactly as identification does, so a
+    pass here means the caller would be recognised rather than merely that
+    they resemble their own profile.
     """
+    profiles = _voice_profiles(session)
+    if not any(p["username"] == user.username and len(p["samples"]) >= voice.MIN_SAMPLES for p in profiles):
+        raise HTTPException(status_code=409, detail=f"Record at least {voice.MIN_SAMPLES} samples before testing.")
+    signature = await _voice_signature_of(file)
+    result = voice.decide(voice.rank(signature["embedding"], profiles))
+    return {**result, "is_me": result["matched_username"] == user.username}
+
+
+class VoiceIdentifyRequest(BaseModel):
+    embedding: list[float]
+    model: str = voice.MODEL
+    threshold: float | None = None
+
+
+@app.post("/api/voice/identify", dependencies=[Depends(require_internal)])
+def identify_voice(req: VoiceIdentifyRequest, session: Session = Depends(get_session)):
+    """Which enrolled family member a signature belongs to (internal)."""
+    if req.model != voice.MODEL:
+        raise HTTPException(status_code=422, detail=f"Signatures are {voice.MODEL}, not {req.model}.")
     try:
-        import hashlib
-        content = await file.read()
-        # Simulation: In a real system, we'd run a model here.
-        # For now, we'll store a mock fingerprint based on the file content.
-        fingerprint = hashlib.sha256(content).hexdigest()
+        embedding = voice.valid_embedding(req.embedding)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    if req.threshold is not None and not 0.0 < req.threshold <= 1.0:
+        raise HTTPException(status_code=422, detail="threshold must be in (0, 1].")
+    candidates = voice.rank(embedding, _voice_profiles(session))
+    if not candidates:
+        raise HTTPException(status_code=404, detail="Nobody has enrolled a voice yet.")
+    return voice.decide(candidates, req.threshold)
 
-        user.voice_fingerprint = f"v1:{fingerprint[:16]}"
-        session.add(user)
-        session.commit()
 
-        log.info(f"User {user.username} enrolled with voice fingerprint {user.voice_fingerprint}")
-        return {"status": "SUCCESS", "message": "Voice profile successfully enrolled."}
-    except Exception as e:
-        log.error(f"Enrollment failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from None
-
+@app.get("/api/voice/profiles", dependencies=[Depends(require_internal)])
+def voice_profiles(session: Session = Depends(get_session)):
+    """Who can be recognised by voice (internal; no signatures included)."""
+    return {
+        "profiles": [
+            {"username": p["username"], "name": p["name"], "samples": len(p["samples"])}
+            for p in _voice_profiles(session)
+            if len(p["samples"]) >= voice.MIN_SAMPLES
+        ]
+    }
 
 
 def _client_of(request: Request | None) -> tuple[str | None, str | None]:
@@ -1301,6 +1455,10 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     ).first()
     if stale_grant:
         session.delete(stale_grant)
+        session.commit()
+    stale_voice = session.get(VoiceSignature, user.username)
+    if stale_voice:
+        session.delete(stale_voice)
         session.commit()
     _audit(request, session, "user.delete", username.lower(), actor=admin,
            changes=[{"field": "account", "change": "cleared"}])

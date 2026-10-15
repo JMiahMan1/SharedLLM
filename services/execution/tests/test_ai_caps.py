@@ -42,8 +42,17 @@ class _Session:
         raise AssertionError(f"unexpected probe url: {url}")
 
 
-def _patch(monkeypatch, image_routes=None, voice_routes=None, proxy_url="http://proxy:11434"):
+def _patch(monkeypatch, image_routes=None, voice_routes=None, proxy_url="http://proxy:11434", voice_model=True):
+    import importlib.util
+
     import aiohttp
+
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *a: (object() if voice_model else None) if name == "resemblyzer" else real_find_spec(name, *a),
+    )
 
     from services.execution.handlers import image_edit, vision_ocr
 
@@ -85,7 +94,7 @@ async def test_a_healthy_image_backend_reports_its_models(monkeypatch):
                 {"data": [{"id": "qwen-image-edit-rapid-aio:q4_k"}, {"id": "qwen-image-edit-2511:q3_k_s"}]},
             )
         },
-        voice_routes={"/health": _Resp(200, {"status": "ok"})},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
     )
 
     caps = await ai_caps.collect_capabilities()
@@ -99,7 +108,7 @@ async def test_a_healthy_image_backend_reports_its_models(monkeypatch):
 @pytest.mark.asyncio
 async def test_an_unconfigured_image_backend_names_the_setting(monkeypatch):
     """A missing URL must say which setting fixes it, not just 'unavailable'."""
-    _patch(monkeypatch, proxy_url=None, voice_routes={"/health": _Resp(200, {})})
+    _patch(monkeypatch, proxy_url=None, voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})})
 
     caps = await ai_caps.collect_capabilities()
 
@@ -112,7 +121,7 @@ async def test_a_backend_that_advertises_nothing_is_not_reported_as_working(monk
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": _Resp(200, {"data": []})},
-        voice_routes={"/health": _Resp(200, {})},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
     )
 
     caps = await ai_caps.collect_capabilities()
@@ -125,7 +134,7 @@ async def test_an_http_error_from_the_image_backend_is_unavailable(monkeypatch):
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": _Resp(503, {})},
-        voice_routes={"/health": _Resp(200, {})},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
     )
     caps = await ai_caps.collect_capabilities()
     assert _by_key(caps, "image_edit")["available"] is False
@@ -136,7 +145,7 @@ async def test_an_unreachable_image_backend_is_unavailable_not_an_exception(monk
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": ConnectionRefusedError("refused")},
-        voice_routes={"/health": _Resp(200, {})},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
     )
     caps = await ai_caps.collect_capabilities()
     edit = _by_key(caps, "image_edit")
@@ -155,7 +164,7 @@ async def test_face_swap_is_unverified_before_anything_has_been_tried(monkeypatc
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": _Resp(200, {"data": [{"id": "m"}]})},
-        voice_routes={"/health": _Resp(200, {})},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
     )
 
     caps = await ai_caps.collect_capabilities()
@@ -170,7 +179,7 @@ async def test_a_successful_two_image_edit_makes_face_swap_available(monkeypatch
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": _Resp(200, {"data": [{"id": "m"}]})},
-        voice_routes={"/health": _Resp(200, {})},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
     )
     ai_caps.record_observation("face_swap", True, "two-image edit worked", bucket="http://proxy:11434")
     # The bucket is the proxy URL; without a matching probe URL the default
@@ -186,7 +195,7 @@ async def test_a_rejected_donor_makes_face_swap_unavailable_with_the_reason(monk
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": _Resp(200, {"data": [{"id": "m"}]})},
-        voice_routes={"/health": _Resp(200, {})},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
     )
     ai_caps.record_observation(
         "face_swap", False, "This backend rejected a second image: no results"
@@ -205,7 +214,7 @@ async def test_an_aged_out_observation_is_reported_as_remembered(monkeypatch):
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": _Resp(200, {"data": [{"id": "m"}]})},
-        voice_routes={"/health": _Resp(200, {})},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
     )
     ai_caps.record_observation("face_swap", False, "it failed earlier")
     ai_caps._observations["default:face_swap"].seen_at -= ai_caps.OBSERVATION_TTL_S + 1
@@ -228,36 +237,47 @@ async def test_voice_with_nothing_enrolled_is_up_but_says_so(monkeypatch):
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": _Resp(200, {"data": [{"id": "m"}]})},
-        voice_routes={"/health": _Resp(200, {}), "/api/voices": _Resp(200, {"profiles": []})},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
     )
 
     caps = await ai_caps.collect_capabilities()
     voice = _by_key(caps, "voice_profiles")
 
     assert voice["available"] is True
-    assert "no voice profiles enrolled" in voice["detail"]
+    assert "nobody has enrolled" in voice["detail"]
 
 
 @pytest.mark.asyncio
-async def test_voice_counts_enrolled_profiles(monkeypatch):
+async def test_voice_counts_enrolled_family_members(monkeypatch):
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": _Resp(200, {"data": [{"id": "m"}]})},
         voice_routes={
-            "/health": _Resp(200, {}),
-            "/api/voices": _Resp(200, {"profiles": [{"pid": "a"}, {"pid": "b"}]}),
+            "/api/voice/profiles": _Resp(200, {"profiles": [{"username": "a"}, {"username": "b"}]}),
         },
     )
     caps = await ai_caps.collect_capabilities()
-    assert "2 enrolled" in _by_key(caps, "voice_profiles")["detail"]
+    assert "2 family voice(s) enrolled" in _by_key(caps, "voice_profiles")["detail"]
 
 
 @pytest.mark.asyncio
-async def test_a_dead_audio_backend_is_unavailable(monkeypatch):
+async def test_voice_without_the_model_installed_is_unavailable(monkeypatch):
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": _Resp(200, {"data": [{"id": "m"}]})},
-        voice_routes={"/health": ConnectionRefusedError("refused")},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
+        voice_model=False,
+    )
+    voice = _by_key(await ai_caps.collect_capabilities(), "voice_profiles")
+    assert voice["available"] is False and "not installed" in voice["detail"]
+
+
+@pytest.mark.asyncio
+async def test_unreachable_identity_makes_voice_unavailable(monkeypatch):
+    _patch(
+        monkeypatch,
+        image_routes={"/v1/images/models": _Resp(200, {"data": [{"id": "m"}]})},
+        voice_routes={"/api/voice/profiles": ConnectionRefusedError("refused")},
     )
     caps = await ai_caps.collect_capabilities()
     assert _by_key(caps, "voice_profiles")["available"] is False
@@ -269,7 +289,7 @@ async def test_video_is_reported_as_absent_rather_than_omitted(monkeypatch):
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": _Resp(200, {"data": [{"id": "m"}]})},
-        voice_routes={"/health": _Resp(200, {})},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
     )
     caps = await ai_caps.collect_capabilities()
     video = _by_key(caps, "video_gen")
@@ -283,7 +303,7 @@ async def test_face_preserve_warns_that_identity_is_approximate(monkeypatch):
     _patch(
         monkeypatch,
         image_routes={"/v1/images/models": _Resp(200, {"data": [{"id": "m"}]})},
-        voice_routes={"/health": _Resp(200, {})},
+        voice_routes={"/api/voice/profiles": _Resp(200, {"profiles": []})},
     )
     caps = await ai_caps.collect_capabilities()
     detail = _by_key(caps, "face_preserve")["detail"]

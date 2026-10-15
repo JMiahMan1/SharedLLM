@@ -110,6 +110,14 @@ RUN python3 -c \
     && mkdir -p /home/sharedllm/.cache/whisper \
     && chown -R 1000:1000 /home/sharedllm/.cache/whisper && chmod -R a+rwX /home/sharedllm/.cache/whisper
 
+# Voice signatures (services/execution/voiceprint.py): Resemblyzer's GE2E
+# encoder, weights inside the package, on the CPU torch Whisper already pulled
+# in. --no-deps because its metadata pins torch/typing versions this image does
+# not need changed; librosa/scipy and the WebRTC VAD are what it imports.
+RUN pip install --no-cache-dir "librosa==0.11.0" "scipy==1.17.1" "webrtcvad-wheels==2.0.14.post1" \
+    && pip install --no-cache-dir --no-deps "resemblyzer==0.1.4" \
+    && python3 -c "from resemblyzer import VoiceEncoder; VoiceEncoder('cpu', verbose=False)"
+
 # Per-commit layers last: the build stamp and the source (~14 MB).
 ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown

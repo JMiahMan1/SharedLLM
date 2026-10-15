@@ -1,4 +1,4 @@
-import { useState, useRef, FC, ReactNode } from 'react';
+import { useState, FC, ReactNode } from 'react';
 import { 
   Cloud, 
   Music, 
@@ -12,7 +12,6 @@ import {
   Plus,
   Trash2,
   Edit3,
-  Activity,
   CheckCircle,
   AlertCircle,
   Globe,
@@ -37,6 +36,7 @@ import { credentialPayload, inUse, integrationFor, isSecretKey, missingFields, p
 import HelpTooltip from '../components/ui/HelpTooltip';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
+import VoiceSignaturePanel from '../components/settings/VoiceSignaturePanel';
 import UserAvatar from '../components/UserAvatar';
 import AvatarPicker from '../components/AvatarPicker';
 
@@ -445,109 +445,6 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
   );
 };
 
-const VoiceEnrollmentCard: FC<{ enrolled: boolean }> = ({ enrolled }) => {
-  const [isRecording, setIsRecording] = useState(false);
-  const [countdown, setCountdown] = useState(0);
-  const [status, setStatus] = useState<string | null>(null);
-  const mediaRecorder = useRef<MediaRecorder | null>(null);
-  const chunks = useRef<Blob[]>([]);
-  const queryClient = useQueryClient();
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder.current = new MediaRecorder(stream);
-      chunks.current = [];
-      
-      mediaRecorder.current.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.current.push(e.data);
-      };
-
-      mediaRecorder.current.onstop = async () => {
-        const blob = new Blob(chunks.current, { type: 'audio/webm' });
-        setStatus('Processing Biometrics...');
-        try {
-          await api.enrollVoice(blob);
-          setStatus('Enrollment Successful!');
-          toast.success('Voice profile verified');
-          queryClient.invalidateQueries({ queryKey: ['me'] });
-        } catch {
-          setStatus('Enrollment Failed');
-          toast.error('Biometric processing failed');
-        }
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.current.start();
-      setIsRecording(true);
-      setCountdown(10);
-      setStatus('Recording Voice Sample...');
-      
-      const timer = setInterval(() => {
-        setCountdown(prev => {
-          if (prev <= 1) {
-            clearInterval(timer);
-            stopRecording();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-    } catch {
-      toast.error('Microphone access denied');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorder.current && isRecording) {
-      mediaRecorder.current.stop();
-      setIsRecording(false);
-    }
-  };
-
-  return (
-    <div className={`glass-panel p-8 flex flex-col items-center text-center gap-6 border-2 transition-all duration-500 ${enrolled ? 'border-emerald-500/30 bg-emerald-500/5 shadow-lg shadow-emerald-500/5' : 'border-dashed border-slate-700 bg-black/10'}`}>
-      <div className={`p-5 rounded-full relative ${isRecording ? 'bg-red-500/20 text-red-400' : enrolled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
-        {isRecording && <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-ping opacity-40" />}
-        <Mic size={40} />
-      </div>
-      <div>
-        <h4 className="font-bold text-white text-lg">Biometric Voice Profile</h4>
-        <p className="text-sm text-slate-400 mt-2 max-w-sm leading-relaxed">
-          {isRecording 
-            ? `Speak naturally... Jarvis is mapping your vocal frequency. (${countdown}s remaining)` 
-            : enrolled 
-              ? "Your voice is registered. Jarvis can now identify you across all media players." 
-              : "Enroll your voice to enable personalized reminders, secure tool usage, and biometric identification."}
-        </p>
-      </div>
-      <div className="flex flex-col items-center gap-4 w-full max-w-xs">
-         <button 
-           onClick={isRecording ? stopRecording : startRecording}
-           disabled={status === 'Processing Biometrics...'}
-           className={`glass-button w-full py-4 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all ${isRecording ? 'bg-red-500/30 border-red-500/50 text-red-400' : 'bg-indigo-600/30 border-indigo-500/50 text-indigo-400 hover:bg-indigo-600/50'}`}
-         >
-           {isRecording ? <X size={16} /> : <Activity size={16} />}
-           {isRecording ? `Stop Recording` : enrolled ? "Retrain Profile" : "Begin Enrollment"}
-         </button>
-         
-         {status && (
-           <p className={`text-[9px] uppercase font-black tracking-widest animate-pulse ${status.includes('Failed') ? 'text-red-400' : 'text-indigo-400'}`}>
-             {status}
-           </p>
-         )}
-      </div>
-      {enrolled && !isRecording && (
-        <div className="flex items-center gap-2 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
-          <CheckCircle size={12} className="text-emerald-500" />
-          <span className="text-[9px] uppercase font-black tracking-widest text-emerald-500">Identity Authenticated</span>
-        </div>
-      )}
-    </div>
-  );
-};
-
 const APIKeyRows = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -768,12 +665,12 @@ const Identity = () => {
               </div>
               <div>
                 <h3 className="text-xl font-bold text-white">Vocal Signature</h3>
-                <p className="text-sm text-slate-400">Neural mapping for biometric identification</p>
+                <p className="text-sm text-slate-400">So Jarvis can tell who in the family is speaking</p>
               </div>
             </div>
             
             <div className="max-w-3xl">
-               <VoiceEnrollmentCard enrolled={!!fullUser?.voice_id} />
+               <VoiceSignaturePanel />
             </div>
           </section>
 
@@ -901,7 +798,7 @@ const Identity = () => {
                       <label className="text-[9px] text-slate-500 uppercase font-black block mb-2 tracking-widest">Voice ID</label>
                       <input 
                         type="text" 
-                        value={fullUser?.voice_id || 'NOT_ASSIGNED'} 
+                        value={fullUser?.voice_id || 'Not enrolled'} 
                         disabled 
                         className="glass-input w-full text-xs opacity-50 cursor-not-allowed" 
                       />

@@ -1,10 +1,10 @@
 """Tests for the podcast / speaker execution handlers.
 
-These three handlers are thin by design: they resolve a workspace, hand the work
-to alpaca, and translate whatever comes back into an ``ExecutionResult``. So the
-tests are about the *translation* - which failure maps to which status, what is
-sent upstream, and what the mission is told - rather than about the audio itself
-(alpaca's own suite covers that).
+These handlers are thin by design: they resolve a workspace, hand the work on
+(alpaca for rendering and the voice list; the local voiceprint and identity for
+speaker identification), and translate whatever comes back into an
+``ExecutionResult``. So the tests are about the *translation* - which failure
+maps to which status, what is sent where, and what the mission is told.
 
 aiohttp is faked with a recorder rather than mocked module-wide, so a handler
 that forgets to pass the internal secret, drops a field, or calls the wrong port
@@ -235,6 +235,25 @@ async def test_the_save_carries_the_internal_secret_and_the_user_context(ws, mon
 
 
 # ----------------------------------------------------------- speaker_identify
+#
+# The signature is computed in-process (voiceprint.embed, faked here with a
+# fixed vector) and matched by identity; these tests cover what is sent where
+# and how each answer is reported.
+
+SIGNATURE = {"embedding": [0.1] * 256, "speech_seconds": 3.4, "model": "resemblyzer-ge2e-256"}
+
+
+@pytest.fixture
+def signed(monkeypatch):
+    """voiceprint.embed, recording the clips it was given."""
+    clips = []
+
+    def embed(audio):
+        clips.append(audio)
+        return SIGNATURE
+
+    monkeypatch.setattr(H.voiceprint, "embed", embed)
+    return clips
 
 
 def _write(root, name, data=b"RIFFfake"):
@@ -242,44 +261,49 @@ def _write(root, name, data=b"RIFFfake"):
     return name
 
 
+def _identified(name="Ada", score=0.91, runner_up=("Bob", 0.62), matched=True):
+    candidates = [{"username": name.lower(), "name": name, "score": score}]
+    if runner_up:
+        candidates.append({"username": runner_up[0].lower(), "name": runner_up[0], "score": runner_up[1]})
+    return {
+        "matched": matched,
+        "matched_username": name.lower() if matched else None,
+        "matched_name": name if matched else None,
+        "score": score,
+        "threshold": 0.8,
+        "margin": round(score - runner_up[1], 3) if runner_up else None,
+        "candidates": candidates,
+    }
+
+
 @pytest.mark.asyncio
-async def test_identify_happy_path_reports_the_match(ws, monkeypatch):
+async def test_identify_happy_path_reports_the_match(ws, monkeypatch, signed):
     _write(ws, "doorbell.wav")
-    _install_aiohttp(monkeypatch, [_Resp(200, {"matched": "p1", "matched_name": "Ada", "score": 0.82, "runner_up": "Bob"})])
+    _install_aiohttp(monkeypatch, [_Resp(200, _identified())])
     res = await H.handle_speaker_identify(
         SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="doorbell.wav")
     )
     assert res.status == "SUCCESS"
-    assert "Ada" in res.message and "Bob" in res.message
-    assert res.detail["score"] == 0.82
+    assert "matches Ada" in res.message and "next closest is Bob" in res.message
+    assert res.detail["score"] == 0.91 and res.detail["speech_seconds"] == 3.4
 
 
 @pytest.mark.asyncio
-async def test_identify_goes_to_the_audio_server_not_the_dashboard(ws, monkeypatch):
-    """Speaker identification needs OpenVoice's reference encoder, which only
-    exists in the audio-server container. Routing it through the dashboard
-    would 404."""
-    _write(ws, "clip.wav")
-    http = _install_aiohttp(monkeypatch, [_Resp(200, {"matched_name": "Ada", "score": 0.9})])
+async def test_the_clip_is_signed_here_and_only_the_signature_goes_to_identity(ws, monkeypatch, signed):
+    _write(ws, "clip.wav", b"RIFFclip")
+    http = _install_aiohttp(monkeypatch, [_Resp(200, _identified())])
     await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav"))
-    assert http.calls[0][1].endswith("/api/voices/identify")
-    assert str(H.ALPACA_AUDIO_URL) in http.calls[0][1]
+    assert signed == [b"RIFFclip"]
+    verb, url, kwargs = http.calls[0]
+    assert url == f"{H.IDENTITY_SVC_URL}/api/voice/identify"
+    assert kwargs["headers"]["X-Internal-Secret"] == H.INTERNAL_SECRET
+    assert kwargs["json"] == {"embedding": SIGNATURE["embedding"], "model": SIGNATURE["model"]}
 
 
 @pytest.mark.asyncio
-async def test_identify_sends_the_derived_threshold_by_default(ws, monkeypatch):
-    """Omitting it is the point: the audio server derives one from how much its
-    own speakers vary. Sending 0.0 would silently mean 'match anyone'."""
+async def test_an_explicit_threshold_is_passed_through(ws, monkeypatch, signed):
     _write(ws, "clip.wav")
-    http = _install_aiohttp(monkeypatch, [_Resp(200, {"matched_name": "Ada", "score": 0.9})])
-    await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav"))
-    assert "threshold" not in http.calls[0][2]["json"]
-
-
-@pytest.mark.asyncio
-async def test_identify_passes_an_explicit_threshold_through(ws, monkeypatch):
-    _write(ws, "clip.wav")
-    http = _install_aiohttp(monkeypatch, [_Resp(200, {"matched_name": "Ada", "score": 0.9})])
+    http = _install_aiohttp(monkeypatch, [_Resp(200, _identified())])
     await H.handle_speaker_identify(
         SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav", threshold=0.62)
     )
@@ -287,65 +311,81 @@ async def test_identify_passes_an_explicit_threshold_through(ws, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_non_match_still_succeeds_and_returns_the_ranking(ws, monkeypatch):
+async def test_a_non_match_still_succeeds_and_returns_the_ranking(ws, monkeypatch, signed):
     """An agent asking "who is this?" needs "nobody you know, but the closest is
     X" - a FAILURE would throw that away and invite a pointless re-record."""
     _write(ws, "clip.wav")
-    payload = {"matched": None, "score": 0.21, "candidates": [{"name": "Ada", "score": 0.21}, {"name": "Bob", "score": 0.18}]}
-    _install_aiohttp(monkeypatch, [_Resp(200, payload)])
+    _install_aiohttp(monkeypatch, [_Resp(200, _identified(score=0.55, runner_up=("Bob", 0.5), matched=False))])
     res = await H.handle_speaker_identify(
         SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav")
     )
     assert res.status == "SUCCESS"
-    assert "does not match" in res.message and "Ada" in res.message
+    assert "does not match" in res.message and "closest is Ada" in res.message
     assert len(res.detail["candidates"]) == 2
 
 
 @pytest.mark.asyncio
-async def test_no_enrolled_voices_tells_the_agent_to_enrol_one(ws, monkeypatch):
+async def test_no_enrolled_voices_says_where_to_enrol(ws, monkeypatch, signed):
     _write(ws, "clip.wav")
-    _install_aiohttp(monkeypatch, [_Resp(404, None, text="no enrolled voices")])
+    _install_aiohttp(monkeypatch, [_Resp(404, None, text="Nobody has enrolled a voice yet.")])
     res = await H.handle_speaker_identify(
         SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav")
     )
     assert res.status == "FAILURE"
-    assert "enrolled" in res.message
+    assert "Vocal Signature" in res.message
 
 
 @pytest.mark.asyncio
-async def test_too_little_speech_is_distinct_from_nobody_enrolled(ws, monkeypatch):
+async def test_too_little_speech_is_reported_without_asking_identity(ws, monkeypatch):
     _write(ws, "clip.wav")
-    _install_aiohttp(monkeypatch, [_Resp(422, None, text="not enough speech")])
+
+    def embed(_audio):
+        raise H.voiceprint.VoiceprintError("Only 0.6s of speech was heard; at least 2s is needed.")
+
+    monkeypatch.setattr(H.voiceprint, "embed", embed)
+    http = _install_aiohttp(monkeypatch, [])
     res = await H.handle_speaker_identify(
         SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav")
     )
-    assert "not enough speech" in res.message
-    assert "enrolled" not in res.message
+    assert res.status == "FAILURE"
+    assert "0.6s of speech" in res.message
+    assert http.calls == []
 
 
 @pytest.mark.asyncio
-async def test_a_missing_clip_fails_before_any_upstream_call(ws, monkeypatch):
+async def test_an_identity_error_is_reported_with_its_status(ws, monkeypatch, signed):
+    _write(ws, "clip.wav")
+    _install_aiohttp(monkeypatch, [_Resp(500, None, text="database is locked")])
+    res = await H.handle_speaker_identify(
+        SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav")
+    )
+    assert res.status == "FAILURE"
+    assert "500" in res.message and "database is locked" in res.message
+
+
+@pytest.mark.asyncio
+async def test_a_missing_clip_fails_before_any_upstream_call(ws, monkeypatch, signed):
     http = _install_aiohttp(monkeypatch, [])
     res = await H.handle_speaker_identify(
         SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="ghost.wav")
     )
     assert res.status == "FAILURE"
     assert "not found" in res.message
-    assert http.calls == []
+    assert http.calls == [] and signed == []
 
 
 @pytest.mark.asyncio
-async def test_a_traversal_path_is_refused(ws, monkeypatch):
+async def test_a_traversal_path_is_refused(ws, monkeypatch, signed):
     http = _install_aiohttp(monkeypatch, [])
     res = await H.handle_speaker_identify(
         SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="../../etc/passwd")
     )
     assert res.status == "FAILURE"
-    assert http.calls == []
+    assert http.calls == [] and signed == []
 
 
 @pytest.mark.asyncio
-async def test_a_non_audio_file_is_refused_with_the_accepted_list(ws, monkeypatch):
+async def test_a_non_audio_file_is_refused_with_the_accepted_list(ws, monkeypatch, signed):
     _write(ws, "notes.txt", b"hello")
     http = _install_aiohttp(monkeypatch, [])
     res = await H.handle_speaker_identify(
@@ -353,22 +393,7 @@ async def test_a_non_audio_file_is_refused_with_the_accepted_list(ws, monkeypatc
     )
     assert res.status == "FAILURE"
     assert ".wav" in res.message
-    assert http.calls == []
-
-
-@pytest.mark.asyncio
-async def test_an_unconfigured_audio_backend_says_so(ws, monkeypatch):
-    """ALPACA_AUDIO_URL has no default on purpose, so the failure mode is a
-    hostname that does not resolve - except when it was never set at all."""
-    _write(ws, "clip.wav")
-    monkeypatch.setattr(H, "ALPACA_AUDIO_URL", "")
-    http = _install_aiohttp(monkeypatch, [])
-    res = await H.handle_speaker_identify(
-        SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav")
-    )
-    assert res.status == "FAILURE"
-    assert "ALPACA_AUDIO_URL" in res.message
-    assert http.calls == []
+    assert http.calls == [] and signed == []
 
 
 # ---------------------------------------------------------------- list_voices
@@ -537,7 +562,7 @@ async def test_an_unreadable_clip_returns_a_failure_rather_than_raising(ws, monk
     locked.write_bytes(b"RIFF" + b"\0" * 64)
     locked.chmod(0o000)
     try:
-        _install_aiohttp(monkeypatch, [_Resp(200, {})])
+        _install_aiohttp(monkeypatch, [])
         res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="locked.wav"))
     finally:
         locked.chmod(0o644)
@@ -547,64 +572,9 @@ async def test_an_unreadable_clip_returns_a_failure_rather_than_raising(ws, monk
 
 
 @pytest.mark.asyncio
-async def test_the_runner_up_is_named_not_identified_by_hash(ws, monkeypatch):
-    """`voice_clone.identify` returns `runner_up` as a profile id, so the message
-    addressed the model as "b81e0d55aa02" while holding the name in `candidates`.
-    The existing test mocked a name the server never produces."""
-    (ws / "clip.wav").write_bytes(b"RIFF" + b"\0" * 64)
-    payload = {
-        "matched": "ada-1",
-        "matched_name": "Ada",
-        "score": 0.9137,
-        "runner_up": "b81e0d55aa02",
-        "candidates": [{"id": "ada-1", "name": "Ada", "score": 0.9137}, {"id": "b81e0d55aa02", "name": "Rowan", "score": 0.7992}],
-    }
-    _install_aiohttp(monkeypatch, [_Resp(200, payload)])
-    res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav"))
-    assert res.status == "SUCCESS"
-    assert "next closest is Rowan" in res.message
-    assert "b81e0d55aa02" not in res.message
-    # the raw id is still in detail, where a caller can join on it
-    assert res.detail["runner_up"] == "b81e0d55aa02"
-
-
-@pytest.mark.asyncio
-async def test_an_unknown_runner_up_id_falls_back_to_printing_it(ws, monkeypatch):
-    """Defensive: a server that returns an id absent from candidates must not
-    produce "next closest is None"."""
-    (ws / "clip.wav").write_bytes(b"RIFF" + b"\0" * 64)
-    payload = {"matched_name": "Ada", "score": 0.9, "runner_up": "gone", "candidates": [{"id": "ada-1", "name": "Ada", "score": 0.9}]}
-    _install_aiohttp(monkeypatch, [_Resp(200, payload)])
-    res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav"))
-    assert "next closest is gone" in res.message
-
-
-@pytest.mark.parametrize(
-    "upstream,expected_fragment",
-    [
-        ("not enough speech to build a voice embedding", "not enough speech"),
-        ("recording is larger than 25 MB", "25 MB"),
-        ("could not decode the recording: moov atom not found", "moov atom"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_a_422_reports_what_the_server_said(ws, monkeypatch, upstream, expected_fragment):
-    """The audio server maps every ValueError to 422, and "not enough speech" is
-    only one of the three. Leading with the wrong diagnosis sends a model looking
-    in the wrong place - an oversize clip is a file-size problem, not a speech one.
-    """
-    (ws / "clip.wav").write_bytes(b"RIFF" + b"\0" * 64)
-    _install_aiohttp(monkeypatch, [_Resp(422, None, text=upstream)])
-    res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav"))
-    assert res.status == "FAILURE"
-    assert expected_fragment in res.message
-    assert "not enough speech in the clip" not in res.message
-
-
-@pytest.mark.asyncio
-async def test_an_oversize_clip_is_refused_before_it_is_uploaded(ws, monkeypatch):
-    """The handler read the whole file and base64-encoded it (+33%) only for the
-    audio server to reject it on a limit the handler already knows."""
+async def test_an_oversize_clip_is_refused_before_it_is_decoded(ws, monkeypatch, signed):
+    """The size cap is known here, so an oversize clip is refused before it is
+    read into memory and handed to ffmpeg."""
     big = ws / "big.wav"
     big.write_bytes(b"\0" * 16)
     monkeypatch.setattr(H, "_MAX_CLIP_BYTES", 8)
@@ -612,7 +582,7 @@ async def test_an_oversize_clip_is_refused_before_it_is_uploaded(ws, monkeypatch
     res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="big.wav"))
     assert res.status == "FAILURE"
     assert "MB" in res.message
-    assert http.calls == []
+    assert http.calls == [] and signed == []
 
 
 @pytest.mark.asyncio
@@ -639,14 +609,13 @@ async def test_an_audio_output_path_in_any_accepted_container_is_allowed(ws, mon
 
 
 @pytest.mark.asyncio
-async def test_a_webm_clip_is_accepted(ws, monkeypatch):
+async def test_a_webm_clip_is_accepted(ws, monkeypatch, signed):
     """A browser MediaRecorder produces .webm by default, so the commonest real
     doorbell clip was the one hard-refused."""
     (ws / "doorbell.webm").write_bytes(b"\x1a\x45\xdf\xa3" + b"\0" * 64)
-    _install_aiohttp(monkeypatch, [_Resp(200, {"matched_name": None, "candidates": []})])
+    _install_aiohttp(monkeypatch, [_Resp(200, _identified())])
     res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="doorbell.webm"))
     assert res.status == "SUCCESS"
-    assert "audio server returned" not in res.message
 
 
 @pytest.mark.asyncio

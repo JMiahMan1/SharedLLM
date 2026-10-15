@@ -1038,6 +1038,22 @@ async def execute_speaker_identify(req: SpeakerIdentifyRequest):
     from services.execution.handlers import podcast
     return await podcast.handle_speaker_identify(req)
 
+@app.post("/voice/signature")
+async def voice_signature(file: UploadFile = File(...), x_internal_secret: str = Header(None)):
+    """The voice signature of a recording, for identity's enrollment and matching.
+
+    Computed in this process (see ``voiceprint``); the audio is not stored.
+    """
+    await _check_internal_secret(x_internal_secret)
+    from services.execution import voiceprint
+
+    audio = await file.read(voiceprint.MAX_AUDIO_BYTES + 1)
+    try:
+        return await asyncio.to_thread(voiceprint.embed, audio)
+    except voiceprint.VoiceprintError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+
+
 @app.post("/execute/list_voices", response_model=ExecutionResult)
 async def execute_list_voices(req: ListVoicesRequest):
     """List enrolled speaker profiles and the curated podcast host pairs."""

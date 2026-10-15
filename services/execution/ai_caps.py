@@ -111,42 +111,35 @@ async def _probe_image_backend() -> tuple[bool, str]:
 
 
 async def _probe_voice_backend() -> tuple[bool, str]:
-    """Is the audio/voice service up, and how many profiles are enrolled?"""
-    try:
-        from services.config import ALPACA_AUDIO_URL
+    """Can voices be signed here, and how many family members have enrolled?
 
-        if not ALPACA_AUDIO_URL:
-            return False, "No audio backend configured. Set ALPACA_AUDIO_URL."
+    Signatures are computed in this process and stored by identity, so this
+    checks both halves rather than any outside audio server.
+    """
+    try:
+        import importlib.util
+
+        if importlib.util.find_spec("resemblyzer") is None:
+            return False, "The voice signature model (resemblyzer) is not installed in this image."
         import aiohttp
+
+        from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
 
         async with aiohttp.ClientSession() as client:
             resp = await client.get(
-                f"{ALPACA_AUDIO_URL}/health",
+                f"{IDENTITY_SVC_URL}/api/voice/profiles",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=PROBE_TIMEOUT_S),
             )
             if resp.status != 200:
-                return False, f"Audio backend answered HTTP {resp.status}."
-            # Enrolled count is best effort: the endpoint is allowed to be empty
-            # or absent, and that is not a reason to call voice unavailable.
-            try:
-                vresp = await client.get(
-                    f"{ALPACA_AUDIO_URL}/api/voices",
-                    timeout=aiohttp.ClientTimeout(total=PROBE_TIMEOUT_S),
-                )
-                if vresp.status == 200:
-                    body = await vresp.json()
-                    profiles = body if isinstance(body, list) else (body or {}).get("profiles") or []
-                    n = len(profiles)
-                    return True, (
-                        f"{n} enrolled voice profile(s)" if n else "Up, but no voice profiles enrolled yet"
-                    )
-            except Exception:
-                pass
-        return True, "Up; enrolled profile count unavailable."
+                return False, f"Identity answered HTTP {resp.status} for enrolled voices."
+            profiles = (await resp.json()).get("profiles") or []
+        n = len(profiles)
+        return True, f"{n} family voice(s) enrolled" if n else "Ready; nobody has enrolled a voice yet"
     except asyncio.TimeoutError:
-        return False, f"Audio backend did not answer within {PROBE_TIMEOUT_S:.0f}s."
+        return False, f"Identity did not answer within {PROBE_TIMEOUT_S:.0f}s."
     except Exception as e:
-        return False, f"Audio backend unreachable: {type(e).__name__}."
+        return False, f"Enrolled voices unavailable: {type(e).__name__}."
 
 
 async def collect_capabilities() -> list[dict]:
@@ -195,7 +188,7 @@ async def collect_capabilities() -> list[dict]:
         )
     caps.append(swap)
 
-    caps.append(Capability("voice_profiles", "Voice profiles", voice_up, voice_detail))
+    caps.append(Capability("voice_profiles", "Recognise family voices", voice_up, voice_detail))
 
     # Stated rather than omitted: "not installed" is far more useful to a user
     # than a feature silently missing from a list.
