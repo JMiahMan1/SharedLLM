@@ -15,15 +15,21 @@ if not api_url_raw:
 # Ensure http prefix
 api_url = f"http://{api_url_raw}:11435" if not api_url_raw.startswith("http") else f"{api_url_raw}:11435"
 
+# System logs are admin-only: an administrator's API key, from the environment.
+api_key = os.getenv("JARVIS_API_KEY")
+if not api_key:
+    print("ERROR: JARVIS_API_KEY (an admin's API key) not set")
+    sys.exit(1)
+
 HEADERS = {
     "Content-Type": "application/json",
-    "X-RAG-User": "admin",
+    "Authorization": f"Bearer {api_key}",
     "User-Agent": "LogFetcher"
 }
 
 def fetch_logs():
     try:
-        url = f"{api_url}/api/logs?limit=200"
+        url = f"{api_url}/api/admin/logs?limit=200"
         print(f"Fetching logs from {url}...")
         resp = requests.get(url, headers=HEADERS, timeout=10)
 

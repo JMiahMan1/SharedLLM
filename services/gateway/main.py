@@ -1559,8 +1559,7 @@ async def build_workspace_readme_context(workspace: dict, user_id: str) -> str:
     read_candidates = [
       "README.md",
       "services/README.md",
-      "docs/architecture.md",
-      "docs/workspace_runtime.md",
+      "docs/INDEX.md",
       "config/workspaces.json",
     ]
     file_sections = []

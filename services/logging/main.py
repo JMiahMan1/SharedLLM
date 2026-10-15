@@ -151,19 +151,25 @@ async def _fetch_logs(
 
     return results
 
-async def _token_is_valid_user_api_key(token: str) -> bool:
-    """Validate a browser-supplied user API key against the Identity service."""
+async def _token_is_admin_api_key(token: str) -> bool:
+    """Is a browser-supplied API key an administrator's?
+
+    Asks Identity's validate-api-key, which has no fallback. This used
+    /api/resolve, which answers with the default (admin) account when nothing
+    matches, so any string at all opened the stream of every service's logs.
+    The logs are the whole system's, so only an admin may read them, as on
+    the HTTP routes.
+    """
     try:
         async with aiohttp.ClientSession() as client:
-            resp = await client.post(
-                f"{IDENTITY_SVC_URL}/api/resolve",
-                json={"api_key": token},
+            resp = await client.get(
+                f"{IDENTITY_SVC_URL}/api/internal/validate-api-key",
+                params={"api_key": token},
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=5.0),
             )
             if resp.status == 200:
-                data = await resp.json()
-                return bool(data.get("user_id"))
+                return bool((await resp.json()).get("is_admin"))
     except Exception as e:
         py_logging.warning(f"[logs] API key validation failed: {e}")
     return False
@@ -229,18 +235,17 @@ async def log_event(entry: LogEntry, x_internal_secret: str | None = Header(defa
 active_ws: list[WebSocket] = []
 
 async def _ws_authorized(websocket: WebSocket) -> bool:
-    """Accept the shared internal secret or a valid user API key (?token=...).
+    """Accept the shared internal secret or an admin's API key (?token=...).
 
     Browsers cannot set custom headers on WebSocket connections, so the
-    stream is authenticated via the query token: either the shared secret
-    itself or an api key resolvable through Identity.
+    stream is authenticated via the query token.
     """
     token = websocket.query_params.get("token") or ""
     if not token:
         return False
     if hmac.compare_digest(token, INTERNAL_SECRET):
         return True
-    return await _token_is_valid_user_api_key(token)
+    return await _token_is_admin_api_key(token)
 
 async def _ws_handler(websocket: WebSocket):
     if not await _ws_authorized(websocket):
@@ -273,11 +278,8 @@ async def _ws_handler(websocket: WebSocket):
             active_ws.remove(websocket)
 
 @app.websocket("/api/logs/stream")
-async def websocket_endpoint(websocket: WebSocket):
-    await _ws_handler(websocket)
-
 @app.websocket("/logs/stream")
-async def websocket_endpoint_direct(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket):
     await _ws_handler(websocket)
 
 START_TIME = time.time()
