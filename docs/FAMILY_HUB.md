@@ -211,16 +211,20 @@ path leaves the server. Calibration and limits are in `services/identity/voice.p
 
 ## Make music (shipped)
 
-`/api/music/generate` proxies the alpaca audio server's `POST /api/music`
-(prompt + length → base64 WAV) and returns a data URL the browser can play
-directly. `ALPACA_AUDIO_URL` has **no default**: an unset value is a 503 naming
-the setting, and the backend's own error text is passed through with its status
-so a refused prompt reads as refused. A backend that returns success with no
-audio is reported, not treated as a silent success.
+Songs, not just clips: pick a shape (song, pop, ballad, short, or a single
+clip) and a length up to 4 minutes. `POST /api/music/songs` queues a job on
+the alpaca audio server (`/api/music/jobs`), which writes the song section by
+section (intro, verse, chorus, bridge, outro); each section continues the last
+4 s of the one before, choruses after the first are reused, and seams are
+crossfaded (alpaca `music_song.py`). `GET /api/music/songs/{id}` reports the
+place in line or the section being written, and the finished song as a data
+URL; the page remembers the job, so leaving it does not lose the song.
 
-UI: Family → Create → `MakeMusic.tsx` — presets, a length slider, inline
-playback, and the failure shown in place. Sharing a finished song into the chat
-room (Talk file upload) is the next step. 5 gateway + 5 UI tests.
+Music jobs run one at a time on one queue because the 8 GB card is shared
+with the resident LLM: a job uses the GPU only when there is room, otherwise
+(or when the GPU runs out mid-song) a CPU copy, about 6x slower but never a
+500. `ALPACA_AUDIO_URL` has **no default**: an unset value is a 503 naming the
+setting.
 
 ## Calls (signalling shipped; media is the next slice)
 

@@ -161,6 +161,20 @@ export interface CredentialShares {
   shared_owner?: string | null;
 }
 
+/** A song being written by the audio server's music queue. */
+export interface SongJob {
+  id: string;
+  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+  /** Place in line while queued (1 = next). */
+  position?: number | null;
+  progress?: { done: number; total: number; section: string };
+  sections?: string[];
+  error?: string;
+  /** Present once done: a playable data URL. */
+  audio_url?: string;
+  meta?: { duration_s?: number; device?: string; fell_back_to_cpu?: boolean; elapsed_s?: number };
+}
+
 /** The signed-in user's voice enrollment (identity /api/users/me/voice). */
 export interface VoiceStatus {
   enrolled: boolean;
