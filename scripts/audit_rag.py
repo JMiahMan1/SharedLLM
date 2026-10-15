@@ -1,7 +1,8 @@
+import os
 import requests
 
 RAG_URL = "http://localhost:8004"
-SECRET = "change-me-in-production"
+SECRET = os.environ.get("INTERNAL_SECRET", "")
 
 def test_rag():
     print("--- 2. Testing RAG Capabilities ---")

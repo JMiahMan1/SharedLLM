@@ -488,7 +488,7 @@ services:
       - WORKSPACE_DATABASE_URL=sqlite:////data/workspace_runtime.db
       - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json
       - WORKSPACE_RUNTIME_ROOT=/workspaces
-      - GIT_WEBHOOK_SECRET=${GIT_WEBHOOK_SECRET:-change-me-in-production}
+      - GIT_WEBHOOK_SECRET=${GIT_WEBHOOK_SECRET:-}
       - TZ=America/Phoenix
       - HOME=/home/raven
       # Host path that /workspaces maps to, so the sandbox can mount the real

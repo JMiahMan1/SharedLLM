@@ -19,7 +19,6 @@ public class TokenBridgePlugin extends Plugin {
     public static final String PREFS = "jarvis_widget";
     public static final String KEY_API_KEY = "jarvis_api_key";
     public static final String KEY_SERVER_URL = "jarvis_server_url";
-    public static final String KEY_INTERNAL_SECRET = "internal_secret";
     /**
      * Who this device is. Mirrored here so LocationTrackingService can attribute
      * an upload after the WebView is gone -- without it, background location
@@ -45,8 +44,10 @@ public class TokenBridgePlugin extends Plugin {
     public void setCredentials(PluginCall call) {
         String apiKey = call.getString("apiKey");
         String serverUrl = call.getString("serverUrl");
-        String internalSecret = call.getString("internalSecret");
         SharedPreferences.Editor ed = prefs(getContext()).edit();
+        // Clients use their own API key only; drop any internal secret an
+        // older build stored here.
+        ed.remove("internal_secret");
         if (apiKey != null) {
             if (apiKey.isEmpty()) {
                 ed.remove(KEY_API_KEY);
@@ -59,13 +60,6 @@ public class TokenBridgePlugin extends Plugin {
                 ed.remove(KEY_SERVER_URL);
             } else {
                 ed.putString(KEY_SERVER_URL, serverUrl);
-            }
-        }
-        if (internalSecret != null) {
-            if (internalSecret.isEmpty()) {
-                ed.remove(KEY_INTERNAL_SECRET);
-            } else {
-                ed.putString(KEY_INTERNAL_SECRET, internalSecret);
             }
         }
         ed.apply();

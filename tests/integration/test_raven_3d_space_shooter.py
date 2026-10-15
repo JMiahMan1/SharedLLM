@@ -47,7 +47,7 @@ import pytest
 
 SERVER_IP = os.getenv("SERVER_IP", "192.168.2.205")
 GATEWAY_URL = os.getenv("GATEWAY_URL", f"http://{SERVER_IP}:8080")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "RAVEN_SECURE_2026")
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 GH_TOKEN = os.getenv("GH_TOKEN", "")
 GH_OWNER = os.getenv("GH_OWNER", "JMiahMan1")
 GH_USER = os.getenv("GH_USER", GH_OWNER)

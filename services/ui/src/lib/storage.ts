@@ -5,29 +5,35 @@ import TokenBridge from '../plugins/tokenBridge';
 const isNative = Capacitor.isNativePlatform();
 const _cache: Record<string, string | null> = {};
 
+/** Credentials the native side (location service, widgets, chat notifier) reads. */
+const NATIVE_KEYS = new Set(['jarvis_api_key', 'jarvis_server_url']);
+
+/** Hand the credentials to TokenBridge; `''` clears one, `undefined` leaves it. */
+async function pushNative(apiKey: string | undefined, serverUrl: string | undefined): Promise<void> {
+  try {
+    await TokenBridge.setCredentials({ apiKey, serverUrl });
+    await TokenBridge.refreshWidgets();
+  } catch (err) {
+    // Never fail silent credential handoff to native widgets
+    console.error('[storage] TokenBridge credential sync failed:', err);
+  }
+}
+
 export async function storageInit(): Promise<void> {
   if (isNative) {
     const { value: apiKey } = await Preferences.get({ key: 'jarvis_api_key' });
-    const { value: internalSecret } = await Preferences.get({ key: 'internal_secret' });
     let { value: serverUrl } = await Preferences.get({ key: 'jarvis_server_url' });
     if (!serverUrl) {
       serverUrl = 'https://jarvis.sumemail.com';
       await Preferences.set({ key: 'jarvis_server_url', value: serverUrl });
     }
+    // Clients authenticate with their own API key only. Older builds could
+    // keep the services' internal secret here and send it on every request;
+    // drop any copy left on the phone.
+    await Preferences.remove({ key: 'internal_secret' });
     _cache['jarvis_api_key'] = apiKey;
-    _cache['internal_secret'] = internalSecret;
     _cache['jarvis_server_url'] = serverUrl;
-    try {
-      await TokenBridge.setCredentials({
-        apiKey: apiKey ?? undefined,
-        serverUrl: serverUrl ?? undefined,
-        internalSecret: internalSecret ?? undefined,
-      });
-      await TokenBridge.refreshWidgets();
-    } catch (err) {
-      // Never fail silent credential handoff to native widgets
-      console.error('[storage] TokenBridge credential sync failed:', err);
-    }
+    await pushNative(apiKey ?? undefined, serverUrl ?? undefined);
   }
 }
 
@@ -51,17 +57,8 @@ export async function storageSet(key: string, value: string): Promise<void> {
   _cache[key] = value;
   if (isNative) {
     await Preferences.set({ key, value });
-    if (key === 'jarvis_api_key' || key === 'jarvis_server_url' || key === 'internal_secret') {
-      try {
-        await TokenBridge.setCredentials({
-          apiKey: key === 'jarvis_api_key' ? value : undefined,
-          serverUrl: key === 'jarvis_server_url' ? value : undefined,
-          internalSecret: key === 'internal_secret' ? value : undefined,
-        });
-        await TokenBridge.refreshWidgets();
-      } catch (err) {
-        console.error('[storage] TokenBridge setCredentials failed:', err);
-      }
+    if (NATIVE_KEYS.has(key)) {
+      await pushNative(key === 'jarvis_api_key' ? value : undefined, key === 'jarvis_server_url' ? value : undefined);
     }
   } else {
     localStorage.setItem(key, value);
@@ -82,29 +79,15 @@ export async function mirrorNativeCredentials(): Promise<void> {
   const apiKey = _cache['jarvis_api_key'] ?? (await Preferences.get({ key: 'jarvis_api_key' })).value ?? undefined;
   const serverUrl = _cache['jarvis_server_url'] ?? (await Preferences.get({ key: 'jarvis_server_url' })).value ?? undefined;
   if (!apiKey && !serverUrl) return;
-  try {
-    await TokenBridge.setCredentials({ apiKey: apiKey || undefined, serverUrl: serverUrl || undefined });
-    await TokenBridge.refreshWidgets();
-  } catch (err) {
-    console.error('[storage] TokenBridge setCredentials failed:', err);
-  }
+  await pushNative(apiKey || undefined, serverUrl || undefined);
 }
 
 export async function storageRemove(key: string): Promise<void> {
   delete _cache[key];
   if (isNative) {
     await Preferences.remove({ key });
-    if (key === 'jarvis_api_key' || key === 'jarvis_server_url' || key === 'internal_secret') {
-      try {
-        await TokenBridge.setCredentials({
-          apiKey: key === 'jarvis_api_key' ? '' : undefined,
-          serverUrl: key === 'jarvis_server_url' ? '' : undefined,
-          internalSecret: key === 'internal_secret' ? '' : undefined,
-        });
-        await TokenBridge.refreshWidgets();
-      } catch (err) {
-        console.error('[storage] TokenBridge clear failed:', err);
-      }
+    if (NATIVE_KEYS.has(key)) {
+      await pushNative(key === 'jarvis_api_key' ? '' : undefined, key === 'jarvis_server_url' ? '' : undefined);
     }
   } else {
     localStorage.removeItem(key);

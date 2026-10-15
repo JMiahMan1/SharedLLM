@@ -1,10 +1,11 @@
+import os
 import json
 
 import httpx
 
 GATEWAY_URL = "http://ai.local:8080/api/chat"
 RAG_URL = "http://ai.local:8080/api/storage" # Or internal if possible, but let's hit gateway
-INTERNAL_SECRET = "change-me-in-production"
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 
 tests = [
     {

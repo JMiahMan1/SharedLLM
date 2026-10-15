@@ -13,7 +13,7 @@ GATEWAY_URL = os.getenv("GATEWAY_SVC_URL", "http://localhost:8002")
 STORAGE_URL = os.getenv("STORAGE_SVC_URL", "http://localhost:8005")
 RAG_URL = os.getenv("RAG_SVC_URL", "http://localhost:8004")
 
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "RAVEN_SECURE_2026")
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 INTERNAL_HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
 
 

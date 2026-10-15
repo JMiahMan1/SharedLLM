@@ -32,10 +32,6 @@ public final class WidgetApi {
         return prefs(context).getString(TokenBridgePlugin.KEY_API_KEY, null);
     }
 
-    public static String internalSecret(Context context) {
-        return prefs(context).getString(TokenBridgePlugin.KEY_INTERNAL_SECRET, null);
-    }
-
     public static String serverUrl(Context context) {
         String s = prefs(context).getString(TokenBridgePlugin.KEY_SERVER_URL, null);
         if (s == null || s.isEmpty()) return DEFAULT_SERVER;
@@ -53,7 +49,6 @@ public final class WidgetApi {
             SharedPreferences cap = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
             String key = cap.getString("jarvis_api_key", null);
             String url = cap.getString("jarvis_server_url", null);
-            String secret = cap.getString("internal_secret", null);
             SharedPreferences.Editor ed = p.edit();
             boolean changed = false;
             if (key != null && !key.isEmpty() && !key.equals(p.getString(TokenBridgePlugin.KEY_API_KEY, null))) {
@@ -63,10 +58,6 @@ public final class WidgetApi {
             }
             if (url != null && !url.isEmpty() && !url.equals(p.getString(TokenBridgePlugin.KEY_SERVER_URL, null))) {
                 ed.putString(TokenBridgePlugin.KEY_SERVER_URL, url);
-                changed = true;
-            }
-            if (secret != null && !secret.isEmpty() && !secret.equals(p.getString(TokenBridgePlugin.KEY_INTERNAL_SECRET, null))) {
-                ed.putString(TokenBridgePlugin.KEY_INTERNAL_SECRET, secret);
                 changed = true;
             }
             // Fallback: TokenBridge mirror may already hold a key if CapacitorStorage is empty
@@ -158,10 +149,6 @@ public final class WidgetApi {
             conn.setReadTimeout(TIMEOUT_MS);
             conn.setRequestMethod(method);
             conn.setRequestProperty("Authorization", "Bearer " + key);
-            String secret = internalSecret(context);
-            if (secret != null && !secret.isEmpty()) {
-                conn.setRequestProperty("X-Internal-Secret", secret);
-            }
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setRequestProperty("Accept", "application/json");
             if (body != null) {

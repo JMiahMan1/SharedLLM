@@ -12,7 +12,7 @@ import os
 log = logging.getLogger("app.users")
 
 _IDENTITY_SVC_URL = os.environ.get("IDENTITY_SVC_URL", "http://localhost:8001")
-_INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "change-me-in-production")
+_INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 
 
 def get_user_creds(username: str = "default") -> dict[str, str | None]:

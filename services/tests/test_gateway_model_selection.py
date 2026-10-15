@@ -35,7 +35,7 @@ def get_test_settings():
     # If DB has no values or doesn't exist, try querying identity service API directly
     if not settings.get("assistant_model") or not settings.get("coding_model"):
         identity_url = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
-        internal_secret = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+        internal_secret = os.environ.get("INTERNAL_SECRET", "")
         try:
             import httpx
             with httpx.Client(timeout=5.0) as client:

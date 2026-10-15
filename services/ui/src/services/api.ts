@@ -284,9 +284,7 @@ function directRequestConfig(): { baseURL: string; headers: Record<string, strin
   }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = storageGetSync('jarvis_api_key');
-  const internalSecret = storageGetSync('internal_secret');
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (internalSecret) headers['X-Internal-Secret'] = internalSecret;
   return { baseURL, headers };
 }
 
@@ -399,14 +397,8 @@ apiClient.interceptors.request.use((config) => {
     console.log('[API] baseURL:', config.baseURL, 'url:', config.url, 'method:', config.method);
   }
   const token = storageGetSync('jarvis_api_key');
-  const internalSecret = storageGetSync('internal_secret');
-
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
-  }
-
-  if (internalSecret) {
-    config.headers['X-Internal-Secret'] = internalSecret;
   }
 
   return config;
