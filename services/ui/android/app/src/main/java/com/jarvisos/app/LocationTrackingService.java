@@ -108,6 +108,11 @@ public class LocationTrackingService extends Service {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, enabled).apply();
     }
 
+    /**
+     * Only a deliberate "on" counts. Builds before this flag never wrote it,
+     * and treating a missing flag as on would also resume sharing for someone
+     * who had switched it off there; the app records it when next opened.
+     */
     static boolean isEnabled(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, false);
     }
@@ -168,6 +173,7 @@ public class LocationTrackingService extends Service {
                 persistIdentity(intent.getStringExtra("username"), intent.getStringExtra("userId"));
             }
         }
+        setEnabled(this, true);
         startForegroundCompat();
         acquireWakeLock();
         requestUpdates();

@@ -110,6 +110,20 @@ async def test_a_song_refusal_keeps_the_backend_reason(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_failed_song_is_reported_as_a_job_so_the_page_can_say_why(monkeypatch):
+    from services.gateway import main
+
+    _patch_client(
+        monkeypatch,
+        lambda url, timeout=None: _Response(200, {"id": "abc123", "status": "error", "error": "music generation failed: OOM"}),
+    )
+    response = await main.music_song_status(_FakeRequest({}), "abc123")
+    body = _body(response)
+    assert response.status_code == 200
+    assert body["job"]["status"] == "error" and "OOM" in body["job"]["error"]
+
+
+@pytest.mark.asyncio
 async def test_a_malformed_song_id_never_reaches_the_backend(monkeypatch):
     from services.gateway import main
 

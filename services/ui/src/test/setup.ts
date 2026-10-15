@@ -527,7 +527,7 @@ export const server = setupServer(
       { id: 'ws1', display_name: 'SharedLLM', local_path: 'SharedLLM', resolved_path: '/workspace/SharedLLM', available: true, scope: 'system', capabilities: [], sync_mode: 'local_git_authoritative', auto_pull_enabled: false },
     ],
   })),
-  http.get('/api/logs', () => HttpResponse.json(logs)),
+  http.get('/api/admin/logs', () => HttpResponse.json(logs)),
   http.post('/api/admin/tests/smoke', () => HttpResponse.json({
     status: 'SUCCESS',
     passed: true,

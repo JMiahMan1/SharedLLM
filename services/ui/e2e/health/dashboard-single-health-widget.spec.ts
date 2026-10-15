@@ -61,7 +61,7 @@ async function mockDashboard(page: Page) {
         best: { label: 'Best', steps: 9120 },
       });
     }
-    if (p === '/api/logs') return json([]);
+    if (p === '/api/admin/logs') return json([]);
     if (p === '/api/entities') return json({ entities: [] });
     if (p === '/api/users/me/theme') return json({ theme: 'dark' });
     if (p.startsWith('/api/geo/')) return json({});

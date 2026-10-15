@@ -3,7 +3,6 @@
 Microservice 1: Identity & Profile Service
 Manages user profiles, device assignments, and secure credential resolution.
 """
-import hmac
 import json
 import logging
 import os
@@ -97,6 +96,7 @@ ResolveRequest,
 )
 from services.identity.seed import hash_password, seed_from_env, system_service_urls, verify_password
 from services.shared.info_endpoint import info_router
+from services.common.secrets import secret_matches
 
 # ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -107,8 +107,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(n
 def _require_internal_secret(x_internal_secret: str | None) -> None:
     expected = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
     if not x_internal_secret or not (
-        (expected and hmac.compare_digest(x_internal_secret, expected))
-        or (INTERNAL_SECRET and hmac.compare_digest(x_internal_secret, INTERNAL_SECRET))
+        (expected and secret_matches(x_internal_secret, expected))
+        or (INTERNAL_SECRET and secret_matches(x_internal_secret, INTERNAL_SECRET))
     ):
         raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -536,8 +536,8 @@ def _matches_internal_secret(val: str | None) -> bool:
         return False
     expected = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
     return bool(
-        (expected and hmac.compare_digest(val, expected))
-        or (INTERNAL_SECRET and hmac.compare_digest(val, INTERNAL_SECRET))
+        (expected and secret_matches(val, expected))
+        or (INTERNAL_SECRET and secret_matches(val, INTERNAL_SECRET))
     )
 
 def require_internal(authorization: str = Header(None), x_internal_secret: str = Header(None, alias="X-Internal-Secret")):
