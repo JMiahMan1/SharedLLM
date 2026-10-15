@@ -90,7 +90,7 @@ async function mockHealth(page: Page, opts: { hourly?: boolean } = {}) {
     if (p === '/api/geo/trips') return json({ trips: [], total_trips: 0 });
     if (p === '/api/geo/vehicles') return json({ vehicles: [] });
     if (p === '/api/geo/people') return json({ features: [] });
-    if (p === '/api/logs') return json([]);
+    if (p === '/api/admin/logs') return json([]);
     if (p === '/api/users/me/theme') return json({ theme: 'dark' });
     if (p.startsWith('/api/geo/')) return json({});
     unhandled.push(`${route.request().method()} ${url.pathname}`);

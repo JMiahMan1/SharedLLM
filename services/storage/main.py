@@ -1,6 +1,5 @@
 # services/storage/main.py
 import base64
-import hmac
 import logging
 import re
 
@@ -27,6 +26,7 @@ RAG_SVC = RAG_SVC_URL
 
 import os
 import time
+from services.common.secrets import secret_matches
 
 START_TIME = time.time()
 
@@ -78,8 +78,8 @@ def _require_internal_secret(
     """
     expected = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
     if not x_internal_secret or not (
-        (expected and hmac.compare_digest(x_internal_secret, expected))
-        or (INTERNAL_SECRET and hmac.compare_digest(x_internal_secret, INTERNAL_SECRET))
+        (expected and secret_matches(x_internal_secret, expected))
+        or (INTERNAL_SECRET and secret_matches(x_internal_secret, INTERNAL_SECRET))
     ):
         raise HTTPException(status_code=403, detail="Forbidden")
 

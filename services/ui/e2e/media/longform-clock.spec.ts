@@ -39,9 +39,9 @@ async function open(page: Page) {
   await page.route('**/execute/media/status', (route) =>
     route.fulfill({ json: LONGFORM_STATUS }),
   );
-  // The shell polls /api/logs; the shared mock aborts it, and the resulting
+  // The shell polls /api/admin/logs; the shared mock aborts it, and the resulting
   // reconnect toast sits on top of the page in screenshots.
-  await page.route('**/api/logs**', (route) => route.fulfill({ json: [] }));
+  await page.route('**/api/admin/logs**', (route) => route.fulfill({ json: [] }));
   await seedAuth(page);
   await page.goto('/media', { waitUntil: 'domcontentloaded' });
   await expect(page.getByText('The Way of Kings').first()).toBeVisible({ timeout: 20_000 });

@@ -1,7 +1,6 @@
 # services/gateway/main.py
 import asyncio
 import hashlib
-import hmac
 import base64
 import json
 import logging
@@ -102,6 +101,7 @@ from services.gateway.external_agent import run_external_agent
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
 from services.shared.media_token import sign, verify
+from services.common.secrets import secret_matches
 
 START_TIME = time.time()
 
@@ -2085,7 +2085,7 @@ async def _require_identity_from_request(request: Request, body: dict | None = N
         # container on the bridge network) authenticate with the internal secret
         # rather than a user's API key. They are already inside the trust
         # boundary, so they keep Identity's own resolution rules.
-        if hmac.compare_digest(request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET):
+        if secret_matches(request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET):
             return await _resolve_identity_allow_anonymous(request, body)
         raise HTTPException(
             status_code=401,
@@ -5349,8 +5349,14 @@ async def _music_backend(request: Request) -> JSONResponse | None:
 
 
 def _music_job_answer(status: int, result: dict) -> JSONResponse:
-    """A song job as the UI reads it: the audio, when ready, as a playable data URL."""
-    if status >= 400 or not isinstance(result, dict) or result.get("error"):
+    """A song job as the UI reads it: the audio, when ready, as a playable data URL.
+
+    A job that failed is still a job (it has an id and status "error"), so it
+    is answered as one and the page can say why; only a refused request or a
+    missing job is an HTTP error.
+    """
+    is_job = isinstance(result, dict) and bool(result.get("id")) and bool(result.get("status"))
+    if status >= 400 or not isinstance(result, dict) or (result.get("error") and not is_job):
         message = (result or {}).get("error") if isinstance(result, dict) else None
         return JSONResponse(
             status_code=status if status >= 400 else 502,

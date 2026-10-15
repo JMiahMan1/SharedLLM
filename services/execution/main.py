@@ -2,7 +2,6 @@
 import asyncio
 import base64
 import hashlib
-import hmac
 import logging
 import os
 import re
@@ -142,6 +141,7 @@ from services.execution.schemas_groups import (
 from services.execution.tts import text_to_speech as _text_to_speech
 from services.shared.info_endpoint import info_router
 from services.shared.rag_client import push_telemetry_alert
+from services.common.secrets import secret_matches
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
@@ -202,8 +202,8 @@ async def require_internal(request: Request, x_internal_secret: str = Header(Non
 
     expected_secret = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
     if not x_internal_secret or not (
-        hmac.compare_digest(x_internal_secret, expected_secret)
-        or (INTERNAL_SECRET and hmac.compare_digest(x_internal_secret, INTERNAL_SECRET))
+        secret_matches(x_internal_secret, expected_secret)
+        or (INTERNAL_SECRET and secret_matches(x_internal_secret, INTERNAL_SECRET))
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
@@ -212,8 +212,8 @@ async def _check_internal_secret(x_internal_secret: str | None):
     """Simple secret check for endpoints without Request dependency."""
     expected_secret = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
     if not x_internal_secret or not (
-        hmac.compare_digest(x_internal_secret, expected_secret)
-        or (INTERNAL_SECRET and hmac.compare_digest(x_internal_secret, INTERNAL_SECRET))
+        secret_matches(x_internal_secret, expected_secret)
+        or (INTERNAL_SECRET and secret_matches(x_internal_secret, INTERNAL_SECRET))
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 

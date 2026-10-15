@@ -1,7 +1,6 @@
 # services/automation/main.py
 import asyncio
 import contextlib
-import hmac
 import json
 import logging
 import os
@@ -12,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 import aiohttp
 import redis.asyncio as redis
 
+from services.common.secrets import secret_matches
 from services.config import (
     EXECUTION_SVC_URL,
     GEO_SVC_URL,
@@ -493,7 +493,7 @@ def _internal_ok(x_internal_secret: str | None) -> bool:
     provided = x_internal_secret or ""
     if not expected:
         return False
-    return hmac.compare_digest(provided, expected)
+    return secret_matches(provided, expected)
 
 
 def _create_app():

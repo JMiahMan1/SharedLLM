@@ -100,7 +100,7 @@ beforeEach(async () => {
     http.get('/api/media/music-assistant/playlists', () =>
       HttpResponse.json({ status: 'SUCCESS', playlists: [] })
     ),
-    http.get('/api/logs', () => HttpResponse.json([])),
+    http.get('/api/admin/logs', () => HttpResponse.json([])),
     http.post('/api/media/ma-library-uri', async ({ request }) => {
       const body = (await request.json()) as { abs_item_id: string; title: string };
       resolveCalls.push(body);

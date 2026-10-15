@@ -106,6 +106,32 @@ describe('MakeMusic', () => {
     expect(localStorage.getItem('make-music-job')).toBeNull();
   });
 
+  it('keeps following a song through a brief outage', async () => {
+    startSong.mockResolvedValue(job({}));
+    getSong
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValueOnce(job({ status: 'done', audio_url: 'data:audio/wav;base64,CC' }));
+    render(<MakeMusic />);
+    fireEvent.change(screen.getByLabelText('Song prompt'), { target: { value: 'tune' } });
+    fireEvent.click(screen.getByRole('button', { name: /make the song/i }));
+    expect(await screen.findByTestId('song-status')).toHaveTextContent('Up next');
+    await advance();
+    await advance();
+    expect(await screen.findByTestId('music-audio')).toHaveAttribute('src', 'data:audio/wav;base64,CC');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says why a song failed', async () => {
+    startSong.mockResolvedValue(job({}));
+    getSong.mockResolvedValue(job({ status: 'error', error: 'music generation failed: out of memory' }));
+    render(<MakeMusic />);
+    fireEvent.change(screen.getByLabelText('Song prompt'), { target: { value: 'tune' } });
+    fireEvent.click(screen.getByRole('button', { name: /make the song/i }));
+    expect(await screen.findByTestId('song-status')).toHaveTextContent('Up next');
+    await advance();
+    await waitFor(() => expect(screen.getByTestId('song-status')).toHaveTextContent('out of memory'));
+  });
+
   it('fills the prompt from a preset', () => {
     render(<MakeMusic />);
     fireEvent.click(screen.getByRole('button', { name: 'Calm piano' }));

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hmac
 import json
 import logging
 import time
@@ -40,6 +39,7 @@ from services.telemetry.config import (
 from services.telemetry.reports import generate_report
 from services.telemetry.schedule import PERIODS, REPORT_TYPES, next_run_at
 from services.telemetry.store import utcnow_iso
+from services.common.secrets import secret_matches
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
@@ -250,7 +250,7 @@ async def worker_loop() -> None:
 
 def _internal_ok(value: str | None) -> bool:
     expected = INTERNAL_SECRET or ""
-    return bool(expected) and hmac.compare_digest(value or "", expected)
+    return bool(expected) and secret_matches(value or "", expected)
 
 
 @asynccontextmanager

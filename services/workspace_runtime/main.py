@@ -1,7 +1,6 @@
 import asyncio
 import fnmatch
 import hashlib
-import hmac
 import io
 import json
 import logging
@@ -45,6 +44,7 @@ from services.shared.info_endpoint import info_router
 from .crypto import decrypt, encrypt
 from .database import engine, init_db
 from .models import Workspace
+from services.common.secrets import secret_matches
 
 log = logging.getLogger("workspace_runtime")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
@@ -550,7 +550,7 @@ class WorkspaceBootstrapRequest(WorkspaceRef):
 def _require_internal_secret(x_internal_secret: str | None) -> None:
     import hmac
     expected = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
-    if not expected or not x_internal_secret or not hmac.compare_digest(x_internal_secret, expected):
+    if not expected or not x_internal_secret or not secret_matches(x_internal_secret, expected):
         raise HTTPException(status_code=403, detail="Invalid internal secret")
 
 
@@ -2896,7 +2896,7 @@ async def git_pull_webhook(
                 raise HTTPException(status_code=503, detail="Webhook service unavailable")
 
             provided_secret = x_webhook_secret or token or ""
-            if not hmac.compare_digest(provided_secret.encode(), expected_secret.encode()):
+            if not secret_matches(provided_secret, expected_secret):
                 log.warning(f"Invalid webhook secret attempt for workspace: {workspace_id}")
                 raise HTTPException(status_code=403, detail="Forbidden")
 

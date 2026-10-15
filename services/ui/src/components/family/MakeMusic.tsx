@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Music, Loader2, X } from 'lucide-react';
 import { api } from '../../services/api';
 import type { SongJob } from '../../services/api';
@@ -13,6 +13,8 @@ const PRESETS = [
 ];
 
 const POLL_MS = 2500;
+/** Failed checks in a row before giving up on a song (about a minute). */
+const MAX_MISSES = 24;
 /** The song being written, so leaving the page and coming back picks it up. */
 const JOB_KEY = 'make-music-job';
 
@@ -49,6 +51,7 @@ export default function MakeMusic() {
   // The song being followed; picked up from storage after leaving the page.
   const [following, setFollowing] = useState<string | null>(rememberedJob);
   const [tick, setTick] = useState(0);
+  const misses = useRef(0);
   const shape = STRUCTURES.find((s) => s.id === structure) ?? STRUCTURES[0];
 
   useEffect(() => {
@@ -58,6 +61,7 @@ export default function MakeMusic() {
       async () => {
         try {
           const next = await api.getSong(following);
+          misses.current = 0;
           setJob(next);
           if (next.status === 'queued' || next.status === 'running') {
             setTick((t) => t + 1);
@@ -66,6 +70,14 @@ export default function MakeMusic() {
           if (next.status !== 'done') rememberJob(null);
           setFollowing(null);
         } catch (e) {
+          // The audio server or gateway restarting is not the song failing:
+          // keep following, unless the server says the job no longer exists.
+          const gone = (e as { response?: { status?: number } })?.response?.status === 404;
+          if (!gone && misses.current < MAX_MISSES) {
+            misses.current += 1;
+            setTick((t) => t + 1);
+            return;
+          }
           rememberJob(null);
           setFollowing(null);
           setError(errorText(e, 'Lost track of the song'));

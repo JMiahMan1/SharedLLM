@@ -1,6 +1,5 @@
 # services/logging/main.py
 import asyncio
-import hmac
 import json
 import logging as py_logging
 import os
@@ -19,6 +18,7 @@ from pydantic import BaseModel
 
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, LOG_MAX_ENTRIES, LOG_RETENTION_DAYS, REDIS_URL
 from services.shared.info_endpoint import info_router
+from services.common.secrets import secret_matches
 
 _redis_client: redis.Redis | None = None
 
@@ -176,7 +176,7 @@ async def _token_is_admin_api_key(token: str) -> bool:
 
 def _require_read_secret(x_internal_secret: str | None):
     """Log reads expose every user's entries; gate them like deletes."""
-    if not x_internal_secret or not hmac.compare_digest(x_internal_secret, INTERNAL_SECRET):
+    if not x_internal_secret or not secret_matches(x_internal_secret, INTERNAL_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 @app.get("/logs")
@@ -243,7 +243,7 @@ async def _ws_authorized(websocket: WebSocket) -> bool:
     token = websocket.query_params.get("token") or ""
     if not token:
         return False
-    if hmac.compare_digest(token, INTERNAL_SECRET):
+    if secret_matches(token, INTERNAL_SECRET):
         return True
     return await _token_is_admin_api_key(token)
 

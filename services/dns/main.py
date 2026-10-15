@@ -7,7 +7,6 @@ Listens on host network port 5353 and resolves container names/IPs.
 """
 
 import asyncio
-import hmac
 import json
 import logging
 import os
@@ -20,6 +19,7 @@ from aiohttp import web
 
 import docker
 from services.common.http import get_client
+from services.common.secrets import secret_matches
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -698,7 +698,7 @@ def _require_internal_secret(request) -> web.StreamResponse | None:
     """Return a 403 response when the caller lacks the internal secret."""
     expected = os.environ.get('INTERNAL_SECRET', '')
     provided = request.headers.get('X-Internal-Secret', '')
-    if not expected or not hmac.compare_digest(provided, expected):
+    if not expected or not secret_matches(provided, expected):
         return web.json_response({'error': 'Unauthorized'}, status=403)
     return None
 
