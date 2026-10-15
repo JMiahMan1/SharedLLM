@@ -22,7 +22,7 @@ const MobileShell = ({ children }: MobileShellProps) => {
   const showBottomNav = isNative || isMobileWidth;
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-slate-950 text-slate-100 transition-all duration-300">
+    <div className="flex flex-col h-screen h-[100dvh] overflow-hidden bg-slate-950 text-slate-100 transition-all duration-300">
       <div className="safe-area-top bg-slate-950/40 backdrop-blur-md z-40 border-b border-white/5 transition-all duration-300">
         <ServerConfigBanner />
         <Header />
