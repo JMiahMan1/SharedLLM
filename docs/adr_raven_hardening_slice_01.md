@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. **Superseded in part:** item 3 below (restricting Raven to read-only
+shell/git) was reversed on 2026-05-11 (`081c5ba7`, "enable autonomous git
+operations for Raven"); Raven now runs shell and git writes inside its sandboxed
+workspaces under the capability policy.
 
 ## Context
 

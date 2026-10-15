@@ -49,8 +49,13 @@ re-implement.
 
 ## Design
 
-1. **Admin curation (explicit request).** New admin-only setting
-   `arcade_featured_games`: an ordered list of `{slug, label?}`.
+Status: item 1 (curation + list) and the Games-tab display are **shipped**
+(slice 1 above). Items 2's launch/stop passthrough, 4 (in-app play) and 5
+(score bridge) are **not built**; there is no `/api/arcade/games/{slug}/launch`
+or `/stop` route yet.
+
+1. **Admin curation.** Admin-only setting `arcade_featured_games`, stored as a
+   plain JSON array of slugs (no labels).
    - If unset, fall back to **top-N by average rating** with a minimum vote
      count (so one 5★ vote cannot outrank a well-played game), N default 6.
    - Stored with the other global settings so it is managed from

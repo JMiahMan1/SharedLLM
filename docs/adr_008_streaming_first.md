@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed
+Implemented (reviewed 2026-10-15): `AgentLoop`'s inference payload now sets
+`"stream": True` ("Hardened: Always stream", `services/gateway/agent_loop.py`).
 
 ## Context
 

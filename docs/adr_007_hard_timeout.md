@@ -2,7 +2,11 @@
 
 ## Status
 
-Proposed
+Implemented (reviewed 2026-10-15) with different numbers than the table below:
+`RAVEN_MAX_TOTAL_SECONDS` = 1800, `RAVEN_ITERATION_TIMEOUT` = 600,
+`RAVEN_HEARTBEAT_INTERVAL` = 30 (`services/config.py`, overridable as
+Identity settings `raven_max_total_seconds` etc.). The tunables table below is
+the original proposal.
 
 ## Context
 

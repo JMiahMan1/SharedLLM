@@ -2,24 +2,30 @@
 
 ## Overview
 
+**This covers selected routes only.** The gateway alone has several hundred;
+the complete, current list is the live OpenAPI schema
+(`http://<gateway>:11435/docs` or `/openapi.json`, and the same on each
+service's own port). Feature docs describe their own routes
+(`docs/MEDIA_PLAYER.md`, `docs/BIBLE_STUDY.md`, `docs/GEO_SERVICE.md`,
+`docs/FAMILY_HUB.md`, …).
+
 The gateway exposes an Ollama-compatible chat surface at `/api/chat` and an
-OpenAI-compatible surface at `/v1/chat/completions`.
+OpenAI-compatible surface at `/v1/chat/completions`. Base URL:
+`http://<host>:11435` (or through Caddy on 8080/8443).
 
-Base URL:
-`http://localhost:11435`
+## Authentication
 
-## Identity Resolution
-
-The gateway does not require a dedicated auth header for normal local use.
-Instead, it resolves user context from request fields such as:
-
-- `voice_id`
-- `device_id`
-- `rag_user`
-- `user`
-
-Those values are passed to the Identity service, which injects the configured
-Home Assistant and Nextcloud credentials for the resolved user profile.
+- **UI and API routes** require the caller's own API key:
+  `Authorization: Bearer <key>`. A missing or unknown key is a **401**; routes
+  that read or write family data never fall back to another account
+  (`_resolve_identity_from_request`). Admin routes also check `is_admin`.
+- **Service-to-service** calls use `X-Internal-Secret` (from `.env`; never
+  sent by clients).
+- **Chat surfaces** (`/api/chat`, `/v1/chat/completions`) accept the bearer
+  key, and voice/device clients may identify with `voice_id` / `device_id`
+  instead (resolved by Identity's anonymous-capable path).
+- **Media streams/SSE** may use a short-lived signed media token `?mt=`
+  (`POST /api/media/token`).
 
 ## `POST /api/chat`
 
@@ -113,27 +119,24 @@ Playback control (execution service):
 
 - `POST /execute/media/play`, `POST /execute/media/transport` (includes `shuffle_set`, `repeat_set`, `join`, `unjoin`), `POST /execute/media/status`, `POST /execute/media/state/sync`
 
-## Workspace Runtime Endpoints
+## Workspace Runtime Endpoints (internal, `X-Internal-Secret`)
 
 - `GET /health`: service health
-- `POST /files/read`: read file content from mounted workspace
-- `POST /files/write`: atomic file write to workspace
-- `POST /files/delete`: remove file from workspace (supports self-cleaning)
-- `GET /git/status`: repo status
-- `POST /git/commit`: commit staged changes
-- `POST /sync/nextcloud`: sync file to Nextcloud provider
+- `POST /files/read`, `POST /files/write`, `POST /files/delete`: workspace files
+- `GET /git/status`, `POST /git/commit`: repository operations
+- `POST /provider/sync/file`, `POST /provider/sync/directory`: sync to the storage provider (Nextcloud)
 
 ## RAG Service Endpoints
 
-- `POST /rag/search`: primary vector search (ha_entities, nextcloud_files, system_capabilities)
+- `POST /rag/search`: hybrid vector + BM25 search in one collection (`ha_entities`, `nextcloud_files`, `system_learnings`, `system_capabilities`, …) or all of them (`collection_name` empty or `all`)
 - `POST /rag/sync/ha`: refresh HA entity index
 - `POST /rag/sync/capabilities`: refresh the self-awareness capability index
-- `GET /rag/stats`: retrieval performance and index status
+- `GET /rag/stats`: retrieval performance and index status (internal)
 
 ## Other Gateway Endpoints
 
 - `GET /health`: liveness check for the gateway service
-- `GET /health/ready`: downstream readiness across identity, execution, rag, storage, logging, and redis
+- `GET /health/ready`: downstream readiness across identity, execution, rag, storage, logging, workspace_runtime and control_plane
 - `POST /api/discovery/sync`: fetch Home Assistant entities and trigger RAG sync
 - `POST /api/generate`: Ollama-compatible generate proxy
 - `GET /api/tags`: model list proxy (Ollama style)
@@ -143,3 +146,16 @@ Playback control (execution service):
 - `GET /api/version`: lightweight version endpoint
 - `GET /v1/models`: OpenAI-compatible list models endpoint
 - `POST /v1/embeddings`: OpenAI-compatible batch embeddings generation endpoint
+
+## Logs
+
+- `GET /api/admin/logs?limit=&service=`, `DELETE /api/admin/logs`: admin only.
+  (The unauthenticated gateway `GET`/`DELETE /api/logs` were removed on
+  2026-10-15.)
+- `WS /api/logs/stream?token=`: live log stream (logging service).
+
+## Family music
+
+- `POST /api/music/songs`, `GET /api/music/songs/{id}`, `DELETE /api/music/songs/{id}`:
+  queue, follow and cancel a song (see `docs/FAMILY_HUB.md`). The one-shot
+  `POST /api/music/generate` was removed.
