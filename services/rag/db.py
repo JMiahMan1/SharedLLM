@@ -272,47 +272,48 @@ def create_vec_table(cur: sqlite3.Connection | sqlite3.Cursor, dim: int) -> None
 
     Single source of truth for the vector table DDL so every call site (schema
     init and dimension-mismatch rebuild) uses the same metadata-column shape.
+
+    ``id`` is the vec0 primary key. As a plain metadata column, the
+    ``DELETE ... WHERE id = ?`` in every upsert scanned all vectors (~50 ms at
+    4k rows), so a 700-entity HA sync held the event loop for over a minute
+    and the services probing ``/health`` meanwhile logged RAG as down.
     """
     cur.execute(
         f"""
         CREATE VIRTUAL TABLE IF NOT EXISTS vec_rag_items USING vec0(
+            id text primary key,
             embedding float[{dim}],
             collection_name text,
-            user_id text,
-            id text
+            user_id text
         )
         """
     )
 
 
 def _migrate_vec_rag_items_schema(cur: sqlite3.Cursor, dim: int) -> bool:
-    """Migrate a legacy ``vec_rag_items`` table to the metadata-column schema,
+    """Rebuild an older ``vec_rag_items`` table in the current shape,
     PRESERVING the existing vectors (no re-embedding).
 
-    The current schema is ``vec0(embedding, collection_name, user_id, id)``.
-    Older databases created ``vec0(id, embedding)`` with no metadata columns, so
-    the KNN could not be scoped per-collection. Those legacy vectors are the same
-    model/dimension and are perfectly valid — we simply move them into the new
-    table with their collection/user copied from ``rag_items`` (the source of
-    truth). This is fast (a blob copy, no model inference) and lossless.
+    Two older shapes exist: ``vec0(id, embedding)`` with no metadata columns
+    (the KNN could not be scoped per collection), and the metadata-column
+    table whose ``id`` was not the primary key (every upsert scanned the whole
+    table). The vectors in both are the same model/dimension, so they are
+    copied into the new table with collection/user taken from ``rag_items``
+    (the source of truth). This is a blob copy, no model inference.
 
     Returns True if a migration was performed.
     """
     log = logging.getLogger("rag")
-    exists = cur.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vec_rag_items'"
+    row = cur.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_rag_items'"
     ).fetchone()
-    if not exists:
+    if not row:
         return False
-    try:
-        cols = {row[1] for row in cur.execute("PRAGMA table_info(vec_rag_items)").fetchall()}
-    except Exception:
-        return False
-    if "collection_name" in cols:
-        return False  # already on the new schema
+    sql = (row[0] or "").lower()
+    if "collection_name" in sql and "id text primary key" in sql:
+        return False  # already current
 
-    log.info("Migrating legacy vec_rag_items to metadata-column schema (preserving vectors)...")
-    # Read legacy (id, embedding) blobs and the id -> (collection, user) map.
+    log.info("Rebuilding vec_rag_items with id as its primary key (preserving vectors)...")
     legacy = list(cur.execute("SELECT id, embedding FROM vec_rag_items"))
     meta = {
         r["id"]: (r["collection_name"], r["user_id"])
@@ -320,18 +321,18 @@ def _migrate_vec_rag_items_schema(cur: sqlite3.Cursor, dim: int) -> bool:
     }
     cur.execute("DROP TABLE vec_rag_items")
     create_vec_table(cur, dim)
-    preserved = 0
+    preserved: set[str] = set()
     for r in legacy:
         m = meta.get(r["id"])
-        if m is None:
-            continue  # orphan vector with no rag_items row — drop it
+        if m is None or r["id"] in preserved:
+            continue  # orphan vector, or a duplicate the old table allowed
         cur.execute(
-            "INSERT INTO vec_rag_items(embedding, collection_name, user_id, id) "
+            "INSERT INTO vec_rag_items(id, embedding, collection_name, user_id) "
             "VALUES(?, ?, ?, ?)",
-            [r["embedding"], m[0], m[1], r["id"]],
+            [r["id"], r["embedding"], m[0], m[1]],
         )
-        preserved += 1
-    log.info(f"Migrated vec_rag_items: preserved {preserved}/{len(legacy)} vectors")
+        preserved.add(r["id"])
+    log.info(f"Rebuilt vec_rag_items: preserved {len(preserved)}/{len(legacy)} vectors")
     return True
 
 
