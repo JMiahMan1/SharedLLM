@@ -4,13 +4,13 @@ import { http, HttpResponse } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
 
-// sendspin-js cannot be bundled by vitest, so stub the web player hook. The
+// sendspin-js cannot be bundled by vitest, so stub the app's shared web player. The
 // audiobook play path goes through it, so the stubs are the assertion surface.
 const maCommand = vi.fn().mockResolvedValue(undefined);
 const webPlay = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('../lib/maWebPlayer', () => ({
-  useMAWebPlayer: () => ({
+vi.mock('../context/MediaPlayerContext', () => ({
+  useSharedMAWebPlayer: () => ({
     isConnected: true,
     connectionState: 'CONNECTED',
     isPlaying: false,

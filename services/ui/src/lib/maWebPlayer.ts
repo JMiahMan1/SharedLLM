@@ -25,7 +25,7 @@ const STORAGE_KEY = 'sendspin_webplayer_id';
  */
 type MAPlaybackState = 'playing' | 'idle';
 
-interface MAWebPlayerState {
+export interface MAWebPlayerState {
   isConnected: boolean;
   isPlaying: boolean;
   volume: number;

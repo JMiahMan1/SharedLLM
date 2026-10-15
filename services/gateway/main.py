@@ -10526,6 +10526,39 @@ async def get_telemetry_notifications(request: Request, limit: int = 20):
     )
 
 
+#: How long a waiting phone is held before it is answered with nothing new.
+NOTIFY_WAIT_MAX_S = 55.0
+NOTIFY_WAIT_POLL_S = 2.0
+
+
+@app.get("/api/telemetry/notifications/wait")
+async def wait_telemetry_notifications(request: Request, since: str = "", timeout: float = 50.0):
+    """Long poll for the phone: notices created after ``since`` (an ISO time
+    from a previous answer's ``cursor``), answered as soon as one exists.
+
+    This is how the Android app shows chat and family notices as system
+    notifications with no outside push service. With no ``since`` the answer
+    is immediate and only sets the cursor, so a freshly started phone does not
+    re-announce the whole outbox.
+    """
+    user = await _user_id_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    deadline = time.monotonic() + max(0.0, min(timeout, NOTIFY_WAIT_MAX_S))
+    while True:
+        data = await _telemetry_call("GET", f"/api/telemetry/notifications/{user}", params={"limit": 50})
+        items = [n for n in (data or {}).get("notifications") or [] if isinstance(n, dict)]
+        newest = max((str(n.get("created_at") or "") for n in items), default="")
+        if not since:
+            return {"notifications": [], "cursor": newest or datetime.now(timezone.utc).isoformat()}
+        fresh = [n for n in items if str(n.get("created_at") or "") > since]
+        if fresh:
+            return {"notifications": fresh, "cursor": max(newest, since)}
+        if time.monotonic() >= deadline or await request.is_disconnected():
+            return {"notifications": [], "cursor": since}
+        await asyncio.sleep(NOTIFY_WAIT_POLL_S)
+
+
 @app.get("/api/telemetry/push/key")
 async def get_push_key(request: Request):
     if not await _user_id_from_request(request):

@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LocationProvider } from './context/LocationContext';
+import { MediaPlayerProvider } from './context/MediaPlayerContext';
+import NativeBridge from './components/NativeBridge';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
 import MobileShell from './components/layout/MobileShell';
@@ -108,7 +110,9 @@ function App() {
             border: '1px solid rgba(255, 255, 255, 0.1)',
           }
         }} />
+        <MediaPlayerProvider>
         <Router>
+          <NativeBridge />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<ProtectedRoute isMobile={isMobile}><Dashboard /></ProtectedRoute>} />
@@ -142,6 +146,7 @@ function App() {
             <Route path="/lab/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLabAdmin /></AdminElevation></ProtectedRoute>} />
           </Routes>
         </Router>
+        </MediaPlayerProvider>
       </LocationProvider>
       </AuthProvider>
     </QueryClientProvider>

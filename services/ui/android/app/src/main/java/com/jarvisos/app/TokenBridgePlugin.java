@@ -69,6 +69,14 @@ public class TokenBridgePlugin extends Plugin {
             }
         }
         ed.apply();
+        if (apiKey != null) {
+            // Signing in starts family chat notifications; signing out ends them.
+            if (apiKey.isEmpty()) {
+                ChatNotifyService.stop(getContext());
+            } else {
+                ChatNotifyService.start(getContext());
+            }
+        }
         call.resolve();
     }
 

@@ -4,9 +4,9 @@ import { http, HttpResponse } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
 
-// sendspin-js cannot be bundled by vitest, so stub the web player hook.
-vi.mock('../lib/maWebPlayer', () => ({
-  useMAWebPlayer: () => ({
+// sendspin-js cannot be bundled by vitest, so stub the app's shared web player.
+vi.mock('../context/MediaPlayerContext', () => ({
+  useSharedMAWebPlayer: () => ({
     isConnected: false,
     connectionState: 'DISCONNECTED',
     isPlaying: false,

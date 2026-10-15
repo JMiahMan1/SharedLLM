@@ -28,6 +28,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(TokenBridgePlugin.class);
         registerPlugin(ApkInstallPlugin.class);
         registerPlugin(LocationTrackingPlugin.class);
+        registerPlugin(ChatNotifyPlugin.class);
+        registerPlugin(JarvisMediaPlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -51,6 +53,9 @@ public class MainActivity extends BridgeActivity {
 
         configureWebView();
         maybeConfirmGarage(getIntent());
+        maybeOpenPath(getIntent());
+        // Signed in already: keep family chat notifications flowing.
+        ChatNotifyService.start(this);
     }
 
     @Override
@@ -59,6 +64,7 @@ public class MainActivity extends BridgeActivity {
         if (intent != null) {
             setIntent(intent);
             maybeConfirmGarage(intent);
+            maybeOpenPath(intent);
         }
     }
 
@@ -86,6 +92,18 @@ public class MainActivity extends BridgeActivity {
                 .show();
         } catch (Exception e) {
             Toast.makeText(this, "Could not ask for confirmation", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** A notification tap carries the page to open (a chat, the player). */
+    private void maybeOpenPath(Intent intent) {
+        if (intent == null) return;
+        String path = intent.getStringExtra(ChatNotifyService.EXTRA_OPEN_PATH);
+        if (path == null || path.isEmpty() || getBridge() == null) return;
+        intent.removeExtra(ChatNotifyService.EXTRA_OPEN_PATH);
+        com.getcapacitor.PluginHandle handle = getBridge().getPlugin("ChatNotify");
+        if (handle != null && handle.getInstance() instanceof ChatNotifyPlugin) {
+            ((ChatNotifyPlugin) handle.getInstance()).open(path);
         }
     }
 
@@ -118,6 +136,13 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         configureWebView();
+        ChatNotifyService.appVisible = true;
+    }
+
+    @Override
+    public void onPause() {
+        ChatNotifyService.appVisible = false;
+        super.onPause();
     }
 
     private void configureWebView() {
