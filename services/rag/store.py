@@ -69,9 +69,9 @@ class SqliteVecAdapter(VectorStoreAdapter):
         # instead of raising "UNIQUE constraint failed on primary key".
         self.conn.execute("DELETE FROM vec_rag_items WHERE id = ?", [doc_id])
         self.conn.execute(
-            "INSERT INTO vec_rag_items(embedding, collection_name, user_id, id) "
+            "INSERT INTO vec_rag_items(id, embedding, collection_name, user_id) "
             "VALUES(?, ?, ?, ?)",
-            [blob, collection, user_id, doc_id],
+            [doc_id, blob, collection, user_id],
         )
 
     def search(
