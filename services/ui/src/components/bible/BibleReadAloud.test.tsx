@@ -127,7 +127,7 @@ describe('BibleReadAloud', () => {
     // Piece 0 is playing while piece 1 is still in flight.
     await waitFor(() => expect(audioElement().src).toBe('blob:verse-1'));
     expect(screen.getByTestId('bible-read-aloud-play').textContent).toContain('Pause');
-    release?.();
+    (release as (() => void) | null)?.();
   });
 
   it('plays the next piece when the current one ends', async () => {

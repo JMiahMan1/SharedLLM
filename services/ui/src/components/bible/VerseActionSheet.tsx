@@ -205,7 +205,7 @@ export default function VerseActionSheet({
     run('Added to your memory verses', async () => {
       const body = await api.addBibleMemory({ ref: verse.reference });
       void trigger('success');
-      return body.added.length
+      return body.added?.length
         ? `Added to your memory verses. Practise it from Bible › Memorize.`
         : 'Already on your memory list.';
     });
@@ -303,7 +303,7 @@ export default function VerseActionSheet({
             disabled={busy}
             onClick={() => {
               void trigger('light');
-              setAsking(true);
+              setAskOpen(true);
             }}
             className={ACTION_CLASS}
             data-testid="bible-action-ask"

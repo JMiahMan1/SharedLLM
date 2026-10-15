@@ -24,6 +24,10 @@ const settings: UserWidgetSettings = {
   order_index: 0,
   size: 'medium',
   is_pinned: false,
+  sort_mode: null,
+  pinned_devices: [],
+  config: {},
+  updated_at: 0,
 };
 
 const summary = (current: number) => ({

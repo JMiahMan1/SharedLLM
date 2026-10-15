@@ -39,8 +39,8 @@ const RESULT: BibleGameResult = {
   duration_ms: 12000,
   counted: true,
   results: [
-    { id: 0, correct: true, chosen: 'John', answer: 'John', reference: 'John 3:16', text: 'For God so loved the world…' },
-    { id: 1, correct: false, chosen: 'Judges', answer: '1 Samuel', reference: 'Ruth, then 1 Samuel', text: '' },
+    { id: 0, prompt: 'Which book is this verse from?', correct: true, chosen: 'John', answer: 'John', reference: 'John 3:16', text: 'For God so loved the world…' },
+    { id: 1, prompt: 'Which book comes right after Ruth?', correct: false, chosen: 'Judges', answer: '1 Samuel', reference: 'Ruth, then 1 Samuel', text: '' },
   ],
   stars: { granted: 1, status: '1 star(s) banked' },
   newly_earned: [{ id: 'quiz_first', name: 'First Quiz', description: '', points: 5, earned_on: '2026-10-13' } as never],

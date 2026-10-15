@@ -1661,7 +1661,7 @@ export interface BibleMark {
   chapter: number;
   verse_start: number;
   verse_end: number | null;
-  kind: 'highlight' | 'bookmark';
+  kind: 'highlight' | 'bookmark' | 'note';
   color: string;
   note_path: string;
   note_preview: string;
