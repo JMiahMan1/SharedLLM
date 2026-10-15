@@ -56,6 +56,9 @@ def test_workspace_lifecycle(api_client):
         "auto_pull_enabled": True,
         "auto_backup_enabled": True,
         "nextcloud_path": f"/Tests/{workspace_id}",
+        # A workspace that tracks its remote. The default mode makes the local
+        # git authoritative, and the webhook rightly skips pulling those.
+        "sync_mode": "git",
         # The git-pull webhook authenticates against the workspace's own token
         # (or the server's GIT_WEBHOOK_SECRET) — never INTERNAL_SECRET. Set one
         # here so the test does not depend on the server's webhook config.
