@@ -6,12 +6,7 @@ import { api } from '../../services/api';
 import PeoplePicker from './PeoplePicker';
 import Sheet from './Sheet';
 import { avatarTint, detailList, initials, type TalkConversation, type TalkParticipant, type TalkPerson } from './chatModel';
-
-function errorText(e: unknown): string {
-  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-  if (typeof detail === 'string') return detail;
-  return e instanceof Error ? e.message : 'That did not work';
-}
+import { errorText } from '../../lib/errorText';
 
 /**
  * Everything about one conversation: who is in it, adding and removing
@@ -46,7 +41,7 @@ export default function ConversationInfo({
     select: (r) => detailList<TalkParticipant>(r, 'participants'),
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['talk-participants', token] });
-  const fail = (e: unknown) => toast.error(errorText(e));
+  const fail = (e: unknown) => toast.error(errorText(e, 'That did not work'));
 
   const add = useMutation({
     mutationFn: (p: TalkPerson) => api.addTalkParticipant(token, p.id),

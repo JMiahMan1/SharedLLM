@@ -4,12 +4,7 @@ import { BookOpenCheck, CalendarDays, Check, ChevronDown, ChevronRight, Loader2,
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { BiblePlanEnrollment, BiblePlanInfo } from '../../types/api';
-
-function errorText(e: unknown): string {
-  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-  if (typeof detail === 'string') return detail;
-  return e instanceof Error ? e.message : 'Something went wrong';
-}
+import { errorText } from '../../lib/errorText';
 
 /**
  * Reading plans: today's reading for each plan the reader follows, at the top

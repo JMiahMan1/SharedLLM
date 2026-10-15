@@ -6,12 +6,7 @@ import { api } from '../services/api';
 import type { UserProfile } from '../types/api';
 import { AVATAR_PRESETS, squarePhoto } from '../lib/avatarPresets';
 import UserAvatar from './UserAvatar';
-
-function errorText(e: unknown): string {
-  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-  if (typeof detail === 'string') return detail;
-  return e instanceof Error ? e.message : 'That did not work';
-}
+import { errorText } from '../lib/errorText';
 
 /**
  * Choose a profile picture: a Bible-story character, your own photo, or your
@@ -26,9 +21,9 @@ export default function AvatarPicker({ user, onClose }: { user: UserProfile; onC
     queryClient.setQueryData(['me'], profile);
     void queryClient.invalidateQueries({ queryKey: ['me'] });
   };
-  const choose = useMutation({ mutationFn: (id: string) => api.chooseAvatar(id), onSuccess: saved, onError: (e) => toast.error(errorText(e)) });
-  const upload = useMutation({ mutationFn: (dataUrl: string) => api.uploadAvatar(dataUrl), onSuccess: (p) => { saved(p); toast.success('Photo saved'); }, onError: (e) => toast.error(errorText(e)) });
-  const remove = useMutation({ mutationFn: () => api.removeAvatar(), onSuccess: saved, onError: (e) => toast.error(errorText(e)) });
+  const choose = useMutation({ mutationFn: (id: string) => api.chooseAvatar(id), onSuccess: saved, onError: (e) => toast.error(errorText(e, 'That did not work')) });
+  const upload = useMutation({ mutationFn: (dataUrl: string) => api.uploadAvatar(dataUrl), onSuccess: (p) => { saved(p); toast.success('Photo saved'); }, onError: (e) => toast.error(errorText(e, 'That did not work')) });
+  const remove = useMutation({ mutationFn: () => api.removeAvatar(), onSuccess: saved, onError: (e) => toast.error(errorText(e, 'That did not work')) });
   const busy = choose.isPending || upload.isPending || remove.isPending || preparing;
   const current = user.avatar ?? null;
 
@@ -38,7 +33,7 @@ export default function AvatarPicker({ user, onClose }: { user: UserProfile; onC
     try {
       upload.mutate(await squarePhoto(file));
     } catch (e) {
-      toast.error(errorText(e));
+      toast.error(errorText(e, 'That did not work'));
     } finally {
       setPreparing(false);
       if (fileRef.current) fileRef.current.value = '';
