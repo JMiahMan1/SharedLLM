@@ -37,6 +37,7 @@ LEAKED = [
     ("GET", "/api/workspaces", None),
     ("GET", "/api/admin/services", None),
     ("GET", "/api/admin/logs", None),
+    ("DELETE", "/api/admin/logs", None),
     ("GET", "/api/raven/missions", None),
     ("GET", "/api/entities", None),
     ("GET", "/api/storage/stats", None),

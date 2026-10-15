@@ -1031,28 +1031,6 @@ async def emit_log(level: str, message: str, context: dict | None = None):
     except Exception:
       pass
 
-@app.get("/api/logs")
-async def get_api_logs(limit: int = 50, service: str | None = None):
-    async with shared_http_client() as client:
-      params: dict[str, object] = {"limit": limit}
-      if service:
-        params["service"] = service
-      resp = await client.get(
-        f"{LOGGING_SVC}/logs",
-        params=params,
-        headers={"X-Internal-Secret": INTERNAL_SECRET},
-      )
-      return await resp.json()
-
-@app.delete("/api/logs")
-async def delete_api_logs():
-    async with shared_http_client() as client:
-      resp = await client.delete(
-        f"{LOGGING_SVC}/api/logs",
-        headers={"X-Internal-Secret": INTERNAL_SECRET},
-      )
-      return await resp.json()
-
 @app.get("/api/admin/logs")
 async def get_api_admin_logs(request: Request, limit: int = 50, service: str | None = None):
     # This route had no authentication at all -- it took no request, so it could

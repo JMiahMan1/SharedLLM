@@ -174,12 +174,8 @@ def _require_read_secret(x_internal_secret: str | None):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 @app.get("/logs")
-async def get_logs(user_id: str | None = None, service: str | None = None, limit: int | None = None, lines: int | None = None, x_internal_secret: str | None = Header(default=None)):
-    _require_read_secret(x_internal_secret)
-    return await _fetch_logs(service=service, user_id=user_id, limit=_resolve_limit(limit, lines))
-
 @app.get("/api/logs")
-async def get_logs_api(user_id: str | None = None, service: str | None = None, limit: int | None = None, lines: int | None = None, x_internal_secret: str | None = Header(default=None)):
+async def get_logs(user_id: str | None = None, service: str | None = None, limit: int | None = None, lines: int | None = None, x_internal_secret: str | None = Header(default=None)):
     _require_read_secret(x_internal_secret)
     return await _fetch_logs(service=service, user_id=user_id, limit=_resolve_limit(limit, lines))
 
@@ -189,14 +185,8 @@ async def get_logs_admin_api(service: str | None = None, limit: int | None = Non
     return await _fetch_logs(service=service, user_id="admin", limit=_resolve_limit(limit, lines))
 
 @app.delete("/api/logs")
-async def clear_logs_api(x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    r = await get_redis()
-    await r.delete("logs:entries")
-    return {"status": "success", "message": "Logs cleared"}
-
 @app.delete("/api/admin/logs")
-async def clear_logs_admin_api(x_internal_secret: str | None = Header(default=None)):
+async def clear_logs(x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     r = await get_redis()
     await r.delete("logs:entries")

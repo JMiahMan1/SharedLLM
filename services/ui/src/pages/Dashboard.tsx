@@ -312,6 +312,7 @@ const Dashboard = () => {
     queryFn: () => api.getLogs(50),
     refetchInterval: 10000,
     retry: 1,
+    enabled: !!isAdmin,
   });
 
   const filteredLogs = useMemo(() => {
