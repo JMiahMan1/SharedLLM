@@ -64,7 +64,7 @@ export default function ConversationList({
       </div>
 
       <label className="relative mb-2 block">
-        <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+        <Search size={14} className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-slate-400" />
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
