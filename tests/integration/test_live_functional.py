@@ -15,7 +15,7 @@ GATEWAY_URL = os.getenv("GATEWAY_URL", f"http://{SERVER_IP}:8080")
 IDENTITY_URL = os.getenv("IDENTITY_URL", f"http://{SERVER_IP}:8001")
 STORAGE_URL = os.getenv("STORAGE_URL", f"http://{SERVER_IP}:8005")
 LOGGING_URL = os.getenv("LOGGING_URL", f"http://{SERVER_IP}:8006")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 
 
 @pytest.fixture

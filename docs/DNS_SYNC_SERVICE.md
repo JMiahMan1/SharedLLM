@@ -134,7 +134,7 @@ dns:
 2. **Verify DNS mappings in Identity:**
    ```bash
    curl -s 'http://localhost:8001/api/settings' \
-     -H 'X-Internal-Secret: RAVEN_SECURE_2026'
+     -H 'X-Internal-Secret: $INTERNAL_SECRET'
    ```
 
 3. **Test DNS resolution:**

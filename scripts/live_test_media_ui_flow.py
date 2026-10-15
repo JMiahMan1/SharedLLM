@@ -12,7 +12,7 @@ if BASE_URL is None:
         "Set BASE_URL to the target server URL (e.g., http://192.168.2.205:8080)."
     )
 
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 
 def log_test(name, success, info=""):
     status = "SUCCESS" if success else "FAILED"

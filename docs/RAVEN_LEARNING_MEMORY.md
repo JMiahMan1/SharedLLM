@@ -170,14 +170,14 @@ docker logs sharedllm_gateway 2>&1 | grep "Mission reflection"
 # 2. Confirm a learning landed in RAG system_learnings:
 curl -s -X POST http://localhost:8002/rag/search \
   -H 'Content-Type: application/json' \
-  -H 'X-Internal-Secret: RAVEN_SECURE_2026' \
+  -H 'X-Internal-Secret: $INTERNAL_SECRET' \
   -d '{"collection_name":"system_learnings","query":"python cli argparse","k":5}' \
   | python3 -m json.tool
 
 # 3. The per-mission journal Raven writes:
 curl -s -X POST http://localhost:8007/files/read \
   -H 'Content-Type: application/json' \
-  -H 'X-Internal-Secret: RAVEN_SECURE_2026' \
+  -H 'X-Internal-Secret: $INTERNAL_SECRET' \
   -d '{"workspace_id":"<mission-workspace>","relative_path":"raven_memory.md"}'
 
 # 4. The teaching test double-checks both the artifact and the memory:

@@ -194,7 +194,7 @@ For testing (e.g., E2E integration tests), create a `test.env` file with hardcod
 
 ```env
 INTERNAL_SECRET=test-secret
-FERNET_KEY=g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=
+FERNET_KEY=<generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())">
 IDENTITY_SVC_URL=http://identity:8001
 EXECUTION_SVC_URL=http://execution:8012
 HA_URL=https://ha.sumemail.com:8095

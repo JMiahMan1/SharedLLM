@@ -9,7 +9,6 @@ export interface TokenBridgePluginInterface {
   setCredentials(options: {
     apiKey?: string;
     serverUrl?: string;
-    internalSecret?: string;
   }): Promise<void>;
   getCredentials(): Promise<Credentials>;
   /** Mirror the signed-in identity so a background service can attribute uploads. */

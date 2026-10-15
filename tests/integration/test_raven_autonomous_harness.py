@@ -17,7 +17,7 @@ import pytest
 
 SERVER_IP = os.getenv("SERVER_IP", "192.168.2.205")
 GATEWAY_URL = os.getenv("GATEWAY_URL", f"http://{SERVER_IP}:8080")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "RAVEN_SECURE_2026")
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 RAVEN_API_KEY = os.getenv("RAVEN_API_KEY", "")
 CHAT_TIMEOUT = float(os.getenv("E2E_CHAT_TIMEOUT", "1800"))
 POLL_INTERVAL = float(os.getenv("E2E_POLL_INTERVAL", "15"))
@@ -219,7 +219,7 @@ def test_raven_path_c_rag_retrieval():
 
     prompt = (
         f"In workspace '{ws_id}', build a Python module `config_spec.py` that "
-        f"implements `get_system_secret_key()` returning 'RAVEN_SECURE_2026' "
+        f"implements `get_system_secret_key()` returning 'SAMPLE-VALUE-FOR-THE-MISSION' "
         f"and `get_dns_port()` returning 15353. Execute `python3 config_spec.py` "
         f"to verify."
     )
@@ -230,7 +230,7 @@ def test_raven_path_c_rag_retrieval():
 
     content = _read_workspace_file(ws_id, "config_spec.py")
     assert content is not None
-    assert "RAVEN_SECURE_2026" in content
+    assert "SAMPLE-VALUE-FOR-THE-MISSION" in content
     assert "15353" in content
 
 

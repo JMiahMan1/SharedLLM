@@ -38,7 +38,7 @@ import pytest
 SERVER_IP = os.getenv("SERVER_IP", "192.168.2.205")
 GATEWAY_URL = os.getenv("GATEWAY_URL", f"http://{SERVER_IP}:8080")
 WORKSPACE_RUNTIME_URL = os.getenv("WORKSPACE_RUNTIME_URL", f"http://{SERVER_IP}:8007")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 GH_TOKEN = os.getenv("GH_TOKEN", "")
 GH_OWNER = os.getenv("GH_OWNER", "JMiahMan1")
 # Default to NO repo binding; workspaces must opt in via E2E_REPO_URL.

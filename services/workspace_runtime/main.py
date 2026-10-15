@@ -1,6 +1,7 @@
 import asyncio
 import fnmatch
 import hashlib
+import hmac
 import io
 import json
 import logging
@@ -2894,8 +2895,8 @@ async def git_pull_webhook(
                 log.warning(f"No webhook secret configured for workspace: {workspace_id}")
                 raise HTTPException(status_code=503, detail="Webhook service unavailable")
 
-            provided_secret = x_webhook_secret or token
-            if provided_secret != expected_secret:
+            provided_secret = x_webhook_secret or token or ""
+            if not hmac.compare_digest(provided_secret.encode(), expected_secret.encode()):
                 log.warning(f"Invalid webhook secret attempt for workspace: {workspace_id}")
                 raise HTTPException(status_code=403, detail="Forbidden")
 

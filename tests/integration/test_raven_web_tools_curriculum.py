@@ -31,7 +31,7 @@ import pytest
 
 SERVER_IP = os.getenv("SERVER_IP", "192.168.2.205")
 GATEWAY_URL = os.getenv("GATEWAY_URL", f"http://{SERVER_IP}:8080")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "RAVEN_SECURE_2026")
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 RAVEN_API_KEY = os.getenv("RAVEN_API_KEY", "")
 
 CHAT_TIMEOUT = float(os.getenv("E2E_CHAT_TIMEOUT", "1800"))

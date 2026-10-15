@@ -388,7 +388,7 @@ LIVE_E2E=1 GH_TOKEN=... RAVEN_API_KEY=... \
 # Check RAG system_learnings contents
 curl -s -X POST http://localhost:8002/rag/search \
   -H 'Content-Type: application/json' \
-  -H 'X-Internal-Secret: RAVEN_SECURE_2026' \
+  -H 'X-Internal-Secret: $INTERNAL_SECRET' \
   -d '{"collection_name":"system_learnings","query":"python cli","k":5}' \
   | python3 -m json.tool
 

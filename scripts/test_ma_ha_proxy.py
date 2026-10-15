@@ -19,7 +19,7 @@ import httpx
 
 # Resolve credentials from identity service
 IDENTITY_URL = os.environ.get("IDENTITY_URL", "http://172.26.0.3:8001")
-INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "RAVEN_SECURE_2026")
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 
 
 async def resolve_credentials():

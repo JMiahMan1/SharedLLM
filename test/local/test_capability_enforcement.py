@@ -5,7 +5,7 @@ import pytest
 
 # Configuration
 BASE_URL = os.getenv("LIVE_TEST_URL", "http://127.0.0.1:8003")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
 
 # Service URLs (Direct to host-networked Execution service)
