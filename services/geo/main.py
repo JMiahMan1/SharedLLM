@@ -2337,6 +2337,9 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
             log.warning(f"[Geo] Error finalizing active trip: {e}")
 
 
+MAX_TRIPS_PER_REQUEST = 1000
+
+
 @app.get("/trips")
 async def get_trips(
     user_id: str | None = None,
@@ -2361,6 +2364,9 @@ async def get_trips(
     clean_user = None if wants_all else await _require_may_view(viewer, user_id, is_admin)
     key = f"geo:trips:user:{clean_user}" if clean_user else "geo:trips:all"
 
+    # Bounded: the client asks for the whole history (Wander groups it by
+    # day/week/month/year), but no request may walk an unbounded index.
+    limit = max(1, min(int(limit), MAX_TRIPS_PER_REQUEST))
     trip_ids = await r.zrevrange(key, 0, limit - 1)
     trips = []
     for tid in trip_ids:

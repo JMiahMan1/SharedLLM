@@ -17,6 +17,8 @@ import {
   formatFuelSummary,
   roundForDisplay,
   tripStats,
+  groupTrips,
+  sortTripsNewestFirst,
 } from './wanderTrips';
 import type { Trip } from '../types/api';
 
@@ -303,5 +305,53 @@ describe('fuel and cost previews', () => {
     expect(previewFuelUsed(25, 0)).toBe(0);
     expect(previewCost(25, 0, 3.65)).toBe(0);
     expect(previewFuelUsed(0, 25)).toBe(0);
+  });
+});
+
+describe('groupTrips', () => {
+  // Local-time dates: grouping follows the phone's calendar, not UTC.
+  const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime() / 1000;
+  const t = (id: string, start: number, miles = 10, cost = 1): Trip =>
+    ({ id, user_id: 'person.jeremiah', start_time: start, end_time: start + 600, distance_miles: miles, trip_cost_usd: cost, activity_type: 'driving' }) as Trip;
+  const NOW = new Date(2026, 9, 15, 18); // Thu 15 Oct 2026
+  const trips = [
+    t('today', at(2026, 10, 15, 8)),
+    t('today2', at(2026, 10, 15, 17)),
+    t('yesterday', at(2026, 10, 14)),
+    t('sunday', at(2026, 10, 11)),
+    t('last-sat', at(2026, 10, 10)),
+    t('sept', at(2026, 9, 3)),
+    t('lastyear', at(2025, 12, 31)),
+  ];
+
+  it('groups by day, newest first, with friendly labels', () => {
+    const g = groupTrips(trips, 'day', NOW);
+    expect(g.map((x) => x.label).slice(0, 3)).toEqual(['Today', 'Yesterday', 'Sun, Oct 11']);
+    expect(g[0].trips.map((x) => x.id)).toEqual(['today2', 'today']);
+    expect(g.at(-1)?.label).toBe('Wed, Dec 31, 2025');
+  });
+
+  it('weeks start on Sunday', () => {
+    const g = groupTrips(trips, 'week', NOW);
+    expect(g[0]).toMatchObject({ label: 'This week' });
+    expect(g[0].trips.map((x) => x.id)).toEqual(['today2', 'today', 'yesterday', 'sunday']);
+    expect(g[1]).toMatchObject({ label: 'Last week' });
+    expect(g[1].trips.map((x) => x.id)).toEqual(['last-sat']);
+  });
+
+  it('groups by month and year with totals per group', () => {
+    const months = groupTrips(trips, 'month', NOW);
+    expect(months.map((x) => x.label)).toEqual(['October', 'September', 'December 2025']);
+    expect(months[0].stats).toMatchObject({ count: 5, miles: 50, cost: 5 });
+    const years = groupTrips(trips, 'year', NOW);
+    expect(years.map((x) => [x.label, x.stats.count])).toEqual([['2026', 6], ['2025', 1]]);
+  });
+
+  it('skips a trip with no start time rather than inventing a date', () => {
+    expect(groupTrips([t('x', 0)], 'day', NOW)).toEqual([]);
+  });
+
+  it('sorts newest first by start', () => {
+    expect(sortTripsNewestFirst(trips).map((x) => x.id)[0]).toBe('today2');
   });
 });

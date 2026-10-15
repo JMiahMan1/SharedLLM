@@ -581,6 +581,9 @@ apiClient.interceptors.response.use(
   },
 );
 
+/** Most trips a single request returns (geo caps it too). */
+export const TRIPS_FETCH_LIMIT = 500;
+
 export const api = {
   async login(username: string, password: string): Promise<{ api_key: string; username: string; is_admin: boolean }> {
     const resp = await apiClient.post('/api/auth/login', { username, password });
@@ -837,7 +840,9 @@ export const api = {
   async getLogs(limit = 50): Promise<LogEntry[]> {
     // Admin only: these are the whole system's logs.
     const resp = await apiClient.get(`/api/admin/logs?limit=${limit}`);
-    return resp.data;
+    // Always a list: the header and dashboard call .filter on it, and an
+    // error body ({detail: ...}) used to take the whole app down.
+    return Array.isArray(resp.data) ? resp.data : [];
   },
 
   async clearLogs(): Promise<{ status: string; message: string }> {
@@ -1103,8 +1108,11 @@ export const api = {
   // Family Circle & Vehicle Trips
   async getTrips(userId?: string): Promise<TripsResponse> {
     const resolved = resolveUserId(userId);
-    const query = resolved ? `?user_id=${encodeURIComponent(resolved)}` : '';
-    const resp = await apiClient.get(`/api/geo/trips${query}`);
+    // The whole history in one request (Wander lists it by day/week/month/
+    // year); one size everywhere so callers sharing the cache agree.
+    const params = new URLSearchParams({ limit: String(TRIPS_FETCH_LIMIT) });
+    if (resolved) params.set('user_id', resolved);
+    const resp = await apiClient.get(`/api/geo/trips?${params.toString()}`);
     return resp.data;
   },
 

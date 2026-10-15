@@ -187,3 +187,96 @@ export function previewFuelUsed(distanceMiles: number, mpg: number): number {
 export function previewCost(distanceMiles: number, mpg: number, costPerGallon: number): number {
   return Math.round(previewFuelUsed(distanceMiles, mpg) * num(costPerGallon) * 100) / 100;
 }
+/** How many trips the Wander page lists before "See all trips". */
+export const RECENT_TRIP_COUNT = 5;
+
+/** Newest first, by when the trip started. */
+export function sortTripsNewestFirst(trips: Trip[]): Trip[] {
+  return [...trips].sort((a, b) => num(b.start_time) - num(a.start_time));
+}
+
+export type TripPeriod = 'day' | 'week' | 'month' | 'year';
+
+export interface TripGroup {
+  key: string;
+  label: string;
+  trips: Trip[];
+  stats: TripStats;
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const SHORT_MONTHS = MONTHS.map((m) => m.slice(0, 3));
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/** Weeks start on Sunday, as the calendar on the phone does. */
+function startOfWeek(d: Date): Date {
+  const day = startOfDay(d);
+  day.setDate(day.getDate() - day.getDay());
+  return day;
+}
+
+function periodStart(d: Date, period: TripPeriod): Date {
+  switch (period) {
+    case 'day':
+      return startOfDay(d);
+    case 'week':
+      return startOfWeek(d);
+    case 'month':
+      return new Date(d.getFullYear(), d.getMonth(), 1);
+    case 'year':
+      return new Date(d.getFullYear(), 0, 1);
+  }
+}
+
+function periodLabel(start: Date, period: TripPeriod, now: Date): string {
+  const sameYear = start.getFullYear() === now.getFullYear();
+  const md = `${SHORT_MONTHS[start.getMonth()]} ${start.getDate()}${sameYear ? '' : `, ${start.getFullYear()}`}`;
+  switch (period) {
+    case 'day': {
+      const today = startOfDay(now).getTime();
+      const days = Math.round((today - start.getTime()) / 86_400_000);
+      if (days === 0) return 'Today';
+      if (days === 1) return 'Yesterday';
+      return `${WEEKDAYS[start.getDay()]}, ${md}`;
+    }
+    case 'week': {
+      const thisWeek = startOfWeek(now).getTime();
+      const weeks = Math.round((thisWeek - start.getTime()) / (7 * 86_400_000));
+      if (weeks === 0) return 'This week';
+      if (weeks === 1) return 'Last week';
+      return `Week of ${md}`;
+    }
+    case 'month':
+      return `${MONTHS[start.getMonth()]}${sameYear ? '' : ` ${start.getFullYear()}`}`;
+    case 'year':
+      return String(start.getFullYear());
+  }
+}
+
+/**
+ * Trips grouped by the day, week, month or year they started in (local time),
+ * newest group first, each with its own totals.
+ */
+export function groupTrips(trips: Trip[], period: TripPeriod, now: Date = new Date()): TripGroup[] {
+  const groups = new Map<number, Trip[]>();
+  for (const trip of sortTripsNewestFirst(trips)) {
+    const started = num(trip.start_time);
+    if (!started) continue;
+    const key = periodStart(new Date(started * 1000), period).getTime();
+    const list = groups.get(key);
+    if (list) list.push(trip);
+    else groups.set(key, [trip]);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => b - a)
+    .map(([key, list]) => ({
+      key: `${period}-${key}`,
+      label: periodLabel(new Date(key), period, now),
+      trips: list,
+      stats: tripStats(list),
+    }));
+}
