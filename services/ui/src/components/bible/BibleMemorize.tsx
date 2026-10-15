@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { BibleMemoryVerse, BibleRecallResult } from '../../types/api';
 import { pageStyle } from './readingPage';
+import { errorText } from '../../lib/errorText';
 
 const STAGE_LABEL: Record<string, string> = {
   read: 'Read and type',
@@ -12,12 +13,6 @@ const STAGE_LABEL: Record<string, string> = {
   first_letters: 'First letters',
   recall: 'From memory',
 };
-
-function errorText(e: unknown): string {
-  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-  if (typeof detail === 'string') return detail;
-  return e instanceof Error ? e.message : 'Something went wrong';
-}
 
 function daysUntil(day: string): number {
   const ms = new Date(`${day}T00:00:00`).getTime() - new Date(new Date().toDateString()).getTime();

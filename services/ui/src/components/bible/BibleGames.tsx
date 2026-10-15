@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { BibleGame, BibleGameInfo, BibleGameMode, BibleGameResult, BibleGameReviewItem } from '../../types/api';
 import { pageStyle } from './readingPage';
+import { errorText } from '../../lib/errorText';
 
 const ICONS: Record<BibleGameMode, typeof Gamepad2> = {
   daily: Crown,
@@ -18,12 +19,6 @@ const ICONS: Record<BibleGameMode, typeof Gamepad2> = {
 function seconds(ms: number): string {
   const s = Math.round(ms / 1000);
   return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
-}
-
-function errorText(e: unknown): string {
-  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-  if (typeof detail === 'string') return detail;
-  return e instanceof Error ? e.message : 'Something went wrong';
 }
 
 /**
