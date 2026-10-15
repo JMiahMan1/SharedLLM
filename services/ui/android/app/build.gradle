@@ -10,6 +10,10 @@ if (uiPackageJson.exists()) {
     if (parsed?.version) uiVersion = parsed.version.toString()
 }
 
+// CI run number of the APK workflow (298 and rising when this was added).
+def ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")
+def apkVersionCode = (ciRunNumber && ciRunNumber.isInteger() && ciRunNumber.toInteger() > 30) ? ciRunNumber.toInteger() : 30
+
 android {
     namespace = "com.jarvisos.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -17,12 +21,14 @@ android {
         applicationId "com.jarvisos.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // Increments for every APK install. The app only offers an APK when the
-        // server's code is strictly greater than the running build
-        // (appUpdater.ts: `remote.apk_version_code > nativeBuildNumber`), so a
-        // rebuild that only changes Java MUST bump this or the phone will never
-        // be offered it.
-        versionCode 30
+        // Must increase with every published APK: the app only offers an APK
+        // whose code is strictly greater than the running build (appUpdater.ts:
+        // `remote.apk_version_code > nativeBuildNumber`). It was hand-edited and
+        // stayed at 30 while the native code changed, so phones were never
+        // offered the new APK. CI's run number rises on every build, so it is
+        // the code; a local build gets a low fixed code and is never offered
+        // over a published release.
+        versionCode apkVersionCode
         versionName uiVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
