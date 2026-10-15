@@ -380,7 +380,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
 
   return (
     <div
-      className={`grid h-[calc(100dvh-13rem)] min-h-[440px] overflow-hidden rounded-3xl border border-white/5 bg-black/20 lg:h-[680px] lg:grid-cols-[320px_1fr] ${className}`}
+      className={`grid min-h-0 overflow-hidden rounded-3xl max-lg:flex-1 lg:min-h-[440px] border border-white/5 bg-black/20 lg:h-[680px] lg:grid-cols-[320px_1fr] ${className}`}
       data-testid="chat-panel"
     >
       {/* Inbox */}

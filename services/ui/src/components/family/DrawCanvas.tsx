@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, Eraser, Loader2, Sparkles, Wand2 } from 'lucide-react';
 import { api } from '../../services/api';
+import { canvasPoint, type Point } from './canvasPoint';
 
 const COLORS = ['#1e293b', '#dc2626', '#2563eb', '#16a34a', '#9333ea', '#ea580c'];
 const WIDTHS = [3, 6, 12];
-
-type Point = { x: number; y: number };
 
 /**
  * Family drawing canvas with a "make it way better" pass.
@@ -30,10 +29,8 @@ export default function DrawCanvas({ onSend }: { onSend?: (dataUrl: string) => v
 
   const ctx = useCallback(() => canvasRef.current?.getContext('2d') ?? null, []);
 
-  const pos = (event: React.PointerEvent<HTMLCanvasElement>): Point => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  };
+  const pos = (event: React.PointerEvent<HTMLCanvasElement>): Point =>
+    canvasPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), event.currentTarget);
 
   const start = (event: React.PointerEvent<HTMLCanvasElement>) => {
     // Record the intent to draw before touching the context: whether a 2D
@@ -55,6 +52,7 @@ export default function DrawCanvas({ onSend }: { onSend?: (dataUrl: string) => v
   const move = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const context = ctx();
     if (!context || !drawing.current || !last.current) return;
+    event.preventDefault();
     const point = pos(event);
     context.strokeStyle = color;
     context.lineWidth = width;
@@ -193,8 +191,9 @@ export default function DrawCanvas({ onSend }: { onSend?: (dataUrl: string) => v
         onPointerDown={start}
         onPointerMove={move}
         onPointerUp={end}
-        onPointerLeave={end}
-        className="w-full h-auto rounded-xl bg-white touch-none"
+        onPointerCancel={end}
+        className="w-full h-auto rounded-xl bg-white touch-none select-none"
+        style={{ touchAction: 'none' }}
       />
 
       <div className="flex flex-wrap items-center gap-2">
