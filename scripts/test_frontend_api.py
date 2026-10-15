@@ -51,9 +51,9 @@ async def test_frontend_chat_identity():
             print(f"Error: {resp.text}")
 
 async def test_frontend_logs():
-    print("\n--- Testing Frontend: GET /api/logs ---")
+    print("\n--- Testing Frontend: GET /api/admin/logs ---")
     async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{GATEWAY_URL}/api/logs?limit=5", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        resp = await client.get(f"{GATEWAY_URL}/api/admin/logs?limit=5", headers={"X-Internal-Secret": INTERNAL_SECRET})
         print(f"Status: {resp.status_code}")
         if resp.status_code == 200:
             logs = resp.json()
