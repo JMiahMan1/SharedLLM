@@ -119,3 +119,9 @@ async def test_forward_location_to_ha_calls_device_tracker_see():
     assert called_json["gps"] == [34.0522, -118.2437]
     assert called_json["battery"] == 92
     assert "dev_id" in called_json
+    # HA's device_tracker.see rejects unknown top-level keys with 400 (verified
+    # live): speed and course only travel as attributes.
+    allowed = {"dev_id", "mac", "host_name", "location_name", "gps", "gps_accuracy",
+               "battery", "attributes", "source_type", "consider_home"}
+    assert set(called_json) <= allowed, set(called_json) - allowed
+    assert called_json["attributes"] == {"speed": 1.2, "course": 90.0}

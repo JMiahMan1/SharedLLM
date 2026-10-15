@@ -107,6 +107,32 @@ describe('Wander page', () => {
     expect(screen.getAllByText('Jeremiah').length).toBeGreaterThan(0);
   });
 
+  it("shows each person's live app position on their card, not HA's stale person", async () => {
+    const fresh = Date.now() / 1000 - 30;
+    server.use(
+      http.get('/api/geo/people', () =>
+        HttpResponse.json({
+          features: [
+            { properties: { entity_id: 'person.michele', friendly_name: 'Michele', state: 'home', last_updated: '2026-10-14T18:00:00Z' } },
+          ],
+        }),
+      ),
+      http.get('/api/geo/zones', () =>
+        HttpResponse.json({
+          features: [{ properties: { entity_id: 'zone.work', friendly_name: 'Work', latitude: 33.3, longitude: -111.9, radius: 150 } }],
+        }),
+      ),
+      http.get('/api/users/location/all', () =>
+        HttpResponse.json({ michele: { latitude: 33.3001, longitude: -111.9001, accuracy: 12, timestamp: fresh, updated_at: fresh } }),
+      ),
+    );
+    renderWithProviders(<Wander />);
+    const name = await screen.findAllByText('Michele');
+    const card = name[0].closest('[role="button"]') ?? name[0].parentElement!.parentElement!;
+    await waitFor(() => expect(card.textContent).toContain('Work'));
+    expect(card.textContent).not.toContain('Home');
+  });
+
   it('labels the trip owner by name rather than a raw entity id', async () => {
     useWanderHandlers({
       trips: () =>

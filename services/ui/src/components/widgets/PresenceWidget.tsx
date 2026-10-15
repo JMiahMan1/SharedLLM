@@ -14,7 +14,7 @@ import {
   buildLiveMembers,
   type LiveFamilyMember,
 } from '../geo/liveLocations';
-import { tripsQueryKey, tripsQueryOptions } from '../../lib/wanderQueries';
+import { tripsQueryKey, tripsQueryOptions, userLocationsQuery } from '../../lib/wanderQueries';
 import {
   displayName,
   formatMiles,
@@ -75,13 +75,11 @@ const PresenceWidget = ({ settingsButton }: IWidgetProps) => {
   const { user } = useAuth();
   const currentUsername = (user?.username || '').toLowerCase() || undefined;
 
+  // The one shared location query (see wanderQueries), so this card and the
+  // Wander page always agree on where someone is.
   const locationsQuery = useQuery({
-    queryKey: ['user-locations', 'presence-widget'],
-    // Freshness is computed at fetch time so render stays pure.
-    queryFn: async () => buildLiveMembers(await api.getAllUserLocations()),
-    refetchInterval: POLL_MS,
-    staleTime: 30_000,
-    retry: false,
+    ...userLocationsQuery,
+    select: (raw) => buildLiveMembers(raw),
   });
 
   const tripsQuery = useQuery({

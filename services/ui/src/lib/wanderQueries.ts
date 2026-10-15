@@ -10,6 +10,8 @@
  * bypass that and let one account request another's trips.
  */
 
+import { api } from '../services/api';
+
 export const TRIPS_STALE_MS = 60_000;
 
 /**
@@ -34,9 +36,19 @@ export function geoZonesQueryKey() {
   return ['geo-zones'] as const;
 }
 
-export function userLocationsQueryKey(scope: string) {
-  return ['user-locations', scope] as const;
-}
+/**
+ * Everyone's latest phone fix (identity's /api/users/location/all): one query,
+ * one cache, one request every 30 s, shared by the Wander map, the member
+ * cards and the Presence widget. Each derives its own view with `select`, so
+ * they can no longer disagree about where someone is.
+ */
+export const userLocationsQuery = {
+  queryKey: ['user-locations'] as const,
+  queryFn: () => api.getAllUserLocations(),
+  refetchInterval: 30_000,
+  staleTime: 15_000,
+  retry: false,
+} as const;
 
 export const tripsQueryOptions = {
   staleTime: TRIPS_STALE_MS,
