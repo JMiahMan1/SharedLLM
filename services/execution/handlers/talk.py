@@ -85,6 +85,31 @@ def _conversation_summary(conversation: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+#: Open polls pinned above a conversation, newest first.
+MAX_POLLS = 5
+
+
+def _poll_summary(poll: dict[str, Any]) -> dict[str, Any]:
+    """A Talk poll in the shape the chat shows: each option with its votes.
+
+    Talk returns options as plain strings and the counts as
+    ``{"option-0": n, ...}`` (empty while results are hidden until you vote).
+    """
+    votes = poll.get("votes") if isinstance(poll.get("votes"), dict) else {}
+    options = [
+        {"id": index, "label": str(label), "numVotes": int(votes.get(f"option-{index}", 0) or 0)}
+        for index, label in enumerate(poll.get("options") or [])
+    ]
+    return {
+        "id": poll.get("id"),
+        "question": poll.get("question"),
+        "status": poll.get("status"),
+        "options": options,
+        "num_voters": poll.get("numVoters"),
+        "voted_self": poll.get("votedSelf") or [],
+    }
+
+
 def _participant_summary(p: dict[str, Any]) -> dict[str, Any]:
     return {
         "attendee_id": p.get("attendeeId"),
@@ -674,18 +699,38 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
         if action == "polls":
             if not req.token:
                 return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_polls")
+            # Talk has no "list a conversation's polls" call: a poll is a chat
+            # message carrying a talk-poll object, and each poll is fetched by
+            # its id. So find the poll ids in the recent history, newest first.
+            room = urllib.parse.quote(req.token)
             ok, data, message = await _talk_request_with_retry(
                 provider,
                 "GET",
-                f"/ocs/v2.php/apps/spreed/api/v1/poll/{urllib.parse.quote(req.token)}",
+                f"/ocs/v2.php/apps/spreed/api/v1/chat/{room}",
+                params={"lookIntoFuture": "0", "limit": "200"},
             )
             if not ok:
                 return ExecutionResult(status="FAILURE", message=message or "Failed to load polls.", service="talk_polls")
+            poll_ids: list[int] = []
+            for item in data or []:
+                for param in (item.get("messageParameters") or {}).values() if isinstance(item, dict) else []:
+                    if isinstance(param, dict) and param.get("type") == "talk-poll":
+                        try:
+                            pid = int(param.get("id"))
+                        except (TypeError, ValueError):
+                            continue
+                        if pid not in poll_ids:
+                            poll_ids.append(pid)
+            polls = []
+            for pid in poll_ids[:MAX_POLLS]:
+                got, poll, _why = await _talk_request_with_retry(provider, "GET", f"/ocs/v2.php/apps/spreed/api/v1/poll/{room}/{pid}")
+                if got and isinstance(poll, dict) and poll.get("status") == 0:
+                    polls.append(_poll_summary(poll))
             return ExecutionResult(
                 status="SUCCESS",
-                message="Polls loaded.",
+                message=f"{len(polls)} open poll(s).",
                 service="talk_polls",
-                detail={"polls": data or []},
+                detail={"polls": polls},
             )
 
         if action == "create_poll":
@@ -706,7 +751,7 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 status="SUCCESS",
                 message="Poll created.",
                 service="talk_create_poll",
-                detail={"poll": data or {}},
+                detail={"poll": _poll_summary(data) if isinstance(data, dict) else {}},
             )
 
         if action == "vote_poll":
@@ -716,7 +761,7 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 provider,
                 "POST",
                 f"/ocs/v2.php/apps/spreed/api/v1/poll/{urllib.parse.quote(req.token)}/{int(req.poll_id)}",
-                data={"optionId": int(req.option_id)},
+                data={"optionIds": [int(req.option_id)]},
             )
             if not ok:
                 return ExecutionResult(status="FAILURE", message=message or "Failed to vote.", service="talk_vote_poll")
@@ -724,7 +769,7 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 status="SUCCESS",
                 message="Vote recorded.",
                 service="talk_vote_poll",
-                detail={"poll": data or {}},
+                detail={"poll": _poll_summary(data) if isinstance(data, dict) else {}},
             )
 
         if action == "send":
