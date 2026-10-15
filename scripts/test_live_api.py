@@ -15,7 +15,7 @@ elif INTERNAL_SECRET:
 
 ENDPOINTS = [
     ("GET", "/health/ready", "Global Readiness"),
-    ("GET", "/api/logs?limit=5", "Live Logs (Logging Service)"),
+    ("GET", "/api/admin/logs?limit=5", "Live Logs (Logging Service)"),
     ("GET", "/api/users", "Users (Identity Service)"),
     ("GET", "/api/workspaces", "Workspaces (Workspace Runtime)"),
     ("GET", "/api/config", "Gateway Config (Gateway Service)"),
