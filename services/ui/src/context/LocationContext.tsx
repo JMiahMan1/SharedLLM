@@ -1100,8 +1100,4 @@ export function useLocation() {
   if (!ctx) throw new Error('useLocation must be used within a LocationProvider');
   return ctx;
 }
-
-export function useBackgroundLocation() {
-  return useLocation();
-}
 /* eslint-enable react-refresh/only-export-components */

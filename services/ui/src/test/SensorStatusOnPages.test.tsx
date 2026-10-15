@@ -27,7 +27,6 @@ vi.mock('../context/LocationContext', async () => {
   return {
     ...actual,
     useLocation: () => mockState,
-    useBackgroundLocation: () => mockState,
   };
 });
 

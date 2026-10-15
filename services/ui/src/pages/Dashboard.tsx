@@ -28,6 +28,8 @@ import { useRavenMissions } from '../hooks/useRavenMissions';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDebounce } from '../hooks/useDebounce';
 import HaloBanner from '../components/presence/HaloBanner';
+import LocationBackgroundNotice from '../components/location/LocationBackgroundNotice';
+import { useLocation } from '../context/LocationContext';
 import VoiceAssistantOverlay from '../components/voice/VoiceAssistantOverlay';
 import Modal from '../components/ui/Modal';
 import BentoBoxDashboard from '../components/dashboard/BentoBoxDashboard';
@@ -269,6 +271,7 @@ const Dashboard = () => {
   const [selectedService, setSelectedService] = useState<ServiceSummary | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const { user } = useAuth();
+  const { isTracking } = useLocation();
   const { trigger } = useHaptics();
   const isMobile = Capacitor.isNativePlatform();
   const isAdmin = user?.is_admin;
@@ -399,6 +402,9 @@ const Dashboard = () => {
   return (
     <div className="space-y-6 md:space-y-8 pb-12 animate-fade-up">
       <HaloBanner userId={user?.id?.toString()} />
+      {/* First thing seen on opening the app: sharing that is on but will not
+          survive the app closing is otherwise invisible until someone asks. */}
+      {isTracking && <LocationBackgroundNotice />}
 
       {/* ── Header ── */}
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
