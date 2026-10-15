@@ -653,7 +653,7 @@ def _progress_pct(record: dict) -> int:
 
 
 async def _all_progress_by_item(abs_url: str, abs_key: str) -> dict:
-    """One upstream call: GET /api/me/progress -> {libraryItemId: mediaProgress}.
+    """One upstream call: GET /api/me -> {libraryItemId: mediaProgress}.
 
     Returns {} when ABS reports an error or the call fails so callers degrade
     to 0% instead of failing the listing (BUG-13: was one call per book).

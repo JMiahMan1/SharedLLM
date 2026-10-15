@@ -333,10 +333,12 @@ async def get_book(abs_url: str, abs_api_key: str, book_id: str) -> dict:
 async def get_progress(abs_url: str, abs_api_key: str, user_id: str = "me") -> dict:
     """Get the user's playback progress for all books.
 
-    Token-scoped (``/api/me/progress``); ``user_id`` kept for call-site
-    compatibility — ABS has no /users/:id/progress route.
+    ``GET /api/me``: the user object carries every ``mediaProgress`` record.
+    There is no bare ``/api/me/progress`` (only ``/api/me/progress/{item}``);
+    it answers 404, which made every listing show 0%. Verified live against
+    ABS 2.33. ``user_id`` kept for call-site compatibility.
     """
-    return await abs_get(abs_url, abs_api_key, "/api/me/progress")
+    return await abs_get(abs_url, abs_api_key, "/api/me")
 
 
 async def get_book_progress(
