@@ -1,203 +1,134 @@
 # Pending Tasks
 
-Single source of truth for documentation tasks that are **not yet complete**.
+The one backlog for work that is **not done yet**. Verified against the code
+on 2026-10-15. When something here ships, delete it; history lives in git.
 
-Verified against the codebase on 2026-07-11. Tasks that were already done have
-been removed from their source docs; tasks whose direction was superseded by a
-working alternative (e.g. the DNS relay, implemented via `dns-sync` +
-`dns-forwarder`) are also removed.
+## Security
 
-## ⚠️ CRITICAL (open) — `/execute/*` is unauthenticated and runs as the default admin
-Found and measured 2026-10-01. Deliberately **not** fixed yet — see "Why it is deferred".
+### Identity's anonymous fallback still resolves to the admin account
 
-Any client on the LAN can drive the whole house — lights, locks, covers, climate,
-media — with **no credentials at all**, resolving as the `default` user
-(`is_admin: true`). This also means the per-entity protection shipped in
-`docs/ENTITY_PROTECTION.md` is **bypassed entirely on this path**, because
-protection is evaluated against a `user_context` that is always "default admin".
+`POST /api/resolve` (`services/identity/main.py`, the `if not user:` block
+after the device lookup) tries `user_id` → `api_key` → `rag_user` →
+`voice_id` → `device_id` and, when nothing matches, returns the system
+default user, who is an admin.
 
-Measured from the LAN against production (`http://192.168.2.205:8080`, no
-`Authorization` header at all):
+The gateway no longer relies on it for family data: every route that reads
+or writes family data goes through `_resolve_identity_from_request`, which is
+strict (a missing or unknown key is a 401), and `/execute/*` forwarding uses
+it via `_resolve_user_context`. What remains is the deliberate anonymous path
+(`_resolve_identity_allow_anonymous`, used by voice, registered devices and
+media stream URLs), which still gets an admin identity.
 
-| request | result |
-|---|---|
-| `POST /execute/entity/search` | **200** — returned **696 entities** (whole house inventory) |
-| `POST /execute/media/status` | **200** |
-| `POST /execute/ha_service` | reached **Home Assistant** and attempted a real call (`HA returned 400 … climate/set_temperature`); failed only because the entity id was fake |
+Proposed fix: when a credential was **presented but did not match**, return
+401; keep the fallback only when no credential was presented, and resolve
+anonymous callers to a non-admin identity. `/api/resolve` is shared by kiosks,
+voice and intercom, so ship it alone with a LAN repro as its test. Validate
+gateway auth with identity's strict `GET /api/internal/validate-api-key`, not
+`resolve_identity`.
 
-Externally it is contained: `https://ai.sumemail.com/execute/entity/search`
-returns **405 from Cloudflare** (the origin answers; the edge blocks it). So this
-is LAN-internal exposure, not internet-facing.
+### Other open findings from the 2026-08-22 code review
 
-### Root cause
-`POST /api/resolve` (`services/identity/main.py`) tries `user_id` → `api_key` →
-`rag_user` → `voice_id` → `device_id`, and when **none** match, **falls back to the
-system default user, which is an admin**. The gateway's `_resolve_user_context`
-(`services/gateway/main.py`, used by every `_forward_execution_request` route)
-guarded with `creds_data.get("user")`, which is truthy (`'default'`) *after* that
-fallback — so its `BUG-02` docstring claim that "unauthenticated calls must fail
-with 401" is not actually achieved. Proven directly:
+Re-checked 2026-10-15 and still present. About 80 medium/low findings from
+that review were not re-checked one by one; the full list is in git history
+(`docs/code_review_2026-08-22.md`, removed in the 2026-10-15 cleanup).
 
-```
-POST identity:8001/api/resolve {"api_key":"totally-bogus-key"}
-→ {"user":"default","is_admin":true,"api_key":"bf7ca7c0…"}
-```
+- **CORS `*`** on identity (`services/identity/main.py`, `allow_origins=["*"]`).
+- **Tracebacks to clients**: the gateway's global exception handler returns
+  `detail` and the full `traceback` in the 500 body
+  (`services/gateway/main.py`, `global_exception_handler`).
+- **Unauthenticated `POST /api/webhooks/dns-sync`** on the control plane
+  (`services/control_plane/main.py`). Nothing posts to it any more (the
+  dns-sync sidecar is gone); remove the route.
+- **Saved password in plain storage**: biometric sign-in replays
+  `jarvis_saved_password` from Capacitor Preferences
+  (`services/ui/src/pages/Login.tsx`). Store a refreshable token instead.
+- **Workspace tests run on the host**: workspace_runtime runs pytest/lint with
+  `subprocess.run(cwd=workspace)` in the container that holds the Docker
+  socket, executing repo code outside the sandbox (W1).
+- **Bare imports in execution** (`from announce_handlers import …`,
+  `from schemas import …` inside `services/execution/main.py` and some
+  handlers) that only work because of `sys.path` side effects (E3).
+- **Discovery probes inert**: `device_discovery.py` calls `.lower()` /
+  `ET.fromstring` on a `StreamReader` and an un-awaited `resp.text`; the
+  blanket `except` hides it (E4).
+- **Chat history not persisted on the queued-job path**; Tier 2 runs with an
+  empty short-term history (`services/gateway/orchestrator.py`) (G4).
+- **All inference serialized behind Raven**: the worker claims jobs one at a
+  time, so one Raven mission blocks chat jobs (G5; see ADR 010).
+- **Terminal context menu** closes ~300 ms after opening
+  (`TerminalPane.tsx`, inverted `menuLeaveRef` check) (U1).
 
-### Proposed fix
-In `/api/resolve`, when credentials were **presented but none matched**, return
-**401** instead of falling back; keep the fallback only when **no** credential was
-presented at all. That preserves kiosk / media-token / voice / intercom behaviour,
-which rely on anonymous resolution, while rejecting a bad credential outright.
+## Identity config DB — seeding and runtime integration
 
-### Why it is deferred
-`/api/resolve` is shared resolution used by media kiosks, voice, and intercom, and
-this repo has a history of auth churn (the `BUG-01` / `BUG-02` comments are
-scar tissue from the last pass). None of those callers can be exercised from the
-dev box, so shipping an app-wide auth change untested — immediately after a
-different security fix (`88ceec44`) — is how the house gets broken. It wants its
-own commit with the LAN repro above as the test.
+Source: `services/identity/seed.py`, `services/identity/models.py`, `services/config.py`.
 
-Note for whoever picks this up: **do not** validate gateway auth by calling
-`resolve_identity`. `88ceec44` hit exactly that trap. Use the strict, no-fallback
-`GET /api/internal/validate-api-key` on identity instead.
+- Seed the `.env` runtime keys that still have no GlobalSetting row, among them
+  `ALPACA_SD_URL`, `ANNOUNCEMENT_BLACKLIST` and `GATEWAY_INTERNAL_URL`.
+- Complete `resolve_runtime_config()`'s settings map for the keys it still
+  ignores, and fix the name mismatches between `seed.py` and the map
+  (`WORKSPACE_ROOT`/`workspace_root`, `MODELS_DIR`/`models_dir`,
+  `PHRASEBOOK_PATH`/`phrasebook_path`).
+- Keep first-run seeding non-destructive and test resolution against a live
+  container.
 
-## Identity Config DB — seeding & runtime integration
-Source: `services/identity/seed.py`, `services/identity/models.py`, `services/config.py`
+## Logging settings are ignored
 
-- Complete `seed.py` with all `.env` runtime keys that should persist to GlobalSettings table:
-  - Missing seeds: `ALPACA_SD_URL`, `WORKSPACE_ROOT`, `WORKSPACE_REGISTRY_PATH`, `WORKSPACE_DATABASE_URL`, `VOLUME_MANIFEST_PATH`, `VOLUME_BACKUP_ROOT`, `GIT_WEBHOOK_SECRET`, `ANNOUNCEMENT_BLACKLIST`, `LOCAL_NOTES_ROOT`, `FAST_PATH_THRESHOLD`, `MODELS_DIR`, `TEMP_MEDIA_DIR`, `SCRIPTS_DIR`, `LEGACY_ENV_PATH`, `COMPOSE_PROJECT_DIR`, `GATEWAY_INTERNAL_URL`, `LLAMA_SERVER_PROXY_URL`
-- Fix key name mismatches between seed.py and settings_map: `WORKSPACE_ROOT` vs `workspace_root`, `MODELS_DIR` vs `models_dir`, `PHRASEBOOK_PATH` vs `phrasebook_path`
-- Complete `resolve_runtime_config()` settings_map in `services/config.py` with all missing entries:
-  - Missing map keys: `MA_URL`, `MA_TOKEN`, `MODELS_DIR`/`models_dir`, `PHRASEBOOK_PATH`/`phrasebook_path`, `EXTRA_INDEX_URL`, `ALPACA_SD_URL`, `WORKSPACE_*`, `VOLUME_*`, `GIT_WEBHOOK_SECRET`, `ANNOUNCEMENT_BLACKLIST`, `LOCAL_NOTES_ROOT`, `FAST_PATH_THRESHOLD`, `TEMP_MEDIA_DIR`, `SCRIPTS_DIR`, `LEGACY_ENV_PATH`, `COMPOSE_PROJECT_DIR`, `GATEWAY_INTERNAL_URL`, `LLAMA_SERVER_PROXY_URL`
-- Verify first-run seeding (non-destructive — existing settings must not be overwritten)
-- Test runtime config resolution against live container
+`services/logging/main.py` imports `LOG_RETENTION_DAYS` / `LOG_MAX_ENTRIES` by
+value before `resolve_runtime_config()` runs, so the `log_retention_days` /
+`log_max_entries` settings never take effect (defaults 30 days / 10000 always
+apply). Read them from `services.config` at use time.
 
-## Artifact Framework (`services/storage`) — not implemented
-Source: `services/storage/ARTIFACT_IMPLEMENTATION_PLAN.md` (design spec: `ARTIFACTS.md`)
+## Artifact framework (`services/storage`) — not started
 
-- `services/storage/requirements.txt`: add `sqlmodel`, `python-multipart`.
-- `services/storage/config.py` (currently an empty stub): expose `ARTIFACTS_ROOT`,
-  `ARTIFACT_LOCAL_QUOTA_BYTES`, etc.
-- `services/storage/database.py` (new): `create_engine("sqlite:///{ARTIFACTS_ROOT}/artifacts.db")`.
-- `services/storage/models.py`: add Pydantic + SQLModel artifact models.
-- `docker-compose.yml` storage service (~line 328): add volume `storage_artifacts:/artifacts`.
-- `services/identity/models.py` `DEFAULT_GLOBAL_SETTINGS`: add artifact-related settings.
-- `services/storage/main.py`: import db init; call in `lifespan`; start purge loop.
-- `services/storage/providers_impl/local.py`: `LocalStorageProvider` implementation.
-- `services/storage/providers.py` `build_provider`: add `if config.kind == "local": ...`.
-- `services/storage/artifacts.py` (new): business logic.
-- `services/storage/main.py`: artifact endpoints.
-- Signed-URL helper: `make_artifact_token` / `verify_artifact_token` (HMAC w/ `INTERNAL_SECRET` or `FERNET_KEY`, ~15 min TTL).
-- Range helper for streaming (parse `Range`, seek, `Content-Range`, `206`).
-- `GET /storage/usage` (current user), `GET /storage/usage/{user}` (admin), plus gateway proxies under `/api/storage/usage*`, `/api/storage/quota/{user}`.
-- `services/gateway/main.py` `DELETE /api/workspaces/{id}`: clean up artifacts before deleting.
-- Execution helper `create_artifact(...)` (HTTP to storage `/artifacts`).
-- Wire TTS first (`services/execution/main.py:1075`), then image (`services/gateway/tool_registry.py` alpaca) and video.
-- Return `artifact_id` + serve URL alongside existing responses.
-- `services/ui/src/services/api.ts`: add artifact + usage methods (see `ARTIFACTS.md §9`).
-- `services/ui/src/pages/Storage.tsx` (user): progress bar, by-kind, recent, ≥90% banner.
-- `services/ui/src/pages/admin/SystemStorage.tsx` (admin): per-user table + quota editor + disk stats.
-- `services/ui/src/pages/Artifacts.tsx` (global library): virtualized list, range audio.
-- Per-workspace Artifacts tab in the workspace view.
-- `pytest` (`@pytest.mark.local_only`): local provider rw, `check-fit` low-free simulation.
-- `Vitest`: storage-usage render, artifact library, fit/warning banner.
-- `git push origin microservices` → confirm CI green (`gh run list --branch=microservices`).
-- `./scripts/deploy_remote.sh jeremiah@192.168.2.205`.
-- Live verification: upload TTS artifact → stream → fill to >90% → confirm warn → exceed.
+Design: `services/storage/ARTIFACTS.md`; build plan:
+`services/storage/ARTIFACT_IMPLEMENTATION_PLAN.md`. None of it exists in
+`services/storage/main.py` yet: artifact models and database, local provider,
+signed URLs with range streaming, usage/quota endpoints and gateway proxies,
+TTS/image/video wiring, and the Storage / Artifacts UI pages.
 
-## UI Stabilization (`services/ui`) — open items
-Source: superseded plan doc removed 2026-09-21; items still open
+## Raven capability gaps
 
-- Enhance E2E Playwright test coverage.
-- Monitor GHA pipelines after push.
+- No browser automation and no screenshot feedback, so Raven cannot test UIs.
+- No multi-agent delegation; one model instance does all the work.
+- CI generation depends on GitHub credentials being present.
+- No dependency-install awareness; missing packages are found by failing.
+- Loop detection escalates but does not diagnose.
+- No shared library/template reuse across workspaces.
 
-## Raven Capability Gaps
-Source: `docs/RAVEN_CAPABILITY_GAP_ANALYSIS.md`, `docs/RAVEN_AUDIT_BLUEPRINT.md`, `docs/raven_learning.md`
+## Media player
 
-- No native browser automation tool — Raven can't test web UIs interactively
-- No screenshot/visual feedback loop — can't verify UI state or visual rendering
-- No multi-agent delegation — all work done by single LLM instance
-- CI workflow generation conditional on GitHub credentials — no automated validation without CI
-- No explicit dependency-install awareness — must discover and install deps manually
-- Loop detection escalates but doesn't auto-diagnose — Raven still needs to figure out fixes
-- No cross-workspace shared library/template reuse — each mission starts from scratch
-
-## Open items found during the 2026-09-21 bug sweep
-
-### Mobile OTA / app updates
-- Live server metadata and bundle are still out of sync until the next deploy
-  (`/api/app-updates/version` advertised `c2946120` while `bundle.zip` contained
-  `2c8dc477`). Redeploy so the two converge; the gateway now derives the
-  advertised SHA from the bundle, so this should not recur.
-- `services/ui/android/app/src/main/assets/public/bundle.zip` ships a full copy
-  of the web bundle *inside* the APK's own assets. Harmless but roughly doubles
-  APK size — exclude it from `npx cap sync`.
-
-### Media player
 - Selecting a remote Music Assistant speaker (`ma:` target) still calls
-  `maPlayer.connect()`, which starts the in-browser Sendspin audio player purely
-  to send a JSON-RPC command. Remote speakers should be driven without the
-  browser becoming a player; the MA logic belongs behind
-  `services/execution/handlers/mass_client.py`, not a new gateway endpoint.
-- The device picker highlights "Web Player" based on `!selectedTarget` rather
-  than `localMode`, so it looks active when no device has been chosen yet.
+  `maPlayer.connect()`, starting the in-browser Sendspin player just to send a
+  JSON-RPC command. Remote speakers should be driven without the browser
+  becoming a player, through `services/execution/handlers/mass_client.py`.
+- The device picker highlights "Web Player" from `!selectedTarget` rather than
+  `localMode`.
+- Background playback stops when the app is swiped away from recents (the
+  WebView is destroyed). Surviving that needs a native audio player.
+- The remaining phases of `docs/MEDIA_OVERHAUL.md`.
 
-### Voice
-- `POST /execute/voice/command` (`services/execution/main.py`) falls off the end
-  of the function when a transcript matches neither the light nor the media
-  keyword lists, returning `null` to the caller instead of a FAILURE result.
+## Voice
 
-### Frontend typing
-- ~~`services/ui/src/ma-stream-test.ts` still has ~24 TypeScript strictness
-  errors~~ **resolved**: the dev-only harness and its `e2e/ma-stream.spec.ts`
-  were deleted (with the config entry) and **all pre-existing `tsc` errors are
-  now fixed** — `npx tsc -b` is clean as of `2b6a3552`.
-- ~~Playwright could not even collect the suite~~ **resolved**: the suite is
-  split into hermetic and live projects and module-load throws were fixed
-  (`d1a693b4`, `0d7126c2`).
-- ~~`QuickNotesWidget` computes an `error` state that is never set —~~ fixed:
-  the widget sets and renders the error message (`QuickNotesWidget.tsx`).
+- `POST /execute/voice/command` (`services/execution/main.py`) returns `null`
+  when a transcript matches neither the light nor the media keywords, instead
+  of a FAILURE result.
 
-### Test suite
-Of the 13 pre-existing failures found in this sweep, 12 are fixed (see the
-`fix(tests)` commit). One remains:
+## Mobile app
 
-- `test/unit/test_gateway_auth.py::test_gateway_extracts_bearer_token` passes on
-  its own and when `test/` runs alone, but fails in a whole-suite run: the
-  gateway never calls `/api/resolve`, so the captured body is None. Some earlier
-  module changes the chat handler's branch (several gateway tests inject a
-  mocked `intent_engine` into `sys.modules` at module scope and never restore
-  it, which is the most likely candidate). Not run by any workflow that
-  triggers on this branch — `python-tests.yml` is limited to `main` /
-  `annoucements` and to `app/**` + `test/**` paths.
+- `services/ui/android/app/src/main/assets/public/bundle.zip` ships a full
+  copy of the web bundle inside the APK. Harmless, but it roughly doubles the
+  APK; exclude it from `npx cap sync`.
+- Health: no background step sync yet (`docs/HEALTH_STEPS.md`).
 
-## Added 2026-09-24 (v1.4.9) — historical
+## Family hub
 
-- **Notes:** the editor now saves with the `write` action (full replace);
-  `append` is quick-capture only. See `docs/NOTES.md`.
-- **Themes:** themes are Jarvis-wide; per-widget theme pickers were removed.
-  See `docs/THEMES.md`.
-- **Health/steps:** per-user step goal endpoints added; the Android widget and
-  dashboard now show only real derived metrics. Open gap: no background step
-  sync service (see `docs/HEALTH_STEPS.md`).
-- **Wander:** live map with Places, proximity clustering, member focus,
-  accuracy/last-seen on cards. See the Geo update section.
+- Calls: media (audio/video in-app) needs a Talk client library or LiveKit,
+  and a reachable STUN/TURN server off the LAN.
+- Drawing: multi-user live drawing on one board.
+- Arcade: phases 2-5 of `docs/ARCADE_INTEGRATION.md`.
 
-## Family hub roadmap — status
+## Tests
 
-- **Phase 1 — goals + achievements: SHIPPED** (engine, endpoints, Wander panel).
-- **Phase 1a — Talk depth: SHIPPED** — reactions (`183d2757`) and polls
-  (`3a021061`), surfaced in `ChatPanel` via Talk's own APIs.
-- **Phase 2 — opt-in activity sharing: SHIPPED** — Identity rows + geo/achievement
-  enforcement, `ActivitySharingPanel` in Settings, tests. See
-  `docs/ACHIEVEMENTS.md`.
-- **Remaining:** chat envelope + activity cards and encouragement references;
-  Skylight star grants; games over a Talk bot; Excalidraw canvas with
-  Raven/Alpaca "make it way better"; calls (Talk signalling + TURN, LiveKit
-  fallback); music + recipes; arcade feature slice (alpaca prerequisite is
-  already satisfied — `GET /api/games` + `/api/games/<slug>` exist and are
-  regression-tested — see `docs/ARCADE_INTEGRATION.md`).
-- **Device ledger** shipped (`StepLedger.java` + backfill); remaining gap is
-  true background sync (foreground service/WorkManager) — see
-  `docs/HEALTH_STEPS.md`.
-
+- `test/unit/test_gateway_auth.py::test_gateway_extracts_bearer_token` passes
+  alone but fails in a whole-suite run: several gateway tests inject a mocked
+  `intent_engine` into `sys.modules` at module scope and never restore it.

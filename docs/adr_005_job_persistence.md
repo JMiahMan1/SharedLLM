@@ -2,7 +2,12 @@
 
 ## Status
 
-Proposed
+Implemented, differently from this proposal (reviewed 2026-10-15). Jobs live
+in the Redis-backed `InferenceJobQueue` (`services/gateway/messaging.py`), and
+`AgentLoop` checkpoints mission state to Redis every iteration
+(`_save_checkpoint`) and restores it on resume (see
+`services/gateway/state_machine.py`), so a restarted mission continues instead
+of starting from iteration 0.
 
 ## Context
 

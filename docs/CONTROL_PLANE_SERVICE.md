@@ -4,7 +4,19 @@ Docker orchestration and management service for the SharedLLM stack.
 
 ## Overview
 
-The Control Plane (`sharedllm_control_plane`) is a FastAPI service on port **8008** that provides Docker API access for managing the SharedLLM container stack. It serves as the operational interface for container lifecycle management, health monitoring, image update detection, and remote command execution.
+The Control Plane (`sharedllm_control_plane`) is a FastAPI service on port **8008** (reached through Caddy's `:8008` site and `/control_plane*`) that provides Docker API access for managing the SharedLLM container stack: container lifecycle, health, image update detection, remote command execution, and two background jobs (below).
+
+## Background jobs
+
+Two daemon threads start with the service:
+
+- **Sandbox reaper** — every `SANDBOX_REAP_INTERVAL` seconds (default 3600)
+  removes orphaned Raven sandbox containers whose workspace no longer exists.
+- **OSRM map updater** — every `OSRM_MAP_CHECK_INTERVAL` seconds (default
+  3600) asks geo which regions are needed (`GET /map/regions`), extends the
+  map build (`services/control_plane/osrm_map.py`, GitHub Actions
+  `osrm-map.yml`) and redeploys `osrm` / `osrm-foot` when a newer build has
+  finished.
 
 ## Docker Integration
 
@@ -33,7 +45,6 @@ All management endpoints require the `X-Internal-Secret` header. The secret is r
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/containers` | Internal Secret | List all `sharedllm_` containers with status, uptime, health, image, exit code, restart count |
-| `GET` | `/api/containers/{service_name}` | Internal Secret | Get detailed info for a specific service. Supports base name (`gateway`), full name (`sharedllm_gateway_1`), or partial match |
 | `DELETE` | `/api/containers/{service_name}` | Internal Secret | Remove a **stopped** container. Returns 409 if running |
 
 ### Service Restart
@@ -58,7 +69,7 @@ On failure: new container is torn down, backup is restored and started.
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/health` | Internal Secret | Aggregated health of all services — returns totals (running/stopped/unhealthy), per-service details, and control plane uptime |
-| `GET` | `/api/status/{service_name}` | Internal Secret | Status of a single service (same detail as `/api/containers/{service_name}`) |
+| `GET` | `/api/status/{service_name}` | Internal Secret | Detailed status of one service. Accepts a base name (`gateway`), full name (`sharedllm_gateway`), or partial match |
 
 ### Update Detection
 
@@ -97,6 +108,12 @@ Request body: `{ "command": "ping -c 1 sharedllm_gateway" }`
 
 Returns: exit code and combined stdout/stderr output.
 
+### Webhook (legacy)
+
+`POST /api/webhooks/dns-sync` only logs the event. Nothing posts to it since
+the dns-sync sidecar was retired, and it is unauthenticated — slated for
+removal (`docs/PENDING_TASKS.md`).
+
 ## Container Name Resolution
 
 The `_resolve_container()` helper tries three strategies in order:
@@ -116,7 +133,8 @@ Environment variables (from `docker-compose.yml`):
 | `DOCKER_HOST` | Docker socket path (default: `unix:///var/run/docker.sock`) |
 | `GHCR_TOKEN` | GitHub PAT with `packages:read` scope (for update checks) |
 | `GITHUB_TOKEN` | Fallback GitHub PAT (same as GHCR_TOKEN if GHCR_TOKEN unset) |
-| `IDENTITY_SVC_URL` | Identity service URL (for GHCR token resolution) |
+| `IDENTITY_SVC_URL` | Identity service URL (`${BRIDGE_IDENTITY_SVC_URL}`; GHCR token resolution) |
+| `SANDBOX_REAP_INTERVAL`, `OSRM_MAP_CHECK_INTERVAL` | Background job intervals (seconds) |
 | `GIT_SHA`, `BUILD_DATE`, `SERVICE_NAME` | Build metadata (set via Docker build args) |
 
 ## Dependencies
@@ -129,12 +147,12 @@ Environment variables (from `docker-compose.yml`):
 ## Deployment
 
 - **Image:** `ghcr.io/jmiahman1/sharedllm-control_plane:latest`
-- **Ports:** 8008 (exposed)
+- **Ports:** 8008 inside the bridge; published to the host by Caddy
 - **Restart policy:** `always`
 - **User:** `PUID:PGID` (defaults 1000:1000)
 - **Group:** `DOCKER_GID` (default 999) for Docker socket access
 - **Volumes:** Docker socket, `/etc/localtime` (ro)
-- **Dns:** `172.26.0.10` (dns-sync), `192.168.1.1` (upstream)
+- **DNS:** `172.26.0.254` (the DNS service, `docs/DNS_SERVICE.md`)
 - **Depends on:** None explicitly (Docker socket is always available)
 
 The Control Plane is depended on by the Gateway service via `CONTROL_PLANE_URL` environment variable.

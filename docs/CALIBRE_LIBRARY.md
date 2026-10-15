@@ -21,7 +21,7 @@ services/rag                       hybrid BM25 + vector search
 ## How it plugs in
 
 `StorageProvider` (`services/storage/providers.py`) declares three abstract methods, and the storage
-service names each collection `f"{provider.kind}_files"` (`services/storage/main.py:138`). Adding a
+service names each collection `f"{provider.kind}_files"` (`services/storage/main.py`, `collection_name = f"{req.provider.kind}_files"`). Adding a
 provider kind therefore routes it into its own RAG collection with **no change to `services/rag`**.
 
 | Piece | Location |
@@ -56,7 +56,7 @@ curl -X POST https://<host>/api/storage/index \
 
 The crawl runs in the background and returns `202 ACCEPTED`. Chunk metadata carries `title`,
 `author`, `calibre_id`, `tags`, `series`, `chapter` and `chapter_ordinal`, so a search hit renders in
-Raven's prompt as ` (Source: The Faithful Promiser, 31st Day.)`.
+Raven's prompt as `(Source: The Faithful Promiser, 31st Day.)`, appended after the text.
 
 ## Why sections, not chunks
 
@@ -101,7 +101,7 @@ BibleVersion + BibleVerse + StudyNote rows in bible.db
 |---|---|---|
 | `StorageProvider.get_bytes(path)` | `services/storage/providers.py` | `get_content` decodes bytes as text, so a PDF or EPUB comes back as a string of replacement characters rather than an error — anything reading it then works from confident mojibake. `get_bytes` returns the real bytes, and returns `None` for "this provider cannot give you bytes", which is a different answer from "the file was empty" |
 | `NextcloudStorageProvider.get_bytes` | `services/storage/providers_impl/nextcloud.py` | `NextCloudClient.get_file_bytes`, whose own docstring warns about `get_file_content` |
-| `CalibreStorageProvider.get_bytes` | returns `None` | The Calibre provider is an **index**, not a file server. Declining is correct, and `test_a_provider_that_cannot_give_bytes_declines_instead_of_guessing` pins it |
+| `CalibreStorageProvider.get_bytes` | `services/storage/providers_impl/calibre.py` | Returns the shelf entry's extracted text as UTF-8 bytes (the entry *is* a `.txt` document), so `/providers/fetch` works for callers like Raven's `fetch_text`; a book with no extracted text (PDF-only) returns `None`, keeping the honest "cannot read as bytes" refusal |
 | `ProviderFetchRequest` | `services/storage/models.py` | `provider`, `path`, `max_bytes` |
 | `POST /providers/fetch` | `services/storage/main.py` | Returns `{"status":"SUCCESS","path","name","size","content_b64"}`, guarded by `X-Internal-Secret` |
 
@@ -119,7 +119,7 @@ different fixes:
 | **502** | `get_bytes` returned `None`. Names the path and lists all three causes: missing file, wrong credentials, provider cannot return binary |
 | **422** | `max_bytes <= 0` — a ceiling of zero is a mistake, not a request for nothing |
 
-### Configuration
+### Bible shelf configuration
 
 `calibre_library_path` is **the same setting** as the RAG index uses. A server
 already indexing books for search gets Bible imports for free from the same

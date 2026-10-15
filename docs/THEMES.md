@@ -115,12 +115,13 @@ against the contract below and writes a real `.pack.json` into
 - **free of `<text>` and `font-family`** — the UI ships Google Fonts only and the Android
   widget receives colours alone, so a glyph falls back to whatever the render host has.
 
-`clearSiteTheme()` (`siteTheme.ts:191-251`) **hardcodes the name of every CSS variable it
-removes**. A new `--site-*` var must be added there or it leaks across a clear; that is
-exactly what `siteTheme.test.ts:93-98` guards.
+`clearSiteTheme()` (`siteTheme.ts`) **hardcodes the name of every CSS variable it
+removes**. A new `--site-*` var must be added there or it leaks across a clear.
+`siteTheme.test.ts` ("clearSiteTheme removes dynamic vars") only spot-checks one variable
+and the active marker, so it will not catch a newly forgotten var.
 
 Android is a **separate surface**: the native widget receives `themeAccent` / `themeAccentText`
-as colours only (`HealthActivityWidget.tsx:112-121` → `HealthWidget.java`). Generated images
+as colours only (`HealthActivityWidget.tsx`, `themeAccent` / `themeAccentText` → `HealthWidget.java`). Generated images
 do not reach it unless that config contract is extended.
 
 ## Tests

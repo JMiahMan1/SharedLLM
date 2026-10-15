@@ -37,8 +37,8 @@ service.
 - Implemented in `services/shared/media_token.py` (HMAC-SHA256,
   `MEDIA_TOKEN_SECRET` or `INTERNAL_SECRET` fallback, TTL 3600s).
 - **Device-facing TTL (2026-09-27):** `DEVICE_TOKEN_TTL_SECONDS = 43200` (12h)
-  is used by `media_file_url` (8888) and `abs_client.get_stream_url`
-  (gateway ABS stream) because HA/Cast/Roku fetch those URLs for hours with no
+  is used by `media_file_url` (8888) and `abs_client.get_session_track_url`
+  (gateway ABS session stream) because HA/Cast/Roku fetch those URLs for hours with no
   `?mt=` refresh path — §7.4's "refresh 5 min before expiry" only applies to
   the UI. Verification is TTL-agnostic (checks `exp` only), so no verify site
   changed; the default UI TTL stays 3600s.
@@ -326,7 +326,7 @@ Source: Home Assistant core `dev` branch, integration lives IN HA core at
   to its own values at module import) got 401/503 whenever an
   earlier-alphabetical file (e.g. `test_ma_jsonrpc_allowlist.py`) imported the
   app first — full-suite order dependence, not a product bug.
-  `tests/conftest_media.py` now **force-sets** both values (it loads before
+  `services/gateway/tests/conftest_media.py` now **force-sets** both values (it loads before
   every module in the directory), so config can only ever freeze the gateway
   test values. Prefer forcing over `setdefault` here.
 
@@ -334,7 +334,7 @@ Source: Home Assistant core `dev` branch, integration lives IN HA core at
 
 Any gateway test that mocks `get_http_client()` (or `shared_http_client()`)
 and counts/queues `post` side effects must ignore the request-logging
-middleware: `emit_log` (`gateway/main.py:995`) posts every REQUEST/RESPONSE
+middleware: `emit_log` (`services/gateway/main.py`) posts every REQUEST/RESPONSE
 log line to `{LOGGING_SVC}/log` through the same client, with exceptions
 swallowed. Those calls consume `side_effect` lists and inflate call counts
 (observed: real call + 2 log emits = 3). Filter doubles by URL (e.g. count
@@ -447,9 +447,9 @@ every route below).
 - **The legacy item stream route is gone.**
   `GET /api/items/:id/stream?format=mp4` → **404 for both books and
   podcasts**. The old gateway `stream_audiobookshelf` endpoint and
-  `abs_client.get_stream_url` book flow therefore 404 live — book playback
-  was NOT switched to the session flow in BUG-26 (see book-HLS caveat
-  below); that path is a separate bug (surfaced to user, 2026-09-28).
+  `abs_client.get_stream_url` book flow 404'd live. Books moved to the
+  session flow in BUG-33 (below) and the legacy route and helper were
+  deleted.
 - Podcast library search matches via `GET /api/libraries/{id}/search?q=…`
   (param is `q`, not `search`); its `episodes` section returns *podcast*
   items matching the title, wrapped in `libraryItem`.
@@ -511,44 +511,3 @@ Live probe of a book (item `510e38dd-3196-4755-8a9b-7c81208c373b`, "God's Smuggl
   but the playlist **never** appears (404 for a full 120s poll): a podcast
   session is only playable with an episode id, which is exactly what BUG-26
   fixed.
-
-## Skylight chore completions: timed instances need `instance_time` (2026-10-05)
-
-Cross-checked against two community references — `joshuaswarren/pyskylight`
-(`client.py`) and `chrischall/skylight-mcp` (`src/tools/chores.ts`) — then
-verified live from inside the execution container.
-
-**Contract** (both references agree):
-
-- `PUT /api/frames/{frame}/chores/{series}/completions` — the path takes the
-  numeric series id, not the instance id.
-- Body: `{status: "complete" | "pending", instance_date: "YYYY-MM-DD", instance_time: "HH:MM"}`.
-  `status` is `complete`/`pending` (not `completed`).
-- `instance_date` is **date-only**. For a time-of-day routine (recurrence set
-  with `BYHOUR`, e.g. `RRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=20`) the time must
-  go in its own `instance_time` field — omitting it fails with
-  **422 `{"errors":{"instance_time":["can't be blank"]}}`**.
-- `category_id` must be omitted for a normally-assigned chore (422 "must be
-  blank" otherwise); it is only for up-for-grabs chores.
-- Our bodies also carry an extra `id` field (the two references omit it); the
-  API tolerates it (live 200) and it is kept deliberately.
-
-**Instance id shapes** returned by `GET /chores?after=&before=`:
-
-- plain occurrence: `{series}-{YYYY}-{MM}-{DD}` (e.g. `52409380-2026-10-04`)
-- timed routine occurrence: `{series}-{YYYY}-{MM}-{DD}-{HHMM}` (e.g.
-  `46464093-2026-10-05-2000`, "Brush Teeth" at 20:00)
-
-**The bug this replaces:** `_skylight_chore_ids` split the id naively and
-returned `instance_date="2026-10-05-2000"` with no `instance_time`. Live probe
-2026-10-05 (pending→pending no-op, state verified unchanged afterwards):
-
-- old body → 422 `instance_time can't be blank` → execution maps non-2xx to
-  `None` → route returns `{"status":"FAILURE","message":"Failed to uncomplete chore"}`
-- corrected body (`instance_date="2026-10-05"`, `instance_time="20:00"`) →
-  **200 with the updated chore JSON**
-
-Implementation: `_skylight_chore_ids` in `services/execution/main.py` now
-returns `(series, date, "HH:MM" | None)` via a strict regex; the complete and
-uncomplete routes add `instance_time` only when the id carried one. Exact-body
-tests live in `services/execution/tests/test_skylight_proxy.py`.

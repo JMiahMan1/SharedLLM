@@ -1,204 +1,101 @@
 # SharedLLM Configuration
 
-## Configuration Architecture
+## The model
 
-SharedLLM uses a **three-layer configuration model**:
+1. **Secrets** (`.env` only): `INTERNAL_SECRET` (service-to-service auth) and
+   `FERNET_KEY` (encrypts stored credentials). Required at import time
+   (`services/config.py`); a service refuses to start without them. They are
+   never stored in the database, code, tests or docs.
+2. **Bootstrap** (`.env`): `NETWORK_MODE` and the network-scoped service URLs
+   (below), so a service can reach Identity at all.
+3. **Runtime** (Identity GlobalSettings): everything else. Each service calls
+   `resolve_runtime_config()` from its FastAPI `lifespan` at startup, which
+   reads `GET {IDENTITY_SVC_URL}/api/settings` and fills the module-level
+   variables in `services/config.py`. Settings are edited in Admin > Settings.
 
-1. **Special Variables** (`.env` file): `INTERNAL_SECRET` and `FERNET_KEY` are required at startup for authentication/encryption. Validated at import time.
-2. **Bootstrap Variables** (`.env` file): `IDENTITY_SVC_URL` is read to contact Identity service (defaults to `http://identity:8001`).
-3. **Runtime Phase** (Identity service): All other configuration values are fetched from Identity service via `resolve_runtime_config()` at service startup.
+`.env` is **seed-only**: on a fresh install `services/identity/seed.py` turns
+its values into GlobalSetting rows once; after that the database wins. The
+deploy merge (`scripts/merge_env.py`) only appends keys the server's `.env`
+lacks, so a value set on the server is never reverted by a deploy.
 
-**.env is seed-only.** It is never consulted for runtime values after the service has started. Special variables may be updated in `.env` if changed via the Identity UI.
+## Network-scoped service URLs
 
-## How It Works
+Execution runs on the host network, everything else on the bridge, so every
+service URL exists twice: `BRIDGE_<NAME>_SVC_URL` (Docker names, e.g.
+`http://rag:8004`) and `HOST_<NAME>_SVC_URL` (`http://127.0.0.1:8004`, through
+Caddy). Each container sets `NETWORK_MODE` (`bridge` default, `host` for
+execution) and `_net_url()` reads only `{NETWORK_MODE}_{NAME}_SVC_URL`.
 
-### Bootstrap Variables (from `.env`)
+Identity stores the same pairs as settings (`bridge_rag_svc_url`,
+`host_rag_svc_url`, …); `resolve_runtime_config()` reads the one for its own
+network, and the gateway orchestrator prefers the scoped key over the plain
+legacy `rag_svc_url` (which is a bridge address and must not be used from the
+host network).
 
-| Variable | Description |
-| ----------- | ------------- |
-| `INTERNAL_SECRET` | Service-to-service authentication token (required) |
-| `IDENTITY_SVC_URL` | Identity service URL (defaults to `http://identity:8001`) |
+Names: `IDENTITY`, `EXECUTION`, `RAG`, `STORAGE`, `LOGGING`,
+`WORKSPACE_RUNTIME`, `GEO`, `TELEMETRY`, `BIBLE`, plus `SEARXNG_URL`.
 
-### Runtime Variables (from Identity Settings)
+## Runtime settings (Identity → `services/config.py`)
 
-All other configuration is stored in the Identity service's database and fetched at startup:
+| Setting key | Variable | What |
+|---|---|---|
+| `llm_local_url` | `OLLAMA_URL` | Local inference server |
+| `{mode}_execution_svc_url`, `{mode}_rag_svc_url`, `{mode}_storage_svc_url`, `{mode}_logging_svc_url`, `{mode}_workspace_runtime_svc_url`, `{mode}_bible_svc_url`, `{mode}_searxng_url` | `*_SVC_URL`, `SEARXNG_URL` | Network-scoped URLs |
+| `geo_svc_url`, `control_plane_url` | `GEO_SVC_URL`, `CONTROL_PLANE_URL` | |
+| `ha_url`, `ha_token` | `HA_URL`, `HA_TOKEN` | Home Assistant |
+| `nextcloud_url`, `nextcloud_user`, `nextcloud_pass` | `NEXTCLOUD_*` | System Nextcloud account |
+| `git_url`, `git_user`, `git_token` | `GIT_*` | System git identity |
+| `audiobookshelf_url`, `audiobookshelf_user`, `audiobookshelf_pass` | `AUDIOBOOKSHELF_*` | |
+| `assistant_model`, `coding_model`, `librarian_model`, `default_model` | `*_MODEL` | Model roles |
+| `embedding_model`, `fast_path_threshold` | | Fast-path router |
+| `default_tts_voice`, `temp_media_dir` | | TTS |
+| `mass_config_entry_id` | | Music Assistant config entry |
+| `blb_base_url`, `bible_devotional_dir`, `bible_import_dir`, `bible_provider_cache`, `bible_provider_call_budget`, `calibre_library_path` | | Bible and Calibre |
+| `log_retention_days`, `log_max_entries`, `rag_retention_days` | | Retention (30 d, 10000 entries by default) |
+| `raven_max_total_seconds`, `raven_iteration_timeout`, `raven_heartbeat_interval`, `raven_hung_threshold`, `raven_error_threshold`, `raven_check_interval` | | Raven limits (1800 s, 600 s, 30 s, 600 s, 5, 300 s) |
+| `workspace_root`, `workspace_runtime_root` | | Workspaces |
+| `upstream_dns`, `dns_poll_interval` | | DNS |
+| `execution_external_host` | | Host used in links to execution media |
 
-| Setting Key | Config Variable | Description |
-| ------------- | --------------- | ------------- |
-| `fernet_key` | `FERNET_KEY` | Encryption key for stored credentials |
-| `llm_local_url` | `OLLAMA_URL` | Ollama inference server URL |
-| `execution_svc_url` | `EXECUTION_SVC_URL` | Execution bridge URL |
-| `rag_svc_url` | `RAG_SVC_URL` | RAG/ChromaDB service URL |
-| `storage_svc_url` | `STORAGE_SVC_URL` | Storage service URL |
-| `logging_svc_url` | `LOGGING_SVC_URL` | Logging service URL |
-| `workspace_runtime_svc_url` | `WORKSPACE_RUNTIME_SVC_URL` | Workspace runtime URL |
-| `control_plane_url` | `CONTROL_PLANE_URL` | Docker control plane service |
-| `searxng_url` | `SEARXNG_URL` | Web search engine URL |
-| `ha_url` | `HA_URL` | Home Assistant URL |
-| `ha_token` | `HA_TOKEN` | Home Assistant long-lived token |
-| `nextcloud_url` | `NEXTCLOUD_URL` | Nextcloud instance URL |
-| `nextcloud_user` | `NEXTCLOUD_USER` | Nextcloud username |
-| `nextcloud_pass` | `NEXTCLOUD_PASS` | Nextcloud password |
-| `git_url` | `GIT_URL` | Git remote URL |
-| `git_user` | `GIT_USER` | Git username |
-| `git_token` | `GIT_TOKEN` | Git personal access token |
-| `redis_url` | `REDIS_URL` | Redis connection string |
-| `assistant_model` | `ASSISTANT_MODEL` | General assistant model |
-| `coding_model` | `CODING_MODEL` | Code/coding model |
-| `librarian_model` | `LIBRARIAN_MODEL` | Document/knowledge model |
-| `default_tts_voice` | `DEFAULT_TTS_VOICE` | Default TTS voice |
-| `mass_config_entry_id` | `MASS_CONFIG_ENTRY_ID` | Music Assistant config entry |
-| `embedding_model` | `EMBEDDING_MODEL` | Embedding model name |
-| `fast_path_threshold` | `FAST_PATH_THRESHOLD` | Semantic router confidence |
-| `execution_external_host` | `EXECUTION_EXTERNAL_HOST` | External host for execution |
+Feature settings read directly from Identity by the service that uses them
+(not through `resolve_runtime_config`) include `dns_mappings`,
+`dns_failover_enabled`, `dns_health_ports` (`docs/DNS_SERVICE.md`) and
+`raven_max_iterations` (default 60).
 
-### Constants (hardcoded defaults)
+`REDIS_URL` is environment-only (it differs between bridge and host).
 
-These are not configurable via Identity; they are container/install paths:
+**Not here:** Music Assistant and per-service logins are per-user credentials
+in Identity, with admin grants for sharing — see `docs/PER_USER_CREDENTIALS.md`.
 
-| Variable | Default | Description |
-| ----------- | --------- | ------------- |
-| `MODELS_DIR` | `/app/models` | Kokoro TTS models directory |
-| `TEMP_MEDIA_DIR` | `/tmp/sharedllm_media` | Temp media directory |
-| `WORKSPACE_ROOT` | `/workspaces` | Workspace root |
-| `CHROMA_PERSIST_DIR` | `/data/chroma_db` | ChromaDB storage |
+## Paths and stores
 
-### Special Variables (Required at Bootstrap)
+| Variable | Default | Where |
+|---|---|---|
+| `RAG_DB_PATH` | `/data/rag.db` | RAG's SQLite + sqlite-vec store (`services/rag/db.py`) |
+| `IDENTITY_DATABASE_URL` | `sqlite:////data/identity.db` | Identity |
+| `BIBLE_DATABASE_URL` | `sqlite:////data/bible.db` | Bible |
+| `WORKSPACE_DATABASE_URL` | `sqlite:////data/workspace_runtime.db` | Workspace runtime |
+| `MODELS_DIR` | `/workspaces/models` (execution, compose) | Kokoro TTS models |
 
-These variables are used for authentication/encryption and must be set in `.env`:
+## Adding a setting
 
-| Variable | Description |
-| ----------- | ------------- |
-| `INTERNAL_SECRET` | Service-to-service authentication token (required) |
-| `FERNET_KEY` | Encryption key for stored credentials (required) |
+1. Add the variable to `services/config.py` with a safe default (or none, if
+   an unset value must be visible as "not configured").
+2. Add it to `resolve_runtime_config()`'s `settings_map`.
+3. Seed it in `services/identity/models.py` / `seed.py` so it appears in
+   Admin > Settings.
 
-If either is missing, the service refuses to start with a fatal error.
+Never add a new runtime value to `.env`, and never put a secret value in code,
+tests or docs; tests read `INTERNAL_SECRET` from the environment.
 
-If these values are changed via the Identity UI, the `.env` file is automatically updated to match.
+## Testing with seeded values
 
-### Required Variables (Bootstrap)
-
-| Variable | Description |
-| ----------- | ------------- |
-| `IDENTITY_SVC_URL` | Identity service URL (defaults to `http://identity:8001`) |
-
-If `IDENTITY_SVC_URL` is missing, the service uses the default value.
-
-### Runtime Variables (Optional)
-
-All other configuration is stored in the Identity service's database and fetched at startup:
-
-| Setting Key | Config Variable | Description |
-| ------------- | --------------- | ------------- |
-| `llm_local_url` | `OLLAMA_URL` | Ollama inference server URL |
-| `execution_svc_url` | `EXECUTION_SVC_URL` | Execution bridge URL |
-| `rag_svc_url` | `RAG_SVC_URL` | RAG/ChromaDB service URL |
-| `storage_svc_url` | `STORAGE_SVC_URL` | Storage service URL |
-| `logging_svc_url` | `LOGGING_SVC_URL` | Logging service URL |
-| `workspace_runtime_svc_url` | `WORKSPACE_RUNTIME_SVC_URL` | Workspace runtime URL |
-| `control_plane_url` | `CONTROL_PLANE_URL` | Docker control plane service |
-| `searxng_url` | `SEARXNG_URL` | Web search engine URL |
-| `ha_url` | `HA_URL` | Home Assistant URL |
-| `ha_token` | `HA_TOKEN` | Home Assistant long-lived token |
-| `nextcloud_url` | `NEXTCLOUD_URL` | Nextcloud instance URL |
-| `nextcloud_user` | `NEXTCLOUD_USER` | Nextcloud username |
-| `nextcloud_pass` | `NEXTCLOUD_PASS` | Nextcloud password |
-| `git_url` | `GIT_URL` | Git remote URL |
-| `git_user` | `GIT_USER` | Git username |
-| `git_token` | `GIT_TOKEN` | Git personal access token |
-| `redis_url` | `REDIS_URL` | Redis connection string (infrastructure-dependent) |
-| `assistant_model` | `ASSISTANT_MODEL` | General assistant model |
-| `coding_model` | `CODING_MODEL` | Code/coding model |
-| `librarian_model` | `LIBRARIAN_MODEL` | Document/knowledge model |
-| `default_tts_voice` | `DEFAULT_TTS_VOICE` | Default TTS voice |
-| `mass_config_entry_id` | `MASS_CONFIG_ENTRY_ID` | Music Assistant config entry |
-| `embedding_model` | `EMBEDDING_MODEL` | Embedding model name |
-| `fast_path_threshold` | `FAST_PATH_THRESHOLD` | Semantic router confidence |
-| `execution_external_host` | `EXECUTION_EXTERNAL_HOST` | External host for execution |
-| `log_retention_days` | `LOG_RETENTION_DAYS` | Log retention in days |
-| `log_max_entries` | `LOG_MAX_ENTRIES` | Maximum log entries |
-| `raven_max_total_seconds` | `RAVEN_MAX_TOTAL_SECONDS` | Raven total timeout |
-| `raven_iteration_timeout` | `RAVEN_ITERATION_TIMEOUT` | Raven iteration timeout |
-| `raven_heartbeat_interval` | `RAVEN_HEARTBEAT_INTERVAL` | Raven heartbeat interval |
-| `raven_hung_threshold` | `RAVEN_HUNG_THRESHOLD` | Raven hung threshold |
-| `raven_error_threshold` | `RAVEN_ERROR_THRESHOLD` | Raven error threshold |
-| `raven_check_interval` | `RAVEN_CHECK_INTERVAL` | Raven check interval |
-| `default_model` | `DEFAULT_MODEL` | Default LLM model |
-| `workspace_root` | `WORKSPACE_ROOT` | Workspace root path |
-| `workspace_runtime_root` | `WORKSPACE_RUNTIME_ROOT` | Workspace runtime root |
-| `audiobookshelf_url` | `AUDIOBOOKSHELF_URL` | Audiobookshelf URL |
-| `audiobookshelf_user` | `AUDIOBOOKSHELF_USER` | Audiobookshelf username |
-| `audiobookshelf_pass` | `AUDIOBOOKSHELF_PASS` | Audiobookshelf password |
-| `upstream_dns` | `UPSTREAM_DNS` | Upstream DNS server |
-| `dns_poll_interval` | `DNS_POLL_INTERVAL` | DNS poll interval |
-
-### Runtime Resolution
-
-`resolve_runtime_config()` is called at service startup. It:
-
-1. Fetches all settings from `GET {IDENTITY_SVC_URL}/api/settings`
-2. Maps each setting key to the corresponding module-level variable
-3. Performs type coercion for numeric values (int, float)
-4. Logs success or warning on failure
-
-**Runtime variables are optional.** If Identity is unavailable at startup, variables retain their empty-string or default values. Services should handle missing values gracefully at runtime.
-
-**Not in this table:** Music Assistant (`MA_URL` / `MA_TOKEN`) and Git providers are
-per-user credentials, not global settings. `.env` values seed the system default
-user once (`services/identity/seed.py`); after that every caller is served from
-Identity resolution, per user, with explicit admin grants for sharing. See
-`docs/PER_USER_CREDENTIALS.md`.
-
-### Special Variables Sync
-
-If `INTERNAL_SECRET` or `FERNET_KEY` are changed via the Identity UI, they are automatically synced to the `.env` file. This ensures all services have access to the current values.
-
-## How Services Use Config
-
-Each service imports from `services/config.py`:
-
-```python
-from config import INTERNAL_SECRET, IDENTITY_SVC_URL, resolve_runtime_config
-
-@app.on_event("startup")
-async def startup():
-    await resolve_runtime_config()
-    # Now all config variables are populated from Identity
-```
-
-## Why This Architecture?
-
-1. **Single source of truth**: Identity holds all runtime configuration
-2. **Hot-reloadable**: Settings can be changed via UI and picked up on next restart
-3. **Secure**: Secrets (tokens, passwords) are encrypted in Identity's database
-4. **Container-safe**: No need to rebuild images or restart with new env vars
-5. **Audit trail**: All config changes go through Identity's API
-
-## .env File Purpose
-
-The `.env` file exists **only for bootstrapping**:
-
-- Seeding initial `INTERNAL_SECRET`, `FERNET_KEY`, and `IDENTITY_SVC_URL`
-- Docker Compose uses it to inject these values into containers
-- Special variables may be updated if changed via Identity UI
-
-**Never add new runtime variables to `.env` for runtime configuration.** If a service needs a new setting, add it to:
-
-1. `services/config.py` (with a default value)
-2. `resolve_runtime_config()` settings map
-3. The Identity settings UI or API
-
-## Testing with Seeded Values
-
-For testing (e.g., E2E integration tests), create a `test.env` file with hardcoded values:
+E2E runs use a `test.env` (see `test.env.example`) with throwaway values,
+mounted into Identity to seed its database:
 
 ```env
-INTERNAL_SECRET=test-secret
+INTERNAL_SECRET=<any value for the test stack>
 FERNET_KEY=<generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())">
-IDENTITY_SVC_URL=http://identity:8001
-EXECUTION_SVC_URL=http://execution:8012
-HA_URL=https://ha.sumemail.com:8095
-WORKSPACE_ROOT=/workspaces
+NETWORK_MODE=bridge
+BRIDGE_IDENTITY_SVC_URL=http://identity:8001
 ```
-
-Mount this `.env` file in the Identity Service container to seed initial values into the database.

@@ -2,7 +2,13 @@
 
 ## Status
 
-Proposed
+Implemented, differently from this proposal (reviewed 2026-10-15): quarantine
+is a **workspace-wide** flag (`Workspace.quarantined` in workspace_runtime's
+database) set by `_auto_quarantine_workspace` when a file fails verification
+too often within `RAVEN_QUARANTINE_WINDOW_SECONDS`. While set, git writes to the
+workspace answer **409** ("quarantined … Admin review required"); there is no
+per-file 409. It is lifted by an admin action (the `/git/revert` path), not
+automatically.
 
 ## Context
 

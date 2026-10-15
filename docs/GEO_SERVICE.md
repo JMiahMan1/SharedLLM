@@ -2,140 +2,89 @@
 
 **Port:** 8009 · **Image:** `ghcr.io/jmiahman1/sharedllm-geo:latest` · **Code:** `services/geo/`
 
-Life360-style family location / mapping layer for the de-Googled phone stack
-(S26-Setup). A self-hosted, privacy-respecting replacement for Google Maps
-location history and Life360 sharing.
+Life360-style family location and activity layer: live positions, places,
+trips, steps, workouts, achievements and stars — self-hosted, nothing sent to
+Google.
 
-## Why this exists
+## Data sources
 
-On the Galaxy S25 de-Google setup, Google Maps (location history, place
-search, navigation) and Life360-style sharing were disabled. This service
-restores that capability without sending location to Google.
+- **Home Assistant** (`HA_URL` / `HA_TOKEN` from Identity via
+  `resolve_runtime_config`): `person` / `device_tracker` states, `zone`
+  geofences ("Places"), Recorder history for replay, `device_tracker.see` for
+  pushes. Called with the insecure pooled client (HA uses a self-signed cert).
+- **The Jarvis app**: phones post GPS to `POST /api/users/{user}/location`
+  (gateway → Identity), which stores `user_location:{user}` and forwards to
+  HA and to geo (`/people/{id}/record`). The Android app's native
+  `LocationTrackingService` keeps posting with the app closed when the user
+  allowed "Allow all the time" (see `docs/FAMILY_HUB.md`).
+- **OSRM** (`osrm` roads, `osrm-foot` paths) for map matching and ETAs, and
+  **Nominatim** for place names — both self-hosted (below). With `OSRM_URL`
+  unset or OSRM down, map matching returns nothing and raw fixes are used.
 
-## Architecture decision: OSM + MapLibre
+## Endpoints (`services/geo/main.py`; gateway proxies under `/api/geo/*`)
 
-- **OpenStreetMap (OSM)** is the map *data*. There is no serious fully-free
-  global map dataset rival (OpenHistoricalMap / OpenSeaMap are OSM forks).
-- **"Better than OSM" means a better renderer on OSM data.** The best open
-  renderer is **MapLibre GL JS** (BSD-2): vector tiles, smooth pan/zoom, 3D,
-  mobile-friendly. Raster Leaflet/OSM is inferior UX. Organic Maps / OsmAnd are
-  great offline *apps* but not embeddable web renderers like MapLibre.
-- Tile / style sources (all self-hostable or free-tier): Protomaps (PMTiles,
-  single static file, serverless — recommended), OpenMapTiles (self-host vector
-  tiles), `tile.openstreetmap.org` (raster, usage-policy limited — dev only).
+| Area | Routes |
+|---|---|
+| Health / client | `GET /health`, `GET /` (static map client) |
+| People and places | `GET /people`, `GET /zones`, `GET /people/{id}/history`, `POST /people/{id}/see` (internal secret), `POST /people/{id}/record`, `GET /closest`, `GET /people/{id}/eta`, `GET /people/{id}/telemetry`, `GET /telemetry/{id}`, `GET /android_auto` |
+| Presence alerts | `GET/PUT /presence-alerts/{viewer}` (arrive/leave notices, on by default) |
+| Trips | `GET /trips`, `GET/PATCH /trips/{id}`, `PATCH /trips/{id}/share`, `GET /trips/{id}/route`, `GET /trips/{id}/locations`, `GET /locations/suggestions` |
+| Steps and metrics | `POST/GET /steps`, `GET /steps/sources`, `GET /steps/ranges`, `GET/PUT /steps/goal`, `GET /metrics/ranges`, `GET /metrics/catalog`, `GET /events` |
+| Workouts | `GET /workouts`, `POST /workouts/start`, `GET /workouts/active`, `POST /workouts/stop`, `GET /workouts/{id}/route` |
+| Goals, achievements, stars | `GET/PUT /goals`, `GET /achievements`, `GET /points`, `GET/POST /api/geo/stars` (`docs/ACHIEVEMENTS.md`) |
+| Sharing | `GET /activity/summary`, `GET /activity/feed` (consent-gated) |
+| Trends | `GET /trends/activity` (read-only), `POST /trends/activity/analyze` (explicit opt-in, per-user lock) |
+| Vehicles | `GET/POST /vehicles`, `DELETE /vehicles/{id}`, `GET /vehicles/assigned/{user}`, `POST /vehicles/assign`, `GET /vehicle-lookup/*`, `GET /fuel-prices` |
+| Maps | `GET /map/regions` |
 
-## Backend: wrap Home Assistant (already running)
-
-Home Assistant (`https://ha.sumemail.com:8095`) already provides, for free:
-
-| HA concept | Geo use |
-|------------|---------|
-| `person` | One aggregated person from one+ device_trackers |
-| `device_tracker` | lat / lon / gps_accuracy / battery per device |
-| `zone` | geofences (home/away + custom), passive zones |
-| History / Recorder | location point history → trip replay |
-| REST `/api/states` + websocket `subscribe_entities` | live push of states |
-| `device_tracker.see` service | programmatically set a tracker from lat/lon |
-
-The HA Android companion app already pushes GPS/battery/geocode. So HA is the
-backend; this service is a thin Jarvis adapter that exposes HA states as GeoJSON
-and can accept pushes.
-
-### Why not Traccar as primary?
-Traccar (Apache-2) is the *most complete* FOSS GPS platform (geofencing,
-sharing, history, apps). It is kept as a **documented upgrade path** if HA's
-sharing/geofence UX proves insufficient — HA has a `traccar_server` integration,
-so the client can switch backends without rework. HA is preferred first because
-it is already deployed and bridges to Jarvis Execution 8003.
-
-## Endpoints (implemented in `services/geo/main.py`)
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/health` | liveness + `ha_configured` flag |
-| GET | `/people` | GeoJSON FeatureCollection of all `person` + `device_tracker` entities (HA states → points) |
-| GET | `/zones` | GeoJSON FeatureCollection of HA `zone` entities (geofences) |
-| GET | `/people/{entity_id}/history?samples=` | trip points from HA Recorder (minimal_response) for replay |
-| POST | `/people/{entity_id}/see` | push location via HA `device_tracker.see` (guarded by `X-Internal-Secret`) |
-| GET | `/locations/suggestions?lat=&lon=` | nearby named places for trip pin edits: current resolved name/address/source + candidates (HA zones containing the point, Overpass POIs within 250 m — shops/restaurants/leisure/tourism, Nominatim address components) |
-
-Trip start/end locations store `{name, latitude, longitude, address?}`. The
-coordinates and distance are locked GPS telemetry, but `PATCH /trips/{trip_id}`
-accepts `start_name` / `end_name` / `start_address` / `end_address` so a user can
-rename a pin (or pick a nearby store/restaurant/zone from `/locations/suggestions`)
-while the street address stays stored. User-picked names win on read — the
-resolver only re-derives street-level names and returns stored names unchanged
-with `source: "stored"`.
-
-Live push to the Android client is done by the client subscribing to HA
-websocket `subscribe_entities` directly; a `/stream` proxy can be added here
-later if the Gateway needs to fan out updates.
+Trip start/end locations store `{name, latitude, longitude, address?}`.
+Coordinates and distance are locked GPS telemetry, but `PATCH /trips/{id}`
+accepts `start_name` / `end_name` / `start_address` / `end_address`, so a user
+can rename a pin (or pick a nearby store/zone from `/locations/suggestions`).
+User-picked names win on read (`source: "stored"`).
 
 ## Configuration
 
-Resolves `HA_URL` / `HA_TOKEN` at boot from Identity (`resolve_runtime_config`),
-exactly like every other service — no hardcoded URLs. Calls HA with the
-insecure pooled client (`services.common.http.get_client_insecure()`) because HA
-uses a self-signed cert.
+| Setting | Source | What |
+|---|---|---|
+| `HA_URL`, `HA_TOKEN` | Identity | Home Assistant |
+| `OSRM_URL`, `OSRM_FOOT_URL` | compose env | road / foot routing |
+| `NOMINATIM_URL` | compose env | self-hosted geocoding (public Nominatim is the fallback outside the import) |
+| `FAMILY_CHAT_TOKEN` | env | room for achievement cards (silent when unset) |
+| `APP_TIMEZONE` | env | day boundaries (default `America/Phoenix`) |
 
-Registered in `config.py` as `GEO_SVC_URL` (default `http://geo:8009`),
-exposed in compose as `BRIDGE_GEO_SVC_URL`, routed via Caddy `:8009`, and added
-to the build matrix in `.github/workflows/build-images.yml`.
+Registered in `services/config.py` as `GEO_SVC_URL` (`BRIDGE_GEO_SVC_URL`),
+routed via Caddy `:8009`.
 
-## Client
+## Maps on the server (live on 205 since 2026-10-07)
 
-A self-contained MapLibre web client is served at `GET /` (file
-`services/geo/static/index.html`) — no build step, loads MapLibre GL JS from
-CDN and OSM raster tiles (no API key). It renders `/people` + `/zones`, lets
-you tap a person to replay their `/people/{id}/history` trail, and auto-refreshes
-every 15s. Open `http://<host>:8009/` in any browser (or Brave on the phone).
-It works as a PWA-style target and is the stopgap until a native Android view
-is built into the SharedLLM app. The native client would render the same
-endpoints via MapLibre (Protomaps/OSM vector tiles) and call
-`POST /people/{id}/see` for push (requires `X-Internal-Secret`).
+- `osrm` (roads, ~770 MB) and `osrm-foot` (paths, ~1.2 GB), both rebuilt by
+  GitHub Actions from `osrm/regions.txt` (`.github/workflows/osrm-map.yml`);
+  the control plane redeploys both after a build (`services/control_plane/osrm_map.py`).
+- `nominatim` (Arizona, ~10 GB on disk in `data/nominatim`, ~1.5 GB RAM). It
+  does not grow with `osrm/regions.txt`: places outside Arizona use the public
+  service. Re-importing a merged extract would cover more.
+- Leave-by reminders need the person's own events and a fresh position;
+  phones without the battery exemption or "Allow all the time" go quiet.
+
+## Clients
+
+- **In-app** (React): Leaflet maps — `components/geo/LiveFamilyMap.tsx`,
+  `MiniRouteMap.tsx`, `TripLocationsMap.tsx`. Freshness: live < 2 min, recent
+  < 15 min, last seen up to 24 h (dimmed pin); members within 60 m cluster;
+  the map starts at the home zone and auto-fits once. The UI reads positions
+  from `GET /api/users/location/all`.
+- **Standalone**: a MapLibre page at `GET /` (`services/geo/static/index.html`,
+  OSM raster tiles, no build step) for any browser on the LAN.
+
+## Why Home Assistant and not Traccar
+
+HA was already deployed and its companion app pushes GPS/battery. Traccar
+(Apache-2) stays the documented upgrade path if HA's sharing/geofence model
+proves insufficient; HA has a `traccar_server` integration, so clients would
+not need rework.
 
 ## License notes
-MapLibre GL JS: BSD-2 · OSM data: ODbL · Protomaps: see their license · HA
-core: Apache-2 · Traccar: Apache-2. All self-hostable / FOSS.
 
----
-
-## Update (2026-09-24, v1.4.9)
-
-**Client.** The in-app live map is **Leaflet** (`components/geo/LiveFamilyMap.tsx`,
-`MiniRouteMap.tsx`, `TripLocationsMap.tsx`), not MapLibre.
-
-**Live positions.** The app posts GPS to `POST /api/users/{user}/location`
-(Identity), which stores `user_location:{user}` and forwards to HA and Geo.
-The UI reads `GET /api/users/location/all` (gateway route is
-`/api/users/location/all`, deliberately not `/api/users/locations` — the
-latter is captured by `PATCH /api/users/{user_id}`).
-
-**Live map behaviour.**
-- freshness: live <2 min, recent <15 min, **last seen up to 24 h** (dimmed
-  gray pin with "last seen X" in the popup, no accuracy circle). Past 24 h the
-  member is dropped. A member with tracking off still shows their last known
-  position — Life360-style — instead of disappearing (`liveLocations.ts`)
-- the map **always has a view**: it starts at the home zone (first Place) or a
-  default US view, and only auto-fits once so 30 s polls never yank the map
-  away while the user is panning/zooming (`LiveFamilyMap.tsx`)
-- `invalidateSize()` on mount (`requestAnimationFrame`) plus a `ResizeObserver`
-  guard against blank/garbled canvases in Android WebViews where the layout
-  settles after mount
-- members within 60 m are clustered into one pin (one phone can post under two
-  keys: per-user + the legacy fallback)
-- HA zones render as "Places" geofences; `GET /api/geo/zones` is used
-- clicking a family card centres the map on that member
-- the footer count distinguishes the two states, e.g. `2 sharing location ·
-  1 last seen` or `1 last seen (sharing is off)`
-
-**Family cards** show zone, GPS accuracy, battery, in-zone chips, speed and a
-relative last-seen label (fields already returned by `GET /api/geo/people`).
-
-**Steps.** `GET /api/geo/steps` now returns the per-user goal and
-`GET/PUT /api/geo/steps/goal` manage it (see `docs/HEALTH_STEPS.md`).
-
-**Other endpoints present but undocumented in the table above:** `/record`,
-`/telemetry/{id}`, `/trips*`, `/workouts*`, `/steps*`, `/trends/activity`
-(GET = read-only) and `POST /trends/activity/analyze` (explicit opt-in, per-user
-lock), `/android_auto`, `/fuel-prices`, `/vehicle-lookup*`.
+Leaflet: BSD-2 · MapLibre GL JS: BSD-2 · OSM data: ODbL · OSRM: BSD-2 ·
+Nominatim: GPL-2 · HA core: Apache-2.

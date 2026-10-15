@@ -28,7 +28,11 @@ points are described at the bottom.
    user deletes their grant, so a re-created account starts clean.
 6. **Skylight is different on purpose.** It is a household system integration
    (one account for the whole house), so it is not part of the per-service
-   grant list. A user's own Skylight credentials still win when they set them.
+   grant list. Execution always logs in with the system default user's
+   `skylight_email` / `skylight_pass` (`_get_skylight_session`); a user's own
+   Skylight credentials are **not** used. Per user, only `skylight_enabled`
+   matters (turn the integration off for that person), and the username is
+   used to filter chores by assignee.
 
 ## What a caller sees
 

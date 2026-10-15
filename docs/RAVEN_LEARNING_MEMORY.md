@@ -1,209 +1,216 @@
-# Raven Learning Memory — Design & Operation
+# Raven — How It Works and How It Learns
 
-> How Raven "learns" from completed missions, why it is necessary, and what
-> changed so the memory is actually useful.
+> The one Raven doc: what the agent is, how a mission runs, which tools it has,
+> how it remembers what it learned, and how to teach it something new.
+> (Merged from the former `raven_learning.md`.) Function names are given
+> instead of line numbers; `grep` for them.
 
-## 1. Why a learning memory is needed
+## 1. What Raven is
 
-Raven is an **autonomous agent loop**: it receives a prompt, plans, and
-runs tool-calls (shell, file writes, `gh`, git) for minutes at a time
-with **no human in the loop**. Three properties make a persistent
-memory mandatory:
+Raven is the autonomous software-engineering agent inside SharedLLM. Given a
+mission ("build a Python CLI that…"), it plans, creates a dedicated workspace,
+writes code and tests, runs lint/test gates, commits and pushes with `gh`/git,
+and reflects on what it learned. It runs on the local model named by the
+`coding_model` setting, with **no human in the loop** once a mission starts.
 
-1. **One expensive inference path.** The local model (`ornith:35b`) is
-   the only LLM slot. A failed mission costs ~5 min of saturated
-   event-loop time. Repeating the same mistake across missions is
-   unacceptable.
-2. **Bounded context window.** A long mission's action log is
-   compressed mid-run (`_compact_conversation`). Decisions made 40
-   tool-calls ago fall out of the window unless they are persisted
-   *somewhere else*.
-3. **Autonomous = no feedback channel.** A human would say
-   "don't do that again." Raven has no such channel, so the only way
-   to "remember" a good solution or a trap is to *write it to a
-   store that the next mission reads back in*.
+## 2. Architecture
 
-Without the learning memory, every mission starts from zero: Raven
-re-derives tool invocations, re-tries broken approaches, and never
-accumulates the "how we do X here" knowledge that makes it
-reliable.
+```
+User / UI
+  │
+  ▼
+Gateway (port 11435)
+  ├── orchestrator.py        ── routing: single-turn (Librarian) vs autonomous
+  ├── intent_engine.py       ── is_raven_intent(): keyword + command verb
+  ├── agent_loop.py          ── AgentLoop(): the mission engine
+  ├── background_worker.py   ── RavenWorker: job queue, health checks, retry
+  ├── tool_registry.py       ── OpenAI-compatible tool schemas for external clients
+  ├── tool_builder.py        ── decide(): use_existing → chain → build
+  └── state_machine.py       ── checkpoint/resume
+prompts/raven_*.md           ── autonomous protocol, plan, reflection, narrator
+```
 
-## 2. The memory architecture (what exists)
+### Mission flow
 
-Raven's memory is **RAG-backed**, not a single file. There are
-three cooperating stores:
+```
+POST /api/raven/missions
+  → InferenceJobQueue (Redis, FIFO)
+  → RavenWorker._process_inference_job()   (TIER3_LOCK, see ADR 010)
+  → orchestrator.process_full_orchestration()
+    → _fetch_rag_context(): lessons, protocol curriculum, toolchain, resources
+    → AgentLoop()
+      → planning      (raven_plan_prompt)
+      → execution     (tool dispatch, loop detection, checkpoints)
+      → reflection    (raven_reflection_prompt) → _persist_learning()
+  → mission status written back to Identity
+```
+
+Mission states: `queued → executing → completed | failed | paused`. A job
+carrying `_mission_id` always runs the autonomous loop.
+
+## 3. The agent loop (`services/gateway/agent_loop.py`)
+
+| Phase | What happens |
+|---|---|
+| Workspace | `resolve_mission_workspace()` finds or creates the sandbox; maintenance tasks ("fix the errors") use the Default Workspace |
+| Model | role aliases (`coding`, `assistant`) resolved from Identity settings |
+| Planning | `raven_plan_prompt` produces a step plan |
+| Checkpoint | state restored from Redis when resuming |
+| Main loop | up to `raven_max_iterations` (default and ceiling `MAX_TOOL_ITERATIONS` = 60): infer → extract tool call(s) → execute → record |
+| Loop detection | `detect_repetitive_failure`, `detect_repetitive_action`, `detect_no_progress` escalate PROBE → REDIRECT → ABORT |
+| Reflection | `raven_reflection_prompt` produces a reusable lesson |
+| Persistence | `_persist_learning()` writes it to RAG `system_learnings` |
+
+Guards: `_normalize_tool` rejects malformed tool calls; workspace tools are
+blocked until a workspace is assigned; `should_persist_learning()` keeps
+empty or error-only results out of memory; `sanitize_for_llm` strips
+credentials before anything is fed back to the model.
+
+**Batching** is the main speed lever: Raven may emit a JSON array of tool
+calls in one turn (create workspace → `gh repo create` → write all files →
+lint → commit → push). `build_adaptive_guidance()` steers toward batching
+early and converging late.
+
+## 4. Tools
+
+**External** (`tool_registry.py`, for OpenAI-compatible clients):
+`sharedllm_gh`, `sharedllm_git`, `sharedllm_write_file`,
+`sharedllm_image_generate`, `sharedllm_image_edit`,
+`sharedllm_list_image_models`, `sharedllm_raven_mission`,
+`sharedllm_web_scraper`, `sharedllm_ocr`, `workspaceportexposerequest`,
+`sharedllm_podcast_render`, `sharedllm_speaker_identify`,
+`sharedllm_list_voices`.
+
+**Inside a mission** (the `ALLOWED_TOOLS` set in `agent_loop.py`): workspace
+file/shell/lint/search/bootstrap/create/settings/port tools,
+`GitOperationRequest`, `RavenBuildToolRequest`, `RavenRecallRequest`,
+`SystemLearningRequest`, and service tools (`HAConfigRequest`,
+`ContextSearchRequest`, `StorageIndexRequest`, `EntitySearchRequest`, …).
+
+The single-turn Librarian path dispatches through `_execute_single_tool()` and
+the `SINGLE_TURN_TOOL_ENDPOINTS` map in `orchestrator.py` (up to 3 turns);
+missions dispatch directly from the agent loop.
+
+## 5. Why a learning memory is needed
+
+1. **One expensive inference path.** A failed mission costs minutes of the
+   only local model; repeating a mistake across missions is unacceptable.
+2. **Bounded context.** Long missions are compacted mid-run
+   (`_compact_conversation`); decisions from 40 calls ago fall out unless they
+   are stored elsewhere.
+3. **No feedback channel.** Nobody tells Raven "don't do that again", so the
+   only way to remember is to write to a store the next mission reads.
+
+## 6. The memory (what exists)
 
 | Store | Where | Written by | Read by |
-|-------|-------|------------|---------|
-| `system_learnings` (RAG collection) | `rag` service (SQLite-vec) | `execution/learning` handler, called from `agent_loop._persist_learning` | `orchestrator._fetch_rag_context` on every mission |
-| Mission post-mortems (RAG) | `rag/main.py: ingest_mission`) | after each mission completes | self-repair recall |
-| In-mission compacted context | Redis checkpoint + `_compact_conversation` | during the loop | same mission (keeps recent turns verbatim, folds older into "preserved learnings") |
+|---|---|---|---|
+| `system_learnings` | RAG (sqlite-vec) | `execution/learning` handler, called from `_persist_learning` | `_fetch_rag_context` on every mission |
+| Mission history | RAG, `POST /rag/sync/missions` | after each mission | `RavenRecallRequest`, self-repair |
+| In-mission context | Redis checkpoint + `_compact_conversation` | during the loop | the same mission |
+| Workspace journal | `raven_memory.md` in each workspace | the mission itself | the next mission in that workspace |
 
-The primary "learning" path is `system_learnings`.
+### Write path
 
-### 2.1 Write path (after a mission)
+1. **Reflection**: after successful tool calls, `raven_reflection_prompt`
+   produces a `reflection_summary` — a short, reusable lesson.
+2. **Gate**: `should_persist_learning()` rejects empty, error-only and
+   incomplete results.
+3. **Persist**: `_persist_learning()` posts the reflection (or, if none, the
+   raw summary) to `execution/learning`, which stores it in `system_learnings`
+   with a stable `lesson-<sha1[:10]>` id, topic `Raven lesson: <query>` and
+   task-aware tags (`python`/`javascript`/`go`/`rust`,
+   `workspace`/`git`/`repair`/`deployment`, `learning`). Summaries are cut to
+   400 characters to fit the context budget.
 
-In `gateway/agent_loop.py`, at the end of a successful mission:
+### Read path
 
-1. **Reflection** — if the mission had successful tool calls, Raven is
-   prompted with `raven_reflection_prompt` and produces a
-   `reflection_summary`: a short, reusable *lesson* (what was
-   learned, the key command/decision, how it was verified).
-2. **Persistence gate** — `should_persist_learning(ans)` rejects
-   meaningless results (empty, pure tool errors, "Error:" strings) so
-   the model never "learns" that reading a file is a success.
-3. **Persist** — `_persist_learning(...)` POSTs to
-   `execution/learning`, which ingests into RAG
-   `collection_name: "system_learnings"` with a `topic` and `tags`.
+`_fetch_rag_context()` injects, before planning:
 
-### 2.2 Read path (start of next mission)
+- `[PROTOCOL — ALWAYS-ON CURRICULUM]` — the seeded protocol lessons, pinned.
+- `[SYSTEM_LEARNINGS — PAST LESSONS: read and APPLY these …]` — the most
+  relevant earned lessons.
+- `[WORKSPACE TOOLCHAIN]` — binaries probed from the workspace shell image
+  (`services/execution/toolchain.py`, run by **workspace_runtime** at startup,
+  synced to RAG; read back from `GET /rag/toolchain`).
+- `[NEXTCLOUD RESOURCES]` and `[HOME ASSISTANT SNAPSHOT]` — from
+  `/rag/resources/nextcloud` and `/rag/resources/ha`.
 
-`orchestrator.process_full_orchestration` → `_fetch_rag_context(query, ...)`
-searches the same collections (prioritising `system_learnings` for
-coding/sys queries) and returns retrieved hits. Those hits are
-injected into the Raven system prompt as `Retrieved Context`, so the
-model sees its own past lessons *before* it plans.
+Raven cites lessons it applies as `Apply: [id]`; applied lessons are marked so
+reuse is counted. `POST /rag/dream` consolidates the store (COMPACT oversized
+summaries, MERGE duplicates sharing a rule, PRUNE superseded lessons).
 
-This is the **Decompose → Memory → RAG → Inference → Tools →
-Update** pipeline named in `orchestrator.py`.
+## 7. Teaching it
 
-## 3. What was broken (and is now fixed)
+1. **Always-on protocol curriculum (seeded).** At RAG startup
+   `_seed_protocol_lessons()` idempotently writes the 19 `lesson-proto-*`
+   lessons (tag `protocol`): dedicated workspace, cheapest sufficient tool,
+   verification before reporting, web-search fact checks, `Apply: [id]`
+   citations, and scenario lessons (writing, programming, typesetting,
+   publishing, image editing, resource pulling).
+2. **Verified mission lessons (earned).** Simple, independently checkable
+   missions in `tests/integration/test_raven_python_basics.py` (hello CLI,
+   FizzBuzz + tests, packaged module, file-processing CLI). Each mission must
+   run its own artifact and append a dated lesson to `raven_memory.md`; the
+   test re-runs the artifact itself before it accepts the memory update, so
+   success is logged only once it is double-checked. Terse-prompt and
+   resource-pulling missions live in `test_raven_terse_prompts.py` and
+   `test_raven_web_tools_curriculum.py`.
 
-The wiring existed, but the *quality* of what was remembered made
-the memory nearly useless:
+Where to extend:
 
-- **The reflection (the actual lesson) was never persisted.** Only a
-  raw `query + actions + final answer` transcript dump was written
-  to `system_learnings`, while the real `reflection_summary` was
-  merely logged. Future missions retrieved a transcript, not a lesson.
-- **Hard-coded "repair" framing.** Every learning was tagged
-  `["raven","autonomous","repair"]` with topic `"Raven repair: …"`,
-  which mis-frames teaching/learning work and merges unrelated
-  tasks under one tag.
-- **Retrieved lessons were buried.** They arrived inside a generic
-  `"Retrieved Context:"` block mixed with HA entities and Nextcloud
-  files, so the model had no signal that these were *its own past
-  lessons to apply*.
+- `tool_builder.py` `_TOOLS` / `decide()` — teach a new capability or chain.
+- `ALLOWED_TOOLS` in `agent_loop.py` — make a tool available inside missions.
+- `SINGLE_TURN_TOOL_ENDPOINTS` in `orchestrator.py` — the Librarian path too.
+- `RAVEN_KEYWORDS` / `RAVEN_COMMAND_VERBS` in `intent_engine.py` — what
+  triggers a mission.
+- `prompts/raven_autonomous_protocol.md` — changes every future mission.
 
-### 3.1 Fixes (this change)
+Proven chains: greenfield build (create → `gh repo create` → settings → write
+× N → lint/test → add → commit → push); tool discovery via
+`RavenBuildToolRequest` (use_existing / chain / build a `tools/<slug>.py`);
+loop recovery (`RavenRecallRequest(only="failed")` → read source → web search
+→ a distinct fix → re-run).
 
-`gateway/agent_loop.py`
-- `_persist_learning(summary, reflection="")` now **persists the
-  reflection lesson** (`reflection_summary`) as the primary content,
-  falling back to the raw dump only if no reflection was produced.
-- **Task-aware tags**: `python` / `javascript` / `go` / `rust`,
-  plus `workspace` / `git` / `repair` / `deployment` derived from
-  the query, and a neutral `learning` tag instead of "repair".
-- Topic is now `"Raven lesson: <query>"` (descriptive, not
-  "repair").
-
-`gateway/orchestrator.py`
-- `_fetch_rag_context` now emits a **distinct, directive header**
-  `[SYSTEM_LEARNINGS — PAST LESSONS: read and APPLY these to avoid
-  repeating past mistakes]` when `system_learnings` hits exist, so
-  retrieved lessons are surfaced prominently rather than lost in
-  generic context.
-
-Net effect: after a successful mission Raven writes a *reusable
-lesson* it can actually find and apply next time.
-
-## 4. How the teaching curriculum exercises it
-
-The memory is only as good as the missions that populate it. Two layers
-drive it:
-
-1. **Always-on protocol curriculum (seeded, not earned).** At RAG
-   startup, `_seed_protocol_lessons()` idempotently writes
-   `lesson-proto-*` lessons (tag `protocol`) to `system_learnings`:
-   workspace acquisition, verification-before-reporting, web-search fact
-   checks, plan + `Apply: [id]` citations, and scenario lessons
-   (writing, programming, typesetting, publishing, image-editing,
-   resource pulling). The gateway pins these into every mission as the
-   `[PROTOCOL — ALWAYS-ON CURRICULUM]` block, so Raven follows the
-   conventions even when the mission prompt is terse.
-2. **Verified mission lessons (earned).** A progression of deliberately
-   simple, independently verifiable Python missions
-   (`tests/integration/test_raven_python_basics.py`):
-
-1. **T1 — hello CLI**: a runnable Python CLI printing
-   `Hello, Raven` with an optional `--name` flag.
-2. **T2 — fizzbuzz + unittest**: correct output + a passing test.
-3. **T3 — small module + pytest + requirements.txt**: importable,
-   tested, installable.
-4. **T4 — file-processing CLI**: reads a file, counts words,
-   writes a report.
-
-Each mission prompt instructs Raven to:
-- build it in the workspace,
-- **self-verify by running it**, and
-- **append a dated lesson to `raven_memory.md`** in its workspace
-  (Raven's own per-task learning journal).
-
-The test then **double-checks** success *before* trusting the memory:
-it polls for mission completion, independently runs the produced
-artifact (clone/exec), asserts the expected behaviour, and only
-*then* asserts that `raven_memory.md` was updated. This satisfies
-the rule: **"success is logged to memory only once it is
-double-checked."** Because `_persist_learning` also fires on any
-successful mission, the same verified win is simultaneously written
-to the RAG `system_learnings` store and reused by later missions.
-
-Working up T1 → T4 lets Raven accumulate a clean, verified
-lesson set (CLI structure, pytest patterns, packaging, file I/O)
-instead of lurching straight into the 3D-shooter integration test.
-
-## 5. How to verify the memory is working
+## 8. Checking that the memory works
 
 ```bash
-# 0. Protocol curriculum is seeded (should return the 13 lesson-proto-* ids):
-curl -s -X GET 'http://192.168.2.205:8004/rag/learning?tag=protocol&user_id=default' \
-  -H 'X-Internal-Secret: <from .env>' | python3 -m json.tool
+# Seeded protocol curriculum (19 lesson-proto-* ids). RAG listens on 8004.
+curl -s 'http://192.168.2.205:8004/rag/learning?tag=protocol&user_id=default' \
+  -H "X-Internal-Secret: $INTERNAL_SECRET" | python3 -m json.tool
 
-# 0b. Toolchain inventory is populated after workspace_runtime container restart:
-curl -s -X GET 'http://192.168.2.205:8004/rag/toolchain' \
-  -H 'X-Internal-Secret: <from .env>' | python3 -m json.tool
+# Toolchain inventory (populated when workspace_runtime starts):
+curl -s 'http://192.168.2.205:8004/rag/toolchain' \
+  -H "X-Internal-Secret: $INTERNAL_SECRET" | python3 -m json.tool
 
-# 1. Live Raven mission completes -> reflection persisted.
-#    Check gateway logs for the lesson text:
+# A lesson landed after a mission:
 docker logs sharedllm_gateway 2>&1 | grep "Mission reflection"
+curl -s -X POST http://192.168.2.205:8004/rag/search \
+  -H 'Content-Type: application/json' -H "X-Internal-Secret: $INTERNAL_SECRET" \
+  -d '{"collection_name":"system_learnings","query":"python cli argparse","k":5}'
 
-# 2. Confirm a learning landed in RAG system_learnings:
-curl -s -X POST http://localhost:8002/rag/search \
-  -H 'Content-Type: application/json' \
-  -H 'X-Internal-Secret: $INTERNAL_SECRET' \
-  -d '{"collection_name":"system_learnings","query":"python cli argparse","k":5}' \
-  | python3 -m json.tool
-
-# 3. The per-mission journal Raven writes:
-curl -s -X POST http://localhost:8007/files/read \
-  -H 'Content-Type: application/json' \
-  -H 'X-Internal-Secret: $INTERNAL_SECRET' \
-  -d '{"workspace_id":"<mission-workspace>","relative_path":"raven_memory.md"}'
-
-# 4. The teaching test double-checks both the artifact and the memory:
+# The teaching test checks both the artifact and the memory:
 LIVE_E2E=1 GH_TOKEN=... RAVEN_API_KEY=... \
   pytest tests/integration/test_raven_python_basics.py -v
 ```
 
-## 6. Failure modes to watch
+`$INTERNAL_SECRET` comes from the server's `.env`; never paste it into docs.
 
-- **Reflection empty** → falls back to the raw dump (still persisted,
-  just lower quality). If you see only transcripts in
-  `system_learnings`, the reflection model call is failing.
-- **`should_persist_learning` rejects** a good result → lesson not
-  stored. Loosen the gate only if verified wins are being dropped.
-- **Retrieval returns nothing** → check the RAG `system_learnings`
-  collection exists and the query is semantically close to stored
-  topics/tags.
-- **Protocol block missing from a mission** → the
-  `[PROTOCOL — ALWAYS-ON CURRICULUM]` fetch in `_fetch_rag_context`
-  failed (gateway log shows a warning); check the RAG service is up and
-  `tag=protocol` returns rows.
-- **Toolchain block empty** → the workspace_runtime container never synced
-  (`sync_toolchain_to_rag` runs at startup, best-effort); check
-  workspace_runtime logs and `/rag/toolchain`. Restart the workspace_runtime container
-  after Dockerfile changes so the probe picks up new binaries (the wsbox shell reuses the workspace_runtime image).
-- **Mission wrote to the wrong workspace / stale artifacts** → a
-  workspace bootstrap may have failed (`create_if_missing` must be
-  true for new raven-* workspaces); the mission then falls back to a
-  stale workspace id from an old lesson topic.
+## 9. Failure modes to watch
+
+- **Reflection empty** → the raw summary is stored instead (lower quality). If
+  `system_learnings` holds only transcripts, the reflection call is failing.
+- **`should_persist_learning` rejects** a good result → loosen the gate only if
+  verified wins are being dropped.
+- **Retrieval returns nothing** → check the collection exists and the query is
+  semantically close to stored topics/tags.
+- **Protocol block missing** → the curriculum fetch in `_fetch_rag_context`
+  failed (gateway warning); check RAG is up and `tag=protocol` returns rows.
+- **Toolchain block empty** → workspace_runtime never synced; check its logs
+  and `/rag/toolchain`, and restart it after shell-image changes.
+- **Wrong workspace / stale artifacts** → a workspace bootstrap failed
+  (`create_if_missing` must be true for new `raven-*` workspaces).
+
+## 10. Open gaps
+
+See "Raven capability gaps" in `docs/PENDING_TASKS.md`.

@@ -1,314 +1,71 @@
-# Migration Blueprint: Replacing ChromaDB with `sqlite-vec`
+# RAG Vector Store — SQLite + `sqlite-vec`
 
-This document defines the technical design, database schemas, code changes, and execution steps to replace ChromaDB with `sqlite-vec` in the `SharedLLM` RAG service.
+Reference for the RAG service's storage (`services/rag/db.py`,
+`services/rag/store.py`). The ChromaDB → `sqlite-vec` migration this file was
+written to plan is **done**: `services/rag/requirements.txt` has `sqlite-vec`
+and no ChromaDB. (The file name is kept because `services/rag/main.py` cites
+it.)
 
----
+## Why
 
-## 1. Architectural Context & Decision
+ChromaDB cost too much RAM on the server (Intel N150, 16 GB) for what RAG
+needs. One SQLite file with the `sqlite-vec` extension does exact KNN, keeps
+the relational data next to the vectors, and needs no separate process.
 
-* **Status:** Proposed
-* **Impacted Service:** `sharedllm_rag` (Microservice 4)
-* **Goal:** Reduce RAG container RAM usage on the remote host (Intel N150 CPU / 16GB RAM) by removing ChromaDB and replacing it with a native SQLite database powered by the `sqlite-vec` C extension.
+## Where
 
-### Memory & CPU Analysis on Host (`192.168.2.205`)
-* **ChromaDB overhead:** Currently consumes **1.355 GiB** of RAM to maintain HNSW graph indices in memory.
-* **sqlite-vec overhead:** SQLite processes vectors on-disk and in-memory using small page caches, reducing container memory usage to **~150–200 MiB** (reclaiming **~1.1 GiB** of host RAM).
-* **SIMD support:** The host's **Intel N150 CPU** has native `avx`, `avx2`, and `avx_vnni` flags. `sqlite-vec` compiles to native AVX2 instructions, accelerating vector distance calculations.
+- Database: `RAG_DB_PATH` (default `/data/rag.db`), WAL mode, 10 s busy
+  timeout.
+- Embeddings: fastembed, default model `nomic-ai/nomic-embed-text-v1.5`
+  (768-d). The **dimension is detected at startup** from the active model,
+  never hard-coded; the model name is stored in `rag_meta`, and a model change
+  triggers a full re-embed from `rag_items` (the source of truth).
 
----
+## Tables
 
-## 2. Database Schema Design
+| Table | What |
+|---|---|
+| `rag_items` | Every document: `id`, `collection_name`, `user_id`, `content`, `metadata` (JSON), timestamps, usage/applied counters, lesson columns (`rule`, `root_cause`, `outcome`, `confidence`, `supersedes`) |
+| `vec_rag_items` | `vec0(id text primary key, embedding float[dim], collection_name text, user_id text)` — one vector per item; collection and user are metadata columns so KNN is filtered in the same query |
+| `rag_fts` | FTS5 keyword index (BM25) used alongside the vector search; maintained on write, best effort |
+| `vec_store` | Plain-table vectors used only by the numpy fallback |
+| `mission_history`, `conversation_memory`, `network_topology`, `telemetry_alerts` | Relational-vector use cases (post-mortems, intercom memory, service topology, alert summaries) |
+| `rag_meta` | Key/value, e.g. the embedding model that built the index |
 
-All vector and metadata content will be stored in `/data/rag.db`.
+`id` is the vec0 **primary key**: as a plain metadata column, the
+`DELETE … WHERE id = ?` in every upsert scanned all vectors (~50 ms at 4k
+rows) and a 700-entity Home Assistant sync blocked the event loop for over a
+minute. Older tables (no metadata columns, or `id` not the key) are rebuilt in
+place at startup, keeping their vectors (`_migrate_vec_rag_items_schema`).
+
+## Search
 
 ```sql
--- 1. Standard metadata table
-CREATE TABLE IF NOT EXISTS rag_items (
-    id TEXT PRIMARY KEY,
-    collection_name TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    content TEXT NOT NULL,
-    metadata TEXT NOT NULL, -- JSON-serialized dictionary
-    created_at INTEGER NOT NULL,
-    indexed_at TEXT NOT NULL
-);
-
--- Index for relational pre-filtering
-CREATE INDEX IF NOT EXISTS idx_rag_items_lookup 
-ON rag_items(collection_name, user_id);
-
--- 2. Virtual vector table for sqlite-vec (using 384-dimensional embeddings)
-CREATE VIRTUAL TABLE vec_rag_items USING vec0(
-    id TEXT PRIMARY KEY,
-    embedding float[384]
-);
+SELECT id, distance FROM vec_rag_items
+WHERE embedding MATCH ? AND collection_name = ? AND user_id IN (?, 'default')
+ORDER BY distance LIMIT ?
 ```
 
-### Search Query Logic
-To search the database, perform a SQL join. By filtering on `collection_name` and `user_id` *first*, SQLite's B-Tree narrows down the search space before running the vector distance math:
-```sql
-SELECT 
-    i.id,
-    i.content, 
-    i.metadata, 
-    v.distance
-FROM vec_rag_items v
-JOIN rag_items i ON v.id = i.id
-WHERE i.collection_name = :collection
-  AND (i.user_id = :user_id OR i.user_id = 'default')
-ORDER BY vec_distance_cosine(v.embedding, :query_vector)
-LIMIT :k;
-```
+`'default'` rows are shared (e.g. protocol lessons). Results are joined back
+to `rag_items` for content and metadata, and combined with BM25 keyword hits
+from `rag_fts`.
 
----
+## Adapters (`store.py`)
 
-## 3. Code Modifications
+`build_adapter(conn)` returns `SqliteVecAdapter` when the extension loads, else
+`NumpyVecAdapter` (brute-force cosine over `vec_store`). `/health` reports
+which one is active (`backend: sqlite-vec | numpy`).
 
-### A. Dependency Changes
-Modify [services/rag/requirements.txt](file:///home/jeremiah/Summers%20Drive/Code/SharedLLM/services/rag/requirements.txt):
-```diff
--chromadb
--langchain-chroma
-+sqlite-vec
-```
+## Writes
 
-Remove compiler build toolchains (like cargo and building tools for HNSW C++ dependencies) from [docker/Dockerfile.base](file:///home/jeremiah/Summers%20Drive/Code/SharedLLM/docker/Dockerfile.base) to slim down base image layers.
+- Single items: `_add_item()` upserts `rag_items`, the vector and the FTS row.
+- Batch endpoints (`/rag/sync/ha`, file chunks, capabilities) embed in a
+  worker thread in cost-bounded batches (`embed_batched`) and **commit once**
+  per batch, so a large sync costs one disk sync, not one per item.
 
-### B. Database Initialization (`services/rag/db.py`)
-Create a helper to manage connection loading and concurrency configurations:
-```python
-# services/rag/db.py
-import sqlite3
-import sqlite_vec
+## Tests
 
-def get_db_connection(db_path: str = "/data/rag.db") -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    
-    # 1. Enable WAL Mode (Concurrently read while writing)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    # 2. Prevent database-locked operational errors by waiting up to 10s
-    conn.execute("PRAGMA busy_timeout=10000;")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    
-    # 3. Load sqlite-vec extension
-    conn.enable_load_extension(True)
-    sqlite_vec.load(conn)
-    conn.enable_load_extension(False)
-    
-    return conn
-```
-
-### C. RAG Adapter Pattern & Fallback Interface
-Encapsulate vector search under an Adapter interface in [services/rag/main.py](file:///home/jeremiah/Summers%20Drive/Code/SharedLLM/services/rag/main.py):
-
-```python
-from abc import ABC, abstractmethod
-
-class VectorStoreAdapter(ABC):
-    @abstractmethod
-    async def add(self, collection: str, doc_id: str, content: str, embedding: list[float], metadata: dict):
-        pass
-
-    @abstractmethod
-    async def search(self, collection: str, user_id: str, query_vector: list[float], k: int) -> list[dict]:
-        pass
-
-    @abstractmethod
-    async def delete(self, collection: str, user_id: str, filter_dict: dict = None):
-        pass
-```
-
-Implement `SqliteVecAdapter` using `db.get_db_connection()`.
-If `sqlite_vec` loading fails at startup (e.g., if Python's `sqlite3` was compiled without extension support), log a warning and fall back to standard keyword search (FTS5) or pure Python `numpy` similarity metrics.
-
----
-
-## 4. One-Time Data Migration Script
-
-Save the following as a script (e.g., `scripts/migrate_chroma_to_sqlite.py`) and execute it. It reads raw embeddings directly from ChromaDB and saves them to SQLite without re-calculating the embeddings.
-
-```python
-import json
-import sqlite3
-import chromadb
-import sqlite_vec
-from sqlite_vec import serialize_float32
-
-CHROMA_DIR = "/data/chroma_db"
-SQLITE_DB = "/data/rag.db"
-
-def migrate():
-    print("Starting migration from ChromaDB to sqlite-vec...")
-    chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
-    
-    conn = sqlite3.connect(SQLITE_DB)
-    sqlite_vec.load(conn)
-    
-    # Create Tables
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS rag_items (
-            id TEXT PRIMARY KEY,
-            collection_name TEXT NOT NULL,
-            user_id TEXT NOT NULL,
-            content TEXT NOT NULL,
-            metadata TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            indexed_at TEXT NOT NULL
-        )
-    """)
-    conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS vec_rag_items USING vec0(id TEXT PRIMARY KEY, embedding float[384])")
-    
-    collections = ["nextcloud_files", "ha_entities", "system_capabilities", "system_learnings"]
-    for name in collections:
-        try:
-            coll = chroma_client.get_collection(name=name)
-            data = coll.get(include=["documents", "metadatas", "embeddings"])
-            
-            if not data or not data["ids"]:
-                print(f"Collection '{name}' is empty. Skipping.")
-                continue
-                
-            print(f"Migrating {len(data['ids'])} items from '{name}'...")
-            for doc_id, doc, meta, emb in zip(data["ids"], data["documents"], data["metadatas"], data["embeddings"]):
-                user_id = meta.get("user_id", "default").lower()
-                created_at = meta.get("created_at", 0)
-                indexed_at = meta.get("indexed_at", "")
-                
-                conn.execute(
-                    "INSERT OR REPLACE INTO rag_items VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    [doc_id, name, user_id, doc, json.dumps(meta), created_at, indexed_at]
-                )
-                conn.execute(
-                    "INSERT OR REPLACE INTO vec_rag_items VALUES (?, ?)",
-                    [doc_id, serialize_float32(emb)]
-                )
-            conn.commit()
-            print(f"Collection '{name}' migrated successfully.")
-        except Exception as e:
-            print(f"Failed to migrate collection '{name}': {e}")
-            
-    print("Migration complete!")
-
-if __name__ == "__main__":
-    migrate()
-```
-
----
-
-## 6. Target Schema Extensions (New Relational-Vector Use Cases)
-
-By switching from ChromaDB's isolated collections to SQLite's relational database, we can store structured transactional data in standard SQL tables and join them with virtual vector tables.
-
-### A. Telemetry Semantic Summary Integration
-High-frequency, raw time-series telemetry data (e.g. power logs, battery volts) remains in the **Identity Service** for rendering graphs. To allow Jarvis to search and recall telemetry events, we will ingest **processed semantic summaries** into the RAG database:
-1. **Define a New Collection:** Register `"telemetry_alerts"` in RAG.
-2. **Generate Natural Language Alerts:**
-   When the telemetry worker in the execution or identity service detects a threshold crossing, it compiles the event into a text summary:
-   * **Alert Content:** `"Telemetry Alert: robot_vacuum battery dropped 90% in 5 minutes at 2026-07-12T19:00:00Z."`
-   * **Metadata:** `{"entity_id": "vacuum.robot", "alert_type": "battery_drain", "severity": "high", "user_id": "admin"}`
-3. **Smart Threshold Options:**
-   * **Domain & Class Engine:** Maps rules based on device type (e.g. general availability, `vacuum` battery, `switch` overload checks, and `climate` short-cycling checks).
-   * **Statistical Calibration:** Auto-configures alert thresholds to $\mu + 3\sigma$ (Mean + 3 Standard Deviations) after a 7-day calibration phase.
-   * **LLM-Guided Recommendations:** Prompts the LLM to output custom rules during enrollment (e.g., alert if power drops indicating a dry run).
-
----
-
-### B. Mission History & Error Post-Mortems (`mission_history`)
-* **Context:** The agent loop generates step traces and audit logs during autonomous coding/debugging missions.
-* **Goal:** Enable Jarvis to remember past failures and successful file edits so it can perform self-repair on similar subsequent errors.
-* **Schema Design:**
-  ```sql
-  CREATE TABLE IF NOT EXISTS mission_history (
-      mission_id TEXT PRIMARY KEY,
-      task_description TEXT NOT NULL,
-      final_status TEXT NOT NULL, -- SUCCESS, FAILURE, ABORTED
-      error_summary TEXT, -- Stack trace summary if failed
-      steps_json TEXT NOT NULL, -- JSON list of executed tools/actions
-      created_at INTEGER NOT NULL
-  );
-
-  CREATE VIRTUAL TABLE IF NOT EXISTS vec_mission_history USING vec0(
-      mission_id TEXT PRIMARY KEY,
-      embedding float[384] -- Embeds task description and error summary
-  );
-  ```
-* **Endpoint:** `POST /rag/sync/missions`
-  Pushes a completed mission's details, triggers `fastembed` for the task/error summary, and updates the SQLite tables.
-
----
-
-### C. Intercom Conversational Memory (`conversation_memory`)
-* **Context:** The household intercom system manages voice broadcasts and session logs.
-* **Goal:** Allow Jarvis to retrieve verbal reminders and household instructions (e.g. *"remember to turn off kitchen lights"*).
-* **Schema Design:**
-  ```sql
-  CREATE TABLE IF NOT EXISTS conversation_memory (
-      utterance_id TEXT PRIMARY KEY,
-      speaker TEXT NOT NULL,
-      text_content TEXT NOT NULL,
-      room_id TEXT NOT NULL,
-      timestamp INTEGER NOT NULL
-  );
-
-  CREATE VIRTUAL TABLE IF NOT EXISTS vec_conversation_memory USING vec0(
-      utterance_id TEXT PRIMARY KEY,
-      embedding float[384] -- Embeds the transcribed text_content
-  );
-  ```
-* **Endpoint:** `POST /rag/sync/conversations`
-  Ingests voice transcripts, generates text embeddings, and saves them to the SQLite tables.
-
----
-
-### D. Semantic Network Topology & Service Discovery (`network_topology`)
-* **Context:** The DNS sync and forwarder services manage container networking and service gateways.
-* **Goal:** Allow Jarvis to resolve service routes (e.g. *"what is the port of the redis database?"*) and debug communication errors.
-* **Schema Design:**
-  ```sql
-  CREATE TABLE IF NOT EXISTS network_topology (
-      container_name TEXT PRIMARY KEY,
-      ip_address TEXT NOT NULL,
-      exposed_ports TEXT NOT NULL, -- JSON-serialized list
-      discovered_services TEXT NOT NULL, -- JSON-serialized list (e.g. ['webdav'])
-      network_name TEXT NOT NULL
-  );
-
-  CREATE VIRTUAL TABLE IF NOT EXISTS vec_network_topology USING vec0(
-      container_name TEXT PRIMARY KEY,
-      embedding float[384] -- Embeds container name and service list
-  );
-  ```
-* **Endpoint:** `POST /rag/sync/network`
-  Updates container topologies during docker discovery syncs.
-
----
-
-### E. Testing Strategy for the New Data Layers
-
-We will implement unit and integration tests inside `services/rag/tests/` to guarantee correctness:
-
-#### 1. Unit Tests (`services/rag/tests/test_adapters.py`)
-* **Mock Loading:** Mock `sqlite_vec` load extension and test table initialization.
-* **Verification Checks:**
-  - Test that calling `SqliteVecAdapter.add()` inserts rows into `rag_items` and `vec_rag_items` respectively.
-  - Test that data validation constraints (e.g., matching vector dimensions of 384) are enforced, throwing errors on invalid dimensions.
-  - Verify that standard relational filters (`user_id` and `collection_name` indexes) function correctly and return matching data.
-
-#### 2. API Integration Tests (`services/rag/tests/test_api_endpoints.py`)
-* Test the sync endpoints (`/rag/sync/missions`, `/rag/sync/conversations`, `/rag/sync/network`) to ensure they handle batch payloads and return `200 OK`.
-* Test `/rag/search` when querying these collections:
-  - Assert that query "vitest import error" successfully matches a past `mission_history` post-mortem containing "vitest import failure".
-  - Assert that query "redis port" successfully matches `network_topology` service descriptions.
-  - Verify that search responses respect the user-level partitions (`user_id`).
-
----
-
-## 7. Verification Plan
-
-1. **Verify Extension Loading:**
-   Verify `sqlite-vec` can be successfully loaded in the Python context of the `sharedllm_rag` container.
-2. **Execute Local Unit Tests:**
-   Ensure `pytest services/rag/tests/` passes cleanly.
-3. **Verify Deployment & Re-sync:**
-   Confirm integration contracts between Gateway, Storage, and RAG services hold up under the new backend.
+`services/rag/tests/` — schema migrations (`test_rag_search.py`), batch
+embedding and single-commit syncs (`test_ha_sync_embed_batches.py`), cost
+budget, curriculum. The `sqlite_vec`-dependent tests skip where the extension
+is not installed.

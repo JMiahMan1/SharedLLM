@@ -24,114 +24,76 @@ This page reuses existing systems and must not grow parallel copies:
 tests assert the Talk composer is *not* present there — so a second chat UI
 cannot reappear.
 
-## Shipped
+## What is there now
 
-- **Family page with Chat / Games / Create tabs** (segmented control on
-  phones, thumb-sized targets, bottom-nav clearance).
-- **ChatPanel on Nextcloud Talk**: conversation picker (full list on desktop,
-  horizontally scrolling pills with avatars on phones), message bubbles aligned
-  by author with per-person avatar tints, Enter-to-send composer, and voice
-  messages that **preview before sending** (playback + optional caption +
-  discard) before posting into Talk.
-- **Mobile-first rules** applied: 44 px minimum targets, sticky composer with
-  `safe-area-inset-bottom`, no hover-only affordances, `text-base` inputs so
-  iOS does not zoom, single-column stacking on phones, 60 vh feed on phones /
-  560 px on desktop.
-- Games and Create tabs list the planned features honestly ("planned") rather
-  than showing dead buttons.
+- **Family page** with Chat / Games / Create tabs. On phones the chat tab is
+  exactly the screen's height and only the conversation list (or the thread)
+  scrolls; the shell sizes to the dynamic viewport (`dvh`).
+- **Chat on Nextcloud Talk** (`ChatPanel` and `components/chat/*`): avatars
+  from the family directory, conversation management (groups, participants,
+  delete), read markers, reactions and polls through Talk's own APIs, voice
+  notes with preview, attachments, a verse banner and quick-action chips, and
+  `@Jarvis` questions (answered as a Jarvis bubble via the `assistant`
+  envelope, posted with the asker's login).
+- **Phone notifications** for new family messages (no outside push service):
+  a gateway worker (`services/gateway/chat_notify.py`) reads each member's own
+  Talk list and queues one notice per new, unread message from someone else;
+  the Android app holds a long poll on
+  `GET /api/telemetry/notifications/wait` (`ChatNotifyService`) and posts
+  grouped system notifications; tapping opens `/family?chat=<token>`. A
+  person's first pass only records where conversations stand; after that a
+  brand-new conversation's first message is announced.
+- **Background media**: one app-wide player (`MediaPlayerContext`, above the
+  router) so switching tabs never stops playback, and an Android media
+  foreground service (`MediaPlaybackService`) with lock-screen controls.
+- **Location sharing that survives the app closing**: the app asks for
+  "Allow all the time" (Android only offers "While using the app" in the first
+  prompt) and the battery exemption (`LocationBackgroundNotice`, shown on the
+  Dashboard and Location panel); `BootReceiver` resumes location sharing and
+  chat notifications after a reboot or app update.
+- **Games** (trivia, memory), **Draw together**, **Make music**, **Recipes**,
+  **Voice signatures** and **Calls** — sections below. Bible games and
+  memorisation are linked from the Games tab (`/bible?tab=play`,
+  `/bible?tab=memorize`).
 
-## Next slices
+## Explicitly not doing
 
-### 1a. Talk depth — reactions and polls SHIPPED
+- No Matrix/Element/Mattermost/Rocket.Chat migration — they replace the
+  backend the family already uses and would orphan Skylight and phone clients.
+- No third-party chat-as-a-service (Stream/Sendbird) — proprietary, per-seat
+  pricing, and the data would leave the house.
+- No bespoke reactions/polls/call stack — Talk ships them.
 
-Tap any message to open a quick reaction bar (👍 ❤️ 😂 🎉 🙏 😮) and chips show
-the tallies. Runs entirely on Talk's reaction API through the gateway
-(`/api/communication/talk/reactions`, `/react`) and the execution action pair
-`reactions`/`react`, so every Talk client (phone, Skylight board) sees them too.
-Polls ride the same path: a poll button next to the composer creates one
-(Talk poll API, 2-4 options, blanks rejected before we call Nextcloud) and
-open polls render above the feed with tap-to-vote and live counts. Both
-surfaces therefore stay in sync with the Nextcloud phone app and the Skylight
-board, because Talk owns the data.
+## Mobile-first checklist (phones and tablets are primary)
 
-### 1b. Games (server first)
+- 44 px minimum targets; composer pinned with `safe-area-inset-bottom`.
+- The message list is the scroll region (`min-h-0` + `overscroll-contain`);
+  the page itself does not scroll on the chat tab.
+- `text-base` inputs (no iOS zoom), thumb-reachable send/voice buttons.
+- Conversation switching without a menu dive.
+- Every game and canvas usable with one thumb and tolerant of interruption.
+- Canvas pointer positions are scaled into the canvas grid (`canvasPoint`),
+  so strokes land under the finger whatever the displayed size.
 
-The Games tab also features the highest-rated **Alpaca arcade** titles
-(admin-curated, rating fallback): see **docs/ARCADE_INTEGRATION.md**.
-- Question sets as **data** (`services/games/*.json`, like theme packs and
-  achievement definitions) so new quizzes need no deploy:
-  Bible trivia, Bible memorisation (fill-in-the-blank with hints), family
-  trivia (generated from names/dates you already have), draw & guess.
-- One active game per Talk room, state in Redis
-  (`game:{room}:{id}`), moves posted as **typed chat messages** so everyone
-  plays in the conversation they are already in and no new client is needed.
-- Scoring feeds the points ledger; winners can earn Skylight stars.
+## Admin identity switching in chat (shipped)
 
-### 2. Create
-- **Draw together**: shared canvas (one document per drawing, stored in
-  Nextcloud), then "make it better" sends the image + prompt to Raven/Alpaca
-  for an improved version (img2img), keeping the original.
-- **Make a picture**: prompt → generated image → saved to the family folder
-  and shareable into a chat as a card.
-- **Make music**: mood/lyrics → generated track, saved and shareable.
-- **Recipes**: a sheet-like Nextcloud note (markdown checklist) editable by the
-  whole family; "what's for dinner" can be asked in chat.
+Admins may post as their own user or as the shared **Admin (default)**
+identity. The request carries only `as_user: "admin"`; the gateway honours it
+only when the authenticated caller is an admin (otherwise 403) and forwards it
+on every Talk write (send, voice, react, poll create/vote, conversation open);
+reads ignore it. The composer's "Send as: Me | Admin" selector is admin-only,
+defaults to Me and badges "Sending as Admin" while active. Tests:
+`test_talk_identity_switch.py`, `SendAsSelector.test.tsx`.
 
-### Admin identity switching in chat (shipped)
+## Typed chat envelope (shipped)
 
-Admins may post as either **their own user** or the shared **Admin (default)**
-identity — for house announcements, chores and games that should look like
-they come from the house account rather than a parent.
-
-Rules:
-
-- **Default is always the caller's own user**, and the composer shows which
-  identity is active (e.g. a "Sending as Admin" badge) so nothing is sent
-  under the wrong name by accident.
-- The choice is **per admin and per device**; turning it on never changes
-  anyone else's default.
-- **The server decides, never the client.** `401`/identity spoofing is the
-  whole point of BUG-01 (`5ca9f00a`: client-supplied `user_context` is now
-  ignored), so the request carries only a flag (`as: "admin"`); the gateway
-  honours it **only when the authenticated caller is an admin**, otherwise
-  403, and then substitutes the admin/default user before calling execution.
-  A client can never name an arbitrary user.
-- One mechanism covers the whole Talk surface — messages, voice notes,
-  reactions and polls all ride the same `user_context` resolution, so the
-  switch is implemented once in the gateway proxy rather than per feature.
-- Switching identity is visible by design (messages display the author Talk
-  attributes) and audit-logged when an admin posts as the Admin identity.
-
-**Shipped** (gateway `450ec020`): `as_user: "admin"` is accepted only when the
-resolved caller has `is_admin`, resolves user ID 1 (the same account Identity
-falls back to) and is forwarded by every Talk write (send, voice, react, poll
-create/vote, conversation open); reads deliberately ignore it. The composer
-shows a "Send as: Me | Admin" selector to admins only, defaults to Me,
-remembers the choice per device and badges "Sending as Admin" while active.
-Tests: 7 gateway (`test_talk_identity_switch.py`) + 6 UI
-(`SendAsSelector.test.tsx`).
-
-### 3. Chat depth
-- **Voice/video calls**: Nextcloud Talk WebRTC needs the Talk signalling API
-  (`/ocs/v2.php/apps/spreed/api/v4/call/*`). Phase 1 is a join button that
-  opens the Talk room; phase 2 is in-app WebRTC via a Talk client library.
-- **Typed chat envelope** (`text | activity | game | creation | system`) — **shipped**
-  (`services/ui/src/lib/chatEnvelope.ts`, `components/chat/EnvelopeBody.tsx`).
-  The wire format is a fenced `jarvis-envelope` JSON block appended to
-  human-readable text, so a bot can post a card while old clients still see
-  plain text. Malformed cards degrade to text instead of blanking a
-  conversation. `encodeEnvelope` / `decodeEnvelope` / `activityEnvelope` are the
-  whole contract; 7 unit + 6 component tests.
-  Posting side: execution action `post_card` (and gateway
-  `POST /api/communication/talk/card`) sends `card_kind`/`card_title`/
-  `card_detail`/`card_stars`/`card_stats`; an unknown kind or a missing title
-  is rejected rather than posted.
-  **Shipped:** `achievements.announce_awards()` posts an activity card when a
-  badge is first earned — after banking, so a Talk outage can never cost the
-  badge — and stays silent unless `FAMILY_CHAT_TOKEN` names a room, so a
-  deployment with no family chat never posts anything. 3 tests.
-- Kid-friendly touches: emoji reactions, big buttons, optionally read-aloud
-  replies through the existing TTS path.
+`services/ui/src/lib/chatEnvelope.ts` + `components/chat/EnvelopeBody.tsx`:
+kinds `text | activity | game | creation | system | assistant`, carried as a
+fenced `jarvis-envelope` JSON block appended to readable text, so other Talk
+clients still see plain text and malformed cards degrade to text. Posting side:
+execution action `post_card` (gateway `POST /api/communication/talk/card`).
+`achievements.announce_awards()` posts an activity card when a badge is first
+earned, only when `FAMILY_CHAT_TOKEN` names a room.
 
 ## Tests
 
@@ -139,12 +101,9 @@ Tests: 7 gateway (`test_talk_identity_switch.py`) + 6 UI
   send, voice preview → caption → send.
 - `src/pages/Communication.test.tsx` — sections render and chat is *not*
   duplicated there.
-- Target for the games slice: rules engine unit tests (deterministic question
-  selection, scoring, no repeated questions) plus a room-level integration test.
-
-See **docs/CHAT_UI_RESEARCH.md** for the build-vs-reuse research
-(reactions/polls/calls already exist in Talk; Excalidraw for drawing; LiveKit as
-the call fallback) that drives these phases.
+- `services/execution/tests/test_family_games.py` and friends for games;
+  `src/components/family/*.test.*` for drawing and music;
+  `services/gateway/tests/test_chat_notify.py` for notifications.
 
 ## Family games (shipped)
 
@@ -176,7 +135,7 @@ Deliberately dependency-free (pointer events, `toDataURL`, the `/api/images/edit
 proxy we already had). On a family device that has to download an APK to get a
 change, a new build-time dependency is a real cost, and the component's
 interface is small enough that dropping in Excalidraw later is a swap rather
-than a rewrite. Multi-user live drawing on one board is the next slice.
+than a rewrite. Multi-user live drawing on one board is in `docs/PENDING_TASKS.md`.
 
 Handling notes worth keeping: pointer capture and PNG export are feature-
 detected, and "has anyone drawn yet" tracks the first stroke rather than

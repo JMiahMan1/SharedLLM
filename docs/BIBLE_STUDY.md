@@ -1,6 +1,9 @@
-# Bible Study — implementation plan
+# Bible Study
 
-Status: **plan / research complete**. A Bible study experience built into
+Status: **built** (service `services/bible`, UI `src/pages/Bible*` and
+`src/components/bible/*`). This document began as the plan; the
+"Implementation status" section below records where the build differs, and
+`services/bible/main.py` is the authority for routes. A Bible study experience built into
 SharedLLM (desktop + Capacitor mobile from the same React code), using
 **blb.org (Blue Letter Bible) as the study-tool base** and patterned on the
 Life.Church Bible App (YouVersion): per-user usage tracking, streaks,
@@ -18,9 +21,41 @@ Phase 1; nothing else ships ahead of it.
 
 Research date: 2026-10-02. Companion docs:
 `docs/ACHIEVEMENTS.md` (points/ledger/sharing), `docs/FAMILY_HUB.md`
-(chat/games surfaces), `docs/CHAT_UI_RESEARCH.md` (envelope format),
+(chat/games surfaces and the chat envelope format),
 `docs/GEO_SERVICE.md` (endpoint patterns), `AGENTS.md` (mobile parity,
 fail-fast rules).
+
+## Implementation status (2026-10-15)
+
+What differs from the plan below:
+
+- **Routes**: reading position is `PUT /state` (not `/state/position`);
+  quizzes are games — `GET /games/{mode}`, `POST /games/{mode}/attempt`,
+  `GET /games/leaderboard`; memorization is `GET/POST /memorize`,
+  `DELETE /memorize/{verse_id}`, `GET /memorize/due`,
+  `POST /memorize/{verse_id}/recall` (no "sets"); plans also have
+  `GET /plans/{id}/family`, `POST /plans/{id}/catch-up` and day un-complete.
+- **Read-aloud** is the bible service's own narration
+  (`GET /narration`, `/narration/plan`, `/narration/chunk`, voices from
+  `GET /voices`), proxied as `/api/bible/narration*`. There is no
+  `/api/bible/speak`.
+- **Jarvis study help** streams: `POST /study/ask/stream` (the reader uses it;
+  `POST /study/ask` remains for one-shot callers), with a depth selector
+  (child/teen/adult) and reference chips.
+- **Blue Letter Bible links** use BLB's own scheme, checked for all 66 books
+  (`services/bible/blb_links.py`): `/{version}/{book}/{ch}/{v}/` and the
+  interlinear tab `t_conc_{chapter index × 1000 + verse}`, in the reader's
+  translation when BLB has it, otherwise KJV. `GET /blb/link` takes
+  `tool=interlinear` (other tool values are refused) and `version`.
+- **Local interlinear**: admins import STEPBible TAGNT (Greek NT) / TAHOT
+  (Hebrew OT) files (CC BY 4.0) in Bible admin → Interlinear
+  (`POST /admin/interlinear/upload`, coverage at `GET /admin/interlinear`);
+  `GET /interlinear?ref=` returns the words (original, transliteration,
+  gloss, Strong's, grammar) or `available: false`, and the verse sheet falls
+  back to BLB's interlinear tab. Source files:
+  <https://github.com/STEPBible/STEPBible-Data> ("Translators Amalgamated OT+NT").
+- **Share to Family chat** from the verse sheet: pick a conversation, add a
+  note, sent through the Talk send path (`src/lib/verseShare.ts`).
 
 ## Principles
 
@@ -408,7 +443,7 @@ folder as an empty library, which is worse than saying nothing.
 | Quizzes/games | Templated deterministic generators as data (`services/bible/games/*.json`, like `family_games.py`); Jarvis-generated questions only when the server can verify the answer key against the corpus | A game that hallucinates a wrong answer breaks trust; the server is the validator |
 | Memorization | SRS-lite interval ladder + recall levels, per-verse state | Simple, explainable, no ML needed |
 | Jarvis study assist | Existing gateway `/v1/chat/completions` with a study system prompt, called by the bible service. The prompt is **the passage and its `StudyNote` rows plus the reader's question** — nothing else — and the model is asked to say plainly when they do not answer. Limits refuse rather than truncate; failure is a 503 with the upstream's own words, never a placeholder answer | The answer can always be traced to something on screen, and a question the passage does not answer is a real answer rather than a hallucination. Reuses Raven/LLM plumbing, so the provider can change without a bible deploy |
-| Read-aloud | **Existing** `POST /execute/tts` (Kokoro + Edge-TTS) — `_expand_scripture_refs()` already narrates "John 3:16" as prose, and SSMD single- and double-pipe pauses give a good reading cadence. Gateway gains a thin `/api/bible/speak` proxy that returns cached WAV bytes | We own no new engine and no audio licenses; the one missing piece is a gateway route. "Play on the kitchen speaker" rides the existing `/execute/ha_service` `tts.piper` path |
+| Read-aloud | **Existing** `POST /execute/tts` (Kokoro + Edge-TTS) — `_expand_scripture_refs()` already narrates "John 3:16" as prose, and SSMD single- and double-pipe pauses give a good reading cadence. Built as the bible service's own `/narration*` routes (proxied as `/api/bible/narration*`), cached per translation+reference+voice | We own no new engine and no audio licenses; the one missing piece is a gateway route. "Play on the kitchen speaker" rides the existing `/execute/ha_service` `tts.piper` path |
 | Note storage | **Nextcloud, via the Notes handler.** The note body is written by the existing `/execute/note` handler into `Notes/{Title}.md` or `{category}/{Title}.md`; the `note` mark stores the path the handler reported (`note_path`) plus a one-line preview. If the server does not report a path, the verse is **not** marked and the reader is told, rather than being pointed at a filename the client guessed | Bible notes are visible in Notes, searchable in RAG, shareable with the family folder, and editable by hand. Two copies of a note is how they drift apart |
 | Sharing controls | Extend `ActivitySharingPanel` with a `bible` scope (4th checkbox next to `totals`/`workouts`/`achievements`) | Private by default; audience `circle`/`users` already enforced server-side |
 | Reminders | **Automation** daily job per user + **telemetry** `send_to_user` for delivery, in-app outbox as the durable record | No new notification infra; the 7pm nudge and the reminder are the same code path as every other notification |
@@ -426,7 +461,7 @@ edits to existing files (collected in §"Changes to existing code").
 
 | Service | What the Bible feature uses it for | Endpoint / mechanism | Change required |
 |---|---|---|---|
-| **gateway** (`:11435`) | Every `/api/bible/*` route as a thin BFF proxy (identity resolution → `X-Internal-Secret` → JSON pass-through); read-aloud proxy to execution TTS; share-card rendering proxy | Copy the `/api/geo/achievements` proxy pattern verbatim | New route block per endpoint; **no generic TTS proxy exists today**, add `/api/bible/speak` (§Changes) |
+| **gateway** (`:11435`) | Every `/api/bible/*` route as a thin BFF proxy (identity resolution → `X-Internal-Secret` → JSON pass-through); read-aloud proxy to execution TTS; share-card rendering proxy | Copy the `/api/geo/achievements` proxy pattern verbatim | New route block per endpoint; read-aloud via `/api/bible/narration*` |
 | **identity** (`:8001`) | User identity; `bible_svc_url`; `bible_api_key`; `blb_base_url`; reading preferences survive a service restart via `GlobalSetting`; the `bible` sharing scope; widget layout rows | `GET/PUT /api/widgets/settings`, `/api/global-settings`, `GET /api/internal/activity-sharing`, `PUT /api/users/me/activity-sharing` | New `GlobalSetting` keys; `ActivitySharingPanel` gains a 4th scope entry; identity `test_activity_sharing.py` extended for `bible` |
 | **geo** (`:8009`) | **Points currency.** Every Bible award and every game score is banked in the existing `geo:points:{user}` ledger, which already mirrors to Skylight stars. One vault, three sources (chores / fitness / Scripture) | `POST /api/geo/stars` (`reason: achievement` \| `game`) | None — call it. Skylight write-through is reported, not assumed, so a Skylight outage can't lose an award |
 | **geo achievements engine** | The *pattern* we copy for `bible_achievements.json`: derived-not-stored, `id`/`name`/`description`/`points`/`rule{type,value}`, computed from day-buckets, banked on first read so `earned_on` is stable | `services/geo/achievements.py` + `achievements.json` (19 entries, 9 rule types) | New file `services/bible/bible_achievements.json` + rules engine in the bible service |
@@ -494,7 +529,7 @@ optional plumbing — each row is a small, testable diff.
 | `services/ui/src/components/settings/ActivitySharingPanel.tsx` | 4th scope entry `{id:'bible',...}` in the literal scope array; default stays `share: ['totals']` (private by default) | extend `src/test/ActivitySharingPanel.test.tsx` + `ActivitySharingPanelNonAdmin.test.tsx` |
 | `services/ui/src/types/api.ts` | `bible` in the sharing-scope union | typecheck |
 | `services/identity/models.py` | `DEFAULT_GLOBAL_SETTINGS` seeds `bible_svc_url`, `blb_base_url`, `bible_devotional_dir`, `bible_import_dir`, `bible_provider_cache`, `bible_provider_call_budget`, and `bible_api_key` (masked in the UI); and `UserActivitySharing` scope doc includes `bible` | identity settings test |
-| `services/gateway/main.py` | `/api/bible/*` proxy block; **`/api/bible/speak`** proxy to execution `/execute/tts` (no generic TTS proxy exists today); share-card render proxy if card rasterization moves server-side | gateway proxy tests incl. upstream-error passthrough |
+| `services/gateway/main.py` | `/api/bible/*` proxy block (read-aloud via `/api/bible/narration*`); share-card render proxy if card rasterization moves server-side | gateway proxy tests incl. upstream-error passthrough |
 | `services/execution/handlers/note.py` | no change — but a new `category` value (`Bible`) is used by the reader so Bible notes land in `Bible/{Title}.md` and stay separable from other notes | existing notes tests |
 | `services/geo/achievements.py` | no change — `reason` already accepts `achievement`/`game` | existing star tests |
 | `services/ui/src/lib/chatEnvelope.ts` | new `card_kind` values (`bible_achievement`, `bible_plan_day`, `bible_verse`, `bible_quiz`) in the envelope type union; renderer already generic | envelope round-trip test |
@@ -617,7 +652,7 @@ opt-in scopes.
 | `GET /passages?ref=John 3:16&version=` | Reference resolver (also used by Jarvis chips) |
 | `GET /search?q=` | Full-text over corpus |
 | `GET/PUT /marks` | Highlights/bookmarks/notes for the caller |
-| `GET /state`, `PUT /state/position` | Last-read position, prefs |
+| `GET /state`, `PUT /state` | Last-read position, prefs |
 | `GET /stats?window=today\|week\|month\|all` | Own usage totals |
 | `GET /streaks` | App-open, reading, plan streaks |
 | `GET /plans`, `GET /plans/{id}`, `POST /plans/{id}/start` | Plan catalog + start |
@@ -625,10 +660,10 @@ opt-in scopes.
 | `GET /plans/{id}/progress` | Own progress + (family) group board |
 | `POST /plans/{id}/groups` / `…/members` | Family plan host/invite (Identity usernames) |
 | `GET /verse-of-day` | Deterministic-by-date verse + share card data |
-| `GET /memorize/sets`, `POST /memorize/sets/{id}/recall` | Memory sets + record a recall result (advances SRS) |
+| `GET/POST /memorize`, `DELETE /memorize/{verse_id}`, `POST /memorize/{verse_id}/recall` | Memory verses + record a recall result (advances SRS) |
 | `GET /memorize/due` | Due queue |
-| `GET /quizzes/{mode}` | Generate a quiz (templated; `?ref=` to scope) |
-| `POST /quizzes/attempt` | Score an attempt (server re-verifies answers against corpus) |
+| `GET /games/{mode}` | Generate a round (templated; `?ref=` to scope) |
+| `POST /games/{mode}/attempt` | Score an attempt (server re-verifies answers against corpus) |
 | `GET /games/leaderboard?scope=family\|week` | Family leaderboard |
 | `GET /achievements` | Earned + next-up with progress (`4/7 days`) |
 | `GET /activity/summary?user=&window=` | Own, or a **consented** user's, scope-filtered totals (404 otherwise) |
@@ -636,7 +671,8 @@ opt-in scopes.
 | `GET /study/notes?ref=&version=&kind=&edition=&cross_version=` | Study apparatus for a passage (commentary, footnotes, introductions), fetched on demand. `edition` picks which study Bible; `cross_version` (default off) adds notes written for other translations. Returns every installed edition and every other translation that carries notes, so the client can render the choices |
 | `GET /editions?version=` | Study Bibles installed for a translation, the default one, and which other translations carry notes |
 | `POST /study/ask` (`{question, ref, version?, edition?, cross_version?}`) | **Jarvis study answer, grounded in what is on screen.** The server assembles the prompt from the passage's verses and its own `StudyNote` rows and asks the gateway LLM; the reader's question is the only free text. Refuses rather than truncating (empty question, >2,000 characters, >150 verses, >40 notes is a 400 naming the number). Only the reading event is recorded — `kind`, `ref`, `value`, `day` — **never the question**, so a study question cannot resurface in activity. Answered in the same voice as `GET /study/notes` (400 for the reader's mistake, 503 for the operator's) and **never a placeholder answer**: an unreachable model, an HTTP error, a non-JSON body or an empty reply each raise a named 503 carrying the upstream's own words. Gateway: `POST /api/bible/study/ask`, caller-scoped (no `user_id`), 300s timeout |
-| `GET /blb/link?ref=&tool=search\|lexicon\|concordance` | Pre-built blb.org deep URL (never proxies BLB content) |
+| `GET /blb/link?ref=&tool=&version=` | Pre-built blb.org verse or interlinear URL (never proxies BLB content) |
+| `GET /interlinear?ref=` | Imported word-by-word interlinear, or `available: false` |
 | `GET /voices` | Narration voices from the execution TTS engine; an absent engine is a 503 naming `EXECUTION_SVC_URL` |
 | `GET /narration?ref=&version=&voice=` | The passage as speech, cached per translation+reference+voice. Refuses rather than truncating: over 120 verses or 12,000 characters is a 400 naming the number |
 | `GET /admin/imports` | **Admin.** Installed catalogue with `primary`/`provider`, declared providers with their configuration reason, supported kinds, the import directory, and the import history |
@@ -654,7 +690,7 @@ talks to an internal service directly):
 
 | Called service | Endpoint | Purpose |
 |---|---|---|
-| execution (TTS) | `POST /execute/tts` via gateway `/api/bible/speak` | Read-aloud WAV for a chapter/ref; response cached in `bible:tts:*` |
+| execution (TTS) | via the bible service's `/narration*`, gateway `/api/bible/narration*` | Read-aloud for a chapter/ref, cached per translation+reference+voice |
 | execution (TTS) | `GET /execute/tts/voices` | Voice picker in reader settings; empty/unavailable engine → visible state |
 | execution (HA) | `POST /execute/ha_service` (`tts.piper`) | "Play on the kitchen speaker" while the family cooks |
 | execution (notes) | `/execute/note` via gateway `/api/communication/notes/*` | Promote a highlight/Jarvis answer to a Nextcloud note (`Bible/{Title}.md`) |
@@ -823,7 +859,7 @@ of Phase 1 explicitly rather than being quietly dropped.
 
 | Must-have (Bible App parity) | How we meet it | Phase |
 |---|---|---|
-| **Opens where you left off** — cold start lands on the last verse you read | `last_read {book,chapter,verse}` in `UserBibleState`; `/state/position` saved on debounced scroll; "Continue reading" is the Read landing card and the default route for `/bible` | 1 |
+| **Opens where you left off** — cold start lands on the last verse you read | `last_read {book,chapter,verse}` in `UserBibleState`; `PUT /state` saved on debounced scroll; "Continue reading" is the Read landing card and the default route for `/bible` | 1 |
 | **Text you can actually read** — font size, line height, serif/sans, dark & light | `font_scale`, `line_height`, `theme` persisted per user; typographic scale tuned for long-form (≈65ch measure, 1.6 leading, verse numbers de-emphasized) | 1 |
 | **Tap anything** — verses are targets, not text | Verse chips ≥44px row hit area on `pointer-coarse`; whole verse row tappable; tap-hold opens the action sheet on touch (no hover-only path) | 1 |
 | **Highlights + bookmarks in color** | `VerseMark` with 5–8 colors, per-chapter color rail, "highlights in this chapter" strip | 1 |
@@ -831,7 +867,7 @@ of Phase 1 explicitly rather than being quietly dropped.
 | **Marks sync across devices** | Marks live in the bible service (server-side), not local storage, so phone + desktop agree; cached for offline | 1 |
 | **Chapter/book navigation** | Book grid (66 books), chapter grid, "next/previous chapter" swipe + buttons, "go to date" for plans | 1 |
 | **Search that finds verses** | Local corpus search (word, phrase, reference, `"John 3:16"`, ranges `John 3:16-21`, multi-passage `John 3:16, 4:22`); BLB `preSearch` deep link for the long tail | 1 |
-| **Read aloud** | `POST /execute/tts` via `/api/bible/speak`; per-verse highlight while speaking; play/pause, speed, voice picker; cache in `bible:tts:*`; "play on the kitchen speaker" via `/execute/ha_service` `tts.piper` | 1 |
+| **Read aloud** | bible `/narration*` via `/api/bible/narration*`; per-verse highlight while speaking; play/pause, speed, voice picker; cache in `bible:tts:*`; "play on the kitchen speaker" via `/execute/ha_service` `tts.piper` | 1 |
 | **Verse of the Day** | Deterministic by date, cached `bible:votd:{date}`, at the top of Read and in the `bible_daily` widget | 1 |
 | **Share a verse** | Verse Image card (SVG, theme-aware, scales with container) → native share sheet or web share; deep link back to the passage | 1 |
 | **Compare / parallel versions** | `compare_version` picks a second translation, fetched from `/passages` like any other. `ChapterReader` puts the two in one row per verse from `sm` up and stacks them on a phone, since a phone cannot show two readable columns. A verse the second translation does not have says "Not in this translation." rather than vanishing — NIV2011 genuinely omits Matthew 17:21, and an invisible gap reads as a rendering fault. The version picker never offers the translation being read, and the server refuses it too | 1 |
@@ -936,7 +972,7 @@ images with photo backgrounds (camera-roll import is a later polish item).
 - **Compare**: side-by-side versions with synchronized scroll on desktop,
   stacked tabs on phone, per-pane font control, and a "diff" highlight for
   verses that differ textually.
-- **Reading position** saved on debounced scroll → `PUT /state/position`;
+- **Reading position** saved on debounced scroll → `PUT /state`;
   `chapter_read` + `chapter_complete` events emitted server-side so the
   streak and stats are not client-reported.
 
@@ -957,8 +993,8 @@ images with photo backgrounds (camera-roll import is a later polish item).
 - **Jarvis thread** scoped to the passage — **shipped as
   `JarvisStudyThread.tsx`, reached from a verse's action sheet.** A thread of
   turns, each answer built only from the passage and its study notes, with a
-  provenance line (`Read 1 verse and 3 notes`). Still planned: streaming,
-  reference chips inline, a depth selector (child/teen/adult), "Generate
+  provenance line (`Read 1 verse and 3 notes`), streamed answers, reference
+  chips and a depth selector (child/teen/adult). Still planned: "Generate
   quiz", "Suggest memory verse", "Discussion questions".
 - **BLB tools row**: Strong's/lexicon/concordance/dictionary buttons →
   blb.org deep links (new tab on desktop, InAppBrowser on native). *(The

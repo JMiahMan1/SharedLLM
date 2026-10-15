@@ -60,7 +60,7 @@ One call per screen. Wire shapes are Pydantic models in
 `services/gateway/media_models.py`; the generated JSON Schema dump
 (`services/ui/src/features/media/__generated__/schemas.json`) is kept in
 lockstep by a pytest drift guard and validated against UI fixtures with ajv
-(§9).
+(§8).
 
 ### `GET /api/media/home`
 
@@ -193,7 +193,8 @@ HA states read itself; the hub snapshot remains the source of truth for SSE.
 ### `POST /execute/media/state/sync`
 
 Local (browser/Capacitor) players report their own state
-(`entity_id: "local_player"`) so the rest of the house sees what is playing.
+(the UI sends `entity_id: "web_player"`; `local`, `browser` and `android` are
+accepted aliases) so the rest of the house sees what is playing.
 `MediaStateSyncRequest` carries the same enriched fields as above.
 
 ### MA control socket (`WS /api/ma-jsonrpc`)
@@ -217,8 +218,9 @@ client→MA frame:
 ### Music Assistant (`POST`/`GET /api/media/stream/music-assistant`)
 
 * `POST` starts playback on the target player via the MA WebSocket
-  (`player_queues/play_media`, replace) and returns the resolved stream URL
-  once the queue reports one.
+  (`player_queues/play_media`, replace), waits up to 15 s for the queue to
+  report a stream URL, caches it for later byte `GET`s and returns
+  `{"status": "SUCCESS"}` (no URL, no bytes).
 * `GET` resolves the stream URL for a queue that is already playing
   (`player_queues/get`). No resolvable session → `409`; start playback with
   `POST` first.
@@ -289,6 +291,13 @@ back to 10 s status polling when the stream is down.
   inside `BentoBoxDashboard` (~280 px columns); use `pointer-coarse:min-h-11`
   for touch rows, `useHaptics()` for tactile feedback and Capacitor native
   audio where it fits. Never make hover or drag the only path to an action.
+* **Playback outlives the page.** The MA web player is mounted once, above the
+  router (`context/MediaPlayerContext.tsx`), so switching tabs never stops it;
+  Media subscribes with `useSharedMAWebPlayer` and gets the current state
+  replayed. On Android, `MediaPlaybackService` (a `mediaPlayback` foreground
+  service) with `JarvisMediaPlugin` keeps playing in the background and shows
+  lock-screen controls (play/pause/next/previous) routed back to the web
+  player. Swiping the app away from recents still stops it.
 * **Partial state.** Every screen renders `loading`/`empty`/`error`/`partial`
   states; a partial response names the unreachable provider
   (“Music Assistant is unreachable”) and keeps the working shelves.

@@ -1,6 +1,9 @@
 # ADR 014: Multi-Dialect Tool Call Extraction and Execution Resilience
 
-**Status:** Accepted  
+**Status:** Accepted. **Note (2026-10-15):** the `resolve_first_user()`
+credential fallback in decision 4 was removed by the per-user credentials
+change (`1901e457`): a request without the caller's own Home Assistant
+credentials now fails naming the user and service (`docs/PER_USER_CREDENTIALS.md`).  
 **Date:** 2026-09-19  
 **Authors:** Antigravity (Advanced Agentic Assistant)  
 **Context:** Raven's `agent_loop`, single-turn orchestrator, and external agent pipeline failed to execute tool calls requested from Home Assistant Voice Assistant (`conversation.ollama_conversation_2`) and API endpoints across diverse model architectures.

@@ -1,64 +1,76 @@
 # Jarvis (SharedLLM) - Modular SOA AI Middleware
 
-Jarvis is a high-performance, modular Service-Oriented Architecture (SOA) that unifies smart home control, personal cloud services, and semantic memory into a single conversational AI interface.
+Jarvis is a Service-Oriented Architecture that unifies smart home control,
+personal cloud services, family features and semantic memory behind one
+conversational AI and one app (web + Android).
 
-## 🏗 Architecture Overview
+## Architecture Overview
 
-Jarvis operates using a three-tier request handling hierarchy to balance speed and intelligence:
+Requests are handled in three tiers, balancing speed and intelligence:
 
-1. **Tier 1: FastPath (Semantic Matcher)**:
-   - **Role**: Immediate keyword and semantic matching for common commands.
-   - **Latency**: <100ms.
-   - **Use Case**: Simple Home Automation commands (e.g., "Turn off the lights").
-   - **Logic**: Uses a local `nomic-embed-text-v1.5` model to bypass the LLM entirely.
+1. **Tier 1: FastPath (semantic matcher)** — keyword and embedding match
+   (`nomic-embed-text-v1.5`) for common commands, bypassing the LLM entirely.
+   Use case: "turn off the lights". Under ~100 ms.
+2. **Tier 2: Librarian** — single-turn LLM with tool access (up to 3 tool
+   turns) for ambiguous home commands, document retrieval and general
+   questions. Seconds.
+3. **Tier 3: Raven** — the autonomous agent for coding and system repair. Runs
+   a multi-step agent loop (up to 60 iterations, `raven_max_iterations`) with
+   tool feedback, in workspaces managed by the Workspace Runtime. See
+   `docs/RAVEN_LEARNING_MEMORY.md`.
 
-2. **Tier 2: Librarian (Standard LLM)**:
-   - **Role**: Single-turn tool access and general conversational reasoning.
-   - **Latency**: 1-3s.
-   - **Use Case**: Ambiguous Home Automation queries, document retrieval, and general knowledge.
-   - **Architecture**: Runs on the main Gateway context; executes tools once per request.
+### Services
 
-3. **Tier 3: Raven (Autonomous Agent)**:
-   - **Role**: Multi-step, goal-oriented agent for coding and system repair.
-   - **Latency**: Variable (long-running).
-   - **Use Case**: Fixing bugs, deploying services, and multi-file workspace operations.
-   - **Architecture**: Runs in a dedicated agent loop (30 iterations max) with tool-feedback support. Raven operates within sandboxed Docker containers via the Workspace Runtime.
+Every service is a container in `docker-compose.yml`. All run on the
+`sharedllm_default` bridge network except **execution**, which uses host
+networking for device discovery (Google Cast, DLNA, SSDP) and reaches the
+bridge services through Caddy (`docs/CADDY_CROSS_NETWORK_IMPLEMENTATION.md`).
 
-### Core Services
+| Service | Port | Description |
+|---|---|---|
+| **caddy** | 8080 / 8443 (+ cross-network ports) | Front door for the UI and API; host-port bridge for execution |
+| **gateway** | 11435 | Orchestrator, intent classification, API for the UI and OpenAI-compatible clients |
+| **identity** | 8001 | Users, API keys, encrypted credentials, devices, settings (GlobalSetting) |
+| **execution** | 8003 (host network) | Home Assistant, media, Talk, TTS/STT, voice signatures, tools |
+| **rag** | 8004 | Semantic memory on SQLite + sqlite-vec (`docs/SQLITE_VEC_MIGRATION.md`) |
+| **storage** | 8005 | Nextcloud file access and indexing |
+| **logging** | 8006 | Centralized logs (admin-only reads) |
+| **workspace_runtime** | 8007 | Raven workspaces, sandboxes, git webhooks |
+| **control_plane** | 8008 | Container status/restarts, sandbox reaper, OSRM map rebuilds |
+| **geo** | 8009 | Family location, trips, steps, workouts, stars (`docs/GEO_SERVICE.md`) |
+| **bible** | 8010 | Bible reader, study, plans, games (`docs/BIBLE_STUDY.md`) |
+| **automation** | 11437 | Timers and scheduled triggers (`docs/AUTOMATION_SERVICE.md`) |
+| **telemetry** | 11438 | Device telemetry, reports, notification outbox |
+| **ui** | via caddy | React app (also the Android app via Capacitor) |
+| **dns** | 15353 (host), 172.26.0.254 (bridge) | Name server for all containers (`docs/DNS_SERVICE.md`) |
+| **osrm**, **osrm-foot**, **nominatim** | internal | Road/foot routing and self-hosted geocoding for geo |
+| **capabilities-sync** | — | One-shot: indexes system capabilities into RAG |
+| **redis** | 6379 | Job queue, sessions, history, caches |
 
-| Service               | Port  | Description                                                                                                |
-| -------               | ----  | -----------                                                                                                |
-| **Gateway**           | 11435 | Orchestrator & Intent Classifier. Routes requests to specialized services.                                 |
-| **Identity**          | 8001  | Secure credential management and device-to-user resolution.                                                |
-| **Execution**         | 8003  | Home Assistant bridge for lights, media, climate, and security.                                            |
-| **RAG**               | 8004  | Semantic memory layer using ChromaDB for knowledge retrieval.                                              |
-| **Storage**           | 8005  | Shared persistence for documents and configuration.                                                        |
-| **Logging**           | 8006  | Centralized observability hub for all microservices.                                                       |
-| **Workspace Runtime** | 8007  | Sandboxed workspace inspection for Raven's coding and system repair tasks.                                 |
-| **Geo**               | 8009  | Life360-style family location service wrapping Home Assistant (person/device_tracker/zone + history).     |
-| **Automation**        | -     | Background task processor for polling and scheduled events.                                                |
-| **Redis**             | 6379  | High-speed cache for session state and history.                                                            |
+Configuration: `docs/CONFIG.md`. Secrets (`INTERNAL_SECRET`, `FERNET_KEY`)
+live only in the server's `.env`; everything else is a GlobalSetting in
+Identity, editable in Admin > Settings.
 
-## 🚀 Deployment
+## Deployment
 
-The system is designed to run in Docker with host networking for seamless device discovery (Google Cast, DLNA).
+Images are built by GitHub Actions on push to `microservices`; nothing is
+built on the server.
 
 ```bash
-# Pull latest changes and auto-deploy
-bash scripts/deploy.sh
+bash scripts/deploy_remote.sh jeremiah@192.168.2.205 /home/jeremiah/SharedLLM <service> [<service>...]
 ```
 
-## ✅ Key Components
+See `AGENTS.md` for the deploy rules and `docs/SCRIPTS.md` for the scripts.
 
-- **Jarvis (Core)**: The overarching middleware managing all microservices.
-- **Raven (Agent)**: The designated coding and long-running task agent. It utilizes a 30-iteration autonomous loop with tool-feedback support.
-- **Fast Path Routing**: Semantic intent classification bypasses LLMs for >90% match rates (<100ms latency).
-- **Smart Power Sync**: Automatically powers on TVs/Media players before executing playback commands.
-- **RAG Memory**: Persistent semantic history and document context for more relevant AI responses.
-- **Capability Enforcement**: Granular, per-workspace security policies (read, write, git_status, git_diff, git_write, pytest) that confine autonomous agents to authorized operations.
-- **Dynamic Sync Exclusions**: Provider-agnostic file filtering (e.g., .git, node_modules) managed via a tag-based UI to protect repository integrity during automated syncs.
+## Key Components
 
----
+- **Raven**: the coding and long-running task agent, with a RAG-backed
+  learning memory.
+- **Fast path routing**: semantic intent classification skips the LLM for
+  strong matches.
+- **Family hub**: Nextcloud Talk chat, games, drawing, music, recipes, voice
+  signatures (`docs/FAMILY_HUB.md`).
+- **Capability enforcement**: per-workspace policies (read, write, git, pytest)
+  that confine autonomous agents to what they are allowed to do.
 
-*Jarvis: The decentralized brain for your smart home.*
-// Fri Jul  3 12:42:37 PM MST 2026
+Docs index: `docs/INDEX.md`. Backlog: `docs/PENDING_TASKS.md`.

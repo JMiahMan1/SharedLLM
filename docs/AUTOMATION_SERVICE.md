@@ -1,138 +1,74 @@
 # Automation Service
 
-## Overview
+The scheduler for timers, alarms and scheduled jobs: it watches Redis for
+timers that are due and dispatches each one to an internal service.
 
-The Automation service is a background scheduler that polls Redis for timed events (timers) and dispatches them to the Execution service for action. It runs continuously in a loop, checking for timers whose `expires_at` timestamp has passed.
+**Container:** `sharedllm_automation` · **Code:** `services/automation/main.py`
+· **Port:** 11437 (FastAPI; internal only, `AUTOMATION_PORT`)
 
-**Container:** `sharedllm_automation`
-**No public port** — communicates internally via HTTP and Redis.
-
-## How It Works
-
-### Architecture
+## How it works
 
 ```
-User (via Execution/Gateway) → Execution Service
-                               └─ Stores timer in Redis as `timer:{user_id}:{timer_id}`
-
-Automation Service ──polls──> Redis keys matching `timer:*`
-                               └─ Expires found? ──> POST /execute/trigger → Execution Service
-                                                              └─ Execution dispatches media alert via Home Assistant
+Execution timer handler ── writes ──> Redis  timer:{user_id}:{timer_id}
+Automation scheduler   ── SCAN timer:* ──> due?  ── dispatch ──> execution /execute/trigger
+                                                                (or an allowlisted target)
 ```
 
-### Scheduler Loop
+- **Loop**: scans `timer:*` with `SCAN` (never `KEYS`), fires everything due,
+  then sleeps until the next timer is due — at least 1 s, at most 60 s, so new
+  timers are still picked up promptly.
+- **Dispatch**: a timer without `target` posts `{"timer": …}` to execution's
+  `POST /execute/trigger` (which plays the alert on `target_device` through
+  Home Assistant). A timer with `target: {service, path, method?, payload?}`
+  is sent to that service instead; `service` must be one of `execution`,
+  `identity`, `geo`, `rag` and `path` a plain absolute path, so a timer can
+  never reach an arbitrary host. Calls carry `X-Internal-Secret`.
+- **Recurring timers**: after firing, `expires_at` is advanced past the fire
+  time from the `recurrence` text (`every N minutes/hours/days/weeks`,
+  hourly, daily, weekly, monthly, yearly; unrecognised text advances one
+  day — wrong-but-bounded beats an endless refire). One-time timers are
+  deleted after a successful run.
+- **Failures**: a failed dispatch is retried with exponential backoff (30 s,
+  doubling, capped at 30 min) up to `max_attempts` (default 5); then the timer
+  is parked inactive (kept 7 days for inspection). Recurring timers still
+  advance after a failed run. Each run is recorded in `timer:…:history`
+  (last 20).
 
-1. Connects to Redis on startup.
-2. Every **5 seconds** (`SCHEDULER_INTERVAL`), scans for keys matching `timer:*`.
-3. For each active timer:
-   - Parses the JSON payload and compares `expires_at` against `datetime.now()`.
-   - If the timer has expired, sends a `POST` to `http://execution.local:8003/execute/trigger` with the timer data.
-   - Deletes one-time timers (those without `recurrence`); recurring timers are re-processed on their schedule (`expires_at` is left as-is and the timer fires again).
-4. Catches and logs errors without restarting the loop.
+## Timer payload
 
-### Timer Payload Schema
+| Field | Description |
+|---|---|
+| `id`, `user_id` | Identity of the timer and its owner |
+| `type`, `title` | e.g. alarm/countdown, label |
+| `expires_at` | ISO 8601 (UTC; legacy naive-local rows are still parsed) |
+| `active` | `false` = paused or parked |
+| `recurrence` | Optional rule text (above) |
+| `target_device` | HA entity to play the alert on (default dispatch) |
+| `target` | Optional `{service, path, method, payload}` (above) |
+| `attempts`, `last_status`, `max_attempts` | Failure bookkeeping |
 
-Timers stored in Redis (set by Execution service timer handler):
+## HTTP API (all but `/health` need `X-Internal-Secret`)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | UUID |
-| `user_id` | string/int | Resolved user identifier |
-| `type` | string | Timer type (e.g. "alarm", "countdown") |
-| `title` | string | Human-readable label |
-| `expires_at` | string (ISO 8601) | When the timer should fire |
-| `active` | boolean | Whether the timer is currently active (paused timers set to `false`) |
-| `recurrence` | string/undefined | Recurrence rule (e.g. `FREQ=DAILY`); recurring timers are re-processed when they fire |
-| `target_device` | string/undefined | HA entity ID to play the alert on |
+| Route | What |
+|---|---|
+| `GET /health` | Liveness |
+| `GET /api/automation/status` | Counts and next due timer |
+| `GET /api/automation/timers?user_id=` | Timers, optionally for one user |
+| `GET /api/automation/timers/{id}/history` | Run history for one timer |
 
-### Trigger Execution Flow
-
-When the automation service fires a timer, the Execution service's `/execute/trigger` endpoint:
-
-1. Extracts the user ID from the payload.
-2. Resolves credentials via `resolve_internal_user()` (fetches HA token).
-3. If a `target_device` is specified, dispatches a media announcement to Home Assistant via `media.handle_media_play()` with `media_type="announcement"`.
+Creating, pausing and deleting timers happens in the execution service's timer
+handler, not here.
 
 ## Configuration
 
-### Environment Variables
-
-All variables come from `.env` via `env_file` and are resolved at runtime through `resolve_runtime_config()`.
-
-| Variable | Source | Purpose |
-|----------|--------|---------|
-| `INTERNAL_SECRET` | `.env` | Authenticates HTTP calls to Execution service |
-| `FERNET_KEY` | `.env` | Encryption key (required by config resolution) |
-| `REDIS_URL` | `.env` | Redis connection string (`redis://redis:6379/0`) |
-| `EXECUTION_SVC_URL` | `.env` | Execution service URL (`http://execution.local:8003`) |
-| `TZ` | `.env` | Timezone (`America/Phoenix`) |
-
-Other environment variables are set but not used by this service: `OLLAMA_URL`, `IDENTITY_SVC_URL`, `RAG_SVC_URL`, `STORAGE_SVC_URL`, `LOGGING_SVC_URL`, `WORKSPACE_RUNTIME_SVC_URL`.
-
-### Hardcoded Constants
-
-| Constant | Value | Purpose |
-|----------|-------|---------|
-| `SCHEDULER_INTERVAL` | `5` | Seconds between Redis scans |
-
-## Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `httpx` | Async HTTP client for calling Execution service |
-| `redis` | Async Redis client for timer polling |
-
-Built from base image `sharedllm-base`, with `jq` installed for debugging.
-
-## Integration with Other Services
-
-| Service | Relationship |
-|---------|-------------|
-| **Execution** | Receives timer trigger events via `POST /execute/trigger`. Execution handles the actual action (HA announcements, audio playback). |
-| **Redis** | Shared key-value store. Automation reads from `timer:*` keys; Execution writes them via `timer:{user_id}:{timer_id}` pattern. |
-
-### Docker Dependencies
-
-```yaml
-depends_on:
-  - redis
-  - execution
-```
-
-### Network
-
-- Uses Docker network `sharedllm` for inter-service communication.
-- Uses `http://execution.local:8003` to reach the Execution service (host network, resolved via DNS).
+`INTERNAL_SECRET`, `REDIS_URL` and the network-scoped service URLs come from
+`.env` / `resolve_runtime_config()` like every service (`docs/CONFIG.md`).
+Dependencies: `aiohttp`, `redis`, `fastapi`, `uvicorn`.
 
 ## Operations
-
-### Running Locally
-
-```bash
-python services/automation/main.py
-```
-
-### Docker Build
-
-```bash
-docker compose build automation
-```
-
-### Restart
-
-```bash
-docker compose restart automation
-```
-
-### Logs
 
 ```bash
 docker logs -f sharedllm_automation
 ```
 
-## Limitations & Known Gaps
-
-- **No recurring timer support:** The scheduler identifies recurring timers but has no logic to update `expires_at` after firing (marked `pass` in code).
-- **Broad Redis scan:** Uses `KEYS timer:*` which is a blocking operation. For large timer counts, this could cause Redis latency spikes.
-- **No health check endpoint:** The service has no HTTP API, so it cannot be health-checked via HTTP probes.
-- **No timer management API:** Timer creation, deletion, pausing, and resuming are all handled by the Execution service, not this one.
+Tests: `services/automation/tests/`.

@@ -1,8 +1,8 @@
 # Achievements, Goals, and Opt-In Activity Sharing
 
-Status: **design + phased plan** (server side first). Companion docs:
-`docs/HEALTH_STEPS.md` (data + fusion), `docs/GEO_SERVICE.md` (endpoints),
-`docs/jarvis_os_2_ui_wireframes.md` (chat/chores surfaces).
+Status: **phases 1-3 and 5 shipped, 4 largely shipped** (see Progress).
+Companion docs: `docs/HEALTH_STEPS.md` (data + fusion), `docs/GEO_SERVICE.md`
+(endpoints), `docs/FAMILY_HUB.md` (chat surfaces and the card envelope).
 
 ## Principles
 
@@ -102,18 +102,12 @@ text, so old clients keep working.
 Skylight already models chores, stars and a reward vault
 (`/api/integrations/skylight/*`, per-user credentials in Identity).
 
-- **Achievement → stars**: points convert to Skylight stars at a fixed rate
-  (default 1:1) through `POST /api/integrations/skylight/bonus`
-  `{user_id, stars, reason, source: achievement|admin}`.
-- **Admin grants**: the same endpoint with `source: admin` (admin-only), so
-  bonus stars can be given for anything — a completed week, a kind act, a
-  rough day.
-- **Gap to close**: the gateway currently exposes only chores read/complete and
-  rewards read/redeem; creating chores/rewards and granting stars must be
-  added in the execution Skylight client, with double-auth fixed (see
-  `docs/code_review_2026-08-22.md` E27) while we are in there.
-- Everything is recorded in the points ledger first, then mirrored to
-  Skylight, so a Skylight outage cannot lose the award.
+As built (see "Bonus stars" below): stars are granted through geo's ledger
+(`POST /api/geo/stars`, reasons `bonus | achievement | game | chore | manual`)
+and mirrored to Skylight through execution
+(`POST /api/integrations/skylight/stars`). Everything is recorded in the
+ledger first, so a Skylight outage cannot lose an award. Creating Skylight
+chores and rewards from Jarvis is not built.
 
 ## Progress
 
@@ -138,7 +132,9 @@ Skylight already models chores, stars and a reward vault
   card. `ActivitySharingPanel` in Settings controls the new opt-in state
   (audience picker, scope checkboxes). Remaining UI: running-totals/feed cards
   and share affordances on Wander.
-- Phases 4 (chat envelope) and 5 (Skylight stars) are next.
+- **Phase 4 — chat: largely SHIPPED.** Typed envelope and achievement cards
+  (`announce_awards`, `docs/FAMILY_HUB.md`); `@Jarvis` answers in chat.
+- **Phase 5 — stars: SHIPPED** (below).
 
 ### Live endpoints
 
@@ -179,3 +175,44 @@ date it was first earned even as the window rolls forward.
   the private frame API **at a configured path**, `skylight_stars_path`. There is
   no default: an unset path returns a clear failure naming the setting, because
   posting to a guessed path would look like a grant that never landed.
+
+## Skylight chore completions (contract): timed instances need `instance_time` (2026-10-05)
+
+Cross-checked against two community references — `joshuaswarren/pyskylight`
+(`client.py`) and `chrischall/skylight-mcp` (`src/tools/chores.ts`) — then
+verified live from inside the execution container.
+
+**Contract** (both references agree):
+
+- `PUT /api/frames/{frame}/chores/{series}/completions` — the path takes the
+  numeric series id, not the instance id.
+- Body: `{status: "complete" | "pending", instance_date: "YYYY-MM-DD", instance_time: "HH:MM"}`.
+  `status` is `complete`/`pending` (not `completed`).
+- `instance_date` is **date-only**. For a time-of-day routine (recurrence set
+  with `BYHOUR`, e.g. `RRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=20`) the time must
+  go in its own `instance_time` field — omitting it fails with
+  **422 `{"errors":{"instance_time":["can't be blank"]}}`**.
+- `category_id` must be omitted for a normally-assigned chore (422 "must be
+  blank" otherwise); it is only for up-for-grabs chores.
+- Our bodies also carry an extra `id` field (the two references omit it); the
+  API tolerates it (live 200) and it is kept deliberately.
+
+**Instance id shapes** returned by `GET /chores?after=&before=`:
+
+- plain occurrence: `{series}-{YYYY}-{MM}-{DD}` (e.g. `52409380-2026-10-04`)
+- timed routine occurrence: `{series}-{YYYY}-{MM}-{DD}-{HHMM}` (e.g.
+  `46464093-2026-10-05-2000`, "Brush Teeth" at 20:00)
+
+**The bug this replaces:** `_skylight_chore_ids` split the id naively and
+returned `instance_date="2026-10-05-2000"` with no `instance_time`. Live probe
+2026-10-05 (pending→pending no-op, state verified unchanged afterwards):
+
+- old body → 422 `instance_time can't be blank` → execution maps non-2xx to
+  `None` → route returns `{"status":"FAILURE","message":"Failed to uncomplete chore"}`
+- corrected body (`instance_date="2026-10-05"`, `instance_time="20:00"`) →
+  **200 with the updated chore JSON**
+
+Implementation: `_skylight_chore_ids` in `services/execution/main.py` now
+returns `(series, date, "HH:MM" | None)` via a strict regex; the complete and
+uncomplete routes add `instance_time` only when the id carried one. Exact-body
+tests live in `services/execution/tests/test_skylight_proxy.py`.

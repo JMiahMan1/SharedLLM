@@ -24,7 +24,7 @@
 | `GET /api/geo/steps?days=N` | `{daily_steps, today, goal}` |
 | `GET /api/geo/steps/goal` | per-user daily goal |
 | `PUT /api/geo/steps/goal` | set the goal (1000–100000) |
-| `GET/POST /api/geo/workouts`, `GET /workouts/{id}/route` | workout sessions and routes |
+| `GET /api/geo/workouts`, `POST /workouts/start`, `GET /workouts/active`, `POST /workouts/stop`, `GET /workouts/{id}/route` | workout sessions and routes |
 | `GET /api/geo/activity/summary?window=today\|week\|month` | your own activity totals for a window |
 | `GET /api/geo/activity/feed?window=…` | opt-in activity of people who share with you |
 | `GET/PUT /api/users/me/activity-sharing` | private-by-default sharing settings (audience + scopes) |
@@ -37,7 +37,7 @@ The goal is stored as `geo:steps_goal:{user}`; the default remains 10,000.
 |---|---|---|
 | **Health page** | `pages/Health.tsx` | ring + 7-day bars, goal editor, achievements, opt-in AI trends, workout start/stop + history. Reached at `/fitness` (sidebar + mobile bottom bar) — `/health` is reserved for service health checks. |
 | Wander | `pages/Wander.tsx` | family presence, places and trips only — steps/workouts moved to Health |
-| Dashboard Health widget | `components/widgets/HealthActivityWidget.tsx` | today + 7-day average, best day, estimated miles; all values real; tapping opens `/health` |
+| Dashboard Health widget | `components/widgets/HealthActivityWidget.tsx` | today + 7-day average, best day, estimated miles; all values real; tapping opens `/fitness` |
 | Android home-screen widget | `android/.../widgets/HealthWidget.java` | today, progress, 7-day average; tints from the active theme |
 | Settings → Sensors | `pages/Settings.tsx` | enable/disable step + location sensors |
 
@@ -73,11 +73,12 @@ closes on selection, backdrop tap or Escape.
 
 ## Known gaps
 
-- **No background service.** The manifest declares background-location
-  permissions but no foreground service exists, so while the app is suspended
-  the native counter still advances (SharedPreferences) but the server is only
-  updated when the app runs again. A foreground service or WorkManager sync is
-  the next step.
+- **No background step sync.** A location foreground service now exists
+  (`LocationTrackingService`, resumed after reboot/update by `BootReceiver`),
+  but steps are not uploaded from it: while the app is suspended the native
+  counter still advances (SharedPreferences) and the server is only updated
+  when the app runs again. Uploading steps from the foreground service (or a
+  WorkManager job) is the next step.
 - Distance is an estimate from stride length, not GPS.
 - Health Connect (`ACTIVITY_RECOGNITION` runtime grant) is still pending.
 

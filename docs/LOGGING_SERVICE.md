@@ -35,22 +35,18 @@ Redis-backed log ingestion, storage, and real-time streaming for the SharedLLM S
 
 ## Configuration
 
-| Environment Variable | Default | Description |
+| Setting | Default | Description |
 | --- | --- | --- |
-| `REDIS_URL` | `redis://redis:6379/0` | Redis connection string |
-| `LOG_RETENTION_DAYS` | `30` | Days to retain logs before automatic deletion |
-| `LOG_MAX_ENTRIES` | `50000` | Maximum number of log entries to keep (hard cap) |
-| `INTERNAL_SECRET` | *(required)* | Service-to-service authentication token |
+| `REDIS_URL` (env) | `redis://redis:6379/0` | Redis connection string |
+| `log_retention_days` (Identity setting → `LOG_RETENTION_DAYS`) | `30` | Days kept before deletion |
+| `log_max_entries` (Identity setting → `LOG_MAX_ENTRIES`) | `10000` | Hard cap; oldest entries are trimmed on write |
+| `INTERNAL_SECRET` (env) | *(required)* | Service-to-service authentication |
 
-### Setting Retention Period
-
-Configure log retention in `.env`:
-
-```bash
-LOG_RETENTION_DAYS=30
-```
-
-Or via the UI System Matrix → Global Settings (if exposed as a configurable setting).
+Defaults are in `services/config.py`. Note: `services/logging/main.py` imports
+`LOG_RETENTION_DAYS` / `LOG_MAX_ENTRIES` by value at import time, before
+`resolve_runtime_config()` runs in its lifespan, so changing the Identity
+settings currently has no effect — the defaults (30 days, 10000 entries)
+always apply.
 
 ## API Endpoints
 
@@ -81,9 +77,14 @@ POST /logs
 ### Fetch Recent Logs
 
 ```text
-GET /api/logs?limit=50&service=gateway&user_id=admin
+GET /logs?limit=50&service=gateway&user_id=…     (same as GET /api/logs)
 GET /api/admin/logs?limit=100&service=execution
 ```
+
+All reads require `X-Internal-Secret`. From the browser the only route is the
+gateway's **admin-only** `GET /api/admin/logs`; the gateway's old
+unauthenticated `GET`/`DELETE /api/logs` were removed on 2026-10-15
+(`411e51d3`) because anyone could read or wipe the system logs through them.
 
 **Query Parameters:**
 
@@ -109,13 +110,11 @@ GET /api/admin/logs?limit=100&service=execution
 ### Clear Logs (Admin Only)
 
 ```text
-DELETE /api/logs
-DELETE /api/admin/logs
+DELETE /api/admin/logs      (same handler as DELETE /api/logs)
 ```
 
-**Headers:**
-
-- `X-Internal-Secret: <secret>`
+Requires `X-Internal-Secret`; from the browser, the gateway's admin-only
+`DELETE /api/admin/logs`.
 
 ### WebSocket Stream
 
@@ -124,14 +123,16 @@ WS /api/logs/stream
 WS /logs/stream
 ```
 
-Connects to Redis PubSub and streams log entries in real-time. Each message is a JSON object matching the log entry format.
+Connects to Redis PubSub and streams log entries in real time. Each message is
+a JSON object matching the log entry format, with a `{"ping": true}` keepalive.
+Authenticated by `?token=` — the internal secret or a valid user API key
+(checked against Identity); otherwise the socket is closed with code 4401.
+Caddy routes `/api/logs/stream*` straight to this service.
 
 ## Retention Cleanup
 
-A background task runs every hour to:
-
-1. Remove entries older than `LOG_RETENTION_DAYS`
-2. Enforce `LOG_MAX_ENTRIES` cap (removes oldest entries if exceeded)
+- A background task removes entries older than `LOG_RETENTION_DAYS`.
+- Every write trims the set to the newest `LOG_MAX_ENTRIES`.
 
 Logs are automatically purged — no manual intervention required.
 
@@ -149,7 +150,7 @@ The previous SQLite backend has been replaced with Redis. Key benefits:
 - **No single-writer bottleneck** — Redis handles concurrent writes efficiently
 - **Automatic rotation** — TTL-based cleanup, no manual pruning needed
 - **Real-time streaming** — PubSub replaces manual WebSocket connection management
-- **Persistence** — Redis AOF (`appendonly yes`) survives restarts
+- **Persistence** — the logs live in Redis, which runs with `appendonly yes`; the logging container itself mounts no volume
 - **Scalability** — Sorted set queries are O(log(N)+M) vs SQLite's O(N) full scans
 
-Existing SQLite data is not automatically migrated. Historical logs remain in `/app/data/logs.db` within the logging container if needed for archival.
+The old SQLite logs were not migrated.
