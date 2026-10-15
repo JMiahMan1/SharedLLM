@@ -88,7 +88,8 @@ async def _assert_call(upstream, method, path_and_query):
     "coro, method, expected",
     [
         (lambda: abs_client.get_book(ABS, KEY, "book1"), "GET", "/api/items/book1?expanded=1"),
-        (lambda: abs_client.get_progress(ABS, KEY), "GET", "/api/me/progress"),
+        # All progress rides on the user object; bare /api/me/progress is a 404 (ABS 2.33, live).
+        (lambda: abs_client.get_progress(ABS, KEY), "GET", "/api/me"),
         (lambda: abs_client.get_book_progress(ABS, KEY, "book1"), "GET", "/api/me/progress/book1"),
         (
             lambda: abs_client.update_progress(ABS, KEY, "book1", 12.5, 100.0),
