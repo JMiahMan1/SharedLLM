@@ -57,13 +57,18 @@ async def ocs_request(
     if params:
         request_params.update(params)
 
+    # A form body cannot carry a list (aiohttp refuses to encode one), and
+    # Talk's poll calls take arrays (options, optionIds). OCS accepts a JSON
+    # body for the same fields, so anything structured goes as JSON.
+    structured = isinstance(data, dict) and any(isinstance(v, (list, dict)) for v in data.values())
     resp = await request(
         method,
         ocs_url(base_url, endpoint),
         auth=(username, password),
         headers=ocs_headers(),
         params=request_params,
-        data=data,
+        data=None if structured else data,
+        json=data if structured else None,
         timeout=timeout,
         verify=False,
     )
