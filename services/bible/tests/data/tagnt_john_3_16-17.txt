@@ -1,0 +1,50 @@
+Word & Type	Greek	English translation	dStrongs = Grammar	Dictionary form =  Gloss	editions	Meaning variants	Spelling variants	Spanish translation	Sub-meaning	Conjoin word	sStrong+Instance	Alt Strongs				
+# Jhn.3.16	οὕτως 	γὰρ 	ἠγάπησεν 	ὁ 	θεὸς 	τὸν 	κόσμον, 	ὥστε 	τὸν 	υἱὸν 						
+Jhn.3.16#01=NKO	οὕτως (houtōs)	Thus	G3779=ADV	οὕτω, οὕτως=thus(-ly)	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			Así	thus	#01	G3779					
+Jhn.3.16#02=NKO	γὰρ (gar)	for	G1063=CONJ	γάρ=for	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			porque	for	#02	G1063					
+Jhn.3.16#03=NKO	ἠγάπησεν (ēgapēsen)	loved	G0025=V-AAI-3S	ἀγαπάω=to love	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			amó	to love	#03	G0025					
+Jhn.3.16#04=NKO	ὁ (ho)	<the>	G3588=T-NSM	ὁ=the/this/who	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			el	the	#04»05:G2316	G3588_A					
+Jhn.3.16#05=NKO	θεὸς (theos)	God	G2316=N-NSM-T	θεός=God	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			Dios	God	#05	G2316					
+Jhn.3.16#06=NKO	τὸν (ton)	the	G3588=T-ASM	ὁ=the/this/who	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			a el	the	#06»07:G2889	G3588_B					
+Jhn.3.16#07=NKO	κόσμον, (kosmon)	world,	G2889=N-ASM	κόσμος=world	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			mundo	world	#07	G2889					
+Jhn.3.16#08=NKO	ὥστε (hōste)	that	G5620=CONJ	ὥστε=so	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			de modo que	so	#08	G5620					
+Jhn.3.16#09=NKO	τὸν (ton)	the	G3588=T-ASM	ὁ=the/this/who	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			el	the	#09»10:G5207	G3588_C					
+Jhn.3.16#10=NKO	υἱὸν (huion)	Son	G5207=N-ASM	υἱός=son	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			Hijo	son	#10	G5207					
+Jhn.3.16#11=ko	αὐτοῦ (autou)	of him	G0846=P-GSM	αὐτός=he/she/it/self	Treg+TR+Byz			de él	of him	#11«10:G5207	G0846_a	G3778				
+Jhn.3.16#12=NKO	τὸν (ton)	the	G3588=T-ASM	ὁ=the/this/who	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			el	the	#12»13:G3439	G3588_D					
+Jhn.3.16#13=NKO	μονογενῆ (monogenē)	only begotten	G3439=A-ASM	μονογενής=unique	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			unigénito	unique	#13	G3439					
+Jhn.3.16#14=NKO	ἔδωκεν, (edōken)	He gave,	G1325=V-AAI-3S	δίδωμι=to give	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			dio	to give	#14	G1325					
+Jhn.3.16#15=NKO	ἵνα (ina)	so that	G2443=CONJ	ἵνα=in order that/to	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			para que	in order that	#15	G2443	G3363				
+Jhn.3.16#16=NKO	πᾶς (pas)	everyone	G3956=A-NSM	πᾶς=all	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			todo	all	#16	G3956					
+Jhn.3.16#17=NKO	ὁ (ho)	who	G3588=T-NSM	ὁ=the/this/who	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			el	[that] which	#17»18:G4100	G3588_E					
+Jhn.3.16#18=NKO	πιστεύων (pisteuōn)	is believing	G4100=V-PAP-NSM	πιστεύω=to trust (in)	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			estando confiando	to trust (in)	#18	G4100					
+Jhn.3.16#19=NKO	εἰς (eis)	in	G1519=PREP	εἰς=toward	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			hacia dentro	toward	#19	G1519					
+Jhn.3.16#20=NKO	αὐτὸν (auton)	Him	G0846=P-ASM	αὐτός=he/she/it/self	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			él	him	#20«19:G1519	G0846_B	G3778				
+Jhn.3.16#21=NKO	μὴ (mē)	not	G3361=PRT-N	μή=not	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			no	not	#21»22:G0622	G3361					
+Jhn.3.16#22=NKO	ἀπόληται (apolētai)	may perish	G0622=V-2AMS-3S	ἀπολλύω=to destroy	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			se destruya	to destroy	#22	G0622					
+Jhn.3.16#23=NKO	ἀλλ᾽ (all᾽)	but	G0235=CONJ	ἀλλά=but	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz		SBL+WH+Treg+TR+Byz: ἀλλὰ ; 	sino	but	#23	G0235					
+Jhn.3.16#24=NKO	ἔχῃ (echē)	may have	G2192=V-PAS-3S	ἔχω=to have/be	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			esté teniendo	to have	#24	G2192					
+Jhn.3.16#25=NKO	ζωὴν (zōēn)	life	G2222=N-ASF	ζωή=life	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			vida	life	#25	G2222					
+Jhn.3.16#26=NKO	αἰώνιον. (aiōnion)	eternal.	G0166=A-ASF	αἰώνιος=eternal	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			eterna	eternal	#26	G0166					
+Jhn.3.17#01=NKO	οὐ (ou)	Not	G3756=PRT-N	οὐ=no	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			No	no	#01»13:G2919	G3756					
+Jhn.3.17#02=NKO	γὰρ (gar)	for	G1063=CONJ	γάρ=for	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			porque	for	#02	G1063					
+Jhn.3.17#03=NKO	ἀπέστειλεν (apesteilen)	sent	G0649=V-AAI-3S	ἀποστέλλω=to send	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			envió como emisario	to send	#03	G0649					
+Jhn.3.17#04=NKO	ὁ (ho)	<the>	G3588=T-NSM	ὁ=the/this/who	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			el	the	#04»05:G2316	G3588_A					
+Jhn.3.17#05=NKO	θεὸς (theos)	God	G2316=N-NSM-T	θεός=God	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			Dios	God	#05	G2316					
+Jhn.3.17#06=NKO	τὸν (ton)	the	G3588=T-ASM	ὁ=the/this/who	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			a el	the	#06»07:G5207	G3588_B					
+Jhn.3.17#07=NKO	υἱὸν (huion)	Son	G5207=N-ASM	υἱός=son	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			Hijo	son	#07	G5207					
+Jhn.3.17#08=ko	αὐτοῦ (autou)	of Him	G0846=P-GSM	αὐτός=he/she/it/self	Treg+TR+Byz			de él	of him	#08«07:G5207	G0846_a	G3778				
+Jhn.3.17#09=NKO	εἰς (eis)	into	G1519=PREP	εἰς=toward	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			hacia dentro	toward	#09	G1519					
+Jhn.3.17#10=NKO	τὸν (ton)	the	G3588=T-ASM	ὁ=the/this/who	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			a el	the	#10»11:G2889	G3588_C					
+Jhn.3.17#11=NKO	κόσμον (kosmon)	world	G2889=N-ASM	κόσμος=world	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			mundo	world	#11	G2889_A					
+Jhn.3.17#12=NKO	ἵνα (ina)	that	G2443=CONJ	ἵνα=in order that/to	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			para que	in order to	#12	G2443_A	G3363				
+Jhn.3.17#13=NKO	κρίνῃ (krinē)	He may judge	G2919=V-PAS-3S	κρίνω=to judge	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			esté juzgando	to judge	#13	G2919					
+Jhn.3.17#14=NKO	τὸν (ton)	the	G3588=T-ASM	ὁ=the/this/who	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			a el	the	#14»15:G2889	G3588_D					
+Jhn.3.17#15=NKO	κόσμον, (kosmon)	world,	G2889=N-ASM	κόσμος=world	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			mundo	world	#15	G2889_B					
+Jhn.3.17#16=NKO	ἀλλ᾽ (all᾽)	but	G0235=CONJ	ἀλλά=but	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			sino	but	#16»17:G2443	G0235					
+Jhn.3.17#17=NKO	ἵνα (ina)	that	G2443=CONJ	ἵνα=in order that/to	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			para que	in order that	#17	G2443_B	G3363				
+Jhn.3.17#18=NKO	σωθῇ (sōthēa)	may be saved	G4982=V-APS-3S	σῴζω=to save	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			sea salvado	to save	#18	G4982					
+Jhn.3.17#19=NKO	ὁ (ho)	the	G3588=T-NSM	ὁ=the/this/who	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			el	the	#19»20:G2889	G3588_E					
+Jhn.3.17#20=NKO	κόσμος (kosmos)	world	G2889=N-NSM	κόσμος=world	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			mundo	world	#20	G2889_C					
+Jhn.3.17#21=NKO	δι᾽ (di᾽)	through	G1223=PREP	διά=through/because of	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			a través de	through	#21	G1223					
+Jhn.3.17#22=NKO	αὐτοῦ. (autou)	Him.	G0846=P-GSM	αὐτός=he/she/it/self	NA28+NA27+Tyn+SBL+WH+Treg+TR+Byz			él	of him	#22«21:G1223	G0846_B	G3778				

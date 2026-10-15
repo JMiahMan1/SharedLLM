@@ -50,9 +50,11 @@ from services.config import (
 from services.bible import achievements as ach
 from services.bible import books as book_table
 from services.bible import (
+    blb_links,
     corpus,
     games,
     importer,
+    interlinear,
     library,
     memorize,
     metrics,
@@ -76,6 +78,7 @@ from services.bible.models import (
     BibleVersion,
     Devotional,
     GameScore,
+    ImportRun,
     MemoryVerse,
     PlanEnrollment,
     ReadingEvent,
@@ -2134,13 +2137,14 @@ async def _sharing_settings() -> list[dict]:
 
 
 @app.get("/blb/link")
-def blb_link(ref: str = Query(...), tool: str = Query(default="")) -> dict:
+def blb_link(ref: str = Query(...), tool: str = Query(default=""), version: str = Query(default="")) -> dict:
     """Build a Blue Letter Bible deep link.
 
     blb.org has no API -- its official surface is web pages and the free
     ScriptTagger asset. We link out and never scrape, so the only thing to get
-    right is a correct URL. An unset ``blb_base_url`` is a configuration error,
-    not an invitation to guess ``blb.org``.
+    right is a correct URL (see ``blb_links`` for the verified scheme). An unset
+    ``blb_base_url`` is a configuration error, not an invitation to guess
+    ``blb.org``. ``tool=interlinear`` opens the verse on its Interlinear tab.
     """
     if not BLB_BASE_URL:
         raise HTTPException(
@@ -2153,16 +2157,134 @@ def blb_link(ref: str = Query(...), tool: str = Query(default="")) -> dict:
     except ReferenceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     first = spans[0]
-    osis = first.book.lower()
+    chapter = None if first.whole_book else first.chapter_start
+    verse = None if first.whole_book else first.verse_start
+    kind = tool.strip("/").lower().split("/")[0]
+    if kind and kind != "interlinear":
+        raise HTTPException(status_code=400, detail=f"Unknown Blue Letter Bible tool {tool!r}; use 'interlinear'.")
+    build = blb_links.interlinear_path if kind == "interlinear" else blb_links.verse_path
+    path = build(first.book, chapter, verse, version)
+    return {"ref": ref, "url": f"{BLB_BASE_URL.rstrip('/')}{path}", "tool": kind or None}
+
+
+@app.get("/interlinear")
+def interlinear_for(ref: str = Query(...), session: Session = Depends(get_session)) -> dict:
+    """The imported word-by-word interlinear for a passage, when there is one.
+
+    ``available`` is false (never invented words) when nothing is imported for
+    it; the reader then opens Blue Letter Bible's interlinear instead. One
+    chapter at most, since a word table is read a verse or two at a time.
+    """
+    try:
+        spans = parse_reference(ref)
+    except ReferenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    first = spans[0]
     if first.whole_book:
-        path = f"/{osis}"
-    else:
-        path = f"/{osis}/{first.chapter_start}/{first.verse_start}"
-    if tool:
-        path = f"/tools/{tool.strip('/').lower()}"
-        if not first.whole_book:
-            path = f"{path}/{osis}/{first.chapter_start}"
-    return {"ref": ref, "url": f"{BLB_BASE_URL.rstrip('/')}{path}", "tool": tool or None}
+        raise HTTPException(status_code=400, detail="Name a chapter or verse for an interlinear, not a whole book.")
+    chapter = first.chapter_start
+    start = first.verse_start
+    # A whole chapter, or a span running into the next one, stops at this
+    # chapter's end; one chapter is the most a word table is read at once.
+    same_chapter = first.verse_end is not None and first.resolved_chapter_end == chapter
+    end = first.verse_end if same_chapter else 999
+    rows = interlinear.verses_for(session, first.book, chapter, start, end)
+    label = book_table.book(first.book)["name"]
+    base = (BLB_BASE_URL or "").rstrip("/")
+
+    def _with_lexicon(words: list[dict]) -> list[dict]:
+        for word in words:
+            path = blb_links.lexicon_path(word.get("s", "")) if base else None
+            if path:
+                word["x"] = f"{base}{path}"
+        return words
+
+    return {
+        "ref": ref,
+        "available": bool(rows),
+        "attribution": interlinear.ATTRIBUTION if rows else None,
+        "verses": [
+            {
+                "reference": f"{label} {row.chapter}:{row.verse}",
+                "language": row.language,
+                "words": _with_lexicon(json.loads(row.words)),
+            }
+            for row in rows
+        ],
+    }
+
+
+@app.get("/admin/interlinear")
+def admin_interlinear(session: Session = Depends(get_session)) -> dict:
+    """Which books have an imported interlinear."""
+    return interlinear.coverage(session)
+
+
+def _admin_interlinear_import(path: str, label: str) -> dict:
+    started = time.monotonic()
+    with Session(_db()) as session:
+        with open(path, encoding="utf-8-sig", errors="strict") as handle:
+            result = interlinear.import_lines(session, handle, label)
+        ok = result.verses > 0
+        message = (
+            f"Imported {result.verses} verses ({result.words} words) across {len(result.books)} books."
+            if ok
+            else "No interlinear rows were found. Expected a STEPBible TAGNT or TAHOT file."
+        )
+        if result.unknown_books:
+            message += f" Skipped unknown book codes: {', '.join(result.unknown_books)}."
+        session.add(
+            ImportRun(
+                source=label,
+                kind="interlinear",
+                code="interlinear",
+                name=label,
+                status="succeeded" if ok else "failed",
+                message=message,
+                verse_count=result.verses,
+                book_count=len(result.books),
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+        )
+        session.commit()
+        return {
+            "status": "succeeded" if ok else "failed",
+            "message": message,
+            "verses": result.verses,
+            "words": result.words,
+            "imported_books": result.books,
+            "coverage": interlinear.coverage(session),
+        }
+
+
+@app.post("/admin/interlinear/upload")
+async def admin_interlinear_upload(file: UploadFile = File(...)) -> JSONResponse:
+    """Import a STEPBible TAGNT/TAHOT file (one testament section per file).
+
+    The upload is kept in the import directory beside the Bibles, so the same
+    file can be re-imported after an update without uploading it again.
+    """
+    directory = _import_dir() / "interlinear"
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = Path(str(file.filename or "")).name or "interlinear.txt"
+    if Path(filename).suffix.lower() not in {".txt", ".tsv"}:
+        raise HTTPException(status_code=400, detail=f"{filename} is not a STEPBible tagged text (.txt/.tsv).")
+    destination = directory / filename
+    written = 0
+    with destination.open("wb") as handle:
+        while chunk := await file.read(1024 * 1024):
+            written += len(chunk)
+            if written > importer.MAX_UPLOAD_BYTES:
+                handle.close()
+                destination.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="That file is larger than the import limit.")
+            handle.write(chunk)
+    try:
+        report = await run_in_threadpool(_admin_interlinear_import, str(destination), filename)
+    except UnicodeDecodeError:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"{filename} is not UTF-8 text.") from None
+    return JSONResponse(status_code=200 if report["status"] == "succeeded" else 422, content=report)
 
 
 @app.get("/daily")

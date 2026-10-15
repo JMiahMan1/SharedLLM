@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Bookmark,
   BookmarkCheck,
@@ -8,6 +9,7 @@ import {
   Highlighter,
   ImageIcon,
   Link2,
+  MessageCircle,
   NotebookPen,
   ScrollText,
   Share2,
@@ -16,6 +18,8 @@ import {
 } from 'lucide-react';
 import BibleStudyNotes from './BibleStudyNotes';
 import JarvisStudyThread from './JarvisStudyThread';
+import InterlinearPanel from './InterlinearPanel';
+import ShareToChatSheet from './ShareToChatSheet';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import { renderVerseImage } from '../../lib/verseImage';
@@ -37,7 +41,7 @@ interface VerseActionSheetProps {
   onToggleMark: (kind: 'highlight' | 'bookmark', color: string) => void;
   /** Called after a note and its pointer are both stored, to refresh the marks. */
   onNoteSaved?: () => void;
-  onShared?: (target: 'clipboard' | 'system') => void;
+  onShared?: (target: 'clipboard' | 'system' | 'chat') => void;
   /** Open a passage in the reader (from a reference Jarvis names). */
   onOpenRef?: (ref: string) => void;
 }
@@ -86,7 +90,34 @@ export default function VerseActionSheet({
   const [studyOpen, setStudyOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [noteBody, setNoteBody] = useState<string | null>(null);
+  const [interlinearOpen, setInterlinearOpen] = useState(false);
+  const [shareChatOpen, setShareChatOpen] = useState(false);
   const { trigger } = useHaptics();
+
+  // Fetched as the sheet opens so the links are real anchors the reader taps:
+  // a window opened after an await is a popup without a gesture, which phone
+  // browsers and the app's web view block.
+  const blbVerse = useQuery({
+    queryKey: ['bible-blb-link', verse.reference, version, ''],
+    queryFn: () => api.getBlbLink(verse.reference, undefined, version),
+    staleTime: Infinity,
+    retry: false,
+  });
+  const blbInterlinear = useQuery({
+    queryKey: ['bible-blb-link', verse.reference, version, 'interlinear'],
+    queryFn: () => api.getBlbLink(verse.reference, 'interlinear', version),
+    staleTime: Infinity,
+    retry: false,
+  });
+  const interlinear = useQuery({
+    queryKey: ['bible-interlinear', verse.reference],
+    queryFn: () => api.getBibleInterlinear(verse.reference),
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
+  const linkError = (q: typeof blbVerse) =>
+    q.error ? `Blue Letter Bible link unavailable: ${q.error instanceof Error ? q.error.message : 'unknown error'}` : 'Loading link…';
+  const blbTapped = () => void api.recordBibleEvent('blb_link_tap', verse.reference).catch(() => undefined);
 
   const highlight = marks.find((m) => m.kind === 'highlight');
   const bookmark = marks.find((m) => m.kind === 'bookmark');
@@ -191,14 +222,6 @@ export default function VerseActionSheet({
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
       onShared?.('clipboard');
       return 'Image saved to your downloads';
-    });
-
-  const openBlb = (tool?: string) =>
-    run('Opened Blue Letter Bible', async () => {
-      const link = await api.getBlbLink(verse.reference, tool);
-      window.open(link.url, '_blank', 'noopener,noreferrer');
-      await api.recordBibleEvent('blb_link_tap', verse.reference);
-      return undefined;
     });
 
   const memorise = () =>
@@ -372,6 +395,17 @@ export default function VerseActionSheet({
           <button
             type="button"
             disabled={busy}
+            onClick={() => setShareChatOpen(true)}
+            className={ACTION_CLASS}
+            data-testid="bible-action-share-chat"
+          >
+            <MessageCircle size={16} className="text-sky-300" />
+            <span className="flex-1">Share to Family chat</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={busy}
             onClick={() => void shareImage()}
             className={ACTION_CLASS}
             data-testid="bible-action-share-image"
@@ -380,27 +414,58 @@ export default function VerseActionSheet({
             <span className="flex-1">Share as image</span>
           </button>
 
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void openBlb()}
-            className={ACTION_CLASS}
-            data-testid="bible-action-blb"
-          >
-            <ExternalLink size={16} className="text-slate-400" />
-            <span className="flex-1">Open on Blue Letter Bible</span>
-          </button>
+          {blbVerse.data ? (
+            <a
+              href={blbVerse.data.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={blbTapped}
+              className={ACTION_CLASS}
+              data-testid="bible-action-blb"
+            >
+              <ExternalLink size={16} className="text-slate-400" />
+              <span className="flex-1">Open on Blue Letter Bible</span>
+            </a>
+          ) : (
+            <button type="button" onClick={() => setStatus(linkError(blbVerse))} className={`${ACTION_CLASS} opacity-60`} data-testid="bible-action-blb">
+              <ExternalLink size={16} className="text-slate-400" />
+              <span className="flex-1">Open on Blue Letter Bible</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void openBlb('interlinear')}
-            className={ACTION_CLASS}
-            data-testid="bible-action-interlinear"
-          >
-            <ScrollText size={16} className="text-slate-400" />
-            <span className="flex-1">Interlinear (Greek &amp; Hebrew)</span>
-          </button>
+          {interlinear.data?.available ? (
+            <button
+              type="button"
+              onClick={() => setInterlinearOpen(true)}
+              className={ACTION_CLASS}
+              data-testid="bible-action-interlinear"
+            >
+              <ScrollText size={16} className="text-amber-300" />
+              <span className="flex-1">Interlinear (Greek &amp; Hebrew)</span>
+            </button>
+          ) : blbInterlinear.data && !interlinear.isLoading ? (
+            <a
+              href={blbInterlinear.data.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={blbTapped}
+              className={ACTION_CLASS}
+              data-testid="bible-action-interlinear"
+            >
+              <ScrollText size={16} className="text-slate-400" />
+              <span className="flex-1">Interlinear on Blue Letter Bible</span>
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setStatus(interlinear.isLoading ? 'Loading interlinear…' : linkError(blbInterlinear))}
+              className={`${ACTION_CLASS} opacity-60`}
+              data-testid="bible-action-interlinear"
+            >
+              <ScrollText size={16} className="text-slate-400" />
+              <span className="flex-1">Interlinear (Greek &amp; Hebrew)</span>
+            </button>
+          )}
         </div>
 
         {noteBody !== null && (
@@ -426,6 +491,20 @@ export default function VerseActionSheet({
           onEditionChange={onEditionChange}
           onCrossVersionChange={onCrossVersionChange}
           onClose={() => setStudyOpen(false)}
+        />
+      )}
+
+      {interlinearOpen && interlinear.data?.available && (
+        <InterlinearPanel data={interlinear.data} blbUrl={blbInterlinear.data?.url} onClose={() => setInterlinearOpen(false)} />
+      )}
+
+      {shareChatOpen && (
+        <ShareToChatSheet
+          reference={verse.reference}
+          text={verse.text}
+          version={version}
+          onClose={() => setShareChatOpen(false)}
+          onSent={() => onShared?.('chat')}
         />
       )}
 

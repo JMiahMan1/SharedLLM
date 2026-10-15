@@ -10018,14 +10018,23 @@ async def proxy_bible_activity_feed(request: Request, limit: int = 20):
 
 
 @app.get("/api/bible/blb/link")
-async def proxy_bible_blb_link(request: Request, ref: str, tool: str = ""):
-    """Deep link into Blue Letter Bible study tools for a reference."""
+async def proxy_bible_blb_link(request: Request, ref: str, tool: str = "", version: str = ""):
+    """Deep link into Blue Letter Bible (a verse, or its interlinear tab)."""
     await _bible_caller(request)
     return await _bible_json(
         "GET",
         "/blb/link",
         label="Failed to build a Blue Letter Bible link",
-        params={"ref": ref, "tool": tool},
+        params={"ref": ref, "tool": tool, "version": version},
+    )
+
+
+@app.get("/api/bible/interlinear")
+async def proxy_bible_interlinear(request: Request, ref: str):
+    """The imported word-by-word interlinear for a passage (``available`` false when none)."""
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/interlinear", label="Failed to read the interlinear", params={"ref": ref}
     )
 
 
@@ -10248,6 +10257,36 @@ async def _bible_import_response(resp) -> JSONResponse:
         detail = body.get("detail") if isinstance(body, dict) else body
         raise HTTPException(status_code=resp.status, detail=str(detail)[:300])
     return JSONResponse(status_code=200, content=body)
+
+
+@app.get("/api/bible/admin/interlinear")
+async def proxy_bible_admin_interlinear(request: Request):
+    """Which books have an imported interlinear."""
+    await _require_admin(request)
+    return await _bible_json("GET", "/admin/interlinear", label="Failed to read the interlinear coverage")
+
+
+@app.post("/api/bible/admin/interlinear/upload")
+async def proxy_bible_admin_interlinear_upload(request: Request):
+    """Import a STEPBible TAGNT/TAHOT tagged text the admin picked."""
+    await _require_admin(request)
+    form = await request.form()
+    uploaded = form.get("file")
+    if not isinstance(uploaded, UploadFile) or not uploaded.filename:
+        raise HTTPException(status_code=400, detail="An interlinear file is required")
+    upload = aiohttp.FormData()
+    upload.add_field(
+        "file", uploaded.file, filename=uploaded.filename,
+        content_type=uploaded.content_type or "text/plain",
+    )
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{BIBLE_SVC}/admin/interlinear/upload",
+            data=upload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=_BIBLE_IMPORT_TIMEOUT,
+        )
+        return await _bible_import_response(resp)
 
 
 @app.get("/api/bible/admin/providers/{code}/translations")
