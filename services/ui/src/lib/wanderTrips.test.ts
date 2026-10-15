@@ -19,6 +19,12 @@ import {
   tripStats,
   groupTrips,
   sortTripsNewestFirst,
+  tripsForPeriod,
+  shiftPeriod,
+  isCurrentPeriod,
+  periodTitle,
+  toDateParam,
+  fromDateParam,
 } from './wanderTrips';
 import type { Trip } from '../types/api';
 
@@ -353,5 +359,64 @@ describe('groupTrips', () => {
 
   it('sorts newest first by start', () => {
     expect(sortTripsNewestFirst(trips).map((x) => x.id)[0]).toBe('today2');
+  });
+});
+
+
+describe('tripsForPeriod', () => {
+  const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime() / 1000;
+  const t = (id: string, start: number): Trip =>
+    ({ id, user_id: 'person.jeremiah', start_time: start, end_time: start + 600, distance_miles: 5, trip_cost_usd: 1, activity_type: 'driving' }) as Trip;
+  const NOW = new Date(2026, 9, 15, 18); // Thu 15 Oct 2026
+  // The real trips on the server, by local date.
+  const trips = [
+    t('mon12', at(2026, 10, 12, 16)),
+    t('sat10a', at(2026, 10, 10, 16)),
+    t('sat10b', at(2026, 10, 10, 15)),
+    t('sat3', at(2026, 10, 3, 20)),
+    t('tue29', at(2026, 9, 29, 8)),
+    t('sun27', at(2026, 9, 27, 12)),
+    t('mon21', at(2026, 9, 21, 18)),
+  ];
+
+  it('Day shows only that day', () => {
+    expect(tripsForPeriod(trips, 'day', NOW, NOW).trips).toEqual([]);
+    const sat = tripsForPeriod(trips, 'day', new Date(2026, 9, 10), NOW);
+    expect(sat.title).toBe('Sat, Oct 10');
+    expect(sat.trips.map((x) => x.id)).toEqual(['sat10a', 'sat10b']);
+    expect(sat.sections).toEqual([]);
+  });
+
+  it('Week shows only that week (Sunday to Saturday), by day', () => {
+    const thisWeek = tripsForPeriod(trips, 'week', NOW, NOW);
+    expect(thisWeek.title).toBe('This week');
+    expect(thisWeek.trips.map((x) => x.id)).toEqual(['mon12']);
+    const lastWeek = tripsForPeriod(trips, 'week', shiftPeriod('week', NOW, -1), NOW);
+    expect(lastWeek.title).toBe('Last week');
+    expect(lastWeek.trips.map((x) => x.id)).toEqual(['sat10a', 'sat10b']);
+    expect(lastWeek.sections.map((g) => g.label)).toEqual(['Sat, Oct 10']);
+    expect(lastWeek.stats).toMatchObject({ count: 2, miles: 10 });
+  });
+
+  it('Month shows only that month, Year only that year by month', () => {
+    expect(tripsForPeriod(trips, 'month', NOW, NOW).trips.map((x) => x.id)).toEqual(['mon12', 'sat10a', 'sat10b', 'sat3']);
+    const sept = tripsForPeriod(trips, 'month', shiftPeriod('month', NOW, -1), NOW);
+    expect(sept.title).toBe('September');
+    expect(sept.trips.map((x) => x.id)).toEqual(['tue29', 'sun27', 'mon21']);
+    const year = tripsForPeriod(trips, 'year', NOW, NOW);
+    expect(year.trips).toHaveLength(7);
+    expect(year.sections.map((g) => g.label)).toEqual(['October', 'September']);
+  });
+
+  it('knows the current period has no next one', () => {
+    expect(isCurrentPeriod('week', NOW, NOW)).toBe(true);
+    expect(isCurrentPeriod('week', shiftPeriod('week', NOW, -1), NOW)).toBe(false);
+    expect(periodTitle('year', shiftPeriod('year', NOW, -1), NOW)).toBe('2025');
+  });
+
+  it('round-trips the date kept in the URL', () => {
+    expect(toDateParam(new Date(2026, 9, 5))).toBe('2026-10-05');
+    expect(fromDateParam('2026-10-05').getDate()).toBe(5);
+    expect(fromDateParam('garbage', NOW)).toBe(NOW);
   });
 });

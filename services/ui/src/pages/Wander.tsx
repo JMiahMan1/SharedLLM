@@ -15,10 +15,14 @@ import {
   displayName,
   filterTrips,
   formatCostSummary,
-  groupTrips,
+  fromDateParam,
+  isCurrentPeriod,
   RECENT_TRIP_COUNT,
   roundForDisplay,
+  shiftPeriod,
   sortTripsNewestFirst,
+  toDateParam,
+  tripsForPeriod,
   formatDistanceMeters,
   formatFuelSummary,
   formatTripLocation,
@@ -62,6 +66,7 @@ import {
   Loader2,
   CalendarDays,
   ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 interface VehicleOption {
@@ -87,9 +92,15 @@ const Wander = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const showAllTrips = searchParams.get('trips') === 'all';
   const tripPeriod: TripPeriod = (['day', 'week', 'month', 'year'] as const).find((p) => p === searchParams.get('by')) ?? 'week';
+  // Which day/week/month/year is on screen, as any date inside it.
+  const periodAt = useMemo(() => fromDateParam(searchParams.get('at')), [searchParams]);
   const openAllTrips = () => {
     trigger('light');
     setSearchParams({ trips: 'all', by: tripPeriod });
+  };
+  const stepPeriod = (delta: number) => {
+    trigger('light');
+    setSearchParams({ trips: 'all', by: tripPeriod, at: toDateParam(shiftPeriod(tripPeriod, periodAt, delta)) }, { replace: true });
   };
   const closeAllTrips = () => {
     trigger('light');
@@ -103,10 +114,6 @@ const Wander = () => {
   useEffect(() => {
     if (showAllTrips) tripsHeaderRef.current?.scrollIntoView({ block: 'start' });
   }, [showAllTrips]);
-  const chooseTripPeriod = (period: TripPeriod) => {
-    trigger('light');
-    setSearchParams({ trips: 'all', by: period }, { replace: true });
-  };
 
   // Route previews (fetched lazily per card)
   const [routePoints, setRoutePoints] = useState<Record<string, RoutePoint[]>>({});
@@ -311,10 +318,19 @@ const Wander = () => {
     () => sortTripsNewestFirst(displayedTrips).slice(0, RECENT_TRIP_COUNT),
     [displayedTrips],
   );
-  const tripGroups = useMemo(
-    () => (showAllTrips ? groupTrips(displayedTrips, tripPeriod) : []),
-    [showAllTrips, displayedTrips, tripPeriod],
+  const periodView = useMemo(
+    () => (showAllTrips ? tripsForPeriod(displayedTrips, tripPeriod, periodAt) : null),
+    [showAllTrips, displayedTrips, tripPeriod, periodAt],
   );
+  const atCurrentPeriod = isCurrentPeriod(tripPeriod, periodAt);
+  const chooseTripPeriod = (period: TripPeriod) => {
+    trigger('light');
+    // Stay in the same stretch of time: zooming in (Week -> Day) lands on the
+    // most recent day with a trip in what was on screen, not its empty first day.
+    const newest = periodView?.trips[0]?.start_time;
+    const at = newest ? new Date(newest * 1000) : periodAt;
+    setSearchParams({ trips: 'all', by: period, at: toDateParam(at) }, { replace: true });
+  };
 
   // Open Edit Modal
   const handleOpenEdit = (trip: Trip) => {
@@ -1041,17 +1057,54 @@ const Wander = () => {
               </button>
             ))}
           </div>
-          {tripGroups.map((group) => (
-            <section key={group.key} className="space-y-3" data-testid="trip-group">
-              <div className="flex items-baseline justify-between gap-3 border-b border-white/5 pb-1.5">
-                <h3 className="text-sm font-semibold text-slate-200">{group.label}</h3>
-                <span className="text-[11px] text-slate-500">
-                  {group.stats.count} trip{group.stats.count === 1 ? '' : 's'} · {roundForDisplay(group.stats.miles)} mi · {formatCostSummary(group.stats.cost)}
-                </span>
+          {periodView && (
+            <>
+              <div className="flex items-center justify-between gap-2 glass-panel rounded-2xl border border-white/5 px-2 py-1.5" data-testid="period-nav">
+                <button
+                  type="button"
+                  onClick={() => stepPeriod(-1)}
+                  aria-label={`Previous ${tripPeriod}`}
+                  className="min-h-11 min-w-11 rounded-xl flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/5"
+                >
+                  <ChevronLeft size={20} />
+                </button>
+                <div className="text-center min-w-0">
+                  <p className="text-sm font-semibold text-slate-100" data-testid="period-title">{periodView.title}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {periodView.stats.count} trip{periodView.stats.count === 1 ? '' : 's'} · {roundForDisplay(periodView.stats.miles)} mi · {formatCostSummary(periodView.stats.cost)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => stepPeriod(1)}
+                  disabled={atCurrentPeriod}
+                  aria-label={`Next ${tripPeriod}`}
+                  className="min-h-11 min-w-11 rounded-xl flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/5 disabled:opacity-25 disabled:pointer-events-none"
+                >
+                  <ChevronRight size={20} />
+                </button>
               </div>
-              <div className="space-y-4">{group.trips.map(renderTripCard)}</div>
-            </section>
-          ))}
+              {periodView.trips.length === 0 ? (
+                <p className="text-center text-sm text-slate-400 py-10" data-testid="period-empty">
+                  No trips {tripPeriod === 'day' ? 'on this day' : `this ${tripPeriod}`}.
+                </p>
+              ) : periodView.sections.length === 0 ? (
+                <div className="space-y-4">{periodView.trips.map(renderTripCard)}</div>
+              ) : (
+                periodView.sections.map((group) => (
+                  <section key={group.key} className="space-y-3" data-testid="trip-group">
+                    <div className="flex items-baseline justify-between gap-3 border-b border-white/5 pb-1.5">
+                      <h3 className="text-sm font-semibold text-slate-200">{group.label}</h3>
+                      <span className="text-[11px] text-slate-500">
+                        {group.stats.count} trip{group.stats.count === 1 ? '' : 's'} · {roundForDisplay(group.stats.miles)} mi · {formatCostSummary(group.stats.cost)}
+                      </span>
+                    </div>
+                    <div className="space-y-4">{group.trips.map(renderTripCard)}</div>
+                  </section>
+                ))
+              )}
+            </>
+          )}
         </div>
         ) : (
         <div className="space-y-4">
