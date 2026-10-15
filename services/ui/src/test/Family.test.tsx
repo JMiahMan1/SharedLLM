@@ -22,7 +22,11 @@ describe('Family hub', () => {
     renderWithProviders(<Family />);
 
     await user.click(screen.getByRole('tab', { name: /games/i }));
-    expect(await screen.findByTestId('family-games')).toHaveTextContent(/bible trivia/i);
+    const games = await screen.findByTestId('family-games');
+    // Real games only: each links to where it is played, nothing marked "planned".
+    expect(within(games).getByRole('link', { name: /daily bible quiz/i })).toHaveAttribute('href', '/bible?tab=play');
+    expect(within(games).getByRole('link', { name: /memory verses/i })).toHaveAttribute('href', '/bible?tab=memorize');
+    expect(games).not.toHaveTextContent(/planned/i);
 
     await user.click(screen.getByRole('tab', { name: /create/i }));
     expect(await screen.findByTestId('family-create')).toHaveTextContent(/shared family space/i);
