@@ -257,6 +257,80 @@ function periodLabel(start: Date, period: TripPeriod, now: Date): string {
   }
 }
 
+/** The day/week/month/year containing `at` (local time): [start, end). */
+export function periodRange(period: TripPeriod, at: Date): { start: Date; end: Date } {
+  const start = periodStart(at, period);
+  const end = new Date(start);
+  if (period === 'day') end.setDate(end.getDate() + 1);
+  else if (period === 'week') end.setDate(end.getDate() + 7);
+  else if (period === 'month') end.setMonth(end.getMonth() + 1);
+  else end.setFullYear(end.getFullYear() + 1);
+  return { start, end };
+}
+
+/** The same period `delta` steps earlier (negative) or later. */
+export function shiftPeriod(period: TripPeriod, at: Date, delta: number): Date {
+  const next = periodRange(period, at).start;
+  if (period === 'day') next.setDate(next.getDate() + delta);
+  else if (period === 'week') next.setDate(next.getDate() + 7 * delta);
+  else if (period === 'month') next.setMonth(next.getMonth() + delta);
+  else next.setFullYear(next.getFullYear() + delta);
+  return next;
+}
+
+/** "Today", "This week", "Week of Oct 6", "October", "2025"... */
+export function periodTitle(period: TripPeriod, at: Date, now: Date = new Date()): string {
+  return periodLabel(periodRange(period, at).start, period, now);
+}
+
+/** Is the period containing `at` the current one (so there is no "next")? */
+export function isCurrentPeriod(period: TripPeriod, at: Date, now: Date = new Date()): boolean {
+  return periodRange(period, at).start.getTime() >= periodRange(period, now).start.getTime();
+}
+
+export interface TripPeriodView {
+  title: string;
+  trips: Trip[];
+  stats: TripStats;
+  /** Day headings for a week or month, month headings for a year, none for a day. */
+  sections: TripGroup[];
+}
+
+/**
+ * The trips that started in one day, week, month or year (local time), newest
+ * first, with totals and the headings to list them under. This is what each
+ * Wander tab shows; the tab picks the period, the arrows pick which one.
+ */
+export function tripsForPeriod(trips: Trip[], period: TripPeriod, at: Date, now: Date = new Date()): TripPeriodView {
+  const { start, end } = periodRange(period, at);
+  const lo = start.getTime() / 1000;
+  const hi = end.getTime() / 1000;
+  const inside = sortTripsNewestFirst(trips).filter((t) => {
+    const s = num(t.start_time);
+    return s >= lo && s < hi;
+  });
+  const sub: TripPeriod | null = period === 'day' ? null : period === 'year' ? 'month' : 'day';
+  return {
+    title: periodTitle(period, at, now),
+    trips: inside,
+    stats: tripStats(inside),
+    sections: sub ? groupTrips(inside, sub, now) : [],
+  };
+}
+
+/** A local calendar date as YYYY-MM-DD (for the URL), and back. */
+export function toDateParam(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export function fromDateParam(value: string | null, fallback: Date = new Date()): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '');
+  if (!m) return fallback;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? fallback : d;
+}
+
 /**
  * Trips grouped by the day, week, month or year they started in (local time),
  * newest group first, each with its own totals.

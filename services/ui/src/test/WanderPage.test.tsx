@@ -133,11 +133,13 @@ describe('Wander page', () => {
     expect(card.textContent).not.toContain('Home');
   });
 
-  it('lists the five most recent trips, then all of them grouped by period', async () => {
+  it('lists the five most recent trips, then each period on its own tab', async () => {
     const day = 86_400;
-    const base = Date.now() / 1000 - 3600;
+    const now = new Date();
+    const noon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12).getTime() / 1000;
+    // One trip today, the rest a week or more apart.
     const many = Array.from({ length: 8 }, (_, i) =>
-      trip({ id: `t${i}`, start_time: base - i * day * 3, end_time: base - i * day * 3 + 600 }),
+      trip({ id: `t${i}`, start_time: noon - i * day * 8, end_time: noon - i * day * 8 + 600 }),
     );
     useWanderHandlers({ trips: () => HttpResponse.json({ trips: many, total_trips: many.length }) });
     const user = userEvent.setup();
@@ -149,14 +151,19 @@ describe('Wander page', () => {
 
     await user.click(seeAll);
     expect(await screen.findByTestId('all-trips')).toBeInTheDocument();
-    expect(screen.getAllByTestId('trip-card')).toHaveLength(8);
-    expect(screen.getByRole('radio', { name: 'week' })).toHaveAttribute('aria-checked', 'true');
-    const weekGroups = screen.getAllByTestId('trip-group').length;
+    // Week tab: only this week's trip.
+    expect(screen.getByTestId('period-title')).toHaveTextContent('This week');
+    expect(screen.getAllByTestId('trip-card')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Next week' })).toBeDisabled();
+
+    // A week back: no trips (they are 8 days apart and today is in this week).
+    await user.click(screen.getByRole('button', { name: 'Previous week' }));
+    expect(screen.getByTestId('period-title')).toHaveTextContent(/Last week/);
+
+    // Day tab keeps the date: back to today via next, then only today's trip.
     await user.click(screen.getByRole('radio', { name: 'day' }));
-    expect(screen.getAllByTestId('trip-group')).toHaveLength(8);
-    expect(weekGroups).toBeLessThan(8);
     await user.click(screen.getByRole('radio', { name: 'year' }));
-    expect(screen.getAllByTestId('trip-group').length).toBeLessThanOrEqual(2);
+    expect(screen.getByTestId('period-title')).toHaveTextContent(String(now.getFullYear()));
   });
 
   it('labels the trip owner by name rather than a raw entity id', async () => {
