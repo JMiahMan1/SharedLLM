@@ -1151,18 +1151,17 @@ class PodcastRenderRequest(BaseRequest):
 
 class SpeakerIdentifyRequest(BaseRequest):
     """
-    Identifies which enrolled speaker a recorded clip belongs to, using the
-    audio server's reference encoder.
+    Identifies which family member a recorded clip belongs to, by comparing
+    its locally computed voice signature with the ones people enrolled.
 
-    The threshold is optional on purpose: the deployment derives one from how
-    much its own enrolled speakers vary between takes, which is a more honest
-    yardstick than any constant. The full ranking is returned even when nothing
-    clears the threshold, because "closest is X, but it is not them" is the
-    answer a caller usually needs.
+    The threshold is optional; identity's default is calibrated for this
+    model. The full ranking is returned even when nothing clears the
+    threshold, because "closest is X, but it is not them" is the answer a
+    caller usually needs.
     """
     user_context: UserContext
     audio_path: str = Field(..., description="Path to the audio clip inside the workspace (e.g. 'visitor/doorbell.wav')")
-    threshold: float | None = Field(None, description="Optional similarity floor in 0..1; omit to derive it")
+    threshold: float | None = Field(None, description="Optional similarity floor in 0..1; omit for the calibrated default")
 
 
 class ListVoicesRequest(BaseRequest):

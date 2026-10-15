@@ -281,8 +281,9 @@ _OCR_TOOL = {
 }
 
 # --- Alpaca audio / Podcast Studio -----------------------------------------
-# These three target the alpaca DASHBOARD (port 5000), not the audio server
-# directly. The dashboard is the front door: it owns /api/audio/* and
+# Render and list_voices target the alpaca DASHBOARD (port 5000), not the
+# audio server directly; speaker_identify is local (execution's voiceprint
+# matched against identity's enrolled signatures). The dashboard is the front door: it owns /api/audio/* and
 # /api/podcast/*, it is where the podcast mixer and the OpenVoice speaker
 # profiles live, and it is the only place that knows about voice gender
 # matching. Routing around it would mean re-implementing all of that here.
@@ -359,8 +360,9 @@ _SPEAKER_IDENTIFY_TOOL = {
     "function": {
         "name": TOOL_SPEAKER_IDENTIFY,
         "description": (
-            "Identify who a recorded voice clip belongs to, out of the enrolled "
-            "speaker profiles on this deployment. Returns a ranked list with "
+            "Identify which family member a recorded voice clip belongs to, out "
+            "of the voices people enrolled under Identity -> Vocal Signature. "
+            "Runs entirely on this server. Returns a ranked list with "
             "similarity scores and a margin, so a near miss is visibly a near "
             "miss. Use this when you need to attach an identity to audio that "
             "arrived from a caller, a visitor panel, or a voice message — for "
@@ -382,8 +384,7 @@ _SPEAKER_IDENTIFY_TOOL = {
                     "type": "number",
                     "description": (
                         "Optional similarity floor in 0..1. Omit it: the "
-                        "deployment derives one from how much its own enrolled "
-                        "speakers vary between takes."
+                        "default is calibrated for the signature model."
                     ),
                 },
             },
@@ -646,7 +647,7 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Render a two-host podcast (TTS per turn, ducked music bed) into a workspace WAV.",
      "payload fields: script, pair_id, output_path, bed_preset, voice_profiles. The script is speaker-tagged."),
     ("SpeakerIdentifyRequest", SVC_EXECUTION, "POST", "/execute/speaker_identify", True,
-     "Identify which enrolled speaker a recorded clip belongs to.",
+     "Identify which family member speaks in a recorded clip, from the voices they enrolled.",
      "payload fields: audio_path, threshold. Threshold is optional; omit to use the default."),
     ("ListVoicesRequest", SVC_EXECUTION, "POST", "/execute/list_voices", False,
      "List enrolled speaker profiles and the curated podcast host pairs.",

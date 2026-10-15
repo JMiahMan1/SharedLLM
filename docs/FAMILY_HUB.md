@@ -192,6 +192,23 @@ Because notes resolve to the caller's own account, an admin can flip the same
 "Send as" control to the Admin identity to keep one house cookbook, and every
 other member keeps their own. Non-admins never see the control. 8 tests.
 
+## Voice signatures (shipped)
+
+Each person enrolls under Identity -> Vocal Signature by reading three short
+sentences aloud. Every recording goes to identity (`POST /api/users/me/enroll`),
+which has execution turn it into a 256-number speaker signature
+(`POST /voice/signature`, Resemblyzer GE2E on CPU, weights bundled in the image)
+and keeps only that vector, never the audio. A take that does not sound like
+the person's earlier ones is refused rather than averaged in. "Test: who am I?"
+(`POST /api/users/me/voice/check`) scores a new recording against everyone
+enrolled, exactly as identification does.
+
+`sharedllm_speaker_identify` signs a workspace clip the same way and asks
+identity (`POST /api/voice/identify`, internal) who it is: a match needs
+similarity 0.80 and a 0.04 lead over the runner-up, so two family members who
+sound alike come back as "not sure" instead of the wrong name. Nothing in this
+path leaves the server. Calibration and limits are in `services/identity/voice.py`.
+
 ## Make music (shipped)
 
 `/api/music/generate` proxies the alpaca audio server's `POST /api/music`

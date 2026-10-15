@@ -158,7 +158,6 @@ class UserUpdate(BaseModel):
     #: The family chat conversation to open on launch (clear with clear_fields).
     chat_default_token: str | None = None
     preferred_tts_voice: str | None = None
-    voice_fingerprint: str | None = None
     is_admin: bool | None = None
     is_system_default: bool | None = None
     # Erase these fields. A blank value never erases anything (it means "leave

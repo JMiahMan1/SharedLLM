@@ -5,6 +5,8 @@ import type { FamilyMember } from '../components/chat/familyDirectory';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
 import type {
+  VoiceCheck,
+  VoiceStatus,
   HealthStatus,
   ServiceInfo,
   LogEntry,
@@ -176,6 +178,8 @@ import type {
 
 // Re-export domain types so consumers can import them from the api module.
 export type {
+  VoiceCheck,
+  VoiceStatus,
   APIKey,
   GlobalSetting,
   HealthStatus,
@@ -323,12 +327,21 @@ const mapUserPayload = (data: Partial<UserProfile>) => {
     payload.display_name = payload.full_name;
     delete payload.full_name;
   }
-  if ('voice_id' in payload) {
-    payload.voice_fingerprint = payload.voice_id;
-    delete payload.voice_id;
-  }
+  // The voice fingerprint is set by enrollment only; identity ignores it here.
+  delete payload.voice_id;
   return payload;
 };
+
+/** The client defaults to JSON, which axios would apply to FormData too;
+ *  multipart lets the browser add the boundary. Signing takes a few seconds. */
+const VOICE_UPLOAD = { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120_000 };
+
+/** A recording as multipart, named for its real container (Safari records MP4). */
+function voiceForm(audio: Blob): FormData {
+  const form = new FormData();
+  form.append('file', audio, audio.type.includes('mp4') ? 'voice.m4a' : 'voice.webm');
+  return form;
+}
 
 /** A list endpoint's records, whether it answers with the list itself or
  *  wraps it as `{ [key]: [...] }`. */
@@ -743,12 +756,26 @@ export const api = {
     return resp.data;
   },
 
-  async enrollVoice(audioBlob: Blob): Promise<{ status: string; message: string }> {
-    const formData = new FormData();
-    formData.append('file', audioBlob, 'enrollment.webm');
-    const resp = await apiClient.post('/api/users/me/enroll', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+  /** How far the signed-in user's voice enrollment has got. */
+  async getMyVoice(): Promise<VoiceStatus> {
+    const resp = await apiClient.get('/api/users/me/voice');
+    return resp.data;
+  },
+
+  /** Add one recording to the user's voice profile (signed on the server). */
+  async enrollVoice(audio: Blob): Promise<VoiceStatus & { speech_seconds: number }> {
+    const resp = await apiClient.post('/api/users/me/enroll', voiceForm(audio), VOICE_UPLOAD);
+    return resp.data;
+  },
+
+  /** Who the household's voice matching thinks is speaking in `audio`. */
+  async checkMyVoice(audio: Blob): Promise<VoiceCheck> {
+    const resp = await apiClient.post('/api/users/me/voice/check', voiceForm(audio), VOICE_UPLOAD);
+    return resp.data;
+  },
+
+  async forgetMyVoice(): Promise<VoiceStatus> {
+    const resp = await apiClient.delete('/api/users/me/voice');
     return resp.data;
   },
 

@@ -161,6 +161,36 @@ export interface CredentialShares {
   shared_owner?: string | null;
 }
 
+/** The signed-in user's voice enrollment (identity /api/users/me/voice). */
+export interface VoiceStatus {
+  enrolled: boolean;
+  samples: number;
+  min_samples: number;
+  max_samples: number;
+  /** Lowest take-to-profile similarity; null with fewer than two takes. */
+  consistency: number | null;
+  model: string;
+  updated_at: string | null;
+}
+
+export interface VoiceCandidate {
+  username: string;
+  name: string;
+  score: number;
+}
+
+/** A "who is speaking?" answer, scored against everyone enrolled. */
+export interface VoiceCheck {
+  matched: boolean;
+  matched_username: string | null;
+  matched_name: string | null;
+  score: number | null;
+  threshold: number;
+  margin: number | null;
+  candidates: VoiceCandidate[];
+  is_me: boolean;
+}
+
 export interface UserProfile extends UserProfileRaw {
   full_name?: string;
   role: 'admin' | 'user';

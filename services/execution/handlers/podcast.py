@@ -1,6 +1,7 @@
 """Podcast + speaker tools - render an episode and identify who is speaking.
 
-Three handlers, all delegating to alpaca rather than doing the work here:
+Rendering and the voice list delegate to alpaca; speaker identification is
+done here, against the family's own enrolled voices:
 
 * ``podcast_render``    - POST {ALPACA_WEB_URL}/api/podcast/render, which
   synthesizes each turn with that host's Kokoro voice, synthesizes a music
@@ -10,11 +11,9 @@ Three handlers, all delegating to alpaca rather than doing the work here:
   needs this *before* assigning a clone: OpenVoice transfers timbre well only
   onto a source voice of the same gender, and this is where both sides of that
   pair are visible.
-* ``speaker_identify``  - POST {ALPACA_AUDIO_URL}/api/voices/identify. This one
-  deliberately does NOT go through the dashboard: the comparison needs the
-  OpenVoice reference encoder, which only exists in the audio-server container
-  because it is the only one with torch loaded. See services/config.py for why
-  there are two base URLs.
+* ``speaker_identify``  - computes the clip's voice signature locally
+  (``services.execution.voiceprint``) and asks identity which enrolled family
+  member it matches. No audio leaves this server.
 
 Every failure is returned as an ``ExecutionResult(status="FAILURE")`` rather
 than raised, so a mission gets a diagnostic it can act on instead of a stack
@@ -23,6 +22,7 @@ script the agent just wrote, which is what makes the write-script-then-render
 chaining worth having.
 """
 
+import asyncio
 import base64
 import logging
 import os
@@ -33,11 +33,12 @@ except ImportError:  # pragma: no cover - dev fallback
     from services.execution.schemas import ExecutionResult
 
 from services.config import (
-    ALPACA_AUDIO_URL,
     ALPACA_WEB_URL,
+    IDENTITY_SVC_URL,
     INTERNAL_SECRET,
     WORKSPACE_RUNTIME_SVC_URL,
 )
+from services.execution import voiceprint
 from services.execution.handlers.workspace import _resolve_workspace_info, resolve_safe_path
 
 log = logging.getLogger("execution.podcast")
@@ -56,9 +57,8 @@ _DEFAULT_OUTPUT = "podcast.wav"
 # most likely real doorbell/visitor clip - it was missing, so the commonest
 # input was the one hard-refused.
 _AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".m4b", ".ogg", ".oga", ".opus", ".webm", ".flac", ".aac", ".aiff", ".amr")
-#: voice_clone.MAX_UPLOAD_BYTES, mirrored so an oversize clip is refused before
-#: it is read and base64-encoded (+33%) only for the audio server to reject it.
-_MAX_CLIP_BYTES = 25 * 1024 * 1024
+#: The voice signature's own cap, checked before the clip is decoded.
+_MAX_CLIP_BYTES = voiceprint.MAX_AUDIO_BYTES
 
 
 def _user_context_dict(req) -> dict | None:
@@ -230,18 +230,12 @@ async def handle_podcast_render(req) -> ExecutionResult:
 
 
 async def handle_speaker_identify(req) -> ExecutionResult:
-    """Identify which enrolled speaker a workspace audio clip belongs to."""
-    if not ALPACA_AUDIO_URL:
-        return ExecutionResult(
-            status="FAILURE",
-            message=(
-                "Speaker identification failed: no audio backend configured. "
-                "Set ALPACA_AUDIO_URL to the alpaca audio-server (e.g. http://host:8082)."
-            ),
-            service="speaker_identify",
-            detail={},
-        )
+    """Identify which enrolled family member a workspace audio clip belongs to.
 
+    Both halves run here: the signature is computed in this process
+    (``voiceprint``) and matched against the signatures people enrolled under
+    Identity -> Vocal Signature, which identity holds.
+    """
     try:
         resolved_path, _ = await _resolve_workspace_info(req.workspace_id, getattr(req, "user_context", None))
     except Exception as e:
@@ -306,52 +300,49 @@ async def handle_speaker_identify(req) -> ExecutionResult:
             status="FAILURE",
             message=(
                 f"Speaker identification failed: '{req.audio_path}' is {len(clip) // 1048576} MB and the "
-                f"audio server accepts at most {_MAX_CLIP_BYTES // 1048576} MB. Trim or compress it first."
+                f"most a clip can be is {_MAX_CLIP_BYTES // 1048576} MB. Trim or compress it first."
             ),
             service="speaker_identify",
             detail={"audio_path": req.audio_path, "bytes": len(clip)},
         )
 
-    payload = {"audio_b64": base64.b64encode(clip).decode("ascii")}
-    if req.threshold is not None:
-        # Omitted on purpose: the audio server derives one from how much its own
-        # enrolled speakers vary between takes, which beats any constant we could
-        # ship here.
-        payload["threshold"] = req.threshold
+    try:
+        signature = await asyncio.to_thread(voiceprint.embed, clip)
+    except voiceprint.VoiceprintError as e:
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Speaker identification failed: {e}",
+            service="speaker_identify",
+            detail={"audio_path": req.audio_path},
+        )
 
+    payload = {"embedding": signature["embedding"], "model": signature["model"]}
+    if req.threshold is not None:
+        payload["threshold"] = req.threshold
     try:
         import aiohttp
 
         async with aiohttp.ClientSession() as client:
             resp = await client.post(
-                f"{ALPACA_AUDIO_URL}/api/voices/identify",
+                f"{IDENTITY_SVC_URL}/api/voice/identify",
                 json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=_IDENTIFY_TIMEOUT_S),
             )
             if resp.status == 404:
                 return ExecutionResult(
                     status="FAILURE",
-                    message="Speaker identification failed: no voices are enrolled yet. Record one in the dashboard's Audio Studio first.",
-                    service="speaker_identify",
-                    detail={"audio_path": req.audio_path},
-                )
-            if resp.status == 422:
-                return ExecutionResult(
-                    status="FAILURE",
-                    # The audio server maps every ValueError to 422 - "not
-                    # enough speech" is only one of them, and the other two
-                    # (over the 25 MB cap, an undecodable container) are not
-                    # about the speech at all. Leading with the wrong diagnosis
-                    # sends a model looking in the wrong place, so report what
-                    # the server actually said.
-                    message=f"Speaker identification failed: {(await resp.text())[:300]}",
+                    message=(
+                        "Speaker identification failed: nobody has enrolled a voice yet. "
+                        "Each person records theirs under Identity -> Vocal Signature."
+                    ),
                     service="speaker_identify",
                     detail={"audio_path": req.audio_path},
                 )
             if resp.status != 200:
                 return ExecutionResult(
                     status="FAILURE",
-                    message=f"Speaker identification failed: audio server returned {resp.status}: {(await resp.text())[:300]}",
+                    message=f"Speaker identification failed: identity returned {resp.status}: {(await resp.text())[:300]}",
                     service="speaker_identify",
                     detail={"audio_path": req.audio_path},
                 )
@@ -365,37 +356,29 @@ async def handle_speaker_identify(req) -> ExecutionResult:
             detail={"audio_path": req.audio_path},
         )
 
-    matched = (data or {}).get("matched_name")
-    score = (data or {}).get("score")
-    candidates = (data or {}).get("candidates") or []
-    runner_up = (data or {}).get("runner_up")
-    # The server returns runner_up as a profile id (voice_clone ranks ids), so
-    # printing it verbatim addressed a model as "b81e0d55aa02". The candidates
-    # carry the display name and are already ordered by descending score, so
-    # look the name up rather than assuming one.
-    runner_up_name = next(
-        (c.get("name") for c in candidates if isinstance(c, dict) and c.get("id") == runner_up),
-        None,
-    )
+    candidates = data.get("candidates") or []
+    matched = data.get("matched_name")
+    score = data.get("score")
     detail = {
         "audio_path": req.audio_path,
-        "matched": (data or {}).get("matched"),
+        "speech_seconds": signature["speech_seconds"],
+        "matched": data.get("matched"),
         "matched_name": matched,
         "score": score,
-        "threshold": (data or {}).get("threshold"),
-        "margin": (data or {}).get("margin"),
-        "runner_up": runner_up,
+        "threshold": data.get("threshold"),
+        "margin": data.get("margin"),
         "candidates": candidates,
     }
+    runner_up = candidates[1].get("name") if len(candidates) > 1 else None
     if matched:
         msg = f"Clip matches {matched} (score {score})"
-        if runner_up_name or runner_up:
-            msg += f"; next closest is {runner_up_name or runner_up}"
+        if runner_up:
+            msg += f"; next closest is {runner_up}"
         return ExecutionResult(status="SUCCESS", message=msg, service="speaker_identify", detail=detail)
 
     # No match still returns the ranking on purpose: "closest is X but it is not
     # them" is what the caller needs to decide whether to enrol or re-record.
-    closest = candidates[0].get("name") if candidates and isinstance(candidates[0], dict) else None
+    closest = candidates[0].get("name") if candidates else None
     return ExecutionResult(
         status="SUCCESS",
         message=(
