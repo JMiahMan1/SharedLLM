@@ -1,6 +1,7 @@
 # services/gateway/main.py
 import asyncio
 import hashlib
+import hmac
 import base64
 import json
 import logging
@@ -2084,7 +2085,7 @@ async def _require_identity_from_request(request: Request, body: dict | None = N
         # container on the bridge network) authenticate with the internal secret
         # rather than a user's API key. They are already inside the trust
         # boundary, so they keep Identity's own resolution rules.
-        if request.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
+        if hmac.compare_digest(request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET):
             return await _resolve_identity_allow_anonymous(request, body)
         raise HTTPException(
             status_code=401,
