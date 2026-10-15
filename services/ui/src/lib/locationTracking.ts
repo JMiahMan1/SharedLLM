@@ -7,6 +7,8 @@ interface LocationTrackingPlugin {
   isRunning(): Promise<{ running: boolean }>;
   batteryUnrestricted(): Promise<{ unrestricted: boolean }>;
   requestBatteryUnrestricted(): Promise<{ unrestricted: boolean }>;
+  backgroundLocation(): Promise<{ granted: boolean; foreground: boolean }>;
+  requestBackgroundLocation(): Promise<{ granted: boolean }>;
 }
 
 /**
@@ -112,5 +114,33 @@ export async function requestBatteryUnrestricted(): Promise<void> {
     await plugin.requestBatteryUnrestricted();
   } catch (err) {
     console.warn('[locationTracking] battery exemption request failed:', err);
+  }
+}
+
+/**
+ * Whether location may be read with the app closed ("Allow all the time").
+ * `null` when it cannot say: not Android, or an APK older than the check.
+ * With only "While using the app", sharing stops for good the first time
+ * Android reclaims the app, with no error anywhere.
+ */
+export async function hasBackgroundLocation(): Promise<boolean | null> {
+  const plugin = getLocationTracking();
+  if (!plugin) return null;
+  try {
+    const res = await plugin.backgroundLocation();
+    return Boolean(res?.granted);
+  } catch {
+    return null;
+  }
+}
+
+/** Takes the user to Android's own "Allow all the time" choice for this app. */
+export async function requestBackgroundLocation(): Promise<void> {
+  const plugin = getLocationTracking();
+  if (!plugin) return;
+  try {
+    await plugin.requestBackgroundLocation();
+  } catch (err) {
+    console.warn('[locationTracking] background location request failed:', err);
   }
 }

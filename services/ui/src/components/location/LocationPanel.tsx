@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useBackgroundLocation } from '../../hooks/useBackgroundLocation';
+import { useLocation } from '../../context/LocationContext';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import Toggle from '../ui/Toggle';
-import BatteryUnrestrictedNotice from './BatteryUnrestrictedNotice';
+import LocationBackgroundNotice from './LocationBackgroundNotice';
 import toast from 'react-hot-toast';
 import {
   MapPin,
@@ -75,7 +75,7 @@ const LocationPanel = () => {
     interval,
     startTracking,
     stopTracking
-  } = useBackgroundLocation();
+  } = useLocation();
 
   const [showRawDetails, setShowRawDetails] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -470,7 +470,7 @@ const LocationPanel = () => {
           </div>
         )}
 
-        {isTracking && <BatteryUnrestrictedNotice />}
+        {isTracking && <LocationBackgroundNotice />}
 
         {showRawDetails && isTracking && (
           <div className="glass-card p-3 space-y-1.5 text-xs font-mono rounded-xl bg-slate-900/50">

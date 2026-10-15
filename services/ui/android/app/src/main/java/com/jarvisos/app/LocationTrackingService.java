@@ -100,6 +100,47 @@ public class LocationTrackingService extends Service {
         }
     };
 
+    private static final String PREFS = "jarvis_location";
+    private static final String KEY_ENABLED = "tracking_enabled";
+
+    /** Remembered so tracking can resume after a reboot or an app update. */
+    static void setEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, enabled).apply();
+    }
+
+    static boolean isEnabled(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, false);
+    }
+
+    /**
+     * Restart tracking after a reboot or update, if it was on. Without
+     * "Allow all the time" a service started now would get no fixes, so it is
+     * not started; the app says so when next opened.
+     */
+    static void resumeIfEnabled(Context context) {
+        if (!isEnabled(context)) return;
+        if (!hasBackgroundLocation(context)) {
+            Log.w(TAG, "tracking was on but location is 'while using the app' only; not resuming in background");
+            return;
+        }
+        Intent intent = new Intent(context, LocationTrackingService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent);
+        } else {
+            context.startService(intent);
+        }
+    }
+
+    /** "Allow all the time": without it a service started in the background gets no fixes. */
+    static boolean hasBackgroundLocation(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+        return context.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();

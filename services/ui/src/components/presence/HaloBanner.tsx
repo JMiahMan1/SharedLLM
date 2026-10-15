@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { MapPin, ChevronLeft, ChevronRight, Navigation } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
-import { useLocation } from '../../context/LocationContext.types';
+import { useLocation } from '../../context/LocationContext';
 import { api } from '../../services/api';
 
 interface Room {

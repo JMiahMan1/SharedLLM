@@ -186,21 +186,17 @@
         </receiver>
 
         <receiver
-            android:name=".widgets.WidgetBootReceiver"
+            android:name=".BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
 
-        <!-- Keeps uploading location while the app is closed. The WebView's
-             watchPosition dies with the process, which is why location and steps
-             both went silent together on an aggressive OEM build. START_STICKY
-             plus foregroundServiceType=location is the only way Android allows
-             this to survive backgrounding; the ongoing notification is required. -->
+        <!-- Holds the long poll for family chat notices and posts them as
+             system notifications (no outside push service). -->
         <service
             android:name=".ChatNotifyService"
             android:exported="false"
@@ -212,22 +208,16 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <!-- Keeps uploading location while the app is closed. The WebView's
+             watchPosition dies with the process, which is why location and steps
+             both went silent together on an aggressive OEM build. START_STICKY
+             plus foregroundServiceType=location is the only way Android allows
+             this to survive backgrounding; the ongoing notification is required. -->
         <service
             android:name=".LocationTrackingService"
             android:exported="false"
             android:foregroundServiceType="location"
             android:stopWithTask="false" />
-
-        <!-- Relaunches the app after its own APK is installed. Must be
-             manifest-declared: the update kills our process, so a receiver
-             registered in code would not survive to see the broadcast. -->
-        <receiver
-            android:name=".SelfRestartReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-            </intent-filter>
-        </receiver>
 
     </application>
 

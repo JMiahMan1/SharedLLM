@@ -1,7 +1,9 @@
 package com.jarvisos.app;
 
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.PowerManager;
@@ -33,6 +35,7 @@ public class LocationTrackingPlugin extends Plugin {
             call.reject("username is required to start location tracking");
             return;
         }
+        LocationTrackingService.setEnabled(getContext(), true);
         Intent intent = new Intent(getContext(), LocationTrackingService.class);
         intent.putExtra("username", username.trim());
         String userId = call.getString("userId");
@@ -55,6 +58,7 @@ public class LocationTrackingPlugin extends Plugin {
 
     @PluginMethod
     public void stop(PluginCall call) {
+        LocationTrackingService.setEnabled(getContext(), false);
         Intent intent = new Intent(getContext(), LocationTrackingService.class);
         intent.setAction("stop");
         try {
@@ -100,6 +104,55 @@ public class LocationTrackingPlugin extends Plugin {
         }
         JSObject ret = new JSObject();
         ret.put("unrestricted", false);
+        call.resolve(ret);
+    }
+
+    /**
+     * Whether location may be read with the app closed ("Allow all the time").
+     *
+     * The permission prompt only ever offers "While using the app" on Android
+     * 11+, and with that grant the tracking service works only while it was
+     * started from the open app. Once Android reclaims the process and the
+     * service is restarted in the background it receives no fixes at all, so
+     * the phone goes silent with no error (seen: a phone reporting every ten
+     * minutes overnight, then nothing from 06:55 on).
+     */
+    @PluginMethod
+    public void backgroundLocation(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("granted", LocationTrackingService.hasBackgroundLocation(getContext()));
+        ret.put("foreground", getContext().checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED);
+        call.resolve(ret);
+    }
+
+    /**
+     * Ask for "Allow all the time". From Android 11 the system answers this
+     * request by opening the app's location page, where that option lives;
+     * on builds that do not, open the app's settings instead.
+     */
+    @PluginMethod
+    public void requestBackgroundLocation(PluginCall call) {
+        if (LocationTrackingService.hasBackgroundLocation(getContext())) {
+            JSObject ret = new JSObject();
+            ret.put("granted", true);
+            call.resolve(ret);
+            return;
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && getActivity() != null) {
+                getActivity().requestPermissions(new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION}, 0x10A2);
+            } else {
+                throw new IllegalStateException("no activity");
+            }
+        } catch (Exception e) {
+            Intent details = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + getContext().getPackageName()));
+            details.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(details);
+        }
+        JSObject ret = new JSObject();
+        ret.put("granted", false);
         call.resolve(ret);
     }
 
