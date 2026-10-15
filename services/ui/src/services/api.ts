@@ -843,12 +843,13 @@ export const api = {
   },
 
   async getLogs(limit = 50): Promise<LogEntry[]> {
-    const resp = await apiClient.get(`/api/logs?limit=${limit}`);
+    // Admin only: these are the whole system's logs.
+    const resp = await apiClient.get(`/api/admin/logs?limit=${limit}`);
     return resp.data;
   },
 
   async clearLogs(): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.delete('/api/logs');
+    const resp = await apiClient.delete('/api/admin/logs');
     return resp.data;
   },
 

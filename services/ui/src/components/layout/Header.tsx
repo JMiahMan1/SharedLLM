@@ -92,6 +92,8 @@ const Header = () => {
     queryKey: ['header-notifications'],
     queryFn: () => api.getLogs(50),
     refetchInterval: 15000,
+    // System logs are admin-only; for everyone else this would be a 403 a minute.
+    enabled: !!user?.is_admin,
   });
 
   // Periodic background check for service updates (admin accounts only).
