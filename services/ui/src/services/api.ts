@@ -5,6 +5,7 @@ import type { FamilyMember } from '../components/chat/familyDirectory';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
 import type {
+  SongJob,
   VoiceCheck,
   VoiceStatus,
   HealthStatus,
@@ -181,6 +182,7 @@ import type {
 
 // Re-export domain types so consumers can import them from the api module.
 export type {
+  SongJob,
   VoiceCheck,
   VoiceStatus,
   APIKey,
@@ -1293,14 +1295,20 @@ export const api = {
     return resp.data;
   },
 
-  async generateMusic(payload: {
-    prompt: string;
-    duration_s?: number;
-  }): Promise<{ status: string; audio_url?: string; mime?: string; message?: string }> {
-    // Music generation can take minutes on CPU; the shared client's 15s would
-    // abort it mid-render.
-    const resp = await apiClient.post('/api/music/generate', payload, { timeout: 600_000 });
-    return resp.data;
+  /** Queue a song; it is written on the audio server and polled with getSong. */
+  async startSong(payload: { prompt: string; duration_s: number; structure: string; seed?: number }): Promise<SongJob> {
+    const resp = await apiClient.post('/api/music/songs', payload, { timeout: 30_000 });
+    return resp.data.job;
+  },
+
+  async getSong(id: string): Promise<SongJob> {
+    const resp = await apiClient.get(`/api/music/songs/${encodeURIComponent(id)}`, { timeout: 30_000 });
+    return resp.data.job;
+  },
+
+  async cancelSong(id: string): Promise<SongJob> {
+    const resp = await apiClient.delete(`/api/music/songs/${encodeURIComponent(id)}`);
+    return resp.data.job;
   },
 
   async joinTalkCall(token: string, as_user?: 'admin'): Promise<ExecutionResponse> {

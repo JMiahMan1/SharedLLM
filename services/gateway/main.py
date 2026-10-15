@@ -5365,66 +5365,87 @@ async def sd_image_generate_proxy(request: Request):
         return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Stable Diffusion backend unreachable: {exc}"})
 
 
-@app.post("/api/music/generate")
-async def music_generate_proxy(request: Request):
-    """Generate a short piece of music from a prompt.
-
-    The audio backend is optional and must be configured: an unset
-    ALPACA_AUDIO_URL is a clear failure, not a probe of some remembered host.
-    The backend's own error text is passed through so a refused prompt reads
-    as refused instead of as silence.
-    """
+async def _music_backend(request: Request) -> JSONResponse | None:
+    """The failure to answer with, or None when a song request may go ahead."""
     if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     if not ALPACA_AUDIO_URL:
         return JSONResponse(
             status_code=503,
-            content={
-                "status": "ERROR",
-                "message": "Music generation is not configured on this deployment (set ALPACA_AUDIO_URL)",
-            },
+            content={"status": "ERROR", "message": "Music generation is not configured on this deployment (set ALPACA_AUDIO_URL)"},
         )
+    return None
 
+
+def _music_job_answer(status: int, result: dict) -> JSONResponse:
+    """A song job as the UI reads it: the audio, when ready, as a playable data URL."""
+    if status >= 400 or not isinstance(result, dict) or result.get("error"):
+        message = (result or {}).get("error") if isinstance(result, dict) else None
+        return JSONResponse(
+            status_code=status if status >= 400 else 502,
+            content={"status": "ERROR", "message": message or f"Audio backend returned {status}"},
+        )
+    job = {k: v for k, v in result.items() if k != "audio_b64"}
+    if result.get("audio_b64"):
+        job["audio_url"] = f"data:{result.get('mime') or 'audio/wav'};base64,{result['audio_b64']}"
+    return JSONResponse(status_code=200, content={"status": "SUCCESS", "job": job})
+
+
+@app.post("/api/music/songs")
+async def music_song_start(request: Request):
+    """Queue a whole song (verse/chorus structure, up to a few minutes).
+
+    Songs take minutes, longer when the GPU is busy with Jarvis and the song is
+    written on the CPU, so this answers at once with a job to poll rather than
+    holding a phone's request open.
+    """
+    if (refusal := await _music_backend(request)) is not None:
+        return refusal
     body = await request.json()
-    prompt = str(body.get("prompt") or "").strip()
-    if not prompt:
+    if not str(body.get("prompt") or "").strip():
         return JSONResponse(status_code=422, content={"status": "ERROR", "message": "A prompt is required"})
-
-    payload = {"prompt": prompt}
-    for key in ("duration_s", "temperature", "guidance_scale", "seed", "top_k"):
-        if body.get(key) is not None:
-            payload[key] = body[key]
-
+    payload = {k: body[k] for k in ("prompt", "duration_s", "structure", "seed", "temperature", "guidance_scale") if body.get(k) is not None}
     try:
         resp = await get_http_client().post(
-            f"{ALPACA_AUDIO_URL}/api/music", json=payload, timeout=aiohttp.ClientTimeout(total=600.0)
+            f"{ALPACA_AUDIO_URL}/api/music/jobs", json=payload, timeout=aiohttp.ClientTimeout(total=30.0)
         )
         result = await resp.json()
     except Exception as exc:  # noqa: BLE001 - reported to the caller
-        return JSONResponse(
-            status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"}
-        )
+        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"})
+    return _music_job_answer(resp.status, result)
 
-    if resp.status >= 400 or result.get("error"):
-        return JSONResponse(
-            status_code=resp.status if resp.status >= 400 else 502,
-            content={"status": "ERROR", "message": result.get("error") or f"Audio backend returned {resp.status}"},
-        )
 
-    audio_b64 = result.get("audio_b64")
-    if not audio_b64:
-        return JSONResponse(
-            status_code=502, content={"status": "ERROR", "message": "Audio backend returned no audio"}
+@app.get("/api/music/songs/{job_id}")
+async def music_song_status(request: Request, job_id: str):
+    """Where a queued song is: its place in line, the section being written, or the song."""
+    if (refusal := await _music_backend(request)) is not None:
+        return refusal
+    if not re.fullmatch(r"[0-9a-f]{6,32}", job_id):
+        return JSONResponse(status_code=404, content={"status": "ERROR", "message": "No such song"})
+    try:
+        resp = await get_http_client().get(
+            f"{ALPACA_AUDIO_URL}/api/music/jobs/{job_id}", timeout=aiohttp.ClientTimeout(total=30.0)
         )
-    mime = result.get("mime") or "audio/wav"
-    return JSONResponse(
-        content={
-            "status": "SUCCESS",
-            "mime": mime,
-            # A data URL so the browser can play it without a temp file.
-            "audio_url": f"data:{mime};base64,{audio_b64}",
-        }
-    )
+        result = await resp.json()
+    except Exception as exc:  # noqa: BLE001 - reported to the caller
+        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"})
+    return _music_job_answer(resp.status, result)
+
+
+@app.delete("/api/music/songs/{job_id}")
+async def music_song_cancel(request: Request, job_id: str):
+    if (refusal := await _music_backend(request)) is not None:
+        return refusal
+    if not re.fullmatch(r"[0-9a-f]{6,32}", job_id):
+        return JSONResponse(status_code=404, content={"status": "ERROR", "message": "No such song"})
+    try:
+        resp = await get_http_client().delete(
+            f"{ALPACA_AUDIO_URL}/api/music/jobs/{job_id}", timeout=aiohttp.ClientTimeout(total=30.0)
+        )
+        result = await resp.json()
+    except Exception as exc:  # noqa: BLE001 - reported to the caller
+        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"})
+    return _music_job_answer(resp.status, result)
 
 
 @app.post("/api/images/edit")
