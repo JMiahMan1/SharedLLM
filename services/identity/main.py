@@ -4733,10 +4733,17 @@ async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
                 }
                 if location.battery is not None:
                     payload["battery"] = int(location.battery)
+                # device_tracker.see has no speed or course fields: sent at the
+                # top level they made HA answer 400 to every update, so the app's
+                # location never reached Home Assistant. Extra values go under
+                # attributes, which the service accepts.
+                extra = {}
                 if location.speed is not None:
-                    payload["speed"] = location.speed
+                    extra["speed"] = location.speed
                 if location.bearing is not None:
-                    payload["course"] = location.bearing
+                    extra["course"] = location.bearing
+                if extra:
+                    payload["attributes"] = extra
 
                 try:
                     async with client.post(

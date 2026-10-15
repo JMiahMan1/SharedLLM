@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { api } from '../../services/api';
+import { userLocationsQuery } from '../../lib/wanderQueries';
 import {
   FRESHNESS_STYLE,
   STALE_MAX_AGE_MS,
@@ -53,12 +53,11 @@ export default function LiveFamilyMap({
   /** Only auto-fit once: 30 s polls must not yank the view away from the user. */
   const hasFitMembersRef = useRef(false);
 
+  // The one shared location query (see wanderQueries); freshness is worked out
+  // in `select`, against the time the data arrived, so render stays pure.
   const { data: members = [] } = useQuery({
-    queryKey: ['user-locations', maxAgeMs],
-    // Freshness is computed at fetch time so render stays pure.
-    queryFn: async () => buildLiveMembers(await api.getAllUserLocations(), Date.now(), maxAgeMs),
-    refetchInterval: 30_000,
-    staleTime: 15_000,
+    ...userLocationsQuery,
+    select: (raw) => buildLiveMembers(raw, Date.now(), maxAgeMs),
   });
 
   useEffect(() => {

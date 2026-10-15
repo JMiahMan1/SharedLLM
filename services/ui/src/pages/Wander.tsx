@@ -29,7 +29,9 @@ import {
   tripsQueryKey,
   tripsQueryOptions,
   vehiclesQueryKey,
+  userLocationsQuery,
 } from '../lib/wanderQueries';
+import { buildFamilyCards, type Place } from '../lib/familyCards';
 import toast from 'react-hot-toast';
 import {
   Users,
@@ -60,21 +62,6 @@ interface VehicleOption {
   mpg: number;
   cost_per_gallon: number;
   fuel_type: string;
-}
-
-interface FamilyMemberStatus {
-  id: string;
-  name: string;
-  zone: string;
-  isMoving: boolean;
-  speedMph: number;
-  battery: number | null;
-  assignedVehicle?: string;
-  lastUpdated?: string;
-  /** GPS accuracy in metres, when the source reports it. */
-  accuracy?: number | null;
-  /** Zones the member is currently inside (from HA). */
-  inZones?: string[];
 }
 
 const Wander = () => {
@@ -138,7 +125,11 @@ const Wander = () => {
     queryKey: geoPeopleQueryKey(),
     queryFn: () => api.getGeoPeople(),
     ...houseConfigQueryOptions,
+    // Live positions, not house config: refresh like the map does.
+    staleTime: 15_000,
+    refetchInterval: 30_000,
   });
+  const locationsQuery = useQuery(userLocationsQuery);
   const zonesQuery = useQuery({
     queryKey: geoZonesQueryKey(),
     queryFn: () => api.getGeoZones(),
@@ -187,37 +178,17 @@ const Wander = () => {
       );
   }, [zonesQuery.data]);
 
-  /** Parse Family Members from the HA People collection - real entities only. */
+  /** The freshest position per person: the Jarvis app's fix, else HA's person. */
   const familyMembers = useMemo(() => {
-    const geoJson = peopleQuery.data as
-      | { features?: Array<{ properties?: Record<string, unknown> }> }
-      | undefined;
-    const members: FamilyMemberStatus[] = [];
-    for (const feat of geoJson?.features ?? []) {
-      const props = feat.properties || {};
-      const entityId = String(props.entity_id || '');
-      if (!entityId.startsWith('person.')) continue;
-      const rawName = String(props.friendly_name || entityId.replace('person.', ''));
-      const zone = String(props.state || 'Unknown');
-      const speedRaw = Number(props.speed || 0);
-      const battery = props.battery != null ? Number(props.battery) : null;
-      const accuracy = props.gps_accuracy != null ? Number(props.gps_accuracy) : null;
-      const lastUpdated = props.last_updated != null ? String(props.last_updated) : undefined;
-      const inZones = Array.isArray(props.in_zones) ? (props.in_zones as string[]) : [];
-      members.push({
-        id: entityId,
-        name: rawName,
-        zone: zone.charAt(0).toUpperCase() + zone.slice(1),
-        isMoving: speedRaw > 1.0,
-        speedMph: Math.round(speedRaw * 2.23694), // m/s -> mph
-        battery: Number.isFinite(battery as number) ? battery : null,
-        accuracy: Number.isFinite(accuracy as number) ? accuracy : null,
-        lastUpdated,
-        inZones,
-      });
-    }
-    return members;
-  }, [peopleQuery.data]);
+    const geoJson = peopleQuery.data as { features?: Array<{ properties?: Record<string, unknown> }> } | undefined;
+    const placeList: Place[] = places.map((p) => ({ name: p.name, lat: p.lat, lon: p.lon, radius: p.radius }));
+    return buildFamilyCards(
+      geoJson?.features ?? [],
+      locationsQuery.data ?? {},
+      placeList,
+      locationsQuery.dataUpdatedAt || peopleQuery.dataUpdatedAt,
+    );
+  }, [peopleQuery.data, peopleQuery.dataUpdatedAt, locationsQuery.data, locationsQuery.dataUpdatedAt, places]);
 
   const refreshAll = useCallback(() => {
     trigger('light');
@@ -225,9 +196,10 @@ const Wander = () => {
       tripsQuery.refetch(),
       vehiclesQuery.refetch(),
       peopleQuery.refetch(),
+      locationsQuery.refetch(),
       zonesQuery.refetch(),
     ]);
-  }, [tripsQuery, vehiclesQuery, peopleQuery, zonesQuery, trigger]);
+  }, [tripsQuery, vehiclesQuery, peopleQuery, locationsQuery, zonesQuery, trigger]);
 
   const loadError = tripsQuery.isError || peopleQuery.isError || zonesQuery.isError;
 
@@ -1263,7 +1235,7 @@ const Wander = () => {
                 {familyMembers
                   .filter((m) => m.id.replace('person.', '').toLowerCase() !== currentUsername)
                   .map((member) => {
-                    const riderId = member.id.replace('person.', '').toLowerCase();
+                    const riderId = member.id.replace(/^(person|user)\./, '').toLowerCase();
                     const selected = shareSelection.includes(riderId);
                     return (
                       <label
