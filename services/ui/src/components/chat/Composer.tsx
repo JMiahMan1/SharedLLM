@@ -53,6 +53,15 @@ interface ComposerProps {
   isAdmin: boolean;
   sendAs: SendAs;
   onSendAsChange: (next: SendAs) => void;
+  /** Shortcuts shown as chips above the input (verse, games, create...). */
+  quickActions?: QuickAction[];
+}
+
+export interface QuickAction {
+  key: string;
+  label: string;
+  icon: ReactNode;
+  onSelect: () => void;
 }
 
 const MAX_INPUT_HEIGHT_PX = 140;
@@ -89,6 +98,7 @@ export default function Composer({
   sendingFiles,
   onNewPoll,
   isAdmin,
+  quickActions = [],
   sendAs,
   onSendAsChange,
 }: ComposerProps) {
@@ -353,10 +363,18 @@ export default function Composer({
         </div>
       )}
 
-      {isAdmin && (
-        <div className="mb-1.5 flex items-center gap-2 px-1">
-          <SendAsSelector value={sendAs} onChange={onSendAsChange} />
-          {adminMode && <span className="text-[10px] text-slate-500">in this chat only</span>}
+      {!editing && (
+        <div className="-mx-1 mb-2 flex items-center gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none]" data-testid="quick-actions">
+          <QuickChip icon={<Sparkles size={14} className="text-fuchsia-300" />} label="@Jarvis" onSelect={askJarvis} />
+          {quickActions.map((action) => (
+            <QuickChip key={action.key} icon={action.icon} label={action.label} onSelect={action.onSelect} />
+          ))}
+          <QuickChip icon={<BarChart3 size={14} className="text-amber-300" />} label="Poll" onSelect={onNewPoll} />
+          {isAdmin && (
+            <span className="ml-auto shrink-0 pl-1">
+              <SendAsSelector value={sendAs} onChange={onSendAsChange} />
+            </span>
+          )}
         </div>
       )}
 
@@ -397,7 +415,7 @@ export default function Composer({
         <div className="relative">
           <button
             type="button"
-            className="flex min-h-11 min-w-11 items-center justify-center rounded-full text-slate-300 hover:bg-white/10"
+            className="flex min-h-11 min-w-11 items-center justify-center rounded-full bg-white/[0.07] text-sky-300 hover:bg-white/[0.12]"
             aria-label="More options"
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((v) => !v)}
@@ -458,7 +476,7 @@ export default function Composer({
             editing ? 'Edit message' : staged.length ? 'Add a caption' : adminMode ? 'Message as Admin' : 'Message, or @Jarvis to ask'
           }
           aria-label="Message"
-          className={`min-h-11 flex-1 resize-none rounded-3xl border bg-white/5 px-4 py-2.5 text-base leading-snug text-slate-100 placeholder:text-slate-500 focus:outline-none sm:text-[15px] ${
+          className={`min-h-11 flex-1 resize-none rounded-3xl border bg-slate-900 px-4 py-2.5 text-base leading-snug text-slate-100 placeholder:text-slate-500 focus:outline-none sm:text-[15px] ${
             toJarvis
               ? 'border-fuchsia-400/50 focus:border-fuchsia-400/80'
               : adminMode
@@ -471,7 +489,7 @@ export default function Composer({
           <button
             type="button"
             className={`flex min-h-11 min-w-11 items-center justify-center rounded-full text-white transition disabled:opacity-50 ${
-              toJarvis ? 'bg-gradient-to-br from-fuchsia-500 to-indigo-500' : 'bg-purple-600 hover:bg-purple-500'
+              toJarvis ? 'bg-gradient-to-br from-fuchsia-500 to-indigo-500' : 'bg-gradient-to-br from-purple-500 to-indigo-600 shadow-lg shadow-purple-500/30'
             }`}
             onClick={() => void submit()}
             disabled={disabled || sendingFiles || (Boolean(editing) && !hasText)}
@@ -495,6 +513,19 @@ export default function Composer({
         )}
       </div>
     </div>
+  );
+}
+
+function QuickChip({ icon, label, onSelect }: { icon: ReactNode; label: string; onSelect: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-slate-800/80 px-3 text-[12px] font-medium text-slate-100 hover:border-purple-400/40 hover:bg-slate-800"
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

@@ -49,28 +49,32 @@ export default function Family() {
   const [tab, setTab] = useState<Tab>('chat');
 
   return (
-    <div className="space-y-4 sm:space-y-5 max-w-6xl mx-auto pb-28 px-1 sm:px-0" data-testid="family-page">
-      <div className="glass-panel p-4 sm:p-5 rounded-2xl border border-white/10">
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-100">Family</h1>
-        <p className="text-xs text-slate-400 mt-0.5">
-          Talk, play and make things together — for every age in the house.
-        </p>
-        <div className="mt-3 sm:mt-4 grid grid-cols-3 gap-2 sm:flex sm:flex-wrap" role="tablist" aria-label="Family sections">
+    <div className="space-y-3 sm:space-y-4 max-w-6xl mx-auto pb-28 px-1 sm:px-0" data-testid="family-page">
+      {/* One compact row, so the conversations get the screen. */}
+      <div className="flex items-center gap-3 px-1">
+        <h1 className="text-2xl font-bold tracking-tight text-white">Family</h1>
+        <div
+          className="ml-auto flex rounded-full border border-white/10 bg-slate-900/80 p-1"
+          role="tablist"
+          aria-label="Family sections"
+        >
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               role="tab"
               aria-selected={tab === id}
               onClick={() => setTab(id)}
-              className={`glass-button px-3 sm:px-4 py-2.5 text-sm min-h-11 justify-center ${tab === id ? 'text-purple-200 border-purple-400/50' : 'text-slate-300'}`}
+              className={`flex min-h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition ${
+                tab === id ? 'bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+              }`}
             >
-              <Icon size={15} /> {label}
+              <Icon size={14} /> {label}
             </button>
           ))}
         </div>
       </div>
 
-      {tab === 'chat' && <ChatPanel />}
+      {tab === 'chat' && <ChatPanel onOpenTab={setTab} />}
 
       {tab === 'games' && (
         <div className="space-y-4" data-testid="family-games">

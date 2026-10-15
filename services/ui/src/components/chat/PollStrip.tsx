@@ -19,22 +19,27 @@ export interface TalkPoll {
  * its share of the votes -- the WhatsApp/Telegram poll card.
  */
 export default function PollStrip({ polls, onVote }: { polls: TalkPoll[]; onVote: (pollId: number, optionId: number) => void }) {
-  const [open, setOpen] = useState(true);
+  // One slim pinned line, like a pinned message; open it to vote.
+  const [open, setOpen] = useState(false);
   if (polls.length === 0) return null;
   const shown = polls.slice(0, 3);
 
   return (
-    <div className="shrink-0 border-b border-white/5 bg-white/[0.02]" data-testid="poll-list">
+    <div className="shrink-0 border-b border-white/5 bg-slate-900/80" data-testid="poll-list">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-semibold text-slate-300"
+        className="flex w-full min-h-11 items-center gap-2 px-3 text-left text-[13px] font-semibold text-slate-200"
       >
-        <BarChart3 size={13} className="text-fuchsia-300" />
-        {polls.length === 1 ? 'Poll' : `${polls.length} polls`}
-        {!open && <span className="truncate font-normal text-slate-400">· {shown[0].question}</span>}
-        <span className="ml-auto text-slate-500">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-fuchsia-500/20">
+          <BarChart3 size={14} className="text-fuchsia-300" />
+        </span>
+        <span className="min-w-0 flex-1 truncate">
+          {polls.length === 1 ? shown[0].question : `${polls.length} open polls · ${shown[0].question}`}
+        </span>
+        <span className="shrink-0 rounded-full bg-fuchsia-500/20 px-2 py-0.5 text-[11px] text-fuchsia-200">{open ? 'Hide' : 'Vote'}</span>
+        <span className="text-slate-500">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
       </button>
       {open && (
         <div className="max-h-56 space-y-2 overflow-y-auto px-3 pb-3">

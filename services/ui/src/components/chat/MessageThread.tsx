@@ -2,11 +2,11 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode 
 import { ArrowDown, Check, CheckCheck, Copy, CornerUpLeft, Pencil, RotateCcw, SmilePlus, Sparkles, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import EnvelopeBody from './EnvelopeBody';
+import UserAvatar from '../UserAvatar';
+import { nameColour, type FamilyLookup } from './familyDirectory';
 import {
-  avatarTint,
   dayLabel,
   groupIntoRuns,
-  initials,
   isEmojiOnly,
   JARVIS_ID,
   plainText,
@@ -25,6 +25,8 @@ interface MessageThreadProps {
   messages: TalkMessage[];
   myActorIds: ReadonlySet<string>;
   isGroup: boolean;
+  /** Who is who, for each sender's picture. */
+  people?: FamilyLookup;
   /** Everyone has read up to this id: drives "Read" under your latest message. */
   lastCommonRead?: number;
   /** Your read marker when the conversation was opened: the "New messages" line. */
@@ -44,6 +46,7 @@ export default function MessageThread({
   messages,
   myActorIds,
   isGroup,
+  people,
   lastCommonRead,
   unreadAfter,
   jarvisThinking,
@@ -98,8 +101,12 @@ export default function MessageThread({
     seenCountRef.current = messages.length;
     const feed = feedRef.current;
     if (!feed) return;
-    if (dividerRef.current && typeof dividerRef.current.scrollIntoView === 'function') {
-      dividerRef.current.scrollIntoView({ block: 'start' });
+    // Move only the feed. scrollIntoView also scrolls every scrollable
+    // ancestor -- the page itself on a wide screen -- which pushed the chat
+    // header and the Family title up under the app bar.
+    const divider = dividerRef.current;
+    if (divider) {
+      feed.scrollTop += divider.getBoundingClientRect().top - feed.getBoundingClientRect().top - 8;
     } else {
       feed.scrollTop = feed.scrollHeight;
     }
@@ -184,6 +191,7 @@ export default function MessageThread({
                 <Run
                   run={run}
                   isGroup={isGroup}
+                  people={people}
                   myActorIds={myActorIds}
                   activeKey={activeKey}
                   receiptMessage={myLatest}
@@ -241,7 +249,7 @@ function JarvisAvatar() {
   return (
     <span
       aria-hidden
-      className="mb-5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-indigo-500 text-white shadow"
+      className="mb-5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-indigo-500 text-white shadow"
     >
       <Sparkles size={14} />
     </span>
@@ -251,6 +259,7 @@ function JarvisAvatar() {
 interface RunProps {
   run: MessageRun;
   isGroup: boolean;
+  people?: FamilyLookup;
   myActorIds: ReadonlySet<string>;
   activeKey: string | null;
   receiptMessage?: TalkMessage;
@@ -273,6 +282,7 @@ function messageKey(message: TalkMessage, index: number): string {
 function Run({
   run,
   isGroup,
+  people,
   myActorIds,
   activeKey,
   receiptMessage,
@@ -300,17 +310,21 @@ function Run({
         (jarvis ? (
           <JarvisAvatar />
         ) : (
-          <span
-            aria-hidden
-            className="mb-5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
-            style={{ background: avatarTint(run.author) }}
-          >
-            {initials(run.author)}
+          <span className="mb-5 shrink-0">
+            <UserAvatar
+              username={people?.(run.authorId)?.username ?? run.authorId ?? run.author}
+              avatar={people?.(run.authorId)?.avatar}
+              name={run.author}
+              size={32}
+            />
           </span>
         ))}
       <div className={`flex min-w-0 max-w-[82%] flex-col sm:max-w-[70%] ${mine ? 'items-end' : 'items-start'}`}>
         {showName && (
-          <span className={`mb-0.5 ml-3 inline-flex items-center gap-1 text-[11px] font-semibold ${jarvis ? 'text-fuchsia-300' : 'text-slate-400'}`}>
+          <span
+            className={`mb-0.5 ml-3 inline-flex items-center gap-1 text-[12px] font-semibold ${jarvis ? 'text-fuchsia-300' : ''}`}
+            style={jarvis ? undefined : { color: nameColour(run.author) }}
+          >
             {run.author}
             {jarvis && <span className="rounded-full bg-fuchsia-500/20 px-1.5 text-[9px] uppercase tracking-wider">AI</span>}
           </span>
@@ -330,10 +344,10 @@ function Run({
             : mine
               ? message.pending === 'failed'
                 ? 'bg-rose-500/20 text-slate-100'
-                : 'bg-gradient-to-br from-purple-600 to-violet-600 text-white'
+                : 'bg-gradient-to-br from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-900/30'
               : jarvis
                 ? 'border border-fuchsia-400/30 bg-gradient-to-br from-fuchsia-500/15 to-indigo-500/15 text-slate-100'
-                : 'bg-white/10 text-slate-100';
+                : 'border border-white/[0.06] bg-slate-800/90 text-slate-100 shadow-sm';
           const open = activeKey === key;
           return (
             <div key={key} className={`group relative flex w-full flex-col ${mine ? 'items-end' : 'items-start'} ${index > 0 ? 'mt-0.5' : ''}`}>

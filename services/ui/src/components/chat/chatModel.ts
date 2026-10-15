@@ -45,6 +45,8 @@ export interface TalkMessage {
 export interface TalkConversation {
   token: string;
   display_name: string;
+  /** For a direct message, the other person's account id. */
+  name?: string;
   description?: string;
   last_message?: string;
   last_message_actor?: string;

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ImageIcon, Info, Loader2, Phone, PhoneOff, Plus, RefreshCw, X } from 'lucide-react';
+import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Loader2, Phone, PhoneOff, Plus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
@@ -9,14 +9,15 @@ import { useConversationSendAs } from './sendAsPref';
 import ConversationList from './ConversationList';
 import ConversationInfo from './ConversationInfo';
 import NewChatSheet from './NewChatSheet';
+import ConversationAvatar from './ConversationAvatar';
+import VerseBanner from './VerseBanner';
+import { useFamilyDirectory } from './familyDirectory';
 import MessageThread from './MessageThread';
 import Composer from './Composer';
 import PollStrip, { type TalkPoll } from './PollStrip';
 import {
   asksJarvis,
-  avatarTint,
   detailList,
-  initials,
   isAssistant,
   MAX_ATTACHMENT_BYTES,
   reactionCounts,
@@ -41,6 +42,8 @@ function fileToBase64(file: File): Promise<string> {
 
 interface ChatPanelProps {
   className?: string;
+  /** Open another part of the Family hub (the Games or Create tab). */
+  onOpenTab?: (tab: 'games' | 'create') => void;
 }
 
 /**
@@ -54,7 +57,7 @@ interface ChatPanelProps {
  * Starting a message with @Jarvis asks the assistant, which answers in the
  * thread.
  */
-export default function ChatPanel({ className = '' }: ChatPanelProps) {
+export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps) {
   const queryClient = useQueryClient();
   const [selectedToken, setSelectedToken] = useState('');
   // 'auto' until the reader picks: a phone opens straight into the default
@@ -83,6 +86,7 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
+  const people = useFamilyDirectory();
   const myActorIds = useMemo(
     () => new Set([me?.nextcloud_user, me?.username].filter((v): v is string => Boolean(v)).map((v) => v.toLowerCase())),
     [me?.nextcloud_user, me?.username],
@@ -121,7 +125,7 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
     select: (response) => detailList<TalkPoll>(response, 'polls'),
   });
 
-  const { data: fetched = EMPTY_ARRAY, isFetching: loadingMessages } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
+  const { data: fetched = EMPTY_ARRAY } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
     queryKey: ['talk-messages', activeToken],
     queryFn: () => api.getTalkMessages(activeToken),
     enabled: Boolean(activeToken),
@@ -390,6 +394,7 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
           onSelect={select}
           onNewChat={() => setNewChatOpen(true)}
           defaultToken={defaultToken}
+          people={people}
         />
       </aside>
 
@@ -430,14 +435,14 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
           </div>
         )}
 
-        <header className="flex shrink-0 items-center gap-2 border-b border-white/5 px-2 py-2 sm:px-3">
+        <header className="flex shrink-0 items-center gap-2 border-b border-white/5 bg-slate-900/95 px-2 py-2.5 sm:px-3">
           <button
             type="button"
-            className="flex min-h-10 min-w-10 items-center justify-center rounded-full text-slate-300 hover:bg-white/10 lg:hidden"
+            className="flex min-h-10 min-w-10 items-center justify-center rounded-full text-slate-200 hover:bg-white/10 lg:hidden"
             aria-label="Back to chats"
             onClick={() => setMobileView('list')}
           >
-            <ChevronLeft size={22} />
+            <ChevronLeft size={24} />
           </button>
           <button
             type="button"
@@ -445,30 +450,22 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
             disabled={!activeConversation}
             aria-label={`About ${name}`}
             data-testid="chat-info-open"
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-xl text-left"
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left"
           >
-          {activeConversation && (
-            <span
-              aria-hidden
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-              style={{ background: avatarTint(name) }}
-            >
-              {initials(name)}
-            </span>
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-semibold text-slate-100">{name}</p>
-            <p className={`truncate text-[11px] ${jarvisThinking ? 'text-fuchsia-300' : 'text-slate-500'}`}>
-              {jarvisThinking
-                ? 'Jarvis is thinking…'
-                : callError ?? (inCall ? 'In call' : activeConversation?.description || (isGroup ? 'Group chat · @Jarvis to ask' : 'Direct message'))}
-            </p>
-          </div>
+            {activeConversation && <ConversationAvatar conversation={activeConversation} people={people} size={42} />}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[16px] font-bold text-white">{name}</p>
+              <p className={`truncate text-[12px] ${jarvisThinking ? 'text-fuchsia-300' : inCall ? 'text-emerald-300' : 'text-slate-400'}`}>
+                {jarvisThinking
+                  ? 'Jarvis is thinking…'
+                  : callError ?? (inCall ? 'In call' : activeConversation?.description || (isGroup ? 'Family group · @Jarvis to ask' : 'Direct message'))}
+              </p>
+            </div>
           </button>
           {activeToken && (
             <button
               type="button"
-              className={`flex min-h-10 min-w-10 items-center justify-center rounded-full ${inCall ? 'bg-rose-500 text-white' : 'text-slate-300 hover:bg-white/10'}`}
+              className={`flex h-10 w-10 items-center justify-center rounded-xl ${inCall ? 'bg-rose-500 text-white' : 'bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]'}`}
               onClick={() => call.mutate(inCall)}
               disabled={call.isPending}
               aria-pressed={inCall}
@@ -478,18 +475,10 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
               {call.isPending ? <Loader2 size={17} className="animate-spin" /> : inCall ? <PhoneOff size={17} /> : <Phone size={17} />}
             </button>
           )}
-          <button
-            type="button"
-            className="flex min-h-10 min-w-10 items-center justify-center rounded-full text-slate-400 hover:bg-white/10"
-            aria-label="Refresh messages"
-            onClick={() => refreshThread(activeToken)}
-          >
-            <RefreshCw size={15} className={loadingMessages ? 'animate-spin' : ''} />
-          </button>
           {activeConversation && (
             <button
               type="button"
-              className="flex min-h-10 min-w-10 items-center justify-center rounded-full text-slate-300 hover:bg-white/10"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"
               aria-label="Conversation details"
               onClick={() => setInfoOpen(true)}
             >
@@ -498,6 +487,8 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
           )}
         </header>
 
+        <VerseBanner />
+
         <PollStrip polls={polls} onVote={(pollId, optionId) => void vote(pollId, optionId)} />
 
         <MessageThread
@@ -505,6 +496,7 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
           messages={messages}
           myActorIds={myActorIds}
           isGroup={isGroup}
+          people={people}
           lastCommonRead={activeConversation?.last_common_read}
           unreadAfter={unreadMarkers[activeToken]}
           jarvisThinking={jarvisThinking}
@@ -584,6 +576,25 @@ export default function ChatPanel({ className = '' }: ChatPanelProps) {
           onCancelEdit={() => setEditing(null)}
           onSaveEdit={(text) => void saveEdit(text)}
           onSend={send}
+          quickActions={[
+            {
+              key: 'verse',
+              label: 'Verse',
+              icon: <BookOpen size={14} className="text-sky-300" />,
+              // Share today's verse with everyone in the conversation.
+              onSelect: () =>
+                void queryClient
+                  .fetchQuery({ queryKey: ['bible-verse-of-day'], queryFn: () => api.getBibleVerseOfDay(), staleTime: 60 * 60 * 1000 })
+                  .then((v) => (v && 'reference' in v && v.reference ? send(`📖 ${v.reference} — "${v.text}"`) : undefined))
+                  .catch(() => toast.error("Today's verse is not available")),
+            },
+            ...(onOpenTab
+              ? [
+                  { key: 'games', label: 'Games', icon: <Gamepad2 size={14} className="text-emerald-300" />, onSelect: () => onOpenTab('games') },
+                  { key: 'create', label: 'Create', icon: <Brush size={14} className="text-pink-300" />, onSelect: () => onOpenTab('create') },
+                ]
+              : []),
+          ]}
           onSendVoice={async (payload) => {
             try {
               await sendVoice.mutateAsync(payload);

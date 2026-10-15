@@ -97,3 +97,35 @@ describe('managing family conversations', () => {
     expect(within(info).queryByTestId('chat-add-member')).not.toBeInTheDocument();
   });
 });
+
+describe('the redesigned chat', () => {
+  it("pins today's verse, shares it from the Verse chip, and hides it until tomorrow", async () => {
+    const user = userEvent.setup();
+    const sent: string[] = [];
+    localStorage.removeItem('family-chat-verse-dismissed');
+    server.use(
+      http.get('/api/bible/verse-of-day', () => HttpResponse.json({ reference: 'Joshua 24:15', text: 'As for me and my house, we will serve the LORD.' })),
+      http.post('/api/communication/talk/messages', async ({ request }) => {
+        sent.push(String(((await request.json()) as Record<string, unknown>).message));
+        return ok({ message: { id: 999 } });
+      }),
+    );
+    renderWithProviders(<Family />);
+    const banner = await screen.findByTestId('chat-verse-banner');
+    expect(banner).toHaveTextContent('Joshua 24:15');
+
+    await user.click(within(screen.getByTestId('quick-actions')).getByRole('button', { name: /verse/i }));
+    await waitFor(() => expect(sent[0]).toBe('📖 Joshua 24:15 — "As for me and my house, we will serve the LORD."'));
+
+    await user.click(within(banner).getByRole('button', { name: "Hide today's verse" }));
+    expect(screen.queryByTestId('chat-verse-banner')).not.toBeInTheDocument();
+    expect(localStorage.getItem('family-chat-verse-dismissed')).toBe(new Date().toISOString().slice(0, 10));
+  });
+
+  it('opens the Games tab from the chat', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Family />);
+    await user.click(within(await screen.findByTestId('quick-actions')).getByRole('button', { name: /games/i }));
+    expect(screen.getByRole('tab', { name: /games/i })).toHaveAttribute('aria-selected', 'true');
+  });
+});
