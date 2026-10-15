@@ -276,6 +276,26 @@ class NarrationAudio(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class InterlinearVerse(SQLModel, table=True):
+    """One verse of an imported interlinear (see ``services/bible/interlinear``).
+
+    ``words`` is a JSON list, one object per original-language word:
+    ``w`` original, ``t`` transliteration, ``e`` English, ``s`` Strong's,
+    ``g`` grammar code, ``l`` lexical form, ``d`` gloss, and ``k`` the
+    edition code when the word is not in every edition.
+    """
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    book: str = Field(index=True)
+    chapter: int = Field(index=True)
+    verse: int
+    language: str = Field(default="")
+    words: str = Field(default="[]")
+    source: str = Field(default="")
+    imported_at: datetime = Field(default_factory=utcnow)
+
+
 class ImportRun(SQLModel, table=True):
     """One attempt to install a translation or a study Bible.
 

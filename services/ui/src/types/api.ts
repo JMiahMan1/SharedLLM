@@ -1991,6 +1991,51 @@ export interface BibleBlbLink {
   tool: string | null;
 }
 
+/** One original-language word of an imported interlinear (STEPBible TAGNT/TAHOT). */
+export interface BibleInterlinearWord {
+  /** Original word (Greek or Hebrew). */
+  w: string;
+  /** Transliteration. */
+  t: string;
+  /** English for this word in context. */
+  e: string;
+  /** Strong's number, e.g. G0025 or H7225G. */
+  s: string;
+  /** Grammar code. */
+  g: string;
+  /** Dictionary (lexical) form. */
+  l: string;
+  /** Short gloss. */
+  d: string;
+  /** Edition code when the word is not in every edition or manuscript tradition. */
+  k?: string;
+  /** Blue Letter Bible lexicon page for the Strong's number. */
+  x?: string;
+}
+
+export interface BibleInterlinear {
+  ref: string;
+  /** False when nothing is imported for this passage: use Blue Letter Bible's instead. */
+  available: boolean;
+  attribution: string | null;
+  verses: Array<{ reference: string; language: 'greek' | 'hebrew' | string; words: BibleInterlinearWord[] }>;
+}
+
+export interface BibleInterlinearCoverage {
+  books: Array<{ book: string; language: string; source: string; verses: number }>;
+  verse_count: number;
+  attribution: string;
+}
+
+export interface BibleInterlinearImport {
+  status: 'succeeded' | 'failed';
+  message: string;
+  verses: number;
+  words: number;
+  imported_books: string[];
+  coverage: BibleInterlinearCoverage;
+}
+
 /**
  * An answer about the passage being read.
  *

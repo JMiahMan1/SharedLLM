@@ -1,0 +1,34 @@
+Eng (Heb) Ref & Type	Hebrew	Transliteration	Translation	dStrongs	Grammar	Meaning Variants	Spelling Variants	Root dStrong+Instance	Alternative Strongs+Instance	Conjoin word	Expanded Strong tags					
+Gen.1.1#01=L	בְּ/רֵאשִׁ֖ית	be./re.Shit	in/ beginning	H9003/{H7225G}	HR/Ncfsa			H7225G			H9003=ב=in/{H7225G=רֵאשִׁית=: beginning»first:1_beginning}					
+Gen.1.1#02=L	בָּרָ֣א	ba.Ra'	he created	{H1254A}	HVqp3ms			H1254A			{H1254A=בָּרָא=to create}					
+Gen.1.1#03=L	אֱלֹהִ֑ים	'E.lo.Him	God	{H0430G}	HNcmpa			H0430G			{H0430G=אֱלֹהִים=God»LORD@Gen.1.1-Heb}					
+Gen.1.1#04=L	אֵ֥ת	'et	<obj.>	{H0853}	HTo			H0853_A			{H0853=אֵת=[Obj.]}					
+Gen.1.1#05=L	הַ/שָּׁמַ֖יִם	ha./sha.Ma.yim	the/ heavens	H9009/{H8064}	HTd/Ncmpa			H8064			H9009=ה=the/{H8064=שָׁמַיִם=heaven}					
+Gen.1.1#06=L	וְ/אֵ֥ת	ve./'Et	and/ <obj.>	H9002/{H0853}	HC/To			H0853_B			H9002=ו=and/{H0853=אֵת=[Obj.]}					
+Gen.1.1#07=L	הָ/אָֽרֶץ\׃	ha./'A.retz	the/ earth	H9009/{H0776G}\H9016	HTd/Ncfsa			H0776G			H9009=ה=the/{H0776G=אֶ֫רֶץ=: country;_planet»land:2_country;_planet}\H9016=׃=verseEnd					
+Gen.1.2#01=L	וְ/הָ/אָ֗רֶץ	ve./ha./'A.retz	and/ the/ earth	H9002/H9009/{H0776G}	HC/Td/Ncfsa			H0776G			H9002=ו=and/H9009=ה=the/{H0776G=אֶ֫רֶץ=: country;_planet»land:2_country;_planet}					
+Gen.1.2#02=L	הָיְתָ֥ה	ha.ye.Tah	<it> was	{H1961}	HVqp3fs			H1961			{H1961=הָיָה=to be}					
+Gen.1.2#03=L	תֹ֙הוּ֙	to.hu	formlessness	{H8414}	HNcmsa			H8414			{H8414=תֹּ֫הוּ=formlessness}					
+Gen.1.2#04=L	וָ/בֹ֔הוּ	va./Vo.hu	and/ emptiness	H9002/{H0922}	HC/Ncmsa			H0922			H9002=ו=and/{H0922=בֹּהוּ=void}					
+Gen.1.2#05=L	וְ/חֹ֖שֶׁךְ	ve./Cho.shekh	and/ darkness	H9002/{H2822}	HC/Ncmsa			H2822			H9002=ו=and/{H2822=חֹ֫שֶׁךְ=darkness}					
+Gen.1.2#06=L	עַל\־	'al-	[was] over	{H5921A}\H9014	HR			H5921A_A			{H5921A=עַל=upon}\H9014=־=link					
+Gen.1.2#07=L	פְּנֵ֣י	pe.Nei	[the] surface of	{H6440J}	HNcmpc			H6440J_A			{H6440J=פָּנֶה=: surface»face:4_surface;_land}					
+Gen.1.2#08=L	תְה֑וֹם	te.Hom	[the] deep	{H8415}	HNcfsa			H8415			{H8415=תְּהוֹם=abyss}					
+Gen.1.2#09=L	וְ/ר֣וּחַ	ve./Ru.ach	and/ [the] spirit of	H9002/{H7307G}	HC/Ncfsc			H7307G			H9002=ו=and/{H7307G=רוּחַ=: spirit»spirit:1_spirit}					
+Gen.1.2#10=L	אֱלֹהִ֔ים	'E.lo.Him	God	{H0430G}	HNcmpa			H0430G			{H0430G=אֱלֹהִים=God»LORD@Gen.1.1-Heb}					
+Gen.1.2#11=L	מְרַחֶ֖פֶת	me.ra.Che.fet	[was] hovering	{H7363B}	HVprfsa			H7363B			{H7363B=רָחַף=to hover}					
+Gen.1.2#12=L	עַל\־	'al-	over	{H5921A}\H9014	HR			H5921A_B			{H5921A=עַל=upon}\H9014=־=link					
+Gen.1.2#13=L	פְּנֵ֥י	pe.Nei	[the] surface of	{H6440J}	HNcmpc			H6440J_B			{H6440J=פָּנֶה=: surface»face:4_surface;_land}					
+Gen.1.2#14=L	הַ/מָּֽיִם\׃	ha./Ma.yim	the/ waters	H9009/{H4325G}\H9016	HTd/Ncmpa			H4325G			H9009=ה=the/{H4325G=מַי=water}\H9016=׃=verseEnd					
+Gen.31.55(32.1)#01=L	וַ/יַּשְׁכֵּ֨ם	va/i.yash.Kem	and/ he rose early	H9001/{H7925}	Hc/Vhw3ms			H7925			H9001=ו=&/{H7925=שָׁכַם=to rise}					
+Gen.31.55(32.1)#02=L	לָבָ֜ן	la.Van	Laban	{H3837A}	HNpm			H3837A_A			{H3837A=לָבָן=Laban»Laban@Gen.24.29-}					
+Gen.31.55(32.1)#03=L	בַּ/בֹּ֗קֶר	ba./Bo.ker	in the/ morning	H9003/{H1242}	HRd/Ncmsa			H1242			H9003=ב=in/{H1242=בֹּ֫קֶר=morning}					
+Gen.31.55(32.1)#04=L	וַ/יְנַשֵּׁ֧ק	va/y.na.Shek	and/ he kissed	H9001/{H5401A}	Hc/Vpw3ms			H5401A			H9001=ו=&/{H5401A=נָשַׁק=to kiss}					
+Gen.31.55(32.1)#05=L	לְ/בָנָ֛י/ו	le./va.Na/v	<to>/ sons/ his	H9005/{H1121G}/H9023	HR/Ncmpc/Sp3ms			H1121G			H9005=ל=to/{H1121G=בֵּן=: descendant»son:2_descendant;_people}/H9023=Ps3m=his					
+Gen.31.55(32.1)#06=L	וְ/לִ/בְנוֹתָ֖י/ו	ve./li/v.no.Ta/v	and/ <to>/ daughters/ his	H9002/H9005/{H1323G}/H9023	HC/R/Ncfpc/Sp3ms			H1323G			H9002=ו=and/H9005=ל=to/{H1323G=בַּת=: daughter»daughter:1_daughter}/H9023=Ps3m=his					
+Gen.31.55(32.1)#07=L	וַ/יְבָ֣רֶךְ	va/y.Va.rekh	and/ he blessed	H9001/{H1288}	Hc/Vpw3ms			H1288			H9001=ו=&/{H1288=בָּרַךְ=to bless}					
+Gen.31.55(32.1)#08=L	אֶתְ/הֶ֑ם	'et./Hem	<obj.>/ them	{H0853}/H9038	HTo/Sp3mp			H0853			{H0853=אֵת=[Obj.]}/H9038=Op3m=them					
+Gen.31.55(32.1)#09=L	וַ/יֵּ֛לֶךְ	va/i.Ye.lekh	and/ he went	H9001/{H1980G}	Hc/Vqw3ms			H1980G	H3212		H9001=ו=&/{H1980G=הָלַךְ=: went»to go:3_went;_go[away]}					
+Gen.31.55(32.1)#10=L	וַ/יָּ֥שָׁב	va/i.Ya.shov	and/ he returned	H9001/{H7725G}	Hc/Vqw3ms			H7725G			H9001=ו=&/{H7725G=שׁוּב=: return»to return:1_return}					
+Gen.31.55(32.1)#11=L	לָבָ֖ן	la.Van	Laban	{H3837A}	HNpm			H3837A_B			{H3837A=לָבָן=Laban»Laban@Gen.24.29-}					
+Gen.31.55(32.1)#12=L	לִ/מְקֹמֽ/וֹ\׃	li/m.ko.M/o	to/ own place/ his	H9005/{H4725}/H9023\H9016	HR/Ncmsc/Sp3ms			H4725			H9005=ל=to/{H4725=מָקוֹם=standing place}/H9023=Ps3m=his\H9016=׃=verseEnd					

@@ -495,7 +495,8 @@ async def _nobody():
 def test_blb_link_for_a_verse(monkeypatch):
     monkeypatch.setattr(cfg, "BLB_BASE_URL", "https://bible.test")
     monkeypatch.setattr(bible_main, "BLB_BASE_URL", "https://bible.test")
-    assert bible_main.blb_link("John 3:16", "")["url"] == "https://bible.test/john/3/16"
+    assert bible_main.blb_link("John 3:16", "", "")["url"] == "https://bible.test/kjv/jhn/3/16/"
+    assert bible_main.blb_link("Song 2:4", "", "nkjv")["url"] == "https://bible.test/nkjv/sng/2/4/"
 
 
 def test_blb_link_without_a_base_url_names_the_setting(loaded_client: TestClient, monkeypatch):
@@ -507,8 +508,9 @@ def test_blb_link_without_a_base_url_names_the_setting(loaded_client: TestClient
 
 def test_blb_link_for_an_interlinear(monkeypatch):
     monkeypatch.setattr(bible_main, "BLB_BASE_URL", "https://bible.test")
-    body = bible_main.blb_link("John 3:16", "interlinear/tr")
-    assert body["url"] == "https://bible.test/tools/interlinear/tr/john/3"
+    body = bible_main.blb_link("John 3:16", "interlinear", "")
+    assert body["url"] == "https://bible.test/kjv/jhn/3/16/t_conc_1000016"
+    assert body["tool"] == "interlinear"
 
 
 def test_blb_link_rejects_a_bad_reference(monkeypatch):

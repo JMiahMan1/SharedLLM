@@ -161,6 +161,9 @@ import type {
   BibleActivityFeed,
   BibleEditionsResponse,
   BibleBlbLink,
+  BibleInterlinear,
+  BibleInterlinearCoverage,
+  BibleInterlinearImport,
   BibleStudyNoteKind,
   BibleStudyNotesResponse,
   BibleDailyResponse,
@@ -3292,8 +3295,15 @@ export const api = {
     return resp.data;
   },
 
-  async getBlbLink(ref: string, tool?: string): Promise<BibleBlbLink> {
-    const resp = await apiClient.get('/api/bible/blb/link', { params: { ref, tool } });
+  /** A Blue Letter Bible link: the verse in `version` (KJV when BLB lacks it), or its interlinear tab. */
+  async getBlbLink(ref: string, tool?: 'interlinear', version?: string): Promise<BibleBlbLink> {
+    const resp = await apiClient.get('/api/bible/blb/link', { params: { ref, tool, version } });
+    return resp.data;
+  },
+
+  /** The imported word-by-word interlinear for a passage (`available` false when none). */
+  async getBibleInterlinear(ref: string): Promise<BibleInterlinear> {
+    const resp = await apiClient.get('/api/bible/interlinear', { params: { ref } });
     return resp.data;
   },
 
@@ -3424,6 +3434,23 @@ export const api = {
   async uploadBibleImport(form: FormData): Promise<BibleImportRun> {
     const resp = await apiClient.post('/api/bible/admin/imports/upload', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return resp.data;
+  },
+
+  /** Which books have an imported interlinear (admin). */
+  async getBibleInterlinearCoverage(): Promise<BibleInterlinearCoverage> {
+    const resp = await apiClient.get('/api/bible/admin/interlinear');
+    return resp.data;
+  },
+
+  /** Import a STEPBible TAGNT/TAHOT tagged text (admin). */
+  async uploadBibleInterlinear(file: File): Promise<BibleInterlinearImport> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const resp = await apiClient.post('/api/bible/admin/interlinear/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600_000,
     });
     return resp.data;
   },
