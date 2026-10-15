@@ -90,6 +90,7 @@ class RavenWorker:
         self._health_task = None
         self._inference_task = None
         self._talk_task = None
+        self._chat_notify_task = None
         self._cleanup_task = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -170,8 +171,9 @@ class RavenWorker:
         self._health_task = self._loop.create_task(self._health_loop())
         self._inference_task = self._loop.create_task(self._inference_loop())
         self._talk_task = self._loop.create_task(self._talk_monitor_loop())
+        self._chat_notify_task = self._loop.create_task(self._chat_notify_loop())
         self._cleanup_task = self._loop.create_task(self._cleanup_loop())
-        log.info("Raven Background Worker (Health + Inference + Talk Monitor + Cleanup) started.")
+        log.info("Raven Background Worker (Health + Inference + Talk Monitor + Chat Notify + Cleanup) started.")
 
     def stop(self):
         """Signal the worker loops to stop and shut the worker loop down."""
@@ -187,7 +189,8 @@ class RavenWorker:
             thread.join(timeout=5)
 
     async def _shutdown(self):
-        for t in (self._health_task, self._inference_task, self._talk_task, self._cleanup_task):
+        for t in (self._health_task, self._inference_task, self._talk_task,
+                  self._chat_notify_task, self._cleanup_task):
             if t is not None:
                 t.cancel()
         await self.job_queue.close()
@@ -382,11 +385,49 @@ class RavenWorker:
             try:
                 await self._check_talk_once(r)
                 await asyncio.sleep(10) # Poll every 10 seconds
+            except (aiohttp.ClientConnectionError, TimeoutError) as e:
+                # Execution restarting (every deploy): wait it out quietly.
+                log.warning(f"Talk Monitor: execution unreachable ({type(e).__name__}); retrying in 15s")
+                await asyncio.sleep(15)
             except Exception as e:
                 log.error(f"Error in Talk Monitor loop: {e}")
                 await asyncio.sleep(30)
             finally:
                 await r.aclose()
+
+    async def _chat_notify_loop(self):
+        """Turns new family chat messages into phone notifications."""
+        import redis.asyncio as redis
+
+        from services.gateway import chat_notify
+        from services.gateway.config import TELEMETRY_SVC
+
+        log.info("Chat Notify worker started.")
+        r = None
+        failures = 0
+        while self.is_running:
+            try:
+                if r is None:
+                    r = redis.from_url(REDIS_URL, decode_responses=True)
+                async with _shared_http_client() as client:
+                    await chat_notify.check_once(
+                        r, client, identity=IDENTITY_SVC, execution=EXECUTION_SVC,
+                        telemetry=TELEMETRY_SVC, secret=INTERNAL_SECRET,
+                    )
+                failures = 0
+                await asyncio.sleep(chat_notify.POLL_SECONDS)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                failures += 1
+                # A deploy restarts identity/execution/redis under us; back off
+                # instead of logging an error every few seconds.
+                log.warning(f"Chat Notify: {type(e).__name__}: {e} (retry {failures})")
+                if r is not None:
+                    with suppress(Exception):
+                        await r.aclose()
+                    r = None
+                await asyncio.sleep(min(5 * failures, 60))
 
     async def _check_talk_once(self, r):
         """Perform a single poll of Nextcloud Talk."""

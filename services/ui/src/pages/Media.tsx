@@ -11,13 +11,8 @@ import { api } from '../services/api';
 import toast from 'react-hot-toast';
 import { useHaptics } from '../hooks/useHaptics';
 import { storageGetSync } from '../lib/storage';
-import {
-  destroy as destroyWebPlayer,
-  installPageHideListener,
-  releaseControl,
-  handleVisibilityChange,
-} from '../lib/webPlayer';
-import { useMAWebPlayer } from '../lib/maWebPlayer';
+import { releaseControl } from '../lib/webPlayer';
+import { useSharedMAWebPlayer } from '../context/MediaPlayerContext';
 import { getServerOrigin } from '../lib/serverUrl';
 import { formatClock } from '../lib/utils';
 import { formatDeviceLabel } from '../lib/deviceLabels';
@@ -1094,8 +1089,9 @@ const Media = () => {
   const lastVolumeChangeTimeRef = useRef<number>(0);
   const volumeDebounceTimerRef = useRef<number | null>(null);
 
-  // MA Web Player (sendspin-js)
-  const maPlayer = useMAWebPlayer(useCallback((playerState) => {
+  // MA Web Player (sendspin-js). App-wide, so leaving this page does not stop
+  // it; the callback replays its current state when the page is reopened.
+  const maPlayer = useSharedMAWebPlayer(useCallback((playerState) => {
     if (playerState.isPlaying !== undefined) {
       setLocalIsPlaying(playerState.isPlaying);
     }
@@ -1287,17 +1283,6 @@ const Media = () => {
       clearInterval(timer);
     };
   }, [localIsPlaying]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    installPageHideListener();
-    const handleVis = () => handleVisibilityChange();
-    document.addEventListener('visibilitychange', handleVis);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVis);
-      destroyWebPlayer();
-    };
-  }, []);
 
   const [remoteCurrentTime, setRemoteCurrentTime] = useState(0);
   const [remoteDuration, setRemoteDuration] = useState(0);

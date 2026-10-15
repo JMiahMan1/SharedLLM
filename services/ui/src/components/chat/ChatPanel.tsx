@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
+import ChatNotify from '../../plugins/chatNotify';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Loader2, Phone, PhoneOff, Plus, X } from 'lucide-react';
@@ -204,6 +207,32 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     setInCall(false);
     setCallError(null);
   };
+
+  // A tapped phone notification lands on /family?chat=<token>: open it, then
+  // drop the parameter so going back to the list is not undone.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedToken = searchParams.get('chat');
+  useEffect(() => {
+    if (!linkedToken) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- following the link
+    setSelectedToken(linkedToken);
+    setMobileView('thread');
+    setSearchParams((params) => {
+      params.delete('chat');
+      return params;
+    }, { replace: true });
+  }, [linkedToken, setSearchParams]);
+
+  // Tell the phone which conversation is on screen, so it does not notify
+  // about messages being read as they arrive.
+  const onScreenToken = showThread || window.innerWidth >= 1024 ? activeToken : '';
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    void ChatNotify.setActiveConversation({ token: onScreenToken || null }).catch(() => {});
+    return () => {
+      void ChatNotify.setActiveConversation({ token: null }).catch(() => {});
+    };
+  }, [onScreenToken]);
 
   const openConversation = useMutation({
     mutationFn: (user: string) => api.openTalkConversation({ target_user: user, as_user: asUser }),

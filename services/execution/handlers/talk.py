@@ -72,6 +72,10 @@ def _conversation_summary(conversation: dict[str, Any]) -> dict[str, Any]:
         "last_message_actor": last_message.get("actorDisplayName"),
         "last_message_actor_id": last_message.get("actorId"),
         "last_message_timestamp": last_message.get("timestamp"),
+        # The id lets a notifier tell a new message from one it already
+        # announced; system lines ("Michele joined") are not worth a buzz.
+        "last_message_id": last_message.get("id"),
+        "last_message_system": bool(last_message.get("systemMessage")),
         # Talk room type: 1 one-to-one, 2 group, 3 public, 4 changelog.
         "type": conversation.get("type"),
         "unread_mention": bool(conversation.get("unreadMention", False)),

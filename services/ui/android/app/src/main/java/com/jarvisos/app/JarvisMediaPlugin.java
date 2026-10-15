@@ -1,0 +1,47 @@
+package com.jarvisos.app;
+
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+
+/**
+ * The web player's link to {@link MediaPlaybackService}: it reports what is
+ * playing, and hears the notification / lock-screen / headset buttons back as
+ * {@code action} events.
+ */
+@CapacitorPlugin(name = "JarvisMedia")
+public class JarvisMediaPlugin extends Plugin {
+
+    @Override
+    public void load() {
+        MediaPlaybackService.listener = action -> {
+            JSObject data = new JSObject();
+            data.put("action", action);
+            notifyListeners("action", data);
+        };
+    }
+
+    @PluginMethod
+    public void update(PluginCall call) {
+        MediaPlaybackService.update(
+                getContext(),
+                call.getString("title", "Jarvis"),
+                call.getString("artist", ""),
+                Boolean.TRUE.equals(call.getBoolean("playing", false)));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stop(PluginCall call) {
+        MediaPlaybackService.stop(getContext());
+        call.resolve();
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        MediaPlaybackService.listener = null;
+        MediaPlaybackService.stop(getContext());
+    }
+}
