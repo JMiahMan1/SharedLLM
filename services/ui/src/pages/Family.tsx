@@ -1,13 +1,6 @@
 import { useState } from 'react';
-import {
-  BookOpen,
-  Brush,
-  Gamepad2,
-  MessageCircle,
-  Music,
-  Sparkles,
-  UtensilsCrossed,
-} from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Brain, Brush, ChevronRight, Crown, Gamepad2, MessageCircle } from 'lucide-react';
 import ChatPanel from '../components/chat/ChatPanel';
 import ArcadeGames from '../components/family/ArcadeGames';
 import DrawCanvas from '../components/family/DrawCanvas';
@@ -16,25 +9,17 @@ import Recipes from './Recipes';
 
 type Tab = 'chat' | 'games' | 'create';
 
+/** The Bible games that exist today, one tap away from the family hub. */
+const BIBLE_GAMES = [
+  { icon: Crown, name: 'Daily Bible Quiz', detail: 'Ten questions, the same for the whole family, with a leaderboard', to: '/bible?tab=play' },
+  { icon: Gamepad2, name: 'Bible games', detail: 'Verse Race, Which Book?, Fill the Gap, What Comes Next?', to: '/bible?tab=play' },
+  { icon: Brain, name: 'Memory verses', detail: 'Learn verses by heart with spaced review', to: '/bible?tab=memorize' },
+];
+
 const TABS: Array<{ id: Tab; label: string; icon: typeof MessageCircle }> = [
   { id: 'chat', label: 'Chat', icon: MessageCircle },
   { id: 'games', label: 'Games', icon: Gamepad2 },
   { id: 'create', label: 'Create', icon: Brush },
-];
-
-/** Roadmap cards are honest: they say what is coming, not fake a feature. */
-const GAMES = [
-  { icon: BookOpen, name: 'Bible Trivia', detail: 'Multiple choice, any age, gentle scoring' },
-  { icon: BookOpen, name: 'Bible Memory Verses', detail: 'Fill-in-the-blank drills with hints' },
-  { icon: Gamepad2, name: 'Family Trivia', detail: 'Custom questions about your own family' },
-  { icon: Sparkles, name: 'Draw & Guess', detail: 'One draws, everyone guesses in chat' },
-];
-
-const CREATE = [
-  { icon: Brush, name: 'Shared canvas together', detail: 'Drawings everyone can add to — next, live on one board' },
-  { icon: Sparkles, name: 'Make a picture', detail: 'Describe it and Jarvis/Raven paints it' },
-  { icon: Music, name: 'Share a song', detail: 'Post a finished song into the family chat' },
-  { icon: UtensilsCrossed, name: 'Family recipes', detail: 'A shared cookbook the whole house can edit' },
 ];
 
 /**
@@ -79,22 +64,22 @@ export default function Family() {
       {tab === 'games' && (
         <div className="space-y-4" data-testid="family-games">
           <ArcadeGames />
-          <div className="glass-panel p-4 rounded-2xl border border-white/5">
-            <h2 className="text-sm font-semibold text-slate-200">Family games — in the works</h2>
-            <p className="text-xs text-slate-400 mt-1">
-              These run in the same conversation as chat, so scores and cheers land where the family already is.
-            </p>
-          </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            {GAMES.map(({ icon: Icon, name, detail }) => (
-              <div key={name} className="glass-panel p-4 rounded-2xl border border-white/5">
-                <div className="flex items-center gap-2">
-                  <Icon size={16} className="text-purple-300" />
-                  <span className="font-semibold text-slate-100">{name}</span>
-                  <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-500">planned</span>
-                </div>
-                <p className="text-xs text-slate-400 mt-2">{detail}</p>
-              </div>
+            {BIBLE_GAMES.map(({ icon: Icon, name, detail, to }) => (
+              <Link
+                key={name}
+                to={to}
+                className="glass-panel flex items-start gap-3 rounded-2xl border border-white/5 p-4 hover:border-purple-400/40"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-500/15 text-purple-200">
+                  <Icon size={18} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold text-slate-100">{name}</span>
+                  <span className="mt-1 block text-xs text-slate-400">{detail}</span>
+                </span>
+                <ChevronRight size={16} className="mt-1 shrink-0 text-slate-500" />
+              </Link>
             ))}
           </div>
         </div>
@@ -111,18 +96,6 @@ export default function Family() {
               Drawings, pictures, songs and recipes live in shared family space, and anything you make can be sent
               straight into a conversation.
             </p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {CREATE.map(({ icon: Icon, name, detail }) => (
-              <div key={name} className="glass-panel p-4 rounded-2xl border border-white/5">
-                <div className="flex items-center gap-2">
-                  <Icon size={16} className="text-purple-300" />
-                  <span className="font-semibold text-slate-100">{name}</span>
-                  <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-500">planned</span>
-                </div>
-                <p className="text-xs text-slate-400 mt-2">{detail}</p>
-              </div>
-            ))}
           </div>
         </div>
       )}

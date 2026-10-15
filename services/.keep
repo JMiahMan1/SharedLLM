@@ -9,5 +9,4 @@
 # └── rag/               Service 4 — Context & RAG Service (ChromaDB)
 #
 # Shared:
-# ├── shim_users.py      Drop-in replacement for app/users.py
 # └── docker-compose.soa.yml

@@ -211,6 +211,7 @@ class DNSResolver:
         self.health_ports = DNS_HEALTH_PORTS
         self.health_path = os.environ.get("DNS_HEALTH_PATH", "")
         self._health: dict[str, tuple[bool, float]] = {}  # ip -> (is_up, checked_at)
+        self._refreshing: set[str] = set()
 
     async def resolve(self, query: 'DNSQuery') -> list | None:
         """Resolve a DNS query"""
@@ -225,7 +226,11 @@ class DNSResolver:
                 if self.health_aware and len(ips) > 1:
                     # Only return IPs that are currently reachable; the answer
                     # flips automatically when the available device changes.
-                    reachable = [ip for ip in ips if await self._is_reachable(ip)]
+                    # Checked together, not one after another: six candidates
+                    # at ~1s each took longer than a resolver waits, so the
+                    # name timed out (seen for jeremiah-home-desktop.local).
+                    up = await asyncio.gather(*(self._is_reachable(ip) for ip in ips))
+                    reachable = [ip for ip, ok in zip(ips, up) if ok]
                     ips = reachable or ips  # fall back to all if none answered (avoid NXDOMAIN)
                 records = [self._make_a_record(name, ip, 300) for ip in ips if ip]
                 logger.debug(f"Found static mapping: {name} -> {ips}")
@@ -290,14 +295,29 @@ class DNSResolver:
         }
 
     async def _is_reachable(self, ip: str) -> bool:
-        """Return cached reachability for an IP, probing if stale."""
+        """Cached reachability for an IP.
+
+        An expired answer is still returned at once and refreshed in the
+        background (stale-while-revalidate), so a DNS reply only ever waits on
+        a probe the very first time an address is seen.
+        """
         now = time.monotonic()
         cached = self._health.get(ip)
         if cached and now - cached[1] < DNS_HEALTH_TTL:
             return cached[0]
+        if cached:
+            if ip not in self._refreshing:
+                self._refreshing.add(ip)
+                task = asyncio.ensure_future(self._refresh(ip))
+                task.add_done_callback(lambda _t, ip=ip: self._refreshing.discard(ip))
+            return cached[0]
         up = await self._probe(ip)
         self._health[ip] = (up, now)
         return up
+
+    async def _refresh(self, ip: str) -> None:
+        up = await self._probe(ip)
+        self._health[ip] = (up, time.monotonic())
 
     async def _probe(self, ip: str) -> bool:
         """Probe an IP for liveness. If a health path is configured, do an HTTP
