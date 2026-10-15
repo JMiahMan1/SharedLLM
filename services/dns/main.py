@@ -212,6 +212,7 @@ class DNSResolver:
         self.health_path = os.environ.get("DNS_HEALTH_PATH", "")
         self._health: dict[str, tuple[bool, float]] = {}  # ip -> (is_up, checked_at)
         self._refreshing: set[str] = set()
+        self._last_reachable: dict[str, list[str]] = {}  # name -> last answer with a live IP
 
     async def resolve(self, query: 'DNSQuery') -> list | None:
         """Resolve a DNS query"""
@@ -223,6 +224,7 @@ class DNSResolver:
             if name in self.static_mappings:
                 entry = self.static_mappings[name]
                 ips = entry if isinstance(entry, list) else [entry]
+                ttl = 300
                 if self.health_aware and len(ips) > 1:
                     # Only return IPs that are currently reachable; the answer
                     # flips automatically when the available device changes.
@@ -231,8 +233,16 @@ class DNSResolver:
                     # name timed out (seen for jeremiah-home-desktop.local).
                     up = await asyncio.gather(*(self._is_reachable(ip) for ip in ips))
                     reachable = [ip for ip, ok in zip(ips, up) if ok]
-                    ips = reachable or ips  # fall back to all if none answered (avoid NXDOMAIN)
-                records = [self._make_a_record(name, ip, 300) for ip in ips if ip]
+                    if reachable:
+                        self._last_reachable[name] = reachable
+                    # None answering: the last address that did, not the whole
+                    # pool -- handing out dead candidates is what sent callers
+                    # to hosts that refuse the connection.
+                    ips = reachable or self._last_reachable.get(name) or ips[:1]
+                    # Short-lived so a client's cache follows a switch within
+                    # one health interval instead of holding a dead IP 5 min.
+                    ttl = max(5, int(DNS_HEALTH_TTL))
+                records = [self._make_a_record(name, ip, ttl) for ip in ips if ip]
                 logger.debug(f"Found static mapping: {name} -> {ips}")
                 return records
 

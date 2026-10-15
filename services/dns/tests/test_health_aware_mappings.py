@@ -57,3 +57,48 @@ def test_an_expired_result_answers_at_once_and_refreshes_behind():
     assert len(records) == 1  # the cached view: only .1 was up
     assert sorted(calls) == ["10.0.0.1", "10.0.0.2"]
     assert r._health["10.0.0.2"][0] is True
+
+
+def _ips(records):
+    return [".".join(str(b) for b in bytes(rec["rdata"])) for rec in records]
+
+
+def test_the_answer_moves_to_whichever_candidate_is_up_and_expires_quickly():
+    dns = _load_dns({})
+    r = _resolver(dns, {"desk.local": ["10.0.0.1", "10.0.0.2", "10.0.0.3"]})
+    up = {"10.0.0.1"}
+
+    async def probe(ip):
+        return ip in up
+
+    r._probe = probe
+
+    async def run():
+        first = await r.resolve(_Query("desk.local"))
+        up.clear()
+        up.add("10.0.0.3")
+        r._health.clear()  # next health interval
+        return first, await r.resolve(_Query("desk.local"))
+
+    first, second = asyncio.run(run())
+    assert _ips(first) == ["10.0.0.1"] and _ips(second) == ["10.0.0.3"]
+    assert all(rec["ttl"] <= max(5, int(dns.DNS_HEALTH_TTL)) for rec in first + second)
+
+
+def test_with_nothing_up_the_last_working_address_is_given_not_the_whole_pool():
+    dns = _load_dns({})
+    r = _resolver(dns, {"desk.local": ["10.0.0.1", "10.0.0.2", "10.0.0.3"]})
+    up = {"10.0.0.2"}
+
+    async def probe(ip):
+        return ip in up
+
+    r._probe = probe
+
+    async def run():
+        await r.resolve(_Query("desk.local"))
+        up.clear()
+        r._health.clear()
+        return await r.resolve(_Query("desk.local"))
+
+    assert _ips(asyncio.run(run())) == ["10.0.0.2"]
