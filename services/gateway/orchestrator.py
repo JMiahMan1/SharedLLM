@@ -326,7 +326,20 @@ _MODEL_KEYS = {
 }
 
 def _get(settings: dict[str, str], key: str, default: str = "") -> str:
-    """Get setting with fallback to defaults (excludes model keys)."""
+    """Get setting with fallback to defaults (excludes model keys).
+
+    Service URLs prefer the variant for this process's network
+    (``host_rag_svc_url`` vs ``bridge_rag_svc_url``). The orchestrator also runs
+    inside the host-networked execution service (Jarvis answering in Talk),
+    where the plain ``rag_svc_url`` (``http://rag:8004``, a Docker-network name)
+    does not resolve, so every Talk answer was given without RAG context.
+    """
+    if key.endswith("_svc_url"):
+        from services.config import NETWORK_MODE
+
+        scoped = settings.get(f"{NETWORK_MODE}_{key}", "")
+        if scoped:
+            return scoped
     val = settings.get(key, "")
     if not val:
         if key in _MODEL_KEYS:
