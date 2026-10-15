@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { PenSquare, Pin, Search } from 'lucide-react';
-import { avatarTint, initials, listTimeLabel, previewLine, type TalkConversation } from './chatModel';
+import { listTimeLabel, previewLine, type TalkConversation } from './chatModel';
+import ConversationAvatar from './ConversationAvatar';
+import type { FamilyLookup } from './familyDirectory';
 
 interface ConversationListProps {
   conversations: TalkConversation[];
@@ -13,6 +15,8 @@ interface ConversationListProps {
   onNewChat: () => void;
   /** The conversation that opens on launch, marked with a pin. */
   defaultToken?: string;
+  /** Who is who, for the pictures on direct messages. */
+  people: FamilyLookup;
 }
 
 /**
@@ -28,6 +32,7 @@ export default function ConversationList({
   onSelect,
   onNewChat,
   defaultToken,
+  people,
 }: ConversationListProps) {
   const [query, setQuery] = useState('');
 
@@ -45,10 +50,10 @@ export default function ConversationList({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between px-1 pb-2">
-        <h2 className="text-lg font-bold text-slate-100">Chats</h2>
+        <h2 className="text-2xl font-bold tracking-tight text-white">Chats</h2>
         <button
           type="button"
-          className="glass-button min-h-10 min-w-10 p-2"
+          className="flex min-h-11 min-w-11 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow-lg shadow-purple-500/25 disabled:opacity-60"
           aria-label="New conversation"
           onClick={onNewChat}
           disabled={opening}
@@ -85,13 +90,7 @@ export default function ConversationList({
                   active ? 'bg-purple-500/15' : 'hover:bg-white/5'
                 }`}
               >
-                <span
-                  aria-hidden
-                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
-                  style={{ background: avatarTint(name) }}
-                >
-                  {initials(name)}
-                </span>
+                <ConversationAvatar conversation={conversation} people={people} size={52} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
                     <span className={`truncate text-[15px] ${showBadge ? 'font-bold text-white' : 'font-semibold text-slate-100'}`}>

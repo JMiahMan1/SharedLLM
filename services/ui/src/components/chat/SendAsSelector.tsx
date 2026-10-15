@@ -18,8 +18,7 @@ export default function SendAsSelector({
     { id: 'admin', label: 'Admin', icon: Users },
   ];
   return (
-    <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Send as" data-testid="send-as-selector">
-      <span className="text-[10px] uppercase tracking-wider text-slate-500">Send as</span>
+    <div className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] p-0.5" role="radiogroup" aria-label="Send as" data-testid="send-as-selector">
       {options.map(({ id, label, icon: Icon }) => (
         <button
           key={id}
@@ -27,20 +26,19 @@ export default function SendAsSelector({
           role="radio"
           aria-checked={value === id}
           onClick={() => onChange(id)}
-          className={`min-h-9 px-2.5 rounded-full border text-[11px] inline-flex items-center gap-1 ${
+          className={`min-h-8 px-2.5 rounded-full text-[11px] inline-flex items-center gap-1 ${
             value === id
-              ? 'border-purple-400/50 bg-purple-400/10 text-purple-200'
-              : 'border-white/10 bg-white/5 text-slate-400'
+              ? id === 'admin'
+                ? 'bg-amber-400/20 text-amber-100'
+                : 'bg-purple-500/25 text-purple-100'
+              : 'text-slate-400'
           }`}
         >
           <Icon size={12} /> {label}
         </button>
       ))}
       {value === 'admin' && (
-        <span
-          className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200"
-          data-testid="send-as-badge"
-        >
+        <span className="sr-only" data-testid="send-as-badge">
           Sending as Admin
         </span>
       )}

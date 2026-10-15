@@ -91,3 +91,11 @@ def test_a_default_chat_is_remembered_and_cleared(client):
     assert client.patch("/api/users/me", json={"chat_default_token": ""}).json()["chat_default_token"] == "abc123"
     cleared = client.patch("/api/users/me", json={"clear_fields": ["chat_default_token"]}).json()
     assert cleared["chat_default_token"] is None
+
+
+def test_the_family_directory_shows_names_and_pictures_only(client, session):
+    client.put("/api/users/me/avatar", json={"preset": "jonahs-whale"})
+    people = {p["username"]: p for p in client.get("/api/users/family-directory").json()}
+    assert people["michele"]["avatar"] == "preset:jonahs-whale"
+    assert set(people["michele"]) == {"username", "display_name", "nextcloud_user", "avatar"}
+    assert "default" in people

@@ -1,6 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import { storageGetSync } from '../lib/storage';
 import { isUnreachable, recallPassage, rememberPassage, type OfflinePassage } from '../lib/bibleOffline';
+import type { FamilyMember } from '../components/chat/familyDirectory';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
 import type {
@@ -721,6 +722,12 @@ export const api = {
    * left every non-admin with an empty picker and "Everyone" as their only
    * choice. This returns username + display name and nothing else.
    */
+  /** Everyone in the household with their chat picture and Talk account. */
+  async getFamilyDirectory(): Promise<FamilyMember[]> {
+    const resp = await apiClient.get('/api/users/family-directory');
+    return resp.data;
+  },
+
   async getSharingRecipients(): Promise<ShareRecipient[]> {
     const resp = await apiClient.get('/api/users/sharing-recipients');
     return resp.data ?? [];
@@ -3108,7 +3115,7 @@ export const api = {
 
   async putBibleMark(payload: {
     ref: string;
-    kind?: 'highlight' | 'bookmark';
+    kind?: 'highlight' | 'bookmark' | 'note';
     color?: string;
     version_code?: string;
     note_path?: string;

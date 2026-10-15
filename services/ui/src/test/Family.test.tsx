@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Family from '../pages/Family';
 import { renderWithProviders } from './render';
@@ -73,6 +73,8 @@ describe('Family hub', () => {
 
     const list = await screen.findByTestId('poll-list');
     expect(list).toHaveTextContent('Dinner tonight?');
+    // The poll is pinned as one line; open it to vote.
+    await user.click(within(list).getByRole('button', { name: /dinner tonight/i }));
     await user.click(screen.getByRole('button', { name: /tacos/i }));
 
     await waitFor(() => expect(screen.getByTestId('poll-list')).toHaveTextContent('2'));

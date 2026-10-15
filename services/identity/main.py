@@ -1334,6 +1334,25 @@ def service_defaults(session: Session = Depends(get_session), _caller: User = De
     return {**urls, "source": source}
 
 
+@app.get("/api/users/family-directory")
+def family_directory(session: Session = Depends(get_session), _caller: User = Depends(require_api_key)):
+    """Everyone in the household, as chat draws them: name, profile picture,
+    and the Nextcloud account their Talk messages arrive from.
+
+    Profile pictures and names are meant to be seen by the family; nothing
+    else about an account (URLs, credentials, keys) is included.
+    """
+    return [
+        {
+            "username": u.username,
+            "display_name": u.display_name or u.username,
+            "nextcloud_user": u.nextcloud_user or None,
+            "avatar": u.avatar or None,
+        }
+        for u in session.exec(select(User)).all()
+    ]
+
+
 @app.get("/api/users/sharing-recipients", response_model=list[ShareRecipient])
 def list_sharing_recipients(
     session: Session = Depends(get_session),
