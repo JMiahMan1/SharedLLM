@@ -310,8 +310,13 @@ def _add_item(
     created_at: int,
     indexed_at: str,
     vector: list[float] | None = None,
+    commit: bool = True,
 ):
     """Insert/replace a document into rag_items + vector store + FTS5.
+
+    Batch writers pass ``commit=False`` and commit once at the end: a commit
+    per item is a disk sync per item, which kept a 700-entity HA sync on the
+    event loop for 17 s even after the vector upsert stopped scanning.
 
     ``vector`` may be precomputed by async callers: embedding is CPU-bound
     ONNX inference, so batch endpoints run it in a worker thread
@@ -375,7 +380,8 @@ def _add_item(
     except Exception as e:  # pragma: no cover - FTS5 may be disabled
         log.debug(f"FTS5 index skip for {doc_id}: {e}")
 
-    _conn().commit()
+    if commit:
+        _conn().commit()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1875,10 +1881,11 @@ async def sync_files(payload: dict):
         )
     for i, (cid, content, meta) in enumerate(pending):
         try:
-            _add_item(collection_name, cid, user_id, content, meta, now, now_ts, vector=vectors[i])
+            _add_item(collection_name, cid, user_id, content, meta, now, now_ts, vector=vectors[i], commit=False)
             count += 1
         except Exception as e:
             log.error(f"File chunk sync failed for {cid}: {e}")
+    _conn().commit()
 
     log.info(f"Synced {count} file chunks for user {user_id} into {collection_name}")
     return {"status": "SUCCESS", "count": count}
@@ -2314,9 +2321,10 @@ async def sync_ha(payload: dict, user_id: str | None = None):
     write_started = time.monotonic()
     for i, (cid, content, meta, created_at) in enumerate(pending):
         try:
-            _add_item("ha_entities", cid, resolved_user, content, meta, created_at, now_ts, vector=vectors[i])
+            _add_item("ha_entities", cid, resolved_user, content, meta, created_at, now_ts, vector=vectors[i], commit=False)
         except Exception as ex:
             log.error(f"HA entity sync failed for {cid}: {ex}")
+    _conn().commit()
     log.info(
         f"[ha_sync] wrote {len(pending)} items in "
         f"{time.monotonic() - write_started:.1f}s (rss={_self_rss_mib()}MiB)"
@@ -2398,10 +2406,11 @@ async def sync_capabilities(payload: dict):
         )
     for i, (cid, content, meta) in enumerate(pending):
         try:
-            _add_item("system_capabilities", cid, "default", content, meta, now, now_ts, vector=vectors[i])
+            _add_item("system_capabilities", cid, "default", content, meta, now, now_ts, vector=vectors[i], commit=False)
             count += 1
         except Exception as e:
             log.error(f"Capability sync failed for {cid}: {e}")
+    _conn().commit()
 
     # Binary inventory converges to the probing container's actual tool set:
     # drop binary rows this probe did not report so stale entries (e.g. from a

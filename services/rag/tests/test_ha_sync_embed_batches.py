@@ -156,3 +156,30 @@ def test_no_batch_endpoint_still_embeds_one_giant_list():
     source = Path(inspect.getsourcefile(rag_main)).read_text()
     assert "asyncio.to_thread(embed," not in source
     assert source.count("asyncio.to_thread(embed_batched,") == 4
+
+
+class _CountingConn:
+    """The connection, counting commits (sqlite3.Connection.commit is read-only)."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self.commits = 0
+
+    def commit(self):
+        self.commits += 1
+        return self._conn.commit()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def test_a_sync_commits_once_not_once_per_entity(tmp_path):
+    """A commit is a disk sync; one per entity kept a 700-entity sync on the
+    event loop for 17 s, long enough for every /health probe to time out."""
+    conn = _install(tmp_path)
+    counting = _CountingConn(conn)
+    rag_main.conn = counting
+    _sync({"entities": _entities(50), "user_id": "default"})
+    assert counting.commits == 1
+    rows = conn.execute("SELECT COUNT(*) FROM rag_items WHERE collection_name = 'ha_entities'").fetchone()[0]
+    assert rows == 51
