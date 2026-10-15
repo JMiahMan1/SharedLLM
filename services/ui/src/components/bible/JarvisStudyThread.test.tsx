@@ -12,7 +12,7 @@ vi.mock('../../services/api', async (importOriginal) => ({
   api: { ...(await importOriginal<typeof import('../../services/api')>()).api, ...apiMock },
 }));
 
-const START: BibleStudyStreamEvent = {
+const START: Extract<BibleStudyStreamEvent, { type: 'start' }> = {
   type: 'start',
   reference: 'John 3:16',
   version: 'nkjv',

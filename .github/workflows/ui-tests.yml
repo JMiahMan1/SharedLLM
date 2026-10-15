@@ -33,6 +33,14 @@ jobs:
         cd services/ui
         npm run lint || echo "Linting failed, but continuing for tests"
 
+    # The root tsconfig only references the real configs ("files": []), so
+    # plain `tsc -p .` checks nothing, and the Vite build strips types without
+    # checking them. This is the step that actually typechecks the UI.
+    - name: Typecheck
+      run: |
+        cd services/ui
+        npm run typecheck
+
     - name: Run Unit Tests
       run: |
         cd services/ui

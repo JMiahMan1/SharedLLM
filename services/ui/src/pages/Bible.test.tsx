@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import Bible from './Bible';
 import { api } from '../services/api';
 import type {
+  BibleStudyNotesResponse,
   BibleAchievementsResponse,
   BibleBookInfo,
   BibleDailyResponse,
@@ -854,7 +855,7 @@ describe('comparing two translations', () => {
 });
 
 describe('commentary alongside the text', () => {
-  const NOTES = {
+  const NOTES: BibleStudyNotesResponse = {
     version: 'kjv',
     edition: 'nkjv-tmn',
     edition_name: 'NKJV Study Bible',

@@ -90,6 +90,9 @@ function catalogue(over: Partial<BibleImportsResponse> = {}): BibleImportsRespon
     kinds: ['json', 'pdf', 'epub'],
     import_dir: '/data/bible',
     import_dir_error: '',
+    library_root: '',
+    library_setting: '',
+    library_error: '',
     runs: [],
     ...over,
   };

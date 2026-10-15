@@ -123,7 +123,7 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
     const element = audioRef.current;
     if (!element) return;
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    const url = URL.createObjectURL(new Blob([piece.bytes], { type: piece.mime }));
+    const url = URL.createObjectURL(new Blob([piece.bytes as Uint8Array<ArrayBuffer>], { type: piece.mime }));
     urlRef.current = url;
     element.src = url;
     await element.play();
