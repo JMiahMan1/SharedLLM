@@ -133,6 +133,32 @@ describe('Wander page', () => {
     expect(card.textContent).not.toContain('Home');
   });
 
+  it('lists the five most recent trips, then all of them grouped by period', async () => {
+    const day = 86_400;
+    const base = Date.now() / 1000 - 3600;
+    const many = Array.from({ length: 8 }, (_, i) =>
+      trip({ id: `t${i}`, start_time: base - i * day * 3, end_time: base - i * day * 3 + 600 }),
+    );
+    useWanderHandlers({ trips: () => HttpResponse.json({ trips: many, total_trips: many.length }) });
+    const user = userEvent.setup();
+    renderWithProviders(<Wander />);
+
+    const seeAll = await screen.findByTestId('see-all-trips');
+    expect(seeAll).toHaveTextContent('See all 8 trips');
+    expect(screen.getAllByTestId('trip-card')).toHaveLength(5);
+
+    await user.click(seeAll);
+    expect(await screen.findByTestId('all-trips')).toBeInTheDocument();
+    expect(screen.getAllByTestId('trip-card')).toHaveLength(8);
+    expect(screen.getByRole('radio', { name: 'week' })).toHaveAttribute('aria-checked', 'true');
+    const weekGroups = screen.getAllByTestId('trip-group').length;
+    await user.click(screen.getByRole('radio', { name: 'day' }));
+    expect(screen.getAllByTestId('trip-group')).toHaveLength(8);
+    expect(weekGroups).toBeLessThan(8);
+    await user.click(screen.getByRole('radio', { name: 'year' }));
+    expect(screen.getAllByTestId('trip-group').length).toBeLessThanOrEqual(2);
+  });
+
   it('labels the trip owner by name rather than a raw entity id', async () => {
     useWanderHandlers({
       trips: () =>

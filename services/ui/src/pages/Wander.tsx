@@ -1,5 +1,6 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { api } from '../services/api';
@@ -14,6 +15,10 @@ import {
   displayName,
   filterTrips,
   formatCostSummary,
+  groupTrips,
+  RECENT_TRIP_COUNT,
+  roundForDisplay,
+  sortTripsNewestFirst,
   formatDistanceMeters,
   formatFuelSummary,
   formatTripLocation,
@@ -21,6 +26,7 @@ import {
   relativeTime,
   tripStats,
   type TripFilter,
+  type TripPeriod,
 } from '../lib/wanderTrips';
 import {
   geoPeopleQueryKey,
@@ -54,6 +60,8 @@ import {
   Activity,
   MapPinned,
   Loader2,
+  CalendarDays,
+  ChevronLeft,
 } from 'lucide-react';
 
 interface VehicleOption {
@@ -68,11 +76,37 @@ const Wander = () => {
   const { user } = useAuth();
   const { trigger } = useHaptics();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const currentUsername = (user?.username || '').toLowerCase();
 
   const [focusMember, setFocusMember] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<TripFilter>('all');
+  // The all-trips view lives in the URL, so Android's back button closes it
+  // like a native screen instead of leaving Wander.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const showAllTrips = searchParams.get('trips') === 'all';
+  const tripPeriod: TripPeriod = (['day', 'week', 'month', 'year'] as const).find((p) => p === searchParams.get('by')) ?? 'week';
+  const openAllTrips = () => {
+    trigger('light');
+    setSearchParams({ trips: 'all', by: tripPeriod });
+  };
+  const closeAllTrips = () => {
+    trigger('light');
+    if (window.history.length > 1) navigate(-1);
+    else setSearchParams({});
+  };
+  // Open at the top of the list: the phone shell scrolls an inner <main>, so
+  // window.scrollTo does nothing there; scrolling the header into view works
+  // whichever element scrolls.
+  const tripsHeaderRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (showAllTrips) tripsHeaderRef.current?.scrollIntoView({ block: 'start' });
+  }, [showAllTrips]);
+  const chooseTripPeriod = (period: TripPeriod) => {
+    trigger('light');
+    setSearchParams({ trips: 'all', by: period }, { replace: true });
+  };
 
   // Route previews (fetched lazily per card)
   const [routePoints, setRoutePoints] = useState<Record<string, RoutePoint[]>>({});
@@ -273,6 +307,14 @@ const Wander = () => {
   );
 
   const stats = useMemo(() => tripStats(displayedTrips), [displayedTrips]);
+  const recentTrips = useMemo(
+    () => sortTripsNewestFirst(displayedTrips).slice(0, RECENT_TRIP_COUNT),
+    [displayedTrips],
+  );
+  const tripGroups = useMemo(
+    () => (showAllTrips ? groupTrips(displayedTrips, tripPeriod) : []),
+    [showAllTrips, displayedTrips, tripPeriod],
+  );
 
   // Open Edit Modal
   const handleOpenEdit = (trip: Trip) => {
@@ -450,6 +492,259 @@ const Wander = () => {
     return Number((previewFuelUsed * costNum).toFixed(2));
   }, [previewFuelUsed, editCostPerGallon, editActivityType]);
 
+  /** One trip card; the recent list and the all-trips view share it. */
+  const renderTripCard = (trip: Trip) => {
+            const canEdit = isTripOwner(trip, currentUsername);
+            const isShared = trip.is_shared;
+            const ActivityIcon = ACTIVITY_ICONS[trip.activity_type || 'driving'] || Car;
+            const isDrive = (trip.activity_type || 'driving') === 'driving';
+
+            return (
+              <div
+                key={trip.id}
+                data-testid="trip-card"
+                className={`glass-card p-5 rounded-2xl border transition-all relative overflow-hidden shadow-lg ${
+                  isShared
+                    ? 'border-purple-500/40 bg-gradient-to-r from-purple-950/20 via-slate-900/40 to-indigo-950/20'
+                    : 'border-white/5 hover:border-white/10'
+                }`}
+              >
+                {/* Top Badge Row */}
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    {/* User Badge */}
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 text-xs font-semibold text-slate-200 border border-white/5">
+                      <span className="w-2 h-2 rounded-full bg-purple-400" />
+                      <span>{displayName(trip)}</span>
+                    </div>
+
+                    {/* Activity Type Badge */}
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.04] text-xs font-semibold text-slate-300 border border-white/10">
+                      <ActivityIcon size={12} className="text-purple-400" />
+                      <span>{formatActivityLabel(trip)}</span>
+                    </div>
+
+                    {/* Shared Ride Badge — renders rider names properly (no [object Object]) */}
+                    {isShared && trip.shared_with && trip.shared_with.length > 0 && (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 text-xs font-semibold">
+                        <Users size={12} />
+                        <span>
+                          Shared with{' '}
+                          {trip.shared_with
+                            .map((r) => (typeof r === 'string' ? r : r.user_name || r.user_id))
+                            .join(', ')}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Status Badge */}
+                    {trip.status === 'in_progress' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                        In Progress
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                        <CheckCircle2 size={10} />
+                        Completed
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Date and Duration */}
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <CalendarIcon size={13} className="text-slate-500" />
+                    <span>{formatTimeRange(trip.start_time, trip.end_time)}</span>
+                    <span className="text-slate-600">•</span>
+                    <Clock size={13} className="text-slate-500" />
+                    <span className="font-semibold text-slate-300">{formatDuration(trip.duration_seconds)}</span>
+                  </div>
+                </div>
+
+                {/* Route Visualization */}
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-black/20 p-3.5 rounded-xl border border-white/5">
+                  {/* Origin & Destination */}
+                  <div className="md:col-span-6 flex items-center gap-3">
+                    <div className="flex flex-col items-center">
+                      <div className="w-3 h-3 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" />
+                      <div className="w-0.5 h-6 bg-slate-700 my-0.5" />
+                      <div className="w-3 h-3 rounded-full bg-rose-400 shadow-sm shadow-rose-400/50" />
+                    </div>
+
+                    <div
+                      className="flex-1 space-y-2 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1 transition-colors"
+                      onClick={() => openTripLocations(trip)}
+                    >
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase font-semibold">Start</span>
+                        <p className="text-xs font-medium text-slate-200 truncate">
+                          {formatTripLocation(trip.start_location, 'Starting Point')}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase font-semibold">Destination</span>
+                        <p className="text-xs font-medium text-slate-200 truncate">
+                          {formatTripLocation(trip.end_location, 'Destination')}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Telemetry Metrics */}
+                  <div className="md:col-span-6 grid grid-cols-3 gap-2 text-center pt-2 md:pt-0 border-t md:border-t-0 md:border-l border-white/5 md:pl-4">
+                    <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-white/[0.02]">
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                        <span title="GPS Distance is locked and immutable" className="inline-flex">
+                          <Lock size={10} className="text-slate-500" aria-label="GPS Distance is locked and immutable" />
+                        </span>
+                        Distance
+                      </span>
+                      <span className="text-sm font-bold text-white mt-0.5">{roundForDisplay(trip.distance_miles)} mi</span>
+                    </div>
+
+                    <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-white/[0.02]">
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                        <Zap size={10} className="text-amber-400" />
+                        Top Speed
+                      </span>
+                      <span className="text-sm font-bold text-amber-300 mt-0.5">{trip.top_speed_mph != null ? `${trip.top_speed_mph} mph` : '—'}</span>
+                    </div>
+
+                    <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-white/[0.02]">
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                        {isDrive ? <DollarSign size={10} className="text-emerald-400" /> : <Activity size={10} className="text-purple-400" />}
+                        {isDrive ? 'Trip Cost' : 'Activity'}
+                      </span>
+                      {isDrive ? (
+                        <span className="text-sm font-bold text-emerald-400 mt-0.5">${trip.trip_cost_usd}</span>
+                      ) : (
+                        <span className="text-sm font-bold text-purple-300 mt-0.5">{formatActivityLabel(trip)}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Vehicle & Fuel Details Row (driving only) */}
+                {isDrive && (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-3 pt-3 border-t border-white/5 text-xs">
+                    <div className="flex flex-wrap items-center gap-3 text-slate-300">
+                      {/* Vehicle Name */}
+                      <div className="flex items-center gap-1.5 font-medium">
+                        <Car size={14} className="text-purple-400 shrink-0" />
+                        <span>{trip.vehicle_name || 'Assigned Vehicle'}</span>
+                      </div>
+
+                      {/* Fuel Type Badge */}
+                      <span
+                        className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
+                          (trip.fuel_type || '').toLowerCase() === 'diesel'
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                            : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+                        }`}
+                      >
+                        {trip.fuel_type || 'Gasoline'}
+                      </span>
+
+                      {/* MPG & Gas Price */}
+                      <div className="flex items-center gap-2 text-slate-400">
+                        <span className="flex items-center gap-1">
+                          <Gauge size={12} className="text-slate-500" />
+                          <span>{trip.mpg} MPG</span>
+                        </span>
+                        <span>•</span>
+                        <span className="flex items-center gap-1">
+                          <Fuel size={12} className="text-slate-500" />
+                          <span>${trip.cost_per_gallon}/gal</span>
+                        </span>
+                        <span>•</span>
+                        <span>{trip.fuel_used_gal} gal used</span>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons (Only for owner) */}
+                    <div className="flex items-center gap-2">
+                      {canEdit ? (
+                        <>
+                          <button
+                            onClick={() => handleOpenShare(trip)}
+                            className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:text-white border-indigo-500/30 rounded-lg transition-all"
+                          >
+                            <Share2 size={12} />
+                            <span>Share</span>
+                          </button>
+                          <button
+                            onClick={() => handleOpenEdit(trip)}
+                            className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-300 hover:text-white border-purple-500/30 rounded-lg transition-all"
+                          >
+                            <Edit2 size={12} />
+                            <span>Edit Vehicle & Fuel</span>
+                          </button>
+                        </>
+                      ) : (
+                        <div
+                          className="flex items-center gap-1.5 text-[11px] text-slate-500 px-2 py-1 bg-white/[0.02] rounded-lg border border-white/5 cursor-not-allowed"
+                          title={`Only ${trip.user_name || 'the trip owner'} can edit this trip`}
+                        >
+                          <Lock size={11} className="text-slate-500" />
+                          <span>Owner locked</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Non-drive action row */}
+                {!isDrive && (
+                  <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-white/5 text-xs">
+                    {canEdit ? (
+                      <>
+                        <button
+                          onClick={() => handleOpenShare(trip)}
+                          className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:text-white border-indigo-500/30 rounded-lg transition-all"
+                        >
+                          <Share2 size={12} />
+                          <span>Share</span>
+                        </button>
+                        <button
+                          onClick={() => handleOpenEdit(trip)}
+                          className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-300 hover:text-white border-purple-500/30 rounded-lg transition-all"
+                        >
+                          <Edit2 size={12} />
+                          <span>Edit Activity</span>
+                        </button>
+                      </>
+                    ) : (
+                      <div
+                        className="flex items-center gap-1.5 text-[11px] text-slate-500 px-2 py-1 bg-white/[0.02] rounded-lg border border-white/5 cursor-not-allowed"
+                        title={`Only ${trip.user_name || 'the trip owner'} can edit this trip`}
+                      >
+                        <Lock size={11} className="text-slate-500" />
+                        <span>Owner locked</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {trip.notes && (
+                  <p className="text-[11px] text-slate-400 mt-2 italic flex items-center gap-1.5">
+                    <Activity size={11} className="text-slate-500" />
+                    {trip.notes}
+                  </p>
+                )}
+
+                <RoutePreview
+                  id={trip.id}
+                  completed={trip.status === 'completed'}
+                  points={routePoints[trip.id]}
+                  loadRoute={loadRoute}
+                  fetcher={() => api.getTripRoute(trip.id).then((r) => r.points)}
+                  onOpenMap={() => openTripLocations(trip)}
+                  hidden={Boolean(tripLocations)}
+                />
+              </div>
+            );
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* A phone that stopped reporting must never look like "nobody moved". */}
@@ -473,6 +768,7 @@ const Wander = () => {
         </div>
       )}
 
+      {!showAllTrips && (<>
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-panel p-6 rounded-2xl border border-white/10 shadow-xl">
         <div className="space-y-1">
@@ -644,17 +940,38 @@ const Wander = () => {
         </div>
       </div>
 
+      </>)}
+
       {/* Trips Section Header with Filter Tabs */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-        <div>
-          <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-            <Route size={20} className="text-purple-400" />
-            Recorded Trips
-          </h2>
-          <p className="text-xs text-slate-400">
-            Driving trips log automatically over 10 MPH. Workouts are manual. Vehicle, fuel, and activity editable by trip owner.
-          </p>
-        </div>
+      <div ref={tripsHeaderRef} className="scroll-mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+        {showAllTrips ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={closeAllTrips}
+              aria-label="Back to Wander"
+              className="min-h-11 min-w-11 rounded-xl flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/5"
+            >
+              <ChevronLeft size={22} />
+            </button>
+            <div>
+              <h2 className="text-lg font-bold text-slate-100">All Trips</h2>
+              <p className="text-xs text-slate-400">
+                {displayedTrips.length} trip{displayedTrips.length === 1 ? '' : 's'} · {roundForDisplay(stats.miles)} mi · {formatCostSummary(stats.cost)}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+              <Route size={20} className="text-purple-400" />
+              Recent Trips
+            </h2>
+            <p className="text-xs text-slate-400">
+              Driving trips log automatically over 10 MPH. Workouts are manual. Vehicle, fuel, and activity editable by trip owner.
+            </p>
+          </div>
+        )}
 
         {/* Tab Filters */}
         <div className="flex items-center p-1 bg-slate-900/80 rounded-xl border border-white/10 self-start sm:self-auto">
@@ -706,258 +1023,51 @@ const Wander = () => {
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {displayedTrips.map((trip) => {
-            const canEdit = isTripOwner(trip, currentUsername);
-            const isShared = trip.is_shared;
-            const ActivityIcon = ACTIVITY_ICONS[trip.activity_type || 'driving'] || Car;
-            const isDrive = (trip.activity_type || 'driving') === 'driving';
-
-            return (
-              <div
-                key={trip.id}
-                className={`glass-card p-5 rounded-2xl border transition-all relative overflow-hidden shadow-lg ${
-                  isShared
-                    ? 'border-purple-500/40 bg-gradient-to-r from-purple-950/20 via-slate-900/40 to-indigo-950/20'
-                    : 'border-white/5 hover:border-white/10'
+        showAllTrips ? (
+        <div className="space-y-6" data-testid="all-trips">
+          <div role="radiogroup" aria-label="Group trips by" className="flex p-1 bg-slate-900/80 rounded-xl border border-white/10 w-full sm:w-fit">
+            {(['day', 'week', 'month', 'year'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                role="radio"
+                aria-checked={tripPeriod === p}
+                onClick={() => chooseTripPeriod(p)}
+                className={`flex-1 sm:flex-none px-4 min-h-11 rounded-lg text-xs font-medium capitalize transition-all ${
+                  tripPeriod === p ? 'bg-purple-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                {/* Top Badge Row */}
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2">
-                    {/* User Badge */}
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 text-xs font-semibold text-slate-200 border border-white/5">
-                      <span className="w-2 h-2 rounded-full bg-purple-400" />
-                      <span>{displayName(trip)}</span>
-                    </div>
-
-                    {/* Activity Type Badge */}
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.04] text-xs font-semibold text-slate-300 border border-white/10">
-                      <ActivityIcon size={12} className="text-purple-400" />
-                      <span>{formatActivityLabel(trip)}</span>
-                    </div>
-
-                    {/* Shared Ride Badge — renders rider names properly (no [object Object]) */}
-                    {isShared && trip.shared_with && trip.shared_with.length > 0 && (
-                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 text-xs font-semibold">
-                        <Users size={12} />
-                        <span>
-                          Shared with{' '}
-                          {trip.shared_with
-                            .map((r) => (typeof r === 'string' ? r : r.user_name || r.user_id))
-                            .join(', ')}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Status Badge */}
-                    {trip.status === 'in_progress' ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                        In Progress
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                        <CheckCircle2 size={10} />
-                        Completed
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Date and Duration */}
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
-                    <CalendarIcon size={13} className="text-slate-500" />
-                    <span>{formatTimeRange(trip.start_time, trip.end_time)}</span>
-                    <span className="text-slate-600">•</span>
-                    <Clock size={13} className="text-slate-500" />
-                    <span className="font-semibold text-slate-300">{formatDuration(trip.duration_seconds)}</span>
-                  </div>
-                </div>
-
-                {/* Route Visualization */}
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-black/20 p-3.5 rounded-xl border border-white/5">
-                  {/* Origin & Destination */}
-                  <div className="md:col-span-6 flex items-center gap-3">
-                    <div className="flex flex-col items-center">
-                      <div className="w-3 h-3 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" />
-                      <div className="w-0.5 h-6 bg-slate-700 my-0.5" />
-                      <div className="w-3 h-3 rounded-full bg-rose-400 shadow-sm shadow-rose-400/50" />
-                    </div>
-
-                    <div
-                      className="flex-1 space-y-2 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1 transition-colors"
-                      onClick={() => openTripLocations(trip)}
-                    >
-                      <div>
-                        <span className="text-[10px] text-slate-500 uppercase font-semibold">Start</span>
-                        <p className="text-xs font-medium text-slate-200 truncate">
-                          {formatTripLocation(trip.start_location, 'Starting Point')}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-slate-500 uppercase font-semibold">Destination</span>
-                        <p className="text-xs font-medium text-slate-200 truncate">
-                          {formatTripLocation(trip.end_location, 'Destination')}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Telemetry Metrics */}
-                  <div className="md:col-span-6 grid grid-cols-3 gap-2 text-center pt-2 md:pt-0 border-t md:border-t-0 md:border-l border-white/5 md:pl-4">
-                    <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-white/[0.02]">
-                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                        <span title="GPS Distance is locked and immutable" className="inline-flex">
-                          <Lock size={10} className="text-slate-500" aria-label="GPS Distance is locked and immutable" />
-                        </span>
-                        Distance
-                      </span>
-                      <span className="text-sm font-bold text-white mt-0.5">{trip.distance_miles} mi</span>
-                    </div>
-
-                    <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-white/[0.02]">
-                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                        <Zap size={10} className="text-amber-400" />
-                        Top Speed
-                      </span>
-                      <span className="text-sm font-bold text-amber-300 mt-0.5">{trip.top_speed_mph != null ? `${trip.top_speed_mph} mph` : '—'}</span>
-                    </div>
-
-                    <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-white/[0.02]">
-                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                        {isDrive ? <DollarSign size={10} className="text-emerald-400" /> : <Activity size={10} className="text-purple-400" />}
-                        {isDrive ? 'Trip Cost' : 'Activity'}
-                      </span>
-                      {isDrive ? (
-                        <span className="text-sm font-bold text-emerald-400 mt-0.5">${trip.trip_cost_usd}</span>
-                      ) : (
-                        <span className="text-sm font-bold text-purple-300 mt-0.5">{formatActivityLabel(trip)}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Vehicle & Fuel Details Row (driving only) */}
-                {isDrive && (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-3 pt-3 border-t border-white/5 text-xs">
-                    <div className="flex flex-wrap items-center gap-3 text-slate-300">
-                      {/* Vehicle Name */}
-                      <div className="flex items-center gap-1.5 font-medium">
-                        <Car size={14} className="text-purple-400 shrink-0" />
-                        <span>{trip.vehicle_name || 'Assigned Vehicle'}</span>
-                      </div>
-
-                      {/* Fuel Type Badge */}
-                      <span
-                        className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
-                          (trip.fuel_type || '').toLowerCase() === 'diesel'
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                            : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
-                        }`}
-                      >
-                        {trip.fuel_type || 'Gasoline'}
-                      </span>
-
-                      {/* MPG & Gas Price */}
-                      <div className="flex items-center gap-2 text-slate-400">
-                        <span className="flex items-center gap-1">
-                          <Gauge size={12} className="text-slate-500" />
-                          <span>{trip.mpg} MPG</span>
-                        </span>
-                        <span>•</span>
-                        <span className="flex items-center gap-1">
-                          <Fuel size={12} className="text-slate-500" />
-                          <span>${trip.cost_per_gallon}/gal</span>
-                        </span>
-                        <span>•</span>
-                        <span>{trip.fuel_used_gal} gal used</span>
-                      </div>
-                    </div>
-
-                    {/* Action Buttons (Only for owner) */}
-                    <div className="flex items-center gap-2">
-                      {canEdit ? (
-                        <>
-                          <button
-                            onClick={() => handleOpenShare(trip)}
-                            className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:text-white border-indigo-500/30 rounded-lg transition-all"
-                          >
-                            <Share2 size={12} />
-                            <span>Share</span>
-                          </button>
-                          <button
-                            onClick={() => handleOpenEdit(trip)}
-                            className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-300 hover:text-white border-purple-500/30 rounded-lg transition-all"
-                          >
-                            <Edit2 size={12} />
-                            <span>Edit Vehicle & Fuel</span>
-                          </button>
-                        </>
-                      ) : (
-                        <div
-                          className="flex items-center gap-1.5 text-[11px] text-slate-500 px-2 py-1 bg-white/[0.02] rounded-lg border border-white/5 cursor-not-allowed"
-                          title={`Only ${trip.user_name || 'the trip owner'} can edit this trip`}
-                        >
-                          <Lock size={11} className="text-slate-500" />
-                          <span>Owner locked</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Non-drive action row */}
-                {!isDrive && (
-                  <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-white/5 text-xs">
-                    {canEdit ? (
-                      <>
-                        <button
-                          onClick={() => handleOpenShare(trip)}
-                          className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:text-white border-indigo-500/30 rounded-lg transition-all"
-                        >
-                          <Share2 size={12} />
-                          <span>Share</span>
-                        </button>
-                        <button
-                          onClick={() => handleOpenEdit(trip)}
-                          className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-300 hover:text-white border-purple-500/30 rounded-lg transition-all"
-                        >
-                          <Edit2 size={12} />
-                          <span>Edit Activity</span>
-                        </button>
-                      </>
-                    ) : (
-                      <div
-                        className="flex items-center gap-1.5 text-[11px] text-slate-500 px-2 py-1 bg-white/[0.02] rounded-lg border border-white/5 cursor-not-allowed"
-                        title={`Only ${trip.user_name || 'the trip owner'} can edit this trip`}
-                      >
-                        <Lock size={11} className="text-slate-500" />
-                        <span>Owner locked</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {trip.notes && (
-                  <p className="text-[11px] text-slate-400 mt-2 italic flex items-center gap-1.5">
-                    <Activity size={11} className="text-slate-500" />
-                    {trip.notes}
-                  </p>
-                )}
-
-                <RoutePreview
-                  id={trip.id}
-                  completed={trip.status === 'completed'}
-                  points={routePoints[trip.id]}
-                  loadRoute={loadRoute}
-                  fetcher={() => api.getTripRoute(trip.id).then((r) => r.points)}
-                  onOpenMap={() => openTripLocations(trip)}
-                  hidden={Boolean(tripLocations)}
-                />
+                {p}
+              </button>
+            ))}
+          </div>
+          {tripGroups.map((group) => (
+            <section key={group.key} className="space-y-3" data-testid="trip-group">
+              <div className="flex items-baseline justify-between gap-3 border-b border-white/5 pb-1.5">
+                <h3 className="text-sm font-semibold text-slate-200">{group.label}</h3>
+                <span className="text-[11px] text-slate-500">
+                  {group.stats.count} trip{group.stats.count === 1 ? '' : 's'} · {roundForDisplay(group.stats.miles)} mi · {formatCostSummary(group.stats.cost)}
+                </span>
               </div>
-            );
-          })}
+              <div className="space-y-4">{group.trips.map(renderTripCard)}</div>
+            </section>
+          ))}
         </div>
+        ) : (
+        <div className="space-y-4">
+          {recentTrips.map(renderTripCard)}
+          {displayedTrips.length > RECENT_TRIP_COUNT && (
+            <button
+              type="button"
+              onClick={openAllTrips}
+              data-testid="see-all-trips"
+              className="w-full min-h-12 rounded-2xl border border-white/10 bg-slate-900/60 text-sm font-medium text-purple-300 hover:text-white hover:border-purple-500/40 flex items-center justify-center gap-2"
+            >
+              <CalendarDays size={16} /> See all {displayedTrips.length} trips by day, week, month or year
+            </button>
+          )}
+        </div>
+        )
       )}
 
       {/* Edit Trip Modal */}
@@ -976,7 +1086,7 @@ const Wander = () => {
                 <span>GPS Verified Trip</span>
               </div>
               <p className="text-slate-400">
-                Distance ({editingTrip.distance_miles} miles) comes from recorded GPS and can&apos;t be altered. Place names can be edited, or picked from nearby stores, restaurants, and zones — the street address stays stored with the coordinates.
+                Distance ({roundForDisplay(editingTrip.distance_miles)} miles) comes from recorded GPS and can&apos;t be altered. Place names can be edited, or picked from nearby stores, restaurants, and zones — the street address stays stored with the coordinates.
               </p>
             </div>
 
@@ -1170,7 +1280,7 @@ const Wander = () => {
             <div className="p-4 rounded-xl bg-slate-900/80 border border-white/10 grid grid-cols-3 gap-3 text-center">
               <div>
                 <span className="text-[10px] text-slate-400 uppercase font-semibold">Distance</span>
-                <p className="text-base font-bold text-white mt-0.5">{editingTrip.distance_miles} mi</p>
+                <p className="text-base font-bold text-white mt-0.5">{roundForDisplay(editingTrip.distance_miles)} mi</p>
               </div>
               <div>
                 <span className="text-[10px] text-slate-400 uppercase font-semibold">New Fuel Used</span>
