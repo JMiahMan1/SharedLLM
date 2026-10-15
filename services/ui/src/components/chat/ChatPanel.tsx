@@ -409,11 +409,11 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
 
   return (
     <div
-      className={`grid min-h-0 overflow-hidden rounded-3xl max-lg:flex-1 lg:min-h-[440px] border border-white/5 bg-black/20 lg:h-[680px] lg:grid-cols-[320px_1fr] ${className}`}
+      className={`grid min-h-0 overflow-hidden rounded-3xl max-lg:flex-1 max-lg:grid-cols-[minmax(0,1fr)] lg:min-h-[440px] border border-white/5 bg-black/20 lg:h-[680px] lg:grid-cols-[320px_1fr] ${className}`}
       data-testid="chat-panel"
     >
       {/* Inbox */}
-      <aside className={`min-h-0 flex-col border-white/5 p-3 lg:flex lg:border-r ${showThread ? 'hidden' : 'flex'}`}>
+      <aside className={`min-h-0 min-w-0 flex-col border-white/5 p-3 lg:flex lg:border-r ${showThread ? 'hidden' : 'flex'}`}>
         <ConversationList
           conversations={conversations}
           activeToken={activeToken}

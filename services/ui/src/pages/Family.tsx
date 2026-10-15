@@ -43,10 +43,17 @@ export default function Family() {
       data-testid="family-page"
     >
       {/* One compact row, so the conversations get the screen. */}
-      <div className="flex shrink-0 items-center gap-3 px-1">
-        <h1 className="text-2xl font-bold tracking-tight text-white">Family</h1>
+      {/* The tabs sit beside the title when they fit at full size and wrap to
+          a full-width row of their own when they do not (a large system font
+          on a narrow phone ran them past the right edge). They never shrink
+          their labels to "Ch…". */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-1">
+        <h1 className="shrink-0 text-2xl font-bold tracking-tight text-white">Family</h1>
         <div
-          className="ml-auto flex rounded-full border border-white/10 bg-slate-900/80 p-1"
+          className="flex grow justify-end"
+        >
+        <div
+          className="flex w-full max-w-sm rounded-full border border-white/10 bg-slate-900/80 p-1 sm:w-auto"
           role="tablist"
           aria-label="Family sections"
         >
@@ -56,13 +63,14 @@ export default function Family() {
               role="tab"
               aria-selected={tab === id}
               onClick={() => setTab(id)}
-              className={`flex min-h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition ${
+              className={`flex min-h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] font-medium transition ${
                 tab === id ? 'bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Icon size={14} /> {label}
+              <Icon size={14} className="shrink-0" /> {label}
             </button>
           ))}
+        </div>
         </div>
       </div>
 
