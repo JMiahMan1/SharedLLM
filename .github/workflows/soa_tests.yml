@@ -8,7 +8,6 @@ on:
       - '!services/ui/**'
       - 'conftest.py'
       - 'pytest.ini'
-      - 'requirements.txt'
       - '.github/workflows/soa_tests.yml'
   pull_request:
     branches: [ main, master ]
@@ -17,7 +16,6 @@ on:
       - '!services/ui/**'
       - 'conftest.py'
       - 'pytest.ini'
-      - 'requirements.txt'
       - '.github/workflows/soa_tests.yml'
 
 jobs:

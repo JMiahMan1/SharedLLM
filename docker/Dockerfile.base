@@ -40,11 +40,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # CPU-only PyTorch (no CUDA libs) — needed by RAG/gateway for embedding models
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# Heavy ML/vector packages (fastembed, onnxruntime, chromadb) — only needed by RAG and gateway
+# Heavy ML/vector packages (fastembed, onnxruntime) — only needed by RAG and gateway
 # Installing in base so they're cached across all service builds
 RUN pip install --no-cache-dir \
     fastembed \
-    chromadb \
     sqlmodel \
     cryptography \
     pydantic \

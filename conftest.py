@@ -140,13 +140,11 @@ _TEST_ENV_DEFAULTS = {
     "GIT_TOKEN": "test-git-token",
     "GIT_WEBHOOK_SECRET": "test-webhook-secret",
     "UPSTREAM_DNS": "127.0.0.1",
-    "DNS_CONF_PATH": "/etc/dnsmasq.conf",
     # Filesystem — tmp paths, so a test can never write into a real deployment.
     "WORKSPACE_ROOT": tempfile.gettempdir(),
     "WORKSPACE_REGISTRY_PATH": os.path.join(tempfile.gettempdir(), "workspaces.json"),
     "LOCAL_NOTES_ROOT": os.path.join(tempfile.gettempdir(), "notes"),
     "PHRASEBOOK_PATH": os.path.join(_root, "data", "phrasebook.json"),
-    "CHROMA_PERSIST_DIR": os.path.join(tempfile.gettempdir(), "chroma_db"),
     "VOLUME_BACKUP_ROOT": os.path.join(tempfile.gettempdir(), "backups"),
     "VOLUME_MANIFEST_PATH": os.path.join(tempfile.gettempdir(), "volumes.json"),
     "LEGACY_ENV_PATH": os.path.join(_root, ".env"),

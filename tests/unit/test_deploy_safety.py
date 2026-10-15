@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """The deploy scripts must not destroy host state or the whole stack.
 
 Both defects here were found after the fact, in production, and neither is
@@ -18,24 +17,19 @@ to call. Parsing shell by hand would test our parser, not the deploy.
 """
 import re
 import subprocess
-import sys
 from pathlib import Path
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1]
+import pytest
+
+SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 SCRIPTS = [
     SCRIPTS_DIR / "deploy_local_build.sh",
     SCRIPTS_DIR / "deploy_remote.sh",
 ]
 
-failures: list[str] = []
-
-
-def check(name: str, ok: bool, detail: str = "") -> None:
-    if ok:
-        print(f"  PASS  {name}")
-    else:
-        print(f"  FAIL  {name}{' -- ' + detail if detail else ''}")
-        failures.append(name)
+def check(failures: list[str], name: str, ok: bool, detail: str = "") -> None:
+    if not ok:
+        failures.append(f"{name}{' -- ' + detail if detail else ''}")
 
 
 def code_only(src: str) -> str:
@@ -58,37 +52,38 @@ def code_only(src: str) -> str:
     return "\n".join(out)
 
 
-print("deploy script safety")
-for path in SCRIPTS:
+@pytest.mark.parametrize("path", SCRIPTS, ids=lambda p: p.name)
+def test_deploy_script_is_safe(path: Path):
     label = path.name
+    failures: list[str] = []
     src = path.read_text()
     code = code_only(src)
 
     # 1. .env must not be in the sync list.
     sync_lists = re.findall(r'for NON_GIT_FILE in ([^\n]+); do', code)
     env_listed = any('".env"' in lst for lst in sync_lists)
-    check(f"{label}: .env is not in the file-sync list", not env_listed,
+    check(failures, f"{label}: .env is not in the file-sync list", not env_listed,
           f"found .env in {sync_lists}")
 
     # 2. No bare `cat >` of .env anywhere.
     cat_env = re.search(r'cat > \'?\$DIR/\.env', code)
-    check(f"{label}: never truncates the host .env", cat_env is None)
+    check(failures, f"{label}: never truncates the host .env", cat_env is None)
 
     # 3. compose up must be scoped to services.
     up = re.search(r'docker compose up[^\n]*', code)
     has_services = up is not None and "$SERVICES" in up.group(0)
-    check(f"{label}: docker compose up is scoped to $SERVICES", has_services,
+    check(failures, f"{label}: docker compose up is scoped to $SERVICES", has_services,
           up.group(0).strip() if up else "no compose up found")
 
     # 4. compose pull (remote script only) also scoped, so images still update.
     pull = re.search(r'docker compose pull[^\n]*', code)
     if pull:
-        check(f"{label}: docker compose pull is scoped too", "$SERVICES" in pull.group(0),
+        check(failures, f"{label}: docker compose pull is scoped too", "$SERVICES" in pull.group(0),
               pull.group(0).strip())
 
     # 5. The service list must never fall back to "everything".
     fallback_all = re.search(r'^\s*SERVICES=""\s*$', code, re.M)
-    check(f"{label}: no empty SERVICES fallback that would recreate everything",
+    check(failures, f"{label}: no empty SERVICES fallback that would recreate everything",
           fallback_all is None, fallback_all.group(0).strip() if fallback_all else "")
 
     # 6. Readiness must not depend on a log line that only exists at boot.
@@ -101,20 +96,15 @@ for path in SCRIPTS:
     # the banner inside the tail -- so every non-gateway deploy then timed out.
     # A bug fixed can unmask the bug it was hiding.
     startup_grep = re.search(r'docker logs --tail \d+[^\n]*grep -q "Application startup complete"', code)
-    check(f"{label}: readiness does not grep a boot-only log line", startup_grep is None,
+    check(failures, f"{label}: readiness does not grep a boot-only log line", startup_grep is None,
           startup_grep.group(0).strip() if startup_grep else "")
 
     # 7. Readiness must poll something that answers while running.
     if "Waiting for application startup" in code:
         health_url = re.search(r'GATEWAY_HEALTH_URL="([^"]+)"', code)
-        check(f"{label}: readiness polls the gateway health endpoint",
+        check(failures, f"{label}: readiness polls the gateway health endpoint",
               health_url is not None and "/health" in health_url.group(1),
               health_url.group(1) if health_url else "no GATEWAY_HEALTH_URL")
 
-    check(f"{label}: syntax is valid", subprocess.run(["bash", "-n", str(path)]).returncode == 0)
-
-print()
-if failures:
-    print(f"{len(failures)} check(s) FAILED: {', '.join(failures)}")
-    sys.exit(1)
-print("all deploy-script safety checks passed")
+    check(failures, f"{label}: syntax is valid", subprocess.run(["bash", "-n", str(path)]).returncode == 0)
+    assert not failures, "\n".join(failures)

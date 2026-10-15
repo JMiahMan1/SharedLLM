@@ -387,13 +387,6 @@ def _download_kokoro_files() -> tuple[list[str], list[str]]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import subprocess  # always available for startup shell setup (gh auth, git config)
-    # Patch DNS resolver to route .local domains through dns-sync for live failover
-    try:
-        from services.common.dns_resolver import patch_dns_resolver
-        patch_dns_resolver()
-    except Exception as e:
-        log.warning(f"DNS resolver patch failed: {e}")
-
     # Resolve runtime config from Identity service
     from services.config import resolve_runtime_config
     await resolve_runtime_config()

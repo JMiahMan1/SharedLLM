@@ -1004,7 +1004,7 @@ const KnowledgeHub = () => {
               <div className="text-xs text-slate-300 leading-relaxed">
                 <p className="font-bold text-white mb-1">Irreversible Action Detected</p>
                 You are about to purge the <span className="font-mono text-red-400 font-bold">{purgeModalCollection}</span> collection. 
-                This will remove all associated vectors from the ChromaDB instance. 
+                This will remove all associated vectors from the knowledge index. 
                 Jarvis will lose all context regarding these resources until they are re-indexed.
               </div>
            </div>
