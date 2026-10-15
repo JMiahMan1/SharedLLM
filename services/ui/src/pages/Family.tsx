@@ -34,9 +34,16 @@ export default function Family() {
   const [tab, setTab] = useState<Tab>('chat');
 
   return (
-    <div className="space-y-3 sm:space-y-4 max-w-6xl mx-auto pb-28 px-1 sm:px-0" data-testid="family-page">
+    <div
+      // On a phone the chat tab is exactly the shell's height and only the
+      // conversation list scrolls; the other tabs scroll the page as usual.
+      className={`mx-auto flex max-w-6xl flex-col gap-3 px-1 sm:gap-4 sm:px-0 ${
+        tab === 'chat' ? 'max-lg:h-full max-lg:min-h-0 lg:pb-28' : 'pb-28'
+      }`}
+      data-testid="family-page"
+    >
       {/* One compact row, so the conversations get the screen. */}
-      <div className="flex items-center gap-3 px-1">
+      <div className="flex shrink-0 items-center gap-3 px-1">
         <h1 className="text-2xl font-bold tracking-tight text-white">Family</h1>
         <div
           className="ml-auto flex rounded-full border border-white/10 bg-slate-900/80 p-1"
