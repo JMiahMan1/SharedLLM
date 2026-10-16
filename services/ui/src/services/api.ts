@@ -851,11 +851,6 @@ export const api = {
     return Array.isArray(resp.data) ? resp.data : [];
   },
 
-  async clearLogs(): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.delete('/api/admin/logs');
-    return resp.data;
-  },
-
   getLogWebSocketUrl(): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;

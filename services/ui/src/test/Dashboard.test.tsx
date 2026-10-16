@@ -37,13 +37,13 @@ describe('Dashboard recent problems', () => {
     expect(asked).toBe('warning,error');
   });
 
-  it('confirms before clearing the whole system log', async () => {
+  it('Clear hides the listed problems on this device and never deletes the log', async () => {
     const { server } = await import('./setup');
     const { http, HttpResponse } = await import('msw');
     let deleted = false;
     server.use(
       http.get('/api/admin/logs', () => HttpResponse.json([
-        { timestamp: '2026-10-15 16:40:07', service: 'gateway', level: 'ERROR', message: 'RESPONSE GET /x -> 502' },
+        { timestamp: '2026-10-15T16:40:07Z', service: 'gateway', level: 'ERROR', message: 'RESPONSE GET /x -> 502' },
       ])),
       http.delete('/api/admin/logs', () => { deleted = true; return HttpResponse.json({ status: 'success' }); }),
     );
@@ -52,8 +52,23 @@ describe('Dashboard recent problems', () => {
     renderWithProviders(<Dashboard />);
 
     await user.click(await screen.findByRole('button', { name: 'Clear' }));
+    expect(await screen.findByText('No failed requests recently')).toBeInTheDocument();
+    expect(screen.queryByText('RESPONSE GET /x -> 502')).not.toBeInTheDocument();
     expect(deleted).toBe(false);
-    await user.click(screen.getByRole('button', { name: /clear whole log/i }));
-    await waitFor(() => expect(deleted).toBe(true));
+  });
+
+  it('shows a web server access line as method, path and status', async () => {
+    const { server } = await import('./setup');
+    const { http, HttpResponse } = await import('msw');
+    server.use(
+      http.get('/api/admin/logs', () => HttpResponse.json([
+        {
+          timestamp: '2026-10-15T16:40:07Z', service: 'gateway', level: 'ERROR',
+          message: 'INFO:     172.26.0.15:49110 - "GET /api/communication/timers HTTP/1.1" 500 Internal Server Error',
+        },
+      ])),
+    );
+    renderWithProviders(<Dashboard />);
+    expect(await screen.findByText('GET /api/communication/timers: 500 Internal Server Error')).toBeInTheDocument();
   });
 });

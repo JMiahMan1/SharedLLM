@@ -7,8 +7,8 @@ import type { TelemetryNotification } from '../../types/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLocation } from '../../context/LocationContext';
 import { useSystemHealth } from '../../hooks/useSystemHealth';
-import { storageGetSync, storageSet } from '../../lib/storage';
 import { relativeTime } from '../../lib/wanderTrips';
+import { useClearedAt, newerThan } from '../../lib/clearedAt';
 import { navPagesFor } from './navItems';
 
 // Navigation search index: the header box is a *command-palette* style finder
@@ -26,6 +26,8 @@ const EXTRA_ITEMS: NavItem[] = [
 
 /** When the bell was last opened; notices newer than this light the dot. */
 const SEEN_KEY = 'jarvis_notifications_seen_at';
+/** When "Clear all" was last used; older notices stay hidden on this device. */
+const CLEARED_KEY = 'jarvis_notifications_cleared_at';
 
 const Header = () => {
   const { user, logout } = useAuth();
@@ -35,7 +37,9 @@ const Header = () => {
   const [navOpen, setNavOpen] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const bellRef = useRef<HTMLDivElement>(null);
 
   const navItems = useMemo<NavItem[]>(() => [
     ...navPagesFor(!!user?.is_admin).map(({ label, path, keywords }) => ({ label, path, keywords, section: 'Pages' })),
@@ -61,9 +65,13 @@ const Header = () => {
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) setProfileOpen(false);
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) setShowNotifications(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setProfileOpen(false);
+      if (e.key === 'Escape') {
+        setProfileOpen(false);
+        setShowNotifications(false);
+      }
     };
     document.addEventListener('mousedown', onClick);
     document.addEventListener('keydown', onKey);
@@ -101,17 +109,17 @@ const Header = () => {
     staleTime: 60000,
   });
 
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [seenAt, setSeenAt] = useState(() => storageGetSync(SEEN_KEY) ?? '');
-  const unread = notifications.filter((n) => (n.created_at ?? '') > seenAt).length;
+  const [seenAt, markSeen] = useClearedAt(SEEN_KEY);
+  // "Clear all" hides the current notices on this device; the outbox keeps
+  // them (they are also the phone's notification history).
+  const [clearedAt, clearNotifications] = useClearedAt(CLEARED_KEY);
+  const visible = newerThan(notifications, clearedAt, (n) => n.created_at);
+  const unread = newerThan(visible, seenAt, (n) => n.created_at).length;
 
   const toggleNotifications = () => {
     const opening = !showNotifications;
     setShowNotifications(opening);
-    if (opening && notifications[0]?.created_at) {
-      setSeenAt(notifications[0].created_at);
-      void storageSet(SEEN_KEY, notifications[0].created_at);
-    }
+    if (opening && notifications[0]?.created_at) markSeen(notifications[0].created_at);
   };
 
   const isReady = health?.status === 'READY';
@@ -176,7 +184,7 @@ const Header = () => {
           </span>
         </div>
 
-        <div className="relative">
+        <div className="relative" ref={bellRef}>
           <button
             onClick={toggleNotifications}
             aria-label={unread ? `Notifications, ${unread} new` : 'Notifications'}
@@ -191,13 +199,21 @@ const Header = () => {
 
           {showNotifications && (
             <div className="fixed left-4 right-4 top-16 sm:absolute sm:left-auto sm:top-auto sm:right-0 sm:mt-4 sm:w-80 glass-menu p-4 z-50 animate-in slide-in-from-top-2 duration-200">
-              <div className="mb-4 border-b border-white/5 pb-3">
-                <h4 className="text-sm font-bold text-white uppercase tracking-widest">Notifications</h4>
+              <div className="mb-3 flex items-center justify-between gap-3 border-b border-white/5 pb-2">
+                <h4 className="text-sm font-bold text-white">Notifications</h4>
+                {visible.length > 0 && (
+                  <button
+                    onClick={() => clearNotifications(visible[0]?.created_at)}
+                    className="min-h-11 px-2 -mr-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+                  >
+                    Clear all
+                  </button>
+                )}
               </div>
-              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                {notifications.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-4">No notifications yet</p>
-                ) : notifications.slice(0, 10).map((n) => (
+              <div className="space-y-2 max-h-[60vh] sm:max-h-72 overflow-y-auto pr-1">
+                {visible.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-6">You're all caught up</p>
+                ) : visible.slice(0, 10).map((n) => (
                   <div key={n.id} className="p-3 rounded-xl bg-white/5 border border-white/5">
                     <p className="text-xs text-white font-medium break-words">{n.title}</p>
                     {(n.body || n.error) && (
@@ -207,12 +223,6 @@ const Header = () => {
                   </div>
                 ))}
               </div>
-              <button
-                onClick={() => setShowNotifications(false)}
-                className="w-full mt-3 min-h-11 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-colors border-t border-white/5 pt-3"
-              >
-                Dismiss
-              </button>
             </div>
           )}
         </div>

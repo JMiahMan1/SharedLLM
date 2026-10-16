@@ -21,7 +21,10 @@ How the everyday screens work and what backs them. API details are in
   the Android app raises as system notifications through its long poll
   (`ChatNotifyService`), and that browsers get by web push when it is turned
   on in Settings. The green dot means notices newer than the last time the
-  bell was opened (remembered on the device).
+  bell was opened. **Clear all** hides the notices listed now; newer ones
+  still appear. Both are remembered on the device (`lib/clearedAt.ts`) and
+  nothing is deleted on the server. The panel closes on a tap outside it or
+  Escape.
 - **Sidebar footer**: the real readiness ("All services online" or "N services
   degraded") and the gateway build.
 - **Server banner** (Android app only): shown while the configured server is
@@ -46,7 +49,9 @@ How the everyday screens work and what backs them. API details are in
   per service from `/health/ready`; tap for revision and last restart.
 - **Recent Problems** (admins): failed requests from the central log
   (`GET /api/admin/logs?level=warning,error`; 4xx are warnings, 5xx errors).
-  **Clear** asks first and then empties the whole system log.
+  Web server access lines are shown as method, path and status, with a
+  relative time. **Clear** hides the problems listed now on this device; the
+  system log itself is untouched.
 - **Workspaces** (desktop, phones for admins) and **Raven** missions (admins).
 
 Widget notes: Device Control groups by Home Assistant area and has one owner
