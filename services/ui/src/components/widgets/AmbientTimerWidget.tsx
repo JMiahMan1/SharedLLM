@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Timer, X, Plus, Loader2, Bell, BellOff, Play, Pause, RotateCcw } from 'lucide-react';
 import type { IWidgetProps } from '../../types/widget';
+import { playChime, unlockChime } from '../../lib/chime';
 import { api } from '../../services/api';
 import { formatClock } from '../../lib/utils';
 import toast from 'react-hot-toast';
@@ -133,6 +134,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
                   return s;
                 });
               }, 3000);
+              playChime();
               if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
                 new Notification('Timer Expired', { body: `"${t.title}" is done!` });
               }
@@ -190,6 +192,8 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
 
   const addTimer = async () => {
     if (newDuration < 1) return;
+    // This tap is the gesture that lets the chime play when the timer ends.
+    unlockChime();
     // Ask for the expiry notification when a timer is actually set, not as a
     // browser prompt the moment the dashboard opens.
     try {

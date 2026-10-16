@@ -5,6 +5,9 @@ import { MemoryRouter } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import AmbientTimerWidget from './AmbientTimerWidget';
 import { api } from '../../services/api';
+import { playChime } from '../../lib/chime';
+
+vi.mock('../../lib/chime', () => ({ playChime: vi.fn(), unlockChime: vi.fn() }));
 
 // Mock the API methods — vi.mock is hoisted to top of file
 vi.mock('../../services/api', async (importOriginal) => {
@@ -419,6 +422,8 @@ describe('AmbientTimerWidget', () => {
 
     expect(screen.queryByText('Short Timer')).not.toBeInTheDocument();
     expect(screen.getByText('No active timers')).toBeInTheDocument();
+    // It chimed once when it finished, not on every tick after.
+    expect(playChime).toHaveBeenCalledTimes(1);
   });
 
   it('shows device picker when media players are available', async () => {
