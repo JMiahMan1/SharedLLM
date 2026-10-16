@@ -1,5 +1,5 @@
 import axios, { type AxiosRequestConfig } from 'axios';
-import type { NetworkStatus, NetworkUsageRow, RouterLogLine } from '../lib/network';
+import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from '../lib/network';
 import { storageGetSync } from '../lib/storage';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
@@ -709,8 +709,11 @@ export const api = {
   async getRouterLog(params: { limit?: number; level?: string; q?: string } = {}): Promise<{ lines: RouterLogLine[] }> {
     return (await apiClient.get('/api/network/log', { params })).data;
   },
-  async getNetworkUsage(hours: number): Promise<{ hours: number; devices: NetworkUsageRow[] }> {
+  async getNetworkUsage(hours: number): Promise<NetworkUsage> {
     return (await apiClient.get('/api/network/usage', { params: { hours } })).data;
+  },
+  async getInternetOutages(days = 30): Promise<{ days: number; outages: InternetOutage[] }> {
+    return (await apiClient.get('/api/network/outages', { params: { days } })).data;
   },
   async getUserTheme(): Promise<{ theme_id: string; packs: unknown[] }> {
     // Runs before/independently of auth, so a 401 must not log the user out.

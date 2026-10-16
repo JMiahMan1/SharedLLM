@@ -56,7 +56,29 @@ export interface NetworkUsageRow {
   mac: string;
   name: string;
   ip: string | null;
+  /** The local network the device's address is on (lan, devices, kids...). */
+  network: string | null;
+  down: number;
+  up: number;
   bytes: number;
+}
+
+export interface NetworkUsage {
+  hours: number;
+  /** "nlbw": every device, wired too; "wifi": Wi-Fi devices only. */
+  source: 'nlbw' | 'wifi';
+  devices: NetworkUsageRow[];
+  networks: { name: string; down: number; up: number }[];
+  /** Household traffic per hour (up to two days) or per day. */
+  series: { t: string; down: number; up: number }[];
+  bucket: 'hour' | 'day';
+}
+
+export interface InternetOutage {
+  start: number;
+  /** null while it is still going on. */
+  end: number | null;
+  minutes: number;
 }
 
 /** "3 days", "5 hrs", "12 min" for an uptime in seconds. */

@@ -28,6 +28,8 @@ def calls(monkeypatch):
             return {"configured": True, "connected": True, "radios": []}
         if url.endswith("/api/network/log"):
             return {"lines": []}
+        if url.endswith("/api/network/outages"):
+            return {"days": params["days"], "outages": []}
         if url.endswith("/api/network/usage"):
             return {"hours": params["hours"], "devices": []}
         if url.endswith("/api/admin/seed-credential"):
@@ -45,7 +47,8 @@ def client():
 
 
 @pytest.mark.parametrize("verb,path", [("get", "/api/network/status"), ("get", "/api/network/log"),
-                                       ("get", "/api/network/usage"), ("post", "/api/network/check"),
+                                       ("get", "/api/network/usage"), ("get", "/api/network/outages"),
+                                       ("post", "/api/network/check"),
                                        ("put", "/api/network/settings")])
 def test_only_admins_see_the_network(client, calls, verb, path):
     kwargs = {"json": {"url": "https://192.168.2.1", "username": "jarvis"}} if verb == "put" else {}

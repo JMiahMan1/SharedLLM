@@ -61,6 +61,12 @@ async def network_usage(request: Request, hours: int = 24):
     return await _control_plane("GET", "/usage", {"hours": hours})
 
 
+@router.get("/outages")
+async def network_outages(request: Request, days: int = 30):
+    await _admin(request)
+    return await _control_plane("GET", "/outages", {"days": days})
+
+
 class RouterSettings(BaseModel):
     url: str
     username: str

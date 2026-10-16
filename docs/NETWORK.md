@@ -3,7 +3,8 @@
 Jarvis watches the home network through the OpenWrt router and tells admins
 when something goes wrong: the internet dropping, a Wi-Fi channel crowded by
 one device, a device that keeps falling off Wi-Fi. Admin > Network shows the
-same picture live, with each device's Wi-Fi data use and the router's log.
+same picture live, with each device's data use, a traffic chart, internet
+outages and the router's log.
 
 It came out of an outage on 2026-10-15: TVs and smart devices on the 2.4 GHz
 "Devices" Wi-Fi kept losing the internet while the Jarvis server, on the same
@@ -16,7 +17,7 @@ so at the time, and the router's in-memory log was gone by the next day.
 |---|---|
 | `services/control_plane/router_client.py` | Read-only client for the router's ubus JSON-RPC API over HTTPS, with certificate pinning |
 | `services/control_plane/router_monitor.py` | Every minute: one snapshot of the router, the internet check, the alert rules, storage in Redis |
-| `services/control_plane/network_routes.py` | `/api/network/status`, `/check`, `/log`, `/usage` (internal secret) and the monitor thread |
+| `services/control_plane/network_routes.py` | `/api/network/status`, `/check`, `/log`, `/usage`, `/outages` (internal secret) and the monitor thread |
 | `services/gateway/network_routes.py` | The same under `/api/network/*` for admins only, plus `PUT /api/network/settings` |
 | `services/identity` | The router login on the system user: `router_url`, `router_user`, `router_pass` (encrypted), `router_cert_sha256`; read back only by `GET /api/internal/router` |
 | `services/ui/src/components/admin/NetworkPanel.tsx` | Admin > Network |
@@ -36,7 +37,8 @@ the router:
 - writes `/usr/share/rpcd/acl.d/jarvis-monitor.json`, an ACL that can only
   read: `system` info and board, `network.interface` dump, `iwinfo` devices,
   info, client lists and channel survey, `luci-rpc` DHCP leases, the `dhcp`
-  UCI config, the system `log`, and the two conntrack counters under `/proc`;
+  UCI config, the system `log`, the two conntrack counters under `/proc`, and
+  running `/usr/sbin/nlbw` (nlbwmon's read-only traffic report, nothing else);
 - adds an rpcd login `jarvis` with that ACL and a new random password (hashed
   on the router with `uhttpd -m`), and reloads rpcd.
 
@@ -51,6 +53,15 @@ a different router address clears the pin.
 
 To remove it: delete the ACL file and the `jarvis` login (`uci delete
 rpcd.@login[N]; uci commit rpcd; /etc/init.d/rpcd reload`).
+
+### Data use for wired devices
+
+Counting every device's traffic, wired ones included, needs the router's
+`nlbwmon` (`apk update && apk add nlbwmon luci-app-nlbwmon`). Its database
+stays in `/var/lib/nlbwmon`, which on OpenWrt is RAM, so it does not wear
+the flash; Jarvis keeps the history. Without it, data use falls back to the
+access points' counters and covers Wi-Fi devices only (Admin > Network says
+which).
 
 ## What is checked, every minute
 
@@ -97,17 +108,28 @@ In Redis, on the control plane:
 - `network:log`: the router's log lines, the newest 25,000 (about a week),
   with the syslog level. The router keeps only 64 KB in memory and loses it on
   restart; this copy is what makes yesterday's problem visible today.
-- `network:usage:<hour>`: bytes each Wi-Fi device moved in that hour, for 35
-  days.
+- `network:usage:<hour>`: each device's download and upload in that hour
+  (`<mac>:down`, `<mac>:up`), for 35 days. From nlbwmon's per-device counters
+  when installed (download is the device's rx), otherwise from the access
+  points (download is the AP's tx). A counter that drops is treated as reset.
+- `network:outages`: the last 500 internet outages, start and end.
+
+## Admin > Network
+
+- **Data use** for a day, week or month: the household's traffic as a chart
+  (hourly up to two days, daily beyond, download and upload stacked), totals
+  per local network, and each device's download and upload with its network.
+- **Internet outages** in the last 30 days, with how long each lasted, and
+  one still going on at the top.
 
 Per-device data use shows what each family member's devices use, so Admin >
 Network is for admins only.
 
 ## Limits
 
-- Data use counts Wi-Fi devices on the router's own access points. Wired
-  devices and those behind the extender (192.168.2.230) are not counted; the
-  extender shows as one device. Counting wired traffic too needs the router's
-  `nlbwmon` package, which this does not install.
+- Devices behind the extender (192.168.2.230) are one Wi-Fi client of the
+  router (its signal and airtime). Whether nlbwmon counts them one by one
+  depends on the extender: a bridging one passes their own addresses through,
+  one that translates them shows as a single device.
 - Airtime shares are estimates from bytes and link rates; they are good at
   naming the device that dominates a channel, not exact.

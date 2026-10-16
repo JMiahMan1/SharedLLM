@@ -11,7 +11,15 @@ vi.mock('../../services/api', () => ({
     checkNetwork: vi.fn(),
     saveRouterSettings: vi.fn(),
     getRouterLog: vi.fn(async () => ({ lines: [{ id: 1, time: 1_792_000_000, level: 'err', msg: 'kernel: oops' }] })),
-    getNetworkUsage: vi.fn(async (hours: number) => ({ hours, devices: [{ mac: 'aa', name: 'server', ip: '192.168.2.205', bytes: 5 * 1024 ** 3 }] })),
+    getNetworkUsage: vi.fn(async (hours: number) => ({
+      hours,
+      source: 'nlbw',
+      devices: [{ mac: 'aa', name: 'server', ip: '192.168.2.205', network: 'devices', down: 5 * 1024 ** 3, up: 1024 ** 2, bytes: 5 * 1024 ** 3 + 1024 ** 2 }],
+      networks: [{ name: 'devices', down: 5 * 1024 ** 3, up: 1024 ** 2 }],
+      series: [{ t: '2026-10-16T09', down: 100, up: 10 }, { t: '2026-10-16T10', down: 5 * 1024 ** 3, up: 1024 ** 2 }],
+      bucket: 'hour',
+    })),
+    getInternetOutages: vi.fn(async () => ({ days: 30, outages: [{ start: 1_792_000_000, end: 1_792_001_080, minutes: 18 }] })),
   },
 }));
 
@@ -58,7 +66,10 @@ describe('NetworkPanel', () => {
     expect(screen.queryByText('0% airtime')).toBeNull();
     expect(screen.getByText(/Weak \(-78 dBm\)/)).toBeTruthy();
     expect(screen.getByText('server is crowding the 2.4 GHz Wi-Fi')).toBeTruthy();
-    expect(await screen.findByText('5.00 GB')).toBeTruthy();
+    expect(await screen.findByTestId('traffic-chart')).toBeTruthy();
+    expect(screen.getByText(/every device, wired and Wi-Fi/)).toBeTruthy();
+    expect(screen.getAllByText(/5\.00 GB/).length).toBeGreaterThan(0);
+    expect(await screen.findByText('18 min')).toBeTruthy();
     expect(await screen.findByText(/kernel: oops/)).toBeTruthy();
   });
 
@@ -72,5 +83,15 @@ describe('NetworkPanel', () => {
     await waitFor(() => expect(api.saveRouterSettings).toHaveBeenCalledWith({
       url: 'https://192.168.2.1', username: 'jarvis', password: undefined,
     }));
+  });
+
+  it('says when only Wi-Fi devices are counted', async () => {
+    vi.mocked(api.getNetworkStatus).mockResolvedValue(HOGGED);
+    vi.mocked(api.getNetworkUsage).mockResolvedValueOnce({
+      hours: 24, source: 'wifi', devices: [], networks: [], series: [], bucket: 'hour',
+    });
+    renderPanel();
+    expect(await screen.findByText(/Wi-Fi devices only/)).toBeTruthy();
+    expect(screen.getByText(/Collecting/)).toBeTruthy();
   });
 });
