@@ -81,10 +81,13 @@ that, every save of an opened note stacked another header on top.
 - **Typing**: the editor keeps its own draft, so a keystroke re-renders the
   sheet only. It used to re-render the page and every card, and each card
   and sort comparison parsed the stored pin/colour map from localStorage.
-- **WebDAV cost**: the folder-exists check is a `Depth: 0` PROPFIND for one
-  property (with no Depth header Nextcloud lists the whole folder), and the
-  list asks only for type, modified time and size instead of Nextcloud's
-  default property set. The list request may take up to 60s on the client.
+- **WebDAV cost**: Nextcloud spends one to several seconds on every listing,
+  so `list` makes one whole-tree PROPFIND (`Depth: infinity`, about 4 s for
+  187 notes) instead of one per folder (nine in a row took over 20 s). If the
+  server refuses infinite depth it lists folders four at a time. Listing never
+  creates the folder (a missing one has no notes); writes still do, with a
+  `Depth: 0` check. Listings ask only for type, modified time and size. The
+  list request may take up to 60s on the client.
 - **Failures**: a failed list shows the backend message (e.g. "Nextcloud
   credentials missing") instead of an empty-looking notebook.
 

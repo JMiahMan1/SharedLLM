@@ -367,3 +367,80 @@ async def test_the_folder_check_asks_for_the_folder_alone(monkeypatch):
     # No Depth header means "list everything in it" to Nextcloud.
     assert seen["method"] == "PROPFIND"
     assert seen["headers"]["Depth"] == "0"
+
+
+# --- listing the tree: one request, not one per folder ----------------------
+
+_TREE = """<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/dav/Notes/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
+  <d:response><d:href>/dav/Notes/Small%20Group/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
+  <d:response><d:href>/dav/Notes/top.md</d:href><d:propstat><d:prop><d:resourcetype/><d:getlastmodified>Tue, 14 Oct 2026 09:00:00 GMT</d:getlastmodified><d:getcontentlength>5</d:getcontentlength></d:prop></d:propstat></d:response>
+  <d:response><d:href>/dav/Notes/Small%20Group/week%201.md</d:href><d:propstat><d:prop><d:resourcetype/><d:getlastmodified>Wed, 15 Oct 2026 09:00:00 GMT</d:getlastmodified><d:getcontentlength>7</d:getcontentlength></d:prop></d:propstat></d:response>
+  <d:response><d:href>/dav/Notes/Small%20Group/photo.jpg</d:href><d:propstat><d:prop><d:resourcetype/></d:prop></d:propstat></d:response>
+</d:multistatus>"""
+
+
+async def test_list_reads_the_whole_tree_in_one_request_and_never_creates_the_folder(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    calls: list[tuple[str, str]] = []
+
+    async def fake_request(method, url, headers=None, **kwargs):
+        calls.append((method, (headers or {}).get("Depth", "")))
+        return {"status_code": 207, "text": _TREE}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(request("list"))
+
+    assert result.status == "SUCCESS"
+    assert calls == [("PROPFIND", "infinity")]
+    assert provider.dirs == []
+    notes = result.detail["notes"]
+    assert [(n["title"], n["path"]) for n in notes] == [
+        ("week 1", "Notes/Small Group/week 1.md"),
+        ("top", "Notes/top.md"),
+    ]
+
+
+async def test_list_falls_back_to_listing_folders_when_infinite_depth_is_refused(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    top = _TREE.replace(
+        '<d:response><d:href>/dav/Notes/Small%20Group/week%201.md</d:href>', '<d:response><d:href>/x/</d:href>'
+    )
+    sub = """<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/dav/Notes/Small%20Group/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
+  <d:response><d:href>/dav/Notes/Small%20Group/week%201.md</d:href><d:propstat><d:prop><d:resourcetype/><d:getlastmodified>Wed, 15 Oct 2026 09:00:00 GMT</d:getlastmodified><d:getcontentlength>7</d:getcontentlength></d:prop></d:propstat></d:response>
+</d:multistatus>"""
+    seen: list[tuple[str, str]] = []
+
+    async def fake_request(method, url, headers=None, **kwargs):
+        depth = (headers or {}).get("Depth", "")
+        seen.append((depth, url))
+        if depth == "infinity":
+            return {"status_code": 403, "text": ""}
+        if url.endswith("Small Group"):
+            return {"status_code": 207, "text": sub}
+        return {"status_code": 207, "text": top}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(request("list"))
+
+    assert sorted(n["path"] for n in result.detail["notes"]) == ["Notes/Small Group/week 1.md", "Notes/top.md"]
+    assert [d for d, _ in seen] == ["infinity", "1", "1"]
+
+
+async def test_list_of_a_missing_folder_is_empty(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, headers=None, **kwargs):
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(request("list"))
+
+    assert result.status == "SUCCESS"
+    assert result.detail["notes"] == []
+    assert provider.dirs == []
