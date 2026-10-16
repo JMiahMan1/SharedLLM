@@ -391,7 +391,7 @@ public class PushService extends Service {
 
     private void startForegroundCompat() {
         Notification notification = BackgroundNotice.build(
-                this, R.drawable.mi_notifications, "Connected for notifications",
+                this, PushNotifier.STATUS_ICON, "Connected for notifications",
                 PushNotifier.openIntent(this, "/settings", SERVICE_NOTIFICATION_ID));
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

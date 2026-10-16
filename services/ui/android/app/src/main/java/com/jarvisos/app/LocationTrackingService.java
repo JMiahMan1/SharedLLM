@@ -208,7 +208,7 @@ public class LocationTrackingService extends Service {
 
     private void startForegroundCompat() {
         Notification notification = BackgroundNotice.build(
-                this, android.R.drawable.ic_menu_mylocation, "Location sharing is on", null);
+                this, PushNotifier.STATUS_ICON, "Location sharing is on", null);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
         } else {
