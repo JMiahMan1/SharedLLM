@@ -296,7 +296,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             </div>
           )}
 
-          {/* ── List / Chip fields ─────────────────────────────────── */}
+          {/* List / Chip fields */}
           {listKeys && Object.entries(listKeys).map(([label, key]) => {
             const chips: string[] = listForm[key] || [];
             const addChip = (val: string) => {

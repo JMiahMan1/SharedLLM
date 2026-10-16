@@ -74,7 +74,7 @@ def test_single_letters_are_not_books():
     assert resolve_book("e") is None and resolve_book("z") is None
 
 
-# ── interlinear ─────────────────────────────────────────────────────────────
+# interlinear
 
 
 def test_the_greek_file_parses_word_by_word():

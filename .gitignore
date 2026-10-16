@@ -27,7 +27,7 @@ services/workspace_runtime/config/
 !services/gateway/data/
 node_modules/
 
-# AI Agent Configs
+# Local editor and tool settings
 .claude/
 .claude.json
 .cursor/

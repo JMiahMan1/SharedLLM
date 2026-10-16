@@ -208,7 +208,7 @@ def catalogue() -> list[dict]:
     ]
 
 
-# ── question generators ─────────────────────────────────────────────────────
+# question generators
 
 
 def _which_book(ctx: _Context, index: int) -> Question | None:
@@ -352,7 +352,7 @@ _GENERATORS = {
 }
 
 
-# ── helpers ─────────────────────────────────────────────────────────────────
+# helpers
 
 
 def _known_verses(session: Session, version: str) -> list[dict]:

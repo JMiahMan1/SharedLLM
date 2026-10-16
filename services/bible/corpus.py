@@ -676,7 +676,7 @@ def require_version(session: Session, code: str, *, manifest_path: Path | None =
     )
 
 
-# ── study editions ───────────────────────────────────────────────────────────
+# study editions
 #
 # Everything below is the second axis: which study Bible explains the text. The
 # functions here never touch ``BibleVerse``, because the text is shared.

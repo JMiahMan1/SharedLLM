@@ -13,7 +13,7 @@ import os
 # every other module then captured.
 from pathlib import Path
 
-# Scratch state goes in the workspace .tmp/ (see AGENTS.md), never /tmp.
+# Scratch state goes in the workspace .tmp/ (see CONTRIBUTING.md), never /tmp.
 _TMP = Path(__file__).resolve().parents[2] / ".tmp"
 _TMP.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault(

@@ -41,8 +41,7 @@ async def _resolve_user_room(user_id: str) -> str | None:
     return None
 
 
-# ─── Two-Way Intercom Sessions ────────────────────────────────────────────────
-
+# Two-Way Intercom Sessions
 async def handle_intercom_start(req, user_context: UserContext) -> ExecutionResult:
     """Start a two-way intercom session."""
     try:
@@ -106,8 +105,7 @@ async def handle_intercom_list_sessions() -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=str(e), service="intercom")
 
 
-# ─── Broadcast / PA System ────────────────────────────────────────────────────
-
+# Broadcast / PA System
 async def handle_intercom_broadcast(req, user_context: UserContext) -> ExecutionResult:
     """Broadcast a message to resolved target devices/rooms (real dispatch)."""
     try:
@@ -129,8 +127,7 @@ async def handle_intercom_broadcast(req, user_context: UserContext) -> Execution
         return ExecutionResult(status="FAILURE", message=str(e), service="intercom")
 
 
-# ─── TV/Smart Speaker Announcements ───────────────────────────────────────────
-
+# TV/Smart Speaker Announcements
 async def handle_intercom_announcement(req, user_context: UserContext) -> ExecutionResult:
     """Send a one-way announcement to TVs or smart speakers (real dispatch)."""
     try:
@@ -152,8 +149,7 @@ async def handle_intercom_announcement(req, user_context: UserContext) -> Execut
         return ExecutionResult(status="FAILURE", message=str(e), service="intercom")
 
 
-# ─── Intercom Configuration ───────────────────────────────────────────────────
-
+# Intercom Configuration
 async def handle_intercom_config() -> ExecutionResult:
     """Get intercom configuration."""
     try:

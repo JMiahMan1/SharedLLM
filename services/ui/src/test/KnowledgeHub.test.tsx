@@ -158,7 +158,7 @@ describe('KnowledgeHub', () => {
       response: {
         data: {
           detail:
-            "No Calibre library path configured. Set the 'calibre_library_path' setting (Admin > Settings) or pass library_path with the request.",
+            "No Calibre library path configured. Set the 'calibre_library_path' setting (Admin > LLM & Settings) or pass library_path with the request.",
         },
       },
     });

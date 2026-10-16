@@ -44,9 +44,7 @@ def _forbid_first_user(monkeypatch) -> list:
     return called
 
 
-# ─── Home Assistant: announce / entity search ─────────────────────────────────
-
-
+# Home Assistant: announce / entity search
 def test_announce_without_ha_credentials_does_not_borrow_admin(monkeypatch):
     called = _forbid_first_user(monkeypatch)
 
@@ -83,9 +81,7 @@ def json_text(body) -> str:
     return json.dumps(body)
 
 
-# ─── Music Assistant ──────────────────────────────────────────────────────────
-
-
+# Music Assistant
 def _stub_resolve(monkeypatch, creds: dict | None) -> None:
     import services.execution.main as exec_main
 
@@ -193,9 +189,7 @@ def test_ma_playlists_pass_the_resolved_users_home_assistant(monkeypatch):
     assert seen["ha_url"] == "http://ha.bob"
 
 
-# ─── Discovery: use the credentials the caller passed ─────────────────────────
-
-
+# Discovery: use the credentials the caller passed
 def test_discovery_entities_uses_the_creds_the_caller_passed(monkeypatch):
     called = _forbid_first_user(monkeypatch)
     seen: dict = {}
@@ -235,9 +229,7 @@ def test_discovery_entities_without_credentials_names_the_missing_setup(monkeypa
     assert not called
 
 
-# ─── UserContext keeps the per-user Music Assistant credentials ───────────────
-
-
+# UserContext keeps the per-user Music Assistant credentials
 def test_user_context_carries_the_per_user_mass_credentials():
     from services.execution.schemas import UserContext
 

@@ -84,7 +84,7 @@ def _patch(monkeypatch, session: _Session | None, *, value_error: Exception | No
     monkeypatch.setattr(narration.aiohttp, "ClientSession", _factory)
 
 
-# ── the script ──────────────────────────────────────────────────────────────
+# the script
 
 
 def test_script_is_the_reference_then_every_verse():
@@ -135,7 +135,7 @@ def test_script_refuses_text_too_short_to_be_worth_speaking():
     assert "too little text" in str(err.value)
 
 
-# ── the conversation with the speech engine ─────────────────────────────────
+# the conversation with the speech engine
 
 
 @pytest.mark.asyncio
@@ -335,7 +335,7 @@ async def test_an_unreachable_engine_is_reported(loaded, monkeypatch):
     assert "Connection refused" in str(err.value)
 
 
-# ── the cache ───────────────────────────────────────────────────────────────
+# the cache
 
 
 def test_the_cache_key_separates_translation_reference_and_voice():

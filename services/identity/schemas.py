@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-# ─── Internal inter-service schema ────────────────────────────────────────────
+# Internal inter-service schema
 
 class ResolveRequest(BaseModel):
     """Sent by the Gateway to resolve a caller's identity."""
@@ -85,7 +85,7 @@ class CredentialSharesUpdate(BaseModel):
     note: str | None = None
 
 
-# ─── External CRUD schemas ─────────────────────────────────────────────────────
+# External CRUD schemas
 
 class UserCreate(BaseModel):
     username: str

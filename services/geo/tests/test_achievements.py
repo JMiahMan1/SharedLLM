@@ -34,7 +34,7 @@ def definitions() -> list[ach.Achievement]:
     return ach.load_definitions()
 
 
-# ── definitions ─────────────────────────────────────────────────────────────
+# definitions
 
 def test_shipped_definitions_are_valid():
     defs = definitions()
@@ -57,7 +57,7 @@ def test_invalid_definitions_are_skipped_not_fatal(tmp_path):
     assert [d.id for d in defs] == ["ok"]
 
 
-# ── metrics ─────────────────────────────────────────────────────────────────
+# metrics
 
 def test_longest_streak_counts_consecutive_days_only():
     steps = {
@@ -116,7 +116,7 @@ def test_workouts_in_best_week_and_total_miles():
     assert ach.total_workout_miles([{"distance_miles": None}]) == 0.0
 
 
-# ── evaluation ──────────────────────────────────────────────────────────────
+# evaluation
 
 def test_evaluate_unlocks_thresholds_and_reports_next_up():
     defs = definitions()
@@ -161,7 +161,7 @@ def test_points_total_ignores_unknown_ledger_keys():
     assert ach.total_points(ledger, defs) == expected
 
 
-# ── goals ───────────────────────────────────────────────────────────────────
+# goals
 
 def test_clean_goals_defaults_and_bounds():
     assert ach.clean_goals(None) == ach.DEFAULT_GOALS

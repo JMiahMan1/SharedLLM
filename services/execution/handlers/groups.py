@@ -30,8 +30,7 @@ async def _call_identity(method: str, path: str, json_data: dict | None = None) 
         return await resp.json()
 
 
-# ─── Media Groups ──────────────────────────────────────────────────────────────
-
+# Media Groups
 async def handle_media_group(req, user_context: UserContext) -> ExecutionResult:
     """Handle media group CRUD operations."""
     try:
@@ -72,8 +71,7 @@ async def handle_media_group(req, user_context: UserContext) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=str(e), service="media_groups")
 
 
-# ─── Light Clusters ────────────────────────────────────────────────────────────
-
+# Light Clusters
 async def handle_light_cluster(req, user_context: UserContext) -> ExecutionResult:
     """Handle light cluster CRUD operations."""
     try:
@@ -115,8 +113,7 @@ async def handle_light_cluster(req, user_context: UserContext) -> ExecutionResul
         return ExecutionResult(status="FAILURE", message=str(e), service="light_clusters")
 
 
-# ─── Light Patterns ────────────────────────────────────────────────────────────
-
+# Light Patterns
 def _find(items: list, key: str, *fields: str) -> dict | None:
     """The item whose id or name field equals ``key`` (case-insensitive)."""
     want = (key or "").strip().lower()

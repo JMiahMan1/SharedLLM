@@ -48,9 +48,9 @@ UI or a tool), execution device discovery (on demand), RAG reindex, and the
 gateway media event hubs (opened per subscriber, closed after 60 s idle).
 Identity has no background jobs.
 
-## Alpaca desktop (`/Users/jeremiahsummers/Code/alpaca/audio_server.py`, container `audio-server`)
+## Alpaca desktop (`audio_server.py` in the alpaca repo, container `audio-server`)
 
 | Job | Function | Interval | What it does |
 |---|---|---|---|
-| Music job queue | `_music_worker` | event-driven | Runs queued music/song jobs one at a time; finished jobs are kept for `MUSIC_JOB_KEEP_S`. |
+| Music job queue | `_music_worker` | event-driven | Runs queued music/song jobs one at a time; finished jobs are kept for `MUSIC_JOB_KEEP_S` (env `AUDIO_MUSIC_JOB_KEEP_S`, 1800 s). |
 | Idle unloader | `_idle_unloader` → `_idle_unload_once` | 15 s | Unloads TTS or music models idle longer than `AUDIO_IDLE_UNLOAD_S` (180 s) to give VRAM back. |

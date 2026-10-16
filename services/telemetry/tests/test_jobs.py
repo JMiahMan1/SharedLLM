@@ -25,7 +25,7 @@ def make_job(user="jeremiah", report_type="health", period="daily", enabled=True
     return store.make_job(user, report_type, period, "21:00", "UTC", enabled=enabled)
 
 
-# ── schedule math ───────────────────────────────────────────────────────────
+# schedule math
 
 def test_daily_job_fires_next_occurrence_at_local_time():
     after = datetime(2026, 5, 10, 9, 0, tzinfo=UTC)
@@ -67,7 +67,7 @@ def test_window_sizes_match_period():
         assert (end - start).days == days
 
 
-# ── alpaca admission ─────────────────────────────────────────────────────────
+# alpaca admission
 
 def test_slots_busy_detection():
     assert evaluate_slots({"slots": [{"is_processing": True}]})[0] is True
@@ -196,7 +196,7 @@ async def test_no_data_window_reports_no_data_without_analysis(rc, monkeypatch):
     assert all(n["kind"] != "report_ready" for n in notifications)
 
 
-# ── store ───────────────────────────────────────────────────────────────────
+# store
 
 async def test_jobs_are_scoped_per_user(rc):
     await store.save_job(rc, make_job(user="jeremiah"))

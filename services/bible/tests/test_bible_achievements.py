@@ -19,7 +19,7 @@ def definition(rule_type: str, value: float, identifier: str = "x") -> ach.Achie
     return ach.Achievement(id=identifier, name="Test", description="", points=5, rule_type=rule_type, rule_value=value)
 
 
-# ── definitions ─────────────────────────────────────────────────────────────
+# definitions
 
 
 def test_shipped_definitions_are_valid():
@@ -63,7 +63,7 @@ def test_missing_file_yields_no_definitions(tmp_path):
     assert ach.load_definitions(tmp_path / "nope.json") == []
 
 
-# ── streaks ─────────────────────────────────────────────────────────────────
+# streaks
 
 
 def test_longest_streak_counts_consecutive_days():
@@ -107,7 +107,7 @@ def test_unparseable_days_are_ignored():
     assert ach.longest_streak([day(0), "not-a-day"]) == 1
 
 
-# ── evaluate ────────────────────────────────────────────────────────────────
+# evaluate
 
 
 def test_a_met_rule_is_earned_today():
@@ -161,7 +161,7 @@ def test_measure_ignores_junk_values():
     assert ach.measure("chapters_total", {"chapters_total": "not a number"}) == 0.0
 
 
-# ── star conversion ─────────────────────────────────────────────────────────
+# star conversion
 
 
 def test_star_grants_use_the_achievement_reason():

@@ -62,9 +62,7 @@ def _permissions_from(raw):
     return entity_access._permissions_from_payload(raw)
 
 
-# ── the core predicate ────────────────────────────────────────────────────────
-
-
+# the core predicate
 def test_protection_beats_an_existing_assignment():
     """The single most important rule: a lock is not a suggestion."""
     perms = EntityPermissions(
@@ -118,9 +116,7 @@ def test_admins_are_not_filtered():
     assert can_view(perms, "anything.at_all") is True
 
 
-# ── payload parsing ───────────────────────────────────────────────────────────
-
-
+# payload parsing
 def test_permits_are_dropped_for_entities_that_are_not_locked():
     """A stray permit must not widen access if an entity is locked later."""
     perms = _permissions_from(
@@ -152,9 +148,7 @@ def test_junk_payload_yields_no_permissions_rather_than_a_crash():
         assert perms.may_control("light.a") is False
 
 
-# ── lookup + degraded mode ────────────────────────────────────────────────────
-
-
+# lookup + degraded mode
 @pytest.mark.asyncio
 async def test_permissions_come_from_identity(monkeypatch):
     _feed(monkeypatch, {"alice": {"device_ids": ["light.a"]}})

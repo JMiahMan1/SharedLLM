@@ -165,7 +165,7 @@ class StateMachine:
             return {"ans": f"Default Raven workflow failed: {e}", "success": False}
 
     def _generate_results(self, workflow_result: dict[str, Any]) -> dict[str, Any]:
-        """Generate comprehensive mission results."""
+        """Generate mission results."""
         return {
             "mission_id": self.mission_id,
             "status": "completed" if workflow_result.get("success", False) else "failed",

@@ -293,7 +293,7 @@ def test_an_unreadable_budget_refuses_the_import_instead_of_running_it(monkeypat
 def test_the_operator_can_manage_every_bible_setting_from_the_config_database():
     """`.env` is the seed; the settings a person changes belong in the DB.
 
-    Anything wired into settings_map has to be seeded, or Admin > Settings will
+    Anything wired into settings_map has to be seeded, or Admin > LLM & Settings will
     not render it and the only way to change it is to edit a file on the host.
     """
     import json as _json
@@ -321,7 +321,7 @@ def test_the_operator_can_manage_every_bible_setting_from_the_config_database():
         "bible_provider_cache",
         "bible_provider_call_budget",
     ):
-        assert key in seeded, f"{key} is not seeded, so Admin > Settings cannot show it"
+        assert key in seeded, f"{key} is not seeded, so Admin > LLM & Settings cannot show it"
         assert f'"{key}"' in source, f"{key} cannot be overridden from the config DB"
 
     # The Bible URL is network-aware, like the six core service URLs: Identity

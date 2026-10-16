@@ -127,8 +127,7 @@ def test_structure_pauses_do_not_mark_body_sentences():
     assert _PAUSE_MARK not in engine._mark_structure_pauses(body)
 
 
-# ─── SSMD, translated rather than rendered ────────────────────────────────────
-
+# SSMD, translated rather than rendered
 @pytest.mark.parametrize(
     "raw,expected",
     [
@@ -219,8 +218,7 @@ async def test_a_trailing_marker_does_not_leave_a_gap_at_the_end():
     assert len(out) == 400
 
 
-# ─── audiobook/regenerate endpoint ────────────────────────────────────────────
-
+# audiobook/regenerate endpoint
 def _import_audiobook_app():
     import os
     os.environ.setdefault("INTERNAL_SECRET", "test-secret")
@@ -388,9 +386,7 @@ def test_audiobook_regenerate_accepts_pdf_source(mocker, tmp_path):
     mock_extract.assert_called_once()
 
 
-# ─── the three files the engine needs, and the route that fetches them ───
-
-
+# the three files the engine needs, and the route that fetches them
 def test_the_file_list_carries_the_vocabulary_the_new_api_requires():
     """pykokoro 0.10 refuses to load v1.0 without the phoneme vocabulary.
 
@@ -502,9 +498,7 @@ def test_a_clean_download_reports_what_it_fetched(mocker):
     assert body["results"] == ["Successfully downloaded kokoro-v1.0.onnx"]
 
 
-# ─── one engine per process ───
-
-
+# one engine per process
 def test_the_same_engine_answers_every_call(mocker):
     """A second call must not pay for a second ONNX session.
 

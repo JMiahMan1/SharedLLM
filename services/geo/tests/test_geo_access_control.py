@@ -24,7 +24,7 @@ from services.config import INTERNAL_SECRET
 SECRET = {"X-Internal-Secret": INTERNAL_SECRET}
 
 
-# ── Redis stand-in ──────────────────────────────────────────────────────────
+# Redis stand-in
 # The consent check runs before any storage access, so the "no consent" cases
 # never touch Redis at all. The "allowed" cases do, and only need empty answers.
 class _EmptyRedis:
@@ -170,7 +170,7 @@ def test_identity_outage_fails_closed(client, redis, monkeypatch):
     assert r.status_code == 404, f"identity outage served data ({r.status_code})"
 
 
-# ── the "all users" buckets ─────────────────────────────────────────────────
+# the "all users" buckets
 def test_the_all_bucket_is_admin_only(client, redis, monkeypatch):
     """Omitting user_id must not hand back everyone's rows.
 
@@ -193,7 +193,7 @@ def test_the_all_bucket_is_admin_only(client, redis, monkeypatch):
         assert r.status_code != 200, f"{path} served the all-bucket to a non-admin"
 
 
-# ── /people filters rather than 404s ────────────────────────────────────────
+# /people filters rather than 404s
 def _ha_state(entity_id, friendly):
     """One HA state entry, as `/api/states` returns them: a flat list."""
     return {
@@ -259,7 +259,7 @@ def test_people_admin_sees_everyone(client, redis, monkeypatch):
     ids = _person_ids(client.get("/people", params={"viewer": "jeremiah", "is_admin": "true"}))
     assert sorted(ids) == ["person.jeremiah", "person.mich"]
 
-# ── edge: no internal secret ────────────────────────────────────────────────
+# edge: no internal secret
 def test_geo_is_unreachable_without_the_internal_secret(redis):
     """Geo is published directly on the host, so the edge must reject callers.
 
@@ -289,7 +289,7 @@ def test_health_stays_reachable_without_the_secret(redis):
     assert TestClient(geo.app).get("/health").status_code == 200
 
 
-# ── previously-unauthenticated WRITES ───────────────────────────────────────
+# previously-unauthenticated WRITES
 def test_goal_writes_require_the_internal_secret(redis):
     """PUT /goals and PUT /steps/goal accepted the header and ignored it."""
     anon = TestClient(geo.app, raise_server_exceptions=False)

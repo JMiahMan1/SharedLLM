@@ -59,6 +59,15 @@ allow sound after a tap, so audio is unlocked by the first tap on the page and
 again when a timer is set. A speaker picked in the widget still gets the
 spoken alert, and the phone still gets its notice.
 
+Active Media (`components/widgets/ActiveMediaWidget.tsx`) shows whatever
+player execution reports as active (`api.mediaStatus()`). When that player is
+this app's own web player (entity id `web_player`), play, pause, next,
+previous, seek and volume drive the in-app player directly through
+`useOptionalWebPlayer()` (`context/webPlayerContext.ts`, provided by
+`MediaPlayerProvider`): the server only stores the web player's last report,
+so a transport command sent there would change that record while the audio on
+this device played on. Every other player goes through `api.mediaTransport()`.
+
 ## Settings (`pages/Settings.tsx`)
 
 - **Notifications**: in a browser, a switch for web push; in the Android app,

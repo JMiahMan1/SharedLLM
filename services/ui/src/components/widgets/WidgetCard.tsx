@@ -2,7 +2,7 @@ import React, { Component, useState, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, Minimize2, AlertTriangle, RefreshCw } from 'lucide-react';
 
-// ── Error Boundary ──────────────────────────────────────────────────────────
+// Error Boundary
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -58,7 +58,7 @@ class WidgetErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 }
 
-// ── WidgetCard ──────────────────────────────────────────────────────────────
+// WidgetCard
 
 interface WidgetCardProps {
   title: string;
@@ -183,7 +183,7 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
     </div>
   );
 
-  // ── Expanded (full-screen overlay) ──────────────────────────────────────
+  // Expanded (full-screen overlay)
 
   if (isExpanded) {
     // Portalled so `fixed` means the viewport: the dashboard's entry
@@ -249,7 +249,7 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
     );
   }
 
-  // ── Compact card ─────────────────────────────────────────────────────────
+  // Compact card
 
   return (
     <div

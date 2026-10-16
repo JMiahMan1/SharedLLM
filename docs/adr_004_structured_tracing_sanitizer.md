@@ -2,7 +2,13 @@
 
 ## Status
 
-Proposed
+Proposed, not implemented (reviewed 2026-10-15). None of the modules named
+below exist (`services/common/logging_config.py`, `services/gateway/sanitizer.py`),
+and no `X-Request-ID` header is propagated. Redaction today is per call site:
+`sanitize_for_llm()` in `services/gateway/agent_loop.py` (tool results fed back
+to the model), `redact_url()` in `services/gateway/redact.py` (secrets in query
+strings before logging) and `_redact_secrets()` in
+`services/workspace_runtime/main.py` (response bodies).
 
 ## Context
 
@@ -102,16 +108,16 @@ def sanitize_dict(data: dict) -> dict:
 
 ### 4. Propagation Header
 
-`X-Request-ID: <uuid>` flows from Gateway → Execution → WorkspaceRuntime → Storage.  
-If header absent, Gateway generates it.
+`X-Request-ID: <uuid>` flows from Gateway → Execution → WorkspaceRuntime → Storage.
+If the header is absent, Gateway generates it.
 
 ## Consequences
 
-* ✅ Zero secret leakage from structured logs (assuming sanitizer coverage complete)
-* ✅ End-to-end request tracing across service mesh
-* ✅ Debugging complex Raven loops: all iterations share same `request_id`
-* ⚠️ Minor CPU overhead (~0.5ms per dict sanitization)
-* ⚠️ Need to audit all `log.info()` calls to ensure they use structured logging, not f-strings with dicts
+* Pro: no secret leakage from structured logs (assuming sanitizer coverage is complete)
+* Pro: end-to-end request tracing across services
+* Pro: easier debugging of long Raven loops, since all iterations share the same `request_id`
+* Con: minor CPU overhead (~0.5 ms per dict sanitization)
+* Con: every `log.info()` call has to be checked to make sure it uses structured logging, not f-strings with dicts
 
 ## Validation
 

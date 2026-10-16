@@ -1,4 +1,4 @@
-"""Comprehensive tests for gateway media proxy routes."""
+"""Tests for gateway media proxy routes."""
 import sys
 
 

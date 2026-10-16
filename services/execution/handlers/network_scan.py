@@ -1,6 +1,6 @@
 # services/execution/handlers/network_scan.py
 """
-Comprehensive network device scanner for smart TVs and media devices.
+Network device scanner for smart TVs and media devices.
 
 Scans the local subnet for Roku, webOS, Samsung, Sony Bravia, Chromecast,
 and Android TV devices. Enriches results with MAC addresses from ARP cache

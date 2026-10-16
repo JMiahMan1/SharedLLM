@@ -171,7 +171,7 @@ def wait_for_logbook_entry(entity_id, expected_action, timeout=15):
     return False, entries
 
 
-# ─── Test 1: Light Control - Turn ON (Direct API) ─────────────────────────────
+# Test 1: Light Control - Turn ON (Direct API)
 def test_light_turn_on():
     log("=== Test 1: Light Control - Turn ON (Direct API) ===")
     entity = "light.piano_lamp"
@@ -208,7 +208,7 @@ def test_light_turn_on():
     record("Light ON - HA logbook entry", has_log, f"Found {len(entries)} entries")
 
 
-# ─── Test 2: Light Control - Turn OFF (Direct API) ────────────────────────────
+# Test 2: Light Control - Turn OFF (Direct API)
 def test_light_turn_off():
     log("=== Test 2: Light Control - Turn OFF (Direct API) ===")
     entity = "light.piano_lamp"
@@ -235,7 +235,7 @@ def test_light_turn_off():
     record("Light OFF - HA logbook entry", has_log, f"Found {len(entries)} entries")
 
 
-# ─── Test 3: Light Control - Brightness (Direct API) ──────────────────────────
+# Test 3: Light Control - Brightness (Direct API)
 def test_light_brightness():
     log("=== Test 3: Light Control - Brightness (Direct API) ===")
     entity = "light.piano_lamp"
@@ -279,7 +279,7 @@ def test_light_brightness():
     exec_post("/execute/light", {"user_context": USER_CTX, "entity_id": entity, "action": "turn_off"})
 
 
-# ─── Test 4: Generic HA Service Call (Direct API) ─────────────────────────────
+# Test 4: Generic HA Service Call (Direct API)
 def test_ha_service_call():
     log("=== Test 4: Generic HA Service Call (Direct API) ===")
     entity = "light.hall_lamp"
@@ -314,7 +314,7 @@ def test_ha_service_call():
     record("HA Service - HA logbook entry", has_log, f"Found {len(entries)} entries")
 
 
-# ─── Test 5: HA Logbook Endpoint ──────────────────────────────────────────────
+# Test 5: HA Logbook Endpoint
 def test_ha_logbook():
     log("=== Test 5: HA Logbook Endpoint ===")
     entity = "light.piano_lamp"
@@ -341,7 +341,7 @@ def test_ha_logbook():
         log(f"  Sample entry: {json.dumps(sample, indent=2)[:200]}")
 
 
-# ─── Test 6: Discovery Entities ───────────────────────────────────────────────
+# Test 6: Discovery Entities
 def test_discovery_entities():
     log("=== Test 6: Discovery Entities ===")
     status, resp = exec_get("/discovery/entities", {"ha_url": HA_URL, "ha_token": HA_TOKEN})
@@ -359,7 +359,7 @@ def test_discovery_entities():
     record("Discovery Entities - Area mapping present", len(with_areas) > 0, f"{len(with_areas)} entities have area_id")
 
 
-# ─── Test 7: Discovery History ────────────────────────────────────────────────
+# Test 7: Discovery History
 def test_discovery_history():
     log("=== Test 7: Discovery History ===")
     entity = "light.piano_lamp"
@@ -378,7 +378,7 @@ def test_discovery_history():
     record("Discovery History - Returns list", is_list, f"Got {len(resp) if is_list else 'non-list'} entries")
 
 
-# ─── Test 8: Authorization - Non-admin blocked from unlock ────────────────────
+# Test 8: Authorization - Non-admin blocked from unlock
 def test_auth_non_admin_blocked():
     log("=== Test 8: Authorization - Non-admin blocked ===")
     # Try to unlock a lock (admin-only action)
@@ -398,7 +398,7 @@ def test_auth_non_admin_blocked():
         record("Security - Non-admin blocked", False, f"status={status}, resp={resp}")
 
 
-# ─── Test 9: Climate Control ──────────────────────────────────────────────────
+# Test 9: Climate Control
 def test_climate_control():
     log("=== Test 9: Climate Control ===")
     entity = "climate.downstairs"
@@ -440,14 +440,14 @@ def test_climate_control():
         record("Climate - Temperature verified", False, "Could not read state")
 
 
-# ─── Test 10: Health endpoint ─────────────────────────────────────────────────
+# Test 10: Health endpoint
 def test_health():
     log("=== Test 10: Health Endpoint ===")
     status, resp = exec_get("/health")
     record("Health - Responds OK", status == 200 and resp.get("status") == "ok", f"status={status}, resp={resp}")
 
 
-# ─── Test 11: Full Chat Interface - "Turn on the piano lamp" ──────────────────
+# Test 11: Full Chat Interface - "Turn on the piano lamp"
 def test_chat_turn_on_light():
     log("=== Test 11: Full Chat Interface - 'Turn on the piano lamp' ===")
     entity = "light.piano_lamp"
@@ -483,7 +483,7 @@ def test_chat_turn_on_light():
     record("Chat - HA logbook entry", has_log, f"Found {len(entries)} entries")
 
 
-# ─── Test 12: Full Chat Interface - "Turn off the piano lamp" ─────────────────
+# Test 12: Full Chat Interface - "Turn off the piano lamp"
 def test_chat_turn_off_light():
     log("=== Test 12: Full Chat Interface - 'Turn off the piano lamp' ===")
     entity = "light.piano_lamp"
@@ -518,7 +518,7 @@ def test_chat_turn_off_light():
     record("Chat OFF - HA logbook entry", has_log, f"Found {len(entries)} entries")
 
 
-# ─── Test 13: Full Chat Interface - HA Status Query ───────────────────────────
+# Test 13: Full Chat Interface - HA Status Query
 def test_chat_status_query():
     log("=== Test 13: Full Chat Interface - Status Query ===")
     entity = "light.hall_lamp"
@@ -545,7 +545,7 @@ def test_chat_status_query():
     record("Chat Status - Response matches HA state", has_state, f"HA state={actual_state}, response mentions it={has_state}")
 
 
-# ─── Run all tests ────────────────────────────────────────────────────────────
+# Run all tests
 if __name__ == "__main__":
     log("Starting HA Integration Test Suite")
     log(f"Execution service: {EXEC_URL}")

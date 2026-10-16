@@ -128,7 +128,7 @@ def make_client(monkeypatch):
     return _make
 
 
-# ── authentication ──────────────────────────────────────────────────────────
+# authentication
 @pytest.mark.parametrize("path", READ_ROUTES)
 def test_anonymous_readers_are_rejected(anon_client, monkeypatch, path):
     _patch_geo(monkeypatch)
@@ -186,7 +186,7 @@ def test_non_admin_is_not_marked_admin(make_client, monkeypatch):
     assert str(captured["calls"][-1]["params"].get("is_admin", "")).lower() not in {"1", "true", "yes"}
 
 
-# ── the impersonation hole ──────────────────────────────────────────────────
+# the impersonation hole
 def test_a_client_supplied_user_id_header_cannot_impersonate(anon_client, monkeypatch):
     """``X-User-Id`` is a gateway->geo transport header, not a client credential.
 
@@ -206,7 +206,7 @@ def test_internal_secret_may_still_assert_an_identity(anon_client, monkeypatch):
     assert captured["calls"][-1]["params"]["user_id"] == "jeremiah"
 
 
-# ── writes ──────────────────────────────────────────────────────────────────
+# writes
 def test_steps_cannot_be_written_for_another_user(make_client, monkeypatch):
     """POST /steps took the body's user_id unchecked -- that is the orphan
     ``geo:steps_meta:me`` writer, and it let anyone inflate anyone's total."""
@@ -262,7 +262,7 @@ def test_reading_your_own_stars_needs_no_admin_rights(make_client, monkeypatch):
     assert make_client(user="michele").get("/api/geo/stars").status_code == 200
 
 
-# ── activity sharing keeps its explicit viewer contract ─────────────────────
+# activity sharing keeps its explicit viewer contract
 def test_activity_feed_requires_a_viewer(anon_client, monkeypatch):
     _patch_geo(monkeypatch, payload={"users": []})
     assert anon_client.get("/api/geo/activity/feed").status_code == 401
@@ -273,7 +273,7 @@ def test_activity_feed_forwards_the_viewer(make_client, monkeypatch):
     make_client(user="michele").get("/api/geo/activity/feed")
     assert captured["calls"][-1]["params"]["viewer"] == "michele"
 
-# ── the active-workout route ─────────────────────────────────────────────────
+# the active-workout route
 # Added alongside `GET /workouts/active`. An in-progress session is deliberately
 # absent from the history index, so this is the only way a client can learn that
 # one is running; without it, "Stop & Save" was unreachable after a reload.

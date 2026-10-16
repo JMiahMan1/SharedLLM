@@ -33,10 +33,15 @@ Used for files, Talk (family chat), notes and calendars. Test performs an OCS AP
 - **API Key** *or* **Username** and **Password**. An API key alone is enough
   (Audiobookshelf → Settings → Users → your user → API token).
 
+Test calls `GET /api/me` with an API key, or `POST /api/login` with a
+username and password.
+
 ## Music Assistant
 
 - **Server URL**: e.g. `http://music-assistant.local:8095`.
 - **Access Token**: a long-lived token from Music Assistant (Settings → Users / tokens).
+
+Test makes one JSON-RPC read to `<server>/api` with the token.
 
 ## Private Git
 
@@ -55,6 +60,8 @@ Test calls GitHub's `GET /user` and reports the login.
 ## GitLab
 
 - **GitLab URL** (blank for gitlab.com), **GitLab Username**, **Access Token**.
+
+Test calls GitLab's `GET /api/v4/user`.
 
 ## Skylight
 

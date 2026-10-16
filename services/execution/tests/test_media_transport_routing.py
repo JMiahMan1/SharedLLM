@@ -312,8 +312,7 @@ async def test_unjoin_uses_media_player_service(monkeypatch):
     }]
 
 
-# ── Remote page: d-pad keys and power ────────────────────────────────────────
-
+# Remote page: d-pad keys and power
 from pydantic import ValidationError  # noqa: E402
 
 

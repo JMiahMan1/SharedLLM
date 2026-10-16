@@ -26,7 +26,7 @@ The indexer must categorize every storage entry into a rich metadata model.
 ## 3. Checkpointing (`CheckpointManager`)
 *   **Efficiency**: Must skip extraction if the file's `mtime` hasn't changed since the last successful index.
 *   **Persistence**: Checkpoints must be saved to `index_checkpoint.json`.
-*   **Robustness**: Must automatically create the checkpoint directory if it is missing.
+*   **Resilience**: Must automatically create the checkpoint directory if it is missing.
 
 ## 4. Operational Controls
 *   **Pause/Resume**: The extraction loop must respect a global `INDEXER_PAUSED` flag, enabling the system to prioritize LLM inference over background indexing.

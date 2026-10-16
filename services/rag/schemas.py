@@ -29,7 +29,7 @@ class SearchRequest(BaseModel):
 
     Over-long queries are refused with a 422 rather than truncated: a silently
     shortened query would return confident results about the wrong half of the
-    caller's text, which is exactly the failure mode AGENTS.md forbids.
+    caller's text, which is exactly the failure mode CONTRIBUTING.md forbids.
     """
 
     MAX_QUERY_CHARS: ClassVar[int] = 2000
@@ -72,7 +72,7 @@ class UserFact(BaseModel):
     confidence: float = 1.0
 
 
-# ─── Section 6: New relational-vector collection schemas ─────────────────────
+# Section 6: New relational-vector collection schemas
 
 class MissionRecord(BaseModel):
     mission_id: str

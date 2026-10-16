@@ -3,9 +3,8 @@
 **Status:** Accepted. **Note (2026-10-15):** the `resolve_first_user()`
 credential fallback in decision 4 was removed by the per-user credentials
 change (`1901e457`): a request without the caller's own Home Assistant
-credentials now fails naming the user and service (`docs/PER_USER_CREDENTIALS.md`).  
-**Date:** 2026-09-19  
-**Authors:** Antigravity (Advanced Agentic Assistant)  
+credentials now fails naming the user and service (`docs/PER_USER_CREDENTIALS.md`).\
+**Date:** 2026-09-19\
 **Context:** Raven's `agent_loop`, single-turn orchestrator, and external agent pipeline failed to execute tool calls requested from Home Assistant Voice Assistant (`conversation.ollama_conversation_2`) and API endpoints across diverse model architectures.
 
 ---
@@ -48,7 +47,7 @@ Implemented unified extraction regexes across `agent_loop.py`, `orchestrator.py`
 - GGUF `call:(?:default_api:)?(?P<tool>\w+)(?P<args>\{[\s\S]*?\})`
 - Qwen `<tool_code>(?P<code>[\s\S]*?)</tool_code>` and `<tool_call>(?P<call>[\s\S]*?)</tool_call>`
 - Fenced and unfenced JSON dictionaries with balanced brace extraction.
-Cleaned textual responses with `_strip_text_calls` to ensure tool call protocol markers are never leaked into user-facing voice speech.
+Cleaned textual responses with `_strip_text_calls` (`services/gateway/external_agent.py`) to ensure tool call protocol markers are never leaked into user-facing voice speech.
 
 ### 3. Decoupled Tool Routing from HA Action Verbs
 Separated tool endpoint lookup from device action payloads:
@@ -58,7 +57,7 @@ Separated tool endpoint lookup from device action payloads:
 
 ### 4. Route Aliasing and Credential Fallback in Execution
 - Registered `@app.post("/execute/entity_search")` as an alias to `@app.post("/execute/entity/search")` in `services/execution/main.py`.
-- Added `resolve_first_user()` credential fallback in `services/execution/handlers/light.py` and `services/execution/main.py:execute_light` so unauthenticated or context-sparse requests pull Home Assistant credentials from `identity.db`.
+- Added `resolve_first_user()` credential fallback in `services/execution/handlers/light.py` and `services/execution/main.py:execute_light` so unauthenticated or context-sparse requests pull Home Assistant credentials from `identity.db`. (Removed since; see the status note. `light.py` now returns a failure naming the missing credentials.)
 
 ### 5. Concrete Single-Turn Tool Guide Prompt
 Populated `prompts/single_turn_tool_guide.md` with explicit, strict schema instructions and few-shot examples for smart home control, entity resolution, and direct JSON block formatting.
@@ -68,10 +67,10 @@ Populated `prompts/single_turn_tool_guide.md` with explicit, strict schema instr
 ## Consequences
 
 **Positive:**
-- Complete end-to-end reliability for Home Assistant Voice Assistant and API requests across diverse model scales (verified live on both 35B `qwen3-6-35b` and 9B `ornith-1-5-9b`).
-- Zero context overflows; prompt evaluation dropped from > 50 seconds to < 3 seconds.
-- Robust execution even when models emit mixed text, GGUF `call:`, XML `<tool_code>`, or fenced JSON.
-- Seamless fallback to Config DB credentials and hardware router (direct ESPHome control when HA is offline).
+- Home Assistant Voice Assistant and API requests execute their tool calls end to end across model sizes (verified live on both 35B `qwen3-6-35b` and 9B `ornith-1-5-9b`).
+- No context overflows in those tests; prompt evaluation dropped from > 50 seconds to < 3 seconds.
+- Tool calls execute even when models emit mixed text, GGUF `call:`, XML `<tool_code>`, or fenced JSON.
+- Fallback to the hardware router (direct ESPHome control when HA is offline). The Config DB credential fallback that shipped with this ADR was later removed (see the status note).
 
 **Negative:**
 - Parsing complexity is higher; maintaining regex patterns across multiple tool dialects requires continued unit test coverage whenever new model families are introduced.

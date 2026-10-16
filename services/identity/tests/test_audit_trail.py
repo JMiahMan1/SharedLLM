@@ -66,7 +66,7 @@ def _events(session: Session) -> list[AuditEvent]:
     return session.exec(select(AuditEvent).order_by(AuditEvent.id)).all()
 
 
-# ─── A blank field is not an eraser ───────────────────────────────────────────
+# A blank field is not an eraser
 
 
 def test_saving_the_admin_dialog_with_blank_secrets_keeps_them(client, session):
@@ -108,7 +108,7 @@ def test_the_settings_card_blank_save_keeps_the_secret(client, session):
     assert decrypt(_michele(session).ha_token_enc) == "ha-long-lived-token"
 
 
-# ─── The trail ────────────────────────────────────────────────────────────────
+# The trail
 
 
 def test_an_admin_edit_records_who_changed_which_fields_without_values(client, session):
@@ -157,7 +157,7 @@ def test_admins_read_the_trail_and_users_read_their_own(client, session):
     assert mine and all(e["target"] == "michele" for e in mine)
 
 
-# ─── Show password ────────────────────────────────────────────────────────────
+# Show password
 
 
 def test_the_owner_can_reveal_their_own_secret_and_it_is_audited(client, session):

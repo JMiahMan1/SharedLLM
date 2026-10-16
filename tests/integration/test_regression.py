@@ -31,8 +31,7 @@ def internal_client(internal_headers):
     return httpx.Client(headers=internal_headers, timeout=30.0)
 
 
-# ─── Issue: Ollama URL hardcoded instead of from Identity settings ─────────────
-
+# Issue: Ollama URL hardcoded instead of from Identity settings
 @pytest.mark.local_only
 class TestOllamaUrlResolution:
     """Regression: Ollama URL was hardcoded to http://ollama:11434 which doesn't exist.
@@ -61,8 +60,7 @@ class TestOllamaUrlResolution:
                 assert len(model) >= 3, f"Model name '{model}' is too short to be valid"
 
 
-# ─── Issue: /api/config/models missing 'models' key on error ──────────────────
-
+# Issue: /api/config/models missing 'models' key on error
 @pytest.mark.local_only
 class TestConfigEndpointContracts:
     """Regression: /api/config/models returned {status, message} on error but UI expected 'models' key.
@@ -90,8 +88,7 @@ class TestConfigEndpointContracts:
             assert key in config, f"/api/config must return '{key}' for UI model dropdowns"
 
 
-# ─── Issue: _require_internal_secret missing from identity service ─────────────
-
+# Issue: _require_internal_secret missing from identity service
 @pytest.mark.local_only
 class TestIdentityInternalSecret:
     """Regression: _require_internal_secret was not defined in identity/main.py,
@@ -124,8 +121,7 @@ class TestIdentityInternalSecret:
         assert resp.status_code == 422, "Should reject request without X-Internal-Secret header"
 
 
-# ─── Issue: Group endpoints requiring exact field names ───────────────────────
-
+# Issue: Group endpoints requiring exact field names
 @pytest.mark.local_only
 class TestGroupEndpointFlexibility:
     """Regression: Group endpoints required exact 'group_id'/'cluster_id'/'pattern_id' fields.
@@ -166,8 +162,7 @@ class TestGroupEndpointFlexibility:
         internal_client.delete(f"{IDENTITY_URL}/api/groups/patterns/{test_name}")
 
 
-# ─── Issue: Telemetry endpoints not working ───────────────────────────────────
-
+# Issue: Telemetry endpoints not working
 @pytest.mark.local_only
 class TestTelemetryEndpoints:
     """Regression: Telemetry endpoints must work end-to-end with proper auth."""
@@ -222,8 +217,7 @@ class TestTelemetryEndpoints:
         internal_client.delete(f"{IDENTITY_URL}/api/telemetry/enroll/{entity_id}")
 
 
-# ─── Issue: Intercom endpoints not working ────────────────────────────────────
-
+# Issue: Intercom endpoints not working
 @pytest.mark.local_only
 class TestIntercomEndpoints:
     """Regression: Intercom endpoints must work end-to-end with proper auth."""

@@ -19,7 +19,7 @@ const MISSION_TEMPLATES = [
   { label: 'Check Dependencies', query: 'Review requirements.txt and package.json for outdated or vulnerable dependencies.' },
 ];
 
-// ─── User View ───────────────────────────────────────────────────────────────
+// User View
 
 const JarvisLab = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -80,7 +80,7 @@ const JarvisLab = () => {
   );
 };
 
-// ─── Admin View ───────────────────────────────────────────────────────────────
+// Admin View
 
 export const JarvisLabAdmin = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'logs'>('overview');
@@ -152,7 +152,7 @@ export const JarvisLabAdmin = () => {
   );
 };
 
-// ─── Shared Panes ─────────────────────────────────────────────────────────────
+// Shared Panes
 
 // Advanced overview adds faster polling and more runtime detail
 const AdvancedOverviewPane = () => {
