@@ -892,20 +892,22 @@ async def readiness():
         status_val = "UNREACHABLE"
         for attempt in range(3):
             try:
-                resp = await client.get(url, timeout=aiohttp.ClientTimeout(total=5.0))
-                if resp.status == 200:
-                    details = None
-                    try:
-                        data = await resp.json()
-                        if isinstance(data, dict):
-                            details = {
-                                "git_sha": data.get("git_sha", "unknown"),
-                                "start_time": data.get("start_time", None),
-                            }
-                    except Exception:
-                        pass
-                    return name, "OK", details
-                status_val = f"ERROR ({resp.status})"
+                # async with: a non-200 answer (a service restarting) left its
+                # connection unreleased ("Unclosed connection" after deploys).
+                async with client.get(url, timeout=aiohttp.ClientTimeout(total=5.0)) as resp:
+                    if resp.status == 200:
+                        details = None
+                        try:
+                            data = await resp.json()
+                            if isinstance(data, dict):
+                                details = {
+                                    "git_sha": data.get("git_sha", "unknown"),
+                                    "start_time": data.get("start_time", None),
+                                }
+                        except Exception:
+                            pass
+                        return name, "OK", details
+                    status_val = f"ERROR ({resp.status})"
             except Exception as e:
                 status_val = "UNREACHABLE"
                 log.warning(f"[health] {name} at {redact_url(url)} failed (attempt {attempt + 1}): {e}")
