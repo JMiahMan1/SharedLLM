@@ -154,8 +154,13 @@ async def test_a_new_apk_is_announced_to_everyone_once_per_build(sent):
     assert await notices.app_update_published(412, "2.4.1", "Faster maps", r) == 3
     assert await notices.app_update_published(412, "2.4.1", "Faster maps", r) == 0
     assert {n["user"] for n in sent} == {"jeremiah", "leo", "michele"}
-    assert sent[0]["category"] == "app_updates" and sent[0]["title"] == "Jarvis app 2.4.1 is available"
+    assert sent[0]["category"] == "app_updates" and sent[0]["title"] == "Jarvis app 2.4.1 (build 412) is available"
     assert sent[0]["body"] == "Faster maps" and sent[0]["data"]["url"] == "/settings"
+
+
+async def test_ci_placeholder_notes_are_not_shown_as_the_update_body(sent):
+    await notices.app_update_published(413, "2.4.1", "Android build 31ccc366", _Redis())
+    assert sent[0]["body"] == "Open Settings to install it."
 
 
 # -------------------------------------------------------------------- raven

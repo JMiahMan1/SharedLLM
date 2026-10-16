@@ -174,6 +174,12 @@ async def mission_needs_approval(mission: dict) -> bool:
 ANNOUNCED_APK_KEY = "app_updates:announced"
 
 
+def _human_notes(notes: str | None) -> bool:
+    """False for the placeholder notes publishers write when nobody wrote any:
+    the default, and CI's "Android build <sha>", which means nothing to a reader."""
+    return bool(notes) and notes != "Jarvis OS update" and not notes.startswith("Android build ")
+
+
 async def app_update_published(version_code: int, version_name: str | None, notes: str, r=None) -> int:
     """Tell everyone once about a new APK; returns how many were told."""
     try:
@@ -183,8 +189,11 @@ async def app_update_published(version_code: int, version_name: str | None, note
     except Exception as e:  # the build is published either way
         log.warning(f"[app-updates] could not record build {version_code}: {type(e).__name__}: {e}")
         return 0
-    label = version_name or str(version_code)
-    body = _summary(notes) if notes and notes != "Jarvis OS update" else "Open Settings to install it."
+    # The version name only changes on a release bump, so every build in
+    # between shares it. The build number is what tells two of them apart and
+    # what Settings shows ("Install build 308").
+    label = f"{version_name} (build {version_code})" if version_name else f"build {version_code}"
+    body = _summary(notes) if _human_notes(notes) else "Open Settings to install it."
     return await notify.send_many(
         await notify.family(),
         lambda user: notify.notice(

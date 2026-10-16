@@ -135,6 +135,26 @@ class TestVersionEndpoint:
         data = client.get("/api/app-updates/version").json()
         assert data["apk_version_code"] == 22
 
+    def test_an_apk_publish_keeps_the_web_bundle_labels(self, client):
+        """CI's Android publish must not relabel the web build Settings shows."""
+        r = client.post("/api/app-updates/publish", headers=auth(),
+                        data={"version": "1.5.0", "git_sha": "web1234", "release_notes": "Web notes"})
+        assert r.status_code == 200
+        r = client.post(
+            "/api/app-updates/publish",
+            headers=auth(),
+            data={"version": "1.5.0", "git_sha": "apk5678", "release_notes": "Android build apk5678"},
+            files={"apk": ("jarvis-os.apk", make_apk_bytes(23), "application/vnd.android.package-archive")},
+        )
+        assert r.status_code == 200
+        import json
+
+        from services.gateway import main
+
+        meta = json.loads((main.APP_UPDATES_DIR / "version.json").read_text())
+        assert meta["git_sha"] == "web1234" and meta["release_notes"] == "Web notes"
+        assert meta["apk_version_code"] == 23
+
 
 class TestApkServing:
     """The published artifact is the release build, not a debug build."""
