@@ -63,12 +63,14 @@ export default function UserAvatar({ username, avatar, name, size = 40, classNam
       </span>
     );
   }
+  // White, not text-white: light themes remap text-white to dark ink, and the
+  // tint behind the initials is always dark.
   return (
     <span
       role="img"
       aria-label={label}
       style={{ ...box, background: avatarTint(label), fontSize: size * 0.38 }}
-      className={`${base} font-semibold text-white`}
+      className={`${base} font-semibold text-[#fff]`}
       data-testid="user-avatar-initials"
     >
       {initials(label)}

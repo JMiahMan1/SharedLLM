@@ -21,6 +21,7 @@ import { calendarColor, calendarLabel, type CalendarPerson } from './calendarMet
 import PeoplePanel from './PeoplePanel';
 import type { CalendarEvent } from '../../types/widget';
 import type { ExecutionResponse } from '../../services/api';
+import { PLANNER_DARK, PLANNER_LIGHT, textOn } from '../../themes/plannerPalette';
 
 // Date helpers (native, no luxon)
 const DAY_MS = 86_400_000;
@@ -49,15 +50,6 @@ const formatTime = (iso: string): string => {
   return `${h}:${m.toString().padStart(2, '0')} ${period}`;
 };
 
-// Pick readable text color on a fill
-const textOn = (hex: string): string => {
-  const c = hex.replace('#', '');
-  const r = parseInt(c.slice(0, 2), 16);
-  const g = parseInt(c.slice(2, 4), 16);
-  const b = parseInt(c.slice(4, 6), 16);
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.62 ? '#34302a' : '#fffdf8';
-};
 
 type ViewKind = 'agenda' | 'day' | 'week' | 'month';
 
@@ -84,7 +76,7 @@ const todayCell = (radius: string) => ({
   boxShadow: '0 0 0 2px var(--os-sun)',
   borderRadius: radius,
 });
-const todayNum = { background: 'var(--os-ember)', color: '#fffdf8' };
+const todayNum = { background: 'var(--os-ember)', color: 'var(--os-on-ember)' };
 
 // Mobile detection: native app, or a narrow viewport (web responsive)
 function useIsMobile(): boolean {
@@ -189,7 +181,7 @@ const MobileMonthGrid = ({
               style={isToday ? todayCell('0.75rem') : inMonth ? { background: 'var(--os-paper-deep)' } : { opacity: 0.4 }}
             >
               <span
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold ${isToday ? 'text-[#fffdf8]' : ''}`}
+                className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold ${isToday ? 'text-[var(--os-on-ember)]' : ''}`}
                 style={isToday ? todayNum : { color: inMonth ? 'var(--os-ink)' : 'var(--os-ink-faint)' }}
               >
                 {day.getDate()}
@@ -240,47 +232,6 @@ const buildByDay = (events: CalendarEvent[], rangeStart: Date, rangeEnd: Date) =
   return map;
 };
 
-// Warm "paper-planner" (OpenSkyLight) palette, used in light mode.
-const LIGHT_VARS = `
-  --os-paper:#f5efe3;
-  --os-paper-deep:#ece4d2;
-  --os-card:#fffdf8;
-  --os-ink:#34302a;
-  --os-ink-soft:#756d5f;
-  --os-ink-faint:#a89f8d;
-  --os-line:#e3dac6;
-  --os-ember:#d95b3a;
-  --os-ember-deep:#bf4526;
-  --os-ember-soft:#f8ddd2;
-  --os-sun:#ffd9a0;
-  --os-sun-soft:#fdf0da;
-  --os-shadow:0 1px 3px rgba(72,60,38,0.07),0 10px 28px -10px rgba(72,60,38,0.16);
-  --os-input-bg:#fffdf8;
-  --os-panel-bg:rgba(255,253,248,0.6);
-  --os-body-font:'Nunito',ui-sans-serif,system-ui,sans-serif;
-  --os-display:'Fraunces',Georgia,'Times New Roman',serif;
-`;
-
-// Glass / neon palette; matches the rest of the SharedLLM site (dark default).
-const DARK_VARS = `
-  --os-paper:rgba(255,255,255,0.03);
-  --os-paper-deep:rgba(255,255,255,0.07);
-  --os-card:rgba(255,255,255,0.06);
-  --os-ink:#f1f5f9;
-  --os-ink-soft:rgba(241,245,249,0.62);
-  --os-ink-faint:rgba(241,245,249,0.38);
-  --os-line:rgba(255,255,255,0.12);
-  --os-ember:#8b5cf6;
-  --os-ember-deep:#c4b5fd;
-  --os-ember-soft:rgba(139,92,246,0.15);
-  --os-sun:#a78bfa;
-  --os-sun-soft:rgba(139,92,246,0.14);
-  --os-shadow:0 4px 24px rgba(0,0,0,0.45),0 1px 0 rgba(255,255,255,0.04) inset;
-  --os-input-bg:rgba(0,0,0,0.25);
-  --os-panel-bg:rgba(255,255,255,0.05);
-  --os-body-font:'Outfit',ui-sans-serif,system-ui,sans-serif;
-  --os-display:'Outfit',ui-sans-serif,system-ui,sans-serif;
-`;
 
 // Warm EventCard
 const EventCard = ({ ev, size = 'md', onSelect, people }: { ev: CalendarEvent; size?: 'md' | 'lg'; onSelect?: (ev: CalendarEvent) => void; people?: CalendarPerson[] }) => {
@@ -420,7 +371,7 @@ const EditEventModal = ({ event, onClose, people, readOnly }: { event: CalendarE
             <button
               disabled={deleteMut.isPending}
               onClick={() => { if (window.confirm(event.recurring ? 'Delete this event and all its repeats?' : 'Delete this event?')) deleteMut.mutate(); }}
-              className="min-h-11 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[#fffdf8] disabled:opacity-60"
+              className="min-h-11 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[var(--os-on-ember)] disabled:opacity-60"
               style={{ background: '#dc2626' }}
             >
               Delete
@@ -438,7 +389,7 @@ const EditEventModal = ({ event, onClose, people, readOnly }: { event: CalendarE
               <button
                 disabled={!summary.trim() || updateMut.isPending}
                 onClick={() => updateMut.mutate()}
-                className="min-h-11 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[#fffdf8] disabled:opacity-60"
+                className="min-h-11 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[var(--os-on-ember)] disabled:opacity-60"
                 style={{ background: 'var(--os-ember)' }}
               >
                 Save
@@ -615,7 +566,7 @@ const CalendarApp = () => {
       onClick={() => setView(key)}
       aria-pressed={view === key}
       className={`min-h-10 min-w-0 flex-1 rounded-full px-1.5 text-xs font-bold transition sm:flex-none sm:px-4 ${view === key ? '' : 'hover:opacity-80'}`}
-      style={view === key ? { background: 'var(--os-ember)', color: '#fffdf8' } : { color: 'var(--os-ink-soft)' }}
+      style={view === key ? { background: 'var(--os-ember)', color: 'var(--os-on-ember)' } : { color: 'var(--os-ink-soft)' }}
     >
       {label}
     </button>
@@ -627,7 +578,7 @@ const CalendarApp = () => {
     <section className="os-calendar rounded-[1.25rem] p-4 md:p-6" style={{ background: 'var(--os-paper)' }}>
       <style>{`
 .os-calendar{
-${isDark ? DARK_VARS : LIGHT_VARS}
+${isDark ? PLANNER_DARK : PLANNER_LIGHT}
   font-family:var(--os-body-font); color:var(--os-ink);
 }
 .os-calendar .os-display{ font-family:var(--os-display); }
@@ -682,7 +633,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
 
       {/* Integration chips */}
       <div className="mb-5 flex flex-wrap gap-2">
-        <button onClick={() => setActiveIntegration('all')} className={`min-h-11 rounded-full border px-4 text-xs font-bold transition ${activeIntegration === 'all' ? '' : 'hover:opacity-80'}`} style={activeIntegration === 'all' ? { background: 'var(--os-ember)', borderColor: 'var(--os-ember)', color: '#fffdf8' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
+        <button onClick={() => setActiveIntegration('all')} className={`min-h-11 rounded-full border px-4 text-xs font-bold transition ${activeIntegration === 'all' ? '' : 'hover:opacity-80'}`} style={activeIntegration === 'all' ? { background: 'var(--os-ember)', borderColor: 'var(--os-ember)', color: 'var(--os-on-ember)' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
           All
         </button>
         {integrations.filter((i) => i.enabled && i.provides_calendar).map((i) => {
@@ -709,9 +660,9 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
               return (
                 <div key={key} className="flex gap-2 py-2 sm:gap-4">
                   <button onClick={() => openDay(key)} aria-label={`Open ${day.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`} className="flex h-16 w-14 shrink-0 flex-col items-center justify-center rounded-2xl sm:h-20 sm:w-20" style={isToday ? { ...todayNum, boxShadow: 'var(--os-shadow)' } : { background: 'var(--os-paper-deep)', color: 'var(--os-ink)' }}>
-                    <span className={`text-xs font-extrabold uppercase ${isToday ? 'text-white/80' : 'text-[#a89f8d]'}`}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+                    <span className={`text-xs font-extrabold uppercase ${isToday ? 'text-[var(--os-on-ember)]/80' : 'text-[var(--os-ink-faint)]'}`}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
                     <span className="os-display text-2xl leading-none sm:text-3xl">{day.getDate()}</span>
-                    <span className={`text-xs font-bold ${isToday ? 'text-white/80' : 'text-[#a89f8d]'}`}>{day.toLocaleDateString('en-US', { month: 'short' })}</span>
+                    <span className={`text-xs font-bold ${isToday ? 'text-[var(--os-on-ember)]/80' : 'text-[var(--os-ink-faint)]'}`}>{day.toLocaleDateString('en-US', { month: 'short' })}</span>
                   </button>
                   <div className="flex min-w-0 flex-1 flex-col gap-2">
                     {evs.map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} size="lg" onSelect={setEditing} people={people} />)}
@@ -735,7 +686,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
             {(byDay.get(ymd(focused)) ?? []).length === 0 && (
               <div className="mt-12 flex flex-col items-center gap-4 text-center">
                 <div className="os-display text-3xl" style={{ color: 'var(--os-ink-faint)' }}>A clear day</div>
-                <button onClick={addOnFocusedDay} className="min-h-11 rounded-full px-5 py-2.5 text-sm font-bold text-[#fffdf8]" style={{ background: 'var(--os-ember)' }}><Plus size={16} className="inline mr-1" />Add something</button>
+                <button onClick={addOnFocusedDay} className="min-h-11 rounded-full px-5 py-2.5 text-sm font-bold text-[var(--os-on-ember)]" style={{ background: 'var(--os-ember)' }}><Plus size={16} className="inline mr-1" />Add something</button>
               </div>
             )}
           </div>
@@ -754,8 +705,8 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
             return (
               <div key={key} className={`flex min-h-0 flex-col rounded-[1.25rem] p-2 ${isToday ? '' : ''}`} style={isToday ? todayCell('1.25rem') : { background: 'var(--os-paper-deep)' }}>
                 <button onClick={() => openDay(key)} className="mb-2 flex items-baseline gap-2 rounded-xl px-2 py-1 text-left">
-                  <span className={`text-sm font-extrabold uppercase ${isToday ? 'text-[#bf4526]' : 'text-[#a89f8d]'}`} style={isToday ? { color: 'var(--os-ember-deep)' } : undefined}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
-                  <span className={`os-display text-3xl ${isToday ? 'flex h-11 w-11 items-center justify-center rounded-full text-[#fffdf8]' : 'text-[#34302a]'}`} style={isToday ? todayNum : { color: 'var(--os-ink)' }}>{day.getDate()}</span>
+                  <span className={`text-sm font-extrabold uppercase ${isToday ? 'text-[#bf4526]' : 'text-[var(--os-ink-faint)]'}`} style={isToday ? { color: 'var(--os-ember-deep)' } : undefined}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+                  <span className={`os-display text-3xl ${isToday ? 'flex h-11 w-11 items-center justify-center rounded-full text-[var(--os-on-ember)]' : 'text-[var(--os-ink)]'}`} style={isToday ? todayNum : { color: 'var(--os-ink)' }}>{day.getDate()}</span>
                 </button>
                 <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
                   {evs.map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} onSelect={setEditing} people={people} />)}
@@ -786,7 +737,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
             })}
           </div>
           <div className="grid grid-cols-7 gap-x-2 pb-1">
-            {WEEKDAYS.map((w) => <div key={w} className="px-2 text-sm font-extrabold uppercase text-[#a89f8d]" style={{ color: 'var(--os-ink-faint)' }}>{w}</div>)}
+            {WEEKDAYS.map((w) => <div key={w} className="px-2 text-sm font-extrabold uppercase text-[var(--os-ink-faint)]" style={{ color: 'var(--os-ink-faint)' }}>{w}</div>)}
           </div>
           <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6 gap-2">
             {days.map((day) => {
@@ -797,7 +748,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
               const overflow = evs.length - 3;
               return (
                 <button key={key} onClick={() => openDay(key)} className={`flex min-h-0 flex-col overflow-hidden rounded-2xl p-1.5 text-left ${isToday ? '' : ''}`} style={isToday ? todayCell('1rem') : inMonth ? { background: 'var(--os-card)', boxShadow: 'var(--os-shadow)' } : { background: 'var(--os-paper-deep)' }}>
-                  <span className={`mb-1 flex h-8 w-8 items-center justify-center rounded-full os-display text-lg ${isToday ? 'text-[#fffdf8]' : inMonth ? 'text-[#34302a]' : 'text-[#a89f8d]'}`} style={isToday ? todayNum : { color: inMonth ? 'var(--os-ink)' : 'var(--os-ink-faint)' }}>{day.getDate()}</span>
+                  <span className={`mb-1 flex h-8 w-8 items-center justify-center rounded-full os-display text-lg ${isToday ? 'text-[var(--os-on-ember)]' : inMonth ? 'text-[var(--os-ink)]' : 'text-[var(--os-ink-faint)]'}`} style={isToday ? todayNum : { color: inMonth ? 'var(--os-ink)' : 'var(--os-ink-faint)' }}>{day.getDate()}</span>
                   <span className="flex min-h-0 flex-col gap-1 overflow-hidden">
                     {evs.slice(0, 3).map((ev, idx) => {
                       const ad = isAllDay(ev);
@@ -809,7 +760,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
                         </span>
                       );
                     })}
-                    {overflow > 0 && <span className="px-1.5 text-xs font-extrabold text-[#a89f8d]" style={{ color: 'var(--os-ink-faint)' }}>+{overflow} more</span>}
+                    {overflow > 0 && <span className="px-1.5 text-xs font-extrabold text-[var(--os-ink-faint)]" style={{ color: 'var(--os-ink-faint)' }}>+{overflow} more</span>}
                   </span>
                 </button>
               );
@@ -844,7 +795,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
               <option value="">Default ({integrationMeta(detail?.default).label})</option>
               {writable.map((i) => <option key={i.type} value={i.type}>{integrationMeta(i.type).label}</option>)}
             </select>
-            <button disabled={addMutation.isPending} onClick={() => { if (!summary.trim() || !startInput.trim()) { toast.error('Enter a title and time'); return; } addMutation.mutate(); }} className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest text-[#fffdf8] disabled:opacity-60" style={{ background: 'var(--os-ember)' }}><Plus size={14} />Add</button>
+            <button disabled={addMutation.isPending} onClick={() => { if (!summary.trim() || !startInput.trim()) { toast.error('Enter a title and time'); return; } addMutation.mutate(); }} className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest text-[var(--os-on-ember)] disabled:opacity-60" style={{ background: 'var(--os-ember)' }}><Plus size={14} />Add</button>
           </div>
         </div>
       </div>
@@ -888,7 +839,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
             <p className="mb-2 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>iCal Subscriptions</p>
             <div className="flex gap-2">
               <input type="url" value={icalUrl} onChange={(e) => setIcalUrl(e.target.value)} aria-label="iCal feed URL" className="min-h-11 min-w-0 flex-1 rounded-xl border px-3 py-2 text-base outline-none sm:text-sm" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="https://example.com/feed.ics" />
-              <button onClick={() => { if (!icalUrl.trim()) { toast.error('Enter a .ics URL'); return; } addIcalMutation.mutate(icalUrl.trim()); }} className="inline-flex min-h-11 items-center gap-1 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest text-[#fffdf8]" style={{ background: 'var(--os-ember)' }}><Plus size={12} />Add</button>
+              <button onClick={() => { if (!icalUrl.trim()) { toast.error('Enter a .ics URL'); return; } addIcalMutation.mutate(icalUrl.trim()); }} className="inline-flex min-h-11 items-center gap-1 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest text-[var(--os-on-ember)]" style={{ background: 'var(--os-ember)' }}><Plus size={12} />Add</button>
             </div>
             {(settingsData?.settings?.ical_urls ?? []).map((u) => (
               <div key={u} className="mt-2 flex items-center gap-2">

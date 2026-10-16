@@ -62,7 +62,7 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
   }
   
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-100">
+    <div className="app-shell flex h-screen overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden relative">
         <Header />
@@ -103,11 +103,12 @@ function App() {
       <AuthProvider>
         <LocationProvider>
         <Toaster position="top-right" toastOptions={{
+          // The theme's menu surface and text, so a toast reads on light themes too.
           style: {
-            background: 'rgba(15, 23, 42, 0.9)',
-            color: '#fff',
+            background: 'var(--site-menu-a)',
+            color: 'var(--site-text)',
             backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            border: '1px solid var(--color-border-mid)',
           }
         }} />
         <MediaPlayerProvider>

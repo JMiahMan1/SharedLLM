@@ -30,6 +30,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(LocationTrackingPlugin.class);
         registerPlugin(PushPlugin.class);
         registerPlugin(JarvisMediaPlugin.class);
+        registerPlugin(SystemBarsPlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
