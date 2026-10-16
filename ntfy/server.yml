@@ -54,6 +54,6 @@ visitor-subscription-limit: 200
 # keep at most about 11 MB on disk. ntfy has no total cache size setting;
 # docs/PUSH.md explains the bound.
 visitor-message-daily-limit: 2000
-message-size-limit: 4096
+message-size-limit: "4k"
 
 log-level: info
