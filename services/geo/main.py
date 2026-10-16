@@ -3238,6 +3238,53 @@ async def _stored_day_differs(r, clean_id: str, source: str, day: str, tz_name: 
     return bool(previous) and str(previous) != tz_name
 
 
+#: A pace no one sustains: a device report for today with more steps than
+#: this many per minute since local midnight cannot be today's.
+MAX_STEPS_PER_MINUTE = 200
+#: Clock slack before a report timestamped in the future is refused.
+FUTURE_SLACK_S = 600
+
+
+def stale_device_report(update: dict, now: float | None = None) -> str | None:
+    """Why a device's step report cannot belong to the day it claims, or None.
+
+    A watch that was off across midnight can send its old day's counter with
+    today's timestamp before it has rolled the day over, which filed days-old
+    steps under today (2,429 on 2026-10-16). Two things give it away, checked
+    for devices other than the phone: steps in hours that have not happened yet
+    today, or more steps than anyone could take since midnight. The phone's
+    own pedometer is left alone, as it resets the counter itself.
+    """
+    if str(update.get("source") or "phone").lower() == "phone":
+        return None
+    now = time.time() if now is None else now
+    ts = update.get("timestamp") or now
+    try:
+        ts = float(ts)
+    except (TypeError, ValueError):
+        return None
+    if ts > now + FUTURE_SLACK_S:
+        return "the report is timestamped in the future"
+    tz = ZoneInfo(_resolve_reporting_tz(update.get("timezone")))
+    local_now = datetime.fromtimestamp(now, tz)
+    if datetime.fromtimestamp(ts, tz).date() != local_now.date():
+        return None  # an earlier day: filed under that day as before
+    for entry in update.get("hourly") or []:
+        try:
+            if int(entry.get("hour", -1)) > local_now.hour and int(entry.get("steps") or 0) > 0:
+                return f"it has steps for {int(entry['hour']):02d}:00, which has not come yet today"
+        except (TypeError, ValueError, AttributeError):
+            continue
+    minutes = local_now.hour * 60 + local_now.minute + 1
+    try:
+        steps = int(update.get("steps") or 0)
+    except (TypeError, ValueError):
+        return None
+    if steps > minutes * MAX_STEPS_PER_MINUTE:
+        return f"{steps} steps is more than possible in the {minutes} minutes since midnight"
+    return None
+
+
 @app.post("/steps")
 async def post_daily_steps(
     update: dict,
@@ -3272,6 +3319,12 @@ async def post_daily_steps(
     if not r:
         raise HTTPException(status_code=503, detail="Redis unavailable")
     source = str(update.get("source") or "phone").lower()
+    stale = stale_device_report(update)
+    if stale:
+        # 200, not an error: the device's day rollover sends the count again
+        # under its own date, and an error would only show as a failed sync.
+        log.warning(f"[steps] Ignored a {source} report for {user}: {stale}")
+        return {"status": "ignored", "user_id": user, "source": source, "reason": stale}
     await _record_daily_steps(
         r,
         user,
