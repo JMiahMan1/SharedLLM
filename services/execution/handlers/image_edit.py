@@ -142,6 +142,20 @@ async def get_image_edit_model() -> str | None:
     return await _identity_setting("image_edit_model")
 
 
+async def get_image_edit_steps() -> int | None:
+    """Sampling steps for edits ('image_edit_steps'), or None for the model's default.
+
+    The rapid all-in-one edit models are made for a handful of steps; left at
+    the backend's default of 20 an edit took over four minutes of sampling.
+    """
+    raw = (await _identity_setting("image_edit_steps") or "").strip()
+    try:
+        steps = int(raw)
+    except ValueError:
+        return None
+    return steps if 1 <= steps <= 100 else None
+
+
 async def get_face_donor_field() -> str:
     """Multipart field name the image backend expects for the DONOR image.
 
@@ -218,6 +232,9 @@ async def _request_edit(
     form.add_field("prompt", prompt)
     form.add_field("size", size)
     form.add_field("response_format", "b64_json")
+    steps = await get_image_edit_steps()
+    if steps is not None:
+        form.add_field("steps", str(steps))
     form.add_field("image", image[0], filename=image[1], content_type=image[2])
     if donor is not None:
         # Base first, donor second, under the configured donor field name.
