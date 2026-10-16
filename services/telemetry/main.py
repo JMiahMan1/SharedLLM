@@ -126,12 +126,20 @@ async def deliver_notice(body: dict[str, Any]) -> dict[str, Any]:
     except notices.NoticeError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
     rc = _redis()
-    if fields["user"] != notices.ADMINS:
+    # System notices (outages, the network, errors, deploys, disks) reach admins
+    # only, whoever a sender addressed them to.
+    system = fields["category"] == notices.ADMIN_CATEGORY
+    if fields["user"] != notices.ADMINS and not system:
         return {"status": "SUCCESS", **await notices.deliver(rc, _client(), fields["user"], fields)}
     try:
         names = await notices.admins(_client())
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Could not resolve the admins: {e}") from None
+    if fields["user"] != notices.ADMINS:
+        if fields["user"].lower() not in names:
+            log.warning("Dropped a system notice (%s) addressed to a non-admin", fields.get("tag"))
+            return {"status": "SUCCESS", "dropped": "not_admin"}
+        names = [fields["user"].lower()]
     recipients = {name: await notices.deliver(rc, _client(), name, fields) for name in names}
     return {"status": "SUCCESS", "recipients": recipients}
 
