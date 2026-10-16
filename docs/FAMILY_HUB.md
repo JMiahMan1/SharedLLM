@@ -51,6 +51,16 @@ itself on every save; its calendar only printed "Loaded N events").
   person's first pass only records where conversations stand; after that a
   brand-new conversation's first message is announced. A Jarvis answer is
   announced as "Jarvis" to the whole room, including the person who asked.
+- **No standing notification for background work**: Android requires a
+  notice while a service runs in the background. Location sharing and the chat
+  connection post theirs to the "Background services" channel
+  (`BackgroundNotice.java`), which the app creates turned off. On Android 13
+  and later the services keep running and appear only under "Active apps" at
+  the bottom of the notification shade. Chat messages and family notices use
+  their own channels and pop up normally, clearing once read. Android 12 and
+  earlier may show a system "running in the background" notice instead.
+  Steps need no service of their own: the hardware step counter keeps counting
+  and is read on the location service's periodic wake-ups.
 - **Background media**: one app-wide player (`MediaPlayerContext`, above the
   router) so switching tabs never stops playback, and an Android media
   foreground service (`MediaPlaybackService`) with lock-screen controls.
