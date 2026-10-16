@@ -20,10 +20,12 @@ def _patch_probes(monkeypatch, down_prefix: str | None = None):
             return {"status": "ok", "git_sha": "abc123", "start_time": 1.0}
 
     class _Client:
+        # Like aiohttp: get() is used as an async context manager.
+        @asynccontextmanager
         async def get(self, url, **kw):
             if down_prefix and url.startswith(down_prefix):
                 raise ConnectionError("refused")
-            return _Resp(200)
+            yield _Resp(200)
 
     @asynccontextmanager
     async def fake():
