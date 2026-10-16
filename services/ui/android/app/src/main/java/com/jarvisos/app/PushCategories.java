@@ -34,9 +34,12 @@ final class PushCategories {
         final String description;
         final int importance;
         final String group;
+        /** Status bar icon: one filled Material style for every category. */
+        final int icon;
 
-        Category(String id, String name, String description, int importance, String group) {
+        Category(String id, String name, String description, int importance, String group, int icon) {
             this.id = id;
+            this.icon = icon;
             this.name = name;
             this.description = description;
             this.importance = importance;
@@ -50,38 +53,38 @@ final class PushCategories {
 
     static final List<Category> ALL = Collections.unmodifiableList(Arrays.asList(
         new Category(CHAT, "Family chat",
-            "New messages and Jarvis answers in your conversations.", POP_UP, GROUP_FAMILY),
+            "New messages and Jarvis answers in your conversations.", POP_UP, GROUP_FAMILY, R.drawable.mi_chat),
         new Category("family_presence", "Arrivals and departures",
-            "When family arrive at or leave a saved place.", NORMAL, GROUP_FAMILY),
+            "When family arrive at or leave a saved place.", NORMAL, GROUP_FAMILY, R.drawable.mi_place),
         new Category("family_safety", "Family safety",
             "Low phone battery, school arrivals, long stops somewhere unknown and On my way.",
-            POP_UP, GROUP_FAMILY),
+            POP_UP, GROUP_FAMILY, R.drawable.mi_shield),
         new Category("health", "Health and fitness",
-            "Step goals reached and your weekly summary.", QUIET, GROUP_FAMILY),
+            "Step goals reached and your weekly summary.", QUIET, GROUP_FAMILY, R.drawable.mi_favorite),
         new Category("leave_by", "Time to leave",
-            "When to head out to reach your next event on time.", POP_UP, GROUP_REMINDERS),
+            "When to head out to reach your next event on time.", POP_UP, GROUP_REMINDERS, R.drawable.mi_car),
         new Category("calendar", "Calendar reminders",
-            "Before events on your calendars.", NORMAL, GROUP_REMINDERS),
+            "Before events on your calendars.", NORMAL, GROUP_REMINDERS, R.drawable.mi_event),
         new Category("timers", "Timers and alarms",
-            "When a timer or alarm goes off.", POP_UP, GROUP_REMINDERS),
+            "When a timer or alarm goes off.", POP_UP, GROUP_REMINDERS, R.drawable.mi_timer),
         new Category("bible", "Bible reading",
-            "Reminders for your reading plan.", NORMAL, GROUP_REMINDERS),
+            "Reminders for your reading plan.", NORMAL, GROUP_REMINDERS, R.drawable.mi_bookmark),
         new Category("home", "Home",
-            "Doorbell, motion while away, doors, the garage, laundry and leaks.", NORMAL, GROUP_HOME),
+            "Doorbell, motion while away, doors, the garage, laundry and leaks.", NORMAL, GROUP_HOME, R.drawable.mi_home),
         new Category("reports", "Reports",
-            "When a scheduled report is ready.", QUIET, GROUP_HOME),
+            "When a scheduled report is ready.", QUIET, GROUP_HOME, R.drawable.mi_description),
         new Category("jobs", "Finished jobs",
-            "Songs, pictures and audiobooks that are ready.", QUIET, GROUP_HOME),
+            "Songs, pictures and audiobooks that are ready.", QUIET, GROUP_HOME, R.drawable.mi_star),
         new Category("raven", "Raven missions",
-            "Missions that finished or need your approval.", NORMAL, GROUP_HOME),
+            "Missions that finished or need your approval.", NORMAL, GROUP_HOME, R.drawable.mi_flag),
         new Category("app_updates", "App updates",
-            "A new version of the Jarvis app is ready to install.", QUIET, GROUP_HOME),
+            "A new version of the Jarvis app is ready to install.", QUIET, GROUP_HOME, R.drawable.mi_download),
         new Category("admin", "System alerts",
-            "Services down or back, error spikes, deploys, backups and disk space.", NORMAL, GROUP_HOME),
+            "Services down or back, error spikes, deploys, backups and disk space.", NORMAL, GROUP_HOME, R.drawable.mi_settings),
         new Category(GENERAL, "Other notices",
-            "Anything from Jarvis that has no category of its own.", NORMAL, GROUP_HOME),
+            "Anything from Jarvis that has no category of its own.", NORMAL, GROUP_HOME, R.drawable.mi_bolt),
         new Category(URGENT, "Urgent alerts",
-            "SOS from family and emergencies such as a water leak.", POP_UP, null)
+            "SOS from family and emergencies such as a water leak.", POP_UP, null, R.drawable.mi_warning)
     ));
 
     /** Channel ids of earlier builds, replaced by the per-category channels. */
@@ -98,6 +101,13 @@ final class PushCategories {
             if (GENERAL.equals(c.id)) general = c;
         }
         return general;
+    }
+
+    /** The status bar icon for a notice: urgent ones (priority 5) get the warning
+     *  sign whatever their category, like their channel. */
+    static int icon(String category, int priority) {
+        if (PushNotice.clampPriority(priority) >= 5) return forId(URGENT).icon;
+        return forId(category).icon;
     }
 
     /** A channel Jarvis notices are posted on (not the background or media one). */

@@ -91,4 +91,19 @@ public class PushCategoriesTest {
         assertFalse(PushCategories.isPushChannel("media_playback"));
         assertFalse(PushCategories.isPushChannel(null));
     }
+
+    @Test
+    public void eachServiceHasItsOwnIconAndJarvisIsTheDefault() {
+        Set<Integer> icons = new HashSet<>();
+        for (PushCategories.Category c : PushCategories.ALL) {
+            assertTrue(c.id + " has an icon", c.icon != 0);
+            icons.add(c.icon);
+        }
+        // No two categories share an icon, so the status bar tells them apart.
+        assertEquals(PushCategories.ALL.size(), icons.size());
+        assertEquals(R.drawable.mi_bolt, PushCategories.icon("something new", 3));
+        assertEquals(R.drawable.mi_chat, PushCategories.icon(PushCategories.CHAT, 3));
+        // An urgent notice shows the warning sign, as it uses the urgent channel.
+        assertEquals(R.drawable.mi_warning, PushCategories.icon("home", 5));
+    }
 }
