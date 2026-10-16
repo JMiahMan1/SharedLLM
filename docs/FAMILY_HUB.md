@@ -183,7 +183,10 @@ the same model, proxy and error wording as the workspace image edit
 [{"b64_json": ...}]}` or a `FAILURE` naming the cause (no model set, proxy down,
 backend refused). The canvas is 640x416 because edit models work in 16 or 32
 pixel blocks. An edit on a CPU-offloaded model takes minutes, so the request
-waits up to 640s and the button says so. Until this was fixed the gateway
+waits up to 640s and the button says so. Measured on the desktop, a 640x416
+edit spent 276 s sampling at the backend's default 20 steps; the
+`image_edit_steps` setting sends a lower count (the rapid edit models are made
+for about 4 to 8), and a model switch on the desktop adds about a minute. Until this was fixed the gateway
 forwarded the JSON body straight to the legacy `ALPACA_SD_URL`
 (`jeremiah-home-desktop.local:8081`), which the server cannot reach and which
 only takes multipart, so every press answered 502 in under 100ms.

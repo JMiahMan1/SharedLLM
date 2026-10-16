@@ -335,3 +335,25 @@ async def test_inline_edit_reports_an_unreachable_backend(monkeypatch):
 
     assert result.status == "FAILURE"
     assert "http://proxy:11434" in result.message and "TimeoutError" in result.message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("setting, expected", [("8", "8"), ("", None), ("fast", None), ("500", None)])
+async def test_inline_edit_sends_the_configured_step_count(monkeypatch, setting, expected):
+    monkeypatch.setattr(image_edit_mod, "get_image_edit_model", _async("qwen-image-edit-rapid-aio:q4_k"))
+
+    async def fake_setting(key):
+        return setting if key == "image_edit_steps" else None
+
+    monkeypatch.setattr(image_edit_mod, "_identity_setting", fake_setting)
+    sent = {}
+
+    def route(url, kwargs):
+        sent["form"] = kwargs.get("data")
+        return _FakeResponse(200, json_data={"data": [{"b64_json": "RURJVEVE"}]})
+
+    _patch_aiohttp(monkeypatch, route)
+    await image_edit_mod.handle_image_edit_inline(_inline_req(proxy_url="http://proxy:11434/"))
+
+    steps = [f[2] for f in sent["form"]._fields if f[0]["name"] == "steps"]
+    assert steps == ([expected] if expected else [])
