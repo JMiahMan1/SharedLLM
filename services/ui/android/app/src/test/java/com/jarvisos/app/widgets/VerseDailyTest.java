@@ -100,7 +100,7 @@ public class VerseDailyTest {
     @Test
     public void longServerMessagesCollapseToOneLine() {
         String long40 = "0123456789012345678901234567890123456789";
-        assertEquals(80, VerseDaily.oneLine(long40).length());
+        assertEquals(80, VerseDaily.oneLine(long40 + long40 + long40).length());
         assertEquals("a b", VerseDaily.oneLine("a\n  b"));
         assertEquals("offline", VerseDaily.oneLine(""));
         assertEquals("offline", VerseDaily.oneLine(null));
