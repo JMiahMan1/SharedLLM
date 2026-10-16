@@ -284,6 +284,14 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
 PROGRESSIVE_THRESHOLD = 5 * 1024 * 1024  # 5 MB
 
 
+#: How long the progressive download may take to reach its threshold, and
+#: the metadata lookup before it. Without them a stalled yt-dlp hung the cast.
+VIDEO_PROGRESSIVE_TIMEOUT_S = 180
+VIDEO_INFO_TIMEOUT_S = 60
+#: Downloads finishing after playback started; kept so they are not collected.
+_BACKGROUND_DOWNLOADS: set[asyncio.Task] = set()
+
+
 async def download_video_progressive(video_url: str, threshold: int = PROGRESSIVE_THRESHOLD) -> tuple[str | None, str | None]:
     """
     Download video with progressive playback support.
@@ -306,7 +314,11 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        info_out, _ = await info_proc.communicate()
+        try:
+            info_out, _ = await asyncio.wait_for(info_proc.communicate(), timeout=VIDEO_INFO_TIMEOUT_S)
+        except TimeoutError:
+            info_proc.kill()
+            info_out = b""
         if info_out:
             try:
                 info = json.loads(info_out.decode())
@@ -317,24 +329,37 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
             except json.JSONDecodeError:
                 pass
 
-        dl_cmd = ["yt-dlp", "-f", "22/18/best[ext=mp4][height<=720]", "--no-playlist", "-o", tmp_path]
+        # --no-progress keeps stderr to real errors: nothing reads the pipes
+        # while this waits, and yt-dlp's progress lines used to fill them and
+        # stall the download.
+        dl_cmd = ["yt-dlp", "-f", "22/18/best[ext=mp4][height<=720]", "--no-playlist", "--no-progress", "-o", tmp_path]
         if cookies_path:
             dl_cmd.extend(["--cookies", cookies_path])
         dl_cmd.append(video_url)
         proc = await asyncio.create_subprocess_exec(
             *dl_cmd,
-            stdout=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
 
+        deadline = time.monotonic() + VIDEO_PROGRESSIVE_TIMEOUT_S
         while proc.returncode is None:
             await asyncio.sleep(0.5)
-            if os.path.exists(tmp_path):
-                current_size = os.path.getsize(tmp_path)
-                if current_size >= threshold:
-                    log.info(f"[video] Progressive threshold reached: {current_size / 1024 / 1024:.1f} MB / {threshold / 1024 / 1024:.0f} MB; returning control to caller")
-                    asyncio.create_task(_wait_for_download(proc, tmp_path, media_id))
-                    return media_id, title
+            # yt-dlp writes <name>.part and renames it only when done.
+            partial = next((f for f in (tmp_path + ".part", tmp_path) if os.path.exists(f)), None)
+            if partial and os.path.getsize(partial) >= threshold:
+                current_size = os.path.getsize(partial)
+                log.info(f"[video] Progressive threshold reached: {current_size / 1024 / 1024:.1f} MB / {threshold / 1024 / 1024:.0f} MB; returning control to caller")
+                task = asyncio.create_task(_wait_for_download(proc, tmp_path, media_id))
+                _BACKGROUND_DOWNLOADS.add(task)
+                task.add_done_callback(_BACKGROUND_DOWNLOADS.discard)
+                return media_id, title
+            if time.monotonic() > deadline:
+                log.error(f"[video] {threshold / 1024 / 1024:.0f} MB not reached in {VIDEO_PROGRESSIVE_TIMEOUT_S} s; stopping yt-dlp")
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                await proc.wait()
+                return None, None
 
         _stdout, stderr = await proc.communicate()
         if proc.returncode != 0:

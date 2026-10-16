@@ -17,16 +17,19 @@ export function PdfViewer({ url }: PdfViewerProps) {
 
   useEffect(() => {
     let cancelled = false;
+    // Kept so closing the viewer frees the document in pdf.js's worker; it
+    // used to stay there for every PDF ever opened.
+    const task = pdfjs.getDocument(url);
     (async () => {
       try {
-        const doc = await pdfjs.getDocument(url).promise;
+        const doc = await task.promise;
         if (cancelled) return;
         setPages(doc.numPages);
         const container = containerRef.current;
         if (!container) return;
         container.innerHTML = '';
         const scale = Math.min(2, Math.max(1, (container.clientWidth || 800) / 800));
-        for (let i = 1; i <= doc.numPages; i++) {
+        for (let i = 1; i <= doc.numPages && !cancelled; i++) {
           const page = await doc.getPage(i);
           const viewport = page.getViewport({ scale });
           const canvas = document.createElement('canvas');
@@ -48,6 +51,7 @@ export function PdfViewer({ url }: PdfViewerProps) {
     })();
     return () => {
       cancelled = true;
+      void task.destroy();
     };
   }, [url]);
 

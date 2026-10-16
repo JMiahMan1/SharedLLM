@@ -12491,7 +12491,7 @@ async def stream_abs_session_segment(session_id: str, track_index: int, segment:
     seg_url = f"{abs_url}/hls/{session_id}/{segment}"
     range_header = request.headers.get("range")
     client = aiohttp.ClientSession(
-        timeout=aiohttp.ClientTimeout(total=None, connect=15.0),
+        timeout=aiohttp.ClientTimeout(total=None, connect=15.0, sock_read=60.0),
     )
     try:
         req_headers = {"User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)"}
@@ -13295,7 +13295,7 @@ async def _ma_proxy_bytes(request: Request, stream_url: str) -> StreamingRespons
     log.info(f"[stream/ma] Client requested range: {range_header}")
     proxy_client = aiohttp.ClientSession(
         # No total deadline: a long MA stream must not be cut at 5 min.
-        timeout=aiohttp.ClientTimeout(total=None, connect=15.0),
+        timeout=aiohttp.ClientTimeout(total=None, connect=15.0, sock_read=600.0),
     )
     # BUG-22: close proxy_client on every exit except the streaming hand-off,
     # where stream_generator_ma's finally owns it. Covers HTTPException

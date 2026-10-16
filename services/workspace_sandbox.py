@@ -953,6 +953,19 @@ def unexpose_workspace_port(workspace_id: str, host_port: int) -> bool:
     return False
 
 
+def unexpose_all_workspace_ports(workspace_id: str) -> int:
+    """Stop every port forward of a workspace (when it is deleted); returns how many.
+
+    Nothing stopped them before, so each expose kept a listener thread and a
+    host port from the 9000-9199 range until the service restarted.
+    """
+    with _PORT_FORWARD_LOCK:
+        keys = [k for k in _ACTIVE_PORT_FORWARDS if k[0] == workspace_id]
+        for key in keys:
+            _ACTIVE_PORT_FORWARDS.pop(key)[1].set()
+    return len(keys)
+
+
 def list_workspace_ports(workspace_id: str) -> list[dict[str, Any]]:
     result = []
     with _PORT_FORWARD_LOCK:

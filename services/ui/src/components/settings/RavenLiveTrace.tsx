@@ -6,6 +6,9 @@ import { storageGetSync } from '../../lib/storage';
 import { downloadMissionLog, type MissionLogEvent } from '../../lib/missionLog';
 import { MissionTimeline } from './MissionTimeline';
 
+/** Mission states after which nothing more happens. */
+const FINISHED = ['completed', 'failed', 'cancelled', 'killed', 'rejected'];
+
 interface RavenLiveTraceProps {
   isOpen: boolean;
   onClose: () => void;
@@ -75,6 +78,12 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
         if (stopped || !mission) return;
         setMissionStatus(mission.status);
         if (mission.result) setMissionResult(mission.result);
+        // A finished mission has nothing more to say: one last read of its
+        // log, then stop (this used to re-download the whole log every 4 s).
+        if (FINISHED.includes(mission.status)) {
+          clearInterval(pollInterval);
+          fetchHttpLogs();
+        }
       }).catch(() => {});
       if (wsRef.current?.readyState !== WebSocket.OPEN) fetchHttpLogs();
     }, 4000);
