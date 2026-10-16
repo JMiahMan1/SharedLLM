@@ -1125,13 +1125,43 @@ export const api = {
   },
 
   // Family arrival / departure notices for the signed-in user (on by default).
-  async getPresenceAlerts(): Promise<{ enabled: boolean }> {
-    const resp = await apiClient.get('/api/geo/presence-alerts');
+  /** Which notice categories reach the signed-in person (docs/PUSH.md); absent means on. */
+  async getNotificationPreferences(): Promise<NotificationPreferences> {
+    const resp = await apiClient.get('/api/users/me/notification-preferences');
+    return booleanMap(resp.data?.preferences ?? resp.data);
+  },
+
+  async setNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferences> {
+    const resp = await apiClient.put('/api/users/me/notification-preferences', preferences);
+    return booleanMap(resp.data?.preferences ?? resp.data);
+  },
+
+  /** Apps on the caller's phones that use Jarvis as their UnifiedPush distributor. */
+  async listPushApps(): Promise<PushAppRegistration[]> {
+    const resp = await apiClient.get('/api/push/up');
+    const list = Array.isArray(resp.data) ? resp.data : resp.data?.registrations;
+    return Array.isArray(list) ? list.filter((r): r is PushAppRegistration => typeof r?.app === 'string') : [];
+  },
+
+  async unregisterPushApp(registration: { app: string; token: string }): Promise<void> {
+    await apiClient.post('/api/push/up/unregister', registration);
+  },
+
+  /** Mark a place (an HA zone) important and choose who hears about it; an empty list means everyone. */
+  async setPlaceSettings(zoneId: string, settings: { important: boolean; notify: string[] }): Promise<{ zone: string; important: boolean; notify: string[] }> {
+    const resp = await apiClient.put(`/api/geo/places/${encodeURIComponent(zoneId)}`, settings);
     return resp.data;
   },
 
-  async setPresenceAlerts(enabled: boolean): Promise<{ enabled: boolean }> {
-    const resp = await apiClient.put('/api/geo/presence-alerts', { enabled });
+  /** Tell the rest of the family you are heading home (with the drive time when known). */
+  async sendOnMyWay(): Promise<{ status: string; sent: number; eta_s?: number | null }> {
+    const resp = await apiClient.post('/api/family/on-my-way');
+    return resp.data;
+  },
+
+  /** An urgent notice to everyone else in the family with your last position. */
+  async sendSos(): Promise<{ status: string; sent: number; family: number; located: boolean }> {
+    const resp = await apiClient.post('/api/family/sos', { confirm: true });
     return resp.data;
   },
 
@@ -1618,7 +1648,7 @@ export const api = {
     return resp.data;
   },
 
-  async updateCalendarSettings(payload: { default?: string; disabled?: string[]; priority?: Record<string, number>; ical_urls?: string[]; people?: CalendarPerson[] }): Promise<ExecutionResponse> {
+  async updateCalendarSettings(payload: { default?: string; disabled?: string[]; priority?: Record<string, number>; ical_urls?: string[]; people?: CalendarPerson[]; reminder_minutes?: number; timezone?: string }): Promise<ExecutionResponse> {
     const resp = await apiClient.put('/api/calendar/settings', payload);
     return resp.data;
   },
@@ -3395,6 +3425,29 @@ export const api = {
     return resp.data;
   },
 };
+
+/** Notice category to on/off; a category that is absent is on. */
+export type NotificationPreferences = Record<string, boolean>;
+
+/** One app on one phone using Jarvis for push (GET /api/push/up). */
+export interface PushAppRegistration {
+  /** Android package name, e.g. com.nextcloud.talk2. */
+  app: string;
+  token?: string;
+  topic?: string;
+  endpoint?: string;
+  device_id?: string;
+  created_at?: string;
+}
+
+function booleanMap(value: unknown): NotificationPreferences {
+  const out: NotificationPreferences = {};
+  if (!value || typeof value !== 'object') return out;
+  for (const [key, on] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof on === 'boolean') out[key] = on;
+  }
+  return out;
+}
 
 export interface RavenLearningItem {
   id: string;

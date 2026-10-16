@@ -54,6 +54,7 @@ import type {
 import Modal from '../components/ui/Modal';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import { EntityProtectionPanel } from '../components/admin/EntityProtectionPanel';
+import { HomeAlertsPanel } from '../components/admin/HomeAlertsPanel';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import ServiceAccessSetup from '../components/admin/ServiceAccessSetup';
 import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
@@ -973,6 +974,8 @@ const Admin = () => {
           </section>
 
           <EntityProtectionPanel users={users} />
+
+          <HomeAlertsPanel users={users} />
         </div>
       )}
 

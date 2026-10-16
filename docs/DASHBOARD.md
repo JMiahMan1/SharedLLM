@@ -18,8 +18,8 @@ How the everyday screens work and what backs them. API details are in
 - **Notification bell**: the signed-in user's own notices from the telemetry
   outbox (`GET /api/telemetry/notifications`): family arrivals and
   departures, leave-by reminders, report results. These are the same notices
-  the Android app raises as system notifications through its long poll
-  (`ChatNotifyService`), and that browsers get by web push when it is turned
+  the Android app raises as system notifications from its push stream
+  (`PushService`), and that browsers get by web push when it is turned
   on in Settings. The green dot means notices newer than the last time the
   bell was opened. **Clear all** hides the notices listed now; newer ones
   still appear. Both are remembered on the device (`lib/clearedAt.ts`) and

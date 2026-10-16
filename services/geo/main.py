@@ -35,6 +35,7 @@ from pydantic import BaseModel
 
 _STATIC = Path(__file__).resolve().parent / "static"
 
+from services.common import notify
 from services.common.http import get_client, get_client_insecure
 from services.config import (
     HA_TOKEN,
@@ -45,9 +46,8 @@ from services.config import (
     OSRM_FOOT_URL,
     OSRM_URL,
     REDIS_URL,
-    TELEMETRY_SVC_URL,
 )
-from services.geo import map_match, map_regions
+from services.geo import health_notices, map_match, map_regions, safety
 from services.shared.info_endpoint import info_router
 
 try:
@@ -90,8 +90,10 @@ async def lifespan(app: FastAPI):
     log.info("[Geo] runtime config resolved (HA_URL=%s)", bool(HA_URL))
     await get_redis()
     sweeper = asyncio.create_task(_idle_trip_sweeper())
+    notices = asyncio.create_task(_notice_sweeper())
     yield
     sweeper.cancel()
+    notices.cancel()
     global _redis
     if _redis is not None:
         try:
@@ -336,7 +338,24 @@ async def get_zones():
         f = _entity_to_feature(s["entity_id"], s)
         if f:
             features.append(f)
-    return {"type": "FeatureCollection", "features": features}
+    # Which places are marked important, and who hears about them.
+    settings = await safety.place_settings(await get_redis())
+    return {"type": "FeatureCollection", "features": safety.annotate_zone_features(features, settings)}
+
+
+@app.put("/place-settings/{zone_id}")
+async def put_place_settings(zone_id: str, body: dict):
+    """Mark a zone important (arrivals and departures become family_safety
+    notices) and choose who hears about it; an empty list means everyone who
+    may see the person."""
+    if not re.fullmatch(r"zone\.[a-z0-9_]+", zone_id):
+        raise HTTPException(status_code=422, detail="zone_id must be a zone entity id")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    notify_list = body.get("notify") if isinstance(body.get("notify"), list) else []
+    entry = await safety.save_place_setting(r, zone_id, bool(body.get("important")), notify_list)
+    return {"zone": zone_id, **entry}
 
 
 @app.get("/people/{entity_id:path}/history")
@@ -462,12 +481,15 @@ async def record_point(
 # Each person's current HA zone is kept in geo:zone_state:{user}. Entering a
 # zone, or leaving one (by ZONE_EXIT_MARGIN_M past its edge, so GPS jitter at
 # the boundary does not flap), notifies the family members who may see them
-# (sharing consent) and have not switched the alerts off: "Jeremiah left Work
-# · home in about 22 min", "Michele arrived at Home".
+# (sharing consent): "Jeremiah left Work · home in about 22 min", "Michele
+# arrived at Home". Whether someone wants these is their family_presence
+# notification preference, which telemetry applies.
 
 ZONE_EXIT_MARGIN_M = 50.0
 PRESENCE_REPEAT_S = 600
-PRESENCE_ALERTS_KEY = "geo:presence_alerts"   # hash viewer -> "off"
+#: The old per-person switch (hash viewer -> "off"), now the family_presence
+#: preference in identity; ``_migrate_presence_switches`` moves it over.
+LEGACY_PRESENCE_ALERTS_KEY = "geo:presence_alerts"
 _zone_cache: dict = {"at": 0.0, "zones": []}
 
 
@@ -531,6 +553,10 @@ async def _safe_presence_transition(r, user, lat, lon, ts, acc=0.0) -> None:
         await _presence_transition(r, user, lat, lon, ts, acc)
     except Exception as e:
         log.warning(f"[Geo] Presence check failed for {user}: {e}")
+    try:
+        await safety.note_fix(r, user, lat, lon, ts, _haversine_distance)
+    except Exception as e:
+        log.warning(f"[Geo] Stop tracking failed for {user}: {e}")
 
 
 async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
@@ -549,47 +575,56 @@ async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
                     body = f"Home in about {max(1, round(eta['duration_s'] / 60))} min by road."
             except HTTPException:
                 pass
-    off = await r.hgetall(PRESENCE_ALERTS_KEY) or {}
-    off = {(k.decode() if isinstance(k, bytes) else k) for k, v in off.items() if (v.decode() if isinstance(v, bytes) else v) == "off"}
+    # An important place (a school) is a family_safety notice for the people
+    # chosen for it; everyone else gets the ordinary arrival or departure.
+    place = (await safety.place_settings(r)).get(zone["entity_id"], {})
+    chosen = set(place.get("notify") or []) if place.get("important") else set()
+    data = {"person": person, "zone": zone["entity_id"], "event": kind}
+    url = f"/wander?person={person}"
     for viewer in await _tracked_users(r):
-        if viewer == person or viewer in off:
+        if viewer == person or not await _viewer_may_see(viewer, person):
             continue
-        if not await _viewer_may_see(viewer, person):
-            continue
-        await _send_notice(viewer, "presence", title, body, {"person": person, "zone": zone["entity_id"], "event": kind})
+        if place.get("important") and (not chosen or viewer in chosen):
+            await _send_notice(notify.notice(
+                viewer, "family_safety", title, body, url=url, priority=4, data=data,
+                tag=f"place:{person}", actions=[notify.view_action(url, "Map")]))
+        else:
+            await _send_notice(notify.notice(
+                viewer, "family_presence", title, body, url=url, data=data,
+                tag=f"presence:{person}", actions=[notify.view_action(url, "Map")]))
 
 
-async def _send_notice(user: str, kind: str, title: str, body: str, data: dict) -> None:
-    """One notification through the telemetry service (in-app + push)."""
-    try:
-        async with get_client() as client, client.post(
-            f"{TELEMETRY_SVC_URL.rstrip('/')}/api/telemetry/notify",
-            json={"user": user, "kind": kind, "title": title, "body": body, "data": data},
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=aiohttp.ClientTimeout(total=10),
-        ) as resp:
-            if resp.status != 200:
-                log.warning(f"[Geo] Notice to {user} failed: HTTP {resp.status}")
-    except Exception as e:
-        log.warning(f"[Geo] Notice to {user} failed: {e}")
+async def _send_notice(payload: dict) -> bool:
+    """Geo's one way out to telemetry's notify (docs/PUSH.md)."""
+    return await notify.send(payload)
 
 
-@app.get("/presence-alerts/{viewer}")
-async def get_presence_alerts(viewer: str):
-    """Whether the viewer gets family arrival/departure notices (on by default)."""
-    r = await get_redis()
-    v = await r.hget(PRESENCE_ALERTS_KEY, viewer.lower()) if r else None
-    return {"viewer": viewer.lower(), "enabled": (v.decode() if isinstance(v, bytes) else v) != "off"}
-
-
-@app.put("/presence-alerts/{viewer}")
-async def put_presence_alerts(viewer: str, body: dict):
-    r = await get_redis()
-    if not r:
-        raise HTTPException(status_code=503, detail="Redis unavailable")
-    enabled = bool(body.get("enabled", True))
-    await r.hset(PRESENCE_ALERTS_KEY, viewer.lower(), "on" if enabled else "off")
-    return {"viewer": viewer.lower(), "enabled": enabled}
+async def _migrate_presence_switches(r) -> int:
+    """Move anyone who had geo's own presence alerts switched off to
+    family_presence=false in identity, then forget the old switch. Each entry
+    is removed only once identity took it, so this is safe to run every
+    sweep; returns how many moved."""
+    moved = 0
+    for viewer, value in (await r.hgetall(LEGACY_PRESENCE_ALERTS_KEY) or {}).items():
+        viewer = viewer.decode() if isinstance(viewer, bytes) else viewer
+        value = value.decode() if isinstance(value, bytes) else value
+        if value == "off":
+            try:
+                async with get_client().put(
+                    f"{IDENTITY_SVC_URL.rstrip('/')}/api/internal/push/preferences",
+                    params={"username": viewer}, json={"family_presence": False},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 404:
+                        pass  # that account is gone: nothing to carry over
+                    elif resp.status != 200:
+                        continue
+            except Exception as e:
+                log.warning(f"[Geo] Presence switch for {viewer} not moved yet: {e}")
+                continue
+            moved += 1
+        await r.hdel(LEGACY_PRESENCE_ALERTS_KEY, viewer)
+    return moved
 
 
 async def _is_impossible_jump(r, clean_id: str, lat: float, lon: float, ts: float) -> bool:
@@ -689,6 +724,52 @@ async def _fuse_day(r, clean_id: str, day: str) -> int:
     return max(best_source, sum((await _fused_hours(r, clean_id, day)).values()))
 
 
+async def _store_fused_day(r, clean_id: str, day: str) -> int:
+    """Store the day's fused total and announce the step goal the first time
+    today's total reaches it; returns the total."""
+    total = await _fuse_day(r, clean_id, day)
+    await r.hset(f"geo:steps:{clean_id}", day, total)
+    if day == _today_date().isoformat():
+        goal = await _get_step_goal(r, clean_id)
+        key = health_notices.GOAL_SENT_KEY.format(user=clean_id, day=day)
+        if total >= goal and await r.set(key, "1", ex=2 * 86400, nx=True):
+            title, body = health_notices.goal_text(total, goal)
+            await _send_notice(notify.notice(
+                clean_id, "health", title, body, url="/fitness", tag=f"steps:{day}",
+                once=f"step_goal:{day}", actions=[notify.view_action("/fitness")]))
+    return total
+
+
+async def _sweep_weekly_summaries(r, now: float | None = None) -> int:
+    """On Sunday from WEEKLY_SUMMARY_HOUR, each person with steps this week or
+    last gets the week's total against last week's, once; returns how many."""
+    local = datetime.fromtimestamp(now or time.time(), ZoneInfo(APP_TIMEZONE))
+    if local.weekday() != 6 or local.hour < health_notices.WEEKLY_SUMMARY_HOUR:
+        return 0
+    today = local.date()
+    week = health_notices.week_start(today).isoformat()
+    sent = 0
+    async for key in r.scan_iter(match="geo:steps:*"):
+        user = (key.decode() if isinstance(key, bytes) else key).split(":", 2)[-1]
+        if not user or "." in user:
+            continue
+        daily = {}
+        for day, value in (await r.hgetall(key)).items():
+            with contextlib.suppress(TypeError, ValueError):
+                daily[day.decode() if isinstance(day, bytes) else day] = int(value)
+        this_week, last_week, days = health_notices.week_totals(daily, today)
+        if not this_week and not last_week:
+            continue
+        if not await r.set(health_notices.WEEK_SENT_KEY.format(user=user, week=week), "1", ex=8 * 86400, nx=True):
+            continue
+        title, body = health_notices.weekly_text(this_week, last_week, days)
+        await _send_notice(notify.notice(
+            user, "health", title, body, url="/fitness", tag="steps:week", once=f"step_week:{week}",
+            actions=[notify.view_action("/fitness")]))
+        sent += 1
+    return sent
+
+
 async def _record_daily_steps(
     r,
     clean_id: str,
@@ -735,7 +816,7 @@ async def _record_daily_steps(
             # Remember which zone this day was filed under, so a corrected
             # reading can overwrite a day that was bucketed in the wrong one.
             await r.hset(f"geo:steps_tz:{clean_id}:{source}", day, tz_name)
-        await r.hset(f"geo:steps:{clean_id}", day, await _fuse_day(r, clean_id, day))
+        await _store_fused_day(r, clean_id, day)
         await r.hset(f"geo:steps_meta:{clean_id}", "updated_at", str(ts))
     except Exception as e:
         log.warning(f"[Geo] Failed to record daily steps for {clean_id}: {e}")
@@ -2221,6 +2302,62 @@ async def _idle_trip_sweeper() -> None:
             log.warning(f"[Geo] Idle trip sweep failed: {e}")
 
 
+#: How often long stops and the weekly step summary are checked.
+NOTICE_SWEEP_S = 300
+
+
+async def _notice_sweeper() -> None:
+    """Notices that come from time passing rather than from a fix: long stops
+    somewhere unknown and the Sunday evening step summary."""
+    while True:
+        await asyncio.sleep(NOTICE_SWEEP_S)
+        r = await get_redis()
+        if not r:
+            continue
+        for job in (_migrate_presence_switches, _sweep_long_stops, _sweep_weekly_summaries):
+            try:
+                await job(r)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning(f"[Geo] {job.__name__} failed: {e}")
+
+
+async def _sweep_long_stops(r, now: float | None = None) -> int:
+    """Tell the family once when someone has stayed put for LONG_STOP_S
+    somewhere that is not a zone (a known place); returns how many stops
+    were announced. Only in LONG_STOP_ACTIVE_HOURS, so a sleepover is not a
+    midnight alarm."""
+    now = now or time.time()
+    if not safety.in_active_hours(datetime.fromtimestamp(now, ZoneInfo(APP_TIMEZONE)).hour):
+        return 0
+    zones = await _zones_cached()
+    announced = 0
+    for person, stop in (await safety.stops(r)).items():
+        if not safety.stop_is_due(stop, now):
+            continue
+        # Mark first: a place that cannot be named or a notice that fails is
+        # not worth a second alarm about the same stop.
+        await safety.mark_stop_notified(r, person, stop)
+        if _zone_at(zones, stop["lat"], stop["lon"]):
+            continue
+        place = await _resolve_place_name_cached(stop["lat"], stop["lon"])
+        hours = (now - float(stop["since"])) / 3600
+        title = f"{person.title()} has been stopped for {hours:.0f} h"
+        body = f"At {place}, which is not a saved place."
+        url = f"/wander?person={person}"
+        for viewer in await _tracked_users(r):
+            if viewer == person or not await _viewer_may_see(viewer, person):
+                continue
+            await _send_notice(notify.notice(
+                viewer, "family_safety", title, body, url=url, priority=4,
+                tag=f"stop:{person}", once=f"stop:{person}:{int(stop['since'])}",
+                data={"person": person, "lat": stop["lat"], "lon": stop["lon"], "since": stop["since"]},
+                actions=[notify.view_action(url, "Map")]))
+        announced += 1
+    return announced
+
+
 async def _note_map_region(r, lat: float, lon: float) -> None:
     try:
         await map_regions.note_if_off_map(r, lat, lon, OSRM_URL)
@@ -3154,7 +3291,7 @@ async def post_daily_steps(
         )
         if hours_written:
             # The day was fused above, before these hours were stored.
-            await r.hset(f"geo:steps:{user}", day, await _fuse_day(r, user, day))
+            await _store_fused_day(r, user, day)
     return {
         "status": "ok",
         "user_id": user,

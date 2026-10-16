@@ -95,6 +95,37 @@ wait_for_build() {
 # leave a remote docker pull running with nobody waiting for it.
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=4 -o ServerAliveInterval=15 -o ServerAliveCountMax=8"
 
+# Tell admins how the deploy ended, on their phones (scripts/notify_admins.sh,
+# sent to the server and run there). DEPLOY_STEP names the step in progress so
+# a failure says where it stopped; the server's own [FAIL] line, if it printed
+# one, is added from REMOTE_LOG.
+DEPLOY_STEP="syncing config files"
+REMOTE_LOG=$(mktemp "${TMPDIR:-/tmp}/deploy_remote.XXXXXX")
+notify_deploy_result() {
+    local status=$? commit title body priority reason
+    commit=$(sed -n 's/^Server now at commit: //p' "$REMOTE_LOG" 2>/dev/null | tail -1)
+    [ -n "$commit" ] || commit=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    commit="$commit $(git log -1 --format=%s "$commit" 2>/dev/null || true)"
+    if [ "$status" -eq 0 ]; then
+        title="Deploy finished"
+        body="${commit% } on ${BRANCH:-unknown}. Services: ${SERVICES}"
+        priority=2
+    else
+        reason=$(grep -F '[FAIL]' "$REMOTE_LOG" 2>/dev/null | tail -1 | sed 's/^ *\[FAIL\] *//' || true)
+        title="Deploy failed"
+        body="Stopped while ${DEPLOY_STEP} (${commit% }).${reason:+ $reason}"
+        priority=4
+    fi
+    # SSH_OPTS splits on purpose, as on every ssh line here; the arguments are
+    # quoted for the remote shell by printf %q.
+    # shellcheck disable=SC2029,SC2086
+    ssh $SSH_OPTS "$HOST" "cd '$DIR' && bash -s -- $(printf '%q ' "$title" "$body" "$priority" admin:deploy)" \
+        < scripts/notify_admins.sh || echo "[WARN] Could not notify admins about the deploy."
+    rm -f "$REMOTE_LOG"
+    exit "$status"
+}
+trap notify_deploy_result EXIT
+
 # Sync non-git files to remote to ensure config match
 for NON_GIT_FILE in "prompts/"; do
     if [ -e "$NON_GIT_FILE" ]; then
@@ -107,6 +138,8 @@ for NON_GIT_FILE in "prompts/"; do
         fi
     fi
 done
+
+DEPLOY_STEP="merging .env"
 
 # .env is SEED-ONLY: services read it once at boot to learn their settings, and
 # from then on Identity's GlobalSetting rows are the runtime source of truth
@@ -147,6 +180,8 @@ else
 fi
 echo "Branch: $BRANCH"
 
+DEPLOY_STEP="waiting for the CI image build"
+
 # Wait for GitHub Actions to build the commit we are about to deploy. This runs
 # after the branch is resolved so it honours DEPLOY_BRANCH and a detached HEAD,
 # and it names the SHA so a newer push landing mid-deploy cannot be mistaken
@@ -164,6 +199,8 @@ else
     echo "[FAIL] Could not resolve the commit being deployed; refusing to deploy an unverified build."
     exit 1
 fi
+
+DEPLOY_STEP="syncing the APK"
 
 # Check if a latest Android APK artifact is available from CI and sync it to update directory
 if command -v gh >/dev/null 2>&1; then
@@ -190,8 +227,10 @@ if command -v gh >/dev/null 2>&1; then
     fi
 fi
 
+DEPLOY_STEP="updating the server (pull, restart, health check, OTA bundle)"
+
 # shellcheck disable=SC2087
-if ssh $SSH_OPTS "$HOST" << EOF
+if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
     cd "$DIR"
 
     # Detect Docker user/group IDs dynamically (not hardcoded)
@@ -265,6 +304,8 @@ if ssh $SSH_OPTS "$HOST" << EOF
     SHA_TAG=\$(git rev-parse --short=8 HEAD 2>/dev/null || true)
     if [ -n "\$SHA_TAG" ] && [ -n "$SERVICES" ]; then
         for service in $SERVICES; do
+            # Upstream images (ntfy, redis, nominatim) have no SHA tags.
+            docker compose config --images "\$service" 2>/dev/null | grep -q "/sharedllm-" || continue
             repo="ghcr.io/jmiahman1/sharedllm-\$service"
             if docker pull -q "\$repo:\$SHA_TAG" >/dev/null 2>&1; then
                 docker tag "\$repo:\$SHA_TAG" "\$repo:latest"
@@ -280,6 +321,12 @@ if ssh $SSH_OPTS "$HOST" << EOF
     # missing from this checkout's compose file, including another author's
     # uncommitted service.
     docker compose up -d --force-recreate $SERVICES
+
+    # The push server (docs/PUSH.md) is an upstream image no commit rebuilds,
+    # so no derived service list names it. Start it if it is not running (a
+    # first deploy, or after a reboot) or its compose entry changed; otherwise
+    # this does nothing. ntfy/server.yml edits need: docker compose restart ntfy
+    docker compose up -d ntfy || echo "[WARN] Could not start ntfy; phone notifications wait for it."
 
     echo "Waiting for application startup..."
     # Monitor logs for success or failure

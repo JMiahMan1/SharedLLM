@@ -7,10 +7,12 @@ import { LocationProvider } from '../context/LocationContext';
 
 interface RenderOptions {
   queryClient?: QueryClient;
+  /** The URL the page opens at, e.g. "/family?tab=create". */
+  route?: string;
 }
 
 export const renderWithProviders = (ui: ReactElement, options: RenderOptions = {}) => {
-  const { queryClient: providedQueryClient } = options;
+  const { queryClient: providedQueryClient, route } = options;
   const queryClient = providedQueryClient || new QueryClient({
     defaultOptions: {
       queries: {
@@ -21,7 +23,7 @@ export const renderWithProviders = (ui: ReactElement, options: RenderOptions = {
 
   const result = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={route ? [route] : undefined}>
         <AuthProvider>
           <LocationProvider>{ui}</LocationProvider>
         </AuthProvider>

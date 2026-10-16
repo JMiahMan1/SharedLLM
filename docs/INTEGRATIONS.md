@@ -19,6 +19,39 @@ are borrowed is described in `docs/PER_USER_CREDENTIALS.md`.
 
 Test calls `GET /api/config` with the token.
 
+## Home alerts
+
+Phone notices (category `home`, docs/PUSH.md) from Home Assistant entities.
+Nothing is guessed from entity names: an admin maps each entity in
+**Admin > Users & Devices > Home alerts**, stored as the `home_alert_entities`
+setting, a JSON list:
+
+```json
+[{"entity_id": "binary_sensor.front_doorbell", "event": "doorbell", "people": []},
+ {"entity_id": "cover.garage_door", "event": "garage_open", "people": ["michele"], "minutes": 20},
+ {"entity_id": "sensor.washer_power", "event": "appliance_done", "people": [], "watts": 10}]
+```
+
+`people` empty means everyone (every account but the system one). Execution's
+`home_alerts` loop reads all states every 15 seconds with the system
+account's Home Assistant login (`GET /api/states`; there is no event
+subscription) and compares each mapped entity with the previous round.
+
+| event | Entity | Sends when | Tuning |
+|---|---|---|---|
+| `doorbell` | binary sensor or `event.*` | pressed (on, or on and off between two rounds; an event entity's new timestamp) | |
+| `motion_away` | motion binary sensor | it turns on while nobody is home; at most once per 10 minutes per sensor | |
+| `garage_open` | cover (`open`) or binary sensor (`on`) | open longer than `minutes`, once per opening | `minutes` (15) |
+| `door_unlocked_night` | lock | `unlocked` for `minutes` between 22:00 and 6:00 household time, once per night per unlock | `minutes` (5) |
+| `appliance_done` | power sensor (W), or a state like `running` / `idle` | power above `watts` for at least 5 minutes, then below it for `minutes` (a pause mid-cycle does not count) | `watts` (10), `minutes` (5) |
+| `water_leak` | moisture binary sensor | `on`, including on first sight after a restart; priority 5 | |
+
+"Nobody home" is the presence tracker execution already keeps (ESPresense
+rooms, else each phone's GPS against Home Assistant's home location): true
+only when everyone it knows of is `not_home`. With no presence data at all,
+motion never notifies. Each notice carries `tag` `home:<entity_id>`, so a
+newer one replaces the older on the phone.
+
 ## Nextcloud
 
 - **Cloud Base URL**: your Nextcloud address.

@@ -40,6 +40,15 @@ def _start(event: dict) -> datetime | None:
     return start if start.tzinfo else None
 
 
+def all_day(event: dict) -> bool:
+    """Flagged all-day, or at local midnight: calendars without the flag
+    send all-day events that way."""
+    if event.get("all_day"):
+        return True
+    start = _start(event)
+    return start is not None and (start.hour, start.minute, start.second) == (0, 0, 0)
+
+
 def belongs_to(event: dict, user: str, creds: dict) -> bool:
     """Whether the event is this person's to drive to.
 
@@ -81,10 +90,7 @@ def candidates(events: list[dict], now: float) -> list[dict]:
     for ev in events:
         start = _start(ev)
         where = (ev.get("location") or "").strip()
-        if not start or not where or ev.get("all_day"):
-            continue
-        # All-day events from calendars without the flag come through as local midnight
-        if (start.hour, start.minute, start.second) == (0, 0, 0):
+        if not start or not where or all_day(ev):
             continue
         if 0 < start.timestamp() - now <= HORIZON_S:
             out.append(ev)
@@ -110,7 +116,10 @@ def reminder(event: dict, eta: dict, leave_ts: float, now: float, tz) -> dict:
     head = "Leave now" if leave_ts <= now else f"Leave by {_clock(leave_ts, tz)}"
     start = _start(event)
     return {
+        "category": "leave_by",
         "kind": "leave_by",
+        "priority": 4,
+        "tag": f"leave_by:{event.get('id') or title}",
         "title": f"{head} for {title}"[:120],
         "body": f"{drive} drive to {event['location']}; starts at {_clock(start.timestamp(), tz)}.",
         "data": {"location": event["location"], "start_time": event["start_time"], "duration_s": eta.get("duration_s")},
@@ -123,22 +132,27 @@ async def _json(session, method: str, url: str, **kw):
         return resp.status, await resp.json(content_type=None)
 
 
-async def _events_for(user: str) -> list[dict]:
-    """This person's own upcoming events (see belongs_to)."""
+async def events_for(user: str, creds: dict | None = None,
+                     range_start: str | None = None, range_end: str | None = None) -> list[dict]:
+    """This person's own events (see belongs_to), in the calendar read's
+    default window unless a range is given. Shared with calendar reminders,
+    which pass the credentials they already resolved."""
     from services.execution.handlers.calendar import handle_calendar
     from services.execution.main import resolve_internal_user
     from services.execution.schemas import CalendarRequest, UserContext
 
-    creds = await resolve_internal_user(rag_user=user)
+    creds = creds or await resolve_internal_user(rag_user=user)
     if not creds:
         return []
-    result = await handle_calendar(CalendarRequest(user_context=UserContext(**creds), action="read"))
+    result = await handle_calendar(CalendarRequest(user_context=UserContext(**creds), action="read",
+                                                   range_start=range_start, range_end=range_end))
     return [ev for ev in (getattr(result, "events", None) or []) if belongs_to(ev, user, creds)]
 
 
 async def remind_once() -> int:
     """One round over everyone; returns how many reminders were sent."""
-    from services.config import GEO_SVC_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, TELEMETRY_SVC_URL
+    from services.common import notify
+    from services.config import GEO_SVC_URL, IDENTITY_SVC_URL, INTERNAL_SECRET
     from services.execution.handlers.calendar import _get_local_tz
 
     hdr = {"X-Internal-Secret": INTERNAL_SECRET}
@@ -154,7 +168,7 @@ async def remind_once() -> int:
             if now - stamp > FRESH_S:
                 continue
             try:
-                events = candidates(await _events_for(user), now)
+                events = candidates(await events_for(user), now)
             except Exception as e:
                 log.info(f"[leave_by] no calendar for {user}: {e}")
                 continue
@@ -167,9 +181,7 @@ async def remind_once() -> int:
                 if leave_ts is None or now < leave_ts - LEAD_S:
                     continue
                 note = reminder(ev, eta, leave_ts, now, tz)
-                status, body = await _json(session, "POST", f"{TELEMETRY_SVC_URL.rstrip('/')}/api/telemetry/notify",
-                                           headers=hdr, json={"user": user, **note})
-                if status == 200 and not (body or {}).get("duplicate"):
+                if await notify.send({"user": user, **note}):
                     sent += 1
                     log.info(f"[leave_by] {user}: {note['title']}")
     return sent

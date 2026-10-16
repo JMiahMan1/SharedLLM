@@ -95,4 +95,22 @@ describe('CalendarApp', () => {
     expect(within(dialog).queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
   });
+  it('sets phone reminders with this device\'s time zone', async () => {
+    const saved: Array<Record<string, unknown>> = [];
+    server.use(
+      http.put('/api/calendar/settings', async ({ request }) => {
+        saved.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ status: 'SUCCESS', settings: saved[saved.length - 1] });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarApp />);
+
+    await user.click(await screen.findByRole('button', { name: /sources/i }));
+    const select = screen.getByLabelText('Event reminder') as HTMLSelectElement;
+    expect(select.value).toBe('30');
+    await user.selectOptions(select, '10');
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]).toEqual({ reminder_minutes: 10, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+  });
 });

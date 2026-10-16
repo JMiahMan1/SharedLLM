@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -29,6 +30,17 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Apps using Jarvis for UnifiedPush: they must be visible to receive
+         their messages and to be raised to the foreground for them. -->
+    <queries>
+        <intent>
+            <action android:name="org.unifiedpush.android.connector.MESSAGE" />
+        </intent>
+        <intent>
+            <action android:name="org.unifiedpush.android.connector.RAISE_TO_FOREGROUND" />
+        </intent>
+    </queries>
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
@@ -195,13 +207,46 @@
             </intent-filter>
         </receiver>
 
-        <!-- Holds the long poll for family chat notices and posts them as
-             system notifications (no outside push service). -->
+        <!-- Holds the push stream (/api/push/stream): Jarvis notices become
+             system notifications and UnifiedPush messages go to the apps
+             that registered for them. No outside push service. -->
         <service
-            android:name=".ChatNotifyService"
+            android:name=".PushService"
             android:exported="false"
             android:foregroundServiceType="remoteMessaging"
             android:stopWithTask="false" />
+
+        <!-- Callback and inline-reply buttons on Jarvis notifications. -->
+        <receiver
+            android:name=".PushActionReceiver"
+            android:exported="false" />
+
+        <!-- UnifiedPush distributor (AND_3). Both start disabled and are
+             enabled while someone is signed in (UnifiedPushDistributor). -->
+        <receiver
+            android:name=".UnifiedPushReceiver"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.distributor.REGISTER" />
+                <action android:name="org.unifiedpush.android.distributor.UNREGISTER" />
+                <action android:name="org.unifiedpush.android.distributor.MESSAGE_ACK" />
+            </intent-filter>
+        </receiver>
+
+        <activity
+            android:name=".UnifiedPushLinkActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="unifiedpush" android:host="link" />
+            </intent-filter>
+        </activity>
 
         <service
             android:name=".MediaPlaybackService"

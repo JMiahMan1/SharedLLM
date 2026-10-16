@@ -11,7 +11,6 @@ import android.content.pm.ServiceInfo;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
-import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
@@ -188,14 +187,7 @@ public class MediaPlaybackService extends Service {
     }
 
     private PendingIntent openApp() {
-        Intent intent = new Intent(this, MainActivity.class)
-                .setAction(Intent.ACTION_VIEW)
-                .setData(Uri.parse("jarvis://open/media"))
-                .putExtra(ChatNotifyService.EXTRA_OPEN_PATH, "/media")
-                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT
-                | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
-        return PendingIntent.getActivity(this, 0x10D2, intent, flags);
+        return PushNotifier.openIntent(this, "/media", 0x10D2);
     }
 
     @Override

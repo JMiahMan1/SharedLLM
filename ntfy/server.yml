@@ -1,0 +1,40 @@
+# ntfy push server for Jarvis (docs/PUSH.md).
+#
+# Internal only. Telemetry publishes and the gateway subscribes as the `jarvis`
+# user; Caddy forwards nothing here except POST /push/up* (UnifiedPush
+# endpoints). The jarvis user and its token are not in this file: they come
+# from NTFY_AUTH_USERS and NTFY_AUTH_TOKENS in .env (see .env.example).
+
+listen-http: ":80"
+behind-proxy: true
+
+# The web app, sign-up and login are not used; the Jarvis app is the client.
+web-root: disable
+enable-signup: false
+enable-login: false
+
+auth-file: /var/lib/ntfy/user.db
+auth-default-access: deny-all
+auth-access:
+  - "jarvis:*:rw"
+  # Outside servers deliver to UnifiedPush endpoints; nobody else reads them.
+  - "everyone:up*:wo"
+
+# Messages are kept 12h so a phone that reconnects with since=<id> catches up.
+cache-file: /var/lib/ntfy/cache.db
+cache-duration: 12h
+
+# Attachments stay off: no attachment-cache-dir.
+
+# Keepalives every 30s keep the gateway stream (and Caddy) from idling out.
+keepalive-interval: 30s
+
+# Every phone stream and every published notice is made by the one jarvis
+# user from the gateway or telemetry on the stack network, so that network is
+# exempt from request rate limiting and the subscription limit (default 30)
+# is raised. Outside UnifiedPush senders arrive through Caddy and are limited
+# by their own address (X-Forwarded-For).
+visitor-subscription-limit: 200
+visitor-request-limit-exempt-hosts: "172.26.0.0/16"
+
+log-level: info

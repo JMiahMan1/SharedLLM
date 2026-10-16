@@ -31,6 +31,10 @@ public class TokenBridgePlugin extends Plugin {
     public static final String KEY_LAST_TS = "last_ts";
     public static final String KEY_HOME_LAT = "home_lat";
     public static final String KEY_HOME_LNG = "home_lng";
+    /** This install's id for the push stream; kept through sign-outs (PushGateway). */
+    public static final String KEY_DEVICE_ID = "push_device_id";
+    /** The last ntfy message id read from the push stream (PushService). */
+    public static final String KEY_PUSH_SINCE = "push_since";
 
     // zone.home from Home Assistant
     public static final double DEFAULT_HOME_LAT = 33.16670697948413;
@@ -44,7 +48,10 @@ public class TokenBridgePlugin extends Plugin {
     public void setCredentials(PluginCall call) {
         String apiKey = call.getString("apiKey");
         String serverUrl = call.getString("serverUrl");
-        SharedPreferences.Editor ed = prefs(getContext()).edit();
+        SharedPreferences p = prefs(getContext());
+        String previousKey = p.getString(KEY_API_KEY, null);
+        String previousServer = p.getString(KEY_SERVER_URL, null);
+        SharedPreferences.Editor ed = p.edit();
         // Clients use their own API key only; drop any internal secret an
         // older build stored here.
         ed.remove("internal_secret");
@@ -54,6 +61,8 @@ public class TokenBridgePlugin extends Plugin {
             } else {
                 ed.putString(KEY_API_KEY, apiKey);
             }
+            // Another person's stream starts from now, not from this one's place.
+            if (!apiKey.equals(previousKey)) ed.remove(KEY_PUSH_SINCE);
         }
         if (serverUrl != null) {
             if (serverUrl.isEmpty()) {
@@ -64,11 +73,13 @@ public class TokenBridgePlugin extends Plugin {
         }
         ed.apply();
         if (apiKey != null) {
-            // Signing in starts family chat notifications; signing out ends them.
+            // Signing in starts notifications; signing out ends them and tells
+            // apps using Jarvis for UnifiedPush that their endpoints are gone.
             if (apiKey.isEmpty()) {
-                ChatNotifyService.stop(getContext());
+                PushService.stop(getContext());
+                UnifiedPushDistributor.signOut(getContext(), previousServer, previousKey);
             } else {
-                ChatNotifyService.start(getContext());
+                PushService.start(getContext());
             }
         }
         call.resolve();

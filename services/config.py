@@ -115,6 +115,14 @@ RAVEN_HEARTBEAT_INTERVAL = 30
 RAVEN_HUNG_THRESHOLD = 600
 RAVEN_ERROR_THRESHOLD = 5
 RAVEN_CHECK_INTERVAL = 300
+# Admin alerts (docs/PUSH.md, admin row): errors in the last 5 minutes that
+# make a spike, repeats of one error that make a spike, the free space below
+# which a data disk is "nearly full" (percent), and how long a desktop GPU
+# service must stay unreachable before admins hear about it (minutes).
+ALERT_ERROR_SPIKE_THRESHOLD = _safe_int("ALERT_ERROR_SPIKE_THRESHOLD", 20)
+ALERT_ERROR_REPEAT_THRESHOLD = _safe_int("ALERT_ERROR_REPEAT_THRESHOLD", 10)
+ALERT_DISK_FREE_PERCENT = _safe_int("ALERT_DISK_FREE_PERCENT", 10)
+ALERT_DESKTOP_DOWN_MINUTES = _safe_int("ALERT_DESKTOP_DOWN_MINUTES", 10)
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL")
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL")
 CODING_MODEL = os.getenv("CODING_MODEL")
@@ -203,6 +211,13 @@ AUDIOBOOKSHELF_PASS = os.getenv("AUDIOBOOKSHELF_PASS")
 # longer uses alpaca at all: see services/execution/voiceprint.py.
 ALPACA_WEB_URL = os.getenv("ALPACA_WEB_URL", "http://jeremiah-home-desktop.local:5000").rstrip("/")
 
+# --- ntfy push server (docs/PUSH.md) ---
+# Telemetry publishes notices and the gateway proxies phone streams through it
+# as the ntfy user `jarvis`, whose access token is NTFY_TOKEN (.env only).
+# Blank token: nothing is published and the phone stream answers 503.
+NTFY_URL = (os.getenv("NTFY_URL") or "http://ntfy:80").rstrip("/")
+NTFY_TOKEN = os.getenv("NTFY_TOKEN", "")
+
 
 # --- Gateway shorthand aliases ---
 IDENTITY_SVC = IDENTITY_SVC_URL
@@ -269,6 +284,10 @@ async def resolve_runtime_config():
         "raven_hung_threshold": "RAVEN_HUNG_THRESHOLD",
         "raven_error_threshold": "RAVEN_ERROR_THRESHOLD",
         "raven_check_interval": "RAVEN_CHECK_INTERVAL",
+        "alert_error_spike_threshold": "ALERT_ERROR_SPIKE_THRESHOLD",
+        "alert_error_repeat_threshold": "ALERT_ERROR_REPEAT_THRESHOLD",
+        "alert_disk_free_percent": "ALERT_DISK_FREE_PERCENT",
+        "alert_desktop_down_minutes": "ALERT_DESKTOP_DOWN_MINUTES",
         "default_model": "DEFAULT_MODEL",
         "assistant_model": "ASSISTANT_MODEL",
         "coding_model": "CODING_MODEL",
@@ -312,7 +331,9 @@ async def resolve_runtime_config():
                                         "RAVEN_ITERATION_TIMEOUT", "RAVEN_HEARTBEAT_INTERVAL",
                                         "RAVEN_HUNG_THRESHOLD", "RAVEN_ERROR_THRESHOLD", "RAVEN_CHECK_INTERVAL",
                                         "DNS_POLL_INTERVAL", "WORKSPACE_RUNTIME_FILE_READ_LIMIT",
-                                        "WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT"):
+                                        "WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT",
+                                        "ALERT_ERROR_SPIKE_THRESHOLD", "ALERT_ERROR_REPEAT_THRESHOLD",
+                                        "ALERT_DISK_FREE_PERCENT", "ALERT_DESKTOP_DOWN_MINUTES"):
                             value = int(float(value))
                         elif var_name == "FAST_PATH_THRESHOLD":
                             value = float(value)

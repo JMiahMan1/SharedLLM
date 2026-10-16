@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 
 import docker
 from services.config import GEO_SVC_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
-from services.control_plane import osrm_map, registry
+from services.control_plane import disk_alerts, osrm_map, registry
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
@@ -146,6 +146,23 @@ def _osrm_map_loop() -> None:
             log.error(f"[osrm-map] unexpected error: {e}")
 
 
+def _disk_alert_loop() -> None:
+    """Hourly free-space check on the data disks (disk_alerts.py)."""
+    import asyncio
+
+    from services import config as runtime_config
+
+    low: set[str] = set()
+    while True:
+        try:
+            # The threshold is an Identity setting (alert_disk_free_percent).
+            asyncio.run(runtime_config.resolve_runtime_config())
+            disk_alerts.tick(low, runtime_config.ALERT_DISK_FREE_PERCENT)
+        except Exception as e:  # never let the thread die
+            log.error(f"[disk] unexpected error: {e}")
+        time.sleep(disk_alerts.CHECK_SECONDS)
+
+
 def _reaper_loop() -> None:
     while True:
         time.sleep(SANDBOX_REAP_INTERVAL)
@@ -160,6 +177,7 @@ async def lifespan(app: FastAPI):
     t = threading.Thread(target=_reaper_loop, name="sandbox-reaper", daemon=True)
     t.start()
     threading.Thread(target=_osrm_map_loop, name="osrm-map", daemon=True).start()
+    threading.Thread(target=_disk_alert_loop, name="disk-alerts", daemon=True).start()
     log.info(f"Sandbox reaper started (interval={SANDBOX_REAP_INTERVAL}s)")
     yield
 

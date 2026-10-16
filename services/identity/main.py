@@ -14,6 +14,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from datetime import datetime as dt
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
@@ -25,7 +26,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common.http import get_client, get_client_insecure
 from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
-from services.identity import audit, voice
+from services.identity import audit, battery_alerts, push, voice
 from services.identity.crypto import decrypt, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
@@ -182,6 +183,7 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "skylight_url", "ALTER TABLE user ADD COLUMN skylight_url VARCHAR")
         _add_column("user", "avatar", "ALTER TABLE user ADD COLUMN avatar VARCHAR")
         _add_column("user", "chat_default_token", "ALTER TABLE user ADD COLUMN chat_default_token VARCHAR")
+        _add_column("user", "push_topic", "ALTER TABLE user ADD COLUMN push_topic VARCHAR")
         _add_column("user", "skylight_email", "ALTER TABLE user ADD COLUMN skylight_email VARCHAR")
         _add_column("user", "skylight_pass_enc", "ALTER TABLE user ADD COLUMN skylight_pass_enc VARCHAR")
         _add_column("user", "git_url", "ALTER TABLE user ADD COLUMN git_url VARCHAR")
@@ -601,6 +603,10 @@ def require_api_key(authorization: str = Header(None), session: Session = Depend
     if not user:
         raise HTTPException(status_code=401, detail="Invalid API Key")
     return user
+
+
+# Push topics, notification preferences, UnifiedPush (docs/PUSH.md)
+app.include_router(push.build_router(get_session, require_api_key, require_internal))
 
 # Internal API
 
@@ -1460,6 +1466,7 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     if stale_voice:
         session.delete(stale_voice)
         session.commit()
+    push.forget_user(session, user.username)
     _audit(request, session, "user.delete", username.lower(), actor=admin,
            changes=[{"field": "account", "change": "cleared"}])
     return {"status": "SUCCESS"}
@@ -3173,8 +3180,11 @@ def update_calendar_settings(
 
     Accepted keys: default (integration name), disabled (list[str]),
     priority (dict[name->int]), ical_urls (list[str]), people (list of
-    calendar-owner person records: {id, name, color, accounts}).
-    Unknown keys are ignored; missing keys are preserved.
+    calendar-owner person records: {id, name, color, accounts}),
+    reminder_minutes (int, minutes before an event its phone reminder goes
+    out; 0 = off, unset = 30) and timezone (IANA name the reminders use;
+    unset = the household's). Unknown keys are ignored; missing keys are
+    preserved.
     """
     row = session.exec(
         select(UserCalendarSetting).where(UserCalendarSetting.username == user.username)
@@ -3184,7 +3194,16 @@ def update_calendar_settings(
         session.add(row)
 
     data = json.loads(row.data) if (row and row.data) else {}
-    allowed = {"default", "disabled", "priority", "ical_urls", "people"}
+    allowed = {"default", "disabled", "priority", "ical_urls", "people", "reminder_minutes", "timezone"}
+    if "reminder_minutes" in (body or {}):
+        minutes = body["reminder_minutes"]
+        if isinstance(minutes, bool) or not isinstance(minutes, int) or not 0 <= minutes <= 1440:
+            raise HTTPException(status_code=422, detail="reminder_minutes must be a whole number from 0 to 1440")
+    if (body or {}).get("timezone"):
+        try:
+            ZoneInfo(str(body["timezone"]))
+        except (ZoneInfoNotFoundError, ValueError):
+            raise HTTPException(status_code=422, detail=f"Unknown timezone: {body['timezone']}") from None
     for key, value in (body or {}).items():
         if key in allowed:
             data[key] = value
@@ -4679,6 +4698,8 @@ class LocationUpdate(BaseModel):
     speed: float | None = None
     bearing: float | None = None
     battery: int | float | None = None
+    #: Newer app builds say whether the phone is charging (low battery notice).
+    charging: bool | None = None
     timestamp: float | None = None
     daily_steps: int | None = None
 
@@ -4861,9 +4882,21 @@ async def update_user_location(
         "timestamp": location.timestamp or time.time(),
         "updated_at": time.time(),
     }
+    low_battery = None
     with Session(engine) as session:
-        key = f"user_location:{_resolve_location_user_key(session, user_id)}"
+        person = _resolve_location_user_key(session, user_id)
+        key = f"user_location:{person}"
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        try:
+            previous = json.loads(existing.value) if existing else None
+        except (TypeError, ValueError):
+            previous = None
+        announce, location_data[battery_alerts.SENT_FIELD] = battery_alerts.step(
+            previous, location.battery, location.charging)
+        if announce:
+            owner = session.exec(select(User).where(User.username == person)).first()
+            family = [u.username for u in session.exec(select(User)).all() if not u.is_system_default]
+            low_battery = (person, (owner.display_name if owner else "") or person.title(), family)
         if existing:
             existing.value = json.dumps(location_data)
         else:
@@ -4876,6 +4909,9 @@ async def update_user_location(
         session.commit()
     # No coordinates in the log: it is kept and read far more widely than the map.
     log.info(f"[location] Updated location for {user_id} (±{int(location.accuracy or 0)} m)")
+    if low_battery:
+        name, display, family = low_battery
+        await battery_alerts.announce(name, display, location.battery, family)
 
     try:
         await _forward_location_to_ha(user_id, location)

@@ -39,37 +39,31 @@ def _parse_duration(text: str | None) -> timedelta | None:
 
 
 async def notify_timer_done(user: str, timer_data: dict) -> bool:
-    """Put "<title> is done" on the person's phone (telemetry outbox).
+    """Put "<title> is done" on the person's phone (category ``timers``).
 
     A timer set from the app has no speaker, and firing one used to do
-    nothing at all: this notice is what makes it ring somewhere.
+    nothing at all: this notice is what makes it ring somewhere. Its buttons
+    are gateway push callbacks (services/gateway/push_callbacks.py) that act
+    as the person: Stop, Snooze 5 min and +1 min.
     """
-    import aiohttp
-
-    from services.config import INTERNAL_SECRET, TELEMETRY_SVC_URL
+    from services.common import notify
 
     title = str(timer_data.get("title") or "Timer").strip() or "Timer"
-    is_alarm = timer_data.get("type") == "alarm"
-    payload = {
-        "user": user,
-        "kind": "alarm" if is_alarm else "timer",
-        "title": f"{'Alarm' if is_alarm else 'Timer'}: {title}",
-        "body": f"{title} is done" if not is_alarm else f"{title}",
-        "data": {"url": "/communication"},
+    kind = "alarm" if timer_data.get("type") == "alarm" else "timer"
+    timer_id = timer_data.get("id")
+    again = {"title": title, "type": kind, "target_device": timer_data.get("target_device")}
+    return await notify.send(notify.notice(
+        user, "timers", f"{kind.title()}: {title}", f"{title} is done" if kind == "timer" else title,
+        url="/communication", kind=kind, priority=4, tag=f"timer:{timer_id}",
+        actions=[
+            # A recurring alarm stays scheduled: Stop only clears this ring.
+            notify.callback_action("Stop", "timer_stop", {} if timer_data.get("recurrence") else {"id": timer_id}),
+            notify.callback_action("Snooze 5 min", "timer_snooze", again),
+            notify.callback_action("+1 min", "timer_add_minute", again),
+        ],
         # One notice per firing, however often the scheduler retries it.
-        "once": f"timer:{timer_data.get('id')}:{timer_data.get('expires_at')}",
-    }
-    try:
-        async with aiohttp.ClientSession() as session, session.post(
-            f"{TELEMETRY_SVC_URL.rstrip('/')}/api/telemetry/notify",
-            json=payload,
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=aiohttp.ClientTimeout(total=10),
-        ) as resp:
-            return resp.status == 200
-    except Exception as e:  # the speaker alert still runs
-        log.warning(f"[timer] phone notice for {user} failed: {e}")
-        return False
+        once=f"timer:{timer_id}:{timer_data.get('expires_at')}",
+    ))
 
 
 async def get_redis():

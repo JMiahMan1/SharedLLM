@@ -98,6 +98,7 @@ from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, S
 from services.gateway.skylight_scope import ChoreScopeError, resolve_chore_scope
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas, tool_catalog
 from services.gateway.external_agent import run_external_agent
+from services.gateway import family_safety, notices, push_routes
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
 from services.shared.media_token import sign, verify
@@ -820,6 +821,8 @@ app.add_middleware(
 )
 
 app.include_router(info_router)
+app.include_router(family_safety.router)
+app.include_router(push_routes.router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -2575,6 +2578,7 @@ def _response_log_level(status_code: object) -> str:
 _ROUTINE_POLL_PREFIXES = (
     "/health",
     "/api/telemetry/notifications/wait",
+    "/api/push/stream",
     "/api/users/location",
     "/api/admin/logs",
     "/api/music/songs/",
@@ -5580,6 +5584,10 @@ async def music_song_start(request: Request):
         result = await resp.json()
     except Exception as exc:  # noqa: BLE001 - reported to the caller
         return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"})
+    user = await _user_id_from_request(request)
+    if resp.status < 400 and isinstance(result, dict) and result.get("id") and user:
+        # The worker tells them when it is written (notices.check_songs_once).
+        await notices.song_started(str(result["id"]), user, str(body["prompt"]))
     return _music_job_answer(resp.status, result)
 
 
@@ -5613,6 +5621,7 @@ async def music_song_cancel(request: Request, job_id: str):
         result = await resp.json()
     except Exception as exc:  # noqa: BLE001 - reported to the caller
         return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"})
+    await notices.song_forgotten(job_id)
     return _music_job_answer(resp.status, result)
 
 
@@ -5652,6 +5661,8 @@ async def sd_image_edit_proxy(request: Request):
         return JSONResponse(status_code=resp.status if resp.status != 200 else 502, content=result)
     b64 = (result.get("detail") or {}).get("b64_json")
     if result.get("status") == "SUCCESS" and b64:
+        if user := await _user_id_from_request(request):
+            asyncio.create_task(notices.picture_ready(user))
         return {"status": "SUCCESS", "data": [{"b64_json": b64}], "model": result["detail"].get("model")}
     return {"status": "FAILURE", "message": result.get("message") or "The image backend did not return a picture."}
 
@@ -7181,7 +7192,12 @@ async def execute_raven_mission(id: int, request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
+    return await dispatch_admin_mission(id, creds)
 
+
+async def dispatch_admin_mission(id: int, creds: dict) -> dict:
+    """Run a mission waiting in Raven Ops as ``creds`` (an admin): Execute in
+    Raven Ops and Approve on the phone notice both come here."""
     async with borrow_http_client() as client:
         # Get mission
         resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions", headers={"X-Internal-Secret": INTERNAL_SECRET})
@@ -9698,31 +9714,6 @@ async def proxy_set_step_goal(request: Request):
     raise HTTPException(status_code=resp.status, detail=detail[:200])
 
 
-@app.get("/api/geo/presence-alerts")
-async def get_presence_alerts(request: Request):
-    """Whether you get family arrival/departure notices (on by default)."""
-    user = await _require_authenticated(request)
-    async with shared_http_client() as client:
-        resp = await client.get(f"{GEO_SVC}/presence-alerts/{user}", headers={"X-Internal-Secret": INTERNAL_SECRET},
-                                timeout=aiohttp.ClientTimeout(total=5.0))
-        if resp.status == 200:
-            return await resp.json()
-    await _raise_scoped_failure(resp, "Could not read the setting")
-
-
-@app.put("/api/geo/presence-alerts")
-async def put_presence_alerts(request: Request):
-    """Switch your own family arrival/departure notices on or off."""
-    user = await _require_authenticated(request)
-    body = await request.json()
-    async with shared_http_client() as client:
-        resp = await client.put(f"{GEO_SVC}/presence-alerts/{user}", json={"enabled": bool(body.get("enabled", True))},
-                                headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=5.0))
-        if resp.status == 200:
-            return await resp.json()
-    await _raise_scoped_failure(resp, "Could not save the setting")
-
-
 @app.get("/api/geo/eta")
 async def get_geo_eta(request: Request, user_id: str | None = None, to: str = "home"):
     """Drive time by road from someone's latest position to a place (an HA
@@ -11168,6 +11159,9 @@ async def publish_app_update(request: Request):
     if apk_code is not None:
         meta["apk_version_code"] = apk_code
     (APP_UPDATES_DIR / "version.json").write_text(json.dumps(meta, indent=2))
+    if apk_published and apk_code is not None:
+        # Once per build, however many times CI publishes it.
+        await notices.app_update_published(apk_code, (info or {}).get("version_name"), str(notes))
     return {"status": "ok", "metadata": meta}
 
 

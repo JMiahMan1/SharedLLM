@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Brain, Brush, ChevronRight, Crown, Gamepad2, MessageCircle } from 'lucide-react';
 import ChatPanel from '../components/chat/ChatPanel';
 import ArcadeGames from '../components/family/ArcadeGames';
 import DrawCanvas from '../components/family/DrawCanvas';
 import MakeMusic from '../components/family/MakeMusic';
+import SafetyButtons from '../components/family/SafetyButtons';
 import Recipes from './Recipes';
 
 type Tab = 'chat' | 'games' | 'create';
@@ -28,10 +29,13 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof MessageCircle }> = [
  * Chat is Nextcloud Talk (the same rooms as the Nextcloud app). Games are the
  * arcade and the Bible games; Create is drawing, songs and the family
  * cookbook, and a drawing or a song can be sent straight into a conversation.
+ * "On my way" and SOS sit beside the title on every tab. ``?tab=create`` opens
+ * a tab directly (a "your song is ready" notice links there).
  * See docs/FAMILY_HUB.md.
  */
 export default function Family() {
-  const [tab, setTab] = useState<Tab>('chat');
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => TABS.find((t) => t.id === searchParams.get('tab'))?.id ?? 'chat');
 
   return (
     <div
@@ -49,6 +53,7 @@ export default function Family() {
           their labels to "Ch…". */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-1">
         <h1 className="shrink-0 text-2xl font-bold tracking-tight text-white">Family</h1>
+        <SafetyButtons />
         <div
           className="flex grow justify-end"
         >

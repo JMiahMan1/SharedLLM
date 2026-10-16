@@ -3,10 +3,9 @@
 Every few seconds each family member's own Talk conversation list is read
 with their own Nextcloud login (so it covers every conversation *they* are
 in, not only the system account's), and a conversation whose last message is
-new, unread, and from someone else becomes one notice in that person's
-telemetry outbox. The phone picks outbox notices up natively (a long poll to
-``/api/telemetry/notifications/wait``) and shows them as system notifications;
-nothing goes through an outside push service.
+new, unread, and from someone else becomes one ``chat`` notice for that
+person through telemetry (docs/PUSH.md), tagged per conversation so a newer
+message replaces the older one, with Reply (inline) and Open buttons.
 
 A person's first pass only records where every conversation stands, so a
 new family member does not get their whole history as a burst of
@@ -20,6 +19,8 @@ import re
 from typing import Any
 
 import aiohttp
+
+from services.common import notify
 
 log = logging.getLogger("gateway.chat_notify")
 
@@ -51,8 +52,9 @@ def preview(message: str | None) -> str:
     return text or "New message"
 
 
-def notice_for(conv: dict[str, Any], me: str) -> dict[str, Any] | None:
-    """The notice a conversation summary deserves for ``me``, or None."""
+def notice_for(conv: dict[str, Any], me: str, user: str = "") -> dict[str, Any] | None:
+    """The notice for ``user`` (Nextcloud login ``me``) a conversation summary
+    deserves, or None."""
     actor = (conv.get("last_message_actor_id") or "").lower()
     if not conv.get("last_message_id") or conv.get("last_message_system"):
         return None
@@ -66,20 +68,28 @@ def notice_for(conv: dict[str, Any], me: str) -> dict[str, Any] | None:
     one_to_one = conv.get("type") == 1
     body = preview(conv.get("last_message"))
     unread = int(conv.get("unread_messages") or 0)
-    return {
-        "kind": "chat",
-        "title": sender if one_to_one else room,
-        "body": body if one_to_one else f"{sender}: {body}",
-        "data": {
-            "token": conv.get("token"),
+    token = conv.get("token")
+    url = f"/family?chat={token}"
+    return notify.notice(
+        user, "chat", sender if one_to_one else room, body if one_to_one else f"{sender}: {body}",
+        url=url,
+        priority=4 if one_to_one or conv.get("unread_mention") else 3,
+        # A newer message in the same conversation replaces this one.
+        tag=f"chat:{token}",
+        actions=[
+            notify.callback_action("Reply", "chat_reply", {"token": token}, reply=True),
+            notify.view_action(url),
+        ],
+        data={
+            "token": token,
             "message_id": conv.get("last_message_id"),
             "conversation": room,
             "sender": sender,
             "unread": unread,
             "mention": bool(conv.get("unread_mention")),
-            "url": f"/family?chat={conv.get('token')}",
         },
-    }
+        once=f"chat:{token}:{conv.get('last_message_id')}",
+    )
 
 
 async def _json(resp: aiohttp.ClientResponse) -> Any:
@@ -135,19 +145,16 @@ async def _check_user(r, client, username: str, *, identity, execution, telemetr
         before = seen.get(token)
         if before is not None and int(before) >= int(msg_id):
             continue
-        notice = None if (before is None and not primed) else notice_for(conv, me)
+        notice = None if (before is None and not primed) else notice_for(conv, me, username)
         if notice is not None:
-            payload = {"user": username, **notice, "once": f"chat:{token}:{msg_id}"}
-            async with client.post(f"{telemetry}/api/telemetry/notify", json=payload,
-                                   headers=headers, timeout=timeout) as resp:
-                if resp.status != 200:
-                    # Not marked handled: the next pass retries, and the
-                    # "once" key keeps a retry from showing it twice. Marking
-                    # it first lost every message that arrived while
-                    # telemetry was restarting.
-                    log.warning(f"[chat-notify] notify {username} failed: HTTP {resp.status}")
-                    continue
-                sent += 1
+            if not await notify.send(notice, client=client, telemetry=telemetry,
+                                     secret=headers["X-Internal-Secret"]):
+                # Not marked handled: the next pass retries, and the "once"
+                # key keeps a retry from showing it twice. Marking it first
+                # lost every message that arrived while telemetry was
+                # restarting.
+                continue
+            sent += 1
         # A user's first pass only records where each conversation stands.
         await r.hset(key, token, str(msg_id))
     if not primed:

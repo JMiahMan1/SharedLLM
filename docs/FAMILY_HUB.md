@@ -45,19 +45,36 @@ itself on every save; its calendar only printed "Loaded N events").
 - **Phone notifications** for new family messages (no outside push service):
   a gateway worker (`services/gateway/chat_notify.py`) reads each member's own
   Talk list and queues one notice per new, unread message from someone else;
-  the Android app holds a long poll on
-  `GET /api/telemetry/notifications/wait` (`ChatNotifyService`) and posts
-  grouped system notifications; tapping opens `/family?chat=<token>`. A
+  telemetry publishes it to ntfy, the Android app reads it from the push
+  stream `GET /api/push/stream` (`PushService`, see [PUSH.md](PUSH.md)) and
+  posts one conversation notification per chat with inline reply; tapping
+  opens `/family?chat=<token>`. A
   person's first pass only records where conversations stand; after that a
   brand-new conversation's first message is announced. A Jarvis answer is
   announced as "Jarvis" to the whole room, including the person who asked.
+- **Family safety** (`components/family/SafetyButtons.tsx`, beside the title
+  on every tab, 44 px targets on phone and desktop): **On my way**
+  (`POST /api/family/on-my-way`) tells everyone else you are heading home,
+  with the drive time by road from geo when it has your position; **SOS**
+  asks first, then `POST /api/family/sos` `{"confirm": true}` sends a
+  priority 5 `family_safety` notice to everyone else with your last position
+  (how long ago, coordinates, an OpenStreetMap link). Telemetry delivers it
+  even to people who switched family safety off. Both live in
+  `services/gateway/family_safety.py`. The other safety notices: identity
+  tells the family once per discharge when a phone drops below 15% and is not
+  charging (`services/identity/battery_alerts.py`, `LOW_BATTERY_PCT`; a
+  charging report, or a higher reading than the last, arms it again), and geo
+  sends important places and long stops (GEO_SERVICE.md, Notices).
+- **Job notices** (category `jobs`): a finished song (with "expires in 30
+  minutes"), Jarvis's improved drawing and a finished audiobook conversion
+  notify whoever asked; the first two open `/family?tab=create`.
 - **No standing notification for background work**: Android requires a
   notice while a service runs in the background. Location sharing and the chat
   connection post theirs to the "Background services" channel
   (`BackgroundNotice.java`), which the app creates turned off. On Android 13
   and later the services keep running and appear only under "Active apps" at
   the bottom of the notification shade. Chat messages and family notices use
-  their own channels and pop up normally, clearing once read. Android 12 and
+  their own channel per kind and pop up normally, clearing once read. Android 12 and
   earlier may show a system "running in the background" notice instead.
   Steps need no service of their own: the hardware step counter keeps counting
   and is read on the location service's periodic wake-ups.
