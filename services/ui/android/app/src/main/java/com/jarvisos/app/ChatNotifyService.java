@@ -39,7 +39,6 @@ import org.json.JSONObject;
  */
 public class ChatNotifyService extends Service {
     private static final String TAG = "ChatNotify";
-    private static final String CHANNEL_SERVICE = "chat_connection";
     private static final String CHANNEL_CHAT = "family_chat";
     private static final String CHANNEL_NOTICES = "family_notices";
     private static final String GROUP_CHAT = "com.jarvisos.app.FAMILY_CHAT";
@@ -277,13 +276,6 @@ public class ChatNotifyService extends Service {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm == null) return;
-        if (nm.getNotificationChannel(CHANNEL_SERVICE) == null) {
-            NotificationChannel ch = new NotificationChannel(
-                    CHANNEL_SERVICE, "Family chat connection", NotificationManager.IMPORTANCE_MIN);
-            ch.setDescription("Keeps Jarvis listening for family messages. Hiding this does not stop them.");
-            ch.setShowBadge(false);
-            nm.createNotificationChannel(ch);
-        }
         if (nm.getNotificationChannel(CHANNEL_CHAT) == null) {
             NotificationChannel ch = new NotificationChannel(
                     CHANNEL_CHAT, "Family chat", NotificationManager.IMPORTANCE_HIGH);
@@ -299,15 +291,9 @@ public class ChatNotifyService extends Service {
     }
 
     private void startForegroundCompat() {
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_SERVICE)
-                .setSmallIcon(android.R.drawable.sym_action_chat)
-                .setContentTitle("Family chat")
-                .setContentText("Listening for new messages")
-                .setOngoing(true)
-                .setPriority(NotificationCompat.PRIORITY_MIN)
-                .setCategory(NotificationCompat.CATEGORY_SERVICE)
-                .setContentIntent(openIntent("/family", SERVICE_NOTIFICATION_ID))
-                .build();
+        Notification notification = BackgroundNotice.build(
+                this, android.R.drawable.sym_action_chat, "Listening for family messages",
+                openIntent("/family", SERVICE_NOTIFICATION_ID));
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(SERVICE_NOTIFICATION_ID, notification,
