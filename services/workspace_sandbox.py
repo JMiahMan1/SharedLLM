@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import os
 import re
 import threading
@@ -588,13 +589,18 @@ async def run_workspace_cmd(
         # relative write landed outside the workspace. It is also the clamped
         # value, so an escape attempt is contained on the host as well.
         return await _host_exec(cmd, cwd=container_cwd, env=env, shell=shell, timeout=timeout)
+    # The time limit is enforced inside the container. wait_for alone only
+    # stopped waiting: exec_run has no timeout, so a command that never exits
+    # (a dev server, tail -f, a prompt) kept its thread and process for good,
+    # and enough of them used up the thread pool the whole service shares.
+    limited = ["timeout", "-k", "5", str(max(1, math.ceil(timeout))), *real_cmd]
     try:
         rc, out, err = await asyncio.wait_for(
             asyncio.to_thread(
                 _exec_blocking,
                 workspace_id,
                 host_path,
-                real_cmd,
+                limited,
                 cwd=container_cwd,
                 env=env,
                 uid=uid,
@@ -621,6 +627,8 @@ async def run_workspace_cmd(
             shell=shell,
             timeout=timeout,
         )
+    if rc == 124:
+        err = (err + "\n" if err else "") + f"[Sandbox] Command timed out after {timeout}s"
     return {"args": real_cmd, "returncode": rc, "stdout": out, "stderr": err}
 
 

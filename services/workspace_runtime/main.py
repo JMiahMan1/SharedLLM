@@ -1,5 +1,6 @@
 import asyncio
 import fnmatch
+import functools
 import hashlib
 import hmac
 import io
@@ -15,6 +16,7 @@ import tempfile
 import threading
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timezone
 from pathlib import Path
@@ -69,6 +71,27 @@ def get_async_sync_lock(workspace_id: str) -> asyncio.Lock:
         if workspace_id not in ASYNC_SYNC_LOCKS:
             ASYNC_SYNC_LOCKS[workspace_id] = asyncio.Lock()
         return ASYNC_SYNC_LOCKS[workspace_id]
+
+@asynccontextmanager
+async def held_workspace_lock(workspace_id: str):
+    """Hold a workspace's sync lock from async code without blocking the loop.
+
+    The lock is a threading.RLock shared with the sync threads (Nextcloud sync,
+    uploads, file writes), and an RLock must be released by the thread that took
+    it. Taking it on the event loop froze the whole service, /health included,
+    for as long as a sync held it. Here one dedicated thread takes it, runs
+    whatever needs it (``run_locked(fn, *args)``; write_file takes the same lock
+    again, which is fine on that thread) and releases it.
+    """
+    lock = get_workspace_lock(workspace_id)
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"ws-lock-{workspace_id}") as holder:
+        await loop.run_in_executor(holder, lock.acquire)
+        try:
+            yield lambda fn, *args: loop.run_in_executor(holder, functools.partial(fn, *args))
+        finally:
+            await loop.run_in_executor(holder, lock.release)
+
 
 WORKSPACE_REGISTRY_PATH = _WRP or "/app/config/workspaces.json"
 _DEFAULT_WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_RUNTIME_ROOT", "/workspace")).resolve()
@@ -2486,7 +2509,7 @@ def delete_file(req: FileDeleteRequest, x_internal_secret: str | None = Header(d
 @app.post("/provider/scan")
 async def provider_scan(req: ProviderScanRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = await asyncio.to_thread(_resolve_workspace, req)
     _require_workspace_capability(workspace, "read")
     identity = workspace.get("resolved_identity") or {}
     provider_kind, provider_settings, provider_path = _workspace_provider_binding(workspace, identity)
@@ -2511,7 +2534,7 @@ async def provider_scan(req: ProviderScanRequest, x_internal_secret: str | None 
 @app.post("/provider/sync/file")
 async def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = await asyncio.to_thread(_resolve_workspace, req)
     _require_workspace_capability(workspace, "write")
     req.relative_path = _strip_workspace_path_prefix(req.relative_path, workspace)
     workspace_path = Path(workspace["resolved_path"])
@@ -2558,7 +2581,7 @@ async def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: st
 @app.post("/provider/sync/directory")
 async def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = await asyncio.to_thread(_resolve_workspace, req)
     _require_workspace_capability(workspace, "write")
     workspace_path = Path(workspace["resolved_path"])
 
@@ -2602,7 +2625,8 @@ async def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_
 @app.post("/workflow/write-sync-commit")
 async def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_secret: str | None = Header(default=None)) -> dict:
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    # Resolving can wait on Identity (up to 60 s) or clone a missing repo.
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "write")
 
     # The git operations run inside the per-workspace sandbox container
@@ -2617,9 +2641,7 @@ async def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_inte
         git_push,
     )
 
-    lock = get_workspace_lock(workspace["id"])
-    lock.acquire()
-    try:
+    async with held_workspace_lock(workspace["id"]) as run_locked:
         ws_id = workspace.get("id", "")
         with Session(engine) as session:
             ws = session.get(Workspace, ws_id)
@@ -2663,7 +2685,8 @@ async def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_inte
                     detail="pytest_targets are required before autonomous push so Raven can prove the branch is review-ready.",
                 )
 
-        write_result = write_file(
+        write_result = await run_locked(
+            write_file,
             FileWriteRequest(
                 workspace_id=req.workspace_id,
                 local_path=req.local_path,
@@ -2813,8 +2836,6 @@ async def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_inte
             "provider_sync": provider_sync_result,
             "review": review,
         }
-    finally:
-        lock.release()
 
 
 @app.post("/tests/pytest")
@@ -2875,6 +2896,34 @@ def _github_signature_matches(signature: str | None, body: bytes, secret: str) -
         return False
     expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(signature, expected)
+
+
+WEBHOOK_PULL_TIMEOUT_S = 120
+WEBHOOK_CLONE_TIMEOUT_S = 600
+
+
+def _clear_workspace_dir(workspace_path: Path, workspace_id: str, dir_contents: list[Path]) -> None:
+    """Empty a workspace folder before a fresh clone (runs in a worker thread)."""
+    # Remove entire directory tree and recreate it to avoid permission issues
+    for item in dir_contents:
+        try:
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+        except PermissionError:
+            # If we can't delete individual items, remove the whole tree
+            log.warning(f"Permission denied clearing {workspace_id}, using fallback removal")
+            try:
+                shutil.rmtree(workspace_path)
+                workspace_path.mkdir(parents=True, exist_ok=True)
+            except Exception as fallback_err:
+                log.error(f"Fallback removal also failed for {workspace_id}: {fallback_err}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to clear workspace directory: {fallback_err!s}"
+                ) from None
+            break
 
 
 @app.post("/webhook/git-pull/{workspace_id}")
@@ -2954,7 +3003,7 @@ async def git_pull_webhook(
                      raise HTTPException(status_code=400, detail="Cannot clone workspace: repo_url is missing")
 
                 # Check for uncommitted changes if it's a git repo
-                git_status_result = _run_command(workspace_path, ["git", "status", "--porcelain"])
+                git_status_result = await asyncio.to_thread(_run_command, workspace_path, ["git", "status", "--porcelain"])
                 if git_status_result["returncode"] == 0 and git_status_result["stdout"].strip():
                     # Git repo exists but has uncommitted changes
                     untracked = [line.strip() for line in git_status_result["stdout"].strip().split("\n") if line.strip()]
@@ -2970,42 +3019,23 @@ async def git_pull_webhook(
                     )
 
                 # Directory exists but is not a git repo - check if it's empty or has content
-                dir_contents = list(workspace_path.iterdir())
+                dir_contents = await asyncio.to_thread(lambda: list(workspace_path.iterdir()))
                 if dir_contents:
                     log.info(f"Workspace {workspace_id} directory has existing content ({len(dir_contents)} items), clearing before clone...")
-                    import shutil
-                    # Remove entire directory tree and recreate it to avoid permission issues
-                    for item in dir_contents:
-                        try:
-                            if item.is_dir():
-                                shutil.rmtree(item)
-                            else:
-                                item.unlink()
-                        except PermissionError:
-                            # If we can't delete individual items, remove the whole tree
-                            log.warning(f"Permission denied clearing {workspace_id}, using fallback removal")
-                            try:
-                                shutil.rmtree(workspace_path)
-                                workspace_path.mkdir(parents=True, exist_ok=True)
-                            except Exception as fallback_err:
-                                log.error(f"Fallback removal also failed for {workspace_id}: {fallback_err}")
-                                raise HTTPException(
-                                    status_code=500,
-                                    detail=f"Failed to clear workspace directory: {fallback_err!s}"
-                                ) from None
-                            break
+                    await asyncio.to_thread(_clear_workspace_dir, workspace_path, workspace_id, dir_contents)
 
                 # Use the HTTPS redirector for the clone too if needed
                 clone_url = _git_webhook_pull_remote(repo_url, remote_name)
                 args = ["git", "clone", "-b", default_branch, clone_url, "."]
-                result = _run_command(workspace_path, args)
+                # A real repository takes longer than the 30 s default to clone.
+                result = await asyncio.to_thread(_run_command, workspace_path, args, WEBHOOK_CLONE_TIMEOUT_S)
                 if result["returncode"] != 0:
                     raise HTTPException(status_code=500, detail=f"Initial clone failed: {result['stderr']}")
 
                 return {"status": "SUCCESS", "message": f"Successfully cloned and initialized {workspace_id}", "branch": default_branch}
 
             log.info(f"Webhook git pull: resolved workspace_path={workspace_path}, remote_name={remote_name}")
-            remote_url = _git_remote_url(workspace_path, remote_name)
+            remote_url = await asyncio.to_thread(_git_remote_url, workspace_path, remote_name)
 
         log.info(f"Webhook triggered git pull for workspace {workspace_id} on {remote_name}/{default_branch}")
 
@@ -3014,7 +3044,9 @@ async def git_pull_webhook(
         # and with no strategy configured git refuses the pull outright when the
         # branches have diverged, which is not something a push can resolve.
         args = ["git", "pull", "--ff-only", _git_webhook_pull_remote(remote_url, remote_name), default_branch]
-        result = _run_command(workspace_path, args)
+        # Off the event loop: a push triggers this from outside, and a slow
+        # pull used to stall every other request, /health included.
+        result = await asyncio.to_thread(_run_command, workspace_path, args, WEBHOOK_PULL_TIMEOUT_S)
 
         if result["returncode"] == 0 and match.nextcloud_path and (match.auto_backup_enabled or match.sync_mode in ("nextcloud", "git_and_nextcloud")):
             log.info(f"Triggering automatic Nextcloud backup for {workspace_id} to {match.nextcloud_path}")
