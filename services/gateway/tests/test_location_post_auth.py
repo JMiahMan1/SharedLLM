@@ -61,3 +61,15 @@ def test_an_admin_may_post_for_someone(monkeypatch):
     sent = _setup(monkeypatch, {"user": "jeremiah", "is_admin": True})
     assert TestClient(app).post("/api/users/michele/location", json=FIX).status_code == 200
     assert sent[-1][0].endswith("/api/users/michele/location")
+
+
+def test_reading_a_location_needs_a_sign_in(monkeypatch):
+    """GET /api/users/{id}/location answered anyone, so a family member's
+    position was readable from the internet."""
+    sent = _setup(monkeypatch, None)
+
+    async def nobody(request):
+        return None
+    monkeypatch.setattr(gateway_main, "_user_id_from_request", nobody)
+    assert TestClient(app).get("/api/users/michele/location").status_code == 401
+    assert sent == []

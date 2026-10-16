@@ -9,7 +9,7 @@ export interface ServiceDetail {
 }
 
 export interface HealthStatus {
-  status: 'READY' | 'NOT_READY';
+  status: 'READY' | 'DEGRADED' | 'NOT_READY';
   services: Record<string, string>;
   service_details?: Record<string, ServiceDetail>;
 }
@@ -60,7 +60,10 @@ export interface Workspace {
   last_sync_error?: string | null;
 }
 
-/** Where a workspace's files live. "git" is a legacy alias of local_git_authoritative. */
+/**
+ * Where a workspace's files live. Both git modes are git-only; "git" follows its
+ * remote (push webhooks fast-forward it), local_git_authoritative does not.
+ */
 export type WorkspaceSyncMode = 'local_git_authoritative' | 'git' | 'nextcloud' | 'git_and_nextcloud';
 export type WorkspaceSyncDirection = 'both' | 'push' | 'pull';
 
@@ -369,7 +372,8 @@ export interface EsphomeDevice {
 
 export interface SearchResult {
   answer?: string;
-  files?: Array<{ name: string; path: string }>;
+  /** One per hit; `snippet` is the hit's own text, `collection` where it lives. */
+  files?: Array<{ name: string; path: string; snippet?: string; collection?: string }>;
 }
 
 export interface GatewayConfig {
@@ -559,7 +563,6 @@ export interface RavenConfig {
   active_coding_model: string | null;
   system_default_tts_voice: string;
   system_default_tts_engine: string;
-  cleanup_interval_seconds?: number;
   raven_max_total_seconds?: number;
 }
 
@@ -676,6 +679,8 @@ export interface CheckUpdatesResponse {
   checked: number;
   updates_available: number;
   services: ImageUpdateCheck[];
+  /** Set when the registry could not be reached, so no update can be ruled out. */
+  check_error?: string | null;
 }
 
 export interface SystemHealthStatus {
@@ -939,11 +944,6 @@ export interface GitLogResponse {
   entries: GitLogEntry[];
 }
 
-export interface StorageMirrorResponse {
-  status: string;
-  message?: string;
-}
-
 export interface WorkspaceFileReadResponse {
   content: string;
   path: string;
@@ -952,29 +952,6 @@ export interface WorkspaceFileReadResponse {
 export interface WorkspaceFileWriteRequest {
   path: string;
   content: string;
-}
-
-export interface WorkspaceFileWriteResponse {
-  status: string;
-  message: string;
-}
-
-export interface PytestRequest {
-  workspace_id: string;
-  test_path?: string;
-  args?: string[];
-}
-
-export interface PytestResponse {
-  status: string;
-  output: string;
-  passed: boolean;
-}
-
-export interface WorkflowWriteSyncCommitRequest {
-  workspace_id: string;
-  branch?: string;
-  message?: string;
 }
 
 export interface VolumeInfo {
@@ -1011,29 +988,6 @@ export interface RagIndexedPathsResponse {
 export interface RagSyncFilesRequest {
   paths: string[];
   recursive?: boolean;
-}
-
-export interface RagSyncCapabilitiesRequest {
-  force?: boolean;
-}
-
-export interface WorkspaceShellRequest {
-  workspace_id: string;
-  command: string;
-  cwd?: string;
-}
-
-export interface WorkspaceShellResponse {
-  output: string;
-  exit_code: number;
-}
-
-export interface WorkspaceFilePatchExecuteRequest {
-  workspace_id: string;
-  file_path: string;
-  patch: PatchChunk[];
-  commit_after?: boolean;
-  commit_message?: string | null;
 }
 
 export interface WorkspaceLintRequest {
@@ -1554,6 +1508,8 @@ export interface TelemetryNotification {
   period?: TelemetryReportPeriod;
   report_id?: string;
   title: string;
+  /** Detail line for notices sent by other services (arrivals, reminders). */
+  body?: string;
   error?: string;
   created_at: string;
   read: boolean;

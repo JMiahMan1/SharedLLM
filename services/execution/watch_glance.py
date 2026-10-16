@@ -10,7 +10,6 @@ driving.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import time
 
@@ -107,5 +106,7 @@ async def push_glances() -> None:
 async def glance_loop() -> None:
     while True:
         await asyncio.sleep(INTERVAL_S)
-        with contextlib.suppress(Exception):
+        try:
             await push_glances()
+        except Exception as e:  # keep looping, but never fail silently
+            log.warning(f"[glance] pass failed: {type(e).__name__}: {e}")

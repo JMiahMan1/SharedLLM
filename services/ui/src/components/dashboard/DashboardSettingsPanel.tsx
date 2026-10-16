@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Capacitor } from '@capacitor/core';
 import toast from 'react-hot-toast';
 import {
   RotateCcw,
@@ -13,7 +15,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import { useWidgetStore, defaultWidgetDefs } from '../../stores/widgetStore';
-import type { UserWidgetSettings, WidgetVisibility } from '../../types/widget';
+import type { UserWidgetSettings, WidgetSize, WidgetVisibility } from '../../types/widget';
 import { api } from '../../services/api';
 
 interface DashboardSettingsPanelProps {
@@ -28,7 +30,9 @@ const WidgetCatalog = () => {
     <div className="space-y-1">
       {widgetRegistry.map((def) => {
         const settings = userWidgets[def.key];
-        const visibility: WidgetVisibility = settings?.visibility ?? 'visible';
+        const visibility: WidgetVisibility =
+          settings?.visibility ?? (def.key === 'quick_assistant' ? 'hidden' : 'visible');
+        const shown = visibility === 'visible';
         const isPinned = settings?.is_pinned ?? false;
         const size = settings?.size ?? def.defaultSize;
         const Icon = def.icon;
@@ -36,14 +40,16 @@ const WidgetCatalog = () => {
         return (
           <div
             key={def.key}
-            className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5 transition-colors group"
+            className="flex items-center justify-between gap-2 px-2 sm:px-3 py-1 sm:py-2 rounded-lg hover:bg-white/5 transition-colors group"
           >
             <div className="flex items-center gap-3 min-w-0">
               <span className="text-slate-500 group-hover:text-slate-300 transition-colors shrink-0">
                 <Icon size={14} />
               </span>
-              <span className="text-sm font-medium text-white truncate">{def.label}</span>
-              <span className="text-[9px] font-bold uppercase tracking-widest text-slate-600 shrink-0">
+              <span className={`text-sm font-medium truncate ${shown ? 'text-white' : 'text-slate-500'}`}>{def.label}</span>
+              {/* The size is a desktop nicety; on a phone it squeezed the name
+                  down to two letters next to the 44px buttons. */}
+              <span className="hidden sm:inline text-[9px] font-bold uppercase tracking-widest text-slate-600 shrink-0">
                 {size}
               </span>
             </div>
@@ -51,24 +57,25 @@ const WidgetCatalog = () => {
             <div className="flex items-center gap-1 shrink-0">
               <button
                 onClick={() => showWidget(def.key)}
-                className="p-1 rounded text-slate-500 hover:text-emerald-400 transition-colors"
+                className="p-1 rounded text-slate-500 hover:text-emerald-400 transition-colors disabled:opacity-30 disabled:hover:text-slate-500 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
                 title="Show"
                 aria-label={`Show ${def.label}`}
+                disabled={shown}
               >
                 <Eye size={13} />
               </button>
               <button
                 onClick={() => hideWidget(def.key)}
-                className="p-1 rounded text-slate-500 hover:text-red-400 transition-colors"
+                className="p-1 rounded text-slate-500 hover:text-red-400 transition-colors disabled:opacity-30 disabled:hover:text-slate-500 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
                 title="Hide"
                 aria-label={`Hide ${def.label}`}
-                disabled={visibility === 'hidden'}
+                disabled={!shown}
               >
                 <EyeOff size={13} />
               </button>
               <button
                 onClick={() => togglePin(def.key)}
-                className={`p-1 rounded transition-colors ${
+                className={`p-1 rounded transition-colors pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center ${
                   isPinned ? 'text-amber-400' : 'text-slate-500 hover:text-amber-400'
                 }`}
                 title={isPinned ? 'Unpin' : 'Pin to top'}
@@ -146,6 +153,8 @@ const ImportSection = () => {
         throw new Error('Invalid format: missing widgets array');
       }
 
+      const SIZES: WidgetSize[] = ['small', 'medium', 'wide', 'tall'];
+      const VISIBILITIES: WidgetVisibility[] = ['visible', 'hidden', 'removed'];
       const widgetsMap: Record<string, UserWidgetSettings> = { ...currentWidgets };
       for (const w of data.widgets) {
         if (!w.widget_key || typeof w.widget_key !== 'string') continue;
@@ -153,30 +162,38 @@ const ImportSection = () => {
         if (!current) continue;
         widgetsMap[w.widget_key] = {
           ...current,
-          visibility: (w.visibility as WidgetVisibility) ?? current.visibility,
+          visibility: VISIBILITIES.includes(w.visibility) ? w.visibility : current.visibility,
           order_index: typeof w.order_index === 'number' ? w.order_index : current.order_index,
-          size: (w.size as never) ?? current.size,
+          size: SIZES.includes(w.size) ? w.size : current.size,
           is_pinned: typeof w.is_pinned === 'boolean' ? w.is_pinned : current.is_pinned,
           sort_mode: w.sort_mode ?? current.sort_mode,
           pinned_devices: Array.isArray(w.pinned_devices) ? w.pinned_devices : current.pinned_devices,
-          config: typeof w.config === 'object' ? w.config : current.config,
+          config: w.config && typeof w.config === 'object' && !Array.isArray(w.config) ? w.config : current.config,
           updated_at: Date.now(),
         };
       }
 
       replaceAllWidgets(widgetsMap);
 
-      await Promise.all(
+      // Everything that was applied locally goes to the server too: favourite
+      // devices and widget config used to apply here and then revert on the
+      // next load.
+      const results = await Promise.allSettled(
         Object.values(widgetsMap).map((w) =>
-          api.updateWidgetSettings(w.widget_key as never, {
+          api.updateWidgetSettings(w.widget_key, {
             visibility: w.visibility,
             order_index: w.order_index,
             size: w.size,
             is_pinned: w.is_pinned,
             sort_mode: w.sort_mode,
-          }).catch(() => undefined)
+            pinned_devices: w.pinned_devices,
+            config: w.config,
+          })
         )
       );
+      if (results.some((r) => r.status === 'rejected')) {
+        toast.error('Some widget settings could not be saved');
+      }
 
       if (typeof data.quick_assistant_enabled === 'boolean') {
         setQuickAssistantEnabled(data.quick_assistant_enabled);
@@ -205,7 +222,11 @@ const ImportSection = () => {
 };
 
 const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps) => {
-  const { userWidgets, replaceAllWidgets } = useWidgetStore();
+  const { userWidgets, replaceAllWidgets, quickAssistantEnabled, setQuickAssistantEnabled } = useWidgetStore();
+  // A blob download does nothing inside the Android WebView, and the layout
+  // already follows the account to every device, so file export/import is a
+  // browser-only tool.
+  const isNative = Capacitor.isNativePlatform();
   const panelRef = useRef<HTMLDivElement>(null);
   const [confirmingReset, setConfirmingReset] = useState(false);
 
@@ -264,18 +285,32 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
   }, [isOpen, requestClose]);
 
   const handleReset = useCallback(async () => {
-    const defaultByKey = new Map(defaultWidgetDefs.map((def) => [def.key, def]));
-    const hasChanges = Object.values(userWidgets).some((w) => {
-      const def = defaultByKey.get(w.widget_key as never);
-      const defaultSize = def?.defaultSize ?? 'medium';
+    const defaultByKey = new Map(defaultWidgetDefs.map((def, index) => [def.key, { def, index }]));
+    const hasChanges = quickAssistantEnabled || Object.values(userWidgets).some((w) => {
+      const entry = defaultByKey.get(w.widget_key as never);
+      if (!entry) return false;
       const defaultVisibility = w.widget_key === 'quick_assistant' ? 'hidden' : 'visible';
-      return w.visibility !== defaultVisibility || w.is_pinned || w.size !== defaultSize;
+      return (
+        w.visibility !== defaultVisibility ||
+        w.is_pinned ||
+        w.size !== entry.def.defaultSize ||
+        w.order_index !== entry.index
+      );
     });
-    if (!hasChanges) return;
+    setConfirmingReset(false);
+    if (!hasChanges) {
+      toast('Already using the default layout');
+      return;
+    }
 
+    // Layout only. Favourite devices and per-widget config (climate devices,
+    // theme colours for the Android widget) are the user's data, not layout,
+    // and the server keeps them anyway, so clearing them here only made the
+    // board disagree with itself until the next load.
     const resetWidgets: Record<string, UserWidgetSettings> = {};
     for (let i = 0; i < defaultWidgetDefs.length; i++) {
       const def = defaultWidgetDefs[i];
+      const current = userWidgets[def.key];
       resetWidgets[def.key] = {
         widget_key: def.key,
         visibility: def.key === 'quick_assistant' ? 'hidden' : 'visible',
@@ -283,31 +318,38 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
         size: def.defaultSize,
         is_pinned: false,
         sort_mode: def.key === 'device_control' ? 'most_used' : null,
-        pinned_devices: [],
-        config: {},
+        pinned_devices: current?.pinned_devices ?? [],
+        config: current?.config ?? {},
         updated_at: Date.now(),
       };
     }
     replaceAllWidgets(resetWidgets);
-    await Promise.all(
+    if (quickAssistantEnabled) void setQuickAssistantEnabled(false);
+    const results = await Promise.allSettled(
       Object.values(resetWidgets).map((w) =>
-        api.updateWidgetSettings(w.widget_key as never, {
+        api.updateWidgetSettings(w.widget_key, {
           visibility: w.visibility,
           order_index: w.order_index,
           size: w.size,
           is_pinned: w.is_pinned,
           sort_mode: w.sort_mode,
-        }).catch(() => undefined)
+        })
       )
     );
-    toast.success('Widget settings reset to defaults');
-    setConfirmingReset(false);
-  }, [userWidgets, replaceAllWidgets]);
+    if (results.some((r) => r.status === 'rejected')) {
+      toast.error('Some widgets could not be reset. Try again.');
+    } else {
+      toast.success('Widget settings reset to defaults');
+    }
+  }, [userWidgets, replaceAllWidgets, quickAssistantEnabled, setQuickAssistantEnabled]);
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={requestClose}>
+  // Portalled: the dashboard animates in with a transform, and a transformed
+  // ancestor turns `fixed` into "fixed to that ancestor", which centred this
+  // dialog on the whole page height, far below the viewport.
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 sm:p-4" onClick={requestClose}>
       <div
         ref={panelRef}
         tabIndex={-1}
@@ -318,19 +360,19 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-white/5 shrink-0">
           <div className="flex items-center gap-3">
             <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-white/5">
               <Settings2 size={16} className="text-purple-400" />
             </div>
             <div>
               <h2 id="dashboard-settings-title" className="text-base font-bold text-white">Dashboard Settings</h2>
-              <p className="text-[10px] text-slate-500">Widget catalog, visibility, and preferences</p>
+              <p className="text-[10px] text-slate-500">Saved to your account and shared by all your devices</p>
             </div>
           </div>
           <button
-            onClick={onClose}
-            className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
+            onClick={requestClose}
+            className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-white/5 transition-colors min-h-11 min-w-11 flex items-center justify-center"
             aria-label="Close settings"
           >
             <X size={16} />
@@ -338,29 +380,31 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
           {/* Widget Catalog */}
           <section>
             <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
               <Grid3X3 size={14} className="text-purple-400" />
               Widget Catalog
             </h3>
-            <div className="glass-card p-3">
+            <div className="glass-card p-1 sm:p-3">
               <WidgetCatalog />
             </div>
           </section>
 
           {/* Import/Export */}
+          {!isNative && (
           <section>
             <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
               <Download size={14} className="text-purple-400" />
               Data Management
             </h3>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <ExportSection />
               <ImportSection />
             </div>
           </section>
+          )}
 
           {/* Reset */}
           <section>
@@ -368,7 +412,7 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
               <RotateCcw size={14} className="text-amber-400" />
               Reset
             </h3>
-            <div className="glass-card p-4 flex items-center justify-between">
+            <div className="glass-card p-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm text-white font-medium">Reset to defaults</p>
                 <p id="reset-all-hint" className="text-xs text-slate-500 mt-0.5">
@@ -376,7 +420,7 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
                 </p>
               </div>
               {confirmingReset ? (
-                <div className="flex items-center gap-2" role="alertdialog" aria-labelledby="reset-confirm-title">
+                <div className="flex flex-wrap items-center gap-2" role="alertdialog" aria-labelledby="reset-confirm-title">
                   <p id="reset-confirm-title" className="text-xs text-amber-200 max-w-[16rem]">
                     Reset every widget to its default size, position, and visibility?
                   </p>
@@ -408,7 +452,8 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
           </section>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

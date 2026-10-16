@@ -192,3 +192,48 @@ def test_a_diverged_workspace_is_reported_and_left_alone(client: TestClient):
     assert after == before
     status = _git(work, "status", "--porcelain").stdout
     assert "local.txt" not in status
+
+
+def _skipping_workspace(client: TestClient, ws_id: str) -> None:
+    """An authoritative workspace: once the caller is proven, the hook answers SKIPPED."""
+    import tempfile
+
+    _workspace(client, ws_id, tempfile.mkdtemp(dir=ROOT), sync_mode="local_git_authoritative")
+
+
+def test_gitlab_sends_the_token_in_its_own_header(client: TestClient):
+    _skipping_workspace(client, "gitlab-hook")
+    resp = client.post("/webhook/git-pull/gitlab-hook", headers={"X-Gitlab-Token": "hook-secret"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "SKIPPED"
+
+
+def test_github_signs_the_body_instead_of_sending_the_secret(client: TestClient):
+    import hashlib
+    import hmac
+
+    _skipping_workspace(client, "github-hook")
+    body = b'{"ref": "refs/heads/main"}'
+    signature = "sha256=" + hmac.new(b"hook-secret", body, hashlib.sha256).hexdigest()
+    resp = client.post(
+        "/webhook/git-pull/github-hook",
+        content=body,
+        headers={"X-Hub-Signature-256": signature, "Content-Type": "application/json"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "SKIPPED"
+
+
+def test_a_signature_made_with_another_secret_is_refused(client: TestClient):
+    import hashlib
+    import hmac
+
+    _skipping_workspace(client, "forged-hook")
+    body = b'{"ref": "refs/heads/main"}'
+    signature = "sha256=" + hmac.new(b"guessed", body, hashlib.sha256).hexdigest()
+    resp = client.post(
+        "/webhook/git-pull/forged-hook",
+        content=body,
+        headers={"X-Hub-Signature-256": signature},
+    )
+    assert resp.status_code == 403

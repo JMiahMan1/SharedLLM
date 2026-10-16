@@ -49,7 +49,7 @@ def test_get_widget_settings_returns_all_known_widgets(client: TestClient, sessi
     resp = client.get("/api/widgets/settings")
     assert resp.status_code == 200
     settings = resp.json()
-    assert len(settings["widgets"]) == 12  # 12 known widget keys
+    assert len(settings["widgets"]) == 13  # 13 known widget keys
 
     widget_keys = [w["widget_key"] for w in settings["widgets"]]
     assert "energy_insights" in widget_keys
@@ -64,6 +64,27 @@ def test_get_widget_settings_returns_all_known_widgets(client: TestClient, sessi
     assert "health_activity" in widget_keys
     assert "climate" in widget_keys
     assert "presence" in widget_keys
+    assert "bible_daily" in widget_keys
+
+
+def test_bible_daily_settings_survive_a_round_trip(client: TestClient):
+    """Hiding or resizing the verse widget used to save and then revert on the
+    next load: the GET only rebuilt rows for the keys it knew about."""
+    client.put("/api/widgets/settings/bible_daily", json={"visibility": "hidden", "size": "small"})
+    widgets = client.get("/api/widgets/settings").json()["widgets"]
+    verse = next(w for w in widgets if w["widget_key"] == "bible_daily")
+    assert verse["visibility"] == "hidden"
+    assert verse["size"] == "small"
+
+
+def test_resizing_an_enabled_quick_assistant_keeps_it_visible(client: TestClient):
+    client.put("/api/widgets/settings/quick_assistant", json={"quick_assistant_enabled": True})
+    client.put("/api/widgets/settings/quick_assistant", json={"size": "wide"})
+    settings = client.get("/api/widgets/settings").json()
+    assert settings["quick_assistant_enabled"] is True
+    qa = next(w for w in settings["widgets"] if w["widget_key"] == "quick_assistant")
+    assert qa["visibility"] == "visible"
+    assert qa["size"] == "wide"
 
 
 def test_presence_widget_survives_a_round_trip(client: TestClient, session: Session):
@@ -362,3 +383,21 @@ def test_widget_settings_with_custom_order(client: TestClient, session: Session)
     energy = next(w for w in settings["widgets"] if w["widget_key"] == "energy_insights")
     assert device_control["order_index"] == 0
     assert energy["order_index"] == 1
+
+
+def test_first_save_keeps_the_widget_default_size_and_order(client: TestClient, session: Session):
+    """Pinning a device used to create the row with the model's defaults, so a
+    tall Devices widget turned medium and jumped to the top of the board."""
+    client.put("/api/widgets/settings/device_control", json={"pinned_devices": ["light.kitchen"]})
+    widgets = client.get("/api/widgets/settings").json()["widgets"]
+    devices = next(w for w in widgets if w["widget_key"] == "device_control")
+    assert devices["size"] == "tall"
+    assert devices["order_index"] == 7
+    assert devices["pinned_devices"] == ["light.kitchen"]
+
+
+def test_unknown_widget_and_bad_values_are_refused(client: TestClient, session: Session):
+    assert client.put("/api/widgets/settings/not_a_widget", json={"size": "small"}).status_code == 404
+    assert client.put("/api/widgets/settings/climate", json={"size": "huge"}).status_code == 400
+    assert client.put("/api/widgets/settings/climate", json={"visibility": "maybe"}).status_code == 400
+    assert session.exec(select(UserWidget).where(UserWidget.widget_key == "not_a_widget")).first() is None

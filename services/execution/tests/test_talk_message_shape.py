@@ -179,3 +179,29 @@ async def test_pooled_sessions_keep_no_cookies():
     finally:
         await session.close()
         http_client._SESSION_CACHE.clear()
+
+
+async def test_app_question_is_claimed_so_the_talk_monitor_does_not_answer_it_too(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from services.execution.schemas import TalkRequest
+
+    async def fake_request(provider, method, endpoint, **kwargs):
+        return True, {"id": 42, "message": kwargs["data"]["message"]}, ""
+
+    claim = AsyncMock()
+    orchestrate = AsyncMock()
+    monkeypatch.setattr(talk_handler, "_talk_request_with_retry", fake_request)
+    monkeypatch.setattr(talk_handler, "_claim_jarvis_question", claim)
+    monkeypatch.setattr(talk_handler, "run_jarvis_orchestration", orchestrate)
+    monkeypatch.setattr(talk_handler, "resolve_personal_data_provider", lambda ctx: SimpleNamespace(username="mom", password="x"))
+
+    res = await talk_handler.handle_talk(TalkRequest(user_context={"user": "mom"}, action="send", token="room-1",
+                                                     message="@Jarvis what's for dinner?"))
+    assert res.status == "SUCCESS"
+    claim.assert_awaited_once_with("room-1", 42)
+
+    claim.reset_mock()
+    await talk_handler.handle_talk(TalkRequest(user_context={"user": "mom"}, action="send", token="room-1", message="hi"))
+    claim.assert_not_awaited()

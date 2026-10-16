@@ -23,6 +23,8 @@ interface BackendTimer {
   expires_at?: string;
   active?: boolean;
   duration_sec?: number;
+  /** Set while paused; the server keeps `expires_at` and shifts it on resume. */
+  paused_at?: string;
 }
 
 interface MediaPlayer {
@@ -31,7 +33,7 @@ interface MediaPlayer {
   state: string;
 }
 
-const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidgetProps) => {
+const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
   const [timers, setTimers] = useState<ActiveTimer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [newDuration, setNewDuration] = useState(300);
@@ -60,9 +62,13 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
       const backendTimers = await api.getTimers() as BackendTimer[];
       const mapped: ActiveTimer[] = [];
       for (const bt of backendTimers) {
-        if (bt.active && bt.expires_at) {
+        // A paused timer is `active: false` with a `paused_at`; it used to be
+        // dropped here, so pausing a timer made it vanish with no way to resume.
+        const paused = !bt.active && Boolean(bt.paused_at);
+        if ((bt.active || paused) && bt.expires_at) {
           const expiresAt = new Date(bt.expires_at).getTime();
-          const remaining = expiresAt - Date.now();
+          const asOf = paused ? new Date(bt.paused_at as string).getTime() : Date.now();
+          const remaining = expiresAt - asOf;
           if (remaining > 0) {
             const durationMs = bt.duration_sec ? bt.duration_sec * 1000 : remaining;
             const createdAt = expiresAt - durationMs;
@@ -73,6 +79,7 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
               remainingMs: remaining,
               createdAt,
               isRemote: true,
+              paused,
             });
           }
         }
@@ -95,15 +102,6 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
     const interval = setInterval(fetchTimers, 10000);
     return () => clearInterval(interval);
   }, [fetchTimers]);
-
-  // Ask for notification permission once on mount
-  useEffect(() => {
-    try {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-        void Notification.requestPermission();
-      }
-    } catch { /* ignore */ }
-  }, []);
 
   // Local countdown + expiry detection
   useEffect(() => {
@@ -192,6 +190,13 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
 
   const addTimer = async () => {
     if (newDuration < 1) return;
+    // Ask for the expiry notification when a timer is actually set, not as a
+    // browser prompt the moment the dashboard opens.
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        void Notification.requestPermission();
+      }
+    } catch { /* ignore */ }
     try {
       const durationSec = Math.floor(newDuration);
       const remote = await api.createTimer({
@@ -256,16 +261,7 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
 
   return (
     <div className="glass-card h-full p-5 relative flex flex-col overflow-hidden">
-      <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
-        <button
-          onClick={onTogglePin}
-          className="text-slate-500 hover:text-purple-400 transition-colors"
-          title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
-        >
-          <Timer size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
-        </button>
-        {settingsButton}
-      </div>
+      <div className="absolute top-3 right-3 z-10">{settingsButton}</div>
 
       <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2 shrink-0">
         <Timer size={18} className="text-purple-400" />
@@ -287,27 +283,36 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
               }`}
             >
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold text-white truncate">{timer.title}</span>
+                <span className="text-sm font-semibold text-white truncate">
+                  {timer.title}
+                  {timer.paused && <span className="ml-1.5 text-[10px] font-normal text-amber-300">Paused</span>}
+                </span>
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     onClick={() => togglePause(timer.id)}
-                    className="text-slate-500 hover:text-purple-400 transition-colors p-0.5"
+                    className="text-slate-500 hover:text-purple-400 transition-colors p-0.5 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
                     aria-label={timer.paused ? 'Resume' : 'Pause'}
                     title={timer.paused ? 'Resume' : 'Pause'}
                   >
                     {timer.paused ? <Play size={13} /> : <Pause size={13} />}
                   </button>
-                  <button
-                    onClick={() => resetTimer(timer.id)}
-                    className="text-slate-500 hover:text-cyan-400 transition-colors p-0.5"
-                    aria-label="Reset"
-                    title="Reset"
-                  >
-                    <RotateCcw size={13} />
-                  </button>
+                  {/* Reset is local only: a server timer would snap back on
+                      the next refresh, so it is offered for local ones. */}
+                  {!timer.isRemote && (
+                    <button
+                      onClick={() => resetTimer(timer.id)}
+                      className="text-slate-500 hover:text-cyan-400 transition-colors p-0.5 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
+                      aria-label="Reset"
+                      title="Reset"
+                    >
+                      <RotateCcw size={13} />
+                    </button>
+                  )}
                   <button
                     onClick={() => removeTimer(timer.id)}
-                    className="text-slate-500 hover:text-red-400 transition-colors p-0.5"
+                    className="text-slate-500 hover:text-red-400 transition-colors p-0.5 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
+                    aria-label={`Delete ${timer.title}`}
+                    title="Delete"
                   >
                     <X size={14} />
                   </button>
@@ -348,6 +353,7 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
           />
           <button
             onClick={addTimer}
+            aria-label="Add timer"
             className="glass-button px-4 py-2 text-sm text-purple-400 hover:text-purple-300 transition-colors shrink-0"
           >
             <Plus size={16} />

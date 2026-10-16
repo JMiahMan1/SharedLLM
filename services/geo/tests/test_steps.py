@@ -137,3 +137,18 @@ async def test_step_goal_round_trip(rc, monkeypatch):
 
     rc.strings["geo:steps_goal:jeremiah"] = "12000"
     assert await geo._get_step_goal(rc, "jeremiah") == 12000
+
+
+async def test_a_sparse_history_is_still_cut_to_the_window(rc, monkeypatch):
+    """Three recorded days, one of them weeks old: "the last 7 days" is two.
+
+    The window used to be applied only when there were more recorded days
+    than asked for, so an old day came back as part of this week."""
+    import services.geo.main as geo
+    from datetime import timedelta
+
+    today = datetime.now(TZ).date()
+    for back, steps in ((0, 1200), (3, 4000), (40, 9000)):
+        rc.hashes.setdefault("geo:steps:michele", {})[(today - timedelta(days=back)).isoformat()] = str(steps)
+    week = await geo._get_daily_steps(rc, "michele", 7)
+    assert sorted(week.values()) == [1200, 4000]

@@ -2,9 +2,11 @@
 
 A workspace's ``sync_mode`` says where its files live:
 
-* ``local_git_authoritative`` (also ``git``): git only. ``nextcloud_path`` is
+* ``local_git_authoritative`` and ``git``: git only. ``nextcloud_path`` is
   optional and, with ``auto_backup_enabled``, receives a one-way push after
-  every successful git pull.
+  every successful git pull. They differ only in the push webhook: ``git``
+  follows its remote (the webhook fast-forwards it), while an authoritative
+  checkout's own history wins and the webhook skips it.
 * ``nextcloud``: no git. The workspace is a two-way synced copy of
   ``nextcloud_path``.
 * ``git_and_nextcloud``: a git checkout that is ALSO two-way synced with
@@ -268,13 +270,21 @@ async def periodic_sync_loop() -> None:
     log.info("Background Nextcloud workspace sync every %ss", interval)
     while True:
         await asyncio.sleep(interval)
-        with Session(main_mod.engine) as session:
-            ids = [
-                ws.id for ws in session.exec(select(Workspace)).all()
-                if ws.sync_mode in NEXTCLOUD_MODES and ws.nextcloud_path and not ws.quarantined
-            ]
-        for workspace_id in ids:
-            await asyncio.to_thread(background_sync, workspace_id)
+        # background_sync already survives one bad workspace; this guards the
+        # listing itself (a locked/unavailable DB), which used to end the task
+        # for good -- no workspace synced again until the next restart.
+        try:
+            with Session(main_mod.engine) as session:
+                ids = [
+                    ws.id for ws in session.exec(select(Workspace)).all()
+                    if ws.sync_mode in NEXTCLOUD_MODES and ws.nextcloud_path and not ws.quarantined
+                ]
+            for workspace_id in ids:
+                await asyncio.to_thread(background_sync, workspace_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Background Nextcloud workspace sync pass failed: %s: %s", type(exc).__name__, exc)
 
 
 # ---------------------------------------------------------------------------

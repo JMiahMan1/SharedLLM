@@ -43,8 +43,13 @@ describe('background location tracking', () => {
 
   it('hands tracking to the native service', async () => {
     const state = await startBackgroundTracking('michele');
-    expect(p.start).toHaveBeenCalledWith({ username: 'michele', userId: undefined });
+    expect(p.start).toHaveBeenCalledWith({ username: 'michele', userId: undefined, steps: false });
     expect(state).toEqual({ serviceRunning: true, supported: true });
+  });
+
+  it('lets the service count steps only when the Steps switch is on', async () => {
+    await startBackgroundTracking('michele', { steps: true });
+    expect(p.start).toHaveBeenLastCalledWith({ username: 'michele', userId: undefined, steps: true });
   });
 
   // A web bundle can be newer than the installed APK, so the plugin may simply
@@ -114,6 +119,11 @@ describe('LocationContext wiring', () => {
 
   it('starts background tracking when the watch comes up', () => {
     expect(source).toMatch(/await startBackgroundTracking\(/);
+  });
+
+  it('tells the service about the Steps switch, at start and when it changes', () => {
+    expect(source).toMatch(/startBackgroundTracking\(user, \{ steps: sensorsRef\.current\.steps\.enabled \}\)/);
+    expect(source).toMatch(/syncBackgroundSteps\(\)/);
   });
 
   it('stops the service when tracking is turned off', () => {

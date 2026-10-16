@@ -112,9 +112,10 @@ Each workspace entry can currently define:
 
 | `sync_mode` | Files live in | Nextcloud sync |
 |---|---|---|
-| `local_git_authoritative` (or legacy `git`) | a git checkout | optional one-way **push** to `nextcloud_path` (manual, or after each git pull when `auto_backup_enabled`) |
+| `local_git_authoritative` | a git checkout whose own history wins; push webhooks are skipped | optional one-way **push** to `nextcloud_path` (manual, or after each git pull when `auto_backup_enabled`) |
+| `git` | a git checkout that follows its remote; push webhooks fast-forward it | as above |
 | `nextcloud` | Nextcloud only, no git | **two-way** with `nextcloud_path` |
-| `git_and_nextcloud` | a git checkout | **two-way** with `nextcloud_path`; `.git` itself never syncs |
+| `git_and_nextcloud` | a git checkout that follows its remote | **two-way** with `nextcloud_path`; `.git` itself never syncs |
 
 The Nextcloud modes require `nextcloud_path`; create/update returns 400
 without it. Credentials are the caller's Identity integration
@@ -164,6 +165,32 @@ falling back to `owner_user`. The outcome is stored in `last_sync_at`,
 WebDAV request times out after `WORKSPACE_NEXTCLOUD_TIMEOUT_SECONDS`
 (default 120).
 
+## Push webhook (pull on push)
+
+`POST /api/webhook/git-pull/{workspace_id}` (Caddy routes it straight here)
+pulls a workspace with `auto_pull_enabled` when its remote is pushed. It
+fast-forwards only (`--ff-only`): a diverged branch is reported, never merged.
+`local_git_authoritative` workspaces answer `SKIPPED`; `nextcloud` workspaces
+have nothing to pull.
+
+The caller proves the workspace's `webhook_token` (stored encrypted, never
+returned by any API) in any of these forms:
+
+- GitHub: the hook's *Secret*; GitHub sends an HMAC of the body in
+  `X-Hub-Signature-256`
+- GitLab: the hook's *Secret token*, sent as `X-Gitlab-Token`
+- anything else: `X-Webhook-Secret`, or `?token=` on the URL
+
+A workspace without a token falls back to the server's `GIT_WEBHOOK_SECRET`.
+
+## Toolchain inventory
+
+At startup the service probes its shell for CLI tools (git, pandoc, ffmpeg,
+ImageMagick, ...) and posts them to RAG `/rag/sync/capabilities`
+(`services/execution/toolchain.py`), so Raven's prompts list what it can run.
+RAG answers only after embedding them, so the request waits up to 300 s and is
+not resent after a timeout.
+
 ## Uploads (many files, whole folders)
 
 `POST /files/upload` is `multipart/form-data` and works in every `sync_mode`.
@@ -184,6 +211,13 @@ and passes the caller's identity in `X-Workspace-User-Context`. The UI batches
 large selections: at most 200 files or 64 MB per request.
 
 ## Access Model
+
+- Registering, reconfiguring and deleting a workspace (`POST`/`PATCH`/`DELETE
+  /api/workspaces...` on the Gateway) is admin-only; the runtime itself does not
+  check a caller on those routes, so the Gateway is the gate. Members create
+  their own workspaces by asking Raven in chat.
+- `GET /api/workspaces/{id}/raven/missions` serves only workspaces the caller
+  can see.
 
 - `authenticated` workspaces require a resolved Identity user
 - `admin_only` workspaces require `is_admin=True` from Identity
@@ -265,22 +299,8 @@ Implemented:
 - workflow orchestration for incremental local edit -> provider sync -> git lifecycle execution.
 - targeted `pytest` execution.
 
-Not yet implemented:
-
-- workspace registry mutation APIs
-- direct Gateway orchestration against these endpoints
-- document or note mutation APIs
-
 ## Remaining Work
 
-- move workspace definitions from static JSON into a DB-backed registry
-- extend file mutation support beyond direct text writes
-- add Git fetch/pull/rebase operations with remote-auth controls
-- let the Gateway orchestrate this service directly for agentic tasks
 - add note, document, metadata, and transcription operations under the same
   workspace policy model
 - add explicit audit logging for write-side workspace actions
-
-See also:
-
-- [docs/workspace_runtime.md](/home/jeremiah/Summers Drive/Code/SharedLLM/docs/workspace_runtime.md)

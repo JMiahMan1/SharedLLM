@@ -23,10 +23,12 @@ import ShareToChatSheet from './ShareToChatSheet';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import { renderVerseImage } from '../../lib/verseImage';
+import { marksOnVerse } from './verseMarks';
 import type { BibleMark, BibleVerse } from '../../types/api';
 
 interface VerseActionSheetProps {
   verse: BibleVerse;
+  /** The reader's marks; the sheet only acts on the ones covering this verse. */
   marks: BibleMark[];
   /** Translation the verse came from; the study panel reports what it carries. */
   version: string;
@@ -119,15 +121,10 @@ export default function VerseActionSheet({
     q.error ? `Blue Letter Bible link unavailable: ${q.error instanceof Error ? q.error.message : 'unknown error'}` : 'Loading link…';
   const blbTapped = () => void api.recordBibleEvent('blb_link_tap', verse.reference).catch(() => undefined);
 
-  const highlight = marks.find((m) => m.kind === 'highlight');
-  const bookmark = marks.find((m) => m.kind === 'bookmark');
-  const noteMark = marks.find(
-    (m) =>
-      m.kind === 'note' &&
-      m.note_path &&
-      m.verse_start <= verse.verse &&
-      (m.verse_end ?? m.verse_start) >= verse.verse,
-  );
+  const own = marksOnVerse(marks, verse);
+  const highlight = own.find((m) => m.kind === 'highlight');
+  const bookmark = own.find((m) => m.kind === 'bookmark');
+  const noteMark = own.find((m) => m.kind === 'note' && Boolean(m.note_path));
 
   const run = async (label: string, work: () => Promise<string | void>) => {
     setBusy(true);

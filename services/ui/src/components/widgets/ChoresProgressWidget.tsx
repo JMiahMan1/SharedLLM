@@ -229,14 +229,16 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
         setCompletedOverrides((prev) => ({ ...prev, [chore.id]: !newStatus }));
         toast.error(resp.message || 'Failed to update chore');
       } else {
-        // Server is now authoritative; drop the optimistic override so the UI
-        // can't get stuck out of sync if the chore changes elsewhere.
+        // Server is now authoritative; drop the optimistic override once the
+        // fresh list is in, so the UI can't get stuck out of sync if the chore
+        // changes elsewhere. Dropping it before the refetch landed flicked the
+        // checkbox back to its old state for a moment.
+        await refetch();
         setCompletedOverrides((prev) => {
           const next = { ...prev };
           delete next[chore.id];
           return next;
         });
-        refetch();
       }
     } catch {
       setCompletedOverrides((prev) => ({ ...prev, [chore.id]: !newStatus }));
@@ -533,7 +535,9 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       expandedClassName="osk-overlay"
       actions={
         <span className="text-xs" style={{ color: 'var(--wc-ink-faint, #94a3b8)' }}>
-          {completedCount}/{totalCount} done · {Math.round(progress)}%
+          {/* The ring already shows the percentage; repeating it here left
+              the title three letters wide on a phone. */}
+          {completedCount}/{totalCount} done
         </span>
       }
       expandedChildren={renderExpanded()}

@@ -11,9 +11,14 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -102,6 +107,20 @@ public class LocationTrackingService extends Service {
 
     private static final String PREFS = "jarvis_location";
     private static final String KEY_ENABLED = "tracking_enabled";
+    private static final String KEY_STEPS = "steps_enabled";
+    /** A step reading is attached to a fix only while both are this fresh. */
+    private static final long STEPS_FRESH_MS = 10 * 60 * 1000L;
+
+    private StepLedger stepLedger;
+    private volatile int todaySteps = -1;
+    private volatile long todayStepsAt = 0L;
+    /** Local day (yyyy-MM-dd) the reading belongs to. */
+    private volatile String todayStepsDay = "";
+
+    /** Whether the user has step counting on; the app passes it at start. */
+    static void setStepsEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_STEPS, enabled).apply();
+    }
 
     /** Remembered so tracking can resume after a reboot or an app update. */
     static void setEnabled(Context context, boolean enabled) {
@@ -176,6 +195,7 @@ public class LocationTrackingService extends Service {
         setEnabled(this, true);
         startForegroundCompat();
         acquireWakeLock();
+        readSteps();
         requestUpdates();
         scheduleHeartbeat();
         // Sticky: if Android reclaims us, come back on our own.
@@ -359,6 +379,7 @@ public class LocationTrackingService extends Service {
         beat.setReferenceCounted(false);
         beat.acquire(HEARTBEAT_WAKE_MS);
         // The alarm may have restarted the process: listen again if so.
+        readSteps();
         if (!updatesRequested) requestUpdates();
         if (System.currentTimeMillis() - lastUploadAt >= HEARTBEAT_MS) requestFreshFix();
         scheduleHeartbeat();
@@ -458,6 +479,21 @@ public class LocationTrackingService extends Service {
         // When the fix was taken, not when it is sent: a cached last-known fix
         // (hours old, possibly) used to be reported as current.
         body.put("timestamp", (location.getTime() > 0 ? location.getTime() : System.currentTimeMillis()) / 1000.0);
+        if (location.hasBearing()) body.put("bearing", location.getBearing());
+        // The family cards show it; without it each upload from here blanked
+        // the battery the app had reported.
+        int battery = batteryPercent();
+        if (battery >= 0) body.put("battery", battery);
+        // Steps are filed under the fix's day on the server, so only with a
+        // recent reading from the same local day as the fix (a held fix from
+        // before midnight would file today's count under yesterday, and the
+        // reverse would carry yesterday's total into today).
+        long now = System.currentTimeMillis();
+        String fixDay = java.time.Instant.ofEpochMilli(location.getTime())
+                .atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString();
+        if (todaySteps >= 0 && now - todayStepsAt <= STEPS_FRESH_MS && fixDay.equals(todayStepsDay)) {
+            body.put("daily_steps", todaySteps);
+        }
         body.put("user_id", userId != null ? userId : username);
         if (userId != null) {
             body.put("username", username);
@@ -476,6 +512,59 @@ public class LocationTrackingService extends Service {
         int status = conn.getResponseCode();
         conn.disconnect();
         return status;
+    }
+
+    /**
+     * Take one pedometer reading into the step ledger, so steps keep syncing
+     * (they ride along with the location uploads) while the app is closed.
+     * Before this only the open app read the counter: a phone whose app was
+     * not opened reported almost no steps, and a day with no reading in its
+     * last hour could not be credited across midnight at all.
+     */
+    private void readSteps() {
+        if (!getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_STEPS, false)) {
+            todaySteps = -1;
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                && checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        final SensorManager sm = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        final Sensor counter = sm == null ? null : sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
+        if (counter == null) return;
+        if (stepLedger == null) stepLedger = new StepLedger(this);
+        final SensorEventListener once = new SensorEventListener() {
+            @Override
+            public void onSensorChanged(SensorEvent event) {
+                sm.unregisterListener(this);
+                try {
+                    todaySteps = StepCounterPlugin.recordReading(
+                            LocationTrackingService.this, stepLedger, event.values[0]);
+                    todayStepsAt = System.currentTimeMillis();
+                    todayStepsDay = java.time.LocalDate.now().toString();
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "step reading failed", e);
+                }
+            }
+
+            @Override
+            public void onAccuracyChanged(Sensor sensor, int accuracy) {
+                // Not used.
+            }
+        };
+        // The counter delivers its current value as soon as it is registered.
+        if (sm.registerListener(once, counter, SensorManager.SENSOR_DELAY_NORMAL)) {
+            handler.postDelayed(() -> sm.unregisterListener(once), 10_000L);
+        }
+    }
+
+    /** Battery charge 0-100, or -1 when the device will not say. */
+    private int batteryPercent() {
+        BatteryManager bm = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
+        if (bm == null) return -1;
+        int pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+        return pct >= 0 && pct <= 100 ? pct : -1;
     }
 
     private void stopTracking() {

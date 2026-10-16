@@ -162,3 +162,27 @@ async def test_write_to_an_explicit_path_reports_that_path(provider, monkeypatch
     )
     assert result.detail is not None
     assert result.detail["path"] == "Bible/John 3_16.md"
+
+
+async def test_saving_what_read_returned_does_not_stack_headers(provider, monkeypatch):
+    """read hands back the whole file; saving it must not add a second header."""
+    import services.execution.http_client as http_client
+
+    puts: list[str] = []
+
+    async def fake_request(method, url, data=None, **kwargs):
+        puts.append((data or b"").decode())
+        return {"status_code": 204, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    # Including a note already corrupted by earlier saves: it heals.
+    stacked = "# Groceries\nCategory: Notes\n\n# Groceries\nCategory: Notes\n\nmilk\n# Heading kept"
+    await note_handler.handle_note(request("write", title="Groceries", category="Notes", content=stacked))
+
+    assert puts[0] == "# Groceries\nCategory: Notes\n\nmilk\n# Heading kept"
+
+
+def test_note_body_keeps_a_markdown_heading_that_is_not_the_stored_header():
+    assert note_handler.note_body("# Shopping\n- [ ] milk") == "# Shopping\n- [ ] milk"
+    assert note_handler.note_body("# T\nCategory: Recipes\n\nStep 1") == "Step 1"

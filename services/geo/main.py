@@ -61,6 +61,9 @@ def _verify_internal_secret(header_secret: str | None, query_secret: str | None 
         return True
     return header_secret == INTERNAL_SECRET or query_secret == INTERNAL_SECRET
 
+# Without this the root logger stays at WARNING and every trip start, finish,
+# discarded phantom and dropped position jump was silently thrown away.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 log = logging.getLogger(__name__)
 
 _START_TIME = time.time()
@@ -73,7 +76,7 @@ async def get_redis():
         try:
             _redis = aioredis.from_url(REDIS_URL, decode_responses=True)
             await _redis.ping()
-            log.info("[Geo] Redis connected: %s", REDIS_URL)
+            log.info("[Geo] Redis connected")
         except Exception as e:
             log.warning(f"[Geo] Redis connection failed: {e}")
             _redis = None
@@ -86,7 +89,9 @@ async def lifespan(app: FastAPI):
     await resolve_runtime_config()
     log.info("[Geo] runtime config resolved (HA_URL=%s)", bool(HA_URL))
     await get_redis()
+    sweeper = asyncio.create_task(_idle_trip_sweeper())
     yield
+    sweeper.cancel()
     global _redis
     if _redis is not None:
         try:
@@ -817,10 +822,11 @@ async def _get_daily_steps(r, clean_id: str, days: int = 30) -> dict:
             result[day_str] = int(val)
         except (TypeError, ValueError):
             continue
-    # Trim to requested window
-    if len(result) > days:
-        cutoff = (datetime.now(tz) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
-        result = {d: v for d, v in result.items() if d >= cutoff}
+    # Trim to the requested window. This used to trim only when there were
+    # more recorded days than asked for, so a sparse history (a phone that
+    # syncs now and then) handed back days from weeks ago as "the last 7".
+    cutoff = (datetime.now(tz) - timedelta(days=max(1, days) - 1)).strftime("%Y-%m-%d")
+    result = {d: v for d, v in result.items() if d >= cutoff}
     if result:
         return dict(sorted(result.items()))
     return await _steps_from_ha(clean_id, days)
@@ -2159,6 +2165,62 @@ async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -
     return completed
 
 
+#: A drive is over once its phone has not moved for this long.
+TRIP_IDLE_S = 300
+#: How often the background sweeper looks for drives that have ended.
+TRIP_SWEEP_S = 60
+
+
+async def _finalize_if_idle(r, akey: str, act: dict, now_ts: float) -> tuple[bool, dict | None]:
+    """Finish an active trip whose phone has not moved for TRIP_IDLE_S.
+
+    Returns (finished, completed-trip-or-None). A trip shorter than the
+    minimum finishes with no record."""
+    if now_ts - float(act.get("last_moving_time", now_ts)) < TRIP_IDLE_S:
+        return False, None
+    user = act.get("user_id") or akey.split("geo:active_trip:")[-1]
+    done = await _finalize_active_trip(r, user, act, now_ts)
+    await r.delete(akey)
+    if done:
+        log.info(f"[Geo] Completed trip {done['id']} for {user}: {done['distance_miles']} miles")
+    return True, done
+
+
+async def _sweep_idle_trips(r, now_ts: float | None = None) -> int:
+    """Finish every active trip that has gone idle; returns how many finished."""
+    now_ts = now_ts or time.time()
+    finished = 0
+    for akey in await r.keys("geo:active_trip:*"):
+        raw = await r.get(akey)
+        if not raw:
+            continue
+        try:
+            ended, _ = await _finalize_if_idle(r, akey, json.loads(raw), now_ts)
+            finished += int(ended)
+        except Exception as e:
+            log.warning(f"[Geo] Could not finish idle trip {akey}: {e}")
+    return finished
+
+
+async def _idle_trip_sweeper() -> None:
+    """Finish drives on the server's clock, not the phone's.
+
+    A trip used to end only when that phone sent another fix (or someone
+    opened Wander). A phone that parks and goes quiet -- Doze, no signal,
+    app killed -- left its drive "in progress", and after a day the active
+    record expired and the drive was lost."""
+    while True:
+        await asyncio.sleep(TRIP_SWEEP_S)
+        try:
+            r = await get_redis()
+            if r:
+                await _sweep_idle_trips(r)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning(f"[Geo] Idle trip sweep failed: {e}")
+
+
 async def _note_map_region(r, lat: float, lon: float) -> None:
     try:
         await map_regions.note_if_off_map(r, lat, lon, OSRM_URL)
@@ -2238,12 +2300,9 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
     #    later drive keeps advancing the stale trip.
     if active_raw:
         try:
-            stale = json.loads(active_raw)
-            if ts - float(stale.get("last_moving_time", ts)) >= 300:
-                await _finalize_active_trip(r, clean_user, stale, ts)
-                await r.delete(active_key)
+            ended, _ = await _finalize_if_idle(r, active_key, json.loads(active_raw), ts)
+            if ended:
                 active_raw = None
-                log.info(f"[Geo] Finalized idle trip {stale.get('id')} for {clean_user}")
         except Exception as e:
             log.warning(f"[Geo] Error finalizing stale active trip: {e}")
 
@@ -2321,20 +2380,6 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
             except Exception as e:
                 log.warning(f"[Geo] Error updating active trip: {e}")
 
-    # 2. Finalize trip if stationary / slow for > 5 minutes (300 seconds).
-    #    Step 0 above already handles the common case; this is the safety net
-    #    when the stale check couldn't parse the active record.
-    elif active_raw:
-        try:
-            trip = json.loads(active_raw)
-            idle_seconds = ts - float(trip.get("last_moving_time", ts))
-            if idle_seconds >= 300:
-                completed = await _finalize_active_trip(r, clean_user, trip, ts)
-                if completed:
-                    log.info(f"[Geo] Completed trip {completed['id']} for {clean_user}: {completed['distance_miles']} miles, {completed['duration_seconds']}s")
-                await r.delete(active_key)
-        except Exception as e:
-            log.warning(f"[Geo] Error finalizing active trip: {e}")
 
 
 MAX_TRIPS_PER_REQUEST = 1000
@@ -2346,36 +2391,57 @@ async def get_trips(
     limit: int = 50,
     viewer: str | None = None,
     is_admin: str | None = None,
+    scope: str | None = None,
 ):
-    """Trips for one user, or (admin only) everyone.
+    """Trips for one user, for the viewer's family, or (admin only) everyone.
 
+    ``scope=family`` is the viewer's own trips plus those of everyone who
+    shares their activity with them -- what Wander lists, and what shared-ride
+    detection needs (it can only pair trips that are in the same list).
     Previously any caller could omit ``user_id`` and receive ``geo:trips:all``,
-    i.e. every user's trips. Reading another person's now requires them to have
-    opted in; the ``all`` bucket is admin-only.
+    i.e. every user's trips; the ``all`` bucket is still admin-only.
     """
     r = await get_redis()
     if not r:
         return {"trips": [], "total_trips": 0}
 
-    wants_all = not user_id or user_id == "all"
     admin = str(is_admin or "").lower() in {"1", "true", "yes"}
-    if wants_all and not admin:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    clean_user = None if wants_all else await _require_may_view(viewer, user_id, is_admin)
-    key = f"geo:trips:user:{clean_user}" if clean_user else "geo:trips:all"
-
     # Bounded: the client asks for the whole history (Wander groups it by
     # day/week/month/year), but no request may walk an unbounded index.
     limit = max(1, min(int(limit), MAX_TRIPS_PER_REQUEST))
-    trip_ids = await r.zrevrange(key, 0, limit - 1)
+
+    if scope == "family":
+        clean_viewer = (viewer or "").split(".")[-1].strip().lower()
+        if not clean_viewer and not admin:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        owners = await _trip_owners(r)
+        if admin:
+            users = owners
+        else:
+            sharing = await _fetch_activity_sharing()
+            users = [u for u in owners if await _viewer_may_see(clean_viewer, u, sharing)]
+            if clean_viewer not in users:
+                users.append(clean_viewer)
+    else:
+        wants_all = not user_id or user_id == "all"
+        if wants_all and not admin:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        users = None if wants_all else [await _require_may_view(viewer, user_id, is_admin)]
+
+    index_keys = [f"geo:trips:user:{u}" for u in users] if users is not None else ["geo:trips:all"]
     trips = []
-    for tid in trip_ids:
-        raw = await r.get(f"geo:trip:{tid}")
-        if raw:
-            try:
-                trips.append(json.loads(raw))
-            except Exception:
-                pass
+    seen: set[str] = set()
+    for key in index_keys:
+        for tid in await r.zrevrange(key, 0, limit - 1):
+            if tid in seen:
+                continue
+            seen.add(tid)
+            raw = await r.get(f"geo:trip:{tid}")
+            if raw:
+                with contextlib.suppress(ValueError):
+                    trips.append(json.loads(raw))
+    trips.sort(key=lambda t: float(t.get("start_time") or 0), reverse=True)
+    trips = trips[:limit]
 
     # Upgrade street-only stored labels (e.g. "North Green Trail") to the
     # closest HA zone or business so the card Destination is useful.
@@ -2399,21 +2465,18 @@ async def get_trips(
                 pass
 
     # Also check active trips in progress
-    active_keys = [f"geo:active_trip:{clean_user}"] if clean_user else await r.keys("geo:active_trip:*")
+    active_keys = (
+        [f"geo:active_trip:{u}" for u in users] if users is not None else await r.keys("geo:active_trip:*")
+    )
     for akey in active_keys:
         act_raw = await r.get(akey)
         if act_raw:
             try:
                 act = json.loads(act_raw)
                 now_t = time.time()
-                # Idle >= 5 min: the drive is over, but no slow GPS fix ever
-                # arrived (client geofence filters stationary points). Finalize
-                # on read so Wander shows a completed trip instead of a
-                # permanently "in_progress" one.
-                if now_t - float(act.get("last_moving_time", now_t)) >= 300:
-                    act_user = act.get("user_id") or akey.split("geo:active_trip:")[-1]
-                    done = await _finalize_active_trip(r, act_user, act, now_t)
-                    await r.delete(akey)
+                # Idle: the drive is over (the sweeper may not have run yet).
+                ended, done = await _finalize_if_idle(r, akey, act, now_t)
+                if ended:
                     if done:
                         trips.append(done)
                     continue
@@ -2438,6 +2501,17 @@ async def get_trips(
     # Group shared trips
     trips = group_shared_trips(trips)
     return {"trips": trips, "total_trips": len(trips)}
+
+
+async def _trip_owners(r) -> list[str]:
+    """Usernames with a trip index or a drive in progress."""
+    owners = set()
+    for pattern in ("geo:trips:user:*", "geo:active_trip:*"):
+        for key in await r.keys(pattern):
+            name = (key.decode() if isinstance(key, bytes) else key).rsplit(":", 1)[-1]
+            if name:
+                owners.add(name)
+    return sorted(owners)
 
 
 async def _trip_by_id(r, trip_id: str) -> dict | None:
@@ -4285,17 +4359,19 @@ async def _fetch_activity_sharing() -> dict:
     return {"users": []}
 
 
-async def _viewer_may_see(viewer: str, target: str) -> bool:
+async def _viewer_may_see(viewer: str, target: str, sharing: dict | None = None) -> bool:
     """True when `viewer` is allowed to read `target`'s activity.
 
     Owners always see their own data. Everyone else requires the target to
-    have opted in and the viewer to be inside the chosen audience.
+    have opted in and the viewer to be inside the chosen audience. `sharing`
+    lets a caller checking several targets fetch the preferences once.
     """
     if not viewer:
         return False
     if viewer == target:
         return True
-    sharing = await _fetch_activity_sharing()
+    if sharing is None:
+        sharing = await _fetch_activity_sharing()
     for entry in sharing.get("users", []):
         if str(entry.get("username", "")).strip().lower() != target:
             continue

@@ -87,6 +87,7 @@ export interface MediaState {
 }
 
 export interface CalendarEvent {
+  /** Skylight event id or Nextcloud UID: what edit and delete act on. */
   id?: string;
   summary: string;
   start_time: string;
@@ -94,6 +95,9 @@ export interface CalendarEvent {
   location?: string;
   integration?: string;
   calendar?: string;
+  all_day?: boolean;
+  /** A repeating Nextcloud event: an edit or delete applies to every repeat. */
+  recurring?: boolean;
 }
 
 /** A calendar owner (person). Events whose `calendar` is in `accounts` are

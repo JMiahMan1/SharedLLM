@@ -353,7 +353,9 @@ def test_the_operator_can_manage_every_bible_setting_from_the_config_database():
         "it a boot-time value that needs a restart to change"
     )
     assert "bible_api_key" in inspect.getsource(main._provider_registry)
-    assert "/api/global-settings" in live_source
+    # Identity serves settings at /api/settings (there is no /api/global-settings;
+    # that path 404ed on every read, so saved keys never reached this service).
+    assert "/api/settings" in live_source and "/api/global-settings" not in live_source
 
     assert len(seeded) == len(DEFAULT_GLOBAL_SETTINGS), "duplicate GlobalSetting keys"
     for row in DEFAULT_GLOBAL_SETTINGS:

@@ -182,4 +182,29 @@ describe('opening a conversation', () => {
       else delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight;
     }
   });
+
+  it('shows earlier messages on request, keeping the window on every refresh', async () => {
+    const user = userEvent.setup();
+    const limits: number[] = [];
+    const history = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        id: 1000 - i, actor_id: 'michele', actor_display_name: 'Michele', timestamp: 1715000000 - i * 60,
+        message_type: 'comment', message: `message ${1000 - i}`,
+      }));
+    server.use(
+      http.get('/api/communication/talk/messages', ({ request }) => {
+        const limit = Number(new URL(request.url).searchParams.get('limit'));
+        limits.push(limit);
+        // 70 messages in all: the first page is full, the second is not.
+        return HttpResponse.json({ status: 'SUCCESS', detail: { messages: history(Math.min(limit, 70)) } });
+      }),
+    );
+    renderWithProviders(<Family />);
+
+    await user.click(await screen.findByRole('button', { name: /show earlier messages/i }));
+    await waitFor(() => expect(screen.getByTestId('chat-feed')).toHaveTextContent('message 931'));
+    expect(limits).toContain(100);
+    // Everything is loaded now: no more "earlier" to show.
+    expect(screen.queryByRole('button', { name: /show earlier messages/i })).not.toBeInTheDocument();
+  });
 });

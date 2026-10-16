@@ -674,6 +674,8 @@ def _hybrid_search(
             # UI) can see how often a lesson has been reused.
             meta["usage_count"] = row["usage_count"] or 0
             meta["last_used_at"] = row["last_used_at"]
+            # An all-collections search merges hits; say where each came from.
+            meta.setdefault("collection_name", collection)
             results.append(
                 SearchResultItem(
                     content=row["content"],
@@ -815,7 +817,9 @@ async def get_stats(user_id: str = "default"):
     user_id = user_id.lower()
     log.info(f"Fetching stats for user_id: {user_id}")
     try:
-        collections = ["nextcloud_files", "ha_entities", "system_capabilities", "system_learnings"]
+        # calibre_files is crawled from the Knowledge Hub like nextcloud_files,
+        # so it belongs in the same counts.
+        collections = ["nextcloud_files", "calibre_files", "ha_entities", "system_capabilities", "system_learnings"]
         total_chunks = 0
         coll_chunks_map: dict[str, int] = {}
         coll_docs_map: dict[str, int] = {}
@@ -824,7 +828,9 @@ async def get_stats(user_id: str = "default"):
         last_indexed = None
 
         for name in collections:
-            target_user = "default" if name == "system_capabilities" else user_id
+            # Capabilities and Raven lessons are system-wide (stored under
+            # "default"), as /rag/learning lists them.
+            target_user = "default" if name in ("system_capabilities", "system_learnings") else user_id
             rows = _conn().execute(
                 "SELECT metadata FROM rag_items WHERE collection_name = ? AND user_id = ?",
                 [name, target_user],
@@ -946,8 +952,10 @@ async def list_learnings(user_id: str = "default", limit: int = 200, sort: str =
 async def edit_learning(doc_id: str, payload: dict):
     """Edit a Raven lesson's content and/or metadata."""
     try:
+        # Lessons only: this id lookup used to edit any row in any collection.
         row = _conn().execute(
-            "SELECT content, metadata FROM rag_items WHERE id = ?", [doc_id]
+            "SELECT content, metadata FROM rag_items WHERE id = ? AND collection_name = 'system_learnings'",
+            [doc_id],
         ).fetchone()
         if not row:
             return JSONResponse(status_code=404, content={"status": "ERROR", "message": "Learning not found"})
@@ -982,8 +990,14 @@ async def edit_learning(doc_id: str, payload: dict):
 
 @app.delete("/rag/learning/{doc_id}", dependencies=[Depends(require_internal)])
 async def delete_learning(doc_id: str):
-    """Delete a single Raven lesson."""
+    """Delete a single Raven lesson (never a row of another collection)."""
     try:
+        exists = _conn().execute(
+            "SELECT 1 FROM rag_items WHERE id = ? AND collection_name = 'system_learnings'",
+            [doc_id],
+        ).fetchone()
+        if not exists:
+            return JSONResponse(status_code=404, content={"status": "ERROR", "message": "Learning not found"})
         _delete_items([doc_id])
         return {"status": "SUCCESS", "id": doc_id}
     except Exception as e:
@@ -2179,6 +2193,20 @@ def _usable_entity_id(entity_id: object) -> bool:
     return domain.islower() and domain.replace("_", "").isalnum()
 
 
+def _ha_item_id(user_id: str, entity_id: str) -> str:
+    """The ``rag_items`` id of one user's copy of one HA entity.
+
+    It used to be ``ha:{entity_id}`` for everyone. ``id`` is the table's primary
+    key, so each user's sync (default, then michele, then jeremiah, every five
+    minutes) replaced the previous user's rows: no user ever found their own
+    copy as "unchanged", all ~700 entities were re-embedded on every sync
+    (RAG busy roughly half of every hour), and at any moment only the last
+    user to sync had any HA entities indexed. Rows stored under the old id are
+    removed as orphans on each user's next sync.
+    """
+    return f"ha:{user_id}:{entity_id}"
+
+
 @app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
 async def sync_ha(payload: dict, user_id: str | None = None):
     entities = payload.get("entities", [])
@@ -2209,15 +2237,22 @@ async def sync_ha(payload: dict, user_id: str | None = None):
 
     try:
         existing_rows = _conn().execute(
-            "SELECT id FROM rag_items WHERE collection_name = 'ha_entities' AND user_id = ?",
+            "SELECT id, content, usage_count FROM rag_items"
+            " WHERE collection_name = 'ha_entities' AND user_id = ?",
             [resolved_user],
         ).fetchall()
-        existing_ids = {r["id"] for r in existing_rows}
+        existing = {r["id"]: (r["content"], r["usage_count"]) for r in existing_rows}
     except Exception:
-        existing_ids = set()
+        existing = {}
+    existing_ids = set(existing)
 
     new_count = 0
     pending: list[tuple[str, str, dict, int]] = []
+    # Entities whose embedded text is unchanged keep their vector: the gateway
+    # calls this every 5 min per user, and re-embedding ~700 unchanged entities
+    # each time kept the RAG container at ~350% CPU around the clock. Only
+    # their metadata (device_* fields, timestamps) is refreshed.
+    unchanged: list[tuple[str, dict]] = []
     for e in entities:
         if not isinstance(e, dict):
             continue
@@ -2247,7 +2282,7 @@ async def sync_ha(payload: dict, user_id: str | None = None):
         if dev_hostname:
             content += f" | Hostname: {dev_hostname}"
 
-        cid = f"ha:{eid}"
+        cid = _ha_item_id(resolved_user, eid)
         created_at = now
         if cid not in existing_ids:
             new_count += 1
@@ -2271,14 +2306,29 @@ async def sync_ha(payload: dict, user_id: str | None = None):
             "device_last_verified": str(dev_last_verified) if dev_last_verified else "",
             "device_metadata": json.dumps(dev_metadata) if dev_metadata else "",
         }
-        pending.append((cid, content, meta, created_at))
+        if cid in existing and existing[cid][0] == content:
+            unchanged.append((cid, {**meta, "usage_count": existing[cid][1] or 0}))
+        else:
+            pending.append((cid, content, meta, created_at))
 
     # Orphan cleanup: delete entities no longer present in HA.
-    incoming_ids = {f"ha:{e.get('entity_id')}" for e in entities if e.get("entity_id")}
-    orphaned_entities = [oid for oid in (existing_ids - incoming_ids) if oid.startswith("ha:")]
-    if orphaned_entities:
-        _delete_items(orphaned_entities)
-        log.info(f"[ha_sync] Removed {len(orphaned_entities)} orphaned entity entries")
+    incoming_eids = {e.get("entity_id") for e in entities if e.get("entity_id")}
+    incoming_ids = {_ha_item_id(resolved_user, eid) for eid in incoming_eids}
+    stale_rows = [oid for oid in (existing_ids - incoming_ids) if oid.startswith("ha:")]
+    if stale_rows:
+        _delete_items(stale_rows)
+        log.info(f"[ha_sync] Removed {len(stale_rows)} stale entity rows")
+    # Report entity ids (the gateway clears its ``ha:state:{entity_id}`` cache
+    # with them), and only ones HA no longer has: a row left under the old id
+    # format is stale, but its entity is still live.
+    own_prefix = _ha_item_id(resolved_user, "")
+    orphaned_entities = sorted(
+        {
+            oid[len(own_prefix):] if oid.startswith(own_prefix) else oid[len("ha:"):]
+            for oid in stale_rows
+        }
+        - incoming_eids
+    )
 
     pending.append(
         (
@@ -2324,9 +2374,14 @@ async def sync_ha(payload: dict, user_id: str | None = None):
             _add_item("ha_entities", cid, resolved_user, content, meta, created_at, now_ts, vector=vectors[i], commit=False)
         except Exception as ex:
             log.error(f"HA entity sync failed for {cid}: {ex}")
+    if unchanged:
+        _conn().executemany(
+            "UPDATE rag_items SET metadata = ?, indexed_at = ? WHERE id = ?",
+            [(json.dumps(meta), now_ts, cid) for cid, meta in unchanged],
+        )
     _conn().commit()
     log.info(
-        f"[ha_sync] wrote {len(pending)} items in "
+        f"[ha_sync] wrote {len(pending)} items, refreshed {len(unchanged)} unchanged in "
         f"{time.monotonic() - write_started:.1f}s (rss={_self_rss_mib()}MiB)"
     )
 

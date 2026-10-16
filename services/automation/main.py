@@ -455,13 +455,19 @@ async def scheduler_loop():
                 if not timer_data:
                     continue
 
-                t = json.loads(timer_data)
-                if not t.get("active", True):
+                # One malformed row (bad JSON, missing/garbled expires_at) used
+                # to abort the whole pass, so every other timer stopped firing
+                # until someone deleted it. Skip just that row instead.
+                try:
+                    t = json.loads(timer_data)
+                    if not isinstance(t, dict) or not t.get("active", True):
+                        continue
+                    # UTC-aware everywhere; legacy naive-local rows are handled
+                    # inside _parse_expires.
+                    expires = _parse_expires(t["expires_at"])
+                except (ValueError, KeyError, TypeError) as e:
+                    log.error(f"Skipping malformed timer {key}: {type(e).__name__}: {e}")
                     continue
-
-                # UTC-aware everywhere; legacy naive-local rows are handled
-                # inside _parse_expires.
-                expires = _parse_expires(t["expires_at"])
 
                 if now >= expires:
                     await _fire_timer(redis_client, key, t)

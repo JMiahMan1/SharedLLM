@@ -86,14 +86,10 @@ describe('DrawCanvas', () => {
     expect(screen.queryByTestId('draw-result')).toBeNull();
   });
 
-  it('offers a send-to-chat action only when a handler is given', () => {
-    const { rerender } = render(<DrawCanvas />);
-    expect(screen.queryByRole('button', { name: /send to chat/i })).toBeNull();
-
-    const onSend = vi.fn();
-    rerender(<DrawCanvas onSend={onSend} />);
+  it('will not send a blank canvas to a chat', () => {
+    render(<DrawCanvas />);
     fireEvent.click(screen.getByRole('button', { name: /send to chat/i }));
-    // jsdom has no PNG export, so we only assert the handler was invoked.
-    expect(onSend).toHaveBeenCalledWith(expect.any(String));
+    // Nothing drawn yet: no conversation picker opens.
+    expect(screen.queryByTestId('send-to-chat')).toBeNull();
   });
 });

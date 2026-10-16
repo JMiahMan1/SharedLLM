@@ -37,6 +37,47 @@ describe('Notes (Keep-style)', () => {
     expect(notesWriteCalls[0].content).toContain('milk and eggs');
   });
 
+  it('opens a note without its stored header and saves it in place', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await user.click(await screen.findByText('Trip ideas'));
+    const content = await screen.findByLabelText('Note content');
+    // The server writes "# title / Category:" itself; showing it here put a
+    // second copy on top of the note with every save.
+    expect((content as HTMLTextAreaElement).value).toBe('Sedona in the fall, then the coast.');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(notesWriteCalls.length).toBe(1));
+    expect(notesWriteCalls[0]).toMatchObject({ title: 'Trip ideas', path: 'Notes/Trip ideas.md', category: 'Notes' });
+  });
+
+  it('renaming a note writes it under the new name and removes the old file', async () => {
+    const user = userEvent.setup();
+    const deletes: Array<{ path?: string }> = [];
+    server.use(
+      http.post('/api/communication/notes/write', async ({ request }) => {
+        notesWriteCalls.push((await request.json()) as never);
+        return HttpResponse.json({ status: 'SUCCESS', message: 'saved', detail: { path: 'Notes/Fall trip.md' } });
+      }),
+      http.post('/api/communication/notes/delete', async ({ request }) => {
+        deletes.push((await request.json()) as { path?: string });
+        return HttpResponse.json({ status: 'SUCCESS', message: 'deleted' });
+      }),
+    );
+    renderWithProviders(<Notes />);
+
+    await user.click(await screen.findByText('Trip ideas'));
+    const title = await screen.findByLabelText('Note title');
+    await user.clear(title);
+    await user.type(title, 'Fall trip');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(deletes).toEqual([expect.objectContaining({ path: 'Notes/Trip ideas.md' })]));
+    expect(notesWriteCalls[0]).toMatchObject({ title: 'Fall trip' });
+    expect((notesWriteCalls[0] as { path?: string }).path).toBeUndefined();
+  });
+
   it('toggles checklist items on the server', async () => {
     const user = userEvent.setup();
     renderWithProviders(<Notes />);

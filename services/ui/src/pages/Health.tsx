@@ -449,7 +449,7 @@ function StepsCard({
               <button
                 type="button"
                 onClick={onOpenGoal}
-                className="mt-0.5 text-[11px] text-purple-300 hover:text-purple-200 underline underline-offset-2 min-h-11 pointer-coarse:min-h-11"
+                className="mt-0.5 text-[11px] text-purple-300 hover:text-purple-200 underline underline-offset-2 min-h-11 min-w-11"
               >
                 Edit goal
               </button>
@@ -696,7 +696,7 @@ function TrendsPanel({ currentUsername }: { currentUsername?: string }) {
         <div className="flex items-center gap-1.5 text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
           <TrendingUp size={13} className="text-purple-400" />
           <h2 id="trends-heading">7-Day Activity Trends</h2>
-          <HelpTooltip docName="HEALTH_STEPS.md" sectionTitle="Activity trends" />
+          <HelpTooltip docName="HEALTH_STEPS.md" sectionTitle="## Surfaces" />
         </div>
         <button
           onClick={() => {

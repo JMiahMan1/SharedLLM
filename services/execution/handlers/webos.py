@@ -21,7 +21,7 @@ except ImportError:
 log = logging.getLogger("execution.webos")
 
 WEBOS_COMMANDS = {
-    "home": "HOME", "back": "BACK", "enter": "ENTER",
+    "home": "HOME", "back": "BACK", "enter": "ENTER", "select": "ENTER", "ok": "ENTER",
     "play": "PLAY", "pause": "PAUSE", "stop": "STOP",
     "fast_forward": "FASTFORWARD", "rewind": "REWIND",
     "channel_up": "CHANNELUP", "channel_down": "CHANNELDOWN",

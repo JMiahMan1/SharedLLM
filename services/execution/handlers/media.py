@@ -664,6 +664,7 @@ async def handle_media_transport(req) -> ExecutionResult:
         "pause": 1, "seek": 2, "volume_set": 4, "volume_mute": 8, "mute": 8,
         "previous": 16, "next": 32, "stop": 4096, "volume_up": 1024,
         "volume_down": 1024, "play": 16384, "resume": 16384,
+        "power_on": 128, "power_off": 256,
     }
     supported_features = int(attrs.get("supported_features", 0) or 0)
     feature_bit = feature_bits.get(command)
@@ -721,6 +722,8 @@ async def handle_media_transport(req) -> ExecutionResult:
         "next": "media_next_track", "previous": "media_previous_track",
         "volume_up": "volume_up", "volume_down": "volume_down", "volume_set": "volume_set", "mute": "volume_mute",
         "seek": "media_seek",
+        # HA has no "power_off" service; turn_on/turn_off are the real ones.
+        "power_on": "turn_on", "power_off": "turn_off",
     }
 
     service = button_map.get(command, command)
@@ -728,12 +731,12 @@ async def handle_media_transport(req) -> ExecutionResult:
     target_entity = full_entity_id
 
     # Remote button commands (uppercase = remote.send_command)
-    remote_buttons = {"home", "back", "up", "down", "left", "right", "select", "enter", "ok", "info", "replay"}
+    remote_buttons = {"home", "back", "up", "down", "left", "right", "select", "enter", "ok", "info", "replay", "menu"}
     if command in remote_buttons:
         service_cmd = "send_command"
         data = {"command": command.upper()}
         domain = "remote"
-        target_entity = full_entity_id.replace("media_player.", "remote.")
+        target_entity = await ha_client.find_companion_remote(ha_url, ha_token, full_entity_id)
     else:
         service_cmd = service
         assert service_cmd is not None

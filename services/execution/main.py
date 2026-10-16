@@ -1110,6 +1110,9 @@ async def execute_trigger(payload: dict[str, Any]):
         log.error(f"Trigger failed: could not resolve credentials for user {user_id}")
         return _ok(f"Triggered {timer_data.get('title')} (failed to resolve creds)", "automation_trigger")
 
+    # Always on the person's phone; on a speaker too when the timer names one.
+    await timer.notify_timer_done(creds.get("user") or str(user_id), timer_data)
+
     # Execute the actual alert via Home Assistant
     try:
         target_device = timer_data.get("target_device")

@@ -55,6 +55,15 @@ describe('classifyLocation', () => {
     expect(m?.freshness).toBe('stale');
   });
 
+  it('ages a re-sent fix by when it was taken, not when it arrived', () => {
+    const m = classifyLocation(
+      'michele',
+      { latitude: 33.4, longitude: -112.0, timestamp: nowSec - 3600, updated_at: nowSec - 5 },
+      now
+    );
+    expect(m?.freshness).toBe('stale');
+  });
+
   it('rejects invalid and null-island fixes', () => {
     expect(classifyLocation('x', { latitude: NaN, longitude: 1 })).toBeNull();
     expect(classifyLocation('x', { latitude: 0, longitude: 0 })).toBeNull();

@@ -81,3 +81,47 @@ async def test_sending_uses_a_once_key_per_day(monkeypatch):
     url, body, headers = sent[0]
     assert url.endswith("/api/telemetry/notify") and headers == {"X-Internal-Secret": "s3"}
     assert body["once"] == "bible-nudge:2026-10-13" and body["user"] == "sam"
+
+
+def test_a_failing_reminder_pass_is_logged_and_the_loop_continues(monkeypatch, caplog):
+    """The loop used to suppress every exception, so a pass failing each time left no trace."""
+    import asyncio
+    import logging
+
+    import pytest
+
+    class _Stop(Exception):
+        pass
+
+    calls = {"pass": 0, "sleep": 0}
+
+    async def failing(*_a):
+        calls["pass"] += 1
+        raise RuntimeError("telemetry gone")
+
+    async def fake_sleep(_s):
+        calls["sleep"] += 1
+        if calls["sleep"] > 2:
+            raise _Stop
+
+    monkeypatch.setattr(reminders, "remind_once", failing)
+    monkeypatch.setattr(reminders.asyncio, "sleep", fake_sleep)
+    with caplog.at_level(logging.WARNING), pytest.raises(_Stop):
+        asyncio.run(reminders.reminder_loop(lambda: None, "http://telemetry:11438", "s"))
+    assert calls["pass"] == 2
+    assert sum("RuntimeError: telemetry gone" in r.getMessage() for r in caplog.records) == 2
+
+
+def test_a_reminder_is_not_sent_hours_late(loaded_client: TestClient):
+    """Setting 07:00 in the evening (or a late restart) must not push at once."""
+    loaded_client.put("/state", params={"username": "sam"}, json={"reminder_time": "07:00"})
+    assert [u for u, _ in _due("08:59")] == ["sam"]
+    assert _due("09:00") == []
+    assert _due("21:00") == []
+
+
+def test_the_plan_link_is_url_encoded(loaded_client: TestClient):
+    loaded_client.put("/state", params={"username": "sam"}, json={"reminder_time": "07:00"})
+    loaded_client.post("/plans/john-21/start", params={"username": "sam"})
+    [(_, note)] = _due("07:30")
+    assert note["data"]["url"] == "/bible?ref=John%201"

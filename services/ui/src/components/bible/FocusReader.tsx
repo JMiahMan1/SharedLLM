@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Minimize2 } from 'lucide-react';
 import type { BibleMark, BibleVerse } from '../../types/api';
 import { ambienceFor } from './focusAmbience';
 import { MARK_WASH, pageStyle, toneOf } from './readingPage';
+import { highlightOn } from './verseMarks';
 import { useSwipe } from '../../lib/useSwipe';
 
 /**
@@ -40,15 +41,6 @@ export interface FocusReaderProps {
   onVerseTap?: (verse: BibleVerse) => void;
 }
 
-function markFor(marks: BibleMark[], verse: BibleVerse): BibleMark | undefined {
-  return marks.find(
-    (m) =>
-      m.kind === 'highlight' &&
-      m.chapter === verse.chapter &&
-      m.verse_start <= verse.verse &&
-      (m.verse_end ?? m.verse_start) >= verse.verse,
-  );
-}
 
 export default function FocusReader({
   reference,
@@ -133,7 +125,7 @@ export default function FocusReader({
           </p>
         )}
         {verses.map((verse) => {
-          const mark = markFor(marks, verse);
+          const mark = highlightOn(marks, verse);
           return (
             <button
               type="button"

@@ -22,7 +22,7 @@ import {
   ArrowUpDown,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api, type StorageEntry, type RagStats, type StorageStatus } from '../services/api';
+import { api, type StorageEntry, type RagStats, type StorageStatus, type SearchResult } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
 
@@ -47,6 +47,27 @@ const REINDEX_PROVIDERS: {
   },
 ];
 
+/** Friendly names for the RAG collections that stats and search report. */
+const COLLECTION_LABELS: Record<string, string> = {
+  nextcloud_files: 'Nextcloud',
+  calibre_files: 'Calibre',
+  ha_entities: 'Home Assistant',
+  system_capabilities: 'Capabilities',
+  system_learnings: 'Raven lessons',
+  mission_history: 'Missions',
+  telemetry_alerts: 'Alerts',
+};
+
+const collectionLabel = (name?: string) => (name && COLLECTION_LABELS[name]) || name || '';
+
+/** The service's own `detail` (e.g. "NextCloud credentials not configured"), else the message. */
+const errorDetail = (err: unknown, fallback: string): string => {
+  const detail = (err as { response?: { data?: { detail?: unknown } } } | null)?.response?.data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  const message = (err as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && message ? message : fallback;
+};
+
 const CRAWL_PHASE_LABELS: Record<string, string> = {
   starting: 'Starting',
   listing: 'Listing entries',
@@ -54,17 +75,22 @@ const CRAWL_PHASE_LABELS: Record<string, string> = {
   syncing: 'Syncing to RAG',
 };
 
+const formatSize = (size?: number | null) => (size ? `${(size / 1024).toFixed(1)} KB` : '0 KB');
+
 const KnowledgeHub = () => {
   const [currentPath, setCurrentPath] = useState('/');
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  // Lessons steer every Raven mission, so only admins may rewrite or delete them.
+  const isAdmin = !!user?.is_admin;
+  const [fileFilter, setFileFilter] = useState('');
   const [purgeModalCollection, setPurgeModalCollection] = useState<string | null>(null);
   const [fullReindexForce, setFullReindexForce] = useState(false);
   const [indexForce, setIndexForce] = useState(false);
   const [reindexProvider, setReindexProvider] = useState<'nextcloud' | 'calibre'>('nextcloud');
 
   const [ragQuery, setRagQuery] = useState('');
-  const [ragResults, setRagResults] = useState<{ answer?: string; files?: { name: string; path: string }[] } | null>(null);
+  const [ragResults, setRagResults] = useState<SearchResult | null>(null);
   const [ragLoading, setRagLoading] = useState(false);
   const [ragError, setRagError] = useState<string | null>(null);
 
@@ -94,7 +120,7 @@ const KnowledgeHub = () => {
     }
   };
 
-  const { data: stats, isLoading: statsLoading } = useQuery<RagStats>({
+  const { data: stats, isLoading: statsLoading, isError: statsError } = useQuery<RagStats>({
     queryKey: ['rag-stats'],
     queryFn: () => api.getRagStats(),
     refetchInterval: 10000,
@@ -109,10 +135,22 @@ const KnowledgeHub = () => {
       (query.state.data as StorageStatus | undefined)?.crawl?.active ? 2000 : 15000,
   });
 
-  const { data: files = [], isLoading: filesLoading, isFetching: filesFetching } = useQuery<StorageEntry[]>({
+  const {
+    data: files = [],
+    isLoading: filesLoading,
+    isFetching: filesFetching,
+    error: filesError,
+  } = useQuery<StorageEntry[]>({
     queryKey: ['storage-files', currentPath],
     queryFn: () => api.getStorageFiles(currentPath),
+    // A 400 (no Nextcloud credentials) will not fix itself on a retry.
+    retry: false,
   });
+
+  const visibleFiles = useMemo(() => {
+    const needle = fileFilter.trim().toLowerCase();
+    return needle ? files.filter((f) => f.name.toLowerCase().includes(needle)) : files;
+  }, [files, fileFilter]);
 
   const {
     data: learnings,
@@ -204,7 +242,7 @@ const KnowledgeHub = () => {
       queryClient.invalidateQueries({ queryKey: ['rag-stats'] });
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to start indexing');
+      toast.error(errorDetail(err, 'Failed to start indexing'));
     },
   });
 
@@ -224,19 +262,24 @@ const KnowledgeHub = () => {
       // Surface the gateway's own detail: an unset calibre_library_path is
       // answered as a 400 naming the setting, and "Request failed with status
       // code 400" would hide exactly what the operator has to fix.
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      toast.error(detail || err.message || 'Failed to start full reindex');
+      toast.error(errorDetail(err, 'Failed to start full reindex'));
     },
   });
 
   const purgeMutation = useMutation({
-    mutationFn: (collectionName: string) => api.purgeRagCollection(collectionName, user?.username || 'default'),
-    onSuccess: () => {
+    mutationFn: (collectionName: string) => api.purgeRagCollection(collectionName),
+    onSuccess: (data, collectionName) => {
       queryClient.invalidateQueries({ queryKey: ['rag-stats'] });
       setPurgeModalCollection(null);
-      toast.success('Collection purged successfully');
+      // Say what actually happened: a purge that matched nothing is not a success story.
+      const removed = typeof data?.removed === 'number' ? data.removed : null;
+      if (removed === 0) {
+        toast(`Nothing to purge: you have no indexed ${collectionLabel(collectionName)} entries`);
+      } else {
+        toast.success(removed === null ? 'Collection purged' : `Removed ${removed.toLocaleString()} entries`);
+      }
     },
-    onError: (err: Error) => toast.error(err.message || 'Purge failed'),
+    onError: (err: Error) => toast.error(errorDetail(err, 'Purge failed')),
   });
 
   const reindexInfo =
@@ -253,13 +296,14 @@ const KnowledgeHub = () => {
 
   const handleNavigate = (path: string) => {
     setCurrentPath(path);
+    setFileFilter('');
   };
 
   const handleGoBack = () => {
     if (currentPath === '/') return;
     const parts = currentPath.split('/').filter(Boolean);
     parts.pop();
-    setCurrentPath('/' + parts.join('/'));
+    handleNavigate('/' + parts.join('/'));
   };
 
   const handleManualIndex = (e: React.FormEvent<HTMLFormElement>) => {
@@ -280,10 +324,10 @@ const KnowledgeHub = () => {
   return (
     <div className="space-y-8 pb-12 animate-in fade-in duration-500">
       <header className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-        <div>
+        <div className="min-w-0">
           <h2 className="text-3xl font-bold tracking-tight text-white">Knowledge Hub</h2>
           <p className="mt-1 text-slate-400">
-            Manage your LLM's brain. Index files and folders from NextCloud into the RAG system.
+            What Jarvis knows: search it, and index your Nextcloud files and Calibre books into it.
           </p>
         </div>
         <div className="flex gap-4">
@@ -291,7 +335,19 @@ const KnowledgeHub = () => {
               <Database className="text-indigo-400" size={20} />
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 leading-none">RAG Status</p>
-                <p className="text-sm font-bold text-white mt-1">Live & Active</p>
+                {/* Derived from the stats request, not a fixed label. */}
+                <p
+                  data-testid="rag-status"
+                  className={`text-sm font-bold mt-1 ${statsError ? 'text-red-300' : 'text-white'}`}
+                >
+                  {statsError
+                    ? 'Unavailable'
+                    : statsLoading
+                      ? 'Checking…'
+                      : crawl?.active
+                        ? 'Indexing…'
+                        : 'Online'}
+                </p>
               </div>
            </div>
         </div>
@@ -319,7 +375,7 @@ const KnowledgeHub = () => {
           <button
             type="submit"
             disabled={ragLoading}
-            className="absolute right-2 top-1/2 -translate-y-1/2 glass-button px-4 py-1.5 text-xs font-bold h-8"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 glass-button px-4 text-xs font-bold h-9"
           >
             {ragLoading ? <RefreshCw size={13} className="animate-spin" /> : 'Search'}
           </button>
@@ -330,26 +386,36 @@ const KnowledgeHub = () => {
             {ragError}
           </div>
         )}
-        {ragResults && (
-          <div className="mt-4 space-y-4">
-            {ragResults.answer && (
-              <div className="rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-relaxed text-slate-300">
+        {ragResults?.files && ragResults.files.length > 0 && (
+          // Each hit shows its own text. `answer` is only the first hit's text,
+          // so it is shown on its own only when the hits carry none.
+          <div className="mt-4 space-y-3">
+            {ragResults.answer && !ragResults.files.some((f) => f.snippet) && (
+              <div className="rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-relaxed text-slate-300 break-words">
                 {ragResults.answer}
               </div>
             )}
-            {ragResults.files && ragResults.files.length > 0 && (
-              <div className="grid gap-3 md:grid-cols-2">
-                {ragResults.files.map((f) => (
-                  <div key={f.path} className="glass-card flex items-center gap-3 p-4">
+            <ul className="grid gap-3 md:grid-cols-2">
+              {ragResults.files.map((f, i) => (
+                <li key={`${f.path}-${i}`} className="glass-card min-w-0 p-4">
+                  <div className="flex min-w-0 items-center gap-2">
                     <File size={15} className="text-blue-400 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-white">{f.name}</p>
-                      <p className="truncate text-xs text-slate-500">{f.path}</p>
-                    </div>
+                    <p className="min-w-0 flex-1 truncate text-sm font-semibold text-white">{f.name}</p>
+                    {f.collection && (
+                      <span className="shrink-0 rounded bg-white/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        {collectionLabel(f.collection)}
+                      </span>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
+                  {f.path && f.path !== f.name && (
+                    <p className="mt-1 truncate text-xs text-slate-500">{f.path}</p>
+                  )}
+                  {f.snippet && (
+                    <p className="mt-2 line-clamp-3 break-words text-xs leading-relaxed text-slate-300">{f.snippet}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </section>
@@ -367,8 +433,8 @@ const KnowledgeHub = () => {
             </h3>
             {stats?.breakdown && (
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] font-black uppercase tracking-tighter text-slate-500">
-                {Object.entries(stats.breakdown).map(([name, s]) => (
-                  <span key={name}>{s.chunks.toLocaleString()} {name.split('_')[0]}</span>
+                {Object.entries(stats.breakdown).filter(([, s]) => s.chunks > 0).map(([name, s]) => (
+                  <span key={name}>{s.chunks.toLocaleString()} {collectionLabel(name)}</span>
                 ))}
               </div>
             )}
@@ -390,14 +456,14 @@ const KnowledgeHub = () => {
             </h3>
             {stats?.breakdown && (
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] font-black uppercase tracking-tighter text-indigo-400/50">
-                {Object.entries(stats.breakdown).map(([name, s]) => (
-                  <span key={name}>{s.documents.toLocaleString()} {name.split('_')[0]}</span>
+                {Object.entries(stats.breakdown).filter(([, s]) => s.documents > 0).map(([name, s]) => (
+                  <span key={name}>{s.documents.toLocaleString()} {collectionLabel(name)}</span>
                 ))}
               </div>
             )}
             <p className="text-xs text-slate-500 mt-4 flex items-center gap-1">
-              <CheckCircle2 size={12} className="text-emerald-500" />
-              Verified across all providers
+              <Info size={12} />
+              Distinct files, books, devices and lessons
             </p>
           </div>
         </div>
@@ -409,12 +475,16 @@ const KnowledgeHub = () => {
           <div className="relative z-10">
             <p className="text-sm font-medium text-slate-400">Last Index Activity</p>
             <h3 className="text-xl font-bold text-white mt-2">
-              {statsLoading ? '...' : (stats?.last_indexed ? new Date(stats.last_indexed).toLocaleTimeString() : 'Never')}
+              {statsLoading
+                ? '...'
+                : stats?.last_indexed
+                  ? new Date(stats.last_indexed).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+                  : 'Never'}
             </h3>
             <div className="mt-4 flex flex-wrap gap-2">
-               {stats?.providers?.map(p => (
-                 <span key={p} className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] text-slate-400 uppercase font-bold tracking-tighter">
-                   {p}
+               {Object.entries(stats?.breakdown ?? {}).filter(([, s]) => s.chunks > 0).map(([name]) => (
+                 <span key={name} className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] text-slate-400 uppercase font-bold tracking-tighter">
+                   {collectionLabel(name)}
                  </span>
                ))}
             </div>
@@ -451,8 +521,8 @@ const KnowledgeHub = () => {
               </div>
             </div>
             
-            <div className="flex items-center gap-6 py-2.5">
-              <div className="flex items-center gap-3 px-4 bg-white/5 rounded-lg border border-white/5">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex min-h-10 pointer-coarse:min-h-11 items-center gap-3 px-4 bg-white/5 rounded-lg border border-white/5">
                 <input 
                   id="recursive"
                   name="recursive"
@@ -465,7 +535,7 @@ const KnowledgeHub = () => {
                 </label>
               </div>
 
-              <div className="flex items-center gap-3 px-4 bg-white/5 rounded-lg border border-white/5">
+              <div className="flex min-h-10 pointer-coarse:min-h-11 items-center gap-3 px-4 bg-white/5 rounded-lg border border-white/5">
                 <input 
                   id="force"
                   name="force"
@@ -483,7 +553,7 @@ const KnowledgeHub = () => {
               disabled={indexMutation.isPending}
               className="glass-button w-full md:w-auto px-8 py-2.5 font-bold text-sm flex items-center justify-center gap-2"
             >
-              {indexMutation.isPending && !indexMutation.variables?.path.startsWith('/') ? (
+              {indexMutation.isPending ? (
                 <RefreshCw size={16} className="animate-spin" />
               ) : (
                 <Database size={16} />
@@ -496,22 +566,24 @@ const KnowledgeHub = () => {
 
       {/* File Explorer */}
       <section className="glass-panel overflow-hidden border-white/5">
-        <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
-          <div className="flex items-center gap-4">
+        <div className="p-4 sm:p-6 border-b border-white/5 flex flex-wrap items-center justify-between gap-3 bg-white/[0.02]">
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
             <button 
               onClick={handleGoBack}
               disabled={currentPath === '/'}
-              className="p-2 rounded-lg hover:bg-white/5 disabled:opacity-30 transition-colors"
+              aria-label="Up one folder"
+              className="flex h-10 w-10 pointer-coarse:h-11 pointer-coarse:w-11 shrink-0 items-center justify-center rounded-lg hover:bg-white/5 disabled:opacity-30 transition-colors"
             >
               <ChevronLeft size={20} />
             </button>
-            <nav className="flex items-center gap-2 text-sm">
+            {/* Deep paths scroll sideways instead of pushing the page wider. */}
+            <nav aria-label="Folder path" className="flex min-w-0 items-center gap-1 overflow-x-auto text-sm">
               {breadcrumbs.map((crumb, i) => (
-                <div key={crumb.path} className="flex items-center gap-2">
+                <div key={crumb.path} className="flex shrink-0 items-center gap-1">
                   {i > 0 && <ChevronRight size={14} className="text-slate-600" />}
                   <button 
                     onClick={() => handleNavigate(crumb.path)}
-                    className={`hover:text-white transition-colors ${i === breadcrumbs.length - 1 ? 'text-white font-bold' : 'text-slate-400'}`}
+                    className={`min-h-10 pointer-coarse:min-h-11 px-1.5 whitespace-nowrap hover:text-white transition-colors ${i === breadcrumbs.length - 1 ? 'text-white font-bold' : 'text-slate-400'}`}
                   >
                     {crumb.name}
                   </button>
@@ -519,18 +591,21 @@ const KnowledgeHub = () => {
               ))}
             </nav>
           </div>
-          <div className="flex items-center gap-3">
-             {filesFetching && <RefreshCw size={16} className="animate-spin text-indigo-400" />}
-             <div className="flex items-center gap-4">
-                <div className="relative">
+          <div className="flex w-full items-center gap-3 sm:w-auto">
+             {filesFetching && <RefreshCw size={16} className="animate-spin text-indigo-400 shrink-0" />}
+             <div className="flex min-w-0 flex-1 items-center gap-3">
+                <div className="relative min-w-0 flex-1">
                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                    <input 
-                     type="text" 
-                     placeholder="Filter files..." 
-                     className="bg-black/20 border border-white/5 rounded-lg py-1.5 pl-9 pr-4 text-sm focus:outline-none focus:border-indigo-500/50 transition-colors"
+                     type="search" 
+                     value={fileFilter}
+                     onChange={(e) => setFileFilter(e.target.value)}
+                     placeholder="Filter this folder..." 
+                     aria-label="Filter files in this folder"
+                     className="w-full min-h-10 pointer-coarse:min-h-11 bg-black/20 border border-white/5 rounded-lg py-1.5 pl-9 pr-4 text-sm focus:outline-none focus:border-indigo-500/50 transition-colors"
                    />
                 </div>
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 rounded-lg border border-white/5">
+                <div className="flex min-h-10 pointer-coarse:min-h-11 shrink-0 items-center gap-2 px-3 bg-white/5 rounded-lg border border-white/5">
                    <input 
                      id="indexForce"
                      type="checkbox" 
@@ -538,7 +613,7 @@ const KnowledgeHub = () => {
                      onChange={(e) => setIndexForce(e.target.checked)}
                      className="w-3.5 h-3.5 rounded border-white/10 bg-black/20 text-amber-600 focus:ring-amber-500 focus:ring-offset-black"
                    />
-                   <label htmlFor="indexForce" className="text-[10px] text-slate-400 cursor-pointer font-bold uppercase tracking-tighter">
+                   <label htmlFor="indexForce" title="Re-read files even if they were indexed before" className="text-[10px] text-slate-400 cursor-pointer font-bold uppercase tracking-tighter">
                      Force
                    </label>
                 </div>
@@ -546,55 +621,71 @@ const KnowledgeHub = () => {
            </div>
         </div>
 
-        <div className="overflow-x-auto pb-4">
-          <table className="w-full min-w-[800px] text-left border-collapse">
+        {/* Size and status get their own columns from sm up; on a phone they
+            sit under the name so the table never needs to scroll sideways. */}
+        <div className="pb-4">
+          <table className="w-full table-fixed text-left border-collapse">
             <thead>
               <tr className="text-[10px] font-black uppercase tracking-widest text-slate-500 border-b border-white/5">
-                <th className="px-6 py-4">Name</th>
-                <th className="px-6 py-4">Size</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4 text-right">Actions</th>
+                <th className="px-4 sm:px-6 py-4">Name</th>
+                <th className="hidden sm:table-cell w-24 px-6 py-4">Size</th>
+                <th className="hidden sm:table-cell w-32 px-6 py-4">Status</th>
+                <th className="w-28 sm:w-40 px-4 sm:px-6 py-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {filesLoading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
-                    <td className="px-6 py-4"><div className="h-4 w-48 bg-white/5 rounded" /></td>
-                    <td className="px-6 py-4"><div className="h-4 w-12 bg-white/5 rounded" /></td>
-                    <td className="px-6 py-4"><div className="h-4 w-20 bg-white/5 rounded" /></td>
-                    <td className="px-6 py-4"><div className="h-4 w-24 ml-auto bg-white/5 rounded" /></td>
+                    <td className="px-4 sm:px-6 py-4"><div className="h-4 w-3/4 bg-white/5 rounded" /></td>
+                    <td className="hidden sm:table-cell px-6 py-4"><div className="h-4 w-12 bg-white/5 rounded" /></td>
+                    <td className="hidden sm:table-cell px-6 py-4"><div className="h-4 w-20 bg-white/5 rounded" /></td>
+                    <td className="px-4 sm:px-6 py-4"><div className="h-4 w-16 ml-auto bg-white/5 rounded" /></td>
                   </tr>
                 ))
-              ) : files.length === 0 ? (
+              ) : filesError ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-12 text-center text-slate-500 italic">
-                    This directory is empty or unreachable.
+                  <td colSpan={4} role="alert" className="px-4 sm:px-6 py-12 text-center text-sm text-red-300">
+                    {errorDetail(filesError, 'Could not list this folder.')}
+                  </td>
+                </tr>
+              ) : visibleFiles.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-4 sm:px-6 py-12 text-center text-slate-500 italic">
+                    {files.length === 0 ? 'This folder is empty.' : `Nothing here matches "${fileFilter}".`}
                   </td>
                 </tr>
               ) : (
-                files.map((file) => (
+                visibleFiles.map((file) => (
                   <tr key={file.path} className="group hover:bg-white/[0.02] transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
+                    <td className="px-4 sm:px-6 py-3 sm:py-4">
+                      <div className="flex min-w-0 items-center gap-3">
                         {file.is_dir ? (
                           <Folder className="text-indigo-400 shrink-0" size={18} />
                         ) : (
                           <File className="text-slate-400 shrink-0" size={18} />
                         )}
-                        <button 
-                          onClick={() => file.is_dir && handleNavigate(file.path)}
-                          className={`text-sm truncate ${file.is_dir ? 'hover:text-indigo-300 font-medium' : 'text-slate-300'}`}
-                          disabled={!file.is_dir}
-                        >
-                          {file.name}
-                        </button>
+                        <div className="min-w-0">
+                          <button 
+                            onClick={() => file.is_dir && handleNavigate(file.path)}
+                            className={`block max-w-full min-h-9 pointer-coarse:min-h-11 text-left text-sm truncate ${file.is_dir ? 'hover:text-indigo-300 font-medium' : 'text-slate-300'}`}
+                            disabled={!file.is_dir}
+                            title={file.name}
+                          >
+                            {file.name}
+                          </button>
+                          <p className="sm:hidden text-[10px] text-slate-500">
+                            {file.is_dir ? 'Folder' : formatSize(file.size)}
+                            {' · '}
+                            <span className={file.indexed ? 'text-emerald-400' : ''}>{file.indexed ? 'Indexed' : 'Not indexed'}</span>
+                          </p>
+                        </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-xs text-slate-500 font-mono">
-                      {file.is_dir ? '--' : (file.size ? `${(file.size / 1024).toFixed(1)} KB` : '0')}
+                    <td className="hidden sm:table-cell px-6 py-4 text-xs text-slate-500 font-mono">
+                      {file.is_dir ? '--' : formatSize(file.size)}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="hidden sm:table-cell px-6 py-4">
                       {file.indexed ? (
                         <div className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
                           <CheckCircle2 size={12} />
@@ -607,32 +698,34 @@ const KnowledgeHub = () => {
                         </div>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-right">
+                    <td className="px-4 sm:px-6 py-3 sm:py-4 text-right">
                       {file.is_dir ? (
                         <button
                           onClick={() => indexMutation.mutate({ path: file.path, recursive: true, force: indexForce })}
+                          aria-label={`Index folder ${file.name}`}
                           disabled={indexMutation.isPending}
-                          className="glass-button text-[10px] font-black uppercase tracking-widest py-1.5 px-3 flex items-center gap-2 ml-auto hover:border-indigo-500/50 hover:text-indigo-300 transition-all"
+                          className="glass-button min-h-9 pointer-coarse:min-h-11 text-[10px] font-black uppercase tracking-widest py-1.5 px-3 flex items-center gap-2 ml-auto hover:border-indigo-500/50 hover:text-indigo-300 transition-all"
                         >
                           {indexMutation.isPending && indexMutation.variables?.path === file.path ? (
                              <RefreshCw size={12} className="animate-spin" />
                           ) : (
                             <RefreshCw size={12} />
                           )}
-                          Index Folder
+                          Index<span className="hidden sm:inline">&nbsp;Folder</span>
                         </button>
                       ) : (
                         <button
                           onClick={() => indexMutation.mutate({ path: file.path, recursive: false, force: indexForce })}
+                          aria-label={`Index file ${file.name}`}
                           disabled={indexMutation.isPending}
-                          className="glass-button text-[10px] font-black uppercase tracking-widest py-1.5 px-3 flex items-center gap-2 ml-auto hover:border-emerald-500/50 hover:text-emerald-300 transition-all"
+                          className="glass-button min-h-9 pointer-coarse:min-h-11 text-[10px] font-black uppercase tracking-widest py-1.5 px-3 flex items-center gap-2 ml-auto hover:border-emerald-500/50 hover:text-emerald-300 transition-all"
                         >
                           {indexMutation.isPending && indexMutation.variables?.path === file.path ? (
                             <RefreshCw size={12} className="animate-spin" />
                           ) : (
                             <Database size={12} />
                           )}
-                          Index File
+                          Index<span className="hidden sm:inline">&nbsp;File</span>
                         </button>
                       )}
                     </td>
@@ -662,7 +755,7 @@ const KnowledgeHub = () => {
             </div>
             <button
                onClick={() => setLearningSort(learningSort === 'recent' ? 'reuse' : 'recent')}
-               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-slate-300 hover:bg-white/10 transition-colors"
+               className="flex min-h-9 pointer-coarse:min-h-11 shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-slate-300 hover:bg-white/10 transition-colors"
             >
                <ArrowUpDown size={12} />
                {learningSort === 'reuse' ? 'Most Reused' : 'Newest'}
@@ -752,29 +845,35 @@ const KnowledgeHub = () => {
                                                 ? meta.confidence
                                                 : null;
                                         return (
-                                           <div key={item.id} className="px-4 py-3 pl-9">
-                                              <div className="flex items-center justify-between gap-3 mb-2">
+                                           <div key={item.id} className="px-4 py-3 sm:pl-9 min-w-0 break-words">
+                                              <div className="flex min-h-9 items-center justify-between gap-3 mb-2">
                                                  <p className="text-[11px] text-slate-500">
                                                     Created {created}
                                                  </p>
-                                                 <div className="flex items-center gap-3 shrink-0">
+                                                 {isAdmin && (
+                                                 <div className="flex items-center gap-1 shrink-0">
                                                     <button
                                                        onClick={() => {
                                                           setEditLearning({ id: item.id, content: item.content });
                                                           setEditDraft(item.content);
                                                        }}
-                                                       className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-300 transition-colors"
+                                                       className="flex min-h-9 pointer-coarse:min-h-11 items-center gap-1.5 px-2 text-xs text-slate-400 hover:text-indigo-300 transition-colors"
                                                     >
                                                        <Pencil size={13} /> Edit
                                                     </button>
                                                     <button
-                                                       onClick={() => deleteLearningMutation.mutate(item.id)}
+                                                       onClick={() => {
+                                                          if (confirm('Delete this lesson? Raven will stop using it.')) {
+                                                             deleteLearningMutation.mutate(item.id);
+                                                          }
+                                                       }}
                                                        disabled={deleteLearningMutation.isPending}
-                                                       className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-red-400 transition-colors"
+                                                       className="flex min-h-9 pointer-coarse:min-h-11 items-center gap-1.5 px-2 text-xs text-slate-400 hover:text-red-400 transition-colors"
                                                     >
                                                        <Trash2 size={13} /> Delete
                                                     </button>
                                                  </div>
+                                                 )}
                                               </div>
 
                                               {item.rule && (
@@ -850,7 +949,7 @@ const KnowledgeHub = () => {
             </div>
             <div>
                <h3 className="text-xl font-bold text-white">System Maintenance</h3>
-               <p className="text-sm text-slate-500">Privileged operations for managing indexed knowledge collections.</p>
+               <p className="text-sm text-slate-500">Rebuild or clear what is indexed for you.</p>
             </div>
          </div>
 
@@ -947,7 +1046,7 @@ const KnowledgeHub = () => {
                 <div className="flex items-start justify-between mb-6">
                    <div className="space-y-1">
                       <h4 className="font-bold text-white">Clear Nextcloud Collection</h4>
-                      <p className="text-xs text-slate-500">Permanently delete all indexed file chunks from Nextcloud storage.</p>
+                      <p className="text-xs text-slate-500">Delete your indexed Nextcloud file chunks from semantic memory. The files themselves are untouched.</p>
                    </div>
                    <AlertTriangle className="text-red-500/40 group-hover:text-red-500 transition-colors" size={24} />
                 </div>
@@ -962,8 +1061,8 @@ const KnowledgeHub = () => {
              <div className="glass-panel p-6 border-red-500/10 hover:border-red-500/30 transition-colors group">
                 <div className="flex items-start justify-between mb-6">
                    <div className="space-y-1">
-                      <h4 className="font-bold text-white">Clear Home Assistant Collection</h4>
-                      <p className="text-xs text-slate-500">Remove all device states and automation history from semantic memory.</p>
+                      <h4 className="font-bold text-white">Clear Home Assistant Devices</h4>
+                      <p className="text-xs text-slate-500">Remove your Home Assistant devices from semantic memory. The background sync re-adds them from Home Assistant within minutes.</p>
                    </div>
                    <AlertTriangle className="text-red-500/40 group-hover:text-red-500 transition-colors" size={24} />
                 </div>
@@ -996,22 +1095,16 @@ const KnowledgeHub = () => {
        <Modal
         isOpen={Boolean(purgeModalCollection)}
         onClose={() => setPurgeModalCollection(null)}
-        title="Critical Security Warning"
+        title={`Purge ${collectionLabel(purgeModalCollection ?? undefined)} from memory?`}
       >
         <div className="space-y-6">
            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex gap-4">
               <AlertTriangle className="text-red-500 shrink-0" size={24} />
               <div className="text-xs text-slate-300 leading-relaxed">
-                <p className="font-bold text-white mb-1">Irreversible Action Detected</p>
-                You are about to purge the <span className="font-mono text-red-400 font-bold">{purgeModalCollection}</span> collection. 
-                This will remove all associated vectors from the knowledge index. 
-                Jarvis will lose all context regarding these resources until they are re-indexed.
+                This removes your entries in <span className="font-mono text-red-400 font-bold break-all">{purgeModalCollection}</span> from
+                the knowledge index. Jarvis cannot answer from them until they are indexed again. It cannot be undone.
               </div>
            </div>
-
-           <p className="text-sm text-slate-400">
-             Are you absolutely sure you want to proceed? This operation cannot be undone.
-           </p>
 
            <div className="flex gap-3">
               <button 

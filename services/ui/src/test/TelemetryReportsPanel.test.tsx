@@ -63,16 +63,42 @@ describe('TelemetryReportsPanel', () => {
     });
   });
 
-  it('toggles the schedule between enabled and paused', async () => {
+  it('pauses and resumes the saved schedule on the server', async () => {
     const user = userEvent.setup();
     renderWithProviders(<TelemetryReportsPanel />);
 
     await screen.findByTestId('telemetry-reports-panel');
-    const pause = screen.getByRole('button', { name: /pause schedule/i });
-    await user.click(pause);
+    await user.selectOptions(screen.getByLabelText('Report frequency'), 'weekly');
+    // Nothing saved yet for this cadence: there is nothing to pause.
+    expect(screen.queryByRole('button', { name: /pause schedule/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /save schedule/i }));
+    await user.click(await screen.findByRole('button', { name: /pause schedule/i }));
     expect(await screen.findByRole('button', { name: /resume schedule/i })).toBeInTheDocument();
+    expect(screen.getByTestId('active-schedule').textContent).toMatch(/paused/i);
 
     await user.click(screen.getByRole('button', { name: /resume schedule/i }));
     expect(await screen.findByRole('button', { name: /pause schedule/i })).toBeInTheDocument();
+    expect(screen.getByTestId('active-schedule').textContent).toMatch(/next run/i);
+  });
+
+  it('lists only report notices, not arrivals or chat', async () => {
+    const { server } = await import('./setup');
+    const { http, HttpResponse } = await import('msw');
+    server.use(
+      http.get('/api/telemetry/notifications', () =>
+        HttpResponse.json({
+          status: 'SUCCESS',
+          notifications: [
+            { id: 'n1', kind: 'presence', title: 'Michele arrived at Home', created_at: '2026-10-14T22:00:00Z', read: false },
+            { id: 'n2', kind: 'report_ready', title: 'Your weekly health report is ready', created_at: '2026-10-14T23:00:00Z', read: false },
+          ],
+        })
+      )
+    );
+    renderWithProviders(<TelemetryReportsPanel />);
+
+    expect(await screen.findByText(/weekly health report is ready/i)).toBeInTheDocument();
+    expect(screen.queryByText(/arrived at home/i)).not.toBeInTheDocument();
   });
 });

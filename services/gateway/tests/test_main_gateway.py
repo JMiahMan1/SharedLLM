@@ -236,6 +236,8 @@ async def test_list_ollama_tags(client: TestClient, monkeypatch):
 @pytest.mark.asyncio
 async def test_proxy_show_embed_embeddings(client: TestClient, monkeypatch):
     from services.gateway import main
+    # Signed-in caller; the anonymous case is test_presence_embed_auth.py.
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value="jeremiah"))
     monkeypatch.setattr(main, "get_all_settings", AsyncMock(return_value={
         "llm_local_url": "http://ollama.local"
     }))

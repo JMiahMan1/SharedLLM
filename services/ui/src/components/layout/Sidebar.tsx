@@ -1,153 +1,84 @@
 import { NavLink } from 'react-router-dom';
-import { Activity, BookOpen, Brain, Calendar, Compass, Database, FolderKanban, HeartPulse, LayoutDashboard, Loader2, Music, Shield, ShieldCheck, SlidersHorizontal, StickyNote, Users } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { Activity } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useRavenMissions } from '../../hooks/useRavenMissions';
-import { api } from '../../services/api';
-import type { RavenMission } from '../../services/api';
+import { useServiceInfo, useSystemHealth } from '../../hooks/useSystemHealth';
+import { cn } from '../../lib/utils';
+import { navPagesFor, type NavPage } from './navItems';
 
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+const linkClass = (isActive: boolean) => cn(
+  // Compact rows: fourteen pages and the status line must fit a 720px laptop
+  // screen without the last links (Settings, Admin) scrolling out of sight.
+  'flex items-center justify-center md:justify-start gap-3 px-3 md:px-4 py-2 rounded-xl transition-all duration-200',
+  isActive
+    ? 'bg-purple-600/30 text-white border border-purple-500/40 neon-border shadow-lg shadow-purple-500/10'
+    : 'text-slate-400 hover:text-white hover:bg-white/5',
+);
 
-const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-  { icon: Compass, label: 'Wander', path: '/wander' },
-  { icon: HeartPulse, label: 'Health', path: '/fitness' },
-  { icon: Users, label: 'Family', path: '/family' },
-  { icon: BookOpen, label: 'Bible', path: '/bible' },
-  { icon: StickyNote, label: 'Notes', path: '/notes' },
-  { icon: Calendar, label: 'Calendar', path: '/calendar' },
-  { icon: Music, label: 'Media', path: '/media' },
-  { icon: FolderKanban, label: 'Workspaces', path: '/workspaces' },
-  { icon: Brain, label: 'Lab', path: '/lab' },
-  { icon: Database, label: 'Knowledge', path: '/knowledge' },
-  { icon: SlidersHorizontal, label: 'Settings', path: '/settings' },
-];
-
-const adminRoutes = [
-  { icon: Shield, label: 'Admin', path: '/admin' },
-];
+const SidebarLink = ({ item }: { item: NavPage }) => (
+  <NavLink
+    to={item.path}
+    end={item.path === '/'}
+    className={({ isActive }) => linkClass(isActive)}
+    title={item.label}
+  >
+    <item.icon size={20} className="shrink-0" />
+    <span className="font-medium hidden md:inline">{item.label}</span>
+  </NavLink>
+);
 
 const Sidebar = () => {
   const { user } = useAuth();
   const isAdmin = user?.is_admin ?? false;
+  const pages = navPagesFor(isAdmin);
+  const everyone = pages.filter((p) => !p.adminOnly);
+  const adminPages = pages.filter((p) => p.adminOnly);
 
   return (
     <aside className="w-20 md:w-64 glass-sidebar m-2 md:m-4 md:mr-0 flex flex-col transition-all duration-300 rounded-2xl">
-      <div className="p-4 md:p-6 flex justify-center md:justify-start">
+      <div className="p-4 md:px-6 md:py-5 flex justify-center md:justify-start">
         <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent flex items-center gap-2">
           <Activity className="text-purple-400" />
           <span className="hidden md:inline">Jarvis OS</span>
         </h1>
       </div>
-      
-      <nav className="flex-1 px-2 md:px-4 space-y-1 overflow-y-auto">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            className={({ isActive }) => cn(
-              "flex items-center justify-center md:justify-start gap-3 px-3 md:px-4 py-3 rounded-xl transition-all duration-200",
-              isActive 
-                ? "bg-purple-600/30 text-white border border-purple-500/40 neon-border shadow-lg shadow-purple-500/10" 
-                : "text-slate-400 hover:text-white hover:bg-white/5"
-            )}
-            title={item.label}
-          >
-            <item.icon size={20} className="shrink-0" />
-            <span className="font-medium hidden md:inline">{item.label}</span>
-          </NavLink>
-        ))}
 
-        {isAdmin && (
+      <nav className="flex-1 px-2 md:px-4 space-y-1 overflow-y-auto">
+        {everyone.map((item) => <SidebarLink key={item.path} item={item} />)}
+        {adminPages.length > 0 && (
           <>
             <div className="border-t border-white/10 my-2" />
-            {adminRoutes.map((item) => (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                className={({ isActive }) => cn(
-                  "flex items-center justify-center md:justify-start gap-3 px-3 md:px-4 py-3 rounded-xl transition-all duration-200",
-                  isActive 
-                    ? "bg-purple-600/30 text-white border border-purple-500/40 neon-border shadow-lg shadow-purple-500/10" 
-                    : "text-slate-500 hover:text-white hover:bg-white/5"
-                )}
-                title={item.label}
-              >
-                <item.icon size={20} className="shrink-0" />
-                <span className="font-medium hidden md:inline">{item.label}</span>
-              </NavLink>
-            ))}
+            {adminPages.map((item) => <SidebarLink key={item.path} item={item} />)}
           </>
         )}
       </nav>
 
-      {isAdmin && (
-        <RavenStatusSection />
-      )}
-      <div className="p-4 mt-auto hidden md:block">
-        <div className="glass-card p-4 text-xs text-slate-500">
-          <p>System v1.0.0-alpha</p>
-          <div className="flex items-center gap-2 mt-1">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            <span>All Services Nominal</span>
-          </div>
-        </div>
-      </div>
+      {/* Raven's status lives on the dashboard and in the Lab; a third copy
+          here pushed the nav off short screens. */}
+      <SystemStatusFooter />
     </aside>
   );
 };
 
-const RavenStatusSection = () => {
-  const { data: activeMissions = [], isLoading } = useRavenMissions();
-
-  const handleLaunch = async () => {
-    try {
-      await api.createUserMission('System diagnostic and maintenance scan', 2);
-    } catch {
-      // Silently fail - user sees this in Lab
-    }
-  };
+/** Real gateway readiness and build, not a fixed "All Services Nominal". */
+const SystemStatusFooter = () => {
+  const { data: health, isError } = useSystemHealth();
+  const { data: info } = useServiceInfo();
+  const down = health ? Object.values(health.services ?? {}).filter((s) => s !== 'OK').length : 0;
+  const [dot, text] = isError
+    ? ['bg-red-500', 'Server unreachable']
+    : !health
+      ? ['bg-yellow-500', 'Checking services…']
+      : down === 0
+        ? ['bg-green-500', 'All services online']
+        : ['bg-amber-500', `${down} service${down === 1 ? '' : 's'} degraded`];
 
   return (
-    <div className="p-4 md:px-4 hidden md:block">
-      <div className="glass-card p-3 md:p-4 text-xs border-l-2 border-l-purple-500">
-        <button
-          onClick={handleLaunch}
-          className="flex items-center gap-2 text-slate-300 hover:text-purple-400 transition-colors w-full"
-          title="Launch Raven mission"
-        >
-          {isLoading ? (
-            <Loader2 size={14} className="animate-spin text-purple-400" />
-          ) : activeMissions.length > 0 ? (
-            <Brain size={14} className="text-purple-400" />
-          ) : (
-            <ShieldCheck size={14} className="text-green-400" />
-          )}
-          <span className="font-medium hidden md:inline">
-            {isLoading ? 'Loading...' : activeMissions.length > 0 ? `${activeMissions.length} Mission${activeMissions.length > 1 ? 's' : ''} Active` : 'Raven Idle'}
-          </span>
-        </button>
-        {!isLoading && activeMissions.length > 0 && (
-          <div className="mt-2 space-y-1 hidden md:block">
-            {activeMissions.slice(0, 2).map((mission: RavenMission) => (
-              <div key={mission.id} className="flex items-center gap-1 text-slate-400">
-                <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                  mission.status === 'running' ? 'bg-orange-400 animate-pulse' :
-                  mission.status === 'queued' ? 'bg-yellow-400' :
-                  'bg-blue-400'
-                }`} />
-                <span className="truncate">{mission.proposed_mission.substring(0, 40)}{mission.proposed_mission.length > 40 ? '...' : ''}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {!isLoading && activeMissions.length === 0 && (
-          <p className="text-slate-500 hidden md:block mt-2">
-            Raven ready to scan workspaces
-          </p>
+    <div className="px-4 pb-4 pt-2 mt-auto hidden md:block">
+      <div className="glass-card px-4 py-2.5 text-xs text-slate-500 flex items-center gap-2" title={info?.git_sha && info.git_sha !== 'unknown' ? `Build ${info.git_sha}` : undefined}>
+        <div className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
+        <span className="truncate">{text}</span>
+        {info && info.git_sha && info.git_sha !== 'unknown' && (
+          <span className="ml-auto font-mono text-[10px] text-slate-600">{info.git_sha}</span>
         )}
       </div>
     </div>

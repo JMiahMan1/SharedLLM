@@ -335,3 +335,56 @@ async def test_idle_browser_player_does_not_hide_a_real_ha_player(mocker):
     assert active["entity_id"] == "media_player.kitchen"
     assert active["media_title"] == "Real Song"
     assert "Real Song" in res.message
+
+
+@pytest.mark.asyncio
+async def test_stale_playing_web_player_is_not_now_playing(mocker):
+    """A "playing" row the app stopped refreshing (closed mid-song) is not playing.
+
+    Live, the dashboard said "Web Player: Hey (playing)" a day after the app closed.
+    """
+    from services.execution import media_playback_registry as registry
+
+    mocker.patch("services.execution.ha_client.get_states", return_value=mock_ha_states)
+    username = "stale_web_player"
+    assert await registry.save_playback_state(
+        username, {"entity_id": "web_player", "state": "playing", "media_title": "Hey"}
+    )
+    ctx = UserContext(user=username, ha_url="http://ha.local", ha_token="t")
+
+    fresh = await MediaPlaybackService.status(MediaStatusRequest(user_context=ctx))
+    assert (fresh.detail or {}).get("active", {}).get("media_title") == "Hey"
+
+    db = await registry._get_conn()
+    await db.execute(
+        "UPDATE media_playback_states SET updated_at = ? WHERE username = ?",
+        ("2026-01-01T00:00:00-07:00", username),
+    )
+    await db.commit()
+
+    stale = await MediaPlaybackService.status(MediaStatusRequest(user_context=ctx))
+    assert (stale.detail or {}).get("active") is None
+    assert "Hey" not in stale.message
+
+
+@pytest.mark.asyncio
+async def test_web_player_pausing_does_not_take_the_chosen_speaker_back(mocker):
+    """Picking a speaker pauses the web player; that pause must not re-select it."""
+    from services.execution import media_playback_registry as registry
+
+    mocker.patch("services.execution.ha_client.get_states", return_value=mock_ha_states)
+    username = "picked_speaker"
+    ctx = UserContext(user=username, ha_url="http://ha.local", ha_token="t")
+    await MediaPlaybackService.sync_local(MediaStateSyncRequest(
+        user_context=ctx, entity_id="media_player.kitchen", state="idle"))
+    await MediaPlaybackService.sync_local(MediaStateSyncRequest(
+        user_context=ctx, entity_id="web_player", state="paused", media_title="Hey"))
+
+    row = await registry.get_playback_state(username)
+    assert row["entity_id"] == "media_player.kitchen"
+
+    # Starting playback on the web player does make it the target again.
+    await MediaPlaybackService.sync_local(MediaStateSyncRequest(
+        user_context=ctx, entity_id="web_player", state="playing", media_title="Hey"))
+    row = await registry.get_playback_state(username)
+    assert row["entity_id"] == "web_player"

@@ -1,136 +1,123 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
-import { useAuth } from '../context/AuthContext';
+import { FileText, Info, Search, ChevronRight, RefreshCw } from 'lucide-react';
 import MarkdownViewer from '../components/MarkdownViewer';
-import { 
-  Book, 
-  Terminal, 
-  Layers, 
-  Cpu,
-  Info,
-  Search,
-  ChevronRight,
-  ExternalLink
-} from 'lucide-react';
-import toast from 'react-hot-toast';
+import { api } from '../services/api';
 
-const DOC_ITEMS = [
-  { id: 'api_reference', label: 'API Reference', icon: Terminal, file: 'api_reference.md' },
-  { id: 'integrations', label: 'Integration Setup', icon: Layers, file: 'integrations.md' },
-  { id: 'architecture', label: 'System Architecture', icon: Cpu, file: 'architecture.md' },
-  { id: 'workspace_runtime', label: 'Workspace Runtime', icon: Book, file: 'workspace_runtime.md' },
-  { id: 'README', label: 'Project Overview', icon: Info, file: 'README.md' },
-];
-
+/**
+ * The project's documentation, read from the server (docs/*.md + README).
+ *
+ * The list comes from the gateway rather than a hard-coded menu: three of the
+ * five hard-coded entries pointed at files that did not exist and only ever
+ * showed "Documentation Unavailable".
+ */
 const Docs = () => {
-  const { token } = useAuth();
-  const [selectedDoc, setSelectedDoc] = useState(DOC_ITEMS[0]);
+  const [selected, setSelected] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const { data: docContent, isLoading, error } = useQuery({
-    queryKey: ['docs', selectedDoc.id],
-    queryFn: async () => {
-      const response = await axios.get(`/api/docs/${selectedDoc.file}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      return response.data.content;
-    },
-    staleTime: 1000 * 60 * 60 * 24, // 24 hours
+  const docsList = useQuery({
+    queryKey: ['docs-list'],
+    queryFn: () => api.listDocs(),
+    staleTime: 1000 * 60 * 10,
+  });
+  const docs = useMemo(() => docsList.data ?? [], [docsList.data]);
+  const current = selected ?? docs[0]?.name ?? null;
+
+  const doc = useQuery({
+    queryKey: ['docs', current],
+    queryFn: () => api.getDoc(current as string),
+    enabled: !!current,
+    staleTime: 1000 * 60 * 10,
   });
 
-  const handleTestExample = (prompt: string) => {
-    // Store in session and redirect or use a callback
-    sessionStorage.setItem('pending_prompt', prompt);
-    toast.success(`Prompt "${prompt}" copied to Laboratory!`);
-    window.location.href = '/lab';
-  };
+  const filteredDocs = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return q ? docs.filter((d) => `${d.title} ${d.name}`.toLowerCase().includes(q)) : docs;
+  }, [docs, searchTerm]);
 
-  const filteredDocs = DOC_ITEMS.filter(doc => 
-    doc.label.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const failed = docsList.isError || doc.isError;
 
   return (
-    <div className="h-full flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+    <div className="h-full flex flex-col gap-4 md:gap-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Developer & Help Hub</h1>
-          <p className="text-slate-400 text-sm">System documentation and API reference for the Jarvis OS ecosystem.</p>
+          <h1 className="text-2xl font-bold text-white">Docs</h1>
+          <p className="text-slate-400 text-sm">How Jarvis works: services, features and setup.</p>
         </div>
-        
-        <div className="relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+
+        <div className="relative w-full md:w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
-            type="text"
-            placeholder="Search documentation..."
+            type="search"
+            placeholder="Find a document…"
+            aria-label="Find a document"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 pr-4 py-2 bg-slate-900/50 border border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all w-64"
+            className="glass-input w-full pl-10 pr-4 min-h-11 text-sm"
           />
         </div>
       </div>
 
-      <div className="flex-1 flex gap-6 overflow-hidden">
-        {/* Sidebar Navigation */}
-        <div className="w-64 flex flex-col gap-2 overflow-y-auto pr-2 custom-scrollbar">
-          {filteredDocs.map((doc) => (
-            <button
-              key={doc.id}
-              onClick={() => setSelectedDoc(doc)}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-left ${
-                selectedDoc.id === doc.id
-                  ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 shadow-lg shadow-indigo-500/5'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <doc.icon className={`w-4 h-4 ${selectedDoc.id === doc.id ? 'text-indigo-400' : 'text-slate-500'}`} />
-              <span className="flex-1 font-medium text-sm">{doc.label}</span>
-              {selectedDoc.id === doc.id && <ChevronRight className="w-4 h-4" />}
-            </button>
-          ))}
-          
-          <div className="mt-auto p-4 rounded-2xl bg-indigo-500/5 border border-indigo-500/10">
-            <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-2">Internal Links</h4>
-            <a 
-              href="https://github.com/JMiahMan1/SharedLLM" 
-              target="_blank" 
-              rel="noreferrer"
-              className="flex items-center justify-between text-xs text-slate-500 hover:text-indigo-300 transition-colors"
-            >
-              GitHub Repository
-              <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
-        </div>
+      {/* Phones: a picker instead of a sidebar that would squeeze the text. */}
+      <select
+        className="md:hidden glass-input w-full min-h-11 text-sm"
+        aria-label="Document"
+        value={current ?? ''}
+        onChange={(e) => setSelected(e.target.value)}
+      >
+        {filteredDocs.map((d) => (
+          <option key={d.name} value={d.name}>{d.title}</option>
+        ))}
+      </select>
 
-        {/* Content Area */}
-        <div className="flex-1 glass-panel overflow-y-auto p-8 relative custom-scrollbar">
-          {isLoading ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
-              <div className="w-12 h-12 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
-              <p className="text-slate-400 animate-pulse font-medium">Retrieving Documentation...</p>
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
-              <div className="w-16 h-16 bg-red-500/10 rounded-2xl flex items-center justify-center mb-2">
+      <div className="flex-1 flex gap-6 min-h-0">
+        <nav className="hidden md:flex w-64 shrink-0 flex-col gap-1 overflow-y-auto pr-2 custom-scrollbar" aria-label="Documents">
+          {docsList.isLoading && <p className="text-xs text-slate-500 px-4 py-3">Loading…</p>}
+          {!docsList.isLoading && filteredDocs.length === 0 && (
+            <p className="text-xs text-slate-500 px-4 py-3">No documents match.</p>
+          )}
+          {filteredDocs.map((d) => {
+            const active = d.name === current;
+            return (
+              <button
+                key={d.name}
+                onClick={() => setSelected(d.name)}
+                className={`flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-left ${
+                  active
+                    ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <FileText className={`w-4 h-4 shrink-0 ${active ? 'text-indigo-400' : 'text-slate-500'}`} />
+                <span className="flex-1 min-w-0 truncate text-sm font-medium" title={d.title}>{d.title}</span>
+                {active && <ChevronRight className="w-4 h-4 shrink-0" />}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="flex-1 min-w-0 glass-panel overflow-y-auto p-4 md:p-8 relative custom-scrollbar">
+          {failed ? (
+            <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-4">
+              <div className="w-16 h-16 bg-red-500/10 rounded-2xl flex items-center justify-center">
                 <Info className="w-8 h-8 text-red-400" />
               </div>
-              <h3 className="text-lg font-bold text-white">Documentation Unavailable</h3>
-              <p className="text-slate-400 max-w-md">
-                We couldn't reach the documentation service. Please ensure the Gateway is online and you are authenticated.
-              </p>
-              <button 
-                onClick={() => window.location.reload()}
-                className="mt-4 px-6 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all"
+              <h3 className="text-lg font-bold text-white">Documentation unavailable</h3>
+              <p className="text-slate-400 max-w-md text-sm">The server could not be reached, or this document is missing.</p>
+              <button
+                onClick={() => { void docsList.refetch(); void doc.refetch(); }}
+                className="glass-button min-h-11 px-6"
               >
-                Retry Connection
+                <RefreshCw size={14} /> Try again
               </button>
             </div>
+          ) : docsList.isLoading || doc.isLoading ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+              <div className="w-12 h-12 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+              <p className="text-slate-400 font-medium">Loading…</p>
+            </div>
           ) : (
-            <MarkdownViewer 
-              markdown={docContent || ''} 
-              onTestExample={handleTestExample}
-            />
+            <MarkdownViewer markdown={doc.data || ''} />
           )}
         </div>
       </div>

@@ -1,6 +1,6 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import { storageGetSync } from '../lib/storage';
-import { isUnreachable, recallPassage, rememberPassage, type OfflinePassage } from '../lib/bibleOffline';
+import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
@@ -71,7 +71,6 @@ import type {
   TagsResponse,
   ShowRequest,
   WorkspaceFileReadResponse,
-  WorkspaceFileWriteResponse,
   WorkspaceFileListResponse,
   GitStatusResponse,
   GitBranchesResponse,
@@ -80,19 +79,11 @@ import type {
   GitCommitResponse,
   GitPushResponse,
   GitLogResponse,
-  StorageMirrorResponse,
-  PytestRequest,
-  PytestResponse,
-  WorkflowWriteSyncCommitRequest,
   VolumesResponse,
   ServiceLogsResponse,
   ContainerExecResponse,
   RagIndexedPathsResponse,
   RagSyncFilesRequest,
-  RagSyncCapabilitiesRequest,
-  WorkspaceShellRequest,
-  WorkspaceShellResponse,
-  WorkspaceFilePatchExecuteRequest,
   WorkspaceLintRequest,
   WorkspaceLintResponse,
   VolumesExecuteRequest,
@@ -784,6 +775,19 @@ export const api = {
     return resp.data;
   },
 
+  /** Documents the Docs page can open (docs/*.md and the README). */
+  async listDocs(): Promise<Array<{ name: string; title: string }>> {
+    const resp = await apiClient.get('/api/docs');
+    return Array.isArray(resp.data?.docs) ? resp.data.docs : [];
+  },
+
+  /** One document's markdown. Goes through apiClient so the phone app reaches
+   * the server (a bare relative fetch hit the app's own localhost). */
+  async getDoc(name: string): Promise<string> {
+    const resp = await apiClient.get(`/api/docs/${encodeURIComponent(name)}`);
+    return String(resp.data?.content ?? '');
+  },
+
   async getInfo(): Promise<ServiceInfo | null> {
     try {
       const resp = await apiClient.get('/info');
@@ -837,9 +841,11 @@ export const api = {
     return resp.data as SearchResult;
   },
 
-  async getLogs(limit = 50): Promise<LogEntry[]> {
-    // Admin only: these are the whole system's logs.
-    const resp = await apiClient.get(`/api/admin/logs?limit=${limit}`);
+  async getLogs(limit = 50, levels?: string[]): Promise<LogEntry[]> {
+    // Admin only: these are the whole system's logs. `levels` (e.g.
+    // ['warning', 'error']) filters server-side over the whole buffer.
+    const level = levels?.length ? `&level=${encodeURIComponent(levels.join(','))}` : '';
+    const resp = await apiClient.get(`/api/admin/logs?limit=${limit}${level}`);
     // Always a list: the header and dashboard call .filter on it, and an
     // error body ({detail: ...}) used to take the whole app down.
     return Array.isArray(resp.data) ? resp.data : [];
@@ -855,13 +861,6 @@ export const api = {
     const host = window.location.host;
     const token = storageGetSync('jarvis_api_key') || '';
     return `${protocol}//${host}/api/logs/stream?token=${encodeURIComponent(token)}`;
-  },
-
-  /**
-   * @deprecated Use useWebSocket + getLogWebSocketUrl() instead
-   */
-  getLogWebSocket(): WebSocket {
-    return new WebSocket(this.getLogWebSocketUrl());
   },
 
   async getSettings(): Promise<GlobalSetting[]> {
@@ -1111,7 +1110,10 @@ export const api = {
     // The whole history in one request (Wander lists it by day/week/month/
     // year); one size everywhere so callers sharing the cache agree.
     const params = new URLSearchParams({ limit: String(TRIPS_FETCH_LIMIT) });
+    // No user named: the family's trips -- yours plus those of everyone who
+    // shares their activity with you (geo applies that consent).
     if (resolved) params.set('user_id', resolved);
+    else params.set('scope', 'family');
     const resp = await apiClient.get(`/api/geo/trips?${params.toString()}`);
     return resp.data;
   },
@@ -1588,10 +1590,15 @@ export const api = {
     return resp.data;
   },
 
-  async getCalendarEvents(calendar_name?: string, integration?: string): Promise<ExecutionResponse> {
+  /** Events in `range` (ISO dates, end exclusive; the server caps it at 120 days), or the next week. */
+  async getCalendarEvents(calendar_name?: string, integration?: string, range?: { start: string; end: string }): Promise<ExecutionResponse> {
     const params: Record<string, string> = {};
     if (calendar_name) params.calendar_name = calendar_name;
     if (integration) params.integration = integration;
+    if (range) {
+      params.start = range.start;
+      params.end = range.end;
+    }
     const resp = await apiClient.get('/api/communication/calendar/events', { params });
     return resp.data;
   },
@@ -1601,7 +1608,7 @@ export const api = {
     return resp.data;
   },
 
-  async updateCalendarEvent(payload: { action: 'update'; event_id?: string; integration?: string; query?: string; summary: string; start_time?: string }): Promise<ExecutionResponse> {
+  async updateCalendarEvent(payload: { action: 'update'; event_id?: string; integration?: string; query?: string; summary?: string; start_time?: string }): Promise<ExecutionResponse> {
     const resp = await apiClient.put('/api/communication/calendar/events', payload);
     return resp.data;
   },
@@ -1899,8 +1906,10 @@ export const api = {
     return resp.data;
   },
 
-  async purgeRagCollection(collectionName: string, userId: string, filter?: Record<string, unknown>): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post(`/api/storage/purge/${collectionName}`, { user_id: userId, filter });
+  // The gateway purges the signed-in user's own rows (Jarvis and Nextcloud
+  // usernames); it never takes a user from the body, so none is sent.
+  async purgeRagCollection(collectionName: string, filter?: Record<string, unknown>): Promise<{ status: string; message: string; removed?: number }> {
+    const resp = await apiClient.post(`/api/storage/purge/${collectionName}`, { filter });
     return resp.data;
   },
 
@@ -1974,18 +1983,8 @@ export const api = {
     return resp.data;
   },
 
-  async getWorkspaceRavenMissions(workspaceId: string): Promise<RavenMission[]> {
-    const resp = await apiClient.get(`/api/workspaces/${encodeURIComponent(workspaceId)}/raven/missions`);
-    return resp.data;
-  },
-
   async createUserMission(query: string, priority = 1): Promise<{ status: string; mission: RavenMission }> {
     const resp = await apiClient.post('/api/raven/missions', { query, priority });
-    return resp.data;
-  },
-
-  async createWorkspaceMission(workspaceId: string, query: string, priority = 3): Promise<{ status: string; mission: RavenMission }> {
-    const resp = await apiClient.post('/api/raven/missions', { query, priority, workspace_id: workspaceId });
     return resp.data;
   },
 
@@ -2268,40 +2267,27 @@ export const api = {
     return resp.data;
   },
 
+  // The Media page shows its own error states, so these throw on failure
+  // rather than pretending the library is empty. `notice` is the gateway's
+  // "Audiobookshelf unavailable" answer (HTTP 200 with no data).
   async getMusicAssistantPlaylists(): Promise<{ status: string; playlists: Array<{ name: string; items: number; uri: string }> }> {
-    try {
-      const resp = await apiClient.get('/api/media/music-assistant/playlists', { timeout: 6000 });
-      return resp.data;
-    } catch {
-      return { status: 'ERROR', playlists: [] };
-    }
+    const resp = await apiClient.get('/api/media/music-assistant/playlists', { timeout: 10000 });
+    return resp.data;
   },
 
-  async getMusicAssistantRecent(): Promise<{ status: string; recent: Array<{ name: string; artist: string; uri: string; last_played: string }> }> {
-    try {
-      const resp = await apiClient.get('/api/media/music-assistant/recent', { timeout: 6000 });
-      return resp.data;
-    } catch {
-      return { status: 'ERROR', recent: [] };
-    }
+  async getMusicAssistantRecent(): Promise<{ status: string; recent: Array<{ name: string; artist: string; uri: string; last_played: string; type?: string; image?: string }> }> {
+    const resp = await apiClient.get('/api/media/music-assistant/recent', { timeout: 10000 });
+    return resp.data;
   },
 
-  async getAudiobookshelfLibraries(): Promise<{ status: string; libraries: Array<{ id: string; name: string; media_type: string }> }> {
-    try {
-      const resp = await apiClient.get('/api/media/audiobookshelf/libraries', { timeout: 6000 });
-      return resp.data;
-    } catch {
-      return { status: 'ERROR', libraries: [] };
-    }
+  async getAudiobookshelfLibraries(): Promise<{ status: string; notice?: string; libraries: Array<{ id: string; name: string; media_type: string }> }> {
+    const resp = await apiClient.get('/api/media/audiobookshelf/libraries', { timeout: 10000 });
+    return resp.data;
   },
 
-  async getAudiobookshelfLastPlayed(): Promise<{ status: string; books: Array<{ id: string; title: string; author: string; progress: number; last_played: string; library_id: string }> }> {
-    try {
-      const resp = await apiClient.get('/api/media/audiobookshelf/last-played', { timeout: 6000 });
-      return resp.data;
-    } catch {
-      return { status: 'ERROR', books: [] };
-    }
+  async getAudiobookshelfLastPlayed(): Promise<{ status: string; notice?: string; books: Array<{ id: string; title: string; author: string; progress: number; last_played: string | number; library_id: string; is_complete?: boolean }> }> {
+    const resp = await apiClient.get('/api/media/audiobookshelf/last-played', { timeout: 10000 });
+    return resp.data;
   },
 
   async playAudiobook(payload: {
@@ -2320,29 +2306,9 @@ export const api = {
     return resp.data;
   },
 
-  async playPlaylist(payload: {
-    playlist_uri: string;
-    entity_id?: string;
-    device_name?: string;
-    volume?: number;
-  }): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/execute/media/play', {
-      query: payload.playlist_uri,
-      media_type: 'music',
-      entity_id: payload.entity_id,
-      device_name: payload.device_name,
-      volume: payload.volume,
-    });
+  async getAudiobookshelfLibrary(libraryId: string, limit = 50): Promise<{ status: string; notice?: string; books: Array<{ id: string; title: string; author: string }> }> {
+    const resp = await apiClient.get(`/api/media/audiobookshelf/library/${encodeURIComponent(libraryId)}?limit=${limit}`, { timeout: 10000 });
     return resp.data;
-  },
-
-  async getAudiobookshelfLibrary(libraryId: string, limit = 50): Promise<{ status: string; books: Array<{ id: string; title: string; author: string }> }> {
-    try {
-      const resp = await apiClient.get(`/api/media/audiobookshelf/library/${encodeURIComponent(libraryId)}?limit=${limit}`, { timeout: 6000 });
-      return resp.data;
-    } catch {
-      return { status: 'ERROR', books: [] };
-    }
   },
 
   async searchAudiobookshelf(query: string, limit = 20): Promise<{
@@ -2907,24 +2873,12 @@ export const api = {
     return resp.data;
   },
 
-  // Workspace -> NextCloud sync (mirror local_path -> nextcloud remote_path)
-  async syncWorkspaceNextcloud(payload: { remote_path: string; local_path: string; excludes?: string[] }): Promise<StorageMirrorResponse> {
-    const resp = await apiClient.post('/api/storage/mirror', payload);
-    return resp.data;
-  },
-
   // Two-way (or one-way) sync between a workspace and its Nextcloud folder.
   // Omit direction for the workspace default: two-way for Nextcloud-backed
   // workspaces, push (backup) for git-only ones. A first sync of a large
   // folder can take minutes, so no client timeout.
   async syncWorkspace(workspaceId: string, opts: { direction?: WorkspaceSyncDirection; dry_run?: boolean } = {}): Promise<WorkspaceSyncResponse> {
     const resp = await apiClient.post('/api/workspaces/sync', { workspace_id: workspaceId, ...opts }, { timeout: 0 });
-    return resp.data;
-  },
-
-  // Forget a workspace's sync history (after pointing it at another folder by hand).
-  async resetWorkspaceSync(workspaceId: string): Promise<{ status: string }> {
-    const resp = await apiClient.post('/api/workspaces/sync/reset', { workspace_id: workspaceId, confirm: true });
     return resp.data;
   },
 
@@ -2963,26 +2917,6 @@ export const api = {
     return resp.data;
   },
 
-  async runPytest(request: PytestRequest): Promise<PytestResponse> {
-    const resp = await apiClient.post('/api/workspaces/tests/pytest', request);
-    return resp.data;
-  },
-
-  async runWorkflowWriteSyncCommit(request: WorkflowWriteSyncCommitRequest): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post('/api/workspaces/workflow/write-sync-commit', request);
-    return resp.data;
-  },
-
-  async resolveWorkspace(workspaceId: string): Promise<{ status: string; resolved_path: string }> {
-    const resp = await apiClient.post('/api/workspaces/resolve', { workspace_id: workspaceId });
-    return resp.data;
-  },
-
-  async bootstrapWorkspace(workspaceId: string): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post('/api/workspaces/bootstrap', { workspace_id: workspaceId });
-    return resp.data;
-  },
-
   // Admin volumes & service logs
   async getVolumes(): Promise<VolumesResponse> {
     const resp = await apiClient.get('/api/admin/volumes');
@@ -3012,32 +2946,7 @@ export const api = {
     return resp.data;
   },
 
-  async syncRagCapabilities(request: RagSyncCapabilitiesRequest): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post('/rag/sync/capabilities', request);
-    return resp.data;
-  },
-
   // Execution service endpoints
-  async workspaceShell(request: WorkspaceShellRequest): Promise<WorkspaceShellResponse> {
-    const resp = await apiClient.post('/execute/workspace_shell', request);
-    return resp.data;
-  },
-
-  async workspaceFileRead(workspaceId: string, path: string): Promise<WorkspaceFileReadResponse> {
-    const resp = await apiClient.get('/execute/workspace_file_read', { params: { workspace_id: workspaceId, path } });
-    return resp.data;
-  },
-
-  async workspaceFileWrite(workspaceId: string, path: string, content: string): Promise<WorkspaceFileWriteResponse> {
-    const resp = await apiClient.post('/execute/workspace_file_write', { workspace_id: workspaceId, path, content });
-    return resp.data;
-  },
-
-  async workspaceFilePatch(request: WorkspaceFilePatchExecuteRequest): Promise<WorkspaceFileWriteResponse> {
-    const resp = await apiClient.post('/execute/workspace_file_patch', request);
-    return resp.data;
-  },
-
   async workspaceLint(request: WorkspaceLintRequest): Promise<WorkspaceLintResponse> {
     const resp = await apiClient.post('/execute/workspace_lint', request);
     return resp.data;
@@ -3101,13 +3010,13 @@ export const api = {
   },
 
   async getBibleVersions(): Promise<{ versions: BibleVersionInfo[]; message?: string }> {
-    const resp = await apiClient.get('/api/bible/versions');
-    return resp.data;
+    return withOfflineCopy('versions', async () => (await apiClient.get('/api/bible/versions')).data);
   },
 
   async getBibleBooks(version?: string): Promise<{ version: string; books: BibleBookInfo[] }> {
-    const resp = await apiClient.get('/api/bible/books', { params: { version } });
-    return resp.data;
+    return withOfflineCopy(`books:${version ?? ''}`, async () =>
+      (await apiClient.get('/api/bible/books', { params: { version } })).data,
+    );
   },
 
   /**
@@ -3170,8 +3079,7 @@ export const api = {
   },
 
   async getBibleState(): Promise<BibleStateResponse> {
-    const resp = await apiClient.get('/api/bible/state');
-    return resp.data;
+    return withOfflineCopy('state', async () => (await apiClient.get('/api/bible/state')).data);
   },
 
   async putBibleState(payload: Partial<BiblePosition> & Partial<BiblePreferences>): Promise<BibleStateResponse> {

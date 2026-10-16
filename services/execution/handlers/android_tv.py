@@ -19,7 +19,7 @@ from services.execution.media_links import media_file_url
 log = logging.getLogger("execution.android_tv")
 
 ANDROID_TV_COMMANDS = {
-    "home": "HOME", "back": "BACK",
+    "home": "HOME", "back": "BACK", "menu": "MENU",
     "up": "DPAD_UP", "down": "DPAD_DOWN", "left": "DPAD_LEFT", "right": "DPAD_RIGHT",
     "enter": "DPAD_CENTER", "select": "DPAD_CENTER", "ok": "DPAD_CENTER",
     "play": "MEDIA_PLAY", "resume": "MEDIA_PLAY", "pause": "MEDIA_PAUSE",
@@ -72,7 +72,7 @@ async def send_command(ha_url: str, ha_token: str, entity_id: str, command: str)
             message=f"Unsupported Android TV command '{command}'.",
             service="android_tv_transport",
         )
-    remote_entity = entity_id.replace("media_player.", "remote.")
+    remote_entity = await ha_client.find_companion_remote(ha_url, ha_token, entity_id)
     log.info(f"[android_tv] Sending {atv_cmd} to {remote_entity}")
     result = await ha_client.call_service(
         ha_url, ha_token, "remote", "send_command", remote_entity,

@@ -123,8 +123,14 @@ Playback control (execution service):
 
 - `GET /health`: service health
 - `POST /files/read`, `POST /files/write`, `POST /files/delete`: workspace files
-- `GET /git/status`, `POST /git/commit`: repository operations
-- `POST /provider/sync/file`, `POST /provider/sync/directory`: sync to the storage provider (Nextcloud)
+- `POST /git/status`, `POST /git/pull`, `POST /git/commit`, ...: repository operations
+- `POST /provider/sync/workspace`: sync a workspace with its Nextcloud folder
+- `POST /api/webhook/git-pull/{id}` (public via Caddy, authenticated by the workspace's webhook token): pull on push
+
+The Gateway exposes these under `/api/workspaces/...` as the signed-in caller.
+Creating, changing and deleting a workspace (`POST /api/workspaces`,
+`PATCH`/`DELETE /api/workspaces/{id}`) is admin-only. Details:
+`services/workspace_runtime/README.md`.
 
 ## RAG Service Endpoints
 
@@ -136,7 +142,12 @@ Playback control (execution service):
 ## Other Gateway Endpoints
 
 - `GET /health`: liveness check for the gateway service
-- `GET /health/ready`: downstream readiness across identity, execution, rag, storage, logging, workspace_runtime and control_plane
+- `GET /health/ready`: downstream readiness across identity, execution, rag, storage, logging, workspace_runtime, control_plane, geo, bible and telemetry (probed concurrently), plus gateway and redis. `status` is `READY` or `DEGRADED`; `services` maps each to `OK`, `ERROR (<code>)` or `UNREACHABLE`. Unauthenticated. The UI polls it every 15 s (header pulse, sidebar, dashboard service board)
+- `GET /info`: gateway build (`git_sha`, `git_branch`, `build_date`)
+- `GET /api/search?q=`: semantic search across all of the caller's RAG collections (dashboard search box). A miss returns `files: []`
+- `GET /api/docs`: `{docs: [{name, title}]}` for README.md and docs/*.md; `GET /api/docs/{name}`: `{name, content}`. Both need a signed-in user (or the internal secret)
+- `GET /api/telemetry/notifications?limit=`: the caller's notices (family arrivals/departures, leave-by reminders, report results), oldest first; shown under the header bell. `GET /api/telemetry/notifications/wait?since=` is the Android app's long poll for the same notices
+- `POST /api/auth/test-connection` `{service, config}`: checks Home Assistant, Nextcloud, GitHub, GitLab, Audiobookshelf or Music Assistant credentials; a blank secret is tested with the caller's saved one
 - `POST /api/discovery/sync`: fetch Home Assistant entities and trigger RAG sync
 - `POST /api/generate`: Ollama-compatible generate proxy
 - `GET /api/tags`: model list proxy (Ollama style)
@@ -149,7 +160,8 @@ Playback control (execution service):
 
 ## Logs
 
-- `GET /api/admin/logs?limit=&service=`, `DELETE /api/admin/logs`: admin only.
+- `GET /api/admin/logs?limit=&service=&level=`, `DELETE /api/admin/logs`: admin only.
+  `level=warning,error` returns only failed requests (see `docs/LOGGING_SERVICE.md`).
   (The unauthenticated gateway `GET`/`DELETE /api/logs` were removed on
   2026-10-15.)
 - `WS /api/logs/stream?token=`: live log stream (logging service).

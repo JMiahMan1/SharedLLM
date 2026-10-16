@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { mediaHandlers } from './msw/handlers/media';
@@ -512,6 +512,7 @@ export const server = setupServer(
     }
     return HttpResponse.json({ status: 'SUCCESS' });
   }),
+  http.get('/info', () => HttpResponse.json({ service: 'gateway', version: '0.0.0', git_sha: 'abc1234', git_branch: 'unknown', build_date: '' })),
   http.get('/health/ready', () => HttpResponse.json({
     status: 'READY',
     services: {
@@ -945,6 +946,10 @@ if (typeof globalThis !== 'undefined') {
   });
 }
 
+// findBy*/waitFor default to 1s, which whole-page renders miss when every
+// worker is busy (same contention as testTimeout in vite.config.ts).
+configure({ asyncUtilTimeout: 5000 });
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 
 beforeEach(() => {
@@ -1004,4 +1009,27 @@ afterEach(() => {
   notesCheckOffCalls.length = 0;
 });
 
-afterAll(() => server.close());
+// Timers and refetch intervals can outlive a file's tests. Once msw is closed
+// their requests would go out for real, to the live gateway in native-mode
+// tests (DEFAULT_SERVER_URL), so the network is shut instead.
+function blockNetwork() {
+  const refuse = (url: string) => new TypeError(`Network is closed after the test file finished: ${url}`);
+  const blockedFetch = async (input: RequestInfo | URL) => {
+    throw refuse(String(input instanceof Request ? input.url : input));
+  };
+  globalThis.fetch = blockedFetch as typeof fetch;
+  window.fetch = blockedFetch as typeof fetch;
+  const open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
+    (this as XMLHttpRequest & { _blockedUrl?: string })._blockedUrl = String(url);
+    return (open as (...a: unknown[]) => void).call(this, method, url, ...rest);
+  } as typeof XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.send = function (this: XMLHttpRequest & { _blockedUrl?: string }) {
+    throw refuse(this._blockedUrl ?? '');
+  };
+}
+
+afterAll(() => {
+  server.close();
+  blockNetwork();
+});

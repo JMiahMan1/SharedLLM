@@ -13,13 +13,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from services.execution import schemas as exec_schemas
 from services.gateway import schemas as gateway_schemas
 
-try:
-    from services.workspace_runtime import (
-        schemas as _workspace_schemas,  # pyright: ignore[reportUnusedImport, reportMissingImports, reportAttributeAccessIssue]
-    )
-except ImportError:
-    _workspace_schemas = None
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("indexer")
 
@@ -89,19 +82,11 @@ def index_capabilities():
     }, indent=2)
 
 
-    # Process Execution and Workspace Schemas
-    # We prioritize execution schemas first, then check workspace_runtime
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'services', 'workspace_runtime'))
-    try:
-        import main as _ws_main  # pyright: ignore[reportMissingImports]
-    except Exception as e:
-        log.warning(f"Failed to load workspace_runtime main: {e}")
-        _ws_main = None
-
+    # Every tool request model lives in services/execution/schemas.py.
     for class_name, description in schema_map.items():
         model = getattr(exec_schemas, class_name, None)
-        if not model and _ws_main:
-            model = getattr(_ws_main, class_name, None)
+        if not model and class_name != "RavenMissionRequest":
+            log.warning(f"No request model named {class_name}; not indexed.")
 
         if model:
             capabilities.append({
@@ -169,7 +154,11 @@ def index_capabilities():
             f"{RAG_SVC_URL}/rag/sync/capabilities",
             json={"capabilities": capabilities},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=300
+            # RAG embeds every capability; right after a deploy it is also
+            # syncing Home Assistant, and this took 11 minutes on 2026-10-15.
+            # It finishes the job even when a client gives up, so a short
+            # timeout only made a successful sync look failed.
+            timeout=1800
         )
         if resp.status_code == 200:
             log.info(f"Successfully indexed {len(capabilities)} capabilities into RAG.")

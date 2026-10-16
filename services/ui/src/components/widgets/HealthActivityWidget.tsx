@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, Flame, Mountain } from 'lucide-react';
+import { Activity, Footprints, Mountain } from 'lucide-react';
 import type { IWidgetProps } from '../../types/widget';
 import { useWidgetStore } from '../../stores/widgetStore';
 import { themeRegistry } from '../../themes';
@@ -15,16 +15,9 @@ import { pedometerQueryOptions, stepsQueryKey } from '../../lib/healthQueries';
 import ActivityRings, { type RingInput } from '../health/ActivityRings';
 import { heroInsight } from '../../lib/healthRanges';
 
-export interface HealthActivityConfig {
-  themeId?: string;
+interface HealthActivityConfig {
+  /** Fallback goal when the server has none for this user. */
   stepGoal?: number;
-  floorGoal?: number;
-  activeMinuteGoal?: number;
-  metrics?: string[];
-  steps?: number;
-  floors?: number;
-  activeMinutes?: number;
-  calories?: number;
   /** Resolved theme colors published for the native Android widget. */
   themeAccent?: string;
   themeAccentText?: string;
@@ -118,12 +111,19 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
   // hardcoded in the Java widget) and keeps both surfaces in sync.
   const accent = theme.tokens.accent;
   const accentText = theme.tokens.text;
+  // One attempt per colour pair: a failed save rolls the config back, which
+  // re-runs this effect, and without the guard a server outage became a tight
+  // loop of PUTs.
+  const publishedRef = useRef<string | null>(null);
   useEffect(() => {
+    const wanted = `${accent}|${accentText}`;
+    if (publishedRef.current === wanted) return;
     if (config.themeAccent !== accent || config.themeAccentText !== accentText) {
-      void updateWidgetConfig(userSettings.widget_key, {
+      publishedRef.current = wanted;
+      updateWidgetConfig(userSettings.widget_key, {
         themeAccent: accent,
         themeAccentText: accentText,
-      });
+      }).catch(() => { /* best effort: the native widget keeps its last tint */ });
     }
   }, [accent, accentText, config.themeAccent, config.themeAccentText, updateWidgetConfig, userSettings.widget_key]);
 
@@ -259,7 +259,7 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
               label: 'Miles (est.)',
               value: weekMiles == null ? null : weekMiles.toFixed(1),
               pct: weekMiles == null ? 0 : weekMiles / 10,
-              icon: Flame,
+              icon: Footprints,
               ring: cssVars['--ht-accent'],
             },
           ].map((tile) => {

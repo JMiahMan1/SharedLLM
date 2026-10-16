@@ -3,6 +3,7 @@ import asyncio
 import logging
 import time
 import urllib.request
+from contextlib import suppress
 from datetime import UTC, date, datetime, timedelta
 
 import caldav
@@ -24,6 +25,17 @@ def _get_local_tz():
     return pytz.timezone(LOCAL_TZ_NAME)
 
 
+def _localize(dt: datetime) -> datetime:
+    """A naive wall-clock time in the household's zone, made aware.
+
+    pytz zones must be attached with ``localize``: ``replace(tzinfo=...)``
+    picks the zone's local mean time (-07:28 for America/Phoenix), which put
+    every event added from the app 28 minutes late and turned all-day events
+    into 12:28 AM appointments.
+    """
+    return _get_local_tz().localize(dt.replace(tzinfo=None))
+
+
 def _normalize_event_time(dt_value):
     """Converts ANY event time to AWARE local time."""
     local_tz = _get_local_tz()
@@ -32,9 +44,76 @@ def _normalize_event_time(dt_value):
             return dt_value.replace(tzinfo=UTC).astimezone(local_tz)
         return dt_value.astimezone(local_tz)
     elif isinstance(dt_value, date):
-        target = datetime.combine(dt_value, datetime.min.time())
-        return target.replace(tzinfo=local_tz)
+        return _localize(datetime.combine(dt_value, datetime.min.time()))
     return None
+
+
+#: Longest window one read may ask for (the agenda shows 60 days, a month grid 42).
+MAX_READ_DAYS = 120
+#: Most occurrences one repeating event may contribute to a read.
+MAX_OCCURRENCES = 400
+
+
+def _parse_bound(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else _localize(dt)
+
+
+def _read_window(req: CalendarRequest) -> tuple[datetime, datetime]:
+    """The window a read covers: the caller's range, else yesterday..+7 days."""
+    lo, hi = _parse_bound(req.range_start), _parse_bound(req.range_end)
+    if lo and hi and hi > lo:
+        return lo, min(hi, lo + timedelta(days=MAX_READ_DAYS))
+    now = datetime.now(_get_local_tz())
+    return now - timedelta(days=1), now + timedelta(days=7)
+
+
+def _occurrences(ve, lo: datetime, hi: datetime) -> list[tuple[datetime, datetime | None]]:
+    """(start, end) of every occurrence of a VEVENT that starts inside [lo, hi].
+
+    A repeating event (RRULE/RDATE, minus EXDATE) is expanded; reading only
+    DTSTART showed a weekly practice once, on the week it was first created.
+    """
+    raw = ve.dtstart.value
+    start = _normalize_event_time(raw)
+    if start is None:
+        return []
+    end = _normalize_event_time(ve.dtend.value) if hasattr(ve, "dtend") else None
+    if end is None and hasattr(ve, "duration"):
+        with suppress(Exception):
+            end = start + ve.duration.value
+    length = (end - start) if end else None
+
+    rset = None
+    if hasattr(ve, "rrule") or hasattr(ve, "rdate"):
+        with suppress(Exception):
+            rset = ve.getrruleset(addRDate=True)
+    if rset is None:
+        return [(start, end)] if lo <= start <= hi else []
+
+    all_day = isinstance(raw, date) and not isinstance(raw, datetime)
+    aware = isinstance(raw, datetime) and raw.tzinfo is not None
+    if aware:
+        a, b = lo, hi
+    elif all_day:
+        # vobject expands a DATE start as naive local midnights.
+        local_tz = _get_local_tz()
+        a, b = lo.astimezone(local_tz).replace(tzinfo=None), hi.astimezone(local_tz).replace(tzinfo=None)
+    else:
+        # Floating times are read as UTC, the same as a single event's.
+        a, b = lo.astimezone(UTC).replace(tzinfo=None), hi.astimezone(UTC).replace(tzinfo=None)
+    out: list[tuple[datetime, datetime | None]] = []
+    for occ in rset.xafter(a, count=MAX_OCCURRENCES, inc=True):
+        if occ > b:
+            break
+        s = _localize(occ) if all_day else _normalize_event_time(occ)
+        out.append((s, s + length if length else None))
+    return out
 
 
 # ── Integration resolution (runtime-derived, never hardcoded) ──────────────
@@ -139,16 +218,49 @@ def _default_integration(integrations: list[dict], settings: dict) -> tuple[str 
 #   { integration, summary, start_time(ISO-8601), end_time?, location?, calendar? }
 
 
+def _is_noise_calendar(cal) -> bool:
+    """Generated calendars (birthdays, contacts, holidays) are not the family's."""
+    return any(x in (cal.name or "").lower() for x in ("birthday", "contact", "holiday"))
+
+
 def _nextcloud_list_calendars(client):
     try:
         calendars = client.principal().calendars()
     except Exception:
         return []
-    return [
-        (cal.url, cal.name)
-        for cal in calendars
-        if not any(x in (cal.name or "").lower() for x in ["birthday", "contact", "holiday"])
-    ]
+    return [(cal.url, cal.name) for cal in calendars if not _is_noise_calendar(cal)]
+
+
+def _nextcloud_event_by_uid(client, uid: str):
+    """The calendar object holding the event with this UID, or None."""
+    for cal in client.principal().calendars():
+        if _is_noise_calendar(cal):
+            continue
+        try:
+            return cal.event_by_uid(uid)
+        except Exception:
+            continue
+    return None
+
+
+def _apply_update(ve, summary: str | None, start_time: str | None) -> None:
+    """Retitle and/or move one VEVENT; a moved event keeps its length."""
+    if summary:
+        if hasattr(ve, "summary"):
+            ve.summary.value = summary
+        else:
+            ve.add("summary").value = summary
+    if start_time:
+        dt = dateparser.parse(start_time)
+        if dt is None:
+            raise ValueError(f"Could not parse date: {start_time}")
+        if dt.tzinfo is None:
+            dt = _localize(dt)
+        old_start = _normalize_event_time(ve.dtstart.value)
+        old_end = _normalize_event_time(ve.dtend.value) if hasattr(ve, "dtend") else None
+        if old_start and old_end:
+            ve.dtend.value = dt + (old_end - old_start)
+        ve.dtstart.value = dt
 
 
 def _nextcloud_search_one(client, cal_url, cal_name, lo, hi):
@@ -166,23 +278,29 @@ def _nextcloud_search_one(client, cal_url, cal_name, lo, hi):
                 continue
             if not hasattr(ve, "dtstart"):
                 continue
-            start_dt = _normalize_event_time(ve.dtstart.value)
-            if not start_dt:
+            # Only occurrences inside the requested window (calendars hold
+            # years of history; a repeating event is expanded into it).
+            occurrences = _occurrences(ve, lo, hi)
+            if not occurrences:
                 continue
-            # Drop events outside the requested window (calendars hold years
-            # of historical data; only upcoming/near-past matter for the feed).
-            if start_dt < lo or start_dt > hi:
-                continue
-            end_dt = _normalize_event_time(ve.dtend.value) if hasattr(ve, "dtend") else None
-            loc = ve.location.value if hasattr(ve, "location") else None
-            out.append({
+            raw = ve.dtstart.value
+            base = {
                 "integration": "nextcloud",
+                # The UID is what edit and delete act on: matching on the title
+                # changed or removed every event that shared a word with it.
+                "id": str(ve.uid.value) if hasattr(ve, "uid") else None,
                 "summary": (ve.summary.value if hasattr(ve, "summary") else "No Summary"),
-                "start_time": start_dt.isoformat(),
-                "end_time": end_dt.isoformat() if end_dt else None,
-                "location": loc,
+                "location": ve.location.value if hasattr(ve, "location") else None,
                 "calendar": cal_name,
-            })
+                "all_day": isinstance(raw, date) and not isinstance(raw, datetime),
+                "recurring": hasattr(ve, "rrule"),
+            }
+            for start_dt, end_dt in occurrences:
+                out.append({
+                    **base,
+                    "start_time": start_dt.isoformat(),
+                    "end_time": end_dt.isoformat() if end_dt else None,
+                })
         return out
     except Exception:
         return []
@@ -289,7 +407,7 @@ def _parse_ics(text: str, lo, hi) -> list[dict]:
         if isinstance(val, datetime):
             start = val if val.tzinfo else val.replace(tzinfo=UTC).astimezone(local_tz)
         elif isinstance(val, date):
-            start = datetime.combine(val, datetime.min.time(), tzinfo=local_tz)
+            start = _localize(datetime.combine(val, datetime.min.time()))
         else:
             continue
         if not (lo <= start <= hi):
@@ -373,9 +491,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                     if i["enabled"] and i["provides_calendar"] and i["type"] not in disabled
                 ]
 
-            local_tz = _get_local_tz()
-            now_lo = datetime.now(local_tz) - timedelta(days=1)
-            now_hi = datetime.now(local_tz) + timedelta(days=7)
+            now_lo, now_hi = _read_window(req)
 
             async def _gather_one(i: dict) -> list[dict]:
                 if i["type"] == "nextcloud":
@@ -458,7 +574,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                 if dt is None:
                     return ExecutionResult(status="FAILURE", message=f"Could not parse date: {req.start_time}", service="calendar_add")
                 if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=_get_local_tz())
+                    dt = _localize(dt)
                 dt_end = dt + timedelta(hours=1)
                 body = {
                     "summary": req.summary,
@@ -481,9 +597,8 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
             dt = dateparser.parse(req.start_time, settings={"PREFER_DATES_FROM": "future"})
             if dt is None:
                 return ExecutionResult(status="FAILURE", message=f"Could not parse date: {req.start_time}", service="calendar_add")
-            local_tz = _get_local_tz()
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=local_tz)
+                dt = _localize(dt)
             dt_utc = dt.astimezone(UTC)
 
             def _add():
@@ -530,7 +645,9 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                     return ExecutionResult(status="SUCCESS", message="Deleted Skylight event.", service="calendar_delete")
                 return ExecutionResult(status="FAILURE", message="Failed to delete Skylight event.", service="calendar_delete")
 
-            if not req.query:
+            if target == "ical":
+                return ExecutionResult(status="FAILURE", message="iCal calendars are read-only.", service="calendar_delete")
+            if not req.query and not req.event_id:
                 return ExecutionResult(status="FAILURE", message="Query parameter is required for delete.", service="calendar_delete")
 
             provider = resolve_personal_data_provider(req.user_context)
@@ -539,11 +656,18 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
 
             def _delete():
                 client = provider.calendar_client()
+                if req.event_id:
+                    # One event, by UID (a repeating event goes as a series).
+                    ev = _nextcloud_event_by_uid(client, req.event_id)
+                    if ev is None:
+                        raise LookupError("That event no longer exists.")
+                    ev.delete()
+                    return "Deleted the event."
                 calendars = client.principal().calendars()
                 deleted_count = 0
                 query_lower = req.query.lower()
                 for cal in calendars:
-                    if any(x in (cal.name or "").lower() for x in ["birthday", "contact", "holiday"]):
+                    if _is_noise_calendar(cal):
                         continue
                     try:
                         events = cal.search(event=True, expand=True)
@@ -582,7 +706,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                     if dt is None:
                         return ExecutionResult(status="FAILURE", message=f"Could not parse date: {req.start_time}", service="calendar_update")
                     if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=_get_local_tz())
+                        dt = _localize(dt)
                     attributes["starts_at"] = dt.isoformat()
                     attributes["ends_at"] = (dt + timedelta(hours=1)).isoformat()
                 if not attributes:
@@ -593,7 +717,12 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                     return ExecutionResult(status="SUCCESS", message="Updated Skylight event.", service="calendar_update")
                 return ExecutionResult(status="FAILURE", message="Failed to update Skylight event.", service="calendar_update")
 
-            if not req.query or not req.summary:
+            if target == "ical":
+                return ExecutionResult(status="FAILURE", message="iCal calendars are read-only.", service="calendar_update")
+            if req.event_id:
+                if not req.summary and not req.start_time:
+                    return ExecutionResult(status="FAILURE", message="Nothing to update.", service="calendar_update")
+            elif not req.query or not req.summary:
                 return ExecutionResult(status="FAILURE", message="Query and summary are required for update.", service="calendar_update")
 
             provider = resolve_personal_data_provider(req.user_context)
@@ -602,11 +731,18 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
 
             def _update():
                 client = provider.calendar_client()
+                if req.event_id:
+                    ev = _nextcloud_event_by_uid(client, req.event_id)
+                    if ev is None:
+                        raise LookupError("That event no longer exists.")
+                    _apply_update(ev.vobject_instance.vevent, req.summary, req.start_time)
+                    ev.save()
+                    return "Updated the event."
                 calendars = client.principal().calendars()
                 updated_count = 0
                 query_lower = req.query.lower()
                 for cal in calendars:
-                    if any(x in (cal.name or "").lower() for x in ["birthday", "contact", "holiday"]):
+                    if _is_noise_calendar(cal):
                         continue
                     try:
                         events = cal.search(event=True, expand=True)
@@ -614,14 +750,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                             ve = ev.vobject_instance.vevent
                             summary = ve.summary.value if hasattr(ve, "summary") else ""
                             if query_lower in summary.lower():
-                                ve.summary.value = req.summary
-                                if req.start_time:
-                                    dt = dateparser.parse(req.start_time)
-                                    if dt is not None:
-                                        local_tz = _get_local_tz()
-                                        if dt.tzinfo is None:
-                                            dt = dt.replace(tzinfo=local_tz)
-                                        ve.dtstart.value = dt
+                                _apply_update(ve, req.summary, req.start_time)
                                 ev.save()
                                 updated_count += 1
                     except Exception:

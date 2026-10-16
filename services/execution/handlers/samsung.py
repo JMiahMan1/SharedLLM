@@ -45,38 +45,6 @@ MEDIA_VERIFY_TIMEOUT = 30
 MEDIA_VERIFY_INTERVAL = 2
 
 
-async def _find_remote_entity(ha_url: str, ha_token: str, media_entity_id: str) -> str | None:
-    """Find the remote companion entity for a media_player."""
-    all_states = await ha_client.get_states(ha_url, ha_token)
-    if not all_states:
-        return None
-
-    media_friendly = ""
-    for state in all_states:
-        if state.get("entity_id") == media_entity_id:
-            media_friendly = state.get("attributes", {}).get("friendly_name", "").lower()
-            break
-
-    for state in all_states:
-        eid = state.get("entity_id", "")
-        if not eid.startswith("remote."):
-            continue
-        attrs = state.get("attributes", {})
-        friendly = attrs.get("friendly_name", "").lower()
-        if media_friendly and media_friendly in friendly:
-            return eid
-        media_short = media_entity_id.split(".")[-1].replace("_", " ")
-        if media_short and media_short in friendly:
-            return eid
-
-    base = media_entity_id.replace("media_player.", "remote.")
-    for state in all_states:
-        if state.get("entity_id") == base:
-            return base
-
-    return None
-
-
 async def is_samsung_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     """Check if a media_player entity is a Samsung Tizen TV."""
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
@@ -147,10 +115,7 @@ async def power_off(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResu
 
 async def send_key(ha_url: str, ha_token: str, entity_id: str, command: str) -> ExecutionResult:
     """Send a key press to a Samsung Tizen TV via remote.send_command."""
-    remote_entity = await _find_remote_entity(ha_url, ha_token, entity_id)
-    if not remote_entity:
-        log.warning(f"[samsung.send_key] No remote entity found for {entity_id}, trying direct")
-        remote_entity = entity_id.replace("media_player.", "remote.")
+    remote_entity = await ha_client.find_companion_remote(ha_url, ha_token, entity_id)
 
     samsung_key = SAMSUNG_KEYS.get(command.lower(), command)
     log.info(f"[samsung] Sending key '{samsung_key}' to {remote_entity}")

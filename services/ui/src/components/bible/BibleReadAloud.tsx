@@ -71,8 +71,15 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
     staleTime: 60 * 60 * 1000,
   });
 
+  // A new passage, translation or voice ends what is being read: the pieces
+  // still to come belong to the old passage's plan, and asking for them by the
+  // new reference would splice two chapters together mid-sentence.
   useEffect(() => {
+    const before = sourceRef.current;
     sourceRef.current = { reference, version, voice };
+    if (before.reference !== reference || before.version !== version || before.voice !== voice) {
+      halt();
+    }
   }, [reference, version, voice]);
 
   useEffect(() => {
@@ -94,7 +101,11 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
   }, []);
 
   useEffect(() => {
+    const element = audioRef.current;
     return () => {
+      // A detached <audio> keeps playing, so leaving the reader has to stop it.
+      runRef.current += 1;
+      element?.pause();
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     };
   }, []);
@@ -217,7 +228,7 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
     void start();
   }
 
-  function stop() {
+  function halt() {
     runRef.current += 1;
     const element = audioRef.current;
     if (element) {
@@ -242,7 +253,7 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
         {listening ? (
           <button
             type="button"
-            onClick={stop}
+            onClick={halt}
             className="ml-auto min-h-11 px-3 rounded-xl text-xs text-slate-400 hover:text-white"
           >
             Stop

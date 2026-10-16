@@ -3,7 +3,8 @@
 
 A reader picks a time (``UserBibleState.reminder_time``, "HH:MM" in the
 server's local time, the same clock reading days are counted on; empty means
-off). A loop inside the bible service checks every few minutes, the pattern
+off). A loop inside the bible service checks every few minutes, sends only
+within two hours after that time (never hours late), the pattern
 execution's leave-by notices use, and sends through telemetry's notify with a
 ``once`` key per reader per day, so a restart or a second replica never sends
 it twice. The message points at what is actually waiting: today's plan
@@ -12,9 +13,9 @@ reading, the memory verses due, or simply the streak.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+from urllib.parse import quote
 
 import aiohttp
 from sqlmodel import Session, select
@@ -26,6 +27,10 @@ from .models import MemoryVerse, PlanEnrollment, ReadingEvent, UserBibleState
 log = logging.getLogger(__name__)
 
 INTERVAL_S = 300
+# How long after the chosen time a nudge may still go out. Without a window a
+# reminder set for 07:00 at nine at night (or a server back up late in the
+# evening) would push "time to read" at once, hours after it means anything.
+WINDOW = timedelta(hours=2)
 
 
 def read_today(session: Session, username: str, today: str) -> bool:
@@ -59,7 +64,7 @@ def message_for(session: Session, username: str, today: str) -> dict:
             return {
                 "title": f"Today in {plans.find(row.plan_id)['name']}",
                 "body": f"Day {day}: {refs}",
-                "data": {"url": f"/bible?ref={refs.split(',')[0]}"},
+                "data": {"url": f"/bible?ref={quote(refs.split(',')[0].strip())}"},
             }
     due = sum(
         1
@@ -80,12 +85,16 @@ def message_for(session: Session, username: str, today: str) -> dict:
 
 
 def due_now(session: Session, now: datetime) -> list[tuple[str, dict]]:
-    """Readers whose reminder time has passed today and who have not read."""
+    """Readers whose reminder time passed within ``WINDOW`` and who have not read today."""
     today = now.date().isoformat()
-    clock = now.strftime("%H:%M")
     out = []
     for state in session.exec(select(UserBibleState).where(UserBibleState.reminder_time != "")).all():
-        if clock < state.reminder_time or read_today(session, state.username, today):
+        try:
+            hour, minute = (int(part) for part in state.reminder_time.split(":"))
+        except ValueError:
+            continue
+        due_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if not (due_at <= now < due_at + WINDOW) or read_today(session, state.username, today):
             continue
         out.append((state.username, message_for(session, state.username, today)))
     return out
@@ -125,5 +134,7 @@ async def reminder_loop(engine_factory, telemetry_url: str, secret: str) -> None
         return
     while True:
         await asyncio.sleep(INTERVAL_S)
-        with contextlib.suppress(Exception):
+        try:
             await remind_once(engine_factory(), telemetry_url, secret)
+        except Exception as e:  # keep looping, but never fail silently
+            log.warning(f"[Bible] reminder pass failed: {type(e).__name__}: {e}")

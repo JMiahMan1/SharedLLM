@@ -55,6 +55,10 @@ TOOLCHAIN_PROBES: list[tuple[str, list[str], list[str], str]] = [
 ]
 
 
+#: How long one capabilities POST may take. RAG answers only after embedding.
+SYNC_TIMEOUT_SECONDS = 300
+
+
 def _probe_version(binary: str, flags: list[str], run: Callable = subprocess.run) -> str:
     """Best-effort first line of `<binary> <flag>`, truncated to 60 chars."""
     for flag in flags:
@@ -120,7 +124,7 @@ async def sync_toolchain_to_rag() -> dict:
         log.warning("[toolchain] RAG_SVC_URL is not configured; skipping sync")
         return {"status": "ERROR", "count": 0, "error": "RAG_SVC_URL not set"}
 
-    log.warning(f"[toolchain] task starting; RAG_SVC_URL={rag_url}")
+    log.info(f"[toolchain] task starting; RAG_SVC_URL={rag_url}")
     capabilities = discover_toolchain()
     if not capabilities:
         log.warning("[toolchain] no binaries discovered; nothing to sync")
@@ -128,7 +132,13 @@ async def sync_toolchain_to_rag() -> dict:
     last_error = "unknown"
     for attempt in range(6):
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
+            # RAG embeds every capability before it answers, and on a busy CPU
+            # that has measured 30-45 s for this list. A 15 s client timeout
+            # gave up on every attempt while RAG kept working, and each retry
+            # queued the same embed again. Wait as long as the work takes.
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=SYNC_TIMEOUT_SECONDS)
+            ) as client:
                 async with client.post(
                     f"{rag_url}/rag/sync/capabilities",
                     json={"capabilities": capabilities},
@@ -142,9 +152,15 @@ async def sync_toolchain_to_rag() -> dict:
                         continue
             log.info(f"[toolchain] synced {len(capabilities)} binaries to RAG")
             return {"status": "SUCCESS", "count": len(capabilities), **body}
+        except TimeoutError:  # aiohttp raises asyncio.TimeoutError, the same class
+            # RAG accepted the request and is still embedding; sending it again
+            # would only queue a second copy of the same work.
+            last_error = f"no answer within {SYNC_TIMEOUT_SECONDS}s"
+            break
         except Exception as e:
-            last_error = str(e)[:120]
-            log.warning(f"[toolchain] sync attempt {attempt + 1}/6 failed: {e}")
+            # str() of several aiohttp errors is empty; the type is the message.
+            last_error = f"{type(e).__name__}: {e}"[:120]
+            log.warning(f"[toolchain] sync attempt {attempt + 1}/6 failed: {last_error}")
             await asyncio.sleep(5)
-    log.warning(f"[toolchain] sync gave up after 6 attempts: {last_error}")
+    log.warning(f"[toolchain] sync gave up: {last_error}")
     return {"status": "ERROR", "count": 0, "error": last_error}

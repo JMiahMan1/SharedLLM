@@ -409,3 +409,14 @@ async def test_scheduler_loop_iterates_timer_keys_asynchronously(rc, timer, monk
         "plain `for` over an async generator -- the scheduler body would be skipped"
     )
     assert "async for key in _iter_timer_keys(" in src
+
+
+async def test_a_malformed_timer_does_not_stop_the_others_firing(rc, timer, monkeypatch):
+    """One bad row (bad JSON / no expires_at) used to abort every pass."""
+    await rc.set("timer:jeremiah:aaa-broken", "{not json")
+    await rc.set("timer:jeremiah:bbb-noexpiry", json.dumps({"id": "x", "active": True}))
+    await rc.set(f"timer:jeremiah:{timer['id']}", json.dumps(timer))
+
+    fired, _sleeps = await _run_one_scheduler_pass(rc, monkeypatch)
+
+    assert fired == [f"timer:jeremiah:{timer['id']}"]

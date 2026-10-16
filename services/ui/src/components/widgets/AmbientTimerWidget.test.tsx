@@ -232,18 +232,33 @@ describe('AmbientTimerWidget', () => {
     });
   });
 
-  it('toggles pin state when pin button is clicked', () => {
-    const onTogglePin = vi.fn();
+  it('keeps a paused server timer on screen so it can be resumed', async () => {
+    // Nothing here counts down, and findBy* polls with setInterval: with it
+    // faked the query only re-checks on DOM mutations and can miss the render
+    // when the whole suite is running.
+    vi.useRealTimers();
+    const now = Date.now();
+    (api.getTimers as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: 'p1',
+        type: 'timer',
+        title: 'Pasta',
+        expires_at: new Date(now + 240_000).toISOString(),
+        paused_at: new Date(now - 60_000).toISOString(),
+        active: false,
+        duration_sec: 600,
+      },
+    ]);
+
     renderWithProviders(
-      <AmbientTimerWidget
-        userSettings={mockWidgetSettings}
-        onTogglePin={onTogglePin}
-        settingsButton={null}
-      />
+      <AmbientTimerWidget userSettings={mockWidgetSettings} onTogglePin={vi.fn()} settingsButton={null} />
     );
-    const pinButton = screen.getByTitle('Pin widget');
-    fireEvent.click(pinButton);
-    expect(onTogglePin).toHaveBeenCalled();
+
+    expect(await screen.findByText('Pasta')).toBeInTheDocument();
+    expect(screen.getByText('Paused')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    // Remaining is frozen at the pause: 5 minutes, not 4.
+    expect(screen.getByText('5:00')).toBeInTheDocument();
   });
 
   it('shows Total Progress section when timers exist', async () => {

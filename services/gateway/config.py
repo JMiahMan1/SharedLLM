@@ -133,6 +133,9 @@ SETTINGS_CACHE_TTL = _safe_float("SETTINGS_CACHE_TTL", 30.0)
 IDENTITY_CACHE_TTL = _safe_float("IDENTITY_CACHE_TTL", 30.0)
 
 # --- Phase 3: Redis-backed entity/device cache TTLs (env-configurable) ---
+# Live device states for Jarvis's answers. Deliberately short: a miss is read
+# through from HA, while a long TTL would let Jarvis report a light as off a few
+# minutes after it was switched on. The 5-minute cleanup pass only pre-warms it.
 HA_STATE_CACHE_TTL = _safe_int("HA_STATE_CACHE_TTL", 60)
 MEDIA_DEVICE_CACHE_TTL = _safe_int("MEDIA_DEVICE_CACHE_TTL", 604800)  # 7 days
 

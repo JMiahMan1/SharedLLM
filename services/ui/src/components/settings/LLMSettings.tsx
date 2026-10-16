@@ -7,12 +7,12 @@ import {
   Brain, 
   Code, 
   Library,
-  ShieldCheck,
   Globe,
   Key,
   Clock,
   Eye,
-  Wand2
+  Wand2,
+  Activity,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
@@ -223,6 +223,8 @@ const LLMSettings: React.FC = () => {
                   { label: 'Assistant', key: 'assistant_model', icon: Brain },
                   { label: 'Coding / Repair', key: 'coding_model', icon: Code },
                   { label: 'Librarian / RAG', key: 'librarian_model', icon: Library },
+                  // Health & power reports (telemetry service); blank falls back to Librarian.
+                  { label: 'Reports', key: 'telemetry_model', icon: Activity },
                   { label: 'Vision OCR', key: 'vision_ocr_model', icon: Eye },
                   { label: 'Image Edit', key: 'image_edit_model', icon: Wand2 }
                 ].map(role => (
@@ -278,15 +280,6 @@ const LLMSettings: React.FC = () => {
             </div>
           </div>
 
-          <div className="glass-panel p-6 border-emerald-500/20 bg-emerald-500/5">
-            <div className="flex items-center gap-3 mb-4">
-              <ShieldCheck size={20} className="text-emerald-400" />
-              <h4 className="text-xs font-black uppercase tracking-widest text-white">Security Compliance</h4>
-            </div>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              API keys are stored using <strong>AES-256 Fernet encryption</strong>. Keys are never logged in raw format and are strictly masked in all UI responses. Internal service-to-service communication is verified via X-Internal-Secret handshakes.
-            </p>
-          </div>
         </div>
       </div>
     </div>

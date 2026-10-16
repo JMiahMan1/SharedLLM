@@ -62,13 +62,18 @@ logic into `workspace_runtime`.
 3. Classifies files and folders into `ContentIndexItem` records.
 4. Extracts text for supported content types.
 5. Chunks extracted text for RAG sync.
-6. Pushes chunks to the RAG service and purges stale chunks by `session_id`.
+6. Removes chunks whose source path is no longer listed, then pushes the new
+   chunks to RAG in batches of 25, under the provider's (Nextcloud) username.
+
+Progress is kept in a crawl record (`phase`, `done`/`total`, `error`) that
+`GET /status` returns and the Knowledge Hub polls. Nothing runs on a schedule:
+a crawl happens only when someone starts one.
 
 The endpoint returns immediately with:
 
 ```json
 {
-  "status": "SUCCESS",
+  "status": "ACCEPTED",
   "message": "Indexing started in background."
 }
 ```

@@ -4,14 +4,45 @@ import type { IActiveMediaWidgetProps, MediaState } from '../../types/widget';
 import { api } from '../../services/api';
 import { formatClock } from '../../lib/utils';
 import toast from 'react-hot-toast';
+import { useOptionalWebPlayer } from '../../context/webPlayerContext';
 
-const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsButton }: IActiveMediaWidgetProps) => {
+/** The entity id the execution service reports for this app's own web player. */
+const WEB_PLAYER_ENTITY = 'web_player';
+
+type TransportRequest = Parameters<typeof api.mediaTransport>[0];
+
+const ActiveMediaWidget = ({ userSettings, onMediaStop, settingsButton }: IActiveMediaWidgetProps) => {
   const [media, setMedia] = useState<MediaState | null>(null);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volumeLevel, setVolumeLevel] = useState(50);
   const [isLoading, setIsLoading] = useState(true);
   const localTimeRef = useRef(0);
+  // The context value changes on every player tick; read it through a ref so
+  // the debounced seek/volume callbacks below stay stable.
+  const webPlayer = useOptionalWebPlayer();
+  const webPlayerRef = useRef(webPlayer);
+  useEffect(() => {
+    webPlayerRef.current = webPlayer;
+  }, [webPlayer]);
+
+  // The server only stores the web player's last report; sending it a transport
+  // command changes that record while the audio on this device plays on. When
+  // the active player is this app's own, drive it directly.
+  const transport = useCallback(async (req: TransportRequest) => {
+    const webPlayer = webPlayerRef.current;
+    if (req.entity_id === WEB_PLAYER_ENTITY && webPlayer) {
+      switch (req.command) {
+        case 'play': return webPlayer.play();
+        case 'pause': return webPlayer.pause();
+        case 'next': return webPlayer.next();
+        case 'previous': return webPlayer.previous();
+        case 'seek': return webPlayer.seek(req.position ?? 0);
+        case 'volume_set': return webPlayer.setVolume(Math.round((req.volume_level ?? 0) * 100));
+      }
+    }
+    return api.mediaTransport(req);
+  }, []);
 
   useEffect(() => {
     const fetchMedia = async () => {
@@ -46,7 +77,8 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
           if (active.duration && active.duration > 0) {
             setDuration(active.duration);
           }
-          if (active.position && active.position > 0) {
+          // A new track restarts at 0, so a zero position is a real reading.
+          if (typeof active.position === 'number' && active.position >= 0) {
             setPosition(active.position);
             localTimeRef.current = active.position;
           }
@@ -103,10 +135,9 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
     const target = pendingSeekRef.current;
     pendingSeekRef.current = null;
     if (target === null || !media?.entity_id) return;
-    api
-      .mediaTransport({ entity_id: media.entity_id, command: 'seek', position: Math.round(target) })
+    transport({ entity_id: media.entity_id, command: 'seek', position: Math.round(target) })
       .catch(() => toast.error('Could not seek on that player'));
-  }, [media]);
+  }, [media, transport]);
 
   const handleSeek = useCallback((timeSec: number) => {
     const clamped = Math.max(0, duration > 0 ? Math.min(timeSec, duration) : timeSec);
@@ -122,11 +153,10 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
     if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current);
     volumeTimerRef.current = setTimeout(() => {
       volumeTimerRef.current = null;
-      api
-        .mediaTransport({ entity_id: entityId, command: 'volume_set', volume_level: level / 100 })
+      transport({ entity_id: entityId, command: 'volume_set', volume_level: level / 100 })
         .catch(() => toast.error('Could not set the volume on that player'));
     }, CONTROL_DEBOUNCE_MS);
-  }, []);
+  }, [transport]);
 
   // Never leave a pending control request firing into an unmounted widget.
   useEffect(() => () => {
@@ -137,7 +167,7 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
   const playPause = async () => {
     if (!media?.entity_id) return;
     try {
-      await api.mediaTransport({
+      await transport({
         entity_id: media.entity_id,
         command: media.state === 'playing' ? 'pause' : 'play',
       });
@@ -195,30 +225,35 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
     }
   }, [duration, media, handleSeek, position]);
 
-  const progressPercent = duration > 0 ? (position / duration) * 100 : 0;
+  const skip = async (command: 'previous' | 'next') => {
+    if (!media?.entity_id) return;
+    try {
+      await transport({ entity_id: media.entity_id, command });
+    } catch {
+      toast.error(command === 'next' ? 'Could not skip ahead' : 'Could not go back');
+    }
+  };
 
+  const progressPercent = duration > 0 ? (position / duration) * 100 : 0;
+  const controlButton =
+    'flex items-center justify-center w-11 h-11 rounded-full text-slate-400 hover:text-white hover:bg-white/5 transition-colors shrink-0';
+
+  // Laid out for the 200px "wide" cell it defaults to: track info, then one
+  // row of transport + volume, then the scrubber. Anything taller scrolls
+  // inside the card instead of spilling into the widget below.
   return (
-    <div className="glass-card h-full p-5 relative">
-      <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
-        <button
-          onClick={onTogglePin}
-          className="text-slate-500 hover:text-purple-400 transition-colors"
-          title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
-        >
-          <Music size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
-        </button>
-        {settingsButton}
-      </div>
+    <div className="glass-card h-full p-4 relative flex flex-col overflow-hidden">
+      <div className="absolute top-2 right-2 z-10">{settingsButton}</div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-32">
+        <div className="flex flex-1 items-center justify-center">
           <p className="text-sm text-slate-500 animate-pulse">Loading media...</p>
         </div>
       ) : media ? (
-        <div className="space-y-4">
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-500/30 flex items-center justify-center shrink-0">
-              <Music size={24} className="text-purple-400" />
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
+          <div className="flex items-center gap-3 pr-10">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-500/30 flex items-center justify-center shrink-0">
+              <Music size={20} className="text-purple-400" />
             </div>
             <div className="min-w-0">
               <p className="font-bold text-white truncate">{media.title || 'Unknown'}</p>
@@ -227,75 +262,28 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
             </div>
           </div>
 
-          <div className="flex items-center justify-center gap-4">
-            <button
-              onClick={async () => {
-                if (media?.entity_id) {
-                  try { await api.mediaTransport({ entity_id: media.entity_id, command: 'previous' }); } catch { /* ignore */ }
-                }
-              }}
-              className="text-slate-400 hover:text-white transition-colors"
-            >
-              <SkipBack size={20} />
+          <div className="flex items-center gap-1">
+            <button onClick={() => void skip('previous')} className={controlButton} aria-label="Previous track">
+              <SkipBack size={18} />
             </button>
             <button
               onClick={playPause}
-              className="w-12 h-12 rounded-full bg-purple-500/30 border border-purple-500/40 flex items-center justify-center text-purple-400 hover:bg-purple-500/40 transition-colors"
+              aria-label={media.state === 'playing' ? 'Pause' : 'Play'}
+              className="w-11 h-11 rounded-full bg-purple-500/30 border border-purple-500/40 flex items-center justify-center text-purple-400 hover:bg-purple-500/40 transition-colors shrink-0"
             >
-              {media.state === 'playing' ? <Pause size={20} /> : <Play size={20} />}
+              {media.state === 'playing' ? <Pause size={18} /> : <Play size={18} />}
             </button>
-            <button
-              onClick={async () => {
-                if (media?.entity_id) {
-                  try { await api.mediaTransport({ entity_id: media.entity_id, command: 'next' }); } catch { /* ignore */ }
-                }
-              }}
-              className="text-slate-400 hover:text-white transition-colors"
-            >
-              <SkipForward size={20} />
+            <button onClick={() => void skip('next')} className={controlButton} aria-label="Next track">
+              <SkipForward size={18} />
             </button>
-          </div>
-
-          {duration > 0 && (
-            <div
-              onPointerDown={handlePointerDown}
-              onKeyDown={handleScrubberKeyDown}
-              role="slider"
-              tabIndex={0}
-              aria-label="Track progress scrubber"
-              aria-valuemin={0}
-              aria-valuemax={Math.round(duration)}
-              aria-valuenow={Math.round(position)}
-              aria-valuetext={`${formatClock(position)} of ${formatClock(duration)}`}
-              className="relative py-4 sm:py-2 select-none touch-none cursor-pointer group"
-            >
-              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative pointer-events-none">
-                <div
-                  className="h-full bg-gradient-to-r from-purple-500 to-pink-400 rounded-full transition-[width] duration-300"
-                  style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
-                />
-              </div>
-              <div
-                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 sm:w-3 sm:h-3 bg-white rounded-full shadow-sm pointer-events-none -ml-2 sm:-ml-1.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
-                style={{ left: `${Math.min(100, Math.max(0, progressPercent))}%` }}
-              />
-            </div>
-          )}
-          {duration > 0 && (
-            <p className="text-[10px] text-slate-500 font-mono text-center -mt-2">
-              {formatClock(position)} / {formatClock(duration)}
-            </p>
-          )}
-
-          <div className="flex items-center gap-2">
-            <Volume2 size={16} className="text-slate-500" />
+            <Volume2 size={16} className="text-slate-500 ml-2 shrink-0" aria-hidden />
             <input
               type="range"
               min={0}
               max={100}
               value={volumeLevel}
               aria-label="Volume"
-              className="flex-1 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer accent-purple-500"
+              className="flex-1 min-w-0 h-11 bg-transparent cursor-pointer accent-purple-500"
               onChange={(e) => {
                 const next = Number(e.target.value);
                 setVolumeLevel(next);
@@ -304,9 +292,40 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
               }}
             />
           </div>
+
+          {duration > 0 && (
+            <div className="flex items-center gap-2">
+              <div
+                onPointerDown={handlePointerDown}
+                onKeyDown={handleScrubberKeyDown}
+                role="slider"
+                tabIndex={0}
+                aria-label="Track progress scrubber"
+                aria-valuemin={0}
+                aria-valuemax={Math.round(duration)}
+                aria-valuenow={Math.round(position)}
+                aria-valuetext={`${formatClock(position)} of ${formatClock(duration)}`}
+                className="relative flex-1 py-3 select-none touch-none cursor-pointer group"
+              >
+                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative pointer-events-none">
+                  <div
+                    className="h-full bg-gradient-to-r from-purple-500 to-pink-400 rounded-full transition-[width] duration-300"
+                    style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+                  />
+                </div>
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 w-4 h-4 sm:w-3 sm:h-3 bg-white rounded-full shadow-sm pointer-events-none -ml-2 sm:-ml-1.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                  style={{ left: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-slate-500 font-mono shrink-0 tabular-nums">
+                {formatClock(position)} / {formatClock(duration)}
+              </p>
+            </div>
+          )}
         </div>
       ) : (
-        <div className="flex items-center justify-center h-32">
+        <div className="flex flex-1 items-center justify-center">
           <p className="text-sm text-slate-500">No active media</p>
         </div>
       )}

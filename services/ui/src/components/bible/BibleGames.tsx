@@ -369,7 +369,7 @@ function GameRound({
       {error && (
         <div className="glass-panel rounded-2xl p-4 text-sm text-amber-300/90" role="alert">
           {error}
-          <button type="button" onClick={() => void submit(answersRef.current)} className="ml-3 underline">
+          <button type="button" onClick={() => void submit(answersRef.current)} className="ml-3 min-h-11 px-2 underline">
             Try again
           </button>
         </div>

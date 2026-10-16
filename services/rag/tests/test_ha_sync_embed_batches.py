@@ -183,3 +183,88 @@ def test_a_sync_commits_once_not_once_per_entity(tmp_path):
     assert counting.commits == 1
     rows = conn.execute("SELECT COUNT(*) FROM rag_items WHERE collection_name = 'ha_entities'").fetchone()[0]
     assert rows == 51
+
+
+def test_a_repeat_sync_does_not_re_embed_unchanged_entities(tmp_path):
+    """The gateway re-syncs every 5 min per user; re-embedding ~700 unchanged
+    entities each time kept the container at ~350% CPU continuously."""
+    conn = _install(tmp_path)
+    _sync({"entities": _entities(50), "user_id": "default"})
+    _fake_embed.batches = []
+
+    changed = _entities(50)
+    changed[3]["attributes"]["friendly_name"] = "Renamed Lamp"
+    changed[7]["attributes"]["_device_ip"] = "10.0.0.7"  # metadata-and-content change
+    result = _sync({"entities": changed, "user_id": "default"})
+
+    recorded = _recorded()
+    assert result["status"] == "SUCCESS"
+    assert result["new_count"] == 0
+    assert len(recorded) == 3  # the two changed entities plus the status row
+    assert any("Renamed Lamp" in t for t in recorded)
+    rows = conn.execute(
+        "SELECT COUNT(*) FROM rag_items WHERE collection_name = 'ha_entities'"
+    ).fetchone()[0]
+    assert rows == 51
+
+
+def test_an_unchanged_entity_still_gets_fresh_metadata_and_keeps_usage(tmp_path):
+    import json as _json
+
+    conn = _install(tmp_path)
+    _sync({"entities": _entities(2), "user_id": "default"})
+    conn.execute("UPDATE rag_items SET usage_count = 4, indexed_at = 'old' WHERE id = 'ha:default:light.kitchen_0'")
+    conn.commit()
+
+    again = _entities(2)
+    again[0]["attributes"]["_device_discovery_method"] = "mdns"  # not part of the embedded text
+    _sync({"entities": again, "user_id": "default"})
+
+    row = conn.execute(
+        "SELECT metadata, indexed_at, usage_count FROM rag_items WHERE id = 'ha:default:light.kitchen_0'"
+    ).fetchone()
+    meta = _json.loads(row["metadata"])
+    assert meta["device_discovery_method"] == "mdns"
+    assert meta["usage_count"] == 4
+    assert row["usage_count"] == 4
+    assert row["indexed_at"] != "old"
+
+
+def test_users_keep_their_own_copies_and_do_not_re_embed_each_other(tmp_path):
+    """Live, three users synced the same ~700 entities in turn. The ids were
+    shared, so each sync replaced the previous user's rows, found nothing of its
+    own unchanged, and re-embedded everything: RAG spent about half of every
+    hour embedding, and only the last user to sync had HA entities indexed."""
+    conn = _install(tmp_path)
+    for user in ("default", "michele", "jeremiah"):
+        _sync({"entities": _entities(20)}, user_id=user)
+    _fake_embed.batches = []
+
+    for user in ("default", "michele", "jeremiah"):
+        _sync({"entities": _entities(20)}, user_id=user)
+
+    # Only the three status rows are re-embedded; every entity is unchanged.
+    assert len(_recorded()) == 3
+    per_user = dict(
+        conn.execute(
+            "SELECT user_id, COUNT(*) FROM rag_items WHERE collection_name = 'ha_entities'"
+            " AND id LIKE 'ha:%' GROUP BY user_id"
+        ).fetchall()
+    )
+    assert per_user == {"default": 20, "michele": 20, "jeremiah": 20}
+
+
+def test_rows_under_the_old_shared_id_are_replaced_without_dropping_live_entities(tmp_path):
+    conn = _install(tmp_path)
+    rag_main._add_item(
+        "ha_entities", "ha:light.kitchen_0", "michele", "old text", {"entity_id": "light.kitchen_0"},
+        0, "2026-01-01T00:00:00Z", vector=[0.0] * rag_main.EMBEDDING_DIM,
+    )
+
+    result = _sync({"entities": _entities(2)}, user_id="michele")
+
+    ids = {r[0] for r in conn.execute("SELECT id FROM rag_items WHERE collection_name = 'ha_entities'")}
+    assert "ha:light.kitchen_0" not in ids
+    assert {"ha:michele:light.kitchen_0", "ha:michele:light.kitchen_1"} <= ids
+    # The entity is still in HA, so the gateway must not clear its state cache.
+    assert result["orphaned_entity_ids"] == []

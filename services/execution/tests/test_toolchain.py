@@ -99,3 +99,89 @@ def test_probe_version_empty_output_gives_unknown():
 
     assert caps[0]["version"] == ""
     assert "Version: unknown." in caps[0]["description"]
+
+
+class _FakeSession:
+    """aiohttp.ClientSession stand-in: each post() runs the next scripted step."""
+
+    calls = 0
+    steps: list = []
+    timeout = None
+
+    def __init__(self, timeout=None):
+        type(self).timeout = timeout
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def post(self, url, **kwargs):
+        type(self).calls += 1
+        step = type(self).steps.pop(0)
+        class _Resp:
+            status = 200
+
+            async def json(self):
+                return {"synced": 1}
+
+            async def __aenter__(self):
+                if isinstance(step, BaseException):
+                    raise step
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+        return _Resp()
+
+
+@pytest.fixture
+def fake_rag(monkeypatch):
+    import aiohttp
+
+    import services.config as cfg
+
+    _FakeSession.calls = 0
+    monkeypatch.setattr(aiohttp, "ClientSession", _FakeSession)
+    monkeypatch.setattr(cfg, "RAG_SVC_URL", "http://rag:8004", raising=False)
+    monkeypatch.setattr(toolchain, "discover_toolchain", lambda: [{"name": "git", "type": "binary"}])
+
+    async def _no_sleep(_s):
+        return None
+
+    monkeypatch.setattr("asyncio.sleep", _no_sleep)
+    return _FakeSession
+
+
+@pytest.mark.asyncio
+async def test_sync_waits_for_rag_to_finish_embedding(fake_rag):
+    """RAG answers only after embedding; a short client timeout gave up every time."""
+    fake_rag.steps = ["ok"]
+    result = await toolchain.sync_toolchain_to_rag()
+    assert result["status"] == "SUCCESS"
+    assert fake_rag.timeout.total >= 120
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_is_not_resent(fake_rag):
+    """Resending after a timeout only queued another copy of the same embed."""
+    fake_rag.steps = [TimeoutError(), "ok"]
+    result = await toolchain.sync_toolchain_to_rag()
+    assert result["status"] == "ERROR"
+    assert fake_rag.calls == 1
+    assert "no answer" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_an_error_with_no_message_still_says_what_failed(fake_rag):
+    class Silent(Exception):
+        def __str__(self):
+            return ""
+
+    fake_rag.steps = [Silent()] * 6
+    result = await toolchain.sync_toolchain_to_rag()
+    assert result["status"] == "ERROR"
+    assert result["error"].startswith("Silent")
+    assert fake_rag.calls == 6

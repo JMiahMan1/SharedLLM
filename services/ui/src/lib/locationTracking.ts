@@ -2,7 +2,7 @@ import { registerPlugin } from '@capacitor/core';
 import { Capacitor } from '@capacitor/core';
 
 interface LocationTrackingPlugin {
-  start(opts: { username: string; userId?: string }): Promise<{ started: boolean }>;
+  start(opts: { username: string; userId?: string; steps?: boolean }): Promise<{ started: boolean }>;
   stop(): Promise<void>;
   isRunning(): Promise<{ running: boolean }>;
   batteryUnrestricted(): Promise<{ unrestricted: boolean }>;
@@ -40,14 +40,20 @@ export interface BackgroundTrackingState {
   supported: boolean;
 }
 
+/**
+ * Start (or update) the native service. `steps` lets it read the pedometer
+ * with the app closed and send the day's count with each upload; it follows
+ * the Steps sensor switch, so calling this again after that switch changes
+ * updates the running service.
+ */
 export async function startBackgroundTracking(
   username: string,
-  userId?: string,
+  opts: { userId?: string; steps?: boolean } = {},
 ): Promise<BackgroundTrackingState> {
   const plugin = getLocationTracking();
   if (!plugin) return { serviceRunning: false, supported: false };
   try {
-    await plugin.start({ username, userId });
+    await plugin.start({ username, userId: opts.userId, steps: Boolean(opts.steps) });
     return { serviceRunning: true, supported: true };
   } catch (err) {
     // Never let this break tracking in the app itself -- the WebView watch can

@@ -36,6 +36,8 @@ public class LocationTrackingPlugin extends Plugin {
             return;
         }
         LocationTrackingService.setEnabled(getContext(), true);
+        // Older bundles do not pass it: no background step readings then.
+        LocationTrackingService.setStepsEnabled(getContext(), Boolean.TRUE.equals(call.getBoolean("steps", false)));
         Intent intent = new Intent(getContext(), LocationTrackingService.class);
         intent.putExtra("username", username.trim());
         String userId = call.getString("userId");

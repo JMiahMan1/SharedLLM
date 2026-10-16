@@ -64,14 +64,14 @@ def test_the_poisoned_id_is_refused_and_reported(tmp_path, caplog):
     assert result["status"] == "SUCCESS"
     assert result["count"] == 2
     assert result["refused_count"] == 1
-    assert f"ha:{POISON_ID}" not in _stored_ids(conn)
+    assert not any(POISON_ID in i for i in _stored_ids(conn))
     assert any("malformed entity_ids" in r.message for r in caplog.records)
 
 
 def test_valid_entities_still_index_normally_alongside_a_refusal(tmp_path):
     conn = _install(tmp_path)
     _sync({"entities": [_valid(0), {"entity_id": POISON_ID}, _valid(1)]})
-    assert {"ha:light.kitchen_0", "ha:light.kitchen_1"} <= _stored_ids(conn)
+    assert {"ha:default:light.kitchen_0", "ha:default:light.kitchen_1"} <= _stored_ids(conn)
 
 
 def test_a_previously_stored_poisoned_row_is_removed_as_an_orphan(tmp_path):
@@ -91,7 +91,7 @@ def test_a_previously_stored_poisoned_row_is_removed_as_an_orphan(tmp_path):
     result = _sync({"entities": [_valid(0)]})
 
     assert f"ha:{POISON_ID}" not in _stored_ids(conn)
-    assert f"ha:{POISON_ID}" in result["orphaned_entity_ids"]
+    assert POISON_ID in result["orphaned_entity_ids"]
 
 
 def test_a_long_but_legitimate_entity_id_is_kept(tmp_path):
@@ -102,7 +102,7 @@ def test_a_long_but_legitimate_entity_id_is_kept(tmp_path):
     result = _sync({"entities": [{"entity_id": long_id, "attributes": {}}]})
 
     assert result["refused_count"] == 0
-    assert f"ha:{long_id}" in _stored_ids(conn)
+    assert f"ha:default:{long_id}" in _stored_ids(conn)
 
 
 def test_a_entries_without_an_entity_id_are_still_skipped_quietly(tmp_path, caplog):

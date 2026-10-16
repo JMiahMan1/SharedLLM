@@ -329,7 +329,18 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
     }
 
     private int computeTodaySteps(float cumulative) {
-        SharedPreferences prefs = bridge.getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        return recordReading(bridge.getContext(), ledger, cumulative);
+    }
+
+    /**
+     * Fold one counter reading into today's total, the ledger and the hourly
+     * split. Static so {@link LocationTrackingService} can take readings with
+     * the app closed: the counter runs regardless, but a reading more than an
+     * hour after the last one cannot be credited across midnight, so without
+     * them a day the app was never opened was lost.
+     */
+    static synchronized int recordReading(Context context, StepLedger ledger, float cumulative) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String today = java.time.LocalDate.now().toString();
         long now = System.currentTimeMillis();
         // The reboot / midnight / delta rules live in StepDayAccumulator so they
@@ -371,7 +382,7 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
                 .apply();
         // Persist the day rollup: history survives reboots and app kills.
         ledger.recordDay(today, (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps)), StepLedger.SOURCE_PHONE);
-        recordCurrentHour((long) cumulative, now);
+        recordCurrentHour(context, ledger, (long) cumulative, now);
         return (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps));
     }
 
@@ -383,8 +394,8 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
      * day total is unaffected either way -- an unattributable delta is dropped
      * from the hourly view, never from the day's count.
      */
-    private void recordCurrentHour(long cumulative, long now) {
-        SharedPreferences prefs = bridge.getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    private static void recordCurrentHour(Context context, StepLedger ledger, long cumulative, long now) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         StepHourAccumulator.State state = new StepHourAccumulator.State(
                 prefs.getLong(KEY_HOUR_BASELINE, 0L),
                 prefs.getLong(KEY_HOUR_LAST_READ_AT, 0L),

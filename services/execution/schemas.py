@@ -213,8 +213,10 @@ class MediaTransportRequest(BaseRequest):
     command: Literal[
         "pause", "resume", "stop", "next", "previous",
         "volume_up", "volume_down", "volume_set", "volume_mute", "mute",
-        "home", "power_off", "back", "play", "seek",
+        "home", "power_off", "power_on", "back", "play", "seek",
         "shuffle_set", "repeat_set", "join", "unjoin",
+        # Remote-control keys (TV d-pad and menu), sent as remote key presses.
+        "up", "down", "left", "right", "select", "menu",
     ]
     volume_level: float | None = Field(None, ge=0.0, le=1.0)
     position: float | None = Field(None, ge=0.0, description="Seek target in seconds (command='seek')")
@@ -396,8 +398,12 @@ class CalendarRequest(BaseRequest):
     start_time: str | None = None
     calendar_name: str | None = None
     integration: str | None = None  # nextcloud | skylight | ical | None(=all/default)
-    event_id: str | None = None  # stable id for update/delete (skylight)
+    event_id: str | None = None  # stable id for update/delete (skylight event id, nextcloud UID)
     priority_wins: bool | None = None  # if True, integration priority wins time conflicts
+    # read: the window to load (ISO dates/datetimes). Unset = yesterday..+7 days,
+    # which is what the dashboard widget and voice answers want.
+    range_start: str | None = None
+    range_end: str | None = None
 
 class NoteRequest(BaseRequest):
     user_context: UserContext

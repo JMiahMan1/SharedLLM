@@ -108,6 +108,8 @@ function PlanCard({
   trigger: (kind: 'light' | 'success') => Promise<void> | void;
 }) {
   const [showDays, setShowDays] = useState(false);
+  // Stopping cannot be undone (starting again starts at day 1), so it asks once.
+  const [confirmStop, setConfirmStop] = useState(false);
   const today = plan.today;
   const doneToday = today ? plan.completed_days.includes(today.day) : false;
 
@@ -192,15 +194,38 @@ function PlanCard({
       </button>
       {showDays && <PlanDays planId={plan.plan_id} onOpenRef={onOpenRef} act={act} />}
 
-      <div className="mt-1 flex justify-end">
-        <button
-          type="button"
-          disabled={busy !== null}
-          onClick={() => void act(`stop-${plan.plan_id}`, () => api.stopBiblePlan(plan.plan_id))}
-          className="min-h-11 px-2 text-[11px] text-slate-500 hover:text-rose-300"
-        >
-          Stop this plan
-        </button>
+      <div className="mt-1 flex flex-wrap items-center justify-end gap-2">
+        {confirmStop ? (
+          <>
+            <span className="text-[11px] text-slate-400">Stop {plan.name}? Starting it again begins at day 1.</span>
+            <button
+              type="button"
+              onClick={() => setConfirmStop(false)}
+              className="min-h-11 px-3 rounded-xl text-xs text-slate-300 hover:bg-white/5"
+            >
+              Keep it
+            </button>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void act(`stop-${plan.plan_id}`, () => api.stopBiblePlan(plan.plan_id))}
+              data-testid={`bible-plan-stop-confirm-${plan.plan_id}`}
+              className="min-h-11 px-3 rounded-xl bg-rose-500/15 text-xs text-rose-200"
+            >
+              Stop plan
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => setConfirmStop(true)}
+            data-testid={`bible-plan-stop-${plan.plan_id}`}
+            className="min-h-11 px-2 text-[11px] text-slate-500 hover:text-rose-300"
+          >
+            Stop this plan
+          </button>
+        )}
       </div>
     </div>
   );
@@ -242,7 +267,7 @@ function PlanDays({
   return (
     <ol className="max-h-80 overflow-y-auto space-y-1 pr-1 custom-scrollbar" data-testid="bible-plan-days">
       {data.days.map((d) => (
-        <li key={d.day} className="flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-white/[0.03]">
+        <li key={d.day} className="flex items-start gap-2 rounded-lg px-2 py-1 hover:bg-white/[0.03]">
           <button
             type="button"
             aria-label={d.done ? `Mark day ${d.day} unread` : `Mark day ${d.day} read`}
@@ -252,17 +277,21 @@ function PlanDays({
                 d.done ? api.undoBiblePlanDay(planId, d.day) : api.completeBiblePlanDay(planId, d.day),
               )
             }
-            className={`min-h-9 min-w-9 rounded-lg border flex items-center justify-center ${d.done ? 'bg-sky-500 border-sky-400 text-white' : 'border-white/15 text-transparent'}`}
+            className={`min-h-11 min-w-11 shrink-0 rounded-lg border flex items-center justify-center ${d.done ? 'bg-sky-500 border-sky-400 text-white' : 'border-white/15 text-transparent'}`}
           >
             <Check size={13} />
           </button>
-          <span className="w-12 text-xs text-slate-500 tabular-nums">Day {d.day}</span>
-          <span className="flex flex-wrap gap-x-2">
-            {d.readings.map((r) => (
-              <button key={r.ref} type="button" onClick={() => onOpenRef(r.ref)} className="text-sm text-slate-200 hover:text-sky-200">
-                {r.ref}
-              </button>
-            ))}
+          {/* The day sits above its readings so a long book name ("1 Thessalonians")
+              keeps its own line on a phone instead of being cut off. */}
+          <span className="min-w-0 flex-1">
+            <span className="block pt-0.5 text-xs text-slate-500 tabular-nums">Day {d.day}</span>
+            <span className="flex flex-wrap gap-x-1">
+              {d.readings.map((r) => (
+                <button key={r.ref} type="button" onClick={() => onOpenRef(r.ref)} className="min-h-11 px-1.5 text-left text-sm text-slate-200 hover:text-sky-200">
+                  {r.ref}
+                </button>
+              ))}
+            </span>
           </span>
         </li>
       ))}

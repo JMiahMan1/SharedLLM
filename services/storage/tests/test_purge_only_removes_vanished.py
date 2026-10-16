@@ -113,3 +113,58 @@ def test_one_failing_purge_does_not_abort_the_remainder():
     client = Flaky(listed=["/one.md", "/two.md"])
     run(client, "nextcloud_files", "summers", set())
     assert len(client.purges) == 2
+
+def test_sub_folder_scan_leaves_the_rest_of_the_index_alone():
+    # Indexing just "Notes" says nothing about files outside it.
+    client = FakeClient(listed=["/Notes/a.md", "/Notes/gone.md", "/Photos/x.jpg", "/Notesy.md"])
+    asyncio.run(_purge_stale_paths(
+        client, "nextcloud_files", "summers", {"/Notes/a.md"}, scope="Notes", recursive=True,
+    ))
+    assert [body["filter"]["path"] for _, body in client.purges] == ["/Notes/gone.md"]
+
+
+def test_non_recursive_scan_only_judges_direct_children():
+    client = FakeClient(listed=["/Notes/gone.md", "/Notes/Sub/deep.md"])
+    asyncio.run(_purge_stale_paths(
+        client, "nextcloud_files", "summers", set(), scope="/Notes/", recursive=False,
+    ))
+    assert [body["filter"]["path"] for _, body in client.purges] == ["/Notes/gone.md"]
+
+
+def test_checkpoint_skipped_files_count_as_present(monkeypatch):
+    """Unchanged files produce no chunks on an incremental run; they are not gone."""
+    from services.storage import main as storage_main
+    from services.storage.models import IndexScanRequest
+
+    seen = {}
+
+    async def fake_purge(client, collection, user, scanned, scope="/", recursive=True):
+        seen["scanned"] = scanned
+
+    class Item:
+        def __init__(self, path):
+            self.path = path
+
+    class Provider:
+        async def list_entries(self, path, recursive):
+            return []
+
+    async def no_chunks(provider, items, checkpoint=None):
+        return []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(storage_main, "build_provider", lambda cfg: Provider())
+    monkeypatch.setattr(storage_main, "build_content_index", lambda entries: [Item("/a.md"), Item("/b.md")])
+    monkeypatch.setattr(storage_main, "extract_and_chunk_contents", no_chunks)
+    monkeypatch.setattr(storage_main, "_purge_stale_paths", fake_purge)
+    monkeypatch.setattr(storage_main, "get_client", lambda: Client())
+
+    req = IndexScanRequest(provider={"kind": "nextcloud", "settings": {"username": "summers"}})
+    asyncio.run(storage_main._run_full_index_task(req))
+    assert seen["scanned"] == {"/a.md", "/b.md"}

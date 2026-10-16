@@ -33,3 +33,15 @@ describe('BottomNav', () => {
     expect(screen.queryByTestId('more-sheet')).not.toBeInTheDocument();
   });
 });
+
+describe('BottomNav reach', () => {
+  it('puts every desktop page a family member may open in More', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<BottomNav />);
+
+    await user.click(screen.getByRole('button', { name: /more pages/i }));
+    for (const label of [/knowledge/i, /workspaces/i, /docs/i, /bible/i]) {
+      expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
+    }
+  });
+});

@@ -79,6 +79,9 @@ class ContainerRegistry:
 class DockerWatcher:
     """Monitors Docker for container changes"""
 
+    #: Longest wait before reconnecting a Docker event stream that ended.
+    RECONNECT_DELAY_CAP_S = 60
+
     def __init__(self, client: docker.DockerClient, registry: ContainerRegistry):
         self.client = client
         self.registry = registry
@@ -182,9 +185,23 @@ class DockerWatcher:
             logger.error(f"Failed to create watcher thread task: {e}")
             raise
 
+        restarts = 0
         while self._running:
+            if watcher_task.done():
+                # The Docker event stream ended (daemon restart, socket error).
+                # Waiting on the queue would wait forever while containers come
+                # and go unregistered, so rescan for anything missed and start a
+                # fresh stream, backing off if it keeps ending.
+                restarts += 1
+                delay = min(self.RECONNECT_DELAY_CAP_S, 2 ** min(restarts, 6))
+                logger.warning(f"Docker event stream ended; rescanning and reconnecting in {delay}s")
+                await asyncio.sleep(delay)
+                await self._sync_containers()
+                watcher_task = asyncio.create_task(asyncio.to_thread(watch_sync))
+                continue
             try:
                 event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+                restarts = 0
                 await self._handle_event(event)
             except TimeoutError:
                 continue

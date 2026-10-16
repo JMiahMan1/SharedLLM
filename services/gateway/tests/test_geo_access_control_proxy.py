@@ -165,6 +165,15 @@ def test_trips_defaults_to_the_caller_when_no_user_id(make_client, monkeypatch):
     )
 
 
+def test_the_family_scope_reaches_geo_with_the_viewer(make_client, monkeypatch):
+    """Wander asks for the family's trips; geo applies each person's consent."""
+    captured = _patch_geo(monkeypatch, payload={"trips": []})
+    make_client(user="michele").get("/api/geo/trips", params={"scope": "family"})
+    sent = captured["calls"][-1]["params"]
+    assert sent["scope"] == "family"
+    assert sent["viewer"] == "michele"
+
+
 def test_admin_status_is_forwarded_to_geo(make_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"trips": []})
     make_client(user="jeremiah", is_admin=True).get("/api/geo/trips")

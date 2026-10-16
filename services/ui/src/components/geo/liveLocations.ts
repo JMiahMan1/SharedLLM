@@ -23,6 +23,15 @@ export interface LiveFamilyMember {
 /** Driving-ish: fast enough that "home in N min" is worth showing. */
 export const MOVING_MPS = 4;
 
+/**
+ * When the fix was taken (epoch seconds), else when it reached the server.
+ * A phone re-sends a held fix when it gets no new one (indoors, asleep), so
+ * the arrival time can be minutes newer than the position it carries.
+ */
+export function fixTimeSeconds(location: UserLiveLocation): number {
+  return location.timestamp || location.updated_at || 0;
+}
+
 export function classifyLocation(
   userId: string,
   location: UserLiveLocation,
@@ -32,7 +41,7 @@ export function classifyLocation(
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
   if (latitude === 0 && longitude === 0) return null; // null island = bad fix
 
-  const stamp = location.updated_at || location.timestamp || 0;
+  const stamp = fixTimeSeconds(location);
   const ageMs = stamp > 0 ? Math.max(0, now - stamp * 1000) : Number.POSITIVE_INFINITY;
   const freshness: LocationFreshness =
     ageMs <= LIVE_THRESHOLD_MS ? 'live' : ageMs <= RECENT_THRESHOLD_MS ? 'recent' : 'stale';

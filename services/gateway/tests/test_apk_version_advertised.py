@@ -238,3 +238,30 @@ class TestPublishEndpoint:
             files={"apk": ("jarvis-os.apk", make_apk_bytes(23), "application/vnd.android.package-archive")},
         )
         assert r.status_code == 403
+
+
+class TestBundleShaDrift:
+    """Metadata and bundle naming the same commit (full vs short SHA) is not drift."""
+
+    def _stage(self, metadata_sha, bundle_sha):
+        import json
+
+        from services.gateway import main
+
+        (main.APP_UPDATES_DIR / "version.json").write_text(json.dumps({"git_sha": metadata_sha}))
+        with zipfile.ZipFile(main.APP_UPDATES_DIR / "bundle.zip", "w") as zf:
+            zf.writestr("version.json", json.dumps({"git_sha": bundle_sha}))
+
+    def test_short_and_full_sha_of_one_commit_do_not_warn(self, client, caplog):
+        self._stage("b24f6eb942084e23b3771ec3786c7c14570c1244", "b24f6eb9")
+        with caplog.at_level("WARNING"):
+            data = client.get("/api/app-updates/version").json()
+        assert data["git_sha"] == "b24f6eb9"
+        assert "disagrees" not in caplog.text
+
+    def test_different_commits_still_warn(self, client, caplog):
+        self._stage("77a7512997daa2d260db14001b536556e4a04ea6", "61caa665")
+        with caplog.at_level("WARNING"):
+            data = client.get("/api/app-updates/version").json()
+        assert data["git_sha"] == "61caa665"
+        assert "disagrees" in caplog.text

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BookOpen, BookOpenCheck, Send, Sparkles, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -66,6 +66,10 @@ export default function JarvisStudyThread({
   const [turns, setTurns] = useState<Turn[]>([]);
   const [asking, setAsking] = useState(false);
   const [depth, setDepth] = useState<BibleStudyDepth>('adult');
+  // Closing the panel ends the answer being written, so a dismissed question
+  // does not keep the model busy for the minute a long answer can take.
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // The answer streams into the newest turn as it is written; the turn is
   // replaced as a whole on each event so React sees a new object.
@@ -83,6 +87,8 @@ export default function JarvisStudyThread({
     ]);
     setQuestion('');
     let written = '';
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       await api.streamBibleStudy(passage, wanted, { version, edition, crossVersion, depth }, (event) => {
         if (event.type === 'start') updateLast({ verses: event.verses_used, notes: event.notes_used });
@@ -94,9 +100,10 @@ export default function JarvisStudyThread({
           updateLast({ text: event.detail, failed: true, streaming: false });
           setQuestion(wanted);
         }
-      });
+      }, controller.signal);
       updateLast({ streaming: false });
     } catch (error) {
+      if (controller.signal.aborted) return;
       // The server's own sentence: an unconfigured gateway, a passage with no
       // text, and a model that could not be reached each have their own fix.
       const message =

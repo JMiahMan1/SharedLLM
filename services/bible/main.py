@@ -2350,7 +2350,7 @@ async def _live_settings() -> dict[str, str]:
     try:
         async with aiohttp.ClientSession() as client:
             async with client.get(
-                f"{IDENTITY_SVC_URL}/api/global-settings",
+                f"{IDENTITY_SVC_URL}/api/settings",
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=10.0),
             ) as resp:

@@ -130,8 +130,10 @@ export default function ActivityRings({
 
   const specs = rings.map((r) => {
     const ring = ringSpec(r.actual, r.goal, defaultGoal);
-    const zone = r.tone ?? stepZone(r.actual, baseline);
-    return { ring, color: ZONE_STYLES[zone].ring, zone, input: r };
+    // Without a baseline there is nothing to compare against, so no zone label:
+    // stepZone's 'on' fallback would claim "On your usual pace" at 0 steps.
+    const zone = r.tone ?? (baseline && baseline > 0 ? stepZone(r.actual, baseline) : null);
+    return { ring, color: ZONE_STYLES[zone ?? 'on'].ring, zone, input: r };
   });
 
   const compact = size < COMPACT_BELOW;
@@ -154,9 +156,11 @@ export default function ActivityRings({
           <Ring spec={s.ring} color={s.color} unit={s.input.unit} size={size} showUnit={!compact} />
           <div className="text-center">
             <p className="text-xs font-medium text-slate-300">{s.input.label}</p>
-            <p className={`text-[11px] font-semibold ${ZONE_STYLES[s.zone].text}`} data-testid={`ring-zone-${s.input.id}`}>
-              {ZONE_STYLES[s.zone].label}
-            </p>
+            {s.zone && (
+              <p className={`text-[11px] font-semibold ${ZONE_STYLES[s.zone].text}`} data-testid={`ring-zone-${s.input.id}`}>
+                {ZONE_STYLES[s.zone].label}
+              </p>
+            )}
             {!thin && (
               <p className="text-[10px] text-slate-500 tabular-nums">
                 {s.ring.reached

@@ -103,8 +103,24 @@ describe('Wander page', () => {
     useWanderHandlers({ trips: () => HttpResponse.json({ trips: [trip()], total_trips: 1 }) });
     renderWithProviders(<Wander />);
 
-    expect(await screen.findByText(/all wander trips/i)).toBeInTheDocument();
+    expect(await screen.findByText(/family trips/i)).toBeInTheDocument();
     expect(screen.getAllByText('Jeremiah').length).toBeGreaterThan(0);
+  });
+
+  it("asks for the family's trips, so My trips and Family trips differ", async () => {
+    const asked: string[] = [];
+    server.use(
+      http.get('/api/geo/trips', ({ request }) => {
+        asked.push(new URL(request.url).search);
+        return HttpResponse.json({
+          trips: [trip(), trip({ id: 't2', user_id: 'michele', user_name: 'Michele', start_time: 1750100000 })],
+          total_trips: 2,
+        });
+      }),
+    );
+    renderWithProviders(<Wander />);
+    await waitFor(() => expect(asked.some((q) => q.includes('scope=family'))).toBe(true));
+    expect(await screen.findAllByText('Michele')).not.toHaveLength(0);
   });
 
   it("shows each person's live app position on their card, not HA's stale person", async () => {
@@ -184,7 +200,7 @@ describe('Wander page', () => {
     const user = userEvent.setup();
     renderWithProviders(<Wander />);
 
-    const all = await screen.findByRole('button', { name: /all wander trips/i });
+    const all = await screen.findByRole('button', { name: /family trips/i });
     const mine = screen.getByRole('button', { name: /my trips/i });
 
     expect(all).toHaveAttribute('aria-pressed', 'true');

@@ -111,7 +111,7 @@ export default function FamilyActivityCard() {
               data-testid={`feed-window-${option.id}`}
               aria-pressed={period === option.id}
               onClick={() => setPeriod(option.id)}
-              className={`min-h-8 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+              className={`min-h-8 pointer-coarse:min-h-11 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
                 period === option.id
                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                   : 'text-slate-400 hover:text-white border border-transparent'

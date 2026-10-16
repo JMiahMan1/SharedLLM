@@ -25,6 +25,11 @@ export const mediaHandlers = [
   http.post('/execute/media/status', () => HttpResponse.json(mediaStatusFixture)),
   http.post('/execute/media/transport', () => HttpResponse.json(transportFixture)),
   http.post('/execute/media/play', () => HttpResponse.json(playFixture)),
+  // The app-wide web player reports what it plays (context/MediaPlayerContext).
+  http.post('/execute/media/state/sync', () =>
+    HttpResponse.json({ status: 'SUCCESS', message: 'Local playback state synced.' })
+  ),
+  http.get('/api/media/detail', () => HttpResponse.json({})),
   http.get('/api/media/music-assistant/playlists', () =>
     HttpResponse.json(maPlaylistsFixture)
   ),

@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Shield, Lock, User, AlertCircle, Fingerprint, Server, WifiOff, Wifi } from 'lucide-react';
+import { Shield, Lock, User, AlertCircle, Server, WifiOff, Wifi } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../context/AuthContext';
-import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import { useHaptics } from '../hooks/useHaptics';
 import { useNavigate } from 'react-router-dom';
 import { storageGet, storageSet } from '../lib/storage';
-import { checkConnectivity } from '../lib/connectivity';
+import { checkConnectivity, normalizeServerUrl } from '../lib/connectivity';
+import { DEFAULT_SERVER_URL } from '../lib/serverUrl';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -15,10 +15,8 @@ const Login = () => {
   const [serverUrl, setServerUrl] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [savedUsername, setSavedUsername] = useState<string | null>(null);
   const [connectivity, setConnectivity] = useState<{ ok: boolean; latency?: number; error?: string } | null>(null);
   const { login, initError } = useAuth();
-  const { isNative, isAvailable, checkAvailability, authenticate } = useBiometricAuth();
   const { trigger } = useHaptics();
   const navigate = useNavigate();
   const showServerField = Capacitor.isNativePlatform();
@@ -26,28 +24,21 @@ const Login = () => {
   useEffect(() => {
     const loadSaved = async () => {
       const saved = await storageGet('jarvis_last_username');
-      if (saved) {
-        setSavedUsername(saved);
-        setUsername(saved);
-      }
+      if (saved) setUsername(saved);
       if (Capacitor.isNativePlatform()) {
         const savedServer = await storageGet('jarvis_server_url');
-        const activeServer = savedServer || 'https://jarvis.sumemail.com';
+        const activeServer = savedServer || DEFAULT_SERVER_URL;
         setServerUrl(activeServer);
         const result = await checkConnectivity(activeServer);
         setConnectivity(result);
-        await checkAvailability();
       }
     };
     loadSaved();
-  }, [checkAvailability]);
+  }, []);
 
   const handleTestConnection = async () => {
     if (!serverUrl) return;
-    let url = serverUrl.trim();
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      url = 'http://' + url;
-    }
+    const url = normalizeServerUrl(serverUrl);
     setConnectivity({ ok: false, error: 'Testing...' });
     const result = await checkConnectivity(url);
     setConnectivity(result);
@@ -60,12 +51,7 @@ const Login = () => {
     setIsLoading(true);
     try {
       if (showServerField && serverUrl) {
-        let normalizedUrl = serverUrl.trim();
-        if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
-          normalizedUrl = 'http://' + normalizedUrl;
-        }
-        normalizedUrl = normalizedUrl.replace(/\/+$/, '');
-        await storageSet('jarvis_server_url', normalizedUrl);
+        await storageSet('jarvis_server_url', normalizeServerUrl(serverUrl));
       }
       await login({ username, password });
       await storageSet('jarvis_last_username', username);
@@ -86,36 +72,8 @@ const Login = () => {
     }
   };
 
-  const handleBiometricLogin = async () => {
-    trigger('medium');
-    setError('');
-    setIsLoading(true);
-
-    const result = await authenticate('Sign in to Jarvis OS');
-
-    if (result.success) {
-      const savedPassword = await storageGet('jarvis_saved_password');
-      if (savedPassword && savedUsername) {
-        try {
-          await login({ username: savedUsername, password: savedPassword });
-          navigate('/');
-        } catch {
-          setError('Biometric login failed. Please enter your password.');
-        }
-      } else {
-        setError('No saved credentials found. Please sign in manually.');
-      }
-    } else if (result.error) {
-      setError(result.error);
-    }
-
-    setIsLoading(false);
-  };
-
-  const showBiometricOption = isNative && isAvailable && savedUsername;
-
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950">
+    <div className="min-h-screen flex items-center justify-center p-4 sm:p-6 bg-slate-950">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-600/20 rounded-full blur-[128px]" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-600/20 rounded-full blur-[128px]" />
@@ -124,7 +82,7 @@ const Login = () => {
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass-panel w-full max-w-md p-8 sm:p-10 relative z-10"
+        className="glass-panel w-full max-w-md p-6 sm:p-10 relative z-10"
       >
         <div className="flex flex-col items-center mb-8">
           <div className="p-4 rounded-2xl bg-purple-600/20 text-purple-400 mb-4 border border-purple-500/20">
@@ -144,29 +102,6 @@ const Login = () => {
           </motion.div>
         )}
 
-        {showBiometricOption && (
-          <div className="flex flex-col items-center mb-6">
-            <button
-              onClick={handleBiometricLogin}
-              disabled={isLoading}
-              className="w-16 h-16 rounded-full bg-purple-500/20 border border-purple-500/30 flex items-center justify-center hover:bg-purple-500/30 transition-colors disabled:opacity-50"
-            >
-              <Fingerprint size={36} className="text-purple-400" />
-            </button>
-            <p className="text-sm text-slate-400 mt-2">
-              Sign in as <span className="text-white font-medium">{savedUsername}</span>
-            </p>
-            <p className="text-xs text-slate-500 mt-1">Tap to authenticate</p>
-            <button
-              onClick={() => { setSavedUsername(null); setUsername(''); }}
-              className="text-xs text-purple-400 hover:text-purple-300 mt-3"
-            >
-              Use different account
-            </button>
-          </div>
-        )}
-
-        {(!showBiometricOption || savedUsername === null) && (
           <form onSubmit={handleSubmit} className="space-y-6">
             {showServerField && (
               <div>
@@ -180,14 +115,18 @@ const Login = () => {
                       onChange={(e) => setServerUrl(e.target.value)}
                       className="glass-input w-full pl-10"
                       placeholder="https://your-jarvis-server.com"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      inputMode="url"
                       required
                     />
                   </div>
                   <button
                     type="button"
                     onClick={handleTestConnection}
-                    className="glass-button px-3 min-w-[48px]"
+                    className="glass-button px-3 min-w-[48px] min-h-11"
                     title="Test connection"
+                    aria-label="Test connection"
                   >
                     {connectivity?.ok ? (
                       <Wifi size={18} className="text-green-400" />
@@ -217,6 +156,10 @@ const Login = () => {
                   onChange={(e) => setUsername(e.target.value)}
                   className="glass-input w-full pl-10"
                   placeholder="Enter username"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   required
                 />
               </div>
@@ -232,6 +175,7 @@ const Login = () => {
                   onChange={(e) => setPassword(e.target.value)}
                   className="glass-input w-full pl-10"
                   placeholder="Enter password"
+                  autoComplete="current-password"
                   required
                 />
               </div>
@@ -255,13 +199,6 @@ const Login = () => {
               {isLoading ? 'Authenticating...' : 'Sign In'}
             </button>
           </form>
-        )}
-
-        <div className="mt-8 text-center">
-          <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold">
-            Identity Service v1.0
-          </p>
-        </div>
       </motion.div>
     </div>
   );

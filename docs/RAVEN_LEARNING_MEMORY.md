@@ -45,8 +45,37 @@ POST /api/raven/missions
   → mission status written back to Identity
 ```
 
-Mission states: `queued → executing → completed | failed | paused`. A job
-carrying `_mission_id` always runs the autonomous loop.
+Mission states: `pending` (a proposed fix awaiting an admin) → `queued →
+executing → completed | failed | paused`. A job carrying `_mission_id` always
+runs the autonomous loop.
+
+### Health watch and proposed fixes
+
+`RavenWorker._health_loop` reads the container list and each container's last
+100 ERROR lines from execution every `raven_scan_interval` seconds (default
+`RAVEN_CHECK_INTERVAL`, 300). A container with at least `raven_error_threshold`
+errors (default `RAVEN_ERROR_THRESHOLD`, 5) gets an `admin_fix` mission in
+state `pending`, unless one for it is already pending, queued, executing or
+paused, or one was filed in the last `SELF_REPAIR_COOLDOWN_SECONDS` (1800).
+Nothing runs until an admin presses **Run fix** in Admin → Raven Ops
+(`POST /api/admin/raven/queue/{id}/execute`). `raven_suspended=true` pauses
+the scan. All three settings are edited in Raven Ops.
+
+### Where missions are seen
+
+- **Jarvis Lab → Missions** (admins): start, watch live, pause/resume, stop,
+  delete, inspect a mission's result, files and timeline, and send follow-up
+  instructions (`POST /api/raven/missions/{id}/refine`).
+- **Admin → Raven Ops**: the health-watch settings, proposed fixes, running
+  and recent missions, and the audit log (every mission's full event log).
+
+The mission list rows are summaries; the detail views load the full mission
+(`GET /api/raven/missions/{id}`) for its log and result.
+
+The worker's other loops: the cleanup loop (every `CLEANUP_INTERVAL_SECONDS`,
+default 300; environment only) syncs each user's Home Assistant entities into
+RAG, prunes orphans and refreshes the Redis state cache; Talk Monitor and Chat
+Notify are described in their own docs.
 
 ## 3. The agent loop (`services/gateway/agent_loop.py`)
 
@@ -195,6 +224,12 @@ LIVE_E2E=1 GH_TOKEN=... RAVEN_API_KEY=... \
 ```
 
 `$INTERNAL_SECRET` comes from the server's `.env`; never paste it into docs.
+
+In the app, Knowledge Hub > Raven Lessons lists lessons grouped by topic
+(`GET /api/storage/learning`, any signed-in user). Edit and Delete are shown
+to admins only and the gateway enforces it; RAG refuses ids outside
+`system_learnings`. A mission marks a lesson applied by calling RAG's
+`PATCH /rag/learning/{id}/applied` directly (there is no gateway route).
 
 ## 9. Failure modes to watch
 

@@ -40,8 +40,8 @@ export default function StepRangeSelector({ value, onChange, narrow = false }: P
             data-testid={`range-${o.id}`}
             className={
               active
-                ? 'px-2.5 py-1 rounded-md text-[11px] font-bold bg-purple-500/30 text-purple-100 border border-purple-400/40 pointer-coarse:min-h-11'
-                : 'px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-400 hover:text-white hover:bg-white/5 pointer-coarse:min-h-11'
+                ? 'px-2.5 py-1 rounded-md text-[11px] font-bold bg-purple-500/30 text-purple-100 border border-purple-400/40 pointer-coarse:min-h-11 pointer-coarse:min-w-11'
+                : 'px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-400 hover:text-white hover:bg-white/5 pointer-coarse:min-h-11 pointer-coarse:min-w-11'
             }
           >
             <span aria-hidden="true">{o.short}</span>
