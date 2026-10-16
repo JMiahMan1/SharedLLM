@@ -13,6 +13,10 @@ admins (category ``admin``) about:
 - a device dropping off Wi-Fi and reconnecting over and over;
 - DHCP address pools, the connection table or router memory nearly full.
 
+It also records each device's download and upload per hour (from the
+router's nlbwmon when installed, which counts wired devices too, otherwise
+from the access points) and each internet outage.
+
 Each alert is sent once when its condition starts and re-arms only after the
 condition has clearly ended, so a problem that persists is one notice.
 
@@ -67,6 +71,8 @@ STATE_KEY = "network:state"
 EVENTS_KEY = "network:events"
 LOG_KEY = "network:log"
 USAGE_PREFIX = "network:usage:"
+OUTAGES_KEY = "network:outages"
+OUTAGES_MAX = 500
 LOG_MAX = 25000
 EVENTS_MAX = 200
 USAGE_TTL_S = 35 * 86400
@@ -126,6 +132,8 @@ def collect(client: RouterClient, last_log_id: int) -> dict[str, Any]:
         except (RouterError, ValueError):
             pass
 
+    nlbw = _nlbw_counters(client)
+
     lines = client.call("log", "read", {"lines": 1000, "stream": False}).get("log", [])
     # Line ids restart when the router reboots; then every line is new.
     if lines and max(int(ln.get("id", 0)) for ln in lines) < last_log_id:
@@ -149,8 +157,31 @@ def collect(client: RouterClient, last_log_id: int) -> dict[str, Any]:
         "pools": _pools(dhcp, interfaces, leases),
         "radios": radios,
         "conntrack": conntrack,
+        "nlbw": nlbw,
         "log": new_lines,
     }
+
+
+def _nlbw_counters(client: RouterClient) -> dict[str, dict[str, int]] | None:
+    """Bytes each device (wired or Wi-Fi) downloaded and uploaded this
+    accounting period, from the router's nlbwmon; None when it is not
+    installed or the account may not run it (then Wi-Fi counters are used)."""
+    try:
+        out = client.call("file", "exec", {"command": "/usr/sbin/nlbw", "params": ["-c", "json", "-g", "mac"]})
+        data = json.loads(out.get("stdout") or "{}")
+    except (RouterError, ValueError):
+        return None
+    cols = data.get("columns") or []
+    try:
+        i_mac, i_rx, i_tx = cols.index("mac"), cols.index("rx_bytes"), cols.index("tx_bytes")
+    except ValueError:
+        return None
+    counters = {}
+    for row in data.get("data") or []:
+        mac = str(row[i_mac] or "").lower()
+        if mac and mac != "00:00:00:00:00:00":
+            counters[mac] = {"down": int(row[i_rx] or 0), "up": int(row[i_tx] or 0)}
+    return counters
 
 
 def _seconds(t: Any) -> float:
@@ -460,7 +491,22 @@ def status_view(snap: dict[str, Any], loads: list[dict[str, Any]], internet: boo
         "radios": radios,
         "pools": snap.get("pools", []),
         "conntrack": snap.get("conntrack", {}),
+        # For data use: every device the router knows by name (wired too),
+        # and each local network's address range.
+        "devices": _known_devices(snap),
+        "networks": [{"name": i["name"], "cidr": i["ipv4"][0]} for i in snap.get("interfaces", [])
+                     if i["ipv4"] and not (i["name"] or "").startswith(("wan", "loopback"))],
     }
+
+
+def _known_devices(snap: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    macs = {le["mac"] for le in snap.get("leases", []) if le["mac"]} | set(snap.get("hosts", {}))
+    macs |= {c["mac"] for r in snap.get("radios", []) for c in r["clients"]}
+    out = {}
+    for mac in macs:
+        name, ip = device_name(mac, snap)
+        out[mac] = {"name": name, "ip": ip}
+    return out
 
 
 # ---------------------------------------------------------------- the loop
@@ -473,14 +519,53 @@ def log_entries(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
              "msg": ln.get("msg", "")} for ln in lines]
 
 
-def usage_add(r, loads: list[dict[str, Any]], now: float) -> None:
-    """Bytes each Wi-Fi device moved, summed per hour (kept 35 days)."""
+def _wifi_counters(snap: dict[str, Any]) -> dict[str, dict[str, int]]:
+    """Per-device byte counters from the access points. The AP's tx is the
+    device's download, its rx the device's upload."""
+    counters: dict[str, dict[str, int]] = {}
+    for r in snap.get("radios", []):
+        for c in r["clients"]:
+            counters[c["mac"]] = {"down": c["tx_bytes"], "up": c["rx_bytes"]}
+    return counters
+
+
+def traffic_deltas(prev: dict[str, Any] | None, snap: dict[str, Any]) -> tuple[str, dict[str, dict[str, int]]]:
+    """Bytes each device moved since the last check, and where they came from
+    ("nlbw": every device; "wifi": Wi-Fi devices only).
+
+    A counter that went down was reset (a new nlbwmon period, a device that
+    reconnected), so its current value is all new.
+    """
+    if not prev:
+        return ("nlbw" if snap.get("nlbw") is not None else "wifi"), {}
+    if snap.get("nlbw") is not None and prev.get("nlbw") is not None:
+        source, now_c, old_c = "nlbw", snap["nlbw"], prev["nlbw"]
+    else:
+        source, now_c, old_c = "wifi", _wifi_counters(snap), _wifi_counters(prev)
+    deltas = {}
+    for mac, c in now_c.items():
+        old = old_c.get(mac)
+        d = {}
+        for k in ("down", "up"):
+            if old is None:
+                d[k] = 0  # first seen: its total so far is not this minute's
+            else:
+                d[k] = c[k] - old[k] if c[k] >= old[k] else c[k]
+        if d["down"] or d["up"]:
+            deltas[mac] = d
+    return source, deltas
+
+
+def usage_add(r, deltas: dict[str, dict[str, int]], now: float) -> None:
+    """Each device's download and upload, summed per hour (kept 35 days)."""
+    if not deltas:
+        return
     key = USAGE_PREFIX + time.strftime("%Y-%m-%dT%H", time.localtime(now))
     pipe = r.pipeline()
-    for load in loads:
-        for c in load["clients"]:
-            if c["bytes"]:
-                pipe.hincrby(key, c["mac"], int(c["bytes"]))
+    for mac, d in deltas.items():
+        for k in ("down", "up"):
+            if d[k]:
+                pipe.hincrby(key, f"{mac}:{k}", int(d[k]))
     pipe.expire(key, USAGE_TTL_S)
     pipe.execute()
 
@@ -524,7 +609,12 @@ class Monitor:
     def tick(self, now: float | None = None) -> dict[str, Any]:
         now = now or time.time()
         internet = internet_up()
+        was_down_since = (self.state.get("internet") or {}).get("down_since")
         notices = internet_notices(self.state, internet, now)
+        if was_down_since is not None and internet:
+            # The internet is back: keep the outage for Admin > Network.
+            self.r.lpush(OUTAGES_KEY, json.dumps({"start": was_down_since, "end": now}))
+            self.r.ltrim(OUTAGES_KEY, 0, OUTAGES_MAX - 1)
         client = self._client()
         if client is None:
             status = {"configured": False, "checked_at": now, "internet": internet}
@@ -567,10 +657,11 @@ class Monitor:
             pipe.ltrim(LOG_KEY, 0, LOG_MAX - 1)
             pipe.execute()
             self.state["last_log_id"] = max(e["id"] for e in entries)
-        if loads:
-            usage_add(self.r, loads, now)
+        usage_source, deltas = traffic_deltas(self.prev, snap)
+        usage_add(self.r, deltas, now)
 
-        status = {"configured": True, "connected": True, "error": None, **status_view(snap, loads, internet, now)}
+        status = {"configured": True, "connected": True, "error": None, "usage_source": usage_source,
+                  **status_view(snap, loads, internet, now)}
         self.prev, self.prev_at = snap, now
         self._save(status)
         return status

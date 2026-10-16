@@ -1,6 +1,6 @@
 import { useState, type FC, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Globe, RefreshCw, Router, ScrollText, Wifi } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, Globe, RefreshCw, Router, ScrollText, Wifi, WifiOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { formatBytes } from '../chat/chatModel';
@@ -11,6 +11,7 @@ import {
   signalLabel,
   type NetworkRadio,
   type NetworkStatus,
+  type NetworkUsage,
 } from '../../lib/network';
 
 /**
@@ -156,44 +157,9 @@ export const NetworkPanel: FC = () => {
 
       {radios.map((r) => <RadioCard key={r.device} radio={r} />)}
 
-      {s.configured && (
-        <section className="glass-panel p-4 sm:p-5">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-white">Wi-Fi data use</h3>
-            <div className="flex gap-1" role="group" aria-label="Period">
-              {[{ h: 24, label: 'Day' }, { h: 168, label: 'Week' }, { h: 720, label: 'Month' }].map((p) => (
-                <button
-                  key={p.h}
-                  type="button"
-                  aria-pressed={usageHours === p.h}
-                  onClick={() => setUsageHours(p.h)}
-                  className={`min-h-9 rounded-lg px-2.5 text-xs font-semibold ${usageHours === p.h ? 'bg-purple-500/20 text-purple-300' : 'text-slate-400 hover:text-white'}`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {usage?.devices.length ? (
-            <ul className="space-y-1.5">
-              {usage.devices.slice(0, 12).map((d) => (
-                <li key={d.mac}>
-                  <div className="flex items-baseline justify-between gap-2 text-xs">
-                    <span className="truncate text-slate-200">{d.name}{d.ip ? <span className="text-slate-500"> · {d.ip}</span> : null}</span>
-                    <span className="shrink-0 font-mono text-slate-300">{formatBytes(d.bytes)}</span>
-                  </div>
-                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/5">
-                    <div className="h-full rounded-full bg-purple-500" style={{ width: `${Math.max(2, (100 * d.bytes) / usage.devices[0].bytes)}%` }} />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-xs text-slate-500">Collecting; usage appears after a few minutes.</p>
-          )}
-          <p className="mt-3 text-[11px] text-slate-500">Wi-Fi devices only, counted from the router's access points.</p>
-        </section>
-      )}
+      {s.configured && <UsageSection hours={usageHours} onHours={setUsageHours} usage={usage} />}
+
+      {s.configured && <OutagesSection />}
 
       {s.configured && (
         <section className="glass-panel p-4 sm:p-5">
@@ -321,6 +287,145 @@ const RouterLoginForm: FC<{ status: NetworkStatus; onSaved: (s: NetworkStatus) =
         {save.isPending ? 'Checking…' : 'Save and check'}
       </button>
     </form>
+  );
+};
+
+const PERIODS = [{ h: 24, label: 'Day' }, { h: 168, label: 'Week' }, { h: 720, label: 'Month' }];
+
+const UsageSection: FC<{ hours: number; onHours: (h: number) => void; usage: NetworkUsage | undefined }> = ({ hours, onHours, usage }) => {
+  const total = (usage?.devices ?? []).reduce((n, d) => n + d.bytes, 0);
+  return (
+    <section className="glass-panel p-4 sm:p-5 space-y-4" data-testid="network-usage">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-white">Data use</h3>
+          {usage && (
+            <p className="text-[11px] text-slate-500">
+              {formatBytes(total) || '0 B'} in all ·{' '}
+              {usage.source === 'nlbw' ? 'every device, wired and Wi-Fi' : "Wi-Fi devices only (the router's traffic counter is not set up)"}
+            </p>
+          )}
+        </div>
+        <div className="flex gap-1" role="group" aria-label="Period">
+          {PERIODS.map((p) => (
+            <button
+              key={p.h}
+              type="button"
+              aria-pressed={hours === p.h}
+              onClick={() => onHours(p.h)}
+              className={`min-h-9 rounded-lg px-2.5 text-xs font-semibold ${hours === p.h ? 'bg-purple-500/20 text-purple-300' : 'text-slate-400 hover:text-white'}`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!usage || usage.devices.length === 0 ? (
+        <p className="text-xs text-slate-500">Collecting; data use appears after a few minutes.</p>
+      ) : (
+        <>
+          <TrafficChart series={usage.series} bucket={usage.bucket} />
+
+          {usage.networks.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {usage.networks.map((n) => (
+                <div key={n.name} className="rounded-xl border border-white/5 bg-white/5 px-3 py-2 text-xs">
+                  <p className="font-semibold text-white capitalize">{n.name}</p>
+                  <p className="text-slate-400">
+                    <ArrowDown size={11} className="inline" /> {formatBytes(n.down) || '0 B'}{' '}
+                    <ArrowUp size={11} className="inline" /> {formatBytes(n.up) || '0 B'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <ul className="space-y-2">
+            {usage.devices.slice(0, 15).map((d) => (
+              <li key={d.mac}>
+                <div className="flex items-baseline justify-between gap-2 text-xs">
+                  <span className="min-w-0 truncate text-slate-200">
+                    {d.name}
+                    <span className="text-slate-500">{[d.ip, d.network].filter(Boolean).map((x) => ` · ${x}`).join('')}</span>
+                  </span>
+                  <span className="shrink-0 font-mono text-slate-300">
+                    <ArrowDown size={11} className="inline" /> {formatBytes(d.down) || '0 B'}{' '}
+                    <ArrowUp size={11} className="inline text-slate-500" /> {formatBytes(d.up) || '0 B'}
+                  </span>
+                </div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/5">
+                  <div className="h-full rounded-full bg-purple-500" style={{ width: `${Math.max(2, (100 * d.bytes) / usage.devices[0].bytes)}%` }} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+};
+
+/** Household traffic per hour or day: download and upload stacked. */
+const TrafficChart: FC<{ series: NetworkUsage['series']; bucket: NetworkUsage['bucket'] }> = ({ series, bucket }) => {
+  const max = Math.max(1, ...series.map((p) => p.down + p.up));
+  const peak = series.reduce((best, p) => (p.down + p.up > best.down + best.up ? p : best), series[0]);
+  const label = (t: string) =>
+    bucket === 'hour'
+      ? new Date(`${t}:00`).toLocaleTimeString([], { hour: 'numeric' })
+      : new Date(`${t}T12:00`).toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return (
+    <figure data-testid="traffic-chart">
+      <div className="flex h-24 items-end gap-px" role="img" aria-label={`Traffic by ${bucket}; busiest ${peak ? label(peak.t) : ''}`}>
+        {series.map((p) => (
+          <div key={p.t} className="flex h-full flex-1 flex-col justify-end" title={`${label(p.t)}: ${formatBytes(p.down) || '0 B'} down, ${formatBytes(p.up) || '0 B'} up`}>
+            <div className="rounded-t-sm bg-purple-300/60" style={{ height: `${(100 * p.up) / max}%` }} />
+            <div className="bg-purple-500" style={{ height: `${(100 * p.down) / max}%` }} />
+          </div>
+        ))}
+      </div>
+      <figcaption className="mt-1 flex justify-between text-[10px] text-slate-500">
+        <span>{series[0] ? label(series[0].t) : ''}</span>
+        <span>
+          <span className="inline-block h-2 w-2 rounded-sm bg-purple-500" /> download{' '}
+          <span className="inline-block h-2 w-2 rounded-sm bg-purple-300/60" /> upload
+        </span>
+        <span>{series.length ? label(series[series.length - 1].t) : ''}</span>
+      </figcaption>
+    </figure>
+  );
+};
+
+const OutagesSection: FC = () => {
+  const { data } = useQuery({
+    queryKey: ['network-outages'],
+    queryFn: () => api.getInternetOutages(30),
+    refetchInterval: 60_000,
+  });
+  const outages = data?.outages ?? [];
+  const minutes = (m: number) => (m < 120 ? `${Math.max(1, m)} min` : `${(m / 60).toFixed(1)} hrs`);
+  return (
+    <section className="glass-panel p-4 sm:p-5" data-testid="network-outages">
+      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+        <WifiOff size={15} className="text-purple-300" /> Internet outages
+      </h3>
+      {outages.length === 0 ? (
+        <p className="text-xs text-slate-500">None in the last 30 days.</p>
+      ) : (
+        <ul className="divide-y divide-white/5">
+          {outages.map((o) => (
+            <li key={o.start} className="flex items-center justify-between gap-3 py-2 text-xs">
+              <span className="text-slate-200">
+                {new Date(o.start * 1000).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+              </span>
+              <span className={o.end ? 'text-slate-400' : 'font-semibold text-rose-300'}>
+                {o.end ? minutes(o.minutes) : `down now · ${minutes(o.minutes)}`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 };
 

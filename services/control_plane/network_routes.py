@@ -6,6 +6,7 @@ internal API and never returns it.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import threading
@@ -109,20 +110,80 @@ def router_log(limit: int = 200, level: str | None = None, q: str | None = None)
     return {"lines": out}
 
 
+def _network_of(ip: str | None, networks: list[dict[str, Any]]) -> str | None:
+    if not ip:
+        return None
+    for n in networks:
+        try:
+            if ipaddress.ip_address(ip) in ipaddress.ip_interface(n["cidr"]).network:
+                return n["name"]
+        except ValueError:
+            continue
+    return None
+
+
 @router.get("/usage")
 def usage(hours: int = 24):
-    """Bytes each Wi-Fi device moved over the last ``hours``, biggest first."""
+    """Download and upload per device over the last ``hours``, biggest first;
+    totals per network; and the household's traffic as a series (hourly up
+    to two days, daily beyond)."""
     hours = max(1, min(hours, 24 * 35))
     r = monitor().r
     now = time.time()
-    totals: dict[str, int] = {}
-    for h in range(hours):
-        key = rm.USAGE_PREFIX + time.strftime("%Y-%m-%dT%H", time.localtime(now - h * 3600))
-        for mac, n in r.hgetall(key).items():
-            totals[mac] = totals.get(mac, 0) + int(n)
     current = json.loads(r.get(rm.STATUS_KEY) or "{}")
-    names = {c["mac"]: (c["name"], c.get("ip")) for radio in current.get("radios", []) for c in radio["clients"]}
-    rows = [{"mac": mac, "name": names.get(mac, (mac, None))[0], "ip": names.get(mac, (mac, None))[1], "bytes": n}
-            for mac, n in totals.items()]
+    known = current.get("devices") or {}
+    networks = current.get("networks") or []
+    by_day = hours > 48
+    per_device: dict[str, dict[str, int]] = {}
+    series: dict[str, dict[str, int]] = {}
+    for h in range(hours - 1, -1, -1):
+        t = time.localtime(now - h * 3600)
+        bucket = time.strftime("%Y-%m-%d" if by_day else "%Y-%m-%dT%H", t)
+        point = series.setdefault(bucket, {"down": 0, "up": 0})
+        for field, n in r.hgetall(rm.USAGE_PREFIX + time.strftime("%Y-%m-%dT%H", t)).items():
+            # "<mac>:down" / "<mac>:up"; a MAC has colons, so split at the last.
+            # A bare MAC is an hour written before the split, counted as download.
+            mac, _, kind = field.rpartition(":")
+            if kind not in ("down", "up"):
+                mac, kind = field, "down"
+            per_device.setdefault(mac, {"down": 0, "up": 0})[kind] += int(n)
+            point[kind] += int(n)
+    rows = []
+    totals: dict[str, dict[str, int]] = {}
+    for mac, d in per_device.items():
+        info = known.get(mac) or {"name": mac, "ip": None}
+        net = _network_of(info.get("ip"), networks)
+        rows.append({"mac": mac, "name": info["name"], "ip": info.get("ip"), "network": net,
+                     "down": d["down"], "up": d["up"], "bytes": d["down"] + d["up"]})
+        if net:
+            tot = totals.setdefault(net, {"down": 0, "up": 0})
+            tot["down"] += d["down"]
+            tot["up"] += d["up"]
     rows.sort(key=lambda x: -x["bytes"])
-    return {"hours": hours, "devices": rows}
+    return {
+        "hours": hours,
+        "source": current.get("usage_source", "wifi"),
+        "devices": rows,
+        "networks": [{"name": k, **v} for k, v in sorted(totals.items(), key=lambda kv: -(kv[1]["down"] + kv[1]["up"]))],
+        "series": [{"t": k, **v} for k, v in series.items()],
+        "bucket": "day" if by_day else "hour",
+    }
+
+
+@router.get("/outages")
+def outages(days: int = 30):
+    """Internet outages in the last ``days``, newest first; an outage still
+    going on is first, with no end."""
+    days = max(1, min(days, 365))
+    r = monitor().r
+    since = time.time() - days * 86400
+    out = []
+    down_since = (json.loads(r.get(rm.STATE_KEY) or "{}").get("internet") or {}).get("down_since")
+    if down_since:
+        out.append({"start": down_since, "end": None, "minutes": round((time.time() - down_since) / 60)})
+    for raw in r.lrange(rm.OUTAGES_KEY, 0, rm.OUTAGES_MAX - 1):
+        o = json.loads(raw)
+        if o["end"] < since:
+            break
+        out.append({**o, "minutes": round((o["end"] - o["start"]) / 60)})
+    return {"days": days, "outages": out}

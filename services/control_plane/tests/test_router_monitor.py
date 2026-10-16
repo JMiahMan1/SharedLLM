@@ -257,3 +257,75 @@ def test_router_log_times_in_milliseconds_are_counted_in_seconds():
     lines = [{**ln, "time": rm._seconds(ln["time"])} for ln in lines]
     assert rm.flap_notices({}, snap(0, log=lines), now) == []
     assert rm.log_entries([{"id": 1, "time": 1_792_163_136_273, "priority": 3, "msg": "x"}])[0]["time"] == 1_792_163_136
+
+
+# ------------------------------------------------------------------- data use
+
+def test_traffic_comes_from_nlbw_when_installed_and_handles_resets():
+    prev = {"nlbw": {SERVER: {"down": 1000, "up": 100}, TV: {"down": 50, "up": 5}}}
+    snap_ = {"nlbw": {SERVER: {"down": 4000, "up": 400}, TV: {"down": 20, "up": 2},
+                      "aa:00:00:00:00:09": {"down": 999, "up": 9}}}
+    source, deltas = rm.traffic_deltas(prev, snap_)
+    assert source == "nlbw"
+    assert deltas[SERVER] == {"down": 3000, "up": 300}
+    assert deltas[TV] == {"down": 20, "up": 2}  # counter reset: all of it is new
+    assert "aa:00:00:00:00:09" not in deltas  # first seen: its total is not this minute's
+
+
+def test_without_nlbw_wifi_counters_are_used_with_download_as_the_aps_tx():
+    prev, now_ = snap(0, server_bytes=1000), snap(60, server_bytes=6000)
+    source, deltas = rm.traffic_deltas(prev, now_)
+    assert source == "wifi" and deltas[SERVER] == {"down": 5000, "up": 0}
+
+
+def test_nlbw_report_is_parsed_by_column_name():
+    class Client:
+        def call(self, obj, method, args):
+            assert args["command"] == "/usr/sbin/nlbw"
+            return {"stdout": json.dumps({"columns": ["mac", "conns", "rx_bytes", "rx_pkts", "tx_bytes", "tx_pkts"],
+                                          "data": [[SERVER.upper(), 3, 500, 5, 70, 7], ["00:00:00:00:00:00", 1, 9, 1, 9, 1]]})}
+
+    assert rm._nlbw_counters(Client()) == {SERVER: {"down": 500, "up": 70}}
+
+    class Denied:
+        def call(self, *a):
+            raise RouterError("file.exec failed (ubus status 6)")
+
+    assert rm._nlbw_counters(Denied()) is None
+
+
+def test_usage_sums_devices_networks_and_a_series(monkeypatch):
+    import time as _time
+
+    from services.control_plane import network_routes
+
+    r = FakeRedis()
+    now = 1_792_190_000.0
+    monkeypatch.setattr(network_routes.time, "time", lambda: now)
+    monkeypatch.setattr(network_routes, "monitor", lambda: type("M", (), {"r": r})())
+    r.set(rm.STATUS_KEY, json.dumps({
+        "usage_source": "nlbw",
+        "devices": {SERVER: {"name": "server", "ip": "192.168.2.205"}, TV: {"name": "LivingRoomTv", "ip": "192.168.4.20"}},
+        "networks": [{"name": "devices", "cidr": "192.168.2.1/24"}, {"name": "kids", "cidr": "192.168.4.1/24"}],
+    }))
+    hour = lambda h: rm.USAGE_PREFIX + _time.strftime("%Y-%m-%dT%H", _time.localtime(now - h * 3600))  # noqa: E731
+    r.hashes[hour(0)] = {f"{SERVER}:down": 5000, f"{SERVER}:up": 500, f"{TV}:down": 100}
+    r.hashes[hour(1)] = {SERVER: 1000}  # written before the download/upload split
+    out = network_routes.usage(hours=2)
+    assert out["source"] == "nlbw" and out["bucket"] == "hour"
+    assert out["devices"][0] == {"mac": SERVER, "name": "server", "ip": "192.168.2.205", "network": "devices",
+                                 "down": 6000, "up": 500, "bytes": 6500}
+    assert {n["name"]: n["down"] for n in out["networks"]} == {"devices": 6000, "kids": 100}
+    assert [p["down"] for p in out["series"]] == [1000, 5100]
+    assert network_routes.usage(hours=72)["bucket"] == "day"
+
+
+def test_an_outage_is_recorded_when_the_internet_returns(monkeypatch):
+    r = FakeRedis()
+    up = iter([False, False, False, True])
+    monkeypatch.setattr(rm, "internet_up", lambda: next(up))
+    m = rm.Monitor(r, lambda: None, lambda fp: None, notify=lambda n: True)
+    for t in (0, 60, 120, 900):
+        m.tick(now=t)
+    outage = json.loads(r.lrange(rm.OUTAGES_KEY, 0, 0)[0])
+    assert outage == {"start": 0, "end": 900}

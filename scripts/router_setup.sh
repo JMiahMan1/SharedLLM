@@ -8,7 +8,8 @@
 #
 # What it changes on the router, after saving a backup to ~/Desktop:
 #   - /usr/share/rpcd/acl.d/jarvis-monitor.json: an ACL that can only read
-#     status (system, interfaces, Wi-Fi, DHCP leases and config, the log);
+#     status (system, interfaces, Wi-Fi, DHCP leases and config, the log) and
+#     run nlbw, nlbwmon's read-only report of each device's traffic;
 #   - an rpcd login "jarvis" using that ACL, with a new random password;
 #   - rpcd is reloaded so the login works.
 # The password goes from here straight into Jarvis's Identity (encrypted) and
@@ -44,13 +45,14 @@ rsh 'cat > /usr/share/rpcd/acl.d/jarvis-monitor.json' <<'JSON'
         "luci-rpc": ["getDHCPLeases"],
         "iwinfo": ["devices", "info", "assoclist", "survey"],
         "log": ["read"],
-        "file": ["read"],
+        "file": ["read", "exec"],
         "uci": ["get"]
       },
       "uci": ["dhcp"],
       "file": {
         "/proc/sys/net/netfilter/nf_conntrack_count": ["read"],
-        "/proc/sys/net/netfilter/nf_conntrack_max": ["read"]
+        "/proc/sys/net/netfilter/nf_conntrack_max": ["read"],
+        "/usr/sbin/nlbw": ["exec"]
       }
     }
   }
