@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from services.common.http import get_client
+from services.common.relay import until_either_ends
 from services.config import (
     IDENTITY_SVC_URL,
     INTERNAL_SECRET,
@@ -3224,6 +3226,9 @@ async def websocket_terminal(
                 await websocket.send_text(json.dumps({"type": "stdout", "data": data.decode(errors="replace")}))
 
         input_warning_logged = False
+        # Set once the browser is gone. The socket reader checks it after every
+        # read timeout (5 s); without it, it waited for output forever.
+        session_over = asyncio.Event()
 
         # Read from socket and forward to websocket
         async def read_socket():
@@ -3240,7 +3245,7 @@ async def websocket_terminal(
             """
             loop = asyncio.get_event_loop()
             source = getattr(sock, "_sock", None) or sock
-            while True:
+            while not session_over.is_set():
                 try:
                     data = await loop.run_in_executor(None, source.recv, 4096)
                     if not data:
@@ -3290,19 +3295,25 @@ async def websocket_terminal(
                                 log.warning(f"[terminal] could not send input to the shell: {e}")
             except Exception as e:
                 log.warning(f"[terminal] websocket read error: {e}")
+            finally:
+                session_over.set()
 
-        # Run both directions
-        await asyncio.gather(read_socket(), read_websocket())
+        # Run both directions; when either ends (the browser left, or the shell
+        # exited) the other stops too, so the cleanup below always runs.
+        await until_either_ends(read_socket(), read_websocket())
 
     except Exception as e:
         log.error(f"[terminal] streaming error: {e}")
     finally:
-        # Cleanup
-        try:
-            if sock:
+        # Cleanup. Shutting the socket down closes the shell's input, so bash
+        # gets end-of-file and exits; closing alone left it running. (Docker
+        # has no "kill exec" call: the exec_kill used here never existed.)
+        if sock:
+            raw = getattr(sock, "_sock", None)
+            if raw is not None:
+                with suppress(Exception):
+                    raw.shutdown(socket.SHUT_RDWR)
+            with suppress(Exception):
                 sock.close()
-        except Exception:
-            pass
         with suppress(Exception):
-            docker_client.api.exec_kill(exec_id, signal=15)
-        await websocket.close()
+            await websocket.close()

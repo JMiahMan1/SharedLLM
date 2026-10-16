@@ -98,6 +98,7 @@ from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, S
 from services.gateway.skylight_scope import ChoreScopeError, resolve_chore_scope
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas, tool_catalog
 from services.gateway.external_agent import run_external_agent
+from services.common.relay import until_either_ends
 from services.gateway import family_safety, network_routes, notices, push_routes
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
@@ -12817,14 +12818,15 @@ async def sendspin_proxy(websocket: WebSocket):
                 with suppress(Exception):
                     await ma_ws.close()
 
-        # Run all three tasks in parallel
-        log.info("[sendspin] STEP 14: Starting asyncio.gather for proxy loops")
-        await asyncio.gather(
-            forward_client_to_ma(),
-            forward_ma_to_client(),
-            graceful_disconnect(),
-        )
-        log.info("[sendspin] STEP 15: Proxy loops complete: both directions ended")
+        # The two directions race: when either ends the other stops, then MA
+        # gets its goodbye and the browser's socket is closed.
+        log.info("[sendspin] STEP 14: Starting the proxy loops")
+        await until_either_ends(forward_client_to_ma(), forward_ma_to_client())
+        proxy_done.set()
+        await graceful_disconnect()
+        with suppress(Exception):
+            await websocket.close()
+        log.info("[sendspin] STEP 15: Proxy ended")
     except InvalidStatus as e:
         log.error(f"[sendspin] MA sendspin connection failed (status {e.response}): {e}", exc_info=True)
         with suppress(Exception):
@@ -13057,13 +13059,14 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                 finally:
                     log.info("[ma-jsonrpc] Proxy: MA→browser direction ended")
 
-            # Run both directions in parallel
-            log.info("[ma-jsonrpc] STEP 6: Starting asyncio.gather for proxy loops")
-            await asyncio.gather(
-                forward_client_to_ma(),
-                forward_ma_to_client(),
-            )
-            log.info("[ma-jsonrpc] STEP 7: Proxy loops complete: both directions ended")
+            # Run both directions; when either ends the other stops. With gather,
+            # an MA restart left the browser's socket open and silent, so the
+            # player never reconnected and the next play/pause was lost.
+            log.info("[ma-jsonrpc] STEP 6: Starting the proxy loops")
+            await until_either_ends(forward_client_to_ma(), forward_ma_to_client())
+            with suppress(Exception):
+                await websocket.close()
+            log.info("[ma-jsonrpc] STEP 7: Proxy ended")
     except InvalidStatus as e:
         log.error(f"[ma-jsonrpc] MA JSON-RPC connection failed (status {e.response}): {e}")
         with suppress(Exception):
@@ -13919,10 +13922,11 @@ async def workspaces_terminal_ws(websocket: WebSocket, workspace_id: str, token:
                 except Exception as e:
                     log.warning(f"[workspaces-terminal] Run->Client error: {e}")
 
-            await asyncio.gather(
-                forward_client_to_run(),
-                forward_run_to_client(),
-            )
+            # When either side ends the other stops, so a closed tab no longer
+            # leaves this relay (and the runtime's shell) open.
+            await until_either_ends(forward_client_to_run(), forward_run_to_client())
+            with suppress(Exception):
+                await websocket.close()
     except Exception as e:
         log.error(f"[workspaces-terminal] Failed to connect to workspace runtime: {e}", exc_info=True)
         with suppress(Exception):

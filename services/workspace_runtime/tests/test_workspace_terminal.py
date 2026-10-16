@@ -11,6 +11,7 @@ os.makedirs(_TEST_WS_ROOT, exist_ok=True)
 _TEST_DB_PATH = os.path.abspath(".tmp/workspaces/workspace_term_test.db")
 
 import contextlib
+import socket
 
 import pytest
 from fastapi.testclient import TestClient
@@ -355,8 +356,9 @@ def test_terminal_resize_failure_doesnt_crash(client):
 # ---------------------------------------------------------------------------
 
 
-def test_terminal_exec_kill_on_close(client):
-    """WebSocket close triggers exec_kill(signal=15)."""
+def test_terminal_ends_the_shell_on_close(client):
+    """Closing the browser's socket shuts the exec socket down, which ends the
+    shell. (It used to call exec_kill, which docker-py does not have.)"""
     _setup_test_workspace(client)
 
     with _mock_auth_context():
@@ -369,8 +371,10 @@ def test_terminal_exec_kill_on_close(client):
 
             time.sleep(0.2)
             ws.close()
+            time.sleep(0.3)
 
-        mock_client.api.exec_kill.assert_called_with("exec-123", signal=15)
+        raw = mock_client.api.exec_start.return_value._sock
+        raw.shutdown.assert_called_with(socket.SHUT_RDWR)
 
 
 def test_terminal_socket_close_on_error(client):
@@ -389,4 +393,4 @@ def test_terminal_socket_close_on_error(client):
             import time
             time.sleep(0.2)
 
-        mock_client.api.exec_kill.assert_called()
+        mock_client.api.exec_start.return_value._sock.shutdown.assert_called()
