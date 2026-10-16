@@ -157,6 +157,20 @@ pass that sends the PNG to the existing image-edit backend and shows the result
 (which can be sent too). A refusal is reported in place; nothing pretends to
 have worked. A blank canvas is not sent.
 
+How the improve pass runs: the PNG goes as a data URL to
+`POST /api/images/edit`, the gateway hands it to execution's
+`/execute/image_edit_inline`, and that sends it as multipart to the
+`llm_local_url` proxy's `/v1/images/edits` with the `image_edit_model` setting,
+the same model, proxy and error wording as the workspace image edit
+(`handlers/image_edit.py`). The answer is `{"status": "SUCCESS", "data":
+[{"b64_json": ...}]}` or a `FAILURE` naming the cause (no model set, proxy down,
+backend refused). The canvas is 640x416 because edit models work in 16 or 32
+pixel blocks. An edit on a CPU-offloaded model takes minutes, so the request
+waits up to 640s and the button says so. Until this was fixed the gateway
+forwarded the JSON body straight to the legacy `ALPACA_SD_URL`
+(`jeremiah-home-desktop.local:8081`), which the server cannot reach and which
+only takes multipart, so every press answered 502 in under 100ms.
+
 Deliberately dependency-free (pointer events, `toDataURL`, the `/api/images/edit`
 proxy we already had). On a family device that has to download an APK to get a
 change, a new build-time dependency is a real cost, and the component's

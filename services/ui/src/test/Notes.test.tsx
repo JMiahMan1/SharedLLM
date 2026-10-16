@@ -3,7 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Notes from '../pages/Notes';
 import { renderWithProviders } from './render';
-import { notesCheckOffCalls, notesWriteCalls, server } from './setup';
+import { notesCheckOffCalls, notesReadCalls, notesWriteCalls, server } from './setup';
 import { http, HttpResponse } from 'msw';
 
 describe('Notes (Keep-style)', () => {
@@ -131,5 +131,61 @@ describe('Notes (Keep-style)', () => {
     });
     // A failed load must not masquerade as "you have no notes"
     expect(screen.queryByText(/no notes yet/i)).not.toBeInTheDocument();
+  });
+
+  it('loads every preview with the list instead of one read per note', async () => {
+    renderWithProviders(<Notes />);
+
+    expect(await screen.findByText('Pick up groceries')).toBeInTheDocument();
+    expect(screen.getByText('Sedona in the fall, then the coast.')).toBeInTheDocument();
+    // 24 parallel reads used to fill the server's Nextcloud connections.
+    expect(notesReadCalls).toEqual([]);
+  });
+
+  it('opens a note from a fresh read, not the preview', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await user.click(await screen.findByText('Trip ideas'));
+
+    await screen.findByLabelText('Note content');
+    expect(notesReadCalls).toEqual([expect.objectContaining({ title: 'Trip ideas' })]);
+  });
+
+  it('does not open an empty editor when the note cannot be read', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post('/api/communication/notes/read', () =>
+        HttpResponse.json({ status: 'FAILURE', message: 'Note error: TimeoutError' })
+      )
+    );
+    renderWithProviders(<Notes />);
+
+    await user.click(await screen.findByText('Trip ideas'));
+
+    // Saving an empty editor would have overwritten the note.
+    await waitFor(() => expect(screen.queryByText(/opening note/i)).not.toBeInTheDocument());
+    expect(screen.queryByLabelText('Note content')).not.toBeInTheDocument();
+    expect(notesWriteCalls).toEqual([]);
+  });
+
+  it('keeps typing inside the editor without re-reading the list', async () => {
+    const user = userEvent.setup();
+    let lists = 0;
+    server.use(
+      http.post('/api/communication/notes/list', async ({ request }) => {
+        lists += 1;
+        const body = (await request.json()) as { previews?: boolean };
+        expect(body.previews).toBe(true);
+        return HttpResponse.json({ status: 'SUCCESS', message: 'ok', detail: { notes: [], directories: ['Notes'] } });
+      })
+    );
+    renderWithProviders(<Notes />);
+
+    await user.click(await screen.findByTestId('quick-capture'));
+    await user.type(screen.getByLabelText('Note content'), 'a few words');
+
+    expect((screen.getByLabelText('Note content') as HTMLTextAreaElement).value).toBe('a few words');
+    expect(lists).toBe(1);
   });
 });

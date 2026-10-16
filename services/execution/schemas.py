@@ -406,6 +406,7 @@ class NoteRequest(BaseRequest):
     storage: Literal["nextcloud", "local"] | None = "nextcloud"
     directories: list[str] | None = None # Custom Nextcloud directories to scan (recursive)
     path: str | None = None # Specific file path for read/write operations
+    previews: bool = False # list: also return the text of the newest notes
 
 
 # Timers / Alarms
@@ -1115,6 +1116,19 @@ class ImageEditRequest(BaseRequest):
     prompt: str = Field(..., description="Editing instruction, e.g. 'Make this image look old and remove the website link on the sign'")
     face_image_path: str | None = Field(None, description="Second workspace image supplying the donor face for a face swap. Required when the prompt asks to swap or transfer a face: the face from this image is copied onto image_path.")
     output_path: str | None = Field(None, description="Path to save the edited image (default: '<stem>_edited.<ext>' next to the source)")
+    size: str | None = Field(None, description="Output size as WxH (default: source image size, max 2048x2048)")
+    model: str | None = Field(None, description="Override image edit model name (default: image_edit_model setting)")
+    proxy_url: str | None = Field(None, description="Override LLM proxy URL (default: llm_local_url setting)")
+
+
+class ImageEditInlineRequest(BaseRequest):
+    """
+    Edits a picture sent in the request (a data: URL or bare base64) with the
+    same image_edit_model and LLM proxy as ImageEditRequest, and returns the
+    result as base64 instead of saving it to a workspace. Used by drawings.
+    """
+    image: str = Field(..., description="The source picture as a data: URL or bare base64 (PNG, JPEG or WebP)")
+    prompt: str = Field(..., description="Editing instruction")
     size: str | None = Field(None, description="Output size as WxH (default: source image size, max 2048x2048)")
     model: str | None = Field(None, description="Override image edit model name (default: image_edit_model setting)")
     proxy_url: str | None = Field(None, description="Override LLM proxy URL (default: llm_local_url setting)")

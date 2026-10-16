@@ -186,3 +186,184 @@ async def test_saving_what_read_returned_does_not_stack_headers(provider, monkey
 def test_note_body_keeps_a_markdown_heading_that_is_not_the_stored_header():
     assert note_handler.note_body("# Shopping\n- [ ] milk") == "# Shopping\n- [ ] milk"
     assert note_handler.note_body("# T\nCategory: Recipes\n\nStep 1") == "Step 1"
+
+
+# --- list with previews: one request instead of one read per card ----------
+
+_PROPFIND = """<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/dav/Notes/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
+  {items}
+</d:multistatus>"""
+_ITEM = (
+    "<d:response><d:href>/dav/Notes/{name}.md</d:href><d:propstat><d:prop><d:resourcetype/>"
+    "<d:getlastmodified>{modified}</d:getlastmodified><d:getcontentlength>{size}</d:getcontentlength>"
+    "</d:prop></d:propstat></d:response>"
+)
+
+
+def _listing(*notes):
+    return _PROPFIND.format(items="".join(_ITEM.format(name=n, modified=m, size=s) for n, m, s in notes))
+
+
+@pytest.fixture
+def fresh_cache():
+    note_handler._preview_cache.clear()
+    yield
+    note_handler._preview_cache.clear()
+
+
+async def test_list_with_previews_reads_each_note_once_and_reuses_it(provider, monkeypatch, fresh_cache):
+    import services.execution.http_client as http_client
+
+    listing = _listing(
+        ("Older", "Mon, 13 Oct 2026 09:00:00 GMT", 10),
+        ("Newer", "Wed, 15 Oct 2026 09:00:00 GMT", 12),
+    )
+    gets: list[str] = []
+    propfinds: list[dict] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        if method == "PROPFIND":
+            propfinds.append({"headers": headers, "data": data})
+            return {"status_code": 207, "text": listing}
+        gets.append(url)
+        return {"status_code": 200, "text": f"# t\nCategory: Notes\n\nbody of {url.rsplit('/', 1)[-1]}"}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    first = await note_handler.handle_note(request("list", previews=True))
+
+    assert first.status == "SUCCESS"
+    notes = first.detail["notes"]
+    # Newest first by date: "Wed" sorts before "Mon" as text, which put the
+    # oldest notes first and previewed the wrong ones.
+    assert [n["title"] for n in notes] == ["Newer", "Older"]
+    assert notes[0]["content"].endswith("body of Newer.md")
+    assert len(gets) == 2
+    # Only the properties the list shows are asked for.
+    assert "getlastmodified" in propfinds[0]["data"] and "quota" not in propfinds[0]["data"]
+
+    second = await note_handler.handle_note(request("list", previews=True))
+
+    assert [n["content"] for n in second.detail["notes"]] == [n["content"] for n in notes]
+    assert len(gets) == 2, "unchanged notes are not read again"
+
+
+async def test_a_save_forgets_the_cached_text_of_that_note(provider, monkeypatch, fresh_cache):
+    import services.execution.http_client as http_client
+
+    listing = _listing(("List", "Wed, 15 Oct 2026 09:00:00 GMT", 20))
+    body = {"text": "# List\nCategory: Notes\n\n- [ ] milk"}
+
+    async def fake_request(method, url, data=None, **kwargs):
+        if method == "PROPFIND":
+            return {"status_code": 207, "text": listing}
+        if method == "PUT":
+            body["text"] = data.decode()
+            return {"status_code": 204, "text": ""}
+        return {"status_code": 200, "text": body["text"]}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    await note_handler.handle_note(request("list", previews=True))
+    # Same size and second as the listing: only the explicit forget catches it.
+    await note_handler.handle_note(request("check_off", title="List", path="Notes/List.md", item="milk"))
+    after = await note_handler.handle_note(request("list", previews=True))
+
+    assert "- [x] milk" in after.detail["notes"][0]["content"]
+
+
+async def test_previews_are_read_a_few_at_a_time(provider, monkeypatch, fresh_cache):
+    import asyncio
+
+    import services.execution.http_client as http_client
+
+    listing = _listing(*[(f"n{i}", "Wed, 15 Oct 2026 09:00:00 GMT", i) for i in range(30)])
+    active = {"now": 0, "peak": 0}
+
+    async def fake_request(method, url, **kwargs):
+        if method == "PROPFIND":
+            return {"status_code": 207, "text": listing}
+        active["now"] += 1
+        active["peak"] = max(active["peak"], active["now"])
+        await asyncio.sleep(0)
+        active["now"] -= 1
+        return {"status_code": 200, "text": "x"}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("list", previews=True))
+
+    with_text = [n for n in result.detail["notes"] if "content" in n]
+    assert len(with_text) == note_handler.PREVIEW_LIMIT
+    assert active["peak"] <= note_handler.PREVIEW_CONCURRENCY
+
+
+async def test_an_unreadable_preview_does_not_fail_the_list(provider, monkeypatch, fresh_cache):
+    import services.execution.http_client as http_client
+
+    listing = _listing(("A", "Wed, 15 Oct 2026 09:00:00 GMT", 1), ("B", "Tue, 14 Oct 2026 09:00:00 GMT", 1))
+
+    async def fake_request(method, url, **kwargs):
+        if method == "PROPFIND":
+            return {"status_code": 207, "text": listing}
+        if url.endswith("A.md"):
+            raise TimeoutError()
+        return {"status_code": 200, "text": "b"}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("list", previews=True))
+
+    assert result.status == "SUCCESS"
+    a, b = result.detail["notes"]
+    assert "content" not in a and b["content"] == "b"
+
+
+async def test_a_plain_list_reads_no_note_bodies(provider, monkeypatch, fresh_cache):
+    import services.execution.http_client as http_client
+
+    methods: list[str] = []
+
+    async def fake_request(method, url, **kwargs):
+        methods.append(method)
+        return {"status_code": 207, "text": _listing(("A", "Wed, 15 Oct 2026 09:00:00 GMT", 1))}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    await note_handler.handle_note(request("list"))
+
+    assert methods == ["PROPFIND"]
+
+
+async def test_a_timeout_is_named_in_the_error(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, **kwargs):
+        raise TimeoutError()
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("read", title="x", path="Notes/x.md"))
+
+    assert result.status == "FAILURE"
+    assert result.message == "Note error: TimeoutError"
+
+
+async def test_the_folder_check_asks_for_the_folder_alone(monkeypatch):
+    from services.execution import nextcloud_client
+
+    seen = {}
+
+    async def fake_request(method, url, headers=None, data=None, **kwargs):
+        seen.update(method=method, headers=headers, data=data)
+        return {"status_code": 207, "text": ""}
+
+    monkeypatch.setattr(nextcloud_client, "request", fake_request)
+
+    await nextcloud_client.ensure_webdav_dir("https://cloud.test", "u", "p", "Notes")
+
+    # No Depth header means "list everything in it" to Nextcloud.
+    assert seen["method"] == "PROPFIND"
+    assert seen["headers"]["Depth"] == "0"

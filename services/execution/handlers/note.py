@@ -1,20 +1,42 @@
 # services/execution/handlers/note.py
+import asyncio
 import logging
 import os
 import re
 import xml.etree.ElementTree as ET
+from collections import OrderedDict
 from pathlib import Path
 
 from services.config import LOCAL_NOTES_ROOT as _LOCAL_NOTES_ROOT
 from services.execution.schemas import ExecutionResult, NoteRequest
 
-from ..http_client import request as http_request
 from ..personal_data import missing_account_message, resolve_personal_data_provider
 
 log = logging.getLogger("execution.note")
 
 DEFAULT_NOTES_DIRS = ["Notes"]
 LOCAL_NOTES_ROOT = _LOCAL_NOTES_ROOT or "/app/data/notes"
+
+#: How many of the newest notes a ``list`` with ``previews`` fills in, and how
+#: many of those reads run at once. The Notes page used to fetch each preview
+#: as its own request: 24 parallel reads filled the execution service's 10
+#: connections to Nextcloud, the rest timed out waiting for one, and Talk and
+#: the editor's own read starved behind them for minutes.
+PREVIEW_LIMIT = 24
+PREVIEW_CONCURRENCY = 4
+#: Note text already read, by file URL (which names the account), with the
+#: modified time and size it was read at. A list only re-reads notes that
+#: changed; every write through this handler forgets the note it touched.
+_PREVIEW_CACHE_MAX = 512
+_preview_cache: "OrderedDict[str, tuple[str, str]]" = OrderedDict()
+
+#: Ask only for what the list shows. Nextcloud's default property set includes
+#: quota and checksum properties that are slow to compute on a big folder.
+_LIST_PROPS = (
+    '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>'
+    "<d:resourcetype/><d:getlastmodified/><d:getcontentlength/>"
+    "</d:prop></d:propfind>"
+)
 
 #: The header create/write put on a note: "# <title>", "Category: <dir>", blank.
 _STORED_HEADER = re.compile(r"\A[ \t]*\n*# [^\n]*\nCategory: [^\n]*\n(?:[ \t]*\n)?")
@@ -36,6 +58,50 @@ def note_body(content: str | None) -> str:
 
 def _with_header(title: str | None, category: str | None, content: str | None) -> str:
     return f"# {title}\nCategory: {category}\n\n{note_body(content)}"
+
+
+def _forget_preview(url: str) -> None:
+    _preview_cache.pop(url, None)
+
+
+def _remember_preview(url: str, version: str, text: str) -> None:
+    _preview_cache[url] = (version, text)
+    _preview_cache.move_to_end(url)
+    while len(_preview_cache) > _PREVIEW_CACHE_MAX:
+        _preview_cache.popitem(last=False)
+
+
+async def _attach_previews(provider, notes: list[dict]) -> None:
+    """Put each of the newest notes' text in ``content``, a few reads at a time.
+
+    A note that cannot be read keeps no ``content``; the page shows its size
+    instead, and opening it reads it again.
+    """
+    from .. import http_client
+
+    gate = asyncio.Semaphore(PREVIEW_CONCURRENCY)
+
+    async def fill(note: dict) -> None:
+        url = provider.file_url(note["path"].lstrip("/"))
+        version = f"{note.get('modified', '')}|{note.get('size', 0)}"
+        cached = _preview_cache.get(url)
+        if cached and cached[0] == version:
+            _preview_cache.move_to_end(url)
+            note["content"] = cached[1]
+            return
+        async with gate:
+            try:
+                resp = await http_client.request(
+                    "GET", url, auth=(provider.username, provider.password), verify=False, timeout=20
+                )
+            except Exception as e:  # noqa: BLE001 - one unreadable note must not fail the list
+                log.warning("Note preview read failed for %s: %s", note["path"], str(e) or type(e).__name__)
+                return
+        if resp["status_code"] == 200:
+            note["content"] = resp["text"]
+            _remember_preview(url, version, resp["text"])
+
+    await asyncio.gather(*(fill(note) for note in notes[:PREVIEW_LIMIT]))
 
 async def handle_note(req: NoteRequest) -> ExecutionResult:
     storage_mode = getattr(req, "storage", "nextcloud")
@@ -76,6 +142,7 @@ async def _handle_local_note(req: NoteRequest) -> ExecutionResult:
                 safe_title = "".join([c for c in (req.title or "") if c.isalnum() or c in (" ", "-", "_")]).strip()
                 file_path = Path(LOCAL_NOTES_ROOT) / f"{safe_title}.md"
             existing = file_path.read_text(encoding='utf-8') if file_path.exists() else ""
+            _forget_preview(url)
             new_content = f"{existing}\n\n- [ ] {req.content}"
             file_path.write_text(new_content, encoding='utf-8')
             return ExecutionResult(status="SUCCESS", message=f"Appended to local note '{req.title}'.", service="note_local")
@@ -128,6 +195,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             file_title = provider.sanitize_filename(req.title or "untitled", "note")
             filename = f"{file_title}.md"
             url = provider.file_url(f"{req.category or 'Notes'}/{filename}")
+            _forget_preview(url)
             content = _with_header(req.title, req.category, req.content)
             resp = await http_request("PUT", url, data=content.encode('utf-8'), auth=(provider.username, provider.password), verify=False)
             if resp["status_code"] in [200, 201, 204]:
@@ -177,6 +245,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             else:
                 file_title = provider.sanitize_filename(req.title or "untitled", "note")
                 url = provider.file_url(f"{category}/{file_title}.md")
+            _forget_preview(url)
             content = _with_header(req.title, category, req.content)
             resp = await http_request(
                 "PUT", url, data=content.encode('utf-8'),
@@ -218,6 +287,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                     break
             if not changed:
                 return ExecutionResult(status="FAILURE", message=f"Checklist item '{target}' not found.", service="note_check_off")
+            _forget_preview(url)
             new_content = "\n".join(lines)
             if r_resp["text"].endswith("\n"):
                 new_content += "\n"
@@ -231,6 +301,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             else:
                 file_title = provider.sanitize_filename(req.title or "", "note")
                 url = provider.file_url(f"Notes/{file_title}.md")
+            _forget_preview(url)
             resp = await http_request("DELETE", url, auth=(provider.username, provider.password), verify=False)
             if resp["status_code"] in [200, 204]:
                 return ExecutionResult(status="SUCCESS", message=f"Note '{req.title}' deleted.", service="note_delete")
@@ -242,7 +313,10 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 await provider.ensure_directory(base_dir)
                 notes = await _walk_webdav_dir(provider, base_dir)
                 all_notes.extend(notes)
-            all_notes.sort(key=lambda x: x.get("modified", ""), reverse=True)
+            # Newest first by time, not by the text of an HTTP date.
+            all_notes.sort(key=_modified_ts, reverse=True)
+            if req.previews:
+                await _attach_previews(provider, all_notes)
             return ExecutionResult(
                 status="SUCCESS",
                 message="Notes listed",
@@ -276,20 +350,35 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=f"Action {action} failed or not implemented.", service="note")
 
     except Exception as e:
-        log.error(f"Note error: {e}")
-        return ExecutionResult(status="FAILURE", message=f"Note error: {e!s}", service="note")
+        # A timeout's text is empty; name the error so the log and the
+        # person both see what happened.
+        reason = str(e) or type(e).__name__
+        log.error(f"Note error ({action}): {reason}")
+        return ExecutionResult(status="FAILURE", message=f"Note error: {reason}", service="note")
+
+
+def _modified_ts(note: dict) -> float:
+    from email.utils import parsedate_to_datetime
+
+    try:
+        return parsedate_to_datetime(note.get("modified") or "").timestamp()
+    except (TypeError, ValueError):
+        return 0.0
 
 async def _walk_webdav_dir(provider, base_dir: str, current_path: str = "") -> list[dict]:
     """Recursively walk a WebDAV directory and return all .md files."""
+    from .. import http_client
+
     dir_path = f"{base_dir}/{current_path}".rstrip("/")
     dir_url = provider.file_url(dir_path)
 
     try:
-        resp = await http_request(
+        resp = await http_client.request(
             "PROPFIND",
             dir_url,
             auth=(provider.username, provider.password),
-            headers={"Depth": "1"},
+            headers={"Depth": "1", "Content-Type": "application/xml; charset=utf-8"},
+            data=_LIST_PROPS,
             verify=False,
             timeout=30,
         )

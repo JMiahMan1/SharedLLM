@@ -86,6 +86,23 @@ describe('DrawCanvas', () => {
     expect(screen.queryByTestId('draw-result')).toBeNull();
   });
 
+  it("shows the server's reason when the request itself fails", async () => {
+    render(<DrawCanvas />);
+    draw();
+
+    editImage.mockRejectedValue(
+      Object.assign(new Error('Request failed with status code 502'), {
+        response: { data: { status: 'ERROR', message: 'Image edit failed: the image backend did not answer' } },
+      }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /make it way better/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toContain('the image backend did not answer'),
+    );
+  });
+
   it('will not send a blank canvas to a chat', () => {
     render(<DrawCanvas />);
     fireEvent.click(screen.getByRole('button', { name: /send to chat/i }));

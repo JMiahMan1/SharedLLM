@@ -109,3 +109,48 @@ def test_the_execution_services_rejection_is_surfaced_verbatim(client, monkeypat
 
     assert resp.status_code == 200
     assert resp.json()["message"] == message
+
+
+# --- /api/images/edit: a picture carried in the request (drawings) ---------
+
+_PNG_URL = "data:image/png;base64,iVBORw0KGgo="
+
+
+def test_a_drawing_edit_runs_through_the_execution_service(client, monkeypatch):
+    """The drawing pass goes to /execute/image_edit_inline, which resolves the
+    configured model and llm_local_url proxy. It used to go straight to the
+    legacy ALPACA_SD_URL with a JSON body and came back 502 every time."""
+    captured = _patch_exec(
+        monkeypatch,
+        200,
+        {"status": "SUCCESS", "detail": {"b64_json": "AAAA", "model": "qwen-image-edit"}},
+        {},
+    )
+
+    resp = client.post("/api/images/edit", json={"prompt": "Make this drawing much better", "image": _PNG_URL})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "SUCCESS", "data": [{"b64_json": "AAAA"}], "model": "qwen-image-edit"}
+    assert captured["url"].endswith("/execute/image_edit_inline")
+    assert captured["json"]["image"] == _PNG_URL
+    assert captured["json"]["prompt"] == "Make this drawing much better"
+    assert "X-Internal-Secret" in captured["headers"]
+
+
+def test_a_drawing_edit_failure_keeps_the_reason(client, monkeypatch):
+    message = "Image edit failed: no image_edit_model configured."
+    _patch_exec(monkeypatch, 200, {"status": "FAILURE", "message": message}, {})
+
+    resp = client.post("/api/images/edit", json={"prompt": "better", "image": _PNG_URL})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "FAILURE", "message": message}
+
+
+def test_a_drawing_edit_needs_a_picture_and_a_prompt(client, monkeypatch):
+    captured = _patch_exec(monkeypatch, 200, {"status": "SUCCESS"}, {})
+
+    resp = client.post("/api/images/edit", json={"prompt": "better"})
+
+    assert resp.status_code == 400
+    assert "url" not in captured

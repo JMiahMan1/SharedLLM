@@ -32,7 +32,7 @@ old second editor (whose Save called `append`) is gone.
 | `read` | return the file body in `message` |
 | `delete` | remove the file |
 | `check_off` | toggle one checklist item (`- [ ] x` ↔ `- [x] x`) by text |
-| `list` | list markdown files under the configured directories |
+| `list` | list markdown files under the configured directories, newest first; with `previews: true` the newest 24 also carry their text in `content` |
 | `sync_rag` | read every note (execution); the gateway then indexes them (below) |
 
 The stored header is the server's: `create`/`write` strip any leading
@@ -58,7 +58,7 @@ that, every save of an opened note stacked another header on top.
   caller, replacing each note's old passages by path. Only counts come back.
   Deleted notes stay indexed until the next storage re-index.
 - **Cards**: markdown checklists are parsed and rendered as real checkboxes;
-  toggling one calls `check_off` and re-reads the note. Non-checklist notes
+  toggling one calls `check_off` and reloads the list. Non-checklist notes
   show a text preview with the stored `# title` / `Category:` header stripped.
 - **Search**: filters on title and (for the first 24 notes) body text.
 - **Pin and colour**: view preferences, stored per device in
@@ -66,19 +66,44 @@ that, every save of an opened note stacked another header on top.
   *content* stays in Nextcloud. On a touch screen the pin is always shown and
   colour is set in the editor; hover reveals both on a desktop. Delete asks
   first.
-- **Previews**: only the first 24 notes are fetched for previews so a large
-  notebook does not turn one page load into hundreds of WebDAV reads.
+- **Previews**: the page asks `list` for `previews: true` and gets the newest
+  24 notes' text in the same reply. Execution reads them four at a time and
+  keeps each note's text keyed by its file URL, modified time and size, so a
+  later list only reads notes that changed; `create`, `write`, `append`,
+  `check_off` and `delete` forget the note they touch. The page used to send
+  one `read` per card: 24 reads at once filled execution's 10 pooled
+  connections to Nextcloud, the rest failed with "Connection timeout" after
+  10s, and Talk and the editor's own read queued behind them for minutes.
+- **Opening a note**: the sheet opens at once with "Opening note…" and fills
+  from a fresh `read`, never from the preview, so a save cannot write back a
+  copy older than the file. If the read fails the sheet closes with the
+  reason; it used to open empty, and saving that emptied the note.
+- **Typing**: the editor keeps its own draft, so a keystroke re-renders the
+  sheet only. It used to re-render the page and every card, and each card
+  and sort comparison parsed the stored pin/colour map from localStorage.
+- **WebDAV cost**: the folder-exists check is a `Depth: 0` PROPFIND for one
+  property (with no Depth header Nextcloud lists the whole folder), and the
+  list asks only for type, modified time and size instead of Nextcloud's
+  default property set. The list request may take up to 60s on the client.
 - **Failures**: a failed list shows the backend message (e.g. "Nextcloud
   credentials missing") instead of an empty-looking notebook.
 
 ## Tests
 
-- `services/ui/src/test/Notes.test.tsx`: list/preview/checklist, save uses
+- `services/ui/src/test/Notes.test.tsx`: list/preview/checklist, previews
+  arrive with the list (no per-card reads), opening reads the note fresh, a
+  failed read opens no editor, typing does not reload the list, save uses
   `write`, opens without the header, rename moves the file, pin persistence,
   search, failure surfacing
 - `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
-- `services/gateway/tests/test_notes_rag_sync.py`: indexing writes to RAG
+- `services/gateway/tests/test_notes_rag_sync.py`: indexing writes to RAG;
+  the list route passes `previews` through
 - `services/ui/src/test/notesMeta.test.ts`: checklist parsing, previews,
   sorting, pin/colour storage
 - `services/execution/tests/test_note_actions.py`: `write` replaces (single
-  PUT) without stacking headers, `check_off` toggles and reports missing items
+  PUT) without stacking headers, `check_off` toggles and reports missing items,
+  previews are read once and reused, a save forgets the cached text, reads run
+  at most four at a time, an unreadable note does not fail the list, a
+  timeout is named in the error, the folder check is `Depth: 0`
+- `services/execution/tests/test_http_client_session_retire.py`: a pooled
+  session that ages out keeps serving the requests already on it

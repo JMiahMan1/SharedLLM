@@ -175,6 +175,147 @@ def _default_output_path(image_path: str) -> str:
     return f"{stem}_edited{ext or '.png'}"
 
 
+async def _resolve_model_and_proxy(
+    model_override: str | None, proxy_override: str | None
+) -> tuple[str, str, str | None]:
+    """The edit model and LLM proxy URL: the request's override, else Settings.
+
+    No silent defaults. The third value names the missing setting and how to
+    set it, and is None when both are known.
+    """
+    model = (model_override or "").strip() or (await get_image_edit_model() or "")
+    if not model:
+        return "", "", (
+            "no image_edit_model configured. Set image_edit_model in Settings > "
+            "AI & Compute (e.g. qwen-image-edit-rapid-aio:q4_k)."
+        )
+    proxy_url = (proxy_override or "").strip() or (await vision_ocr.get_ollama_url() or "")
+    if not proxy_url:
+        return model, "", "no LLM proxy URL configured. Set llm_local_url in Settings > AI & Compute."
+    return model, proxy_url.rstrip("/"), None
+
+
+async def _request_edit(
+    proxy_url: str,
+    model: str,
+    prompt: str,
+    size: str,
+    image: tuple[bytes, str, str],
+    *,
+    donor: tuple[bytes, str, str] | None = None,
+    donor_field: str = _DONOR_FIELD,
+) -> tuple[int, str | None, str]:
+    """POST one edit to the proxy's /v1/images/edits as multipart.
+
+    ``image`` and ``donor`` are (bytes, filename, content type). Returns the
+    HTTP status, the edited image as base64 (None on failure) and the
+    backend's error text for _explain_backend_failure.
+    """
+    import aiohttp
+
+    form = aiohttp.FormData()
+    form.add_field("model", model)
+    form.add_field("prompt", prompt)
+    form.add_field("size", size)
+    form.add_field("response_format", "b64_json")
+    form.add_field("image", image[0], filename=image[1], content_type=image[2])
+    if donor is not None:
+        # Base first, donor second, under the configured donor field name.
+        form.add_field(donor_field, donor[0], filename=donor[1], content_type=donor[2])
+
+    async with aiohttp.ClientSession() as client:
+        resp = await client.post(
+            f"{proxy_url}/v1/images/edits",
+            data=form,
+            timeout=aiohttp.ClientTimeout(total=590.0),
+        )
+        if resp.status != 200:
+            return resp.status, None, (await resp.text())[:500]
+        data = await resp.json()
+
+    items = (data or {}).get("data") or []
+    b64 = items[0].get("b64_json") if items else None
+    return 200, b64 or None, "" if b64 else str(data)[:300]
+
+
+#: The largest picture accepted inline. A phone drawing is a few hundred KB;
+#: anything bigger belongs in a workspace and the workspace edit path.
+_MAX_INLINE_BYTES = 12 * 1024 * 1024
+_DATA_URL = re.compile(r"\Adata:(image/(?:png|jpeg|webp));base64,", re.IGNORECASE)
+
+
+def _decode_inline_image(value: str | None) -> tuple[bytes, str]:
+    """A data URL (or bare base64) to (bytes, content type). Raises ValueError."""
+    import base64
+    import binascii
+
+    text = (value or "").strip()
+    if not text:
+        raise ValueError("an image is required.")
+    match = _DATA_URL.match(text)
+    content_type = match.group(1).lower() if match else "image/png"
+    try:
+        data = base64.b64decode(text[match.end():] if match else text, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("the image is not valid base64 or a data: URL.") from None
+    if not data:
+        raise ValueError("the image is empty.")
+    if len(data) > _MAX_INLINE_BYTES:
+        raise ValueError(f"the image is larger than {_MAX_INLINE_BYTES // (1024 * 1024)} MB.")
+    return data, content_type
+
+
+async def handle_image_edit_inline(req) -> ExecutionResult:
+    """Edit a picture sent in the request and return the result in the reply.
+
+    Backs the gateway's /api/images/edit (Family > Create's "Make it way
+    better"). Same model, proxy and error wording as the workspace edit; the
+    only difference is that nothing is read from or saved to a workspace.
+    """
+    if looks_like_face_swap(req.prompt):
+        return ExecutionResult(status="FAILURE", message=f"Image edit failed: {_NEEDS_DONOR}", service="image_edit")
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        image_bytes, content_type = _decode_inline_image(req.image)
+        with Image.open(BytesIO(image_bytes)) as img:
+            source_size = img.size
+        size = _parse_size(req.size, source_size)
+    except Exception as e:  # noqa: BLE001 - bad input is reported to the caller
+        return ExecutionResult(status="FAILURE", message=f"Image edit failed: {e}", service="image_edit")
+
+    model, proxy_url, missing = await _resolve_model_and_proxy(req.model, req.proxy_url)
+    if missing:
+        return ExecutionResult(status="FAILURE", message=f"Image edit failed: {missing}", service="image_edit")
+
+    extension = content_type.split("/")[-1].replace("jpeg", "jpg")
+    try:
+        status, b64, body = await _request_edit(
+            proxy_url, model, req.prompt, size, (image_bytes, f"image.{extension}", content_type)
+        )
+    except Exception as e:  # noqa: BLE001 - an unreachable proxy is reported, not raised
+        log.error(f"Inline image edit failed: {e!r}")
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Image edit failed: the image backend at {proxy_url} did not answer ({str(e) or type(e).__name__}).",
+            service="image_edit",
+        )
+    if not b64:
+        return ExecutionResult(
+            status="FAILURE",
+            message=_explain_backend_failure(status, body, False, proxy_url),
+            service="image_edit",
+        )
+    return ExecutionResult(
+        status="SUCCESS",
+        message="Image edited",
+        service="image_edit",
+        detail={"b64_json": b64, "model": model, "size": size},
+    )
+
+
 async def handle_image_edit(req) -> ExecutionResult:
     """Edit an image inside the mission workspace via the LLM proxy."""
     try:
@@ -250,26 +391,11 @@ async def handle_image_edit(req) -> ExecutionResult:
     # Only pay for the settings round-trip when a donor is actually being sent.
     donor_field = await get_face_donor_field() if face_path_arg else _DONOR_FIELD
 
-    # Resolve model: explicit override, else the user-configured setting. No
-    # silent defaults - if the setting is missing, fail loudly with a clear fix.
-    model = (req.model or "").strip()
-    if not model:
-        model = await get_image_edit_model()
-    if not model:
+    model, proxy_url, missing = await _resolve_model_and_proxy(req.model, req.proxy_url)
+    if missing:
         return ExecutionResult(
             status="FAILURE",
-            message="Image edit failed: no image_edit_model configured. Set image_edit_model in Settings > AI & Compute (e.g. qwen-image-edit-rapid-aio:q4_k).",
-            service="image_edit",
-            detail={"image_path": req.image_path},
-        )
-
-    proxy_url = (req.proxy_url or "").strip().rstrip("/")
-    if not proxy_url:
-        proxy_url = await vision_ocr.get_ollama_url()
-    if not proxy_url:
-        return ExecutionResult(
-            status="FAILURE",
-            message="Image edit failed: no LLM proxy URL configured. Set llm_local_url in Settings > AI & Compute.",
+            message=f"Image edit failed: {missing}",
             service="image_edit",
             detail={"image_path": req.image_path},
         )
@@ -305,43 +431,22 @@ async def handle_image_edit(req) -> ExecutionResult:
                 f"background, pose, clothing and framing. Then: {req.prompt}"
             )
 
-        form = aiohttp.FormData()
-        form.add_field("model", model)
-        form.add_field("prompt", prompt)
-        form.add_field("size", size)
-        form.add_field("response_format", "b64_json")
-        form.add_field("image", image_bytes, filename=os.path.basename(safe_path), content_type=content_type)
+        donor = None
         if donor_bytes is not None:
-            # Base first, donor second, under the configured donor field name.
-            form.add_field(
-                donor_field,
-                donor_bytes,
-                filename=os.path.basename(face_safe_path),
-                content_type=donor_type,
-            )
-
-        async with aiohttp.ClientSession() as client:
-            resp = await client.post(
-                f"{proxy_url}/v1/images/edits",
-                data=form,
-                timeout=aiohttp.ClientTimeout(total=590.0),
-            )
-            if resp.status != 200:
-                body = (await resp.text())[:500]
-                return ExecutionResult(
-                    status="FAILURE",
-                    message=_explain_backend_failure(resp.status, body, bool(face_path_arg), proxy_url),
-                    service="image_edit",
-                    detail={"image_path": req.image_path, "face_image_path": face_path_arg or None},
-                )
-            data = await resp.json()
-
-        items = (data or {}).get("data") or []
-        b64 = items[0].get("b64_json") if items else None
+            donor = (donor_bytes, os.path.basename(face_safe_path), donor_type)
+        status, b64, body = await _request_edit(
+            proxy_url,
+            model,
+            prompt,
+            size,
+            (image_bytes, os.path.basename(safe_path), content_type),
+            donor=donor,
+            donor_field=donor_field,
+        )
         if not b64:
             return ExecutionResult(
                 status="FAILURE",
-                message=_explain_backend_failure(200, str(data)[:300], bool(face_path_arg), proxy_url),
+                message=_explain_backend_failure(status, body, bool(face_path_arg), proxy_url),
                 service="image_edit",
                 detail={"image_path": req.image_path, "face_image_path": face_path_arg or None},
             )
