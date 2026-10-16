@@ -2664,33 +2664,89 @@ def normalize_audit_log(audit_log: list[dict]) -> list[dict]:
     return normalized
 
 
-async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None, history_log: str | None = None) -> Any:
-    full_audit_log = []
+#: Streamed tokens are written in batches of about this much text or time.
+REASONING_FLUSH_CHARS = 500
+REASONING_FLUSH_SECONDS = 0.25
+#: The newest events a mission's replayable history keeps.
+MISSION_HISTORY_MAX = 5000
 
-    async def stream_event(event_type: str, data: Any):
-        """Append one event to the mission's audit log and live stream.
 
-        ``data`` is coerced to text because the providers stream content parts
-        (``{"type": "content", "text": ...}``) through the same callback that
-        everything else uses for strings. Written through uncoerced, that object
-        reached the reader and crashed the whole live trace with React error #31
-        ("objects are not valid as a React child") the moment a mission streamed
-        its first token.
-        """
-        if not mission_id:
+def mission_time_limit(settings: dict | None) -> float:
+    """A mission's wall-clock cap in seconds (``raven_max_total_seconds``,
+    Config DB); 0 or less means no cap (infinity). The loop checks it between
+    steps and the worker enforces it from outside (background_worker)."""
+    try:
+        limit = int(str((settings or {}).get("raven_max_total_seconds", RAVEN_MAX_TOTAL_SECONDS)).strip())
+    except (ValueError, TypeError):
+        limit = RAVEN_MAX_TOTAL_SECONDS
+    return float("inf") if limit <= 0 else limit
+
+
+class MissionEventStream:
+    """A mission's audit log and live stream (Redis history + pub/sub).
+
+    ``data`` is coerced to text because the providers stream content parts
+    (``{"type": "content", "text": ...}``) through the same callback that
+    everything else uses for strings. Written through uncoerced, that object
+    reached the reader and crashed the whole live trace with React error #31
+    ("objects are not valid as a React child") the moment a mission streamed
+    its first token.
+
+    Streamed tokens ("reasoning") are batched: one history entry, publish and
+    render per token made a long mission's log tens of thousands of entries.
+    Any other event flushes the batch first, so order is kept.
+    """
+
+    def __init__(self, mission_id: int | None, audit_log: list[dict]):
+        self.mission_id = mission_id
+        self.audit_log = audit_log
+        self._buf: list[str] = []
+        self._len = 0
+        self._since = time.monotonic()
+
+    async def event(self, event_type: str, data: Any) -> None:
+        if not self.mission_id:
             return
-        msg_obj = {"type": event_type, "data": event_text(data), "timestamp": time.time()}
-        full_audit_log.append(msg_obj)
+        if event_type == "reasoning":
+            self._buf.append(event_text(data))
+            self._len += len(self._buf[-1])
+            if self._len < REASONING_FLUSH_CHARS and time.monotonic() - self._since < REASONING_FLUSH_SECONDS:
+                return
+            await self.flush()
+            return
+        await self.flush()
+        await self._write({"type": event_type, "data": event_text(data), "timestamp": time.time()})
+
+    async def flush(self) -> None:
+        if not self._buf:
+            return
+        text = "".join(self._buf)
+        self._buf.clear()
+        self._len = 0
+        self._since = time.monotonic()
+        await self._write({"type": "reasoning", "data": text, "timestamp": time.time()})
+
+    async def _write(self, msg_obj: dict) -> None:
+        self.audit_log.append(msg_obj)
         global _stream_redis
         if not _stream_redis:
             _stream_redis = redis.from_url(REDIS_URL, decode_responses=True)
         try:
             msg_str = json.dumps(msg_obj)
-            await _stream_redis.rpush(f"raven:mission:history:{mission_id}", msg_str)  # type: ignore[reportGeneralTypeIssues]
-            await _stream_redis.expire(f"raven:mission:history:{mission_id}", 86400)
-            await _stream_redis.publish(f"raven:mission:stream:{mission_id}", msg_str)
+            history_key = f"raven:mission:history:{self.mission_id}"
+            await _stream_redis.rpush(history_key, msg_str)  # type: ignore[reportGeneralTypeIssues]
+            await _stream_redis.ltrim(history_key, -MISSION_HISTORY_MAX, -1)
+            await _stream_redis.expire(history_key, 86400)
+            await _stream_redis.publish(f"raven:mission:stream:{self.mission_id}", msg_str)
         except Exception as e:
             log.warning(f"Failed to stream event: {e}")
+
+
+async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None, history_log: str | None = None) -> Any:
+    full_audit_log: list[dict] = []
+    events = MissionEventStream(mission_id, full_audit_log)
+    stream_event = events.event
+    _flush_reasoning = events.flush
 
     async def _record_loop_probe(iter_num: int, goal: str, outcome: str, directive: str) -> None:
         """Persist a structured, pullable record of a detected no-progress loop
@@ -2966,12 +3022,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # read from the Config DB (GlobalSetting `raven_max_total_seconds`), NOT from
     # .env/env; the runtime only reads .env during seeding. Falls back to the
     # module default if the setting is absent. Mirrors `raven_max_iterations` above.
-    try:
-        raven_max_total = int(str((settings or {}).get("raven_max_total_seconds", RAVEN_MAX_TOTAL_SECONDS)).strip())
-    except (ValueError, TypeError):
-        raven_max_total = RAVEN_MAX_TOTAL_SECONDS
-    if raven_max_total <= 0:
-        raven_max_total = float("inf")  # 0 = no lifetime cap
+    raven_max_total = mission_time_limit(settings)
 
     async def _compress_context() -> tuple[str, str]:
         """Compress action_log into a summary + recent entries to prevent context bloat.
@@ -3439,6 +3490,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # handlers above), which left this heartbeat running for good.
             heartbeat_stop.set()
             hb_task.cancel()
+            # The reply's last streamed tokens, if no other event followed them.
+            with contextlib.suppress(Exception):
+                await _flush_reasoning()
 
         if skip_inference:
             # tool_data was already dequeued from pending_batch at iteration start;

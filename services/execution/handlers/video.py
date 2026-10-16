@@ -221,6 +221,29 @@ async def _ensure_youtube_cookies() -> str | None:
         return None
 
 
+#: Time limits for yt-dlp: the metadata lookup, reaching the progressive
+#: start threshold, and a whole download. Without them a stalled yt-dlp hung
+#: the cast (and its process) for good.
+VIDEO_INFO_TIMEOUT_S = 60
+VIDEO_PROGRESSIVE_TIMEOUT_S = 180
+VIDEO_DOWNLOAD_TIMEOUT_S = 1800
+#: Downloads finishing after playback started; kept so they are not collected.
+_BACKGROUND_DOWNLOADS: set[asyncio.Task] = set()
+
+
+async def _communicate(proc, timeout: float) -> tuple[bytes, bytes]:
+    """``proc.communicate()`` with a limit; on expiry the process is killed and
+    its stderr says so, so callers report a failure instead of waiting."""
+    try:
+        return await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+        return b"", f"yt-dlp did not finish within {timeout:.0f} s".encode()
+
+
 async def download_video(video_url: str) -> tuple[str | None, str | None]:
     """
     Download video as MP4 using yt-dlp CLI.
@@ -241,7 +264,7 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _stdout, stderr = await proc.communicate()
+        _stdout, stderr = await _communicate(proc, VIDEO_DOWNLOAD_TIMEOUT_S)
 
         if proc.returncode != 0:
             log.error(f"[video] yt-dlp download failed: {stderr.decode()[:300]}")
@@ -265,7 +288,7 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            info_out, _ = await info_proc.communicate()
+            info_out, _ = await _communicate(info_proc, VIDEO_INFO_TIMEOUT_S)
             if info_out:
                 info = json.loads(info_out.decode())
                 title = info.get("title", video_url)
@@ -282,14 +305,6 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
 
 
 PROGRESSIVE_THRESHOLD = 5 * 1024 * 1024  # 5 MB
-
-
-#: How long the progressive download may take to reach its threshold, and
-#: the metadata lookup before it. Without them a stalled yt-dlp hung the cast.
-VIDEO_PROGRESSIVE_TIMEOUT_S = 180
-VIDEO_INFO_TIMEOUT_S = 60
-#: Downloads finishing after playback started; kept so they are not collected.
-_BACKGROUND_DOWNLOADS: set[asyncio.Task] = set()
 
 
 async def download_video_progressive(video_url: str, threshold: int = PROGRESSIVE_THRESHOLD) -> tuple[str | None, str | None]:
@@ -314,11 +329,7 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        try:
-            info_out, _ = await asyncio.wait_for(info_proc.communicate(), timeout=VIDEO_INFO_TIMEOUT_S)
-        except TimeoutError:
-            info_proc.kill()
-            info_out = b""
+        info_out, _ = await _communicate(info_proc, VIDEO_INFO_TIMEOUT_S)
         if info_out:
             try:
                 info = json.loads(info_out.decode())
@@ -384,7 +395,7 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
 async def _wait_for_download(proc, tmp_path: str, media_id: str):
     """Background task to wait for download completion and log result."""
     try:
-        _stdout, stderr = await proc.communicate()
+        _stdout, stderr = await _communicate(proc, VIDEO_DOWNLOAD_TIMEOUT_S)
         if proc.returncode != 0:
             log.error(f"[video] Background download failed for {media_id}: {stderr.decode()[:200]}")
         else:
@@ -415,7 +426,7 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        info_out, _ = await info_proc.communicate()
+        info_out, _ = await _communicate(info_proc, VIDEO_INFO_TIMEOUT_S)
         if info_out:
             try:
                 info = json.loads(info_out.decode())
@@ -437,7 +448,7 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _stdout, stderr = await proc.communicate()
+        _stdout, stderr = await _communicate(proc, VIDEO_DOWNLOAD_TIMEOUT_S)
 
         if proc.returncode != 0:
             log.error(f"[video] yt-dlp download failed: {stderr.decode()[:300]}")

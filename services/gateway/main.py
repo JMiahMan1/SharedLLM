@@ -3365,8 +3365,8 @@ async def stream_chat_job(job_id: str):
         r = redis.from_url(REDIS_URL, decode_responses=True)
         status_ch = f"raven:job:status:{job_id}"
         pubsub = r.pubsub()
-        await pubsub.subscribe(status_ch)
         try:
+            await pubsub.subscribe(status_ch)
             while True:
                 job = await job_queue.get_job_status(job_id)
                 if not job:
@@ -7616,6 +7616,27 @@ def _ensure_mission_owner(creds: dict, mission_data: dict) -> None:
     if not is_admin and mission_user_id is not None and mission_user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden: You are not the owner of this mission.")
 
+
+async def _signal_mission(mission_id, kind: str, value: str, *, clear: bool = False) -> None:
+    """Set (or clear) a mission's ``kill``/``pause`` flag for an hour and publish
+    ``value`` on the same channel. The client is closed even when a call fails;
+    each route used to close it only after everything succeeded."""
+    import redis.asyncio as redis
+
+    from services.gateway.config import REDIS_URL
+
+    key = f"raven:mission:{kind}:{mission_id}"
+    r = redis.from_url(REDIS_URL, decode_responses=True)
+    try:
+        if clear:
+            await r.delete(key)
+        else:
+            await r.set(key, value, ex=3600)
+        await r.publish(key, value)
+    finally:
+        await r.close()
+
+
 @app.post("/api/raven/missions/{id_or_slug}/kill")
 async def kill_mission(request: Request, id_or_slug: str):
     creds = await _resolve_identity_from_request(request)
@@ -7660,12 +7681,8 @@ async def kill_mission(request: Request, id_or_slug: str):
         # 2. Publish kill signal to Redis
         import redis.asyncio as redis
 
-        from services.gateway.config import REDIS_URL
-        r = redis.from_url(REDIS_URL, decode_responses=True)
         log.warning(f"[AUDIT] Setting kill flag raven:mission:kill:{real_id}=KILL (ttl=3600) for mission '{id_or_slug}'")
-        await r.set(f"raven:mission:kill:{real_id}", "KILL", ex=3600)
-        await r.publish(f"raven:mission:kill:{real_id}", "KILL")
-        await r.close()
+        await _signal_mission(real_id, "kill", "KILL")
 
         # Also remove any pending job from the Redis queue so a queued mission
         # can never be picked up again after a kill.
@@ -7716,12 +7733,8 @@ async def cancel_mission(request: Request, id_or_slug: str):
         # 2. Publish kill signal for safety (in case it is currently running).
         import redis.asyncio as redis
 
-        from services.gateway.config import REDIS_URL
-        r = redis.from_url(REDIS_URL, decode_responses=True)
         log.warning(f"[AUDIT] Setting kill flag raven:mission:kill:{real_id}=KILL (ttl=3600) for mission '{id_or_slug}'")
-        await r.set(f"raven:mission:kill:{real_id}", "KILL", ex=3600)
-        await r.publish(f"raven:mission:kill:{real_id}", "KILL")
-        await r.close()
+        await _signal_mission(real_id, "kill", "KILL")
 
         # 3. Mark the mission cancelled in the database.
         resp = await client.patch(
@@ -7750,11 +7763,7 @@ async def pause_mission(request: Request, id_or_slug: str):
 
         import redis.asyncio as redis
 
-        from services.gateway.config import REDIS_URL
-        r = redis.from_url(REDIS_URL, decode_responses=True)
-        await r.set(f"raven:mission:pause:{real_id}", "PAUSED", ex=3600)
-        await r.publish(f"raven:mission:pause:{real_id}", "PAUSED")
-        await r.close()
+        await _signal_mission(real_id, "pause", "PAUSED")
 
         return {"status": "SUCCESS", "message": f"Mission {real_id} paused. LLM access will be deferred until resumed."}
 
@@ -7774,11 +7783,7 @@ async def resume_mission(request: Request, id_or_slug: str):
 
         import redis.asyncio as redis
 
-        from services.gateway.config import REDIS_URL
-        r = redis.from_url(REDIS_URL, decode_responses=True)
-        await r.delete(f"raven:mission:pause:{real_id}")
-        await r.publish(f"raven:mission:pause:{real_id}", "RESUMED")
-        await r.close()
+        await _signal_mission(real_id, "pause", "RESUMED", clear=True)
 
         return {"status": "SUCCESS", "message": f"Mission {real_id} resumed. LLM access restored."}
 
@@ -7962,9 +7967,10 @@ async def get_mission_logs(id_or_slug: str, request: Request):
 
     from services.gateway.config import REDIS_URL
     r = redis.from_url(REDIS_URL, decode_responses=True)
-    history_key = f"raven:mission:history:{real_id}"
-    existing_logs = await r.lrange(history_key, 0, -1)  # type: ignore[misc]
-    await r.close()
+    try:
+        existing_logs = await r.lrange(f"raven:mission:history:{real_id}", 0, -1)  # type: ignore[misc]
+    finally:
+        await r.close()
 
     if not existing_logs and mission_data.get("output_log"):
         try:
@@ -8022,54 +8028,46 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
         import redis.asyncio as redis
 
         from services.gateway.config import REDIS_URL
+        # try/finally: the client is closed even when reading history or
+        # subscribing fails, which used to leak it.
         r = redis.from_url(REDIS_URL, decode_responses=True)
+        try:
+            # 1. Send all existing historical messages first
+            history_key = f"raven:mission:history:{real_id}"
+            existing_logs = await r.lrange(history_key, 0, -1)  # type: ignore[misc]
+            for msg in existing_logs:
+                with suppress(Exception):
+                    await websocket.send_text(msg)
 
-        # 1. Send all existing historical messages first
-        history_key = f"raven:mission:history:{real_id}"
-        existing_logs = await r.lrange(history_key, 0, -1)  # type: ignore[misc]
-        for msg in existing_logs:
-            with suppress(Exception):
-                await websocket.send_text(msg)
+            # 2. Subscribe to new messages
+            pubsub = r.pubsub()
+            channel = f"raven:mission:stream:{real_id}"
+            await pubsub.subscribe(channel)
 
-        # 2. Subscribe to new messages
-        pubsub = r.pubsub()
-        channel = f"raven:mission:stream:{real_id}"
-        await pubsub.subscribe(channel)
+            async def reader():
+                try:
+                    async for message in pubsub.listen():
+                        if message["type"] == "message":
+                            await websocket.send_text(message["data"])
+                except Exception as e:
+                    log.warning(f"[WebSocket] Pubsub reader error: {e}")
 
-        async def reader():
-            try:
-                async for message in pubsub.listen():
-                    if message["type"] == "message":
-                        await websocket.send_text(message["data"])
-            except Exception as e:
-                log.warning(f"[WebSocket] Pubsub reader error: {e}")
-
-        async def keep_alive():
-            """Send periodic pings to keep the WebSocket connection alive."""
+            reader_task = asyncio.create_task(reader())
             try:
                 while True:
-                    await asyncio.sleep(25)
-                    await websocket.ping("keepalive")
-            except Exception:
-                pass
-
-        reader_task = asyncio.create_task(reader())
-        keep_alive_task = asyncio.create_task(keep_alive())
-        try:
-            while True:
-                try:
-                    await asyncio.wait_for(websocket.receive_text(), timeout=30)
-                except TimeoutError:
-                    pass  # Connection is still alive, handled by ping loop
-                except WebSocketDisconnect:
-                    break
-        except Exception as e:
-            log.warning(f"[WebSocket] Client disconnect: {e}")
+                    try:
+                        await asyncio.wait_for(websocket.receive_text(), timeout=30)
+                    except TimeoutError:
+                        pass  # still connected; uvicorn's protocol pings keep it open
+                    except WebSocketDisconnect:
+                        break
+            except Exception as e:
+                log.warning(f"[WebSocket] Client disconnect: {e}")
+            finally:
+                reader_task.cancel()
+                with suppress(Exception):
+                    await pubsub.unsubscribe(channel)
         finally:
-            reader_task.cancel()
-            keep_alive_task.cancel()
-            with suppress(Exception):
-                await pubsub.unsubscribe(channel)
             await r.close()
     except WebSocketDisconnect:
         pass
@@ -12403,39 +12401,44 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
             )
 
     if resp.status >= 400:
-        body = await resp.text()
-        await resp.release()
-        await client.close()
+        try:
+            body = await resp.text()
+        finally:
+            # Closed even when reading the body fails, which used to leak it.
+            await resp.release()
+            await client.close()
         log.info(f"[stream/abs-session] Upstream error {resp.status} for session {session_id} track {track_index}")
         return Response(content=body, status_code=resp.status, media_type="text/plain")
 
     ctype = resp.headers.get("Content-Type", "")
     if "mpegurl" in ctype.lower():
-        body = await resp.text()
-        await resp.release()
-        # Wait for segment 0 *before* closing the session; returning the playlist
-        # earlier only moves the 404 to the device, which treats it as fatal.
-        if playlist_url is None:
-            # ABS served the playlist without redirecting, so we never learned its
-            # URL and cannot join segments against it. Serve what we have rather
-            # than guessing a base, since a wrong guess would rewrite the segments to
-            # a URL that 404s.
-            log.warning(
-                f"[stream/abs-session] Session {session_id} track {track_index} returned a "
-                "playlist without a redirect; skipping the first-segment readiness check"
-            )
-        else:
-            if not await _await_abs_first_segment(client, playlist_url, body):
-                await client.close()
-                return Response(
-                    content=(
-                        f"Audiobookshelf is still transcoding session {session_id}; the first "
-                        "audio segment does not exist yet. Try again shortly."
-                    ),
-                    status_code=504,
-                    media_type="text/plain",
+        # The client is closed on every exit, a failed read included.
+        try:
+            body = await resp.text()
+            await resp.release()
+            # Wait for segment 0 *before* closing the session; returning the playlist
+            # earlier only moves the 404 to the device, which treats it as fatal.
+            if playlist_url is None:
+                # ABS served the playlist without redirecting, so we never learned its
+                # URL and cannot join segments against it. Serve what we have rather
+                # than guessing a base, since a wrong guess would rewrite the segments to
+                # a URL that 404s.
+                log.warning(
+                    f"[stream/abs-session] Session {session_id} track {track_index} returned a "
+                    "playlist without a redirect; skipping the first-segment readiness check"
                 )
-        await client.close()
+            else:
+                if not await _await_abs_first_segment(client, playlist_url, body):
+                    return Response(
+                        content=(
+                            f"Audiobookshelf is still transcoding session {session_id}; the first "
+                            "audio segment does not exist yet. Try again shortly."
+                        ),
+                        status_code=504,
+                        media_type="text/plain",
+                    )
+        finally:
+            await client.close()
         base = str(request.base_url)
         rewritten = _rewrite_m3u8_segments(body, base, session_id, track_index, user, mt)
         return Response(
@@ -13430,8 +13433,6 @@ async def start_music_assistant_stream(uri: str, request: Request, player_id: st
                 ma_error = ma_client.get_ma_error()
                 if ma_error:
                     log.error(f"[stream/ma] MA returned error: {ma_error}")
-                    with suppress(Exception):
-                        await ma_client.disconnect()
                     raise HTTPException(
                         status_code=502,
                         detail=f"MA error: {ma_error['code']}: {ma_error['details']}"
@@ -13445,23 +13446,21 @@ async def start_music_assistant_stream(uri: str, request: Request, player_id: st
             if not stream_url:
                 queue_desc = ma_client.get_queue_state_description()
                 log.error(f"[stream/ma] Stream URL not resolved within timeout. queue_state={ma_client.get_queue_state()}")
-                with suppress(Exception):
-                    await ma_client.disconnect()
                 raise HTTPException(
                     status_code=502,
                     detail=f"MA did not resolve queue state within {stream_timeout}s. Queue state: {queue_desc}. Session ID: {session_id}"
                 )
 
-            # Step 4: Disconnect MA WebSocket (no longer needed)
-            await ma_client.disconnect()
-            log.info("[stream/ma] WebSocket closed after stream URL resolved")
         except HTTPException:
             raise
         except Exception as e:
             log.error(f"[stream/ma] WebSocket/stream handling failed: {e}", exc_info=True)
+            raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}") from e
+        finally:
+            # Every exit, cancellation included, which used to skip the
+            # disconnects and leave the client reconnecting in the background.
             with suppress(Exception):
                 await ma_client.disconnect()
-            raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}") from e
 
         _ma_stream_cache_put(str(creds.get("user") or ""), uri, stream_url)
         return {"status": "SUCCESS"}
@@ -13522,17 +13521,15 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                 ma_client.ingest_queue_state(result)
             stream_url = _ma_pick_stream_url(ma_client, mass_url, target_player_id)
         except HTTPException:
-            with suppress(Exception):
-                await ma_client.disconnect()
             raise
         except Exception as e:
             log.error(f"[stream/ma] Queue state resolution failed: {e}", exc_info=True)
+            raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}") from e
+        finally:
+            # Also on cancellation, which skipped the except branches above
+            # and left this client and its background tasks running.
             with suppress(Exception):
                 await ma_client.disconnect()
-            raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}") from e
-
-        with suppress(Exception):
-            await ma_client.disconnect()
 
         if not stream_url:
             log.error(f"[stream/ma] No resolvable session for uri='{uri}' (queue idle or empty)")

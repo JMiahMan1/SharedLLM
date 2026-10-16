@@ -9,6 +9,7 @@ import traceback
 
 from fastapi import HTTPException
 
+from services.common.proc import run_process
 from services.config import INTERNAL_SECRET, WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL
 from services.execution.document_text import is_text_file
 from services.execution.schemas import (
@@ -320,34 +321,10 @@ async def _run_command_async(
 ) -> tuple[int, str, str]:
     """Runs a subprocess asynchronously using asyncio to prevent blocking the event loop."""
     try:
-        if shell:
-            proc = await asyncio.create_subprocess_shell(
-                cmd if isinstance(cmd, str) else " ".join(cmd),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-            )
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-            )
-
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            ret_code = proc.returncode if proc.returncode is not None else 0
-            return ret_code, stdout.decode(errors="replace"), stderr.decode(errors="replace")
-        except TimeoutError:
-            try:
-                proc.kill()
-                await proc.wait()
-            except Exception:
-                pass
+        ret_code, out, err = await run_process(cmd, cwd=cwd, env=env, shell=shell, timeout=timeout)
+        if ret_code is None:
             raise TimeoutError(f"Command timed out after {timeout} seconds")
+        return ret_code, out, err
     except FileNotFoundError as e:
         return -1, "", f"Executable or directory not found: {e}"
 

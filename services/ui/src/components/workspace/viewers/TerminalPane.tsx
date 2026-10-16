@@ -247,6 +247,9 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
       term.element!.removeEventListener('contextmenu', handleContextMenu);
       window.removeEventListener('resize', onResize);
       ro.disconnect();
+      // Detach first: a message or close event arriving after unmount wrote to
+      // the disposed terminal.
+      ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }

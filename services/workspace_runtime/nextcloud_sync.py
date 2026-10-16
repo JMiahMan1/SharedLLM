@@ -214,6 +214,10 @@ class WebDavClient:
         self.session.auth = (username, password)
         self.session.headers["User-Agent"] = "SharedLLM-WorkspaceSync/1.0"
 
+    def close(self) -> None:
+        """Release the HTTP session's connections (one client per sync run)."""
+        self.session.close()
+
     def _url(self, path: str) -> str:
         clean = str(PurePosixPath("/" + path.strip("/")))
         return f"{self.base_url}{quote(self.base_path + clean, safe='/')}"
