@@ -35,6 +35,8 @@ public class TokenBridgePlugin extends Plugin {
     public static final String KEY_DEVICE_ID = "push_device_id";
     /** The last ntfy message id read from the push stream (PushService). */
     public static final String KEY_PUSH_SINCE = "push_since";
+    /** The outbox long poll's cursor while the push stream is unavailable (PushFallback). */
+    public static final String KEY_POLL_CURSOR = "push_poll_cursor";
 
     // zone.home from Home Assistant
     public static final double DEFAULT_HOME_LAT = 33.16670697948413;
@@ -61,8 +63,14 @@ public class TokenBridgePlugin extends Plugin {
             } else {
                 ed.putString(KEY_API_KEY, apiKey);
             }
-            // Another person's stream starts from now, not from this one's place.
-            if (!apiKey.equals(previousKey)) ed.remove(KEY_PUSH_SINCE);
+        }
+        boolean accountChanged = apiKey != null && !apiKey.isEmpty()
+                && previousKey != null && !previousKey.isEmpty() && !apiKey.equals(previousKey);
+        boolean serverChanged = serverUrl != null && !serverUrl.isEmpty() && !serverUrl.equals(previousServer);
+        if ((apiKey != null && !apiKey.equals(previousKey)) || serverChanged) {
+            // Another person's (or server's) stream starts from now, not from this one's place.
+            ed.remove(KEY_PUSH_SINCE);
+            ed.remove(KEY_POLL_CURSOR);
         }
         if (serverUrl != null) {
             if (serverUrl.isEmpty()) {
@@ -79,8 +87,18 @@ public class TokenBridgePlugin extends Plugin {
                 PushService.stop(getContext());
                 UnifiedPushDistributor.signOut(getContext(), previousServer, previousKey);
             } else {
+                if (accountChanged) {
+                    // The previous person's notices go, so none of their
+                    // buttons can act as the new one.
+                    PushNotifier.clearAll(getContext());
+                    UnifiedPushDistributor.switchAccount(getContext(), previousServer, previousKey);
+                }
                 PushService.start(getContext());
             }
+        }
+        if ((accountChanged || serverChanged) && p.getString(KEY_API_KEY, null) != null) {
+            // A running stream re-reads the credentials only when it reconnects.
+            PushService.reconnect(getContext());
         }
         call.resolve();
     }

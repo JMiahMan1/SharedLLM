@@ -107,18 +107,18 @@ final class UnifiedPushDistributor {
     }
 
     /**
-     * REGISTER from {@code app}. An unchanged registration gets its endpoint
-     * again without a new one being made; otherwise the gateway makes one.
+     * REGISTER from {@code app}. The gateway is always asked, since the
+     * registration may have been removed from the web page or another phone:
+     * it answers with the existing topic, or a new one when it had none, and
+     * the app gets that endpoint. Only when the gateway cannot be asked (no
+     * network, or it is failing) is the endpoint known here sent again; the
+     * check when the stream opens ({@link #reconcile}) corrects it later.
      * Runs on the worker thread.
      */
     static void register(Context context, String app, String token, String description) {
         UnifiedPushRegistration existing = get(context, token);
-        if (existing != null) {
-            if (!existing.app.equals(app)) {
-                Log.w(TAG, app + " sent a token registered to another app; ignored");
-                return;
-            }
-            sendNewEndpoint(context, existing);
+        if (existing != null && !existing.app.equals(app)) {
+            Log.w(TAG, app + " sent a token registered to another app; ignored");
             return;
         }
         if (!signedIn(context)) {
@@ -126,29 +126,110 @@ final class UnifiedPushDistributor {
             return;
         }
         try {
-            JSONObject body = new JSONObject();
-            body.put("app", app);
-            body.put("token", token);
-            JSONObject res = PushGateway.post(context, PushGateway.UP_REGISTER, body);
-            String endpoint = PushNotice.str(res, "endpoint");
-            String topic = PushNotice.str(res, "topic");
-            if (!UnifiedPushRules.validEndpoint(endpoint) || !UnifiedPushRules.isUpTopic(topic)) {
-                Log.w(TAG, "gateway answered without a usable endpoint for " + app);
-                sendFailed(context, app, token, REASON_INTERNAL_ERROR);
-                return;
-            }
-            UnifiedPushRegistration r = new UnifiedPushRegistration(token, app, topic, endpoint, description);
+            UnifiedPushRegistration r = registerWithGateway(context, app, token,
+                    description != null ? description : existing != null ? existing.description : null);
             save(context, r);
             sendNewEndpoint(context, r);
             // The gateway picks the topics to stream when the stream opens.
-            PushService.reconnect(context);
-        } catch (IOException e) {
-            Log.w(TAG, "register " + app + ": " + e.getMessage());
-            sendFailed(context, app, token, REASON_NETWORK);
+            if (existing == null || !existing.topic.equals(r.topic)) PushService.reconnect(context);
         } catch (Exception e) {
             Log.w(TAG, "register " + app + ": " + e.getMessage());
-            sendFailed(context, app, token, REASON_INTERNAL_ERROR);
+            if (existing != null) {
+                sendNewEndpoint(context, existing);
+            } else {
+                sendFailed(context, app, token, e instanceof IOException ? REASON_NETWORK : REASON_INTERNAL_ERROR);
+            }
         }
+    }
+
+    /** {@code POST /api/push/up/register} as the signed-in person; throws when the answer is unusable. */
+    private static UnifiedPushRegistration registerWithGateway(Context context, String app, String token,
+                                                               String description) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("app", app);
+        body.put("token", token);
+        JSONObject res = PushGateway.post(context, PushGateway.UP_REGISTER, body);
+        String endpoint = PushNotice.str(res, "endpoint");
+        String topic = PushNotice.str(res, "topic");
+        if (!UnifiedPushRules.validEndpoint(endpoint) || !UnifiedPushRules.isUpTopic(topic)) {
+            throw new IllegalStateException("gateway answered without a usable endpoint for " + app);
+        }
+        return new UnifiedPushRegistration(token, app, topic, endpoint, description);
+    }
+
+    /**
+     * Brings this phone's registrations in line with the gateway's when the
+     * stream opens. One the gateway no longer has (removed on the web page or
+     * from another phone) is dropped and its app hears UNREGISTERED, as AND_3
+     * asks when the distributor ends a registration; the app may register
+     * again. One whose topic changed gets its new endpoint. Nothing changes
+     * when the gateway cannot be asked.
+     */
+    static void reconcile(Context context) {
+        final Context app = context.getApplicationContext();
+        run(() -> {
+            if (all(app).isEmpty()) return;
+            Map<String, UnifiedPushRegistration> server;
+            try {
+                server = UnifiedPushRegistration.thisDevice(PushGateway.get(app, PushGateway.UP_LIST));
+            } catch (Exception e) {
+                Log.w(TAG, "could not check registrations: " + e.getMessage());
+                return;
+            }
+            if (server == null) return;
+            boolean moved = false;
+            for (UnifiedPushRegistration r : all(app)) {
+                UnifiedPushRegistration there = server.get(UnifiedPushRegistration.key(r.app, r.token));
+                if (there == null) {
+                    Log.i(TAG, r.app + " is no longer registered on the server; telling it");
+                    forget(app, r.token);
+                    sendUnregistered(app, r.app, r.token);
+                } else if (!r.sameDelivery(there)) {
+                    UnifiedPushRegistration now = r.movedTo(there);
+                    save(app, now);
+                    sendNewEndpoint(app, now);
+                    moved = true;
+                }
+            }
+            if (moved) PushService.reconnect(app);
+        });
+    }
+
+    /**
+     * Another person signed in on this phone: each app's registration moves
+     * to the new account and gets its endpoint there, and the previous
+     * account's is removed with the key being replaced. When the new account
+     * gives the same topic (the same person with a new key) nothing is
+     * removed. A registration the new account cannot take is ended and its
+     * app hears UNREGISTERED.
+     */
+    static void switchAccount(Context context, String previousServer, String previousKey) {
+        final Context app = context.getApplicationContext();
+        run(() -> {
+            for (UnifiedPushRegistration r : all(app)) {
+                boolean keep = false;
+                try {
+                    UnifiedPushRegistration now = registerWithGateway(app, r.app, r.token, r.description);
+                    save(app, now);
+                    sendNewEndpoint(app, now);
+                    keep = now.topic.equals(r.topic);
+                } catch (Exception e) {
+                    Log.w(TAG, "could not move " + r.app + " to the new account: " + e.getMessage());
+                    forget(app, r.token);
+                    sendUnregistered(app, r.app, r.token);
+                }
+                if (keep || previousServer == null || previousServer.isEmpty()
+                        || previousKey == null || previousKey.isEmpty()) {
+                    continue;
+                }
+                try {
+                    PushGateway.post(app, previousServer, previousKey, PushGateway.UP_UNREGISTER, upBody(r));
+                } catch (Exception e) {
+                    Log.w(TAG, "gateway unregister for the previous account " + r.app + ": " + e.getMessage());
+                }
+            }
+            PushService.reconnect(app);
+        });
     }
 
     /**

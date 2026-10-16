@@ -3,17 +3,24 @@
 Every location upload carries the phone's battery percentage (and, from newer
 app builds, whether it is charging). The first reading below LOW_BATTERY_PCT
 that is not charging sends one ``family_safety`` notice to the rest of the
-family; a charging phone, or a reading higher than the last one (it was
-plugged in), arms it again for the next discharge. The state rides along in
-the stored location record, so no other table is needed.
+family. Only a charging phone, or a reading of at least LOW_BATTERY_PCT +
+REARM_MARGIN (it was charged), arms it again for the next discharge: a reading
+that wobbles around the threshold, or two phones on one account reporting in
+turn, must not announce again. The state rides along in the stored location
+record, so no other table is needed. On top of that each notice carries a
+``once`` key per person per day, so nobody hears about the same phone twice in
+one day whatever the readings do.
 """
 from __future__ import annotations
 
 import os
+from datetime import date
 
 from services.common import notify
 
 LOW_BATTERY_PCT = int(os.environ.get("LOW_BATTERY_PCT", "15"))
+#: Percentage points above LOW_BATTERY_PCT that count as charged again.
+REARM_MARGIN = 5
 #: Key in the stored location record: this discharge was already announced.
 SENT_FIELD = "battery_low_sent"
 
@@ -24,22 +31,23 @@ def step(previous: dict | None, battery: float | None, charging: bool | None) ->
     sent = bool(prev.get(SENT_FIELD))
     if battery is None:
         return False, sent
-    last = prev.get("battery")
-    if charging or (isinstance(last, (int, float)) and battery > last):
+    if charging or battery >= LOW_BATTERY_PCT + REARM_MARGIN:
         return False, False
     if battery < LOW_BATTERY_PCT and not sent:
         return True, True
     return False, sent
 
 
-async def announce(person: str, display_name: str, battery: float, family: list[str]) -> int:
+async def announce(person: str, display_name: str, battery: float, family: list[str],
+                   today: date | None = None) -> int:
     """Tell everyone in ``family`` but ``person``; how many notices went out."""
     url = f"/wander?person={person}"
+    once = f"battery:{person}:{(today or date.today()).isoformat()}"
     title = f"{display_name}'s phone is at {int(battery)}%"
     body = "It is not charging, so it may switch off soon."
     return await notify.send_many(
         [u for u in family if u != person],
         lambda user: notify.notice(
-            user, "family_safety", title, body, url=url, priority=4, tag=f"battery:{person}",
+            user, "family_safety", title, body, url=url, priority=4, tag=f"battery:{person}", once=once,
             data={"person": person, "battery": int(battery)}, actions=[notify.view_action(url, "Map")]),
     )

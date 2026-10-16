@@ -7,6 +7,8 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.Arrays;
+import java.util.Map;
+import org.json.JSONObject;
 import org.junit.Test;
 
 /**
@@ -112,5 +114,55 @@ public class UnifiedPushRulesTest {
             "{\"token\":\"t\",\"app\":\"a\",\"topic\":\"upx\",\"endpoint\":\"https://e\"}");
         assertNotNull(noDescription);
         assertNull(noDescription.description);
+    }
+
+    private static final String LIST = "{\"status\":\"SUCCESS\",\"registrations\":["
+        + "{\"device_id\":\"d1\",\"app\":\"org.tusky\",\"token\":\"t1\",\"topic\":\"upAAA\","
+        + "\"endpoint\":\"https://jarvis.example/push/upAAA\",\"this_device\":true},"
+        + "{\"device_id\":\"d2\",\"app\":\"org.tusky\",\"token\":\"t2\",\"topic\":\"upBBB\","
+        + "\"endpoint\":\"https://jarvis.example/push/upBBB\",\"this_device\":false},"
+        + "{\"device_id\":\"d1\",\"app\":\"at.bitfire.davdroid\",\"token\":\"t3\",\"topic\":\"upCCC\","
+        + "\"endpoint\":\"https://jarvis.example/push/upCCC\",\"this_device\":true}]}";
+
+    @Test
+    public void theServerListIsReadForThisDeviceOnly() throws Exception {
+        Map<String, UnifiedPushRegistration> mine = UnifiedPushRegistration.thisDevice(new JSONObject(LIST));
+        assertEquals(2, mine.size());
+        assertEquals("upAAA", mine.get(UnifiedPushRegistration.key("org.tusky", "t1")).topic);
+        assertNull(mine.get(UnifiedPushRegistration.key("org.tusky", "t2")));
+        assertEquals("upCCC", mine.get(UnifiedPushRegistration.key("at.bitfire.davdroid", "t3")).topic);
+    }
+
+    @Test
+    public void anAnswerWithoutAListRemovesNothing() throws Exception {
+        assertNull(UnifiedPushRegistration.thisDevice(new JSONObject("{\"detail\":\"oops\"}")));
+        assertNull(UnifiedPushRegistration.thisDevice(null));
+        assertTrue(UnifiedPushRegistration.thisDevice(new JSONObject("{\"registrations\":[]}")).isEmpty());
+    }
+
+    @Test
+    public void aRegistrationIsGoneMovedOrUnchanged() throws Exception {
+        Map<String, UnifiedPushRegistration> server = UnifiedPushRegistration.thisDevice(new JSONObject(LIST));
+        UnifiedPushRegistration same = new UnifiedPushRegistration(
+            "t1", "org.tusky", "upAAA", "https://jarvis.example/push/upAAA", "Mastodon");
+        UnifiedPushRegistration moved = new UnifiedPushRegistration(
+            "t3", "at.bitfire.davdroid", "upOLD", "https://jarvis.example/push/upOLD", null);
+        UnifiedPushRegistration removedElsewhere = new UnifiedPushRegistration(
+            "t9", "org.tusky", "upZZZ", "https://jarvis.example/push/upZZZ", null);
+
+        assertTrue(same.sameDelivery(server.get(UnifiedPushRegistration.key(same.app, same.token))));
+        UnifiedPushRegistration there = server.get(UnifiedPushRegistration.key(moved.app, moved.token));
+        assertFalse(moved.sameDelivery(there));
+        UnifiedPushRegistration now = moved.movedTo(there);
+        assertEquals("upCCC", now.topic);
+        assertEquals("https://jarvis.example/push/upCCC", now.endpoint);
+        assertEquals("t3", now.token);
+        assertNull(server.get(UnifiedPushRegistration.key(removedElsewhere.app, removedElsewhere.token)));
+    }
+
+    @Test
+    public void aTokenOfAnotherAppIsNotTheSameRegistration() throws Exception {
+        Map<String, UnifiedPushRegistration> server = UnifiedPushRegistration.thisDevice(new JSONObject(LIST));
+        assertNull(server.get(UnifiedPushRegistration.key("com.evil", "t1")));
     }
 }

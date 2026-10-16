@@ -20,6 +20,9 @@ export interface PlaceMember {
 interface Props {
   places: PlaceSetting[];
   members: PlaceMember[];
+  /** Whether the viewer may change the settings (admins only; the server
+   *  refuses everyone else), otherwise they are shown read only. */
+  canEdit: boolean;
   /** Called after a place is saved, so the caller can reload the zones. */
   onSaved: () => void;
 }
@@ -30,9 +33,10 @@ interface Props {
  * Arriving at or leaving an important place (a school, a grandparent's house)
  * is a family safety notice rather than an ordinary arrival, and goes to the
  * people picked here; nobody picked means everyone who may see that person.
- * The places themselves are drawn in Home Assistant.
+ * The places themselves are drawn in Home Assistant. Only an admin can change
+ * them; everyone else sees which places are important and who hears about them.
  */
-export default function PlacesPanel({ places, members, onSaved }: Props) {
+export default function PlacesPanel({ places, members, canEdit, onSaved }: Props) {
   const [saving, setSaving] = useState<string | null>(null);
 
   const save = async (place: PlaceSetting, important: boolean, notify: string[]) => {
@@ -63,7 +67,9 @@ export default function PlacesPanel({ places, members, onSaved }: Props) {
           <MapPin size={15} className="text-purple-400" /> Places
         </h3>
         <p className="mt-1 text-xs text-slate-500">
-          Mark a place important to get a safety alert when someone arrives or leaves. Places are drawn in Home Assistant.
+          {canEdit
+            ? 'Mark a place important to get a safety alert when someone arrives or leaves. Places are drawn in Home Assistant.'
+            : 'Arriving at or leaving an important place sends a safety alert. An admin chooses the places.'}
         </p>
       </div>
       <ul className="divide-y divide-white/5">
@@ -74,17 +80,30 @@ export default function PlacesPanel({ places, members, onSaved }: Props) {
                 {place.important && <ShieldAlert size={14} className="shrink-0 text-amber-300" />}
                 <span className="truncate">{place.name}</span>
               </span>
-              <span className="flex items-center gap-2 text-xs text-slate-400">
-                Important
-                <Toggle
-                  checked={place.important}
-                  disabled={saving === place.id}
-                  ariaLabel={`${place.name} is important`}
-                  onChange={(next) => void save(place, next, next ? place.notify : [])}
-                />
-              </span>
+              {canEdit ? (
+                <span className="flex items-center gap-2 text-xs text-slate-400">
+                  Important
+                  <Toggle
+                    checked={place.important}
+                    disabled={saving === place.id}
+                    ariaLabel={`${place.name} is important`}
+                    onChange={(next) => void save(place, next, next ? place.notify : [])}
+                  />
+                </span>
+              ) : (
+                place.important && <span className="text-xs text-amber-300">Important</span>
+              )}
             </div>
-            {place.important && members.length > 0 && (
+            {!canEdit && place.important && (
+              <p className="pb-1 text-xs text-slate-500">
+                Alerts go to{' '}
+                {place.notify.length === 0
+                  ? 'everyone'
+                  : place.notify.map((u) => members.find((m) => m.username === u)?.name ?? u).join(', ')}
+                .
+              </p>
+            )}
+            {canEdit && place.important && members.length > 0 && (
               <div className="flex flex-wrap items-center gap-2 pb-1">
                 <span className="text-xs text-slate-500">
                   {place.notify.length === 0 ? 'Alerts go to everyone. Or only:' : 'Alerts go to:'}

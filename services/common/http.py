@@ -19,8 +19,12 @@ import asyncio
 import aiohttp
 
 _DNS_TTL = 60
-_client: aiohttp.ClientSession | None = None
-_client_insecure: aiohttp.ClientSession | None = None
+
+#: One session per (TLS verification, event loop). A session belongs to the
+#: loop that created it, so a worker thread running its own loop (RavenWorker)
+#: gets its own session instead of sharing, or closing, the main loop's. The
+#: ``None`` loop key is for callers outside any running loop.
+_clients: dict[tuple[bool, asyncio.AbstractEventLoop | None], aiohttp.ClientSession] = {}
 
 
 class NonClosingSessionWrapper:
@@ -45,18 +49,27 @@ def _make(verify: bool) -> aiohttp.ClientSession:
     )
 
 
+def _close_connector(client: aiohttp.ClientSession) -> None:
+    """Close a session's connector without awaiting (its loop may be gone).
+
+    ``close()`` is a coroutine on newer aiohttp, which cannot run here;
+    ``_close()`` releases the connections synchronously on every 3.x release.
+    """
+    if client.connector is not None and not client.connector.closed:
+        client.connector._close()
+
+
 def _retire_session(client: aiohttp.ClientSession | None) -> None:
-    """Safely close or retire an obsolete session."""
+    """Safely close or retire an obsolete session of the current loop."""
     if client is not None and not client.closed:
         try:
             current_loop = asyncio.get_running_loop()
             if current_loop.is_running():
                 current_loop.create_task(client.close())
-            elif client.connector is not None and not client.connector.closed:
-                client.connector.close()
+            else:
+                _close_connector(client)
         except RuntimeError:
-            if client.connector is not None and not client.connector.closed:
-                client.connector.close()
+            _close_connector(client)
 
 
 def _session_dead(client: aiohttp.ClientSession | None) -> bool:
@@ -68,55 +81,65 @@ def _session_dead(client: aiohttp.ClientSession | None) -> bool:
     if client is None or client.closed:
         return True
     connector = client.connector
-    if connector is None or getattr(connector, "closed", False):
-        return True
+    return connector is None or bool(getattr(connector, "closed", False))
 
-    # Treat the session as dead if its associated event loop is closed or different
-    # from the current active event loop context.
+
+def _running_loop() -> asyncio.AbstractEventLoop | None:
     try:
-        client_loop = getattr(client, "_loop", None)
-        if client_loop is None:
-            client_loop = client.loop
-        if client_loop.is_closed():
-            return True
-        current_loop = asyncio.get_running_loop()
-        if client_loop is not current_loop:
-            return True
+        return asyncio.get_running_loop()
     except RuntimeError:
-        pass
-    return False
+        return None
+
+
+def _forget_closed_loops() -> None:
+    """Drop the sessions of loops that have since closed (a finished worker
+    thread, a test's loop), so neither they nor their loops are kept."""
+    for key in [k for k in _clients if k[1] is not None and k[1].is_closed()]:
+        _close_connector(_clients.pop(key))
+
+
+def _session(verify: bool) -> NonClosingSessionWrapper:
+    _forget_closed_loops()
+    key = (verify, _running_loop())
+    client = _clients.get(key)
+    if _session_dead(client):
+        _retire_session(client)
+        client = _clients[key] = _make(verify)
+    return NonClosingSessionWrapper(client)
 
 
 def get_client() -> aiohttp.ClientSession:
-    """Return a process-wide pooled aiohttp client (verifies TLS)."""
-    global _client
-    if _session_dead(_client):
-        _retire_session(_client)
-        _client = _make(True)
-    return NonClosingSessionWrapper(_client)
+    """Return the pooled aiohttp client of the running event loop (verifies TLS)."""
+    return _session(True)
 
 
 def get_client_insecure() -> aiohttp.ClientSession:
-    """Return a pooled client that does NOT verify TLS.
+    """Return a pooled client that does NOT verify TLS (per event loop).
 
     For hosts with self-signed certificates (Home Assistant, Nextcloud, Roku,
     webOS, etc.). Do NOT use for public endpoints; use ``get_client()``.
     """
-    global _client_insecure
-    if _session_dead(_client_insecure):
-        _retire_session(_client_insecure)
-        _client_insecure = _make(False)
-    return NonClosingSessionWrapper(_client_insecure)
+    return _session(False)
 
 
 async def close_client() -> None:
-    """Close shared pooled aiohttp sessions on service shutdown."""
-    global _client, _client_insecure
-    for c in (_client, _client_insecure):
-        if c is not None and not c.closed:
-            try:
+    """Close the pooled sessions on service shutdown.
+
+    The running loop's sessions are awaited; a session of another loop that is
+    still running is closed on that loop, and one whose loop has stopped has
+    its connector closed directly.
+    """
+    current = _running_loop()
+    for (_, loop), c in list(_clients.items()):
+        if c.closed:
+            continue
+        try:
+            if loop is current:
                 await c.close()
-            except Exception:
-                pass
-    _client = None
-    _client_insecure = None
+            elif loop is not None and loop.is_running():
+                asyncio.run_coroutine_threadsafe(c.close(), loop)
+            else:
+                _close_connector(c)
+        except Exception:
+            pass
+    _clients.clear()

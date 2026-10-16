@@ -100,6 +100,11 @@ final class PushCategories {
         return general;
     }
 
+    /** A channel Jarvis notices are posted on (not the background or media one). */
+    static boolean isPushChannel(String channelId) {
+        return channelId != null && channelId.startsWith(CHANNEL_PREFIX);
+    }
+
     /** Urgent notices (priority 5: SOS, leaks) share one channel that always pops up. */
     static String channelId(String category, int priority) {
         if (PushNotice.clampPriority(priority) >= 5) return CHANNEL_PREFIX + URGENT;

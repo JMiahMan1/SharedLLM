@@ -17,7 +17,7 @@ from datetime import datetime as dt
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -3647,8 +3647,41 @@ def update_mission(
     session.refresh(mission)
     return mission
 
+
+class RavenMissionTransition(BaseModel):
+    from_status: str
+    to_status: str
+
+
+@app.post("/api/raven/missions/{mission_id}/transition")
+def transition_mission(
+    mission_id: int,
+    body: RavenMissionTransition,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_internal),
+):
+    """Move a mission from one status to another only if it is still in the
+    first: one conditional UPDATE, so of two callers racing (two taps on
+    Approve) exactly one wins and the other gets 409."""
+    from sqlalchemy import update
+
+    result = session.exec(
+        update(RavenMission)
+        .where(RavenMission.id == mission_id, RavenMission.status == body.from_status)
+        .values(status=body.to_status)
+    )
+    session.commit()
+    if result.rowcount == 1:
+        return {"status": "SUCCESS", "mission_status": body.to_status}
+    mission = session.get(RavenMission, mission_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    raise HTTPException(status_code=409, detail=f"Mission #{mission_id} is already {mission.status}")
+
+
 @app.delete("/api/raven/missions/{mission_id_or_slug}")
 def delete_mission(mission_id_or_slug: str, session: Session = Depends(get_session)):
+
     mission = _resolve_mission(mission_id_or_slug, session)
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
@@ -4863,12 +4896,15 @@ def _resolve_location_user_key(session: Session, user_id: str) -> str:
 async def update_user_location(
     user_id: str,
     location: LocationUpdate,
+    background: BackgroundTasks,
     x_internal_secret: str | None = Header(None),
 ):
     """Store user GPS location from mobile app, forward to Home Assistant, and record in Geo service.
 
     Header is optional in the signature so a missing secret returns 403 (not FastAPI's 422),
-    matching the rest of the identity internal endpoints.
+    matching the rest of the identity internal endpoints. A low battery
+    announcement runs after the response, so a slow telemetry never holds up
+    or fails the upload.
     """
     _require_internal_secret(x_internal_secret)
     import time
@@ -4911,7 +4947,7 @@ async def update_user_location(
     log.info(f"[location] Updated location for {user_id} (±{int(location.accuracy or 0)} m)")
     if low_battery:
         name, display, family = low_battery
-        await battery_alerts.announce(name, display, location.battery, family)
+        background.add_task(battery_alerts.announce, name, display, location.battery, family)
 
     try:
         await _forward_location_to_ha(user_id, location)

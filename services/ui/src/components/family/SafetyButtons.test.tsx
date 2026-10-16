@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SafetyButtons from './SafetyButtons';
+import toast from 'react-hot-toast';
 import { api } from '../../services/api';
+
+vi.mock('react-hot-toast', () => {
+  const fn = Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() });
+  return { default: fn };
+});
 
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -42,6 +48,17 @@ describe('SafetyButtons', () => {
     await userEvent.click(await screen.findByRole('button', { name: /send sos/i }));
     await waitFor(() => expect(sendSos).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('a repeat within the cooldown closes the dialog and says when it can go again', async () => {
+    const detail = 'Your SOS went out less than a minute ago. You can send it again in 1 min.';
+    sendSos.mockRejectedValue({ response: { status: 429, data: { detail } } });
+    render(<SafetyButtons />);
+    await userEvent.click(screen.getByRole('button', { name: /^sos$/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /send sos/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(toast).toHaveBeenCalledWith(detail);
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it('keeps the buttons a thumb wide', () => {

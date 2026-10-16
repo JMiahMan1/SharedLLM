@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.service.notification.StatusBarNotification;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.Person;
 import androidx.core.app.RemoteInput;
@@ -160,8 +161,10 @@ final class PushNotifier {
         for (int i = 0; i < actions.size(); i++) {
             PushNotice.Action a = actions.get(i);
             if (a.isView()) {
-                b.addAction(new NotificationCompat.Action.Builder(0, a.label,
-                        openIntent(context, a.url, id + i + 1)).build());
+                PendingIntent pi = a.isExternal()
+                        ? browserIntent(context, a.url, id + i + 1)
+                        : openIntent(context, a.url, id + i + 1);
+                b.addAction(new NotificationCompat.Action.Builder(0, a.label, pi).build());
                 continue;
             }
             Intent intent = PushActionReceiver.intent(context, a, n, id, i, chatToken);
@@ -250,6 +253,15 @@ final class PushNotifier {
         return PendingIntent.getActivity(context, requestCode, intent, flags);
     }
 
+    /** Opens a web page from a view button (SOS directions) in the browser. */
+    static PendingIntent browserIntent(Context context, String url, int requestCode) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+        return PendingIntent.getActivity(context, requestCode, intent, flags);
+    }
+
     /** One channel per category, grouped as in Settings; earlier builds' channels removed. */
     static void ensureChannels(Context context) {
         if (channelsReady || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
@@ -325,6 +337,27 @@ final class PushNotifier {
                 return R.drawable.mi_settings;
             default:
                 return R.drawable.mi_notifications;
+        }
+    }
+
+    /**
+     * Removes every Jarvis notice on show (another person signed in on this
+     * phone). Only the push channels are touched; the background and media
+     * notices stay.
+     */
+    static void clearAll(Context context) {
+        clearConversations();
+        NotificationManager nm = context.getSystemService(NotificationManager.class);
+        if (nm == null) return;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            // No channels to tell them apart; foreground services' notices survive cancelAll.
+            nm.cancelAll();
+            return;
+        }
+        for (StatusBarNotification sbn : nm.getActiveNotifications()) {
+            if (PushCategories.isPushChannel(sbn.getNotification().getChannelId())) {
+                nm.cancel(sbn.getTag(), sbn.getId());
+            }
         }
     }
 

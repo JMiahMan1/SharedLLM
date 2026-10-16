@@ -45,6 +45,19 @@ class _Redis:
         members.add(value)
         return 1
 
+    # Strings with a TTL, enough for SET NX EX cooldowns.
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.s:
+            return None
+        self.s[key] = (value, ex)
+        return True
+
+    async def ttl(self, key):
+        return self.s[key][1] if key in self.s else -2
+
+    async def delete(self, key):
+        self.s.pop(key, None)
+
 
 @pytest.fixture
 def sent(monkeypatch):
@@ -175,6 +188,7 @@ def test_mission_notices_skip_the_system_account():
 
 @pytest.fixture
 def missions(monkeypatch):
+    """A fake identity for missions: GET, the conditional transition, DELETE."""
     store = {7: {"id": 7, "status": "pending", "user_id": None, "mission_type": "admin_fix"}}
     deleted, dispatched = [], []
 
@@ -182,6 +196,15 @@ def missions(monkeypatch):
         def get(self, url, **kw):
             mission = store.get(int(url.rsplit("/", 1)[-1]))
             return _Resp(200 if mission else 404, mission)
+
+        def post(self, url, json=None, **kw):
+            mission = store.get(int(url.rsplit("/", 2)[-2]))
+            if mission is None:
+                return _Resp(404, {"detail": "Mission not found"})
+            if mission["status"] != json["from_status"]:
+                return _Resp(409, {"detail": f"Mission #{mission['id']} is already {mission['status']}"})
+            mission["status"] = json["to_status"]
+            return _Resp(200, {"status": "SUCCESS"})
 
         def delete(self, url, **kw):
             deleted.append(int(url.rsplit("/", 1)[-1]))
@@ -198,32 +221,91 @@ def missions(monkeypatch):
     return store, deleted, dispatched
 
 
+ADMIN = {"user": "jeremiah", "id": 1, "is_admin": True}
+
+
 def test_the_raven_buttons_are_registered():
     assert {"raven_approve", "raven_reject"} <= set(push_callbacks.PUSH_CALLBACKS)
 
 
 async def test_an_admin_approves_or_rejects_a_waiting_mission(missions):
-    _, deleted, dispatched = missions
-    admin = {"user": "jeremiah", "id": 1, "is_admin": True}
-    assert (await raven_approval.approve(admin, {"mission_id": 7}))["status"] == "SUCCESS"
-    assert dispatched == [(7, "jeremiah")]
-    assert (await raven_approval.reject(admin, {"mission_id": "7"}))["status"] == "SUCCESS"
-    assert deleted == [7]
-
-
-async def test_only_an_admin_or_the_owner_may_act_and_only_while_it_waits(missions):
     store, deleted, dispatched = missions
-    with pytest.raises(HTTPException) as e:
-        await raven_approval.approve({"user": "leo", "id": 5, "is_admin": False}, {"mission_id": 7})
-    assert e.value.status_code == 403
+    assert (await raven_approval.approve(ADMIN, {"mission_id": 7}))["status"] == "SUCCESS"
+    assert dispatched == [(7, "jeremiah")] and store[7]["status"] == "queued"
     store[8] = {"id": 8, "status": "pending", "user_id": 5}
-    await raven_approval.reject({"user": "leo", "id": 5, "is_admin": False}, {"mission_id": 8})
+    assert (await raven_approval.reject(ADMIN, {"mission_id": "8"}))["status"] == "SUCCESS"
     assert deleted == [8]
+
+
+async def test_only_an_admin_may_act_even_on_their_own_mission(missions):
+    """As Execute in Raven Ops: the owner of a mission is not enough."""
+    store, deleted, dispatched = missions
+    store[8] = {"id": 8, "status": "pending", "user_id": 5, "mission_type": "user"}
+    leo = {"user": "leo", "id": 5, "is_admin": False}
+    for act in (raven_approval.approve, raven_approval.reject):
+        with pytest.raises(HTTPException) as e:
+            await act(leo, {"mission_id": 8})
+        assert e.value.status_code == 403
+    assert deleted == [] and dispatched == [] and store[8]["status"] == "pending"
+
+
+async def test_only_while_it_waits(missions):
+    store, _, dispatched = missions
     store[7]["status"] = "queued"
     with pytest.raises(HTTPException) as e:
-        await raven_approval.approve({"user": "jeremiah", "id": 1, "is_admin": True}, {"mission_id": 7})
+        await raven_approval.approve(ADMIN, {"mission_id": 7})
     assert e.value.status_code == 409
     assert dispatched == []
+
+
+async def test_a_mission_waits_for_the_one_it_depends_on(missions):
+    store, _, dispatched = missions
+    store[7]["depends_on_mission_id"] = 6
+    store[6] = {"id": 6, "status": "executing"}
+    with pytest.raises(HTTPException) as e:
+        await raven_approval.approve(ADMIN, {"mission_id": 7})
+    assert e.value.status_code == 409 and "#6" in e.value.detail
+    del store[6]
+    with pytest.raises(HTTPException):
+        await raven_approval.approve(ADMIN, {"mission_id": 7})
+    assert dispatched == [] and store[7]["status"] == "pending"
+    store[6] = {"id": 6, "status": "completed"}
+    await raven_approval.approve(ADMIN, {"mission_id": 7})
+    assert dispatched == [(7, "jeremiah")]
+
+
+async def test_two_taps_enqueue_once(missions, monkeypatch):
+    """Both taps read ``pending``; only the first claims it in identity."""
+    import asyncio
+
+    _, _, dispatched = missions
+    real = raven_approval._waiting_mission
+
+    async def both_see_it_waiting(creds, params):
+        mission = dict(await real(creds, params))
+        await asyncio.sleep(0)
+        return mission
+
+    monkeypatch.setattr(raven_approval, "_waiting_mission", both_see_it_waiting)
+    results = await asyncio.gather(raven_approval.approve(ADMIN, {"mission_id": 7}),
+                                   raven_approval.approve(ADMIN, {"mission_id": 7}),
+                                   return_exceptions=True)
+
+    assert dispatched == [(7, "jeremiah")]
+    assert sum(isinstance(r, HTTPException) and r.status_code == 409 for r in results) == 1
+
+
+async def test_a_failed_dispatch_puts_the_mission_back(missions, monkeypatch):
+    store, _, _ = missions
+    from services.gateway import main
+
+    async def broken(mission_id, creds):
+        raise RuntimeError("queue down")
+
+    monkeypatch.setattr(main, "dispatch_admin_mission", broken)
+    with pytest.raises(RuntimeError):
+        await raven_approval.approve(ADMIN, {"mission_id": 7})
+    assert store[7]["status"] == "pending"
 
 
 # ------------------------------------------------------------ family safety
@@ -231,10 +313,23 @@ async def test_only_an_admin_or_the_owner_may_act_and_only_while_it_waits(missio
 
 @pytest.fixture
 def safety_client(sent, monkeypatch):
+    from contextlib import asynccontextmanager
+
     from services.gateway import main
 
     async def caller(request):
         return "leo"
+
+    who = {"creds": {"user": "jeremiah", "id": 1, "is_admin": True}}
+
+    async def identity(request, body=None):
+        return who["creds"]
+
+    redis = _Redis()
+
+    @asynccontextmanager
+    async def shared_redis(r=None):
+        yield redis
 
     answers = {}
 
@@ -250,7 +345,10 @@ def safety_client(sent, monkeypatch):
             return _Resp(200, {"zone": "zone.school", **json})
 
     monkeypatch.setattr(main, "_require_authenticated", caller)
+    monkeypatch.setattr(main, "_resolve_identity_from_request", identity)
+    monkeypatch.setattr(notices, "_redis", shared_redis)
     monkeypatch.setattr(family_safety, "get_client", lambda: Client())
+    answers["who"] = who
     return TestClient(main.app), answers
 
 
@@ -296,13 +394,79 @@ def test_sos_text_without_a_position_or_with_an_old_one():
     assert "2 h ago (may be out of date)" in body
 
 
+def test_sos_and_on_my_way_wait_between_sends(safety_client, sent):
+    """One SOS a minute and one On my way every five minutes per person, with
+    a 429 the app shows as is."""
+    client, _ = safety_client
+    assert client.post("/api/family/sos", json={"confirm": True}).status_code == 200
+    again = client.post("/api/family/sos", json={"confirm": True})
+    assert again.status_code == 429 and again.headers["Retry-After"] == "60"
+    assert again.json()["detail"] == "Your SOS went out less than a minute ago. You can send it again in 1 min."
+    assert client.post("/api/family/on-my-way").status_code == 200
+    way = client.post("/api/family/on-my-way")
+    assert way.status_code == 429
+    assert way.json()["detail"] == ("Your family was already told you are on the way. "
+                                    "You can send it again in 5 min.")
+    assert len(sent) == 4  # two people each, once
+    assert family_safety._wait_text(45) == "45 s" and family_safety._wait_text(61) == "2 min"
+
+
+def test_a_notice_nobody_got_can_be_sent_again_at_once(safety_client, monkeypatch):
+    client, _ = safety_client
+
+    async def refused(payload, **kw):
+        return False
+
+    monkeypatch.setattr(notify, "send", refused)
+    assert client.post("/api/family/sos", json={"confirm": True}).json()["sent"] == 0
+    assert client.post("/api/family/sos", json={"confirm": True}).status_code == 200
+
+
+def test_an_sos_still_goes_out_when_redis_is_down(safety_client, sent, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def down(r=None):
+        raise ConnectionError("redis down")
+        yield
+
+    monkeypatch.setattr(notices, "_redis", down)
+    client, _ = safety_client
+    for _ in range(2):
+        assert client.post("/api/family/sos", json={"confirm": True}).status_code == 200
+    assert len(sent) == 4
+
+
 def test_marking_a_place_important_goes_to_geo(safety_client):
     client, answers = safety_client
-    resp = client.put("/api/geo/places/zone.school", json={"important": True, "notify": ["michele", 3]})
+    resp = client.put("/api/geo/places/zone.school", json={"important": True, "notify": ["Michele", "leo", "leo"]})
     assert resp.status_code == 200
     url, payload = answers["put"]
     assert url.endswith("/place-settings/zone.school")
-    assert payload == {"important": True, "notify": ["michele"]}
+    assert payload == {"important": True, "notify": ["michele", "leo"]}
+
+
+@pytest.mark.parametrize("body", [
+    [True],
+    {"notify": []},
+    {"important": "yes"},
+    {"important": 1},
+    {"important": True, "notify": "michele"},
+    {"important": True, "notify": ["michele", 3]},
+    {"important": True, "notify": ["stranger"]},
+])
+def test_place_settings_are_validated(safety_client, body):
+    client, answers = safety_client
+    assert client.put("/api/geo/places/zone.school", json=body).status_code == 422
+    assert "put" not in answers
+
+
+def test_only_an_admin_changes_a_place(safety_client):
+    client, answers = safety_client
+    answers["who"]["creds"] = {"user": "leo", "id": 5, "is_admin": False}
+    resp = client.put("/api/geo/places/zone.school", json={"important": True})
+    assert resp.status_code == 403
+    assert "put" not in answers
 
 
 def test_notice_builder_caps_actions_and_priority():

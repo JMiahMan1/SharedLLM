@@ -26,13 +26,18 @@ ACTION_TYPES = ("view", "callback", "reply")
 MAX_ACTIONS = 3
 #: Preferences and the admin list are re-read from identity this often.
 CACHE_SECONDS = 60.0
+#: A person's ntfy topic is re-read this often, so a topic that changes in
+#: identity (an account removed and added again) is picked up without
+#: restarting telemetry.
+
+TOPIC_CACHE_SECONDS = 600.0
 ONCE_SECONDS = 3 * 86400
 
 _CATEGORY = re.compile(r"^[a-z][a-z_]{0,31}$")
 _CALLBACK = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 _prefs_cache: dict[str, tuple[float, dict[str, bool] | None]] = {}
-_topic_cache: dict[str, str] = {}
+_topic_cache: dict[str, tuple[float, str]] = {}
 _admins_cache: tuple[float, list[str]] | None = None
 
 
@@ -139,9 +144,10 @@ async def preferences(session: aiohttp.ClientSession, user: str) -> dict[str, bo
 
 
 async def push_topic(session: aiohttp.ClientSession, user: str) -> str | None:
-    """The person's ntfy topic. It never changes, so it is kept for good."""
-    if user in _topic_cache:
-        return _topic_cache[user]
+    """The person's ntfy topic, cached for ``TOPIC_CACHE_SECONDS``."""
+    cached = _topic_cache.get(user)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
     try:
         data = await _identity_get(session, "/api/internal/push/topic", {"username": user})
     except Exception as e:
@@ -149,7 +155,7 @@ async def push_topic(session: aiohttp.ClientSession, user: str) -> str | None:
         return None
     topic = str((data or {}).get("topic") or "")
     if topic:
-        _topic_cache[user] = topic
+        _topic_cache[user] = (time.monotonic() + TOPIC_CACHE_SECONDS, topic)
     return topic or None
 
 
@@ -168,7 +174,8 @@ async def deliver(rc, session: aiohttp.ClientSession, user: str, fields: dict[st
     if not wanted(await preferences(session, user), fields["category"], fields["priority"]):
         return {"dropped": "preference"}
     once = fields["once"]
-    if once and not await rc.set(f"telemetry:notify_once:{user}:{once}", "1", nx=True, ex=ONCE_SECONDS):
+    once_key = f"telemetry:notify_once:{user}:{once}" if once else None
+    if once_key and not await rc.set(once_key, "1", nx=True, ex=ONCE_SECONDS):
         return {"duplicate": True}
     notice = {
         "id": store.new_id(),
@@ -184,7 +191,13 @@ async def deliver(rc, session: aiohttp.ClientSession, user: str, fields: dict[st
         "once": once or None,
         "created_at": utcnow_iso(),
     }
-    await store.push_notification(rc, user, {**notice, "read": False})
+    try:
+        await store.push_notification(rc, user, {**notice, "read": False})
+    except Exception:
+        # Not recorded, so not sent: a retry must not count as a duplicate.
+        if once_key:
+            await rc.delete(once_key)
+        raise
     delivered: dict[str, Any] = {}
     try:
         delivered = await push.send_to_user(user, notice["title"], notice["body"], notice["data"])

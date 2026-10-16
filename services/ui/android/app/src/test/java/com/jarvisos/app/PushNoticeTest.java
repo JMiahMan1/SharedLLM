@@ -93,9 +93,45 @@ public class PushNoticeTest {
     }
 
     @Test
+    public void viewButtonsOpenAppPagesOrHttpsWebPages() {
+        String directions = "https://www.openstreetmap.org/?mlat=33.16671&mlon=-111.56466#map=17/33.16671/-111.56466";
+        assertEquals("/wander?person=ana", PushNotice.safeActionUrl("/wander?person=ana"));
+        assertEquals(directions, PushNotice.safeActionUrl(directions));
+        assertEquals("", PushNotice.safeActionUrl("http://www.openstreetmap.org/"));
+        assertEquals("", PushNotice.safeActionUrl("https://"));
+        assertEquals("", PushNotice.safeActionUrl("https://user@evil.example/"));
+        assertEquals("", PushNotice.safeActionUrl("https://evil example/"));
+        assertEquals("", PushNotice.safeActionUrl("javascript:alert(1)"));
+        assertEquals("", PushNotice.safeActionUrl("intent://scan#Intent;end"));
+        assertEquals("", PushNotice.safeActionUrl("//evil.example/"));
+        assertEquals("", PushNotice.safeActionUrl(null));
+        StringBuilder longUrl = new StringBuilder("https://example.org/");
+        while (longUrl.length() <= PushNotice.MAX_URL_LENGTH) longUrl.append('a');
+        assertEquals("", PushNotice.safeActionUrl(longUrl.toString()));
+    }
+
+    @Test
+    public void anSosKeepsItsDirectionsButtonForTheBrowser() {
+        PushNotice n = PushNotice.parse("{\"category\":\"family_safety\",\"title\":\"SOS\",\"body\":\"Ana needs help\","
+            + "\"data\":{\"url\":\"/wander?person=ana\"},\"actions\":["
+            + "{\"label\":\"Map\",\"type\":\"view\",\"url\":\"/wander?person=ana\"},"
+            + "{\"label\":\"Directions\",\"type\":\"view\",\"url\":\"https://www.openstreetmap.org/?mlat=1&mlon=2\"}]}");
+        assertEquals(2, n.actions.size());
+        assertFalse(n.actions.get(0).isExternal());
+        assertTrue(n.actions.get(1).isExternal());
+        assertEquals("https://www.openstreetmap.org/?mlat=1&mlon=2", n.actions.get(1).url);
+    }
+
+    @Test
+    public void theNoticeTapStillOpensOnlyAnAppPage() {
+        PushNotice n = PushNotice.parse("{\"title\":\"x\",\"data\":{\"url\":\"https://example.org/\"}}");
+        assertEquals("", n.path);
+    }
+
+    @Test
     public void unusableActionsAreDroppedAndAtMostThreeKept() {
         PushNotice n = PushNotice.parse("{\"title\":\"Raven\",\"body\":\"Approve?\",\"actions\":["
-            + "{\"label\":\"Open\",\"type\":\"view\",\"url\":\"https://elsewhere\"},"
+            + "{\"label\":\"Open\",\"type\":\"view\",\"url\":\"http://elsewhere\"},"
             + "{\"label\":\"\",\"type\":\"callback\",\"callback\":\"raven_approve\"},"
             + "{\"label\":\"Mystery\",\"type\":\"http\",\"url\":\"/x\"},"
             + "{\"label\":\"Approve\",\"type\":\"callback\",\"callback\":\"raven_approve\"},"
