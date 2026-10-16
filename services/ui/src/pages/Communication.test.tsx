@@ -46,7 +46,7 @@ describe('Communication page', () => {
     renderWithProviders(<Communication />);
 
     // Chat has one home now (Family). Communication must not grow its own copy
-    // again — the Talk composer and conversation controls are gone from here.
+    // again; the Talk composer and conversation controls are gone from here.
     expect(await screen.findByRole('link', { name: /open family/i })).toHaveAttribute('href', '/family');
     expect(screen.queryByPlaceholderText('Send a live Nextcloud Talk message')).not.toBeInTheDocument();
   });

@@ -2,8 +2,12 @@
 
 ## Status
 
-Implemented (reviewed 2026-10-15): `AgentLoop`'s inference payload now sets
-`"stream": True` ("Hardened: Always stream", `services/gateway/agent_loop.py`).
+Implemented (reviewed 2026-10-15): `OllamaProvider.generate()` in
+`services/gateway/agent_loop.py` always sends `"stream": True` ("Hardened:
+Always stream"). `AgentLoop`'s own `ollama_payload` dict still carries
+`"stream": False`, but only its messages and options reach the provider. The
+`RAVEN_STREAMING_ENABLED` flag proposed below was never added. Line numbers in
+this ADR refer to the file as it was when the ADR was written.
 
 ## Context
 
@@ -21,11 +25,11 @@ Switch `AgentLoop` to streaming mode by default.
 
 ### Changes Required
 
-1. **agent_loop.py:249-254** — Set `"stream": True`
-2. **agent_loop.py:77-92 streaming path** — Already implemented; accumulates `full_content` and returns it.
-3. **Background worker** — Already uses `chunk_callback` to push chunks to job-specific Redis list (`raven:job:chunks:{job_id}`). Maintain this behavior.
-4. **Orchestrator** — When `chunk_callback` provided, forward chunks to caller via Server-Sent Events (SSE) or just accumulate for final result (current behavior).
-5. **Gateway main.py `/api/chat` endpoint** — If request came from UI with `stream=true`, return `StreamingResponse` that yields chunks as they arrive from worker queue.
+1. **agent_loop.py:249-254**: set `"stream": True`
+2. **agent_loop.py:77-92 streaming path**: already implemented; accumulates `full_content` and returns it.
+3. **Background worker**: already uses `chunk_callback` to push chunks to job-specific Redis list (`raven:job:chunks:{job_id}`). Maintain this behavior.
+4. **Orchestrator**: when `chunk_callback` provided, forward chunks to caller via Server-Sent Events (SSE) or just accumulate for final result (current behavior).
+5. **Gateway main.py `/api/chat` endpoint**: if the request came from UI with `stream=true`, return `StreamingResponse` that yields chunks as they arrive from worker queue.
 
 **Why not stream all the way to user?**
 Current UI (`/services/ui`) buffers; but enabling streaming in gateway is forward-compatible. Keep existing non-stream path for backward compatibility.
@@ -38,9 +42,9 @@ Current UI (`/services/ui`) buffers; but enabling streaming in gateway is forwar
 
 ### Trade-offs
 
-- ⚠️ Slightly more complex error handling (stream interruption mid-stream)
-- ⚠️ Chunk ordering must be preserved when pushing to Redis list (current code is correct: `rpush` preserves order)
-- ✅ Better user experience
+- Con: slightly more complex error handling (stream interruption mid-stream)
+- Con: chunk ordering must be preserved when pushing to the Redis list (current code is correct: `rpush` preserves order)
+- Pro: better user experience
 
 ## Validation
 
@@ -50,6 +54,6 @@ Current UI (`/services/ui`) buffers; but enabling streaming in gateway is forwar
 
 ---
 
-**Configuration Flag:** `RAVEN_STREAMING_ENABLED` (default: true)
+**Configuration Flag (proposed, not built):** `RAVEN_STREAMING_ENABLED` (default: true)
 
-**Future Work:** Adaptive streaming — if Ollama queue builds up, fall back to non-stream to avoid back-pressure on in-memory buffers.
+**Future Work:** adaptive streaming. If Ollama queue builds up, fall back to non-stream to avoid back-pressure on in-memory buffers.

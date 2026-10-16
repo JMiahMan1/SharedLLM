@@ -110,7 +110,7 @@ THINKING_PATTERNS = [
 
 # Tool actions that operate INSIDE a workspace. When no workspace is assigned yet
 # (a project mission), every one of these must be blocked until Raven acquires a
-# dedicated workspace via WorkspaceCreateRequest — otherwise it would silently
+# dedicated workspace via WorkspaceCreateRequest; otherwise it would silently
 # operate in the Default Workspace / WORKSPACE_ROOT.
 WORKSPACE_TOOL_ACTIONS = {
     "workspacefilereadrequest", "workspacefilewriterequest",
@@ -125,7 +125,7 @@ def _has_valid_workspace_id(value: object) -> bool:
     """True only for a non-empty, non-whitespace workspace id.
 
     A blank/whitespace id (``""``, ``"   "``, ``None``) must be treated as
-    "unassigned" — the execution service rejects it with a 400
+    "unassigned": the execution service rejects it with a 400
     ("No workspace_id provided"), so the agent-loop guard must catch it before
     the request is sent.
     """
@@ -165,7 +165,7 @@ def build_adaptive_guidance(
     """
     parts: list[str] = []
 
-    # 1) A step just FAILED — highest priority: diagnose, don't blindly retry.
+    # 1) A step just FAILED: highest priority: diagnose, don't blindly retry.
     if last_status in ("ERROR", "LINT_ERRORS"):
         parts.append(
             "The previous step FAILED (see LAST TOOL RESULT). Read the actual "
@@ -174,7 +174,7 @@ def build_adaptive_guidance(
             "RavenRecallRequest(only='failed') to review what you already tried."
         )
 
-    # 2) Detected no-progress loop — escalate to a different route.
+    # 2) Detected no-progress loop: escalate to a different route.
     if repeating:
         parts.append(
             "You appear to be REPEATING a step with no new progress. Change "
@@ -182,7 +182,7 @@ def build_adaptive_guidance(
             "what worked before. Another identical attempt will fail the same way."
         )
 
-    # 3) Budget awareness — past 70% of the time budget, converge and ship.
+    # 3) Budget awareness: past 70% of the time budget, converge and ship.
     if elapsed_frac >= 0.7:
         parts.append(
             "You are past 70% of your time budget. STOP polishing: commit and "
@@ -212,7 +212,7 @@ def build_adaptive_guidance(
             )
             if files_written == 0:
                 parts.append(
-                    "You have written NO files yet — batch your initial project "
+                    "You have written NO files yet; batch your initial project "
                     "files (source, tests, README, pyproject/config) in one array."
                 )
 
@@ -243,7 +243,7 @@ def guidance_branch(
     return "batch"
 
 
-# Heuristics that identify a *system-maintenance* mission — i.e. one that edits or
+# Heuristics that identify a *system-maintenance* mission, i.e. one that edits or
 # fixes SharedLLM's own source/logs (e.g. "Raven fix the errors appearing in the
 # logs"). These run in the Default Workspace. Anything that builds or creates a
 # new project must return False so Raven acquires a dedicated workspace instead of
@@ -322,7 +322,7 @@ class OllamaProvider(BaseLLMProvider):
         # BUGFIX (observed live): a hard sock_read=60 cap is WRONG for
         # large-context inference. During the prompt-eval / prefill phase the
         # model legitimately emits NO chunks for a long time (prefilling tens of
-        # thousands of tokens on num_ctx=32k–64k can take well over a minute
+        # thousands of tokens on num_ctx=32k-64k can take well over a minute
         # before the first token streams). The old `min(to, 60)` fired sock_read
         # mid-prefill, the inner streaming loop retried (range(3)), and each retry
         # RESTARTED the whole request → re-prefilled → timed out again. This is
@@ -330,7 +330,7 @@ class OllamaProvider(BaseLLMProvider):
         # tell-tale 30s-quantised "inference completed in 150006ms / 240011ms"
         # stalls: they were stacked prefill timeouts + retries, not real
         # generation. `total` already bounds the whole request, so sock_read only
-        # needs to catch a *truly* wedged stream — make it a large fraction of
+        # needs to catch a *truly* wedged stream, so make it a large fraction of
         # total (min 180s) instead of a tiny fixed cap.
         if isinstance(timeout, aiohttp.ClientTimeout):
             self.timeout = timeout
@@ -346,7 +346,7 @@ class OllamaProvider(BaseLLMProvider):
     ) -> None:
         """Poll /api/ps until the target model appears in loaded models.
         
-        Prevents 404s when the model is cold-loaded — /api/chat returns 404
+        Prevents 404s when the model is cold-loaded: /api/chat returns 404
         until Ollama has finished loading the weights into VRAM.
         """
         deadline = asyncio.get_running_loop().time() + timeout
@@ -369,7 +369,7 @@ class OllamaProvider(BaseLLMProvider):
                         elif isinstance(entry, str) and entry == model:
                             log.info(f"[OllamaProvider-Hardened] Model {model} loaded")
                             return
-                # Check slots — if available, model may already be loaded
+                # Check slots; if available, model may already be loaded
                 slots = data.get("slots") or data.get("active_requests", {})
                 if isinstance(slots, dict):
                     for req_model in slots:
@@ -378,7 +378,7 @@ class OllamaProvider(BaseLLMProvider):
                             return
                     if isinstance(data.get("slots"), dict) and data["slots"].get("available", 0) > 0:
                         log.info(
-                            f"[OllamaProvider-Hardened] No active slots, but slot pool available — model may be preloaded"
+                            f"[OllamaProvider-Hardened] No active slots, but slot pool available; model may be preloaded"
                         )
                         return
             except Exception:
@@ -386,7 +386,7 @@ class OllamaProvider(BaseLLMProvider):
             await asyncio.sleep(2)
         log.warning(
             f"[OllamaProvider-Hardened] Timed out waiting for model {model} "
-            f"after {timeout}s — attempting request anyway"
+            f"after {timeout}s; attempting request anyway"
         )
 
     async def generate(
@@ -415,7 +415,7 @@ class OllamaProvider(BaseLLMProvider):
         async with shared_http_client() as client:
             # Wait for model to be loaded before attempting streaming request.
             # This prevents 404s caused by cold-start (model weights not yet
-            # in VRAM) — /api/chat returns 404 until loading completes.
+            # in VRAM): /api/chat returns 404 until loading completes.
             await self._wait_for_model(client, model, timeout=120.0)
 
             log.info(f"[OllamaProvider-Hardened] Calling {self.base_url}/api/chat for model {model}")
@@ -693,7 +693,7 @@ def _valid_structured_tool(obj: dict) -> bool:
 
     Rejects the live-observed failure mode where a truncated generation emits a
     flat bag-of-words dict like {"file_path":":", "envdiff":"/core.py",
-    "content":":"} — file_path is a stub (":"/"."/"/") and content is a 1-char
+    "content":":"}: file_path is a stub (":"/"."/"/") and content is a 1-char
     stub or a dict of words. Such calls must never be executed; the caller should
     steer the model to re-emit a well-formed call instead.
     """
@@ -831,7 +831,7 @@ def _normalize_tool(obj: dict) -> dict | None:
     # Observed live: with a truncated generation the model emitted e.g.
     #   {"file_path":":", "envdiff":"/core.py", "content":":", ...}  (a flat bag-of-
     #   words dict). The old code accepted it (content is truthy; file_path is a
-    #   non-empty string) and executed a write to path ":" — poisoning the
+    #   non-empty string) and executed a write to path ":", poisoning the
     #   workspace with garbage and never producing a real file, so the mission
     #   looped re-emitting garbage instead of converging. A tool call this broken
     #   must be rejected (return None) so the agent loop steers the model to
@@ -882,7 +882,7 @@ def _normalize_git_payload_action(payload: dict) -> dict:
     current = str(raw).strip().lower() if raw is not None else ""
     outer_action = str(payload.get("_outer_action") or "").strip().lower()
 
-    # Already a valid verb — nothing more to do.
+    # Already a valid verb; nothing more to do.
     if current in _GIT_VALID_ACTIONS:
         return payload
 
@@ -1124,8 +1124,8 @@ def extract_action_json(text: str, _depth: int = 0) -> dict | None:
 def extract_action_batch(text: str) -> list[dict] | None:
     """Extract a *batch* of tool calls (a JSON array) from model output.
 
-    When Raven emits an array of tool-call objects — e.g. a proven multi-step
-    command chain assembled from its memory/history — the whole batch is executed
+    When Raven emits an array of tool-call objects (e.g. a proven multi-step
+    command chain assembled from its memory/history), the whole batch is executed
     from a SINGLE inference, which is the core lever that keeps autonomous builds
     from burning 1800s re-deriving every individual step. Returns the list of
     normalized tool dicts, or ``None`` when the response is not a tool-call array.
@@ -1149,7 +1149,7 @@ def extract_action_batch(text: str) -> list[dict] | None:
         parsed = None
         # Attempt 1: strict parse. Attempt 2: strip trailing commas.
         # Attempt 3: repair raw control chars (newlines/tabs) that leaked inside
-        # string values — REAL file content always contains literal newlines, so
+        # string values; REAL file content always contains literal newlines, so
         # without this repair every batch of file-writes silently fails to parse
         # and the loop falls back to a single tool call. This mirrors the repair
         # already applied on the single-object path (extract_action_json).
@@ -1186,7 +1186,7 @@ def _next_batch_step(pending_batch: list[dict]) -> tuple[bool, dict | None]:
     """Pop the next step of an in-flight batched command chain.
 
     Returns ``(skip_inference, tool_data)``. When the queue is non-empty the next
-    tool is dequeued and the caller must SKIP the LLM inference — the whole chain
+    tool is dequeued and the caller must SKIP the LLM inference; the whole chain
     is driven by a single reasoning cycle. When empty, ``(False, None)`` signals a
     normal inference turn. Extracted from the agent loop so the queue semantics are
     unit-testable without standing up the full loop.
@@ -1227,7 +1227,7 @@ def compose_timeout_partial_result(
     """Build a meaningful partial-result summary when a mission hard-times-out.
 
     The raw final model response at timeout may be an internal batch-continuation
-    placeholder ("[batch] <tool>") or empty — neither tells the user what actually
+    placeholder ("[batch] <tool>") or empty; neither tells the user what actually
     got done. Compose a readable summary from the real progress signals the loop
     tracks: verified/written workspace artifacts and the recent action log.
     """
@@ -1249,7 +1249,7 @@ def _repair_json_control_chars(text: str) -> str:
     values so ``json.loads`` can parse otherwise-valid tool-call payloads.
 
     Only string *contents* are touched (matched between unescaped quotes), so
-    structural whitespace outside strings is left intact. Best-effort only —
+    structural whitespace outside strings is left intact. Best-effort only;
     callers must still validate the result.
     """
     def _esc_quoted(m: "re.Match[str]") -> str:
@@ -1275,7 +1275,7 @@ def action_signature(action_name: str, payload: dict | None) -> str:
 
     Combines the canonical action name with the most identifying payload field
     (file path or shell command) so the loop can tell apart 'wrote game.py' from
-    'wrote README.md' and from 'ran ruff' — which matters for stagnation checks.
+    'wrote README.md' and from 'ran ruff', which matters for stagnation checks.
     """
     action_name = (action_name or "").lower()
     if not isinstance(payload, dict):
@@ -1311,7 +1311,7 @@ def detect_repetitive_action(recent: list[tuple[str, bool]], window: int = 8) ->
     """True when the last ``window`` actions share ONE signature (success OR fail).
 
     Catches an agent "stuck in a loop" that repeats the same step without making
-    distinct progress — even when every call succeeds (e.g. re-running the same
+    distinct progress, even when every call succeeds (e.g. re-running the same
     read-only command 20 times). Used to allow long missions while still halting
     runaway repetition.
     """
@@ -1350,7 +1350,7 @@ def _translate_shell_to_git_op(cmd: str) -> list[dict] | None:
     # `gh` runs NATIVELY inside the workspace sandbox. The sandbox has the `gh`
     # CLI installed and receives the user's GITHUB_TOKEN (and GIT_TOKEN) injected
     # into its environment at exec time, so `gh repo create`, `gh pr`, `gh api`,
-    # etc. work directly in the shell. We must NOT intercept/route `gh` — the old
+    # etc. work directly in the shell. We must NOT intercept/route `gh`; the old
     # backstop assumed no `gh` binary and no-op'd every `gh` command, which broke
     # agent git/GitHub workflows. If the pipeline contains any `gh` command, run
     # the WHOLE pipeline as a native shell command (git, if present alongside,
@@ -1369,7 +1369,7 @@ def _translate_shell_to_git_op(cmd: str) -> list[dict] | None:
     # is a LOCAL operation that does NOT need push credentials and, critically,
     # the git-op translator mangles it (it reads `parts[2]` as the branch name,
     # so `git branch -m master main` becomes action 'branch' path '-m' and the
-    # real `command` is dropped — see mission 7). Run the WHOLE pipeline natively
+    # real `command` is dropped; see mission 7). Run the WHOLE pipeline natively
     # in the shell so the branch rename (and any sibling git steps) execute as
     # written against the injected-token environment.
     _branch_norm = re.sub(r"^\s*sudo\s+", "", cmd).strip()
@@ -1417,13 +1417,13 @@ def _translate_shell_to_git_op(cmd: str) -> list[dict] | None:
             # a shell command when any `gh` is present, since the sandbox has the
             # `gh` CLI + injected GITHUB_TOKEN). This branch is only reachable if
             # a pipeline somehow contained `gh` without tripping the early
-            # return — treated as a no-op so it cannot break the git pipeline.
+            # return; treated as a no-op so it cannot break the git pipeline.
             r = _translate_gh_parts(parts, sub)
             if r is not None:
                 routed.append(r)
             continue
         elif bin_name in _SHELL_NOISE_CMDS:
-            # Non-git noise (echo, ls, true, cat, ...) — safe to skip; irrelevant
+            # Non-git noise (echo, ls, true, cat, ...) are safe to skip; irrelevant
             # to the git pipeline.
             continue
         else:
@@ -1538,7 +1538,7 @@ def _translate_git_parts(parts: list[str], sub: str) -> dict | None:
         # `git remote -v` / `git remote get-url origin` etc. -> show remotes.
         return {"action": "remote"}
     # Unknown git subcommand: return None so the caller SKIPS it (rather than
-    # aborting the whole pipeline) — a sibling `git push` is still intercepted.
+    # aborting the whole pipeline); a sibling `git push` is still intercepted.
     return None
 
 
@@ -1662,13 +1662,13 @@ def normalize_shell_goal(command: str) -> str:
         SDL_VIDEODRIVER=dummy python main.py --selftest 2>/tmp/e; echo EXIT=$?; cat /tmp/e | tail -30
 
     map to the SAME goal key. We only care about the executable + script + args
-    that decide *what* runs, not redirections or exit-code/inspection wrappers —
+    that decide *what* runs, not redirections or exit-code/inspection wrappers;
     otherwise a re-run with a slightly different wrapper evades loop detection.
     """
     if not command:
         return ""
     s = command
-    # 1) Drop inspection/exit-code probes FIRST — before env-strip, because
+    # 1) Drop inspection/exit-code probes FIRST, before env-strip, because
     #    `echo EXIT=$?` would otherwise look like an env assignment to step 3
     #    and survive. These wrappers must not change the normalized goal.
     s = re.sub(r';\s*echo\s+EXIT=.*$', '', s)
@@ -1686,7 +1686,7 @@ def outcome_digest(exec_data) -> str:
     """Short, stable fingerprint of a tool result so we can tell whether a
     re-run produced *identical* output (no progress) vs a new error.
 
-    For a shell run this is the tail of the combined stdout/stderr — the part
+    For a shell run this is the tail of the combined stdout/stderr: the part
     that usually holds the actual error (e.g. a NameError traceback). An empty
     digest means the command produced no meaningful output (a clean pass).
     """
@@ -1700,7 +1700,7 @@ def outcome_digest(exec_data) -> str:
 def detect_no_progress(outcomes: list[tuple[str, str]], window: int = NO_PROGRESS_WINDOW) -> bool:
     """True when the last ``window`` shell runs share ONE goal AND produced
     IDENTICAL (non-empty) output. Catches the "exit-0 but never makes progress"
-    loop that ``detect_repetitive_failure`` (which needs all-fail) misses — e.g.
+    loop that ``detect_repetitive_failure`` (which needs all-fail) misses, e.g.
     a ``--selftest`` that crashes before printing GAME_OK yet still returns a
     successful shell exit, so the agent re-runs it forever. The non-empty
     requirement avoids flagging clean, repeated passes (empty output).
@@ -1719,8 +1719,8 @@ def no_progress_directive(stage: int, iter_num: int, goal: str, out: str) -> str
     """Build the escalating loop-control directive for a detected no-progress loop.
 
     Three stages (never a blind abort):
-      stage 1 PROBE     — stop re-running; read the error + source; make a DISTINCT fix.
-      stage 2 REDIRECT  — steer to a different debug route (web search, recall its
+      stage 1 PROBE:    stop re-running; read the error + source; make a DISTINCT fix.
+      stage 2 REDIRECT: steer to a different debug route (web search, recall its
                           own history, re-read source) instead of another blind attempt.
     stage 3 is a hard abort handled separately by the caller.
     """
@@ -1728,25 +1728,25 @@ def no_progress_directive(stage: int, iter_num: int, goal: str, out: str) -> str
     out_s = out[:60]
     if stage == 1:
         return (
-            f"ITERATION {iter_num}: LOOP PROBE — you have run the same command "
+            f"ITERATION {iter_num}: LOOP PROBE: you have run the same command "
             f"({goal_s!r}) repeatedly and the output has not changed "
             f"(fingerprint: {out_s!r}). Re-running it will NOT help. "
             f"STOP and diagnose: use RavenRecallRequest (only='shell' or only='failed') "
             f"to inspect prior runs, READ the source file involved and the captured "
-            f"error above, identify the root cause, and make a DISTINCT fix — not "
+            f"error above, identify the root cause, and make a DISTINCT fix, not "
             f"another identical run."
         )
     if stage == 2:
         return (
-            f"ITERATION {iter_num}: LOOP REDIRECT — still looping on {goal_s!r} "
+            f"ITERATION {iter_num}: LOOP REDIRECT: still looping on {goal_s!r} "
             f"with identical output ({out_s!r}). Another identical attempt will "
             f"fail the same way. Take a DIFFERENT route to diagnose:\n"
-            f"  1. websearchrequest — search the web for the exact error / how the "
+            f"  1. websearchrequest: search the web for the exact error / how the "
             f"library or API actually works (e.g. the F821 undefined name, the missing "
             f"import, or the correct raylib/pygame call). External docs beat guessing.\n"
-            f"  2. RavenRecallRequest (only='failed') — review what you already tried and "
+            f"  2. RavenRecallRequest (only='failed'): review what you already tried and "
             f"what the prior errors were so you don't repeat them.\n"
-            f"  3. WorkspaceFileReadRequest — re-read the actual source file (not just "
+            f"  3. WorkspaceFileReadRequest: re-read the actual source file (not just "
             f"patch from memory) and the captured error above, then make a DISTINCT fix.\n"
             f"Do NOT run {goal_s!r} again until you have changed the underlying code "
             f"based on what you learned from the web/history."
@@ -1813,7 +1813,7 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
         # code+history after the ~5k-token system prompt, so the model could not
         # see a test file and its implementation together to fix import mismatches.
         # 4096 still fits a full file write and doubles the input budget for free
-        # (no VRAM cost — num_predict does not change resident VRAM).
+        # (no VRAM cost: num_predict does not change resident VRAM).
         # num_predict=4096 + 65536 ctx: a 4096-token gen took 180-270s, so only
         # ~17 iters fit the 1920s mission cap -> timeout before converging. 2048
         # halved per-infer time (~90-135s) but OBSERVED LIVE: 2048 is too small to
@@ -1822,7 +1822,7 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
         # gate), and looped until the wall-clock cap. 3072 is the measured
         # compromise: large enough that cli.py/tests/core.py complete in one turn
         # (no truncation -> no prose fallback), but per-infer stays ~120-180s so
-        # ~10-12 iters fit the cap — enough to write the lib, test, and push.
+        # ~10-12 iters fit the cap, enough to write the lib, test, and push.
         "num_predict": 3072,
         "temperature": 0.1,
         "top_p": 0.9,
@@ -1895,7 +1895,7 @@ async def execute_inference_with_kill(
         while not inf_task.done():
             try:
                 if await _is_kill_flag_set(mission_id):
-                    log.warning(f"[AgentLoop] KILL flag detected for mission {mission_id} during inference — cancelling stream.")
+                    log.warning(f"[AgentLoop] KILL flag detected for mission {mission_id} during inference; cancelling stream.")
                     inf_task.cancel()
                     return
             except Exception:
@@ -1918,7 +1918,7 @@ async def execute_inference_with_kill(
         watch.cancel()
         # NOTE: CancelledError is a BaseException (not Exception) in Python 3.8+,
         # so `suppress(Exception)` would NOT swallow the cancellation raised by
-        # awaiting the just-cancelled watcher — leaking it as a spurious
+        # awaiting the just-cancelled watcher, leaking it as a spurious
         # "user abort". Suppress CancelledError explicitly.
         with contextlib.suppress(asyncio.CancelledError):
             await watch
@@ -2079,7 +2079,7 @@ async def _await_mission_resume(
         if not await _redis_flag_active(pause_key):
             return False
         log.warning(f"[AgentLoop] MISSION PAUSED for {mission_id}. Waiting for resume signal.")
-        await stream_event("system", "Mission paused — waiting for LLM access to become available.")
+        await stream_event("system", "Mission paused, waiting for LLM access to become available.")
         async for message in pubsub.listen():
             if message.get("type") != "message":
                 continue
@@ -2104,7 +2104,7 @@ async def _await_mission_resume(
 # no-tool text reply contains one of these AND the mission has already produced
 # successful tool calls, the runtime terminates cleanly instead of nudging the
 # (correctly-finished) agent to keep emitting tool calls for up to
-# MAX_IDLE_NUDGES turns — which wastes iterations and confuses the model into a
+# MAX_IDLE_NUDGES turns, which wastes iterations and confuses the model into a
 # "complete -> re-prompt -> complete" loop.
 COMPLETION_INDICATORS = [
     "mission complete",
@@ -2134,7 +2134,7 @@ def should_persist_learning(result: str) -> bool:
     if len(result_lower) < 3:
         return False
 
-    # Lint results with "issues found" are meaningful — the LLM found real problems.
+    # Lint results with "issues found" are meaningful: the LLM found real problems.
     # Only reject if it's a tool execution error, not a diagnostic finding.
     if "lint issues found" in result_lower or "lint passed" in result_lower:
         return True
@@ -2149,7 +2149,7 @@ def should_persist_learning(result: str) -> bool:
         if indicator in result_lower:
             return False
 
-    # Reject messages that start with "Error:" or "Failed:" — these are
+    # Reject messages that start with "Error:" or "Failed:"; these are
     # infrastructure/tool error messages, not meaningful LLM summaries
     if re.match(r'^\s*(error|exception|failed)\s*:', result_lower):
         return False
@@ -2225,7 +2225,7 @@ async def resolve_mission_workspace(
     - Otherwise, if the mission is *system maintenance* on SharedLLM itself
       (editing/fixing its own code or logs), return the user's **Default
       Workspace** so Raven works there.
-    - Otherwise (a project / new-build mission) return ``None`` — do NOT fall back
+    - Otherwise (a project / new-build mission) return ``None``; do NOT fall back
       to the Default Workspace. Raven must acquire a dedicated workspace via
       ``WorkspaceCreateRequest`` (protocol Step 0). This keeps the Default
       Workspace reserved for system maintenance only.
@@ -2252,7 +2252,7 @@ async def resolve_mission_workspace(
         ws = await _resolve_one(assigned_workspace_id)
         if ws:
             return ws
-        # Not found — try to bootstrap it (creates the repo only if requested).
+        # Not found; try to bootstrap it (creates the repo only if requested).
         try:
             async with shared_http_client() as client:
                 boot = await client.post(
@@ -2315,7 +2315,7 @@ async def resolve_mission_workspace(
 
     # No assigned workspace. System-maintenance missions (fixing SharedLLM's own
     # code/logs) run in the user's Default Workspace. Everything else (building or
-    # creating a new project) must NOT use the Default Workspace — return None so
+    # creating a new project) must NOT use the Default Workspace; return None so
     # Raven is forced to acquire a dedicated sandbox via WorkspaceCreateRequest.
     if is_system_maintenance_task(query):
         try:
@@ -2353,8 +2353,8 @@ async def _is_blocked_for_repo(
 
     A repo may only be created inside a workspace Raven acquired for itself via
     WorkspaceCreateRequest during this mission (tracked in ``created_workspaces``).
-    Everything else — the mission's starting/default workspace, shared/system
-    workspaces, or any workspace we cannot prove is Raven-created — is blocked.
+    Everything else (the mission's starting/default workspace, shared/system
+    workspaces, or any workspace we cannot prove is Raven-created) is blocked.
     The check fails CLOSED: if we cannot confirm the workspace is Raven-created,
     repo creation is forbidden. Detection is by tracked id, never by name.
     """
@@ -2388,7 +2388,7 @@ def _workspace_create_guard_message(assigned_ws: str | None, action: str) -> str
     tries to create a new one via WorkspaceCreateRequest.
 
     Chained children and follow-ups inherit the parent's workspace and MUST run
-    there — the model must never spawn a new sandbox and strand the mission's
+    there; the model must never spawn a new sandbox and strand the mission's
     output outside the assigned workspace. Returns None when creation is allowed
     (no assigned workspace, or a non-create action).
     """
@@ -2605,7 +2605,7 @@ def normalize_audit_log(audit_log: list[dict]) -> list[dict]:
             # the history-reconstruction path re-ingests; if it is stored as a
             # repr (or dropped) the reconstruction emits `{"action": ...,
             # "payload": null}` assistant turns that poison the model into
-            # mirroring the malformed `null` payload — the exact failure seen on
+            # mirroring the malformed `null` payload, the exact failure seen on
             # "Tweak or Fix Results" refinements.
             if current_action_payload is not None and not isinstance(current_action_payload, str):
                 _payload_store = json.dumps(current_action_payload)
@@ -2698,9 +2698,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # 0. Resolve the workspace this agentic mission runs in.
     # If the task assigned an existing workspace we use it and ENFORCE it: the model
     # may never create a new workspace for such a mission (chained children and
-    # follow-ups must reuse the parent's workspace — see the guard at dispatch).
-    # Otherwise we resolve (or fall back to) a workspace, and Raven itself decides —
-    # via the WorkspaceCreateRequest tool described in its protocol — whether a
+    # follow-ups must reuse the parent's workspace; see the guard at dispatch).
+    # Otherwise we resolve (or fall back to) a workspace, and Raven itself decides
+    # (via the WorkspaceCreateRequest tool described in its protocol) whether a
     # project mission needs its own dedicated sandbox. The gateway only supplies the means.
     try:
         _ws = await resolve_mission_workspace(rag_user, workspace_id, query=query)
@@ -2726,20 +2726,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 f"\n\n[WORKSPACE CONTEXT]\n"
                 f"You are operating inside workspace '{workspace_id}'.\n"
                 f"Absolute workspace path on disk: {_ws_path}\n"
-                f"Do NOT call WorkspaceCreateRequest — this mission is ALREADY assigned a "
+                f"Do NOT call WorkspaceCreateRequest; this mission is ALREADY assigned a "
                 f"workspace. Use workspace_id '{workspace_id}' in every workspace tool call. "
                 f"Write files relative to this path. In file tools, set `relative_path` to the "
                 f"file's path RELATIVE to the workspace root (e.g. 'game.py' or 'src/main.py'). "
-                f"Do NOT use the `local_path` field (e.g. 'users/default/...') as a file path — "
+                f"Do NOT use the `local_path` field (e.g. 'users/default/...') as a file path; "
                 f"it is an internal identifier, not a location on disk. Shell commands already "
-                f"run inside this workspace directory — pass an empty `cwd` (or '.'), and do NOT "
+                f"run inside this workspace directory; pass an empty `cwd` (or '.'), and do NOT "
                 f"'cd' into a 'users/...' path."
             )
     else:
         # No workspace was pre-assigned (a project / new-build mission). Inject an
         # explicit note so Raven follows protocol Step 0 and acquires a dedicated
         # workspace via WorkspaceCreateRequest before any file/shell/git operation
-        # — and never operates in the Default Workspace (reserved for maintenance).
+        # and never operates in the Default Workspace (reserved for maintenance).
         full_system += (
             "\n\n[WORKSPACE NOTE]\n"
             "No workspace is pre-assigned to this mission. Per protocol Step 0, your VERY "
@@ -2747,7 +2747,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             "(e.g. {\"@type\": \"WorkspaceCreateRequest\", \"id\": \"raven-<project>\", "
             "\"display_name\": \"...\"}). Capture the returned id and pass it as "
             "`workspace_id` in EVERY following WorkspaceFileWriteRequest / WorkspaceShellRequest "
-            "/ WorkspaceSettingsUpdateRequest. Do NOT operate in the Default Workspace — it is "
+            "/ WorkspaceSettingsUpdateRequest. Do NOT operate in the Default Workspace; it is "
             "reserved for system maintenance only."
         )
 
@@ -2827,7 +2827,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     MAX_TOOL_ITERATIONS = 60  # ceiling; overridable per-deployment via the
     # raven_max_iterations dynamic LLM setting. The loop also self-terminates on
     # stagnation (repeated failures) or on a detected action loop, so a higher
-    # ceiling is safe — long missions are allowed as long as they keep making
+    # ceiling is safe: long missions are allowed as long as they keep making
     # distinct progress.
     # Consecutive textual (no-tool-call) responses tolerated before the loop
     # decides the agent is stuck and terminates. Without this, a single plan-as-
@@ -2854,11 +2854,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     action_log = []
 
     # --- HARNESS GUARDS (OpenCode-orchestrator / Hermes patterns) ---
-    # These let the runtime — not the model — decide when work is truly done.
+    # These let the runtime (not the model) decide when work is truly done.
     #  * _recent_actions: (signature, succeeded) for stagnation detection.
     #  * _written_files / _verified_files: enforce lint/test before finishing.
     _recent_actions: list[tuple[str, bool]] = []
-    # (goal_sig, outcome_sig) for shell runs only — feeds detect_no_progress so
+    # (goal_sig, outcome_sig) for shell runs only; feeds detect_no_progress so
     # exit-0 loops (e.g. a --selftest that crashes before printing GAME_OK) are
     # caught even when the literal command string varies between iterations.
     _recent_shell_runs: list[tuple[str, str]] = []
@@ -2921,14 +2921,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 if isinstance(_cp_files, list):
                     _written_files.update(_cp_files)
                 log.info(f"[AgentLoop] Resuming mission {mission_id} from iteration {start_iteration} (restored {len(action_log)} action log entries)")
-            # NOTE: do NOT close r_cp — it is the module-level shared singleton
+            # NOTE: do NOT close r_cp; it is the module-level shared singleton
             # returned by _get_redis_cmd(). Closing it here would set the
             # connection dead while _redis_cmd still points to it (no None
             # reset), causing all subsequent Redis ops to fail.
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to load checkpoint for mission {mission_id}: {e}")
 
-    # Iteration ceiling — long missions allowed, but bounded and guarded by
+    # Iteration ceiling: long missions allowed, but bounded and guarded by
     # stagnation/loop detection below. Overridable per-deployment.
     try:
         max_iterations = int(str((settings or {}).get("raven_max_iterations", MAX_TOOL_ITERATIONS)).strip())
@@ -2939,7 +2939,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     # Runtime hard wall-clock cap for a single mission. Operational config MUST be
     # read from the Config DB (GlobalSetting `raven_max_total_seconds`), NOT from
-    # .env/env — the runtime only reads .env during seeding. Falls back to the
+    # .env/env; the runtime only reads .env during seeding. Falls back to the
     # module default if the setting is absent. Mirrors `raven_max_iterations` above.
     try:
         raven_max_total = int(str((settings or {}).get("raven_max_total_seconds", RAVEN_MAX_TOTAL_SECONDS)).strip())
@@ -3008,7 +3008,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             c = m.get("content", "") or ""
             note_lines.append(f"[{m.get('role', 'user')}] {c[:240]}{'…' if len(c) > 240 else ''}")
         compact_note = (
-            "COMPACTED EARLIER CONTEXT (preserved learnings — do not re-derive):\n"
+            "COMPACTED EARLIER CONTEXT (preserved learnings; do not re-derive):\n"
             + "\n".join(note_lines)
         )
         base_system = system_msgs[0]["content"] if system_msgs else ""
@@ -3039,7 +3039,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 (raven_max_total if raven_max_total != float("inf") else RAVEN_MAX_TOTAL_SECONDS) + 60,
                 json.dumps(cp_data),
             )
-            # NOTE: do NOT close r_cp — shared singleton; see checkpoint-load comment.
+            # NOTE: do NOT close r_cp: shared singleton; see checkpoint-load comment.
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to save checkpoint at iter {iter_num}: {e}")
 
@@ -3049,7 +3049,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         try:
             r_cp = await _get_redis_cmd()
             await r_cp.delete(f"raven:checkpoint:{mission_id}")
-            # NOTE: do NOT close r_cp — shared singleton; see checkpoint-load comment.
+            # NOTE: do NOT close r_cp: shared singleton; see checkpoint-load comment.
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to clear checkpoint for mission {mission_id}: {e}")
 
@@ -3184,7 +3184,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.error(f"[AgentLoop] HARD TIMEOUT after {elapsed_total:.0f}s at iteration {iter_num}")
             # Surface what actually got done. The raw `ans` may hold an internal
             # batch-continuation placeholder ("[batch] <tool>") or be empty, which
-            # is useless to the user — compose a meaningful partial result from the
+            # is useless to the user, so compose a meaningful partial result from the
             # action log and any verified workspace artifacts instead.
             _partial_result = compose_timeout_partial_result(
                 successful_tool_calls, action_log, _written_files, _verified_files
@@ -3217,10 +3217,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             except Exception as e:
                 log.error(f"[AgentLoop] Error in mission pause/resume handling: {e}")
 
-        # ── Batched command-chain continuation ──────────────────────────────────
+        # Batched command-chain continuation
         # If a previous inference returned an array of tool calls (a proven
         # command chain), the remainder lives in `pending_batch`. Execute the next
-        # queued step WITHOUT a new LLM inference — the whole chain is driven by a
+        # queued step WITHOUT a new LLM inference; the whole chain is driven by a
         # single reasoning cycle instead of one per step.
         skip_inference, tool_data = _next_batch_step(pending_batch)
         _guidance_branch = "batch_continuation" if skip_inference else "unknown"
@@ -3242,9 +3242,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     break
                 elapsed = asyncio.get_event_loop().time() - t0
                 if elapsed > RAVEN_HUNG_THRESHOLD:
-                    log.warning(f"[AgentLoop] ⚠ HUNG WARNING — iter {iter_n} waiting {elapsed:.0f}s for Ollama")
+                    log.warning(f"[AgentLoop] ⚠ HUNG WARNING: iter {iter_n} waiting {elapsed:.0f}s for Ollama")
                 else:
-                    log.info(f"[AgentLoop] ♥ heartbeat — iter {iter_n} | waiting for Ollama {elapsed:.0f}s")
+                    log.info(f"[AgentLoop] ♥ heartbeat: iter {iter_n} | waiting for Ollama {elapsed:.0f}s")
 
         hb_task = asyncio.create_task(_heartbeat(agent_iter + 1, iter_start))
 
@@ -3258,7 +3258,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             user_content += "RECENT ACTIONS:\n" + ctx_recent
             if exec_data:
                 # Keep tool output large enough that the model can actually SEE full
-                # test failures / tracebacks — the whole point of a big context. The
+                # test failures / tracebacks; that is the whole point of a big context. The
                 # old 500/2000-char caps hid the exact pytest error lines the model
                 # needed to fix, which caused endless "run tests -> can't see the
                 # failure -> guess -> re-run" loops. Bounded, but generous.
@@ -3382,7 +3382,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
             heartbeat_stop.set()
             await hb_task
-            log.info(f"[AgentLoop] Inference completed in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms — iter {agent_iter + 1}")
+            log.info(f"[AgentLoop] Inference completed in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms, iter {agent_iter + 1}")
             log.info(f"[AgentLoop] Response content: {ans[:200]}...")
             # Structural preview: the first non-whitespace char reveals whether the
             # model returned an object ('{') or a batch array ('['). Honest signal
@@ -3417,7 +3417,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         else:
             # A single inference may return a *batch* of tool calls (a proven command
             # chain assembled from memory/history). Execute the first immediately and
-            # queue the rest — the whole chain runs from THIS one inference instead of
+            # queue the rest; the whole chain runs from THIS one inference instead of
             # burning a reasoning cycle per step.
             batch = extract_action_batch(ans)
             if batch:
@@ -3506,10 +3506,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
         # Validation: If we don't have a valid action at this point, we MUST re-prompt.
         if not tool_data or not tool_data.get("action"):
-            # Blank/whitespace-only response is a failure — re-prompt
+            # Blank/whitespace-only response is a failure; re-prompt
             if not ans or not ans.strip():
                 log.warning(f"[AgentLoop] Empty response on iter {iter_num}; re-prompting...")
-                action_log.append(f"ITERATION {iter_num}: Model returned empty response — forcing correction.")
+                action_log.append(f"ITERATION {iter_num}: Model returned empty response; forcing correction.")
                 continue
 
             # If tool_data exists but has no action, it might be a malformed JSON that parsed but is missing keys
@@ -3525,7 +3525,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # EARLY COMPLETION: the model has already produced successful tool
             # calls and now replies with a clear "I'm done" statement (e.g.
             # "mission complete", "successfully created <repo>"). Treat this as a
-            # genuine completion signal and terminate cleanly — do NOT keep
+            # genuine completion signal and terminate cleanly; do NOT keep
             # nudging a correctly-finished agent to emit more tool calls, which
             # would loop it into "complete → re-prompt → complete" for
             # MAX_IDLE_NUDGES turns.
@@ -3538,7 +3538,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
             if agent_iter > 0 and successful_tool_calls > 0:
                 # OpenCode-orchestrator idle-boundary rule: the RUNTIME decides
-                # "done" — not the model. If files were written but never verified
+                # "done", not the model. If files were written but never verified
                 # (linted/tested), force one verification step before finishing.
                 if not _verification_nudge_sent:
                     unverified = pending_verification(_written_files, _verified_files)
@@ -3548,10 +3548,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         action_log.append(
                             f"ITERATION {iter_num}: You changed files ({', '.join(unverified)}) "
                             f"but have NOT verified them. Before finishing, run the standard STATIC CHECK "
-                            f"for the language you wrote and confirm it PASSES — do NOT consider the "
+                            f"for the language you wrote and confirm it PASSES; do NOT consider the "
                             f"mission complete until it is clean:\n"
                             f"  - Python:        `ruff check .` (+ `python -m pyflakes .`). Fix EVERY issue, "
-                            f"especially `F821`/`F405` 'undefined name' — that almost always means a MISSING "
+                            f"especially `F821`/`F405` 'undefined name'; that almost always means a MISSING "
                             f"IMPORT (add `from raylib import *` / `import raylib as rl`, or the right module). "
                             f"A static check catches these WITHOUT running the program; a runtime NameError "
                             f"means you shipped broken code.\n"
@@ -3576,7 +3576,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # the final text reply IS the deliverable summary.
                 # Extra guards: a real artifact must exist in the workspace
                 # (_written_files non-empty) and no queued batch call may be
-                # pending — otherwise a stall after a rejected/malformed write
+                # pending; otherwise a stall after a rejected/malformed write
                 # would "complete" a mission whose deliverable was never created
                 # (regression: flyer mission stalled after the write call was
                 # rejected as malformed and the mission ended without a PDF).
@@ -3616,7 +3616,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 _entries = (await _list.json()).get("entries") or [] if _list.status == 200 else []
                             if _entries:
                                 _gate_ok = True
-                                log.info(f"[AgentLoop] Workspace listing shows {len(_entries)} artifact(s) — treating stalled media/graphics mission as complete.")
+                                log.info(f"[AgentLoop] Workspace listing shows {len(_entries)} artifact(s); treating stalled media/graphics mission as complete.")
                                 # Independent verification of media artifacts: a
                                 # listed file is only trustworthy if it is actually
                                 # the playable format its name claims. Fetch a small
@@ -3647,13 +3647,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                         if _mv["valid"]:
                                             log.info(f"[AgentLoop] Media artifact {_me_path}: VALID {(_mv['format'] or '?').upper()} ({len(_me_bytes)} bytes)")
                                         else:
-                                            log.warning(f"[AgentLoop] Media artifact {_me_path}: INVALID — {'; '.join(_mv['issues'])}")
+                                            log.warning(f"[AgentLoop] Media artifact {_me_path}: INVALID: {'; '.join(_mv['issues'])}")
                                     except Exception as _me_e:
                                         log.warning(f"[AgentLoop] Media validation of {_me_path} failed: {_me_e}")
                         except Exception as _ge:
                             log.warning(f"[AgentLoop] Workspace listing check failed on stall: {_ge}")
                     if _gate_ok:
-                        log.info(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} successful tool call(s) with a verified artifact and nothing queued — treating as completion.")
+                        log.info(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} successful tool call(s) with a verified artifact and nothing queued; treating as completion.")
                         await _clear_checkpoint()
                         break
                 # The mission is multi-step; a plan-as-text reply is NOT "done".
@@ -3663,7 +3663,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 if _consecutive_no_tool >= MAX_IDLE_NUDGES:
                     log.error(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} tool call(s). Terminating to prevent runaway.")
                     ans = (
-                        "ERROR: Agent stalled — produced no tool calls for several turns after making progress. "
+                        "ERROR: Agent stalled: produced no tool calls for several turns after making progress. "
                         "Last response: " + (ans[:200] if ans else "empty")
                         + "\n\nPOSSIBLE CAUSES:\n"
                         "- The model got confused by its own output and needs a fresh prompt\n"
@@ -3678,7 +3678,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 log.warning(f"[AgentLoop] Textual reply after progress (idle {_consecutive_no_tool}/{MAX_IDLE_NUDGES}); nudging to continue with tool calls.")
                 action_log.append(
                     f"ITERATION {iter_num}: You described the next step but did not emit a tool "
-                    f"call. The mission is NOT complete — you must keep executing it with tool "
+                    f"call. The mission is NOT complete; you must keep executing it with tool "
                     f"calls (e.g. WorkspaceShellRequest to run `gh repo create`, "
                     f"WorkspaceFileWriteRequest to write files, then git add/commit/push). Emit "
                     f"the next concrete tool call now; do not stop at a description. "
@@ -3697,7 +3697,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             action_log.append(f"ITERATION {iter_num}: Your response did not contain a valid JSON tool call. Every mission step MUST be a tool call.")
             continue
 
-        # ── Tool Name Resolution Pipeline ──────────────────────────────────────
+        # Tool Name Resolution Pipeline
         # 1. Normalize: strip underscores/spaces, lowercase → canonical form
         # 2. Short-alias lookup for semantic names (read_file, shell, etc.)
         # 3. Regex pattern matching for common hallucinations
@@ -3705,7 +3705,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         raw_action = str(tool_data.get("action") or tool_data.get("operation") or "")
         action_name = re.sub(r'[\s_]+', '', raw_action).lower()
 
-        # ── Git verb fast-path ──
+        # Git verb fast-path
         # The model emits git verbs like `repo_create` / `git_commit`; after
         # underscore-stripping these become `repocreate` / `gitcommit`, which are
         # NOT in ALLOWED_TOOLS. The Tier-3 fuzzy matcher would then corrupt them
@@ -3720,7 +3720,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         if action_name not in ALLOWED_TOOLS:
             short_action = raw_action.lower().strip()
 
-            # ── Tier 1: Exact short aliases (semantic names that don't normalize) ──
+            # Tier 1: Exact short aliases (semantic names that don't normalize)
             action_map_aliases = {
                 "read_file": "workspacefilereadrequest",
                 "write_file": "workspacefilewriterequest",
@@ -3774,7 +3774,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if short_action in action_map_aliases:
                 action_name = action_map_aliases[short_action]
 
-            # ── Tier 2: Regex patterns for common hallucinations ──
+            # Tier 2: Regex patterns for common hallucinations
             if action_name not in ALLOWED_TOOLS:
                 regex_aliases = [
                     (r'.*workspace.*shell.*', "workspaceshellrequest"),
@@ -3839,7 +3839,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         action_name = target
                         break
 
-            # ── Tier 3: Fuzzy match fallback ──
+            # Tier 3: Fuzzy match fallback
             if action_name not in ALLOWED_TOOLS:
                 import difflib
                 matches = difflib.get_close_matches(action_name, list(ALLOWED_TOOLS), n=1, cutoff=0.6)
@@ -3879,7 +3879,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         try:
             action = action_name
             payload = tool_data.get("payload", tool_data)
-            # ROBUSTNESS: the model sometimes emits a tool call whose payload is
+            # Defensive: the model sometimes emits a tool call whose payload is
             # null/missing or a JSON *string* (e.g. {"action": "WorkspaceShellRequest",
             # "payload": null}). Assigning into ``payload`` later (user_context,
             # workspace_id, ...) then raises
@@ -4061,7 +4061,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     _skip_user_context = True
 
                 # ALWAYS inject user_context. Pydantic schemas require it for validation.
-                # (Skipped for WorkspaceCreateRequest — the runtime's Workspace model
+                # (Skipped for WorkspaceCreateRequest: the runtime's Workspace model
                 # rejects the extra key, which would 422 and break adoption.)
                 if not _skip_user_context:
                     _uc = {
@@ -4090,7 +4090,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # Force workspace-scoped tool calls into the mission's CURRENT working
                 # workspace. Once Raven creates its own workspace (via
                 # WorkspaceCreateRequest) and we adopt it as `workspace_id`, all
-                # subsequent file/shell/git operations run there — overriding any id the
+                # subsequent file/shell/git operations run there, overriding any id the
                 # model happens to send. This keeps Raven inside the sandbox it created
                 # even when the model doesn't reliably carry the id across turns.
                 # Defined unconditionally so it is also in scope for the post-call
@@ -4114,7 +4114,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 _b.setdefault("workspace_id", workspace_id)
 
                 # GUARDRAIL: creating a NEW repository must happen in a dedicated
-                # workspace Raven acquired for itself — never the default/shared/system
+                # workspace Raven acquired for itself, never the default/shared/system
                 # workspace. If Raven attempts `gh repo create` (or similar) there, fail
                 # loudly so it creates a workspace first instead of polluting a shared one.
                 _skip_post = False
@@ -4184,8 +4184,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # TTSRequest: convert text to speech via the execution service (Kokoro /
                 # Edge-TTS), then persist the returned base64 audio straight into the
                 # workspace as a binary file. Unlike generic tools, /execute/tts returns
-                # the audio only as detail.audio_base64 — it does not write a file itself
-                # — so if we only relayed the detail back to the model, Raven would have
+                # the audio only as detail.audio_base64 (it does not write a file itself),
+                # so if we only relayed the detail back to the model, Raven would have
                 # to base64-decode and re-save it by hand (which it reliably forgets to
                 # do; mission 36 lost its narration this way). Mirror the image-generation
                 # artifact path: decode server-side, write via the workspace_runtime binary
@@ -4252,7 +4252,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 _t_payload["voice"] = _tts_voice
                             # TTSRequest is on the no-user_context injection list, but the
                             # execution schema REQUIRES user_context. execute_tts itself
-                            # never reads it — so pass the synthesized one from above.
+                            # never reads it, so pass the synthesized one from above.
                             _t_payload["user_context"] = _tts_uc
                             async with shared_http_client() as _tc:
                                 _tts_resp = await _tc.post(
@@ -4274,11 +4274,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 # confirm it is actually a playable audio container
                                 # that matches the requested extension. The engine
                                 # may return WAV (Kokoro) when the model asked for
-                                # .mp3 (or vice versa) — instead of failing, the
+                                # .mp3 (or vice versa), instead of failing, the
                                 # path is rewritten to the REAL format so the file
                                 # is what its name says it is. Garbage output (an
                                 # HTML error page, empty bytes, unknown container)
-                                # is a hard ERROR — never persist it.
+                                # is a hard ERROR; never persist it.
                                 _tts_audio = base64.b64decode(_tts_b64) if isinstance(_tts_b64, str) else b""
                                 _tts_check = validate_media_bytes(_tts_audio, _tts_path or "audio")
                                 if not _tts_check["playable"]:
@@ -4340,7 +4340,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     _skip_post = True
 
                 # STTRequest: transcribe a workspace audio file back to text using
-                # Whisper. This is the audiobook/narration VERIFICATION path — the
+                # Whisper. This is the audiobook/narration VERIFICATION path: the
                 # deterministic TTS normalization (scripture refs, years, eras,
                 # small numbers) is checked by hearing what the engine actually
                 # spoke. Mirror the TTSRequest text_file flow: resolve the file
@@ -4464,7 +4464,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # it can self-diagnose loops (e.g. "I've run --selftest N times; what
                 # succeeded before and is the error identical?"). Reads the pullable
                 # raven:mission:history:{id} (and raven:mission:loopstate:{id}) we
-                # already write every step, returning a capped, scoped summary — never
+                # already write every step, returning a capped, scoped summary, never
                 # the raw firehose, which would blow the context window.
                 if lookup_action == "ravenrecallrequest":
                     # The local 35B sometimes emits a non-dict payload (e.g. a bare
@@ -4594,7 +4594,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     _skip_post = True
                 # GUARD: a workspace was assigned to this mission (e.g. a chained child or
                 # follow-up inheriting the parent's workspace). The mission MUST run inside
-                # that workspace — never let the model spawn a new one and strand the
+                # that workspace; never let the model spawn a new one and strand the
                 # mission's output outside the assigned workspace.
                 _create_err = _workspace_create_guard_message(starting_ws_id, lookup_action)
                 if _create_err:
@@ -4640,7 +4640,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(log_payload)}")
                         # WorkspaceSettingsUpdateRequest must PATCH the existing
                         # workspace (workspace_runtime only exposes PATCH /workspaces/{id},
-                        # not POST) — POSTing there returns 405. Every other
+                        # not POST); POSTing there returns 405. Every other
                         # action is a POST.
                         _http_method = (
                             "patch" if lookup_action == "workspacesettingsupdaterequest" else "post"
@@ -4686,7 +4686,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         if resp.status == 422:
                             try:
                                 error_detail = (await resp.json()).get("detail", "Validation failed")
-                                # Sanitize error detail before exposing to LLM — 422 responses
+                                # Sanitize error detail before exposing to LLM: 422 responses
                                 # echo back the full request payload including credentials
                                 error_detail = sanitize_for_llm(error_detail)
                                 msg = f"SCHEMA ERROR (422): {error_detail}. Ensure you are using the correct field names (e.g. 'action', 'message') instead of 'command' or 'commit_message'."
@@ -4705,7 +4705,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 exec_data = {"status": "SUCCESS", "message": "", "detail": {}}
                             # Auto-wire the git 'origin' remote whenever a repo_url is
                             # bound via WorkspaceSettingsUpdateRequest. workspace_runtime
-                            # only STORES repo_url — it never runs `git remote add` — so
+                            # only STORES repo_url (it never runs `git remote add`), so
                             # without this the workspace has no origin and a later
                             # `git push` fails with "Cannot determine the push target
                             # repository". The model had been shell-hacking this (observed
@@ -4834,7 +4834,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     else:
                         action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
                     # Track successful tool executions (non-ERROR responses).
-                    # NOTE: "LINT_ERRORS" is NOT a success — a file that fails the
+                    # NOTE: "LINT_ERRORS" is NOT a success: a file that fails the
                     # post-write lint (e.g. ruff F821 undefined name, syntax error)
                     # must NOT be counted as a verified/completed step, otherwise
                     # Raven can push code that a static checker would have caught
@@ -4867,7 +4867,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         # --- POST-WRITE LINT HOOK ---
                         # MUST be in the success branch: lint only makes sense when
                         # the write itself succeeded. Running it in the `else`
-                        # (failure) branch was a bug — lint never fired after a
+                        # (failure) branch was a bug: lint never fired after a
                         # clean write. Re-run here immediately after tracking the
                         # write; if lint fails we retroactively downgrade the result
                         # so the success counter / stagnation logic see it correctly.
@@ -4974,29 +4974,29 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         # still exits 0). detect_repetitive_failure needs all-fail and
         # detect_repetitive_action needs the identical literal command, so
         # neither fires here. Three escalating stages (never a blind abort):
-        #   1) PROBE      — stop re-running; read error + source; make a DISTINCT fix.
-        #   2) REDIRECT   — don't just give up: steer Raven to a DIFFERENT debug
+        #   1) PROBE:     stop re-running; read error + source; make a DISTINCT fix.
+        #   2) REDIRECT:  don't just give up: steer Raven to a DIFFERENT debug
         #                   route (web search, recall its own history, re-read source).
-        #   3) TERMINATE  — hard cap: even after a probe + redirect it still loops.
+        #   3) TERMINATE: hard cap: even after a probe + redirect it still loops.
         if detect_no_progress(_recent_shell_runs, window=NO_PROGRESS_WINDOW):
             _np_goal = _recent_shell_runs[-1][0]
             _np_out = _recent_shell_runs[-1][1]
             if not _shell_loop_nudge_sent:
-                # STAGE 1 — PROBE
+                # STAGE 1: PROBE
                 _shell_loop_nudge_sent = True
                 _np_directive = no_progress_directive(1, iter_num, _np_goal, _np_out)
                 action_log.append(_np_directive)
                 log.warning(f"[AgentLoop] No-progress loop detected (goal={_np_goal[:90]}); probing.")
                 await _record_loop_probe(iter_num, _np_goal, _np_out, _np_directive)
             elif not _shell_loop_diversify_sent:
-                # STAGE 2 — REDIRECT to a different debugging route (do NOT terminate yet).
+                # STAGE 2: REDIRECT to a different debugging route (do NOT terminate yet).
                 _shell_loop_diversify_sent = True
                 _np_directive = no_progress_directive(2, iter_num, _np_goal, _np_out)
                 action_log.append(_np_directive)
                 log.warning(f"[AgentLoop] No-progress loop persists; redirecting to alternate debug route (goal={_np_goal[:90]}).")
                 await _record_loop_probe(iter_num, _np_goal, _np_out, _np_directive)
             else:
-                # STAGE 3 — hard cap: probe + redirect both failed to break the loop.
+                # STAGE 3: hard cap: probe + redirect both failed to break the loop.
                 log.error("[AgentLoop] No-progress loop persists after probe + route redirect. Terminating.")
                 ans = "ERROR: Detected a no-progress loop (same command repeated with identical output despite a probe and a route redirect). Aborting to avoid runaway."
                 await _clear_checkpoint()
@@ -5081,7 +5081,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # BRIDGE: keep the workspace's local raven_memory.md journal in sync
             # with the global system_learnings store. system_learnings is what
             # cross-workspace missions retrieve, but raven_memory.md is the
-            # human-readable, auditable journal for THIS workspace — and the
+            # human-readable, auditable journal for THIS workspace, and the
             # training curriculum's success criteria checks it. Persisting here
             # (not relying on the model's prompt instruction) guarantees the two
             # layers never diverge, and gives repeatable tasks in the same
@@ -5122,7 +5122,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     ans_is_empty = not ans or ans.strip() in ("", "None", "null", "{}", "[]", "}")
     # Bound the action log so the summary/reflection prompts themselves cannot
     # exhaust the context window. A long, verbose mission log is the usual cause
-    # of a missing final answer — the model runs out of space and returns nothing,
+    # of a missing final answer: the model runs out of space and returns nothing,
     # and feeding the whole log back uncompressed just repeats the failure.
     _ctx_s, _ctx_r = await _compress_context()
     bounded_log = (_ctx_s + "\n\n" + _ctx_r).strip() or "\n".join(action_log)
@@ -5136,13 +5136,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         log.info("[AgentLoop] Finalizing with clean summarization phase...")
 
         if ans_is_empty:
-            # LLM response was empty — build summary from action log only.
+            # LLM response was empty; build summary from action log only.
             # BUG FIX: previously execute_inference was never called in this branch;
             # summary_prompt was built and silently discarded, always falling through
             # to the static fallback. Now we actually call inference here too.
             summary_prompt = [
                 {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. State what was accomplished based on the actions taken."},
-                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{bounded_log}\n\nThe LLM did not produce a final response, but the following actions were completed successfully. Summarize what was accomplished. Output the summary directly as your response — do not draft, plan, or repeat phrases like 'I will write'."}
+                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{bounded_log}\n\nThe LLM did not produce a final response, but the following actions were completed successfully. Summarize what was accomplished. Output the summary directly as your response; do not draft, plan, or repeat phrases like 'I will write'."}
             ]
             try:
                 async with asyncio.timeout(30.0):
@@ -5153,7 +5153,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         else:
             summary_prompt = [
                 {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. Do NOT say the mission failed unless the tool execution itself reported an error."},
-                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{bounded_log}\n\nRaw output: {ans}\n\nPlease provide the final clean summary now: Output it directly as your response — do not draft, plan, or repeat phrases like 'I will write'."}
+                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{bounded_log}\n\nRaw output: {ans}\n\nPlease provide the final clean summary now: Output it directly as your response; do not draft, plan, or repeat phrases like 'I will write'."}
             ]
             try:
                 async with asyncio.timeout(30.0):
@@ -5192,7 +5192,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     f"Actions taken:\n{bounded_log}\n\nFinal result: {ans}\n\n"
                     "Reflect and EXTRACT A REUSABLE LESSON. Reply ONLY with these "
                     "fields, one per line, no preamble:\n"
-                    "RULE: <when <situation>, do <action> — the transferable takeaway>\n"
+                    "RULE: <when <situation>, do <action> (the transferable takeaway)>\n"
                     "ROOT CAUSE: <why the naive/previous approach failed or what was misunderstood>\n"
                     "OUTCOME: <success | partial | failure>\n"
                     "CONFIDENCE: <0.0-1.0; 1.0 = verified-applied, 0.5 = plausible, 0.2 = uncertain>\n"
@@ -5240,12 +5240,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     confidence=_lesson_confidence,
                 )
         else:
-            log.info(f"[AgentLoop] Skipping RAG learning persistence — result appears meaningless: {ans[:100]}")
+            log.info(f"[AgentLoop] Skipping RAG learning persistence; result appears meaningless: {ans[:100]}")
 
         # --- APPLY ENFORCEMENT (honest reuse signal) ---
         # The mission prompt instructs the model to cite lesson ids it applies
         # via `Apply: [id]`. If it did, bump applied_count on those
-        # lessons — the real "this lesson was useful" metric, distinct
+        # lessons: the real "this lesson was useful" metric, distinct
         # from mere retrieval (usage_count).
         try:
             import re as _re
@@ -5294,7 +5294,7 @@ async def run_post_write_lint(file_path: str, execution_svc: str | None, interna
     # Keep this in sync with the extensions the lint handler actually supports
     # (services/execution/handlers/workspace.py). If a language's compiler is
     # missing from the sandbox, the handler reports `verified=False` rather than
-    # lying about a clean pass — see below.
+    # lying about a clean pass; see below.
     lintable_exts = {
         "py", "js", "jsx", "mjs", "ts", "tsx",
         "sh", "bash", "go", "rs", "c", "h", "cpp", "cc", "cxx", "hpp",
@@ -5345,7 +5345,7 @@ async def run_post_write_lint(file_path: str, execution_svc: str | None, interna
                         f"LINT UNVERIFIED for {file_path}: no code checker ("
                         + ", ".join(skipped or ["?"])
                         + ") is installed in the sandbox. This code was NOT actually "
-                        + "verified — install the language toolchain or rely on CI to catch errors."
+                        + "verified; install the language toolchain or rely on CI to catch errors."
                     )
                     logger.warning(warn)
                     return warn

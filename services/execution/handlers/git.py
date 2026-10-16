@@ -1,21 +1,21 @@
 # services/execution/handlers/git.py
 """
-GitHandler — Allows the Ouroboros autonomous loop to perform Git lifecycle
+GitHandler: allows the Ouroboros autonomous loop to perform Git lifecycle
 operations on workspaces.
 
 Supported actions:
-    status   — git status (porcelain + branch)
-    diff     — git diff (staged or unstaged)
-    add      — git add <path> (or '.' for all)
-    commit   — git commit -m <message>
-    pull     — git pull origin <branch>
-    push     — git push origin <branch>  [admin only]
-    log      — git log --oneline -N
-    init     — git init
-    remote_add — git remote add <name> <url>  (token-aware for https)
-    repo_create — create a GitHub repo via API (token-aware) + wire origin remote
-    repo_clone  — no-op: workspace is already the repo (sandbox has no `gh` CLI)
-    gh_noop     — no-op: intercepted `gh` command with no git-tool equivalent
+    status     git status (porcelain + branch)
+    diff       git diff (staged or unstaged)
+    add        git add <path> (or '.' for all)
+    commit     git commit -m <message>
+    pull       git pull origin <branch>
+    push       git push origin <branch>  [admin only]
+    log        git log --oneline -N
+    init       git init
+    remote_add   git remote add <name> <url>  (token-aware for https)
+    repo_create   create a GitHub repo via API (token-aware) + wire origin remote
+    repo_clone    no-op: workspace is already the repo (sandbox has no `gh` CLI)
+    gh_noop       no-op: intercepted `gh` command with no git-tool equivalent
 
 Security:
     - push requires is_admin=True in UserContext.
@@ -91,7 +91,7 @@ checkpoints/
 
 # ---------------------------------------------------------------------------
 # Repo-write guardrail: a workspace may ONLY push to its OWN designated repository.
-# There is intentionally NO hardcoded allow/deny list of specific repos — the
+# There is intentionally NO hardcoded allow/deny list of specific repos; the
 # policy is purely per-workspace. SharedLLM stays safe simply because no ordinary
 # workspace is bound to it: a workspace may only push to the repo it is bound to.
 # ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ def push_allowed(workspace_repo_url: str | None, target_url: str | None) -> tupl
     Allowed iff the target remote URL matches the workspace's designated repo.
     If the workspace has no designated repo (e.g. a freshly created "netnew"
     workspace that just ran `gh repo create` and has not yet bound a repo_url),
-    the push is ALLOWED — the caller binds repo_url on success so the per-workspace
+    the push is ALLOWED; the caller binds repo_url on success so the per-workspace
     scope guardrail becomes effective for subsequent pushes. This supports the
     create-repo-then-push flow without a hardcoded repo allow-list. The push is
     still gated upstream by token/identity checks (shell path requires a GitHub
@@ -294,7 +294,7 @@ async def _resolve_workspace_path(
 async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dict | None = None) -> dict:
     """
     Run a git command as a subprocess and return stdout/stderr/returncode.
-    args — list of git sub-command + arguments (NOT including 'git' itself).
+    args: list of git sub-command + arguments (NOT including 'git' itself).
     """
     cmd = ["git", *args]
 
@@ -439,13 +439,13 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     Dispatch git operations based on req.action.
 
     req fields (from GitOperationRequest):
-        action: str           — one of: status, diff, add, commit, pull, push, log
-        path: Optional[str]   — file path for 'add' (default '.')
-        commit_message: str   — required for 'commit'
-        branch: str           — branch name for pull/push (default 'microservices')
-        log_count: int        — number of commits for 'log' (default 10)
-        user_context          — must have is_admin=True for push
-        workspace_id: Optional[str] — workspace to operate on (uses default if not specified)
+        action: str             one of: status, diff, add, commit, pull, push, log
+        path: Optional[str]     file path for 'add' (default '.')
+        commit_message: str     required for 'commit'
+        branch: str             branch name for pull/push (default 'microservices')
+        log_count: int          number of commits for 'log' (default 10)
+        user_context            must have is_admin=True for push
+        workspace_id: Optional[str]   workspace to operate on (uses default if not specified)
     """
     action: str = req.action.lower().strip()
     required_capability = "git_status"
@@ -598,7 +598,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
 
         if action == "push":
             # Guardrail: a workspace may ONLY push to its OWN designated repository.
-            # No hardcoded repo lists — the policy is purely per-workspace. SharedLLM
+            # No hardcoded repo lists; the policy is purely per-workspace. SharedLLM
             # stays safe because no ordinary workspace is bound to it. This is the
             # server-side backstop so a flaky model can never push to the wrong repo
             # (covers both the git API and raw shell pushes via workspace.py).
@@ -759,7 +759,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
 
     elif action == "repo_clone":
         # The sandbox has no `gh` CLI and no need for one. The model's
-        # `gh repo clone` almost always means "set up my repository" — which
+        # `gh repo clone` almost always means "set up my repository", which
         # is done by the `gh repo create` step (wires git + GitHub for the
         # workspace). If that step hasn't run yet the workspace isn't a git
         # repo, so steer the model there instead of lying that it's present.
@@ -781,7 +781,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
                 status="SUCCESS",
                 message=(
                     "Repository already present: the workspace is already a git "
-                    f"repository with origin = {remote_url}. No clone needed — "
+                    f"repository with origin = {remote_url}. No clone needed; "
                     "write files with WorkspaceFileWriteRequest and commit/push via "
                     "GitOperationRequest."
                 ),
@@ -791,7 +791,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         return GitExecutionResult(
             status="SUCCESS",
             message=(
-                "Workspace is ready. No `gh repo clone` needed — the workspace is "
+                "Workspace is ready. No `gh repo clone` needed; the workspace is "
                 "already a git repository bound to its GitHub remote. Write files "
                 "and commit/push via GitOperationRequest."
             ),

@@ -21,7 +21,7 @@ import sys
 
 # Forced, not setdefault: the root conftest already sets INTERNAL_SECRET to
 # test-secret-ci, and services.gateway.config freezes INTERNAL_SECRET and
-# ALPACA_AUDIO_URL at its first import — whichever test module imports
+# ALPACA_AUDIO_URL at its first import; whichever test module imports
 # gateway main first. This conftest loads before every module in this
 # directory, so pin the gateway test values here (401/503 in
 # test_music_proxy.py otherwise, depending on file order).
@@ -184,7 +184,7 @@ def mock_upstream(
     ``payload`` is JSON-encoded by aioresponses; use ``body`` (str or bytes)
     with ``content_type`` for raw (non-JSON) upstream responses.
 
-    ``repeat`` reuses the same response for N calls — aioresponses raises
+    ``repeat`` reuses the same response for N calls; aioresponses raises
     ``ClientConnectionError`` once a registration is exhausted, which is how
     polling code is tested (a 404 that never turns into a 200).
     """

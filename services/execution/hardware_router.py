@@ -5,7 +5,7 @@ One interaction path for device control: callers issue standard HA-style
 service calls and the router decides how they reach the hardware.
 
 Policy (HA-first, chosen by the user):
-1. HA is attempted first for every call — existing behavior is unchanged
+1. HA is attempted first for every call; existing behavior is unchanged
    while HA is healthy.
 2. Only when HA is *unreachable* (connection error / not configured) do we
    fall back to a direct ESPHome native-API call, provided the target

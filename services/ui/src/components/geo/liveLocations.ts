@@ -112,7 +112,7 @@ export function distanceMeters(
 }
 
 export interface MemberCluster {
-  /** Freshest member in the cluster — the one the marker represents. */
+  /** Freshest member in the cluster: the one the marker represents. */
   lead: LiveFamilyMember;
   members: LiveFamilyMember[];
 }

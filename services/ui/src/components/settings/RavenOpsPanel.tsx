@@ -155,7 +155,7 @@ export default function RavenOpsPanel() {
                 : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30'
             }`}
           >
-            {current.raven_suspended ? 'Paused — tap to resume' : 'Watching — tap to pause'}
+            {current.raven_suspended ? 'Paused: tap to resume' : 'Watching: tap to pause'}
           </button>
         </SettingCard>
 

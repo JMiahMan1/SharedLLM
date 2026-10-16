@@ -1,4 +1,4 @@
-"""P2-T25: per-user media event hub — normalization, snapshot-first SSE,
+"""P2-T25: per-user media event hub: normalization, snapshot-first SSE,
 heartbeats, idle stop with an injectable clock, and user isolation."""
 import json
 

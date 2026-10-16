@@ -1,4 +1,4 @@
-# Artifact Framework — Implementation Plan
+# Artifact Framework: Implementation Plan
 
 Phased, actionable plan for the Artifact Framework (extends the `storage` service).
 Design spec: `ARTIFACTS.md`. Branch: `microservices`. CI must pass before deploy.

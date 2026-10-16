@@ -23,7 +23,7 @@ export default function SiteThemePanel() {
 
   const handleSync = async () => {
     const ok = await syncPacksToServer();
-    setSyncMsg(ok ? 'Theme packs synced to your account.' : 'Sync failed — check connection.');
+    setSyncMsg(ok ? 'Theme packs synced to your account.' : 'Sync failed. Check your connection.');
   };
 
   return (

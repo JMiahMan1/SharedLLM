@@ -207,7 +207,7 @@ async def test_image_edit_invalid_size_fails(tmpdir, monkeypatch):
 @pytest.mark.asyncio
 async def test_image_edit_save_sends_plain_dict_user_context(tmpdir, monkeypatch):
     """Regression: pydantic UserContext leaked into the aiohttp json= payload and
-    blew up with 'Object of type UserContext is not JSON serializable' — the
+    blew up with 'Object of type UserContext is not JSON serializable'; the
     workspace save must receive a plain dict that json.dumps can encode."""
     import json
 

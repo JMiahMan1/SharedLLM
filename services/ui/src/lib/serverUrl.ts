@@ -10,7 +10,7 @@ const SERVER_URL_KEY = 'jarvis_server_url';
  * On the web this is simply the current page origin (same-origin to the
  * gateway). Inside the Capacitor app the page is bundled and served from
  * `localhost`, so `window.location.origin` is useless for reaching the
- * backend — we must use the server URL the user configured in the app
+ * backend. We must use the server URL the user configured in the app
  * (`jarvis_server_url`, set via the server-config banner / login),
  * defaulting to the public gateway https://jarvis.sumemail.com.
  */

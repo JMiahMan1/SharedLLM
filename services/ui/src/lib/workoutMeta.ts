@@ -47,7 +47,7 @@ export function formatDuration(seconds: number): string {
   return `${hrs}h ${remMins}m`;
 }
 
-/** "Mar 3, 9:15 AM – 10:02 AM" style range from unix seconds. */
+/** "Mar 3, 9:15 AM - 10:02 AM" style range from unix seconds. */
 export function formatTimeRange(start: number, end: number): string {
   const sDate = new Date(start * 1000);
   const eDate = new Date(end * 1000);
@@ -58,7 +58,7 @@ export function formatTimeRange(start: number, end: number): string {
   const dateStr = sDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
 
   if (sameDay) {
-    return `${dateStr}, ${timeStr} – ${endTimeStr}`;
+    return `${dateStr}, ${timeStr} - ${endTimeStr}`;
   }
-  return `${dateStr} ${timeStr} – ${eDate.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${endTimeStr}`;
+  return `${dateStr} ${timeStr} - ${eDate.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${endTimeStr}`;
 }

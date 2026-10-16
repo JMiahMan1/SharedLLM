@@ -1,6 +1,6 @@
 # services/gateway/background_worker.py
 """
-Jarvis Background Worker — The "heartbeat" and "brain" of the autonomous Raven agent.
+Jarvis Background Worker: the "heartbeat" and "brain" of the autonomous Raven agent.
 1. Health Monitoring: Periodically scrapes logs and triggers self-repair.
 2. Singleton Inference: Processes the FIFO job queue for Tier 2 (Librarian) and Tier 3 (Raven) tasks.
 """
@@ -203,7 +203,7 @@ class RavenWorker:
         from services.gateway.main import _build_raven_system_prompt
 
         """
-        On startup, any mission still in 'executing' or 'paused' status is an orphan —
+        On startup, any mission still in 'executing' or 'paused' status is an orphan:
         the gateway was killed or restarted mid-run. Re-enqueue them so they resume
         automatically from their last checkpoint.
         """
@@ -263,7 +263,7 @@ class RavenWorker:
                 await asyncio.sleep(300)
 
     async def _inference_loop(self):
-        """The Singleton Inference Worker — Processes jobs one by one."""
+        """The Singleton Inference Worker. Processes jobs one by one."""
         log.info("Inference worker listening for jobs...")
         while self.is_running:
             try:
@@ -324,7 +324,7 @@ class RavenWorker:
             if jobs:
                 continue
 
-            # No job and still queued/executing — only reap if old enough.
+            # No job and still queued/executing; only reap if old enough.
             ts_raw = m.get("queued_at") or m.get("created_at") or m.get("updated_at")
             if ts_raw:
                 try:
@@ -708,18 +708,18 @@ class RavenWorker:
                         status = "completed"
                         log.info(f"[Worker] Mission {mission_id} completed with meaningful result")
                     else:
-                        # Check if this looks like a schema/tool format error — retry with bigger model
+                        # Check if this looks like a schema/tool format error; retry with bigger model
                         needs_upgrade = self._should_upgrade_model(result_str, payload)
                         if needs_upgrade:
                             await self._retry_with_bigger_model(mission_id, payload, result_str)
-                            return  # Don't update status yet — retry will handle it
+                            return  # Don't update status yet; retry will handle it
                         status = "failed"
                         # Preserve the actual result so the user can see what went wrong
                         if result_str and result_str.strip() not in ("None", "", "null"):
                             result_str = f"The mission did not produce a meaningful result. Output: {result_str[:1000]}"
                         else:
                             result_str = "The mission did not produce a meaningful result. The LLM returned an empty or invalid response."
-                        log.warning(f"[Worker] Mission {mission_id} marked failed — no meaningful work accomplished")
+                        log.warning(f"[Worker] Mission {mission_id} marked failed: no meaningful work accomplished")
                     async with _shared_http_client() as client:
                         completed_iso = datetime.now(UTC).isoformat()
                         duration = int(time.time() - started_ts) if started_ts else None
@@ -834,12 +834,12 @@ class RavenWorker:
             "produced no tool calls",
         ]
         if any(indicator in result_lower for indicator in schema_error_indicators):
-            log.warning("[Worker] Schema error detected — candidate for model upgrade")
+            log.warning("[Worker] Schema error detected; candidate for model upgrade")
             return True
 
         # Also detect when model just writes garbage instead of using tools
         if "successfully wrote" in result_lower and len(result) < 200:
-            log.warning("[Worker] Suspicious short 'success' — candidate for model upgrade")
+            log.warning("[Worker] Suspicious short 'success'; candidate for model upgrade")
             return True
 
         return False
@@ -874,7 +874,7 @@ class RavenWorker:
 
                 The mission was created (with status pending) when its dependency
                 was declared; here we only build the job payload and mark it
-                queued — never create a second mission record.
+                queued; never create a second mission record.
                 """
                 query = mission_data.get("proposed_mission", "")
                 coding_model = mission_data.get("coding_model") or payload.get("model")
@@ -1058,7 +1058,7 @@ class RavenWorker:
         Find the largest available model within the SAME family as the current one.
         Queries Ollama's /api/tags, filters to the same model family (prefix before
         the first ':' or '--'), and picks the largest by size. Returns the current
-        model unchanged if no same-family upgrade exists — so the UI-configured
+        model unchanged if no same-family upgrade exists, so the UI-configured
         default model is always respected and cross-family jumps (e.g. qwen → ornith)
         never happen.
         """
@@ -1124,7 +1124,7 @@ class RavenWorker:
 
             device_id = payload.get("device_id")
             if not device_id:
-                log.warning("Announcement requested without device_id — skipping")
+                log.warning("Announcement requested without device_id; skipping")
                 return
 
             # Use execution service's announce endpoint
@@ -1219,7 +1219,7 @@ class RavenWorker:
 
     async def _has_pending_self_repair(self, container: str) -> bool:
         """True if an admin_fix mission for this container is already pending
-        approval, queued, executing or paused — pushing another is redundant."""
+        approval, queued, executing or paused; pushing another is redundant."""
         try:
             async with _shared_http_client() as client:
                 resp = await client.get(
@@ -1254,7 +1254,7 @@ class RavenWorker:
         if not coding_model:
             log.error(
                 "[SelfRepair] No coding_model configured in Identity settings. "
-                "Set coding_model in Settings (AI & Compute) — self-repair missions "
+                "Set coding_model in Settings (AI & Compute); self-repair missions "
                 "cannot be dispatched without it. Skipping."
             )
             return
@@ -1356,7 +1356,7 @@ class RavenWorker:
 
             # Resolve decrypted HA credentials for this user. UserRead (returned
             # by /api/users) intentionally omits encrypted tokens, so we use
-            # /api/resolve — the system's source of truth for credentials,
+            # /api/resolve, the system's source of truth for credentials,
             # including any Config DB overrides. This is how the default system
             # user (ID 1) picks up the HA account configured in the UI.
             try:
@@ -1439,7 +1439,7 @@ class RavenWorker:
                 )
                 if transient:
                     # Dependants (rag/execution) may still be starting after a
-                    # deploy, or busy (a slow RAG sync) — retry next interval.
+                    # deploy, or busy (a slow RAG sync); retry next interval.
                     log.warning(f"Cleanup: deferred for user {username}: {msg}")
                 else:
                     log.error(f"Cleanup: failed for user {username}: {msg}")

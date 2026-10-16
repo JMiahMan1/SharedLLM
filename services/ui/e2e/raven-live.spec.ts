@@ -26,7 +26,7 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
 
 test.describe('@live Raven live frontend checks', () => {
   test.beforeEach(async ({ page }) => {
-    test.skip(!process.env.LIVE_E2E, 'LIVE_E2E not set — skipping live UI checks');
+    test.skip(!process.env.LIVE_E2E, 'LIVE_E2E not set, skipping live UI checks');
     await loginAsAdmin(page);
   });
 

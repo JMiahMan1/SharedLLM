@@ -69,13 +69,13 @@ def _req(method, url, *, headers=None, json_body=None, timeout=45):
     Retries on TRANSIENT failures:
       * network stalls (timeout / connection reset / DNS)
       * 5xx server/proxy errors (e.g. a momentary 502 from the gateway)
-      * 422/429 — observed intermittently against the live gateway for an
+      * 422/429: observed intermittently against the live gateway for an
         identical payload that succeeds moments later (server-side race),
         NOT a malformed request. Retried with backoff.
 
     On a FATAL error (400/401/403 or exhausted retries) it prints the
     response body so the failure is diagnosable instead of a bare traceback.
-    We report the ACTUAL HTTP code + body — we do not guess at causes.
+    We report the ACTUAL HTTP code + body; we do not guess at causes.
     """
     last_err = None
     for attempt in range(8):

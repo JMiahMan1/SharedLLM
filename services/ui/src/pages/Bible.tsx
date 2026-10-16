@@ -572,7 +572,7 @@ export default function Bible() {
         <h1 className="text-xl sm:text-2xl font-bold text-slate-100">Bible</h1>
         <p className="text-xs text-slate-400 mt-0.5">
           Read, mark and remember
-          {version ? ` — ${version.toUpperCase()}` : ' — no translation loaded yet'}.
+          {version ? ` (${version.toUpperCase()})` : ' (no translation loaded yet)'}.
         </p>
         {/* Five tabs share a phone's width while they fit; with large system text
             the row scrolls rather than letting labels run into each other. */}

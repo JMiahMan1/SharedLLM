@@ -115,7 +115,7 @@ describe('the redesigned chat', () => {
     expect(banner).toHaveTextContent('Joshua 24:15');
 
     await user.click(within(screen.getByTestId('quick-actions')).getByRole('button', { name: /verse/i }));
-    await waitFor(() => expect(sent[0]).toBe('📖 Joshua 24:15 — "As for me and my house, we will serve the LORD."'));
+    await waitFor(() => expect(sent[0]).toBe('📖 Joshua 24:15: "As for me and my house, we will serve the LORD."'));
 
     await user.click(within(banner).getByRole('button', { name: "Hide today's verse" }));
     expect(screen.queryByTestId('chat-verse-banner')).not.toBeInTheDocument();

@@ -8,7 +8,7 @@ described a limit the system never enforced. The same shape of bug produced
 three different `raven_max_total_seconds` defaults: 1800 in the Identity seed,
 1800 in `services/config.py`, and 14400 in the orchestrator's merge defaults.
 
-Read by AST, not by import — importing `main` or `agent_loop` builds the FastAPI
+Read by AST, not by import; importing `main` or `agent_loop` builds the FastAPI
 app and needs the Identity service to be reachable.
 """
 
@@ -55,7 +55,7 @@ def _assigned_str(rel: str, name: str) -> str | None:
 
 
 def _unwrap(value: ast.expr) -> ast.expr:
-    """`cast(dict[str, str], {...})` — the orchestrator annotates its defaults, so
+    """`cast(dict[str, str], {...})`: the orchestrator annotates its defaults, so
     the literal is the LAST positional arg, not the first (the first is the type)."""
     seen = 0
     while isinstance(value, ast.Call) and value.args and seen < 5:
@@ -65,7 +65,7 @@ def _unwrap(value: ast.expr) -> ast.expr:
 
 
 def _dict_item_str(rel: str, dict_name: str, key: str) -> str | None:
-    """`NAME = {... "key": "value" ...}` — the orchestrator's _DEFAULTS shape."""
+    """`NAME = {... "key": "value" ...}`: the orchestrator's _DEFAULTS shape."""
     for node in _tree(rel).body:
         targets = node.targets if isinstance(node, ast.Assign) else []
         if not any(isinstance(t, ast.Name) and t.id == dict_name for t in targets):
@@ -216,7 +216,7 @@ def test_the_live_iteration_ceiling_is_sixty():
 def test_the_docs_no_longer_quote_the_dead_numbers():
     """Guards the specific regression: docs were written from a code path that
     nothing executed. The superseded values are allowed to appear once per file,
-    inside the block-quoted correction note that explains where they came from —
+    inside the block-quoted correction note that explains where they came from;
     that note is the whole point, so stripping it would lose the history."""
     stale_numbers = ("MAX_TOOL_ITERATIONS = 30", "RAVEN_MAX_TOTAL_SECONDS = 600")
     for rel in ("docs/adr_007_hard_timeout.md", "docs/adr_013_agentloop_termination_safeguards.md"):

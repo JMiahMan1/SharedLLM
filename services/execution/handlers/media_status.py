@@ -54,7 +54,7 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
 
         # Music Assistant players are preferred for the "active" slot, but we
         # must not drop cast/Chrome/HA players that carry real now-playing
-        # metadata — otherwise Office TV shows "No Active Playback" while
+        # metadata; otherwise Office TV shows "No Active Playback" while
         # transport still works via entity_id.
         is_ma = is_music_assistant_player(attrs, entity_id)
         has_metadata = bool(media_title or media_artist or media_album or entity_picture)
@@ -96,7 +96,7 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         }
 
         # Anything actively rendering media is "active"; everything else is a
-        # selectable target. The two lists together must cover every player —
+        # selectable target. The two lists together must cover every player:
         # states outside a fixed whitelist (e.g. "on", "unavailable") used to
         # fall through both and vanish from the picker.
         if is_active_state:

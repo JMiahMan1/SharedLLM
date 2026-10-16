@@ -64,7 +64,7 @@ def _retry_delay(attempts: int) -> int:
     return int(min(RETRY_BASE_SECONDS * (2 ** max(0, attempts - 1)), RETRY_MAX_SECONDS))
 
 
-# ── Scheduler ───────────────────────────────────────────────────────────────
+# Scheduler
 
 async def scheduler_loop() -> None:
     """Queue scheduled jobs whose next run time has arrived."""
@@ -113,7 +113,7 @@ async def _all_jobs(rc) -> list[dict[str, Any]]:
     return jobs
 
 
-# ── Worker ──────────────────────────────────────────────────────────────────
+# Worker
 
 async def _notify(rc, job: dict[str, Any], report: dict[str, Any]) -> None:
     title = f"Your {report.get('period')} {report.get('type')} report is ready"
@@ -199,7 +199,7 @@ async def process_job(job_id: str) -> str:
             job["last_status"] = "deferred_busy"
             job["last_error"] = f"alpaca busy: {reason}"
             await store.save_job(rc, job)
-            log.info("Job %s deferred — alpaca busy (%s)", job_id, reason)
+            log.info("Job %s deferred, alpaca busy (%s)", job_id, reason)
             return "deferred"
 
         # 2. Generate. A failure here is retried with backoff.
@@ -246,7 +246,7 @@ async def worker_loop() -> None:
         await asyncio.sleep(WORKER_TICK_SECONDS)
 
 
-# ── HTTP API ────────────────────────────────────────────────────────────────
+# HTTP API
 
 def _internal_ok(value: str | None) -> bool:
     expected = INTERNAL_SECRET or ""

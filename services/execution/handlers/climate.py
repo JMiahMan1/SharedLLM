@@ -23,7 +23,7 @@ async def handle_climate(req: ClimateRequest) -> ExecutionResult:
     # 1. AUTHORIZATION CHECK
     # Deliberately NOT ha_client.authorize_action: a setpoint is only as
     # sensitive as the entity itself, so the rule is "may this user control this
-    # entity" — admin, system-default user, or the entity's own permit list.
+    # entity": admin, system-default user, or the entity's own permit list.
     # Checking here (rather than only in the /execute/climate route) also closes
     # the composite night-mode path, which calls this handler directly.
     from services.execution.entity_access import verify_entity_access

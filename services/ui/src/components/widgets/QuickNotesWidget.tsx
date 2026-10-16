@@ -40,7 +40,7 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
       let loaded: NoteItem[] = [];
       if (typeof data === 'object' && data !== null) {
         // /execute/note wraps the listing in `detail.notes` on SUCCESS.
-        // On FAILURE, `detail` may be a traceback array — surface the message.
+        // On FAILURE, `detail` may be a traceback array; surface the message.
         const resp = data as {
           status?: string;
           message?: string;

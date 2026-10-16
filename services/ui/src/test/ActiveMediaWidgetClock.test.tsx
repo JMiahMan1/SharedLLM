@@ -36,7 +36,7 @@ const nowPlaying = (position: number, duration: number) => ({
   },
 });
 
-describe('ActiveMediaWidget — time display', () => {
+describe('ActiveMediaWidget: time display', () => {
   beforeEach(() => {
     server.use(
       http.post('/execute/media/status', () => HttpResponse.json(nowPlaying(3725, 4000))),

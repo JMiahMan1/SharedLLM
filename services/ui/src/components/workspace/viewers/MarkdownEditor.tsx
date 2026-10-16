@@ -253,7 +253,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     <div className="h-full flex flex-col">
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
         <FileType2 size={14} className="text-indigo-400" />
-        <span className="text-xs text-slate-400">Markdown — rich editor</span>
+        <span className="text-xs text-slate-400">Markdown (rich editor)</span>
       </div>
       <WordProcessorToolbar dirty={dirty} saving={saving} onExec={exec} onSave={() => void save()} />
       <div className="flex-1 min-h-0 overflow-auto bg-white p-8">

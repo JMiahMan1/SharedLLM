@@ -18,9 +18,9 @@ export function statusOf(cap: AiCapability): CapabilityStatus {
 
 export function capabilityLabel(cap: AiCapability): string {
   const s = statusOf(cap);
-  if (s === 'ok') return `${cap.label} — ready`;
-  if (s === 'no') return `${cap.label} — unavailable`;
-  return `${cap.label} — unconfirmed`;
+  if (s === 'ok') return `${cap.label}: ready`;
+  if (s === 'no') return `${cap.label}: unavailable`;
+  return `${cap.label}: unconfirmed`;
 }
 
 export interface CapabilitySummary {

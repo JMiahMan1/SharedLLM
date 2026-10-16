@@ -1,6 +1,6 @@
 """BUG-13 (P2-T4): ABS progress values passed through; fixed upstream call count.
 
-Plan row: handlers/audiobookshelf.py:308,316,437 — progress hardcoded to "0%";
+Plan row: handlers/audiobookshelf.py:308,316,437: progress hardcoded to "0%";
 last_played fetched progress per book (up to 20 sequential calls). Fix: a single
 GET /api/me/items-in-progress for metadata joined with a single GET /api/me/progress
 for every book's progress values (no per-item calls, real percentages).

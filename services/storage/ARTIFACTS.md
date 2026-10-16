@@ -1,4 +1,4 @@
-# Artifact Framework — Design & Architecture
+# Artifact Framework: Design & Architecture
 
 > Status: Designed (approved). Implementation tracked in `ARTIFACT_IMPLEMENTATION_PLAN.md`.
 > Scope: Managed, lifecycle-independent artifacts produced by workspaces (TTS audio,
@@ -38,7 +38,7 @@ The service already defines `StorageProvider` (`services/storage/providers.py`) 
 
 - **`LocalStorageProvider`** (new, `services/storage/providers_impl/local.py`): writes
   bytes to `ARTIFACTS_ROOT` at `/artifacts/{owner}/{kind}/{artifact_id}`. Paths are
-  generated from the artifact `id` — never user-supplied — so there is no traversal risk.
+  generated from the artifact `id` (never user-supplied), so there is no traversal risk.
   Implements `list_entries`, `get_content`, `write_content` (and `delete_content`).
 - **`NextcloudStorageProvider`** (existing): remains available as an alternate backend;
   selected per artifact via `storage_backend`. Default backend is `local`.
@@ -97,7 +97,7 @@ warn  = (used / quota) >= ARTIFACT_WARN_PCT                    # default 0.90
 `FitResult` = `{fits, needed, used, quota, free, headroom, warn, message}`.
 
 - `warn` never blocks; it surfaces a message: *"You're at ≥90% of your storage. This may
-  fail due to space — clean up or request more from your admin."*
+  fail due to space. Clean up or request more from your admin."*
 - `fits=False` blocks creation with a clear message: *"Cannot store artifact: needs
   ~X MB, only Y MB free of Z MB quota/local."*
 - **Preflight** `POST /artifacts/check-fit {size, owner}` lets generators (and the UI)
@@ -138,7 +138,7 @@ Storage-usage endpoints:
 
 A background asyncio task started in the storage `lifespan` runs every ~5 minutes:
 purges `Artifact` rows where `deleted_at IS NOT NULL` and
-`now - deleted_at > ARTIFACT_UNDO_WINDOW_HOURS` (24h) — deletes the bytes via the
+`now - deleted_at > ARTIFACT_UNDO_WINDOW_HOURS` (24h); it deletes the bytes via the
 backend and removes the row. Hard deletes skip the window.
 
 ---

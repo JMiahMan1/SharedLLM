@@ -86,13 +86,13 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
       goal: stepsGoal,
       unit: 'steps',
       // `tone` is deliberately not set. It overrides the zone outright, so
-      // pinning it to 'on' would paint every day as "On your usual pace" — a
+      // pinning it to 'on' would paint every day as "On your usual pace", a
       // confident, wrong claim. The zone colours are the shared ones the Health
       // page uses, and matching the site theme is worth less than being right.
     },
   ];
 
-  // Real derived metrics — no data source is invented to fill a tile.
+  // Real derived metrics: no data source is invented to fill a tile.
   const weekValues = useMemo(
     () => Object.values(stepsData?.daily_steps ?? {}).filter((v): v is number => typeof v === 'number' && v > 0),
     [stepsData]
@@ -202,7 +202,7 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
                 color: cssVars['--ht-text'],
               }}
             >
-              {steps == null ? '—' : steps.toLocaleString()}
+              {steps == null ? 'No data' : steps.toLocaleString()}
               <span className="text-sm font-medium ml-1" style={{ color: cssVars['--ht-text-muted'] }}>
                 / {stepsGoal.toLocaleString()}
               </span>
@@ -282,7 +282,7 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
                     color: cssVars['--ht-text'],
                   }}
                 >
-                  {tile.value == null ? '—' : tile.value}
+                  {tile.value == null ? 'No data' : tile.value}
                 </div>
                 <div className="text-[10px]" style={{ color: cssVars['--ht-text-muted'] }}>
                   {tile.label}

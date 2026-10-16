@@ -30,7 +30,7 @@ NOTE = {
 }
 
 
-# ── what the model is shown ────────────────────────────────────────────────
+# what the model is shown
 
 
 def test_the_prompt_carries_the_passage_and_its_notes():
@@ -143,7 +143,7 @@ def test_a_passage_with_no_text_is_refused():
     assert "no text" in str(exc.value)
 
 
-# ── reading the answer out of whatever shape comes back ────────────────────
+# reading the answer out of whatever shape comes back
 
 
 def test_an_openai_reply_yields_its_content():
@@ -168,7 +168,7 @@ def test_an_empty_or_unknown_reply_yields_nothing(data):
     assert study_ask._extract_answer(data) == ""
 
 
-# ── the conversation with the gateway ──────────────────────────────────────
+# the conversation with the gateway
 
 
 class _Response:
@@ -309,7 +309,7 @@ async def test_no_failure_becomes_an_answer(monkeypatch, failure):
         )
 
 
-# ── the route, end to end against a stubbed gateway ────────────────────────
+# the route, end to end against a stubbed gateway
 
 
 def _patch_gateway(monkeypatch, answer: str = "It is about love."):
@@ -420,7 +420,7 @@ def test_the_route_needs_a_question(loaded_client: TestClient):
     assert resp.status_code == 422
 
 
-# ── depth and reference chips ──────────────────────────────────────────────
+# depth and reference chips
 
 
 def test_the_depth_changes_the_words_not_the_rules():
@@ -457,7 +457,7 @@ def test_an_unknown_depth_is_refused(loaded_client: TestClient):
     assert resp.status_code == 422
 
 
-# ── streaming ──────────────────────────────────────────────────────────────
+# streaming
 
 
 class _StreamResp:

@@ -6,8 +6,8 @@ How SharedLLM is tested, and what CI runs.
 
 | Workflow | Runs |
 |---|---|
-| `soa_tests.yml` | `pytest --collect-only` as a fast import gate, then the whole Python suite (`pytest`, roots from `pytest.ini`: `tests`, `services`, `test`) |
-| `ui-tests.yml` | UI lint (non-blocking), `npm run typecheck`, unit tests (vitest), `npm run build` |
+| `soa_tests.yml` | `ruff` syntax/undefined-name check on `services/gateway` and `pytest --collect-only` as a fast import gate, then the whole Python suite except `local_only`/`server_only` markers (roots from `pytest.ini`: `tests`, `services`, `test`) |
+| `ui-tests.yml` | UI lint (non-blocking), `npm run typecheck`, unit tests (`npm run test`, vitest), `npm run build` |
 | `e2e-tests.yml` | `tests/unit`, service contracts, `tests/integration` and the `tests/` end-to-end suite against a composed stack |
 | `build-images.yml` | builds and pushes every service image on push to `microservices` |
 | `android-build.yml` | builds the APK (published by `scripts/deploy_remote.sh`) |
@@ -21,10 +21,10 @@ python3 -m pytest -q                                                # everything
 cd services/ui && npx vitest run && npm run -s typecheck && npx eslint src
 ```
 
-Some suites skip when an optional dependency is missing locally (e.g.
+Some suites skip when an optional dependency is missing locally (for example
 `sqlite_vec` for RAG, `resemblyzer` for voice signatures); those run fully in
-the service images. `scripts/run_ci_unit_tests.sh` is a quick subset used by
-the Workspace Runtime's "unit tests" admin endpoint.
+the service images. `scripts/run_ci_unit_tests.sh` is a quick subset run by
+the Workspace Runtime's `/api/admin/tests/unit` endpoint.
 
 ## Live and integration tests
 

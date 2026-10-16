@@ -61,7 +61,7 @@ describe('Header profile menu', () => {
     mockUser = { username: 'jeremiah', is_admin: true };
   });
 
-  it('does not log out when the avatar is pressed — it opens a menu', () => {
+  it('does not log out when the avatar is pressed; it opens a menu', () => {
     renderHeader();
     fireEvent.click(screen.getByLabelText('Account menu'));
     expect(screen.getByTestId('profile-menu')).toBeTruthy();

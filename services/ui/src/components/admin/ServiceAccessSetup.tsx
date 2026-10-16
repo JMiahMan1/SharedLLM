@@ -10,7 +10,7 @@ const SERVICES: Array<{ id: Service; label: string; needsPassword: boolean; hint
     id: 'nextcloud',
     label: 'Nextcloud',
     needsPassword: false,
-    hint: 'Jarvis mints an app password for them — nothing to type',
+    hint: 'Jarvis mints an app password for them, nothing to type',
   },
   {
     id: 'home_assistant',
@@ -28,7 +28,7 @@ const SERVICES: Array<{ id: Service; label: string; needsPassword: boolean; hint
 
 /**
  * Onboarding helper: turn a service login into a long-lived token so nobody
- * has to keep a password in Jarvis. Nextcloud needs no password at all — the
+ * has to keep a password in Jarvis. Nextcloud needs no password at all; the
  * admin mints an app password. The typed password is sent once and discarded.
  */
 export default function ServiceAccessSetup({
@@ -119,7 +119,7 @@ export default function ServiceAccessSetup({
             autoFocus
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            placeholder={`${username}'s password — used once, not stored`}
+            placeholder={`${username}'s password (used once, not stored)`}
             aria-label={`${asking} password`}
             className="glass-input flex-1 px-2.5 py-1.5 text-[11px]"
           />

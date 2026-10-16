@@ -37,7 +37,7 @@ export default function VerseBanner() {
       <BookOpen size={15} className="shrink-0 text-amber-200" />
       <p className="min-w-0 flex-1 truncate text-[13px] text-slate-100">
         <span className="font-semibold text-amber-100">{verse.reference}</span>
-        <span className="text-slate-300"> — {verse.text}</span>
+        <span className="text-slate-300">: {verse.text}</span>
       </p>
       <button
         type="button"

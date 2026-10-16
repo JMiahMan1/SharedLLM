@@ -58,7 +58,7 @@ public final class HealthRingCalc {
      */
     public static Ring build(int steps, int goal, String formatted, boolean everRecorded) {
         if (!everRecorded) {
-            return new Ring(-1, false, "—", "No steps recorded yet");
+            return new Ring(-1, false, "-", "No steps recorded yet");
         }
         if (goal <= 0) {
             // Steps are known; only the target is missing. Show the number and

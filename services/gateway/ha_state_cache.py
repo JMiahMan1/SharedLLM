@@ -83,7 +83,7 @@ async def get_live_state(entity_id: str, execution_url: str, ha_url: str, ha_tok
     if cached is not None:
         return cached
 
-    # Cache miss — fetch live (reuse the gateway's shared pooled client)
+    # Cache miss: fetch live (reuse the gateway's shared pooled client)
     try:
         from services.gateway.main import get_http_client
 

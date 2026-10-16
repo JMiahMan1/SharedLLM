@@ -26,8 +26,7 @@ async def _call_identity(method: str, path: str, json_data: dict | None = None) 
         return await resp.json()
 
 
-# ─── Enrollment ────────────────────────────────────────────────────────────────
-
+# Enrollment
 async def handle_telemetry_enroll(req, user_context: UserContext) -> ExecutionResult:
     """Enroll a device in telemetry monitoring."""
     try:
@@ -81,8 +80,7 @@ async def handle_telemetry_list_enrolled() -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=str(e), service="telemetry")
 
 
-# ─── Snapshot Ingestion ────────────────────────────────────────────────────────
-
+# Snapshot Ingestion
 async def handle_telemetry_snapshot(req) -> ExecutionResult:
     """Ingest a telemetry snapshot for an enrolled device."""
     try:
@@ -104,8 +102,7 @@ async def handle_telemetry_snapshot(req) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=str(e), service="telemetry")
 
 
-# ─── Query ─────────────────────────────────────────────────────────────────────
-
+# Query
 async def handle_telemetry_query(req) -> ExecutionResult:
     """Query telemetry data for an enrolled device."""
     try:
@@ -141,8 +138,7 @@ async def handle_telemetry_summary(req) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=str(e), service="telemetry")
 
 
-# ─── LLM Pattern Analysis ──────────────────────────────────────────────────────
-
+# LLM Pattern Analysis
 async def handle_telemetry_analyze(req, user_context: UserContext) -> ExecutionResult:
     """Trigger LLM pattern analysis for enrolled devices."""
     try:

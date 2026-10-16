@@ -309,8 +309,8 @@ export interface CompanionDevice {
 /**
  * One usage event a device reported, with whatever small scalars it carried.
  *
- * Every event comes from the no-opt-in allowlist, so this is activity — an app
- * open, a battery reading, a step count — and never anything the device heard
+ * Every event comes from the no-opt-in allowlist, so this is activity (an app
+ * open, a battery reading, a step count) and never anything the device heard
  * or saw.
  */
 export interface DeviceEventRead {
@@ -665,9 +665,9 @@ export interface PullAndRestartResult {
 export interface ImageUpdateCheck {
   service: string;
   image: string;
-  /** Local image RepoDigest (sha256:...) — may be null if image was built locally */
+  /** Local image RepoDigest (sha256:...); may be null if image was built locally */
   current_digest: string | null;
-  /** Remote manifest digest fetched from registry — null if auth failed or unreachable */
+  /** Remote manifest digest fetched from registry; null if auth failed or unreachable */
   remote_digest: string | null;
   has_update: boolean;
   /** Set when the comparison could not be completed (e.g. no_image_tag, digest_unavailable) */
@@ -1028,7 +1028,7 @@ export interface NetworkScanResponse {
 
 /**
  * A trip endpoint as stored by the geo service
- * (`{"name", "latitude", "longitude"}` — services/geo/main.py).
+ * (`{"name", "latitude", "longitude"}`, services/geo/main.py).
  * `lat`/`lon`/`zone` are the legacy spelling, still tolerated on read.
  */
 export interface TripLocation {
@@ -1310,7 +1310,7 @@ export interface TimelineResponse {
   user_id: string;
   /** The window that was requested. */
   window_days: number;
-  /** How many day groups came back — NOT the same as window_days. */
+  /** How many day groups came back; NOT the same as window_days. */
   day_count: number;
   groups: TimelineDay[];
   total_events: number;
@@ -1353,7 +1353,7 @@ export interface ActivityTrendsResponse {
 
 export type ActivityWindow = 'today' | 'week' | 'month';
 
-/** One person's opt-in shared activity — only the scopes they chose appear. */
+/** One person's opt-in shared activity; only the scopes they chose appear. */
 export interface SharedActivityUser {
   username: string;
   window: string;
@@ -1516,7 +1516,7 @@ export interface TelemetryNotification {
 }
 
 
-// ── Bible (services/bible) ───────────────────────────────────────────────────
+// Bible (services/bible)
 
 export interface BibleVersionInfo {
   code: string;
@@ -2130,7 +2130,7 @@ export interface BibleDailyResponse {
   memory_due?: number;
 }
 
-// ── Reading aloud ───────────────────────────────────────────────────────────
+// Reading aloud
 
 export interface BibleVoicesResponse {
   voices: string[];
@@ -2190,7 +2190,7 @@ export interface BibleNarrationChunk {
   audio_base64: string;
 }
 
-// ── Bible imports (Admin › Bible) ───────────────────────────────────────────
+// Bible imports (Admin › Bible)
 
 export type BibleImportKind = 'json' | 'pdf' | 'epub';
 

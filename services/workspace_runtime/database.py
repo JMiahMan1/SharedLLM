@@ -31,7 +31,7 @@ if _is_sqlite:
     _engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
 if _is_memory:
     # An in-memory SQLite database lives inside a single connection, so the
-    # default pool hands every caller its own empty database — tables created
+    # default pool hands every caller its own empty database, so tables created
     # by init_db() are then invisible to the next request ("no such table").
     # StaticPool keeps one shared connection so the schema persists.
     from sqlalchemy.pool import StaticPool

@@ -1,4 +1,4 @@
-"""GET /metrics/ranges — event-metric history, under the same consent gate.
+"""GET /metrics/ranges: event-metric history, under the same consent gate.
 
 The consent tests are the point of this file. A new read route on geo is
 exactly where a sharing check can be quietly skipped, and the failure is

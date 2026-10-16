@@ -6,7 +6,7 @@ took longer than 2s was dropped. A drop is not surfaced as an error: the resolve
 returns nothing, Docker's embedded resolver turns that into SERVFAIL, and the
 calling service sees "Temporary failure in name resolution". That is how ABS and
 Music Assistant came to look "down" from inside containers while both were
-running — the symptom had nothing to do with either service.
+running; the symptom had nothing to do with either service.
 
 The fix makes the timeout ``DNS_UPSTREAM_TIMEOUT`` (env-overridable, like the
 other knobs in that file) with a 5s default.
@@ -162,7 +162,7 @@ class TestSlowUpstreamStillResolves:
         assert records
 
     def test_a_dead_upstream_still_fails_rather_than_hanging(self):
-        """The budget must remain bounded — no unbounded wait."""
+        """The budget must remain bounded, with no unbounded wait."""
         dns = _load_dns({"DNS_UPSTREAM_TIMEOUT": "0.3"})
         client = dns._DNSClient("127.0.0.1", port=1)  # nothing listening
         t0 = time.time()

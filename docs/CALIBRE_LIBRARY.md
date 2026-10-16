@@ -37,13 +37,13 @@ provider kind therefore routes it into its own RAG collection with **no change t
 
 | Setting | Where | Meaning |
 |---|---|---|
-| `calibre_library_path` | Identity `GlobalSetting`, Admin > Settings | Library root inside Nextcloud, e.g. `/Books/Text` |
+| `calibre_library_path` | Identity `GlobalSetting`, Admin > LLM & Settings | Library root inside Nextcloud, e.g. `/Books/Text` |
 
 Blank is a **refusal**, not a fallback. A guessed library path would index the wrong shelf and say
 nothing. The request may also carry `library_path` explicitly, which takes precedence.
 
-Nextcloud credentials are the caller's existing ones — the Calibre provider reuses the same
-`_resolve_nextcloud_settings` path, so there is no separate credential to configure.
+Nextcloud credentials are the caller's existing ones: the gateway passes them to storage, and the
+Calibre provider reuses the same `_resolve_nextcloud_settings` path (`services/storage/providers.py`), so there is no separate credential to configure.
 
 ## Triggering a crawl
 
@@ -61,7 +61,7 @@ Raven's prompt as `(Source: The Faithful Promiser, 31st Day.)`, appended after t
 ## Why sections, not chunks
 
 `chunk_text` is a fixed 1000-character window, so a book indexed that way yields citations like
-"chunk 412" — technically true and useless to a reader. `services/common/epub_text.py` reads the
+"chunk 412", technically true and useless to a reader. `services/common/epub_text.py` reads the
 OPF spine and then splits each document on its **own heading structure**, choosing the level with the
 most headings at a depth no deeper than `h4`.
 
@@ -70,13 +70,13 @@ is a *single* spine document with one `h1` and thirty-one `h2` day markers. Spin
 gives one 50,000-character "chapter"; heading-aware sectioning gives thirty-two named sections.
 
 Every value written to chunk metadata is a scalar, because `/rag/sync/files` coerces non-scalars with
-`str()` — a list arrives back as a quoted string.
+`str()`, so a list would arrive back as a quoted string.
 
 ## The Bible shelf as a second consumer
 
 The same shelf is also a **source of Bible translations and study Bibles**. The
 RAG index above reads `metadata.db` and derives searchable sections; the Bible
-importer needs the opposite — the raw bytes of one file, to extract verses and
+importer needs the opposite: the raw bytes of one file, to extract verses and
 commentary from it. Both consumers share one setting and one WebDAV path, and
 neither of them writes to the library.
 
@@ -99,7 +99,7 @@ BibleVersion + BibleVerse + StudyNote rows in bible.db
 
 | Piece | Location | Why here |
 |---|---|---|
-| `StorageProvider.get_bytes(path)` | `services/storage/providers.py` | `get_content` decodes bytes as text, so a PDF or EPUB comes back as a string of replacement characters rather than an error — anything reading it then works from confident mojibake. `get_bytes` returns the real bytes, and returns `None` for "this provider cannot give you bytes", which is a different answer from "the file was empty" |
+| `StorageProvider.get_bytes(path)` | `services/storage/providers.py` | `get_content` decodes bytes as text, so a PDF or EPUB comes back as a string of replacement characters rather than an error, and anything reading it then works from confident mojibake. `get_bytes` returns the real bytes, and returns `None` for "this provider cannot give you bytes", which is a different answer from "the file was empty" |
 | `NextcloudStorageProvider.get_bytes` | `services/storage/providers_impl/nextcloud.py` | `NextCloudClient.get_file_bytes`, whose own docstring warns about `get_file_content` |
 | `CalibreStorageProvider.get_bytes` | `services/storage/providers_impl/calibre.py` | Returns the shelf entry's extracted text as UTF-8 bytes (the entry *is* a `.txt` document), so `/providers/fetch` works for callers like Raven's `fetch_text`; a book with no extracted text (PDF-only) returns `None`, keeping the honest "cannot read as bytes" refusal |
 | `ProviderFetchRequest` | `services/storage/models.py` | `provider`, `path`, `max_bytes` |
@@ -117,7 +117,7 @@ different fixes:
 |---|---|
 | **413** | The file is larger than `max_bytes`. Both numbers are named. A silently shortened EPUB would look to an importer like a complete one that ends early, so this is refused rather than truncated |
 | **502** | `get_bytes` returned `None`. Names the path and lists all three causes: missing file, wrong credentials, provider cannot return binary |
-| **422** | `max_bytes <= 0` — a ceiling of zero is a mistake, not a request for nothing |
+| **422** | `max_bytes <= 0`: a ceiling of zero is a mistake, not a request for nothing |
 
 ### Bible shelf configuration
 
@@ -127,16 +127,17 @@ folder, and blank is a refusal for both consumers rather than a guess that
 reports the wrong shelf as an empty library.
 
 The bible service reads it **from Identity at call time**, so pointing it at a
-new shelf in Admin › Settings takes effect without a restart; the storage
-service's index reads it through `resolve_runtime_config()`, which does need one.
+new shelf in Admin > LLM & Settings takes effect without a restart. The
+gateway's `POST /api/storage/index` also reads it from Identity on every
+request, so a new path applies to the next crawl without a restart either.
 
 ## What is deliberately not supported
 
 - **Writes.** `write_content` returns a refusal. `metadata.db` belongs to Calibre.
 - **PDF and DOCX text.** Only `EPUB`, `AZW3`, `MOBI` and `FB2` are extracted. A PDF-only book still
   appears as a searchable metadata row rather than a failure, and nothing pretends its bytes are text.
-  (The Bible importer is the exception, because it has its own PDF reader — see
-  `services/bible/pdf_import.py` — and it refuses a PDF whose chapter counts do not match the canon.)
+  (The Bible importer is the exception, because it has its own PDF reader (see
+  `services/bible/pdf_import.py`), and it refuses a PDF whose chapter counts do not match the canon.)
 - **Calibre-Web's `/cdb/cmd`.** That endpoint executes arbitrary `calibredb` commands, which is a
   shell on the library. Use `calibredb` deliberately, not by proxy.
 - **Annotations and reading progress.** The schema carries both tables; neither is read yet.
@@ -149,6 +150,10 @@ service's index reads it through `resolve_runtime_config()`, which does need one
   where it stopped instead of re-fetching all 3,000 books. Unset, the path is refused rather than
   guessed: checkpoints stop persisting and the service logs a one-time warning naming the setting.
 - **A full-library crawl is long.** Scope it with `path` (e.g. one author folder) or `force=false`.
+- **A scoped crawl only purges inside its own scope.** After a crawl, chunks whose file has
+  vanished are removed, but only for paths inside the scanned `path` (and, when `recursive` is false,
+  only its direct children). Books elsewhere in the index were never looked at and are left alone
+  (`_purge_stale_paths` and `_within_scope` in `services/storage/main.py`).
 - The library directory is skipped by `GLOBAL_SKIP_LIST` only for entries that carry provider
   metadata; a book under an author folder named `lib` is still indexed, and a skip that did happen
   would be logged rather than silent.

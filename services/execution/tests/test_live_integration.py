@@ -1,4 +1,4 @@
-"""LIVE integration tests — hit actual services running on the server (192.168.2.205).
+"""LIVE integration tests: hit actual services running on the server (192.168.2.205).
 No mocks. These tests validate real HTTP communication with each service."""
 import os
 
@@ -6,7 +6,7 @@ import os
 import httpx
 import pytest
 
-# Service endpoints — resolved via Identity at runtime, but seeded for tests
+# Service endpoints are resolved via Identity at runtime, but seeded for tests
 IDENTITY_URL = os.getenv("IDENTITY_SVC_URL", "http://localhost:8001")
 EXECUTION_URL = os.getenv("EXECUTION_SVC_URL", "http://localhost:8003")
 GATEWAY_URL = os.getenv("GATEWAY_SVC_URL", "http://localhost:8002")
@@ -18,7 +18,7 @@ INTERNAL_HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
 
 
 def _get_user_credentials(username: str = "jeremiah") -> dict:
-    """Resolve user credentials from the Identity service — the single source of truth."""
+    """Resolve user credentials from the Identity service, the single source of truth."""
     with httpx.Client(timeout=10.0) as client:
         resp = client.post(
             f"{IDENTITY_URL}/api/resolve",
@@ -125,7 +125,7 @@ async def test_identity_resolve_by_api_key_live():
     # The credentials dict may contain api_key or api_key_enc
     # Try resolving with the plaintext api_key if available
     async with httpx.AsyncClient(timeout=10.0) as client:
-        # We need the actual api_key — fetch it via the identity endpoint
+        # We need the actual api_key; fetch it via the identity endpoint
         resolve_resp = await client.post(
             f"{IDENTITY_URL}/api/resolve",
             json={"user": "jeremiah"},
@@ -202,7 +202,7 @@ async def test_execution_light_endpoint_live():
             },
             headers=INTERNAL_HEADERS,
         )
-    # Endpoint must respond — status could be SUCCESS/FAILURE but must be JSON
+    # Endpoint must respond; status could be SUCCESS/FAILURE but must be JSON
     assert resp.status_code == 200
     data = resp.json()
     assert "status" in data
@@ -500,7 +500,7 @@ async def test_execution_ltm_search_endpoint_live():
             },
             headers=INTERNAL_HEADERS,
         )
-    # May 404 if LTM not configured — endpoint just needs to respond
+    # May 404 if LTM not configured; endpoint just needs to respond
     assert resp.status_code in (200, 404, 501)
     if resp.status_code == 200:
         data = resp.json()
@@ -530,7 +530,7 @@ async def test_gateway_media_status_proxy_live():
             json={},
             headers=INTERNAL_HEADERS,
         )
-    # Gateway resolves identity internally and proxies — should succeed
+    # Gateway resolves identity internally and proxies; should succeed
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "SUCCESS"
@@ -615,13 +615,13 @@ async def test_identity_resolve_multiple_users_exist_live():
     data1 = resp1.json()
     assert data1["credentials"]["user"] == "jeremiah"
 
-    # The system should have at least 2 users — verify by resolving user_id 2 if exists
+    # The system should have at least 2 users; verify by resolving user_id 2 if exists
     resp2 = await client.post(
         f"{IDENTITY_URL}/api/resolve",
         json={"user_id": 2},
         headers=INTERNAL_HEADERS,
     )
-    # Either it exists (200) or doesn't (404) — both are valid behaviors
+    # Either it exists (200) or doesn't (404); both are valid behaviors
     assert resp2.status_code in (200, 404)
     if resp2.status_code == 200:
         data2 = resp2.json()
@@ -676,7 +676,7 @@ async def test_execution_discovery_entities_live():
             f"{EXECUTION_URL}/discovery/entities",
             headers=INTERNAL_HEADERS,
         )
-    # May return empty list if no HA entities indexed — just needs to succeed
+    # May return empty list if no HA entities indexed; just needs to succeed
     assert resp.status_code == 200
     data = resp.json()
     assert "status" in data

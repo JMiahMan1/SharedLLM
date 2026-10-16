@@ -197,8 +197,7 @@ def test_announce_with_device_name(mocker):
     assert resp.status_code == 200
 
 
-# ─── STT transcribe_workspace (audiobook verification) ────────────────────────
-
+# STT transcribe_workspace (audiobook verification)
 def test_transcribe_workspace_missing_file_path():
     resp = client.post(
         "/execute/stt/transcribe_workspace",

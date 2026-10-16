@@ -198,7 +198,7 @@ async def verify_entity_access(ctx, entity_id: str) -> bool:
     if perms is None:
         log.warning(
             "Access check for %s on %s: ALLOW (Identity unreachable and no cached "
-            "permissions) — entity protection cannot be enforced right now",
+            "permissions); entity protection cannot be enforced right now",
             username,
             entity_id,
         )

@@ -2,8 +2,8 @@
 
 The UI reaches Identity through the gateway, so both the read and the
 admin-only write need a route. These tests assert the exact upstream method,
-path, body, the forwarded Authorization header, and — because the id is
-spliced into a URL — that it is percent-encoded on the way out.
+path, body, the forwarded Authorization header, and (because the id is
+spliced into a URL) that it is percent-encoded on the way out.
 """
 import json
 from contextlib import asynccontextmanager

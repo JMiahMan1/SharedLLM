@@ -85,7 +85,7 @@ _EVERY_RE = re.compile(r"every\s+(\d+)\s*(minute|min|hour|hr|day|week)s?", re.IG
 def _next_recurrence(prev: datetime, recurrence: str) -> datetime:
     """Next occurrence after ``prev`` (UTC-aware) for a free-form rule string.
 
-    Falls back to a daily advance when the rule text isn't recognized — a
+    Falls back to a daily advance when the rule text isn't recognized: a
     wrong-but-bounded interval beats an unbounded refire storm.
     """
     rule = (recurrence or "").strip().lower()
@@ -127,7 +127,7 @@ def _next_recurrence(prev: datetime, recurrence: str) -> datetime:
         except Exception:
             step = timedelta(days=1)
     else:
-        # daily / every day / weekdays / unknown — advance one day.
+        # daily / every day / weekdays / unknown: advance one day.
         # (weekday-only refinement intentionally not attempted on unknown text.)
         step = timedelta(days=1)
 
@@ -489,7 +489,7 @@ async def scheduler_loop():
         await asyncio.sleep(sleep_s)
 
 
-# ── HTTP surface ────────────────────────────────────────────────────────────
+# HTTP surface
 # The scheduler used to be a bare script, so nothing could observe it. These
 # endpoints make the schedule inspectable and give scheduled jobs a status
 # channel without touching the dispatch hot path.

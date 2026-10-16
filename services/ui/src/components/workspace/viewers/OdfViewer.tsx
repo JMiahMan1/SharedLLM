@@ -5,7 +5,7 @@ import { api } from '../../../services/api';
 import toast from 'react-hot-toast';
 import { WordProcessorToolbar } from './WordProcessorToolbar';
 
-// ── ODF namespaces (OpenDocument 1.2) ────────────────────────────────────────
+// ODF namespaces (OpenDocument 1.2)
 const NS = {
   office: 'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
   text: 'urn:oasis:names:tc:opendocument:xmlns:text:1.0',
@@ -140,7 +140,7 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
     [onDirtyChange],
   );
 
-  // ── Serialization helpers ────────────────────────────────────────────────────
+  // Serialization helpers
 
   const makeEl = (doc: Document, ns: string, name: string, attrs: Record<string, string> = {}) => {
     const el = doc.createElementNS(ns, name);
@@ -319,7 +319,7 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
 
   useImperativeHandle(ref, () => ({ save }), [save]);
 
-  // ── Parsing: ODF zip → editable HTML ────────────────────────────────────────
+  // Parsing: ODF zip → editable HTML
 
   useEffect(() => {
     let cancelled = false;
@@ -480,7 +480,7 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
             wrap.className = 'mb-5';
             const caption = document.createElement('p');
             caption.className = 'text-[10px] uppercase tracking-wider text-slate-500 mb-1';
-            caption.textContent = `Slide ${pi + 1}${page.getAttribute(localNameOf('name')) ? ` — ${page.getAttribute(localNameOf('name'))}` : ''}`;
+            caption.textContent = `Slide ${pi + 1}${page.getAttribute(localNameOf('name')) ? `: ${page.getAttribute(localNameOf('name'))}` : ''}`;
             wrap.appendChild(caption);
             Array.from(page.getElementsByTagNameNS(NS.text, 'p')).forEach((pEl) => {
               const p = document.createElement('p');
@@ -511,7 +511,7 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
     parsedHtmlRef.current = null;
   });
 
-  // ── Toolbar commands ─────────────────────────────────────────────────────────
+  // Toolbar commands
 
   const exec = (command: string, value?: string) => {
     editorRef.current?.focus();
@@ -556,7 +556,7 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
         <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
           <FileType2 size={14} className="text-indigo-400" />
           <span className="text-xs text-slate-400">
-            {docTypeRef.current === 'spreadsheet' ? 'Spreadsheet — read-only preview' : 'Presentation — read-only preview'}
+            {docTypeRef.current === 'spreadsheet' ? 'Spreadsheet (read-only preview)' : 'Presentation (read-only preview)'}
           </span>
         </div>
       )}

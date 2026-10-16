@@ -7,8 +7,8 @@ The pattern this encodes, first used by Execution's entity-permission lookup:
     discards a decision the operator deliberately made. Instead, keep the last
     value that was actually read and serve that when the fetch fails.
 
-This is only appropriate for *configuration* — settings, permissions,
-capability lists — where the value is (a) expensive or impossible to recompute
+This is only appropriate for *configuration* (settings, permissions,
+capability lists), where the value is (a) expensive or impossible to recompute
 locally, (b) stable between changes, and (c) safe to serve slightly stale.
 Never use it for anything an operator expects a failure to surface.
 

@@ -501,7 +501,7 @@ async def search_library_items(
 
 
 async def get_author(abs_url: str, abs_api_key: str, author_id: str, include: str | None = None) -> dict:
-    """GET /api/authors/:id — ``include="items"`` returns the author's libraryItems."""
+    """GET /api/authors/:id: ``include="items"`` returns the author's libraryItems."""
     params = {"include": include} if include else None
     return await abs_get(abs_url, abs_api_key, f"/api/authors/{author_id}", params=params)
 
@@ -524,7 +524,7 @@ async def get_library_series(abs_url: str, abs_api_key: str, library_id: str) ->
 async def get_user_playlists(abs_url: str, abs_api_key: str, library_id: str) -> dict:
     """Get user's playlists for a library.
 
-    ABS mounts this router under ``/api``; verified live — with a working key,
+    ABS mounts this router under ``/api``; verified live: with a working key,
     ``/api/libraries/{id}/playlists`` returns 200 and the bare path 404s.
     """
     return await abs_get(abs_url, abs_api_key, f"/api/libraries/{library_id}/playlists")
@@ -536,7 +536,7 @@ async def get_podcast_episode(
     """Get details for a specific podcast episode.
 
     Unused, and ABS 2.x does not expose episodes as standalone items
-    (``GET /api/items/{episodeId}`` is a 404 — see
+    (``GET /api/items/{episodeId}`` is a 404; see
     ``docs/MEDIA_UPSTREAM_API_NOTES.md``); episodes come from the expanded
     podcast's ``media.episodes``. Left as found rather than pointed at a route
     that would still not work.

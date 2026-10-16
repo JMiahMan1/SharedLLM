@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install system deps once — common tools for all containers
+# Install system deps once: common tools for all containers
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -37,10 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# CPU-only PyTorch (no CUDA libs) — needed by RAG/gateway for embedding models
+# CPU-only PyTorch (no CUDA libs), needed by RAG/gateway for embedding models
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# Heavy ML/vector packages (fastembed, onnxruntime) — only needed by RAG and gateway
+# Heavy ML/vector packages (fastembed, onnxruntime), only needed by RAG and gateway
 # Installing in base so they're cached across all service builds
 RUN pip install --no-cache-dir \
     fastembed \
@@ -82,7 +82,7 @@ RUN pip install --no-cache-dir \
     html2text \
     && playwright install --with-deps chromium
 
-# Testing and dev tools — available in all containers for debugging
+# Testing and dev tools, available in all containers for debugging
 RUN pip install --no-cache-dir \
     pytest \
     pytest-asyncio \

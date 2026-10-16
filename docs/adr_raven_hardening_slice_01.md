@@ -21,8 +21,8 @@ These gaps made long-running repair tasks fragile and increased the risk of secr
 
 We will harden the current architecture in-place with three immediate controls:
 
-1. Raven jobs use Redis lease-based processing with recovery and dead-letter behavior.
-2. The logging service sanitizes secrets server-side and requires the internal secret for log writes and clears.
+1. Raven jobs use Redis lease-based processing with recovery and dead-letter behavior (`InferenceJobQueue` in `services/gateway/messaging.py`).
+2. The logging service sanitizes secrets server-side (`sanitize_log_payload` in `services/logging/main.py`) and requires the internal secret for log writes and clears.
 3. The legacy execution layer blocks mutating shell commands and blocks autonomous git mutation workflows in favor of the workspace runtime review workflow.
 
 ## Consequences

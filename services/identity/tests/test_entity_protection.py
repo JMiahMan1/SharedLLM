@@ -93,7 +93,7 @@ def _permissions(client: TestClient, username: str) -> dict:
     return resp.json()
 
 
-# ── the admin surface ─────────────────────────────────────────────────────────
+# the admin surface
 
 
 def test_locking_an_entity_records_the_permit_list(client: TestClient):
@@ -155,7 +155,7 @@ def test_locking_rejects_an_empty_entity_id(client: TestClient, session: Session
 
 
 def test_the_locked_entity_is_exactly_the_one_in_the_path(client: TestClient, session: Session):
-    """Whatever the path resolves to is the entity that gets locked — no more.
+    """Whatever the path resolves to is the entity that gets locked, no more.
 
     A ``..`` segment is resolved by URL normalisation before the request is
     even sent, so the server receives ``/api/entity-protection/light.kitchen``
@@ -177,14 +177,14 @@ def test_the_locked_entity_is_exactly_the_one_in_the_path(client: TestClient, se
 
 
 def test_a_partially_shaped_entity_id_is_rejected(client: TestClient, session: Session):
-    """A dot is not enough — the id has to look like ``domain.object_id``."""
+    """A dot is not enough: the id has to look like ``domain.object_id``."""
     for bad in (".hallway", "climate.", "Hallway Thermostat.x", "climate.Hall-Way"):
         resp = _lock(client, bad)
         assert resp.status_code == 400, bad
     assert session.exec(select(EntityProtection)).all() == []
 
 
-# ── only admins may manage protection ─────────────────────────────────────────
+# only admins may manage protection
 
 
 def test_a_normal_user_cannot_lock_an_entity(client: TestClient, session: Session):
@@ -235,7 +235,7 @@ def test_a_valid_api_key_without_admin_rights_is_forbidden_not_unauthorised(
     assert _lock(client, "climate.hallway").status_code == 403
 
 
-# ── what the internal endpoint reports ────────────────────────────────────────
+# what the internal endpoint reports
 
 
 def test_a_lock_is_reported_as_a_lock_not_as_a_grant(client: TestClient):
@@ -292,7 +292,7 @@ def test_a_non_list_permit_list_also_fails_loudly(client: TestClient, session: S
     assert client.get("/api/entity-protection").status_code == 500
 
 
-# ── the assignment hole this feature depends on being closed ─────────────────
+# the assignment hole this feature depends on being closed
 
 
 def test_a_normal_user_cannot_assign_a_device_to_themselves(client: TestClient, session: Session):

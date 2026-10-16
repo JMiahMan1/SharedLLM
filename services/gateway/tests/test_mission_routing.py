@@ -27,7 +27,7 @@ def test_is_raven_intent_keywordless_prompt_is_false():
 
 def test_is_raven_intent_colon_prefixed_prompt_is_false():
     # Regression: legacy `":" in query[:15]` clause re-opened the false-trigger
-    # door — e.g. "Note: ...", "Q: ...", "Hey: ..." dispatched missions through
+    # door, e.g. "Note: ...", "Q: ...", "Hey: ..." dispatched missions through
     # the OpenAI/Ollama chat endpoints and surfaced model_config_error when the
     # mission dispatch failed. Only EXPLICIT Raven invocations may trigger.
     for q in (

@@ -12,7 +12,7 @@ import Admin from '../pages/Admin';
  * The grant is only *half* a feature: the ledger write lands in Jarvis and then
  * mirrors to the recipient's Skylight account, and those two can disagree. So
  * what is pinned here is that the admin surface asks who the stars are for
- * before offering a form at all — a stars panel that defaults to the first user
+ * before offering a form at all. A stars panel that defaults to the first user
  * in the list is a panel that will eventually award stars to the wrong person.
  */
 describe('admin bonus stars', () => {

@@ -3,7 +3,7 @@
 `play_music` (services/execution/handlers/media.py) had two fallbacks that
 silently played *something else* when the MASS search found nothing:
 
-1. `get_library` with `order_by=random` — a random track from the library.
+1. `get_library` with `order_by=random`: a random track from the library.
 2. a last-resort `play_media` with the raw query as `media_id` (which MA
    rejects for plain text).
 
@@ -15,7 +15,7 @@ every `music_assistant.play_media` call. The HA service's `enqueue` field
 accepts `play|replace|next|replace_next|add` (verified 2026-09-27 against
 HA core `music_assistant/services.yaml`, cached in
 `.tmp/ha_music_assistant_services.yaml`), and the schema's
-`add|next|replace` values all map 1:1 — so the request's `enqueue` must pass
+`add|next|replace` values all map 1:1, so the request's `enqueue` must pass
 through unchanged (replace keeps its clear-queue semantics instead of
 degrading to plain play).
 """

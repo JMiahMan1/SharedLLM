@@ -98,7 +98,7 @@ describe('checkApkUpdate', () => {
   });
 
   // A browser is not running an APK, so there is no honest build number to
-  // quote — and "build 1" was previously being displayed as if it were real.
+  // quote, and "build 1" was previously being displayed as if it were real.
   it('reports no running build number in a browser rather than inventing one', async () => {
     mocks.isNative.mockReturnValue(false);
     mocks.get.mockResolvedValue({ data: remote() });

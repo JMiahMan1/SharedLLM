@@ -30,7 +30,7 @@ public class VerseWidget extends AppWidgetProvider {
         views.setOnClickPendingIntent(R.id.verse_refresh, WidgetUpdater.refreshPendingIntent(context));
 
         if (WidgetApi.apiKey(context) == null) {
-            views.setTextViewText(R.id.verse_text, "—");
+            views.setTextViewText(R.id.verse_text, "-");
             views.setTextViewText(R.id.verse_sub, "Sign in to Jarvis OS");
             return views;
         }
@@ -44,7 +44,7 @@ public class VerseWidget extends AppWidgetProvider {
             String sub = message.toLowerCase().contains("no bible text is imported")
                 ? "No Bible text imported on the server"
                 : VerseDaily.oneLine(message);
-            lines = new VerseDaily.Lines("", "—", sub, "", message);
+            lines = new VerseDaily.Lines("", "-", sub, "", message);
         }
 
         views.setTextViewText(R.id.verse_reference, lines.reference);

@@ -116,9 +116,7 @@ def _occurrences(ve, lo: datetime, hi: datetime) -> list[tuple[datetime, datetim
     return out
 
 
-# ── Integration resolution (runtime-derived, never hardcoded) ──────────────
-
-
+# Integration resolution (runtime-derived, never hardcoded)
 # Cache last-known Skylight configuration so a transient identity/host blip
 # (which makes resolve_first_user() throw) doesn't silently disable Skylight.
 _SKYLIGHT_CONFIG_CACHE: dict = {"enabled": None, "ts": 0.0}
@@ -189,7 +187,7 @@ async def _resolve_calendar_integrations(req: CalendarRequest, availability: dic
 
 
 def _default_integration(integrations: list[dict], settings: dict) -> tuple[str | None, bool]:
-    """Pick the default integration — runtime-derived, never hardcoded.
+    """Pick the default integration: runtime-derived, never hardcoded.
 
     - explicit stored default (if still enabled)
     - else auto-default to the ONLY enabled calendar integration
@@ -211,8 +209,7 @@ def _default_integration(integrations: list[dict], settings: dict) -> tuple[str 
     return enabled[0]["type"], True
 
 
-# ── Per-integration readers (each returns normalized event dicts) ──────────
-
+# Per-integration readers (each returns normalized event dicts)
 # Normalized event shape consumed by UpcomingEventsWidget.parseEvent plus an
 # `integration` tag for the merged-agenda UI:
 #   { integration, summary, start_time(ISO-8601), end_time?, location?, calendar? }
@@ -445,9 +442,7 @@ async def _read_ical(req: CalendarRequest, lo, hi) -> list[dict]:
     return out
 
 
-# ── Action handlers ────────────────────────────────────────────────────────
-
-
+# Action handlers
 async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
     action = req.action
     log.info(f"[calendar] Action: {action} for user: {req.user_context.user}")
@@ -513,7 +508,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
             # Per-integration liveness. A source is "hard" down when its read
             # raised or timed out. It is "soft" down when the read succeeded but
             # returned nothing AND this source normally carries events (it had
-            # some within the last day) — a blip that yields an empty payload
+            # some within the last day): a blip that yields an empty payload
             # instead of an error. A genuinely empty calendar (no recent data)
             # is left alone so we never cry wolf on a quiet period.
             availability: dict = {}

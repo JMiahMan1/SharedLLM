@@ -92,7 +92,7 @@ async def test_the_dream_block_is_dropped_when_curriculum_is_dropped(settings):
 
     context = await _context(session, include_curriculum=False)
 
-    assert "[DREAM —" not in context
+    assert "[DREAM:" not in context
     assert not any("dream/pending" in url for url in session.got)
 
 
@@ -101,7 +101,7 @@ async def test_the_dream_block_still_ships_with_the_curriculum(settings):
 
     context = await _context(session, include_curriculum=True)
 
-    assert "[DREAM — VALIDATE ON NEXT MISSION" in context
+    assert "[DREAM: VALIDATE ON NEXT MISSION" in context
     assert "lesson-abc" in context
     assert any("dream/pending" in url for url in session.got)
 
@@ -160,7 +160,7 @@ def test_the_dream_block_sits_inside_the_curriculum_guard():
 
     curriculum_guard = source.index("if not skip_curriculum:")
     dream_guard = source.index("if not skip_curriculum and (workspace_id")
-    block = source.index("[DREAM — VALIDATE ON NEXT MISSION")
+    block = source.index("[DREAM: VALIDATE ON NEXT MISSION")
 
     assert curriculum_guard < dream_guard < block
     assert source.count("if not skip_curriculum") == 2

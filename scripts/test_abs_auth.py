@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Debug Audiobookshelf login flow — test with stored credentials."""
+"""Debug Audiobookshelf login flow: test with stored credentials."""
 import asyncio
 import os
 import sys
@@ -57,7 +57,7 @@ async def test():
                 else:
                     print(f"\nWARN: No token in response. Keys: {list(data.keys())}")
             elif resp.status_code == 401:
-                print("\nERROR: 401 Unauthorized — credentials rejected by server")
+                print("\nERROR: 401 Unauthorized: credentials rejected by server")
                 # Try with different formats
                 print("\n--- Trying alternative formats ---\n")
 

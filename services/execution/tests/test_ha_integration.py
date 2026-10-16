@@ -20,8 +20,7 @@ from services.execution.main import app
 
 client = TestClient(app)
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
+# Helpers
 async def resolve_default_user():
     """Resolve default user credentials for real HA testing."""
     return await main.resolve_internal_user(rag_user="default")
@@ -49,8 +48,7 @@ async def call_ha_service(domain: str, service: str, entity_id: str, data: dict,
     return await ha_client_module.call_service(ha_url, ha_token, domain, service, entity_id, data)
 
 
-# ─── Fixtures ─────────────────────────────────────────────────────────────────
-
+# Fixtures
 @pytest.fixture(scope="module")
 def ha_credentials():
     """Get HA credentials from identity service."""
@@ -69,8 +67,7 @@ def ha_connection(ha_credentials):
     return ha_credentials["ha_url"], ha_credentials["ha_token"]
 
 
-# ─── Light Control Tests ─────────────────────────────────────────────────────
-
+# Light Control Tests
 class TestLightControl:
     """Test light control with state verification."""
 
@@ -168,8 +165,7 @@ class TestLightControl:
         await call_ha_service("light", "turn_off", test_light, {}, ha_url, ha_token)
 
 
-# ─── Media Player Tests ──────────────────────────────────────────────────────
-
+# Media Player Tests
 class TestMediaPlayer:
     """Test media player functionality with state verification."""
 
@@ -244,8 +240,7 @@ class TestMediaPlayer:
         assert "playing" in detail or "idle" in detail or "all" in detail
 
 
-# ─── Entity Search Tests ─────────────────────────────────────────────────────
-
+# Entity Search Tests
 class TestEntitySearch:
     """Test entity search functionality."""
 
@@ -295,8 +290,7 @@ class TestEntitySearch:
         assert len(result["detail"]["entities"]) == 0
 
 
-# ─── HA Service Call Tests ───────────────────────────────────────────────────
-
+# HA Service Call Tests
 class TestHAServiceCall:
     """Test direct HA service calls."""
 
@@ -337,8 +331,7 @@ class TestHAServiceCall:
         await call_ha_service("light", "turn_off", test_light, {}, ha_url, ha_token)
 
 
-# ─── Discovery Tests ─────────────────────────────────────────────────────────
-
+# Discovery Tests
 class TestDiscovery:
     """Test device discovery endpoints."""
 
@@ -366,8 +359,7 @@ class TestDiscovery:
         assert len(result["control_methods"]) > 0
 
 
-# ─── Logbook Tests ───────────────────────────────────────────────────────────
-
+# Logbook Tests
 class TestLogbook:
     """Test logbook query functionality."""
 
@@ -391,8 +383,7 @@ class TestLogbook:
         assert "entries" in result["detail"]
 
 
-# ─── Identity Tests ──────────────────────────────────────────────────────────
-
+# Identity Tests
 class TestIdentity:
     """Test identity management."""
 
@@ -436,8 +427,7 @@ class TestIdentity:
         assert profile["ha_url"] == ha_url
 
 
-# ─── Health Check ────────────────────────────────────────────────────────────
-
+# Health Check
 class TestHealth:
     """Test service health."""
 

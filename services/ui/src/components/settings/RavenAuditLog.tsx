@@ -13,9 +13,9 @@ interface RavenAuditLogProps {
 
 const AUDITED = ['completed', 'failed', 'running', 'executing'];
 
-const formatTs = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
+const formatTs = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : 'No data');
 const formatDuration = (seconds?: number | null) => {
-  if (seconds == null) return '—';
+  if (seconds == null) return 'No data';
   const m = Math.floor(seconds / 60);
   return m > 0 ? `${m}m ${seconds % 60}s` : `${seconds % 60}s`;
 };

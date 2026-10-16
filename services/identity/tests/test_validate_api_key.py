@@ -3,7 +3,7 @@
 This endpoint exists because ``POST /api/resolve`` is NOT a safe authentication
 gate: when nothing matches it falls back to the system default user, who is an
 admin. A caller that treated a successful resolve as proof of authentication
-would therefore accept any string at all — including an anonymous caller's — as
+would therefore accept any string at all (including an anonymous caller's) as
 the default administrator.
 
 The endpoint under test must never fall back. These tests pin that property

@@ -8,7 +8,7 @@ The embedding dimension is detected dynamically at startup from the active
 ``EMBEDDING_MODEL``. The migration blueprint hardcodes ``float[384]``, but the
 deployed model (``nomic-ai/nomic-embed-text-v1.5``) produces **768-dimensional**
 vectors. Declaring the ``vec0`` virtual table with the wrong dimension would
-corrupt every insert, so we never trust a hardcoded value — we probe the model.
+corrupt every insert, so we never trust a hardcoded value; we probe the model.
 """
 import logging
 import os
@@ -45,7 +45,7 @@ def get_db_connection(
     """Open a SQLite connection with WAL mode and the sqlite-vec extension.
 
     If the ``sqlite_vec`` extension cannot be loaded (e.g. Python's ``sqlite3``
-    was built without extension support), the connection is still returned — the
+    was built without extension support), the connection is still returned; the
     store layer will fall back to the numpy adapter which does not need it.
     """
     conn = sqlite3.connect(db_path, check_same_thread=check_same_thread)
@@ -95,7 +95,7 @@ def init_schema(conn: sqlite3.Connection, dim: int) -> None:
     """Create all tables. ``dim`` is the (dynamically detected) embedding size."""
     cur = conn.cursor()
 
-    # Generic metadata table — holds every collection's items.
+    # Generic metadata table: holds every collection's items.
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS rag_items (
@@ -116,7 +116,7 @@ def init_schema(conn: sqlite3.Connection, dim: int) -> None:
         "ON rag_items(collection_name, user_id)"
     )
 
-    # ── Incremental migration: older DBs lack the usage-tracking columns. ──
+    # Incremental migration: older DBs lack the usage-tracking columns.
     # Must run BEFORE any index referencing those columns is created.
     _migrate_rag_items_usage_columns(cur)
 
@@ -132,7 +132,7 @@ def init_schema(conn: sqlite3.Connection, dim: int) -> None:
     # The vec0 table carries the collection/user as metadata columns so the KNN
     # can be filtered per-collection directly in the WHERE clause (the documented
     # sqlite-vec pattern). Older databases created the table as
-    # ``vec0(id, embedding)`` with NO metadata columns — a global KNN there had to
+    # ``vec0(id, embedding)`` with NO metadata columns; a global KNN there had to
     # be JOIN-filtered afterwards, which dropped in-collection hits once other
     # collections crowded the top-k (semantic lesson search returned 0). Migrate
     # such tables by dropping and recreating with the metadata columns; the
@@ -177,10 +177,10 @@ def init_schema(conn: sqlite3.Connection, dim: int) -> None:
         "ON vec_store(collection_name, user_id)"
     )
 
-    # ── Section 6: dedicated relational tables ─────────────────────────────
+    # Section 6: dedicated relational tables
     # NOTE: Vectors for *all* collections (including the structured ones below)
     # live in the unified `vec_rag_items` table keyed by the same id. We do not
-    # create per-collection vec0 tables — that would duplicate the embedding
+    # create per-collection vec0 tables; that would duplicate the embedding
     # dimension config and risk mismatch. The dedicated tables below hold the
     # structured relational columns; similarity search always goes through
     # `rag_items` + `vec_rag_items` filtered by `collection_name`.

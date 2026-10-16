@@ -4,7 +4,7 @@
  * ## Why this exists
  *
  * The daily reset used to be a 30-second interval looking for exactly
- * `getHours() === 0 && getMinutes() === 0` — a 60-second-wide window. If the
+ * `getHours() === 0 && getMinutes() === 0`, a 60-second-wide window. If the
  * app was backgrounded, killed, or simply not open at 00:00, the reset never
  * ran and yesterday's total stayed on screen as today's.
  *
@@ -13,7 +13,7 @@
  * the app was closed in between. It also matches how the OS pedometer buckets
  * its own "today" total, which is local-day based.
  *
- * Local time is deliberate and matches the device's own calendar — a user
+ * Local time is deliberate and matches the device's own calendar: a user
  * thinks in their own midnight, not UTC.
  */
 

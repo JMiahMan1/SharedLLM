@@ -105,7 +105,7 @@ def invalidate_identity(api_key: str | None = None) -> None:
 # Consolidates the previously-duplicated per-module Redis connections in
 # ha_state_cache.py / media_device_cache.py into one connection + one helper
 # set. The backing store stays Redis (shared across instances, survives
-# restarts) — only the connection and TTL handling are centralized.
+# restarts); only the connection and TTL handling are centralized.
 _redis: "_redis_lib.Redis | None" = None
 
 

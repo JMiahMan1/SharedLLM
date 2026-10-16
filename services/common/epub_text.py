@@ -81,7 +81,7 @@ _MIN_SPLIT_DEPTH = 4
 _MIN_SECTION_CHARS = 40
 
 #: Separates a section heading from a deeper heading nested inside it.
-_LABEL_JOIN = " — "
+_LABEL_JOIN = ": "
 
 
 class _Section:
@@ -101,7 +101,7 @@ class _Prose(HTMLParser):
     """Collect readable blocks, recording which of them are headings.
 
     Headings are kept as blocks rather than being discarded, because a book that
-    is a single html file — the usual shape of a Project Gutenberg export — has no
+    is a single html file (the usual shape of a Project Gutenberg export) has no
     spine to split on, and its only structure is the headings inside that one
     document.
     """
@@ -170,8 +170,8 @@ def _pick_split_level(blocks: list[tuple[int, str]]) -> int:
     the readings rather than on the title. A level seen only once is not a
     structure, so it cannot win here.
 
-    When no level repeats but the document nests headings inside one another — an
-    ``h1`` title above a single ``h2`` — there is still a title and its
+    When no level repeats but the document nests headings inside one another (an
+    ``h1`` title above a single ``h2``), there is still a title and its
     subdivision, so the deepest level wins. Splitting there keeps the title with
     the prose that precedes the subdivision instead of discarding either.
     """
@@ -207,8 +207,8 @@ def _split_sections(
             prose.label = headings[0][1].strip() or fallback
         return [prose]
 
-    # A title spanning several blocks — <h1>THE</h1><h1>FAITHFUL PROMISER.</h1>, or a
-    # heading whose line breaks became separate paragraphs — is one title, so the
+    # A title spanning several blocks (<h1>THE</h1><h1>FAITHFUL PROMISER.</h1>, or a
+    # heading whose line breaks became separate paragraphs) is one title, so the
     # shallower headings before the first section are joined rather than taken one
     # at a time.
     title_parts: list[str] = []

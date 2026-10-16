@@ -1,15 +1,14 @@
 # ADR 013: AgentLoop Termination Safeguards
 
-**Status:** Accepted  
-**Date:** 2026-05-12  
-**Authors:** Kilo (AI Architect)  
+**Status:** Accepted (reviewed 2026-10-15)\
+**Date:** 2026-05-12\
 **Context:** Raven sometimes terminates without executing any tool calls, giving up too early on malformed output
 
 ---
 
 ## Problem
 
-`AgentLoop` (services/gateway/agent_loop.py) has a termination heuristic at lines 366–374 (original) that declares "Mission likely accomplished" when:
+`AgentLoop` (`services/gateway/agent_loop.py`) had a termination heuristic that declared "Mission likely accomplished" when:
 
 * `agent_iter > 0` (at least one iteration completed)
 * No JSON tool call was extracted from the response
@@ -33,11 +32,16 @@ Introduce explicit success criteria and iteration guards:
 3. **Enforce minimum iterations:** If no valid JSON after 3 iterations, force-terminate with error instead of looping indefinitely.
 4. **Remove ambiguous conversational drift check:** The keyword list was arbitrary and caused false positives. Replaced with clear guard: `if agent_iter > 0 and successful_tool_calls > 0` → can terminate on textual answer.
 
-**Code changes** (`agent_loop.py`):
+**Code changes** (`agent_loop.py`; line numbers have since moved, so search for the names):
 
-* Line 269: `successful_tool_calls = 0` initialization
-* Lines 359–376: Revised termination heuristic
-* Lines 539–542: Increment `successful_tool_calls` on non-error tool responses
+* `successful_tool_calls = 0` initialization at the top of `AgentLoop` (it is also saved in the mission checkpoint)
+* Revised termination heuristic: the `if agent_iter > 0 and successful_tool_calls > 0` guard on a text reply
+* Increment `successful_tool_calls` on non-error tool responses
+
+Later change: the "no valid JSON after 3 iterations" rule is now a count of
+consecutive no-tool replies (`_consecutive_no_tool`); after `MAX_IDLE_NUDGES`
+(6) of them the loop terminates, or treats the run as complete if a verified
+artifact exists and nothing is queued.
 
 ---
 
@@ -60,7 +64,7 @@ Introduce explicit success criteria and iteration guards:
 
 | Alternative | Reason Rejected |
 | :--- | :--- |
-| Keep drift detection but require ≥1 tool call | Still arbitrary keywords; clarity over heuristics |
+| Keep drift detection but require at least 1 tool call | Still arbitrary keywords; clarity over heuristics |
 | Infinite retry with exponential backoff | Could loop forever on hopeless cases; need hard cutoff |
 | Always force full 60 iterations | Wasteful; terminate when task done |
 

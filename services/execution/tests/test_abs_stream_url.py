@@ -48,14 +48,14 @@ async def test_session_track_url_is_signed_for_the_user_and_time_limited():
 
 
 async def test_session_track_url_uses_lan_host_for_devices():
-    """HA/Cast fetch this URL from the LAN — must be the routable host.
+    """HA/Cast fetch this URL from the LAN, so it must be the routable host.
 
     The docker-internal alias (`http://gateway:11435`) is not resolvable from
     devices, so when EXECUTION_EXTERNAL_HOST is configured (the same host used
     for every :8888 device URL) the gateway URL must be built from it.
 
-    The expected host is read from abs_client — the module that actually builds
-    the URL — not from services.config. Other tests reload services.config
+    The expected host is read from abs_client (the module that actually builds
+    the URL), not from services.config. Other tests reload services.config
     mid-session, which re-derives its constants from the current environment;
     importing it here compared two different import-time snapshots of the same
     name, so the assertion failed on a developer machine (where .env sets

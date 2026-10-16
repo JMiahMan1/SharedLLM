@@ -11,7 +11,7 @@ import { storageGetSync, storageSet } from '../../lib/storage';
 import { relativeTime } from '../../lib/wanderTrips';
 import { navPagesFor } from './navItems';
 
-// Navigation search index — the header box is a *command-palette* style finder
+// Navigation search index: the header box is a *command-palette* style finder
 // for pages/tabs/settings, distinct from the RAG/semantic search on Knowledge.
 // Pages come from the shared nav list; these are the extra destinations.
 type NavItem = { label: string; path: string; section: string; keywords: string };
@@ -76,7 +76,7 @@ const Header = () => {
   const { data: health, isLoading, error } = useSystemHealth();
 
   // The bell shows this user's own notices from the telemetry outbox: family
-  // arrivals/departures, leave-by reminders, finished reports — the same
+  // arrivals/departures, leave-by reminders, finished reports: the same
   // notices the Android app raises as system notifications. It used to show
   // filtered system *logs* (admin only), which never matched anything, and
   // its "Clear All" wiped the whole system log.

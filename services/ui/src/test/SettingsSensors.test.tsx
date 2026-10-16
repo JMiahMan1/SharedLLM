@@ -22,7 +22,7 @@ vi.mock('../context/LocationContext', async () => {
       interval: 'stationary',
       sensors: {
         location: { enabled: true, permission: 'granted', message: null },
-        steps: { enabled: false, permission: 'denied', message: 'Physical activity permission denied — steps turned off' },
+        steps: { enabled: false, permission: 'denied', message: 'Physical activity permission denied: steps turned off' },
       },
       enableSensor,
       disableSensor,
@@ -54,7 +54,7 @@ describe('Settings sensors section', () => {
   it('shows denial message and Open settings when steps permission denied', async () => {
     renderWithProviders(<Settings />);
     expect(
-      await screen.findByText('Physical activity permission denied — steps turned off')
+      await screen.findByText('Physical activity permission denied: steps turned off')
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /open settings/i })).toBeInTheDocument();
   });

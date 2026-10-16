@@ -33,7 +33,7 @@ function writeJson(key: string, value: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // quota / private mode — registry still works in-memory for the session
+    // quota / private mode: registry still works in-memory for the session
   }
 }
 

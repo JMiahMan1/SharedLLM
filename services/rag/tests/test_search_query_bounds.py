@@ -72,7 +72,7 @@ def test_the_description_tells_the_caller_what_to_do_about_it():
 
 
 def test_the_http_endpoint_refuses_before_touching_the_index(monkeypatch):
-    """A 422 must come back from validation alone — the handler, the embedder
+    """A 422 must come back from validation alone: the handler, the embedder
     and FTS5 must never run, because running them is what killed the container."""
 
     def _never_called(*_args, **_kwargs):
@@ -130,5 +130,5 @@ def test_a_normal_search_still_validates_on_the_http_path(monkeypatch):
     assert seen[0][0].startswith("What did Macduff")
 
     # Either 500 (validation passed, handler then failed on unset globals) or a
-    # successful response — but never the 422 that means the bound is too tight.
+    # successful response, but never the 422 that means the bound is too tight.
     assert resp.status_code != 422, "a realistic query was refused by the bound"

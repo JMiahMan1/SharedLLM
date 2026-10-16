@@ -23,7 +23,7 @@ import java.security.MessageDigest;
 
 /**
  * Downloads a self-hosted APK and launches the system package installer.
- * No Play Store — works with the release.keystore signature.
+ * No Play Store; works with the release.keystore signature.
  *
  * The download happens here rather than in the WebView so that a real file
  * path is produced (the system installer needs one), so progress can be
@@ -262,7 +262,7 @@ public class ApkInstallPlugin extends Plugin {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 && !getContext().getPackageManager().canRequestPackageInstalls()) {
                 openInstallSettings();
-                pending.reject("Need 'Install unknown apps' for Jarvis OS — enable it, then try again.");
+                pending.reject("Need 'Install unknown apps' for Jarvis OS. Enable it, then try again.");
                 return;
             }
             downloadAndInstall(getContext(), url, new ResultCallback() {

@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-# Scratch state goes in the workspace .tmp/ (see AGENTS.md), never /tmp — which
+# Scratch state goes in the workspace .tmp/ (see CONTRIBUTING.md), never /tmp, which
 # is read-only in some sandboxes, leaving SQLite with no table to query.
 _TMP = Path(__file__).resolve().parents[1] / ".tmp"
 _TMP.mkdir(parents=True, exist_ok=True)

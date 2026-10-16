@@ -214,7 +214,7 @@ async def lifespan(app: FastAPI):
 
     adapter = build_adapter(conn)
 
-    # Rebuild the vector index ONLY when it is genuinely out of sync — either the
+    # Rebuild the vector index ONLY when it is genuinely out of sync: either the
     # vector count no longer matches rag_items (missing/orphaned vectors) or the
     # embedding model actually changed to a DIFFERENT known model. A first run
     # (stored_model is None) does NOT force a re-embed: the legacy migration above
@@ -297,9 +297,7 @@ def require_internal(x_internal_secret: str = Header(...)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Core storage helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _add_item(
     collection: str,
@@ -384,9 +382,7 @@ def _add_item(
         _conn().commit()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Protocol curriculum (always-available behavioral lessons)
-# ─────────────────────────────────────────────────────────────────────────────
 
 # Seeded once at startup (idempotent by stable id). These teach the operating
 # conventions Raven must follow even when a user prompt is terse and does not
@@ -404,7 +400,7 @@ _PROTOCOL_LESSONS: list[dict] = [
     {
         "id": "lesson-proto-tool-choice",
         "topic": "Raven protocol: cheapest sufficient tool",
-        "rule": "Prefer the cheapest sufficient tool for the task: a straightforward factual question only needs WebSearchRequest — do not write code, launch browsers, or invent extra steps.",
+        "rule": "Prefer the cheapest sufficient tool for the task: a straightforward factual question only needs WebSearchRequest; do not write code, launch browsers, or invent extra steps.",
         "tags": ["protocol", "web", "search"],
     },
     {
@@ -487,7 +483,7 @@ _PROTOCOL_LESSONS: list[dict] = [
     {
         "id": "lesson-proto-media",
         "topic": "Raven scenario: media and audio creation",
-        "rule": "Media creation: to generate speech use TTSRequest — it converts text to speech locally (Kokoro) and SAVES the audio to the workspace automatically when you include a relative_path (e.g. 'narration.wav') AND workspace_id; it returns the saved path. You can pass raw text, a workspace text file via text_file, OR a workspace PDF/EPUB/DOCX (its text layer is extracted automatically). The engine reads Bible verses (John 3:16 -> 'John chapter 3, verse 16'), years, and small numbers naturally and accepts SSMD markup for pause control (e.g. '...p' paragraph pause, '...500ms' custom). Do NOT pip-install or script external TTS libraries (gTTS/espeak) — TTSRequest is the intended tool. StorageTextToAudioRequest converts a Nextcloud text file to audio; ffmpeg is available for audio format conversion and trimming. For image/media generation, use the text-to-image tool if available. Always mention what format the output is in.",
+        "rule": "Media creation: to generate speech use TTSRequest. It converts text to speech locally (Kokoro) and SAVES the audio to the workspace automatically when you include a relative_path (e.g. 'narration.wav') AND workspace_id; it returns the saved path. You can pass raw text, a workspace text file via text_file, OR a workspace PDF/EPUB/DOCX (its text layer is extracted automatically). The engine reads Bible verses (John 3:16 -> 'John chapter 3, verse 16'), years, and small numbers naturally and accepts SSMD markup for pause control (e.g. '...p' paragraph pause, '...500ms' custom). Do NOT pip-install or script external TTS libraries (gTTS/espeak); TTSRequest is the intended tool. StorageTextToAudioRequest converts a Nextcloud text file to audio; ffmpeg is available for audio format conversion and trimming. For image/media generation, use the text-to-image tool if available. Always mention what format the output is in.",
         "tags": ["protocol", "media", "audio", "tts"],
     },
     {
@@ -499,19 +495,19 @@ _PROTOCOL_LESSONS: list[dict] = [
     {
         "id": "lesson-proto-orchestrate",
         "topic": "Raven scenario: multi-tool orchestration",
-        "rule": "Multi-source tasks that cross domains: query Home Assistant for current state (temperature, device status), fetch related web information with WebSearchRequest, then synthesize everything into a combined workspace artifact (status report, dashboard JSON, etc.). Pull resources from Nextcloud as needed. Each domain feeds into the next — show the logical chain in your plan and Apply: citations.",
+        "rule": "Multi-source tasks that cross domains: query Home Assistant for current state (temperature, device status), fetch related web information with WebSearchRequest, then synthesize everything into a combined workspace artifact (status report, dashboard JSON, etc.). Pull resources from Nextcloud as needed. Each domain feeds into the next, so show the logical chain in your plan and Apply: citations.",
         "tags": ["protocol", "orchestration", "ha", "web", "resources"],
     },
     {
         "id": "lesson-proto-library",
         "topic": "Raven protocol: answer book questions from the Calibre library",
-        "rule": "For questions about books, authors, sermons, commentaries, or theology, search the household's own library FIRST: ContextSearchRequest with collection_name 'calibre_files' returns matching passages (cite them as `Source: Title by Author, chapter`), and CalibreRequest (actions: list, search, get_book, fetch_text) finds a book or reads its text. Only fall back to WebSearchRequest when the library plainly has nothing on the subject — a web answer about a book this shelf holds is a wrong-source answer.",
+        "rule": "For questions about books, authors, sermons, commentaries, or theology, search the household's own library FIRST: ContextSearchRequest with collection_name 'calibre_files' returns matching passages (cite them as `Source: Title by Author, chapter`), and CalibreRequest (actions: list, search, get_book, fetch_text) finds a book or reads its text. Only fall back to WebSearchRequest when the library plainly has nothing on the subject; a web answer about a book this shelf holds is a wrong-source answer.",
         "tags": ["protocol", "library", "calibre", "research"],
     },
     {
         "id": "lesson-proto-scripture",
         "topic": "Raven protocol: answer scripture questions from the Bible service",
-        "rule": "Scripture quotes and passages come from BibleRequest FIRST: action 'read' with a ref (and version when the asker names one) returns the real verse text — cite it as `{reference} ({version})`. For commentary or study-Bible notes use action 'study_notes' (add edition for a named study Bible); for 'what does the Bible say about X' use 'search' then read the best passage; use 'catalogue' to discover installed translations and editions. Never quote scripture from WebSearchRequest or ContextSearchRequest — a paraphrase from the web is a wrong-source answer when the corpus holds the verse.",
+        "rule": "Scripture quotes and passages come from BibleRequest FIRST: action 'read' with a ref (and version when the asker names one) returns the real verse text. Cite it as `{reference} ({version})`. For commentary or study-Bible notes use action 'study_notes' (add edition for a named study Bible); for 'what does the Bible say about X' use 'search' then read the best passage; use 'catalogue' to discover installed translations and editions. Never quote scripture from WebSearchRequest or ContextSearchRequest; a paraphrase from the web is a wrong-source answer when the corpus holds the verse.",
         "tags": ["protocol", "scripture", "bible", "quote"],
     },
 ]
@@ -572,7 +568,7 @@ def reindex_all(batch_size: int = 256) -> int:
     the vector store.
 
     Stale vectors (indexed with a previous embedding model) silently break
-    semantic search — the KNN returns 0 hits even though documents exist. This
+    semantic search: the KNN returns 0 hits even though documents exist. This
     guarantees the index always matches the active model. Embedding runs in
     bounded batches so peak memory stays flat even for thousands of documents
     (a single giant batch once peaked at >11 GiB for ~3.5k docs and OOM-killed
@@ -699,12 +695,12 @@ def _item_exists(doc_id: str) -> bool:
 
 
 def _bump_retrieved(doc_ids: list[str]) -> None:
-    """Increment ``usage_count`` — the lesson was retrieved/seen by a mission."""
+    """Increment ``usage_count``: the lesson was retrieved/seen by a mission."""
     _bump_columns(doc_ids, "usage_count = usage_count + 1")
 
 
 def _bump_applied(doc_ids: list[str]) -> None:
-    """Increment ``applied_count`` — the lesson was genuinely applied by a mission.
+    """Increment ``applied_count``: the lesson was genuinely applied by a mission.
 
     Separated from retrieval so we can tell "frequently searched" from
     "frequently useful". Called only when the model cites a lesson id.
@@ -769,9 +765,7 @@ def _search_all_collections(
     return merged[:k]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Search / Ingest endpoints (legacy contract preserved)
-# ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/rag/search", response_model=SearchResponse, dependencies=[Depends(require_internal)])
 async def search(req: SearchRequest):
@@ -1078,13 +1072,13 @@ async def dream_learnings(
     """Dreaming mode: review Raven lessons and consolidate memory.
 
     Runs three deterministic passes over ``system_learnings`` for the user:
-      1. COMPACT — lessons whose JSON content exceeds ``compact_at`` chars get
+      1. COMPACT: lessons whose JSON content exceeds ``compact_at`` chars get
          their ``summary`` truncated to ``summary_len`` (re-embedded) so the
          mission context budget is not wasted on long prose.
-      2. MERGE — lessons sharing the same ``rule`` are consolidated: the
+      2. MERGE: lessons sharing the same ``rule`` are consolidated: the
          highest-confidence (tie: newest) lesson survives and absorbs the
          others' applied/usage counts and ids into ``supersedes``.
-      3. PRUNE — any lesson referenced by another's ``supersedes`` list is
+      3. PRUNE: any lesson referenced by another's ``supersedes`` list is
          deleted (outdated information is removed).
     Returns a dream report of what was compacted/merged/pruned.
     """
@@ -1113,7 +1107,7 @@ async def dream_learnings(
         ]
         reviewed = len(docs)
 
-        # Pass 0: WEB SEARCH — enrich lessons with real-world context.
+        # Pass 0: WEB SEARCH. Enrich lessons with real-world context.
         web_searched: list[str] = []
         seen_rules: set[str] = set()
         for d in docs:
@@ -1224,7 +1218,7 @@ async def dream_learnings(
             _delete_items(pruned)
         _conn().commit()
 
-        # Pass 4: VALIDATE — check structural integrity of surviving lessons
+        # Pass 4: VALIDATE. Check structural integrity of surviving lessons
         # and generate a validation checklist for RSI (lessons that have been
         # applied/used but never verified against current workspace state are
         # flagged as candidates for the next mission to test).
@@ -2158,9 +2152,7 @@ async def maintenance_endpoint(payload: dict):
     return body
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Home Assistant sync
-# ─────────────────────────────────────────────────────────────────────────────
 
 _ENTITY_ID_MAX_LENGTH = 255
 
@@ -2496,7 +2488,7 @@ async def get_toolchain(user_id: str = "default"):
     Returns the type="binary" capabilities the execution container reported
     at startup (name, version, scenario tags, short description) so the
     gateway can inject a truthful [WORKSPACE TOOLCHAIN] block into every
-    mission prompt — Raven always knows exactly which tools it can run.
+    mission prompt, so Raven always knows exactly which tools it can run.
     """
     try:
         rows = _conn().execute(
@@ -2530,7 +2522,7 @@ async def list_nextcloud_resources(user_id: str = "default", limit: int = 15):
     Lets the gateway render a compact [NEXTCLOUD RESOURCES] block so Raven
     knows which documents it can pull into its workspace (via
     StorageFileReadRequest -> WorkspaceFileWriteRequest). Only the paths,
-    friendly names and timestamps are returned — not the contents.
+    friendly names and timestamps are returned, not the contents.
     """
     try:
         target_user = "default"
@@ -2594,9 +2586,7 @@ async def list_ha_resources(user_id: str = "default", limit: int = 15):
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section 6: New relational-vector collections + sync endpoints
-# ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/rag/sync/missions", dependencies=[Depends(require_internal)])
 async def sync_missions(payload: dict):

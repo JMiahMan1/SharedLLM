@@ -1,13 +1,13 @@
 # services/execution/tests/test_abs_client_paths.py
 """BUG-12: abs_client must speak the real ABS API.
 
-Every route verified against the ABS server source of truth —
+Every route verified against the ABS server source of truth:
 ``advplyr/audiobookshelf`` ``server/routers/ApiRouter.js`` (master,
 fetched 2026-09-27; the router is mounted under ``/api``):
 
-* ``GET  /api/items/:id`` (:108)                      — `?expanded=1`
+* ``GET  /api/items/:id`` (:108)                      `?expanded=1`
 * ``GET  /api/me/progress/:id/:episodeId?`` (:183)
-* ``PATCH /api/me/progress/:libraryItemId/:episodeId?`` (:185)  — was POST + wrong path
+* ``PATCH /api/me/progress/:libraryItemId/:episodeId?`` (:185)  was POST + wrong path
 * ``GET  /api/me/items-in-progress`` (:191)
 * ``POST /api/items/:id/play`` (:117)
 * ``POST /api/session/:id/sync`` (:242)
@@ -17,7 +17,7 @@ fetched 2026-09-27; the router is mounted under ``/api``):
 * ``POST /session/local`` (:238), ``PATCH /me/progress/batch/update`` (:184),
   ``GET /me/listening-sessions`` (:179), ``GET /libraries/:id/collections`` (:80),
   ``GET /libraries/:id/series`` (:78), ``GET /me/progress`` (:176)
-* ``GET /api/authors/:id?include=items`` (:217; AuthorController.findOne —
+* ``GET /api/authors/:id?include=items`` (:217; AuthorController.findOne;
   ``libraryItems`` are the author's books)
 
 Live probes of ``https://abs.sumemail.com`` could not discriminate routes:

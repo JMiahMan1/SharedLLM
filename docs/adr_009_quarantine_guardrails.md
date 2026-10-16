@@ -4,11 +4,18 @@
 
 Implemented, differently from this proposal (reviewed 2026-10-15): quarantine
 is a **workspace-wide** flag (`Workspace.quarantined` in workspace_runtime's
-database) set by `_auto_quarantine_workspace` when a file fails verification
-too often within `RAVEN_QUARANTINE_WINDOW_SECONDS`. While set, git writes to the
-workspace answer **409** ("quarantined … Admin review required"); there is no
-per-file 409. It is lifted by an admin action (the `/git/revert` path), not
-automatically.
+database) set by `_auto_quarantine_workspace` (`services/workspace_runtime/main.py`)
+when a file reaches `RAVEN_QUARANTINE_THRESHOLD` (3) lint/pytest failures within
+`RAVEN_QUARANTINE_WINDOW_SECONDS` (env `RAVEN_QUARANTINE_WINDOW`, 600).
+Failures are tracked per file in a Redis sorted set
+`workspace:quarantine:{file_path}` (`_record_verification_failure`) and cleared
+on success, not in the `raven:quarantine:<workspace_id>` hash proposed below.
+While the flag is set, `/workflow/write-sync-commit` answers **409**
+("quarantined … Admin review required") and the Nextcloud sync skips the
+workspace; there is no per-file 409. It is lifted by a successful
+`POST /git/revert` (`services/workspace_runtime/git_ops.py`), not
+automatically, and the proposed `DELETE /workflow/quarantine/...` route does
+not exist.
 
 ## Context
 
@@ -72,7 +79,7 @@ await redis.expire(quarantine_key, RAVEN_QUARANTINE_WINDOW_SECONDS + 60)
 ```
 
 1. **On lint/pytest success:**
-   Reset counter to 0 (optional — conservative approach keeps failure count forever until window expiry).
+   Reset counter to 0 (optional; a conservative approach keeps failure count forever until window expiry).
 
 ### Admin Override
 
@@ -103,11 +110,11 @@ Raven will interpret this as a hard failure and attempt alternative approaches (
 
 ## Consequences
 
-- ✅ Prevents hammering on broken files
-- ✅ Forces human review when automated fix repeatedly fails
-- ✅ Self-healing: window expiry auto-clears if issue fixed elsewhere
-- ⚠️ False positives possible if flaky test; window mitigates
-- ⚠️ Raven may need to edit different file to work around quarantine — monitor for workarounds
+- Pro: prevents hammering on broken files
+- Pro: forces human review when an automated fix repeatedly fails
+- Pro: self-healing, since window expiry clears the count if the issue is fixed elsewhere
+- Con: false positives are possible with a flaky test; the window mitigates this
+- Con: Raven may edit a different file to work around the quarantine, so watch for workarounds
 
 ## Validation
 
@@ -118,4 +125,4 @@ Raven will interpret this as a hard failure and attempt alternative approaches (
 
 ---
 
-**Related:** ADR 002 (Branch Push Guardrails) already prevents pushing to protected branches; this ADR prevents commit creation itself when quality gates fail.
+**Related:** the Raven branch push guardrails ADR (`docs/adr_raven_branch_push_guardrails.md`) already prevents pushing to protected branches; this ADR prevents commit creation itself when quality gates fail.

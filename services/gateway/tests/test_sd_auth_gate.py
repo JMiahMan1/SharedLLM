@@ -1,7 +1,7 @@
 """The image/music/OCR gate: ``_sd_request_authorized`` must verify, not assume.
 
-Regression under test. The gate used to end in ``return bool(api_key)`` — a
-*presence* check — so any non-empty string authorized the caller. The obvious
+Regression under test. The gate used to end in ``return bool(api_key)``, a
+*presence* check, so any non-empty string authorized the caller. The obvious
 "fix" of validating through ``resolve_identity`` would have been far worse:
 that endpoint falls back to the system default user, which is an admin, so
 every string resolves successfully (see services/identity/tests/

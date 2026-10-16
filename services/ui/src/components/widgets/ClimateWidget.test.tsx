@@ -159,7 +159,7 @@ describe('ClimateWidget', () => {
     const { queryClient } = renderWidget({ config: { devices: ['climate.living_room'] } });
     await screen.findByTestId('climate-dial');
 
-    // The entity is pulled out from under us — a lock was just applied, so the
+    // The entity is pulled out from under us: a lock was just applied, so the
     // next poll no longer returns it. Nothing should be left to press.
     mockedApi.getDeviceStates.mockResolvedValue([]);
     await queryClient.invalidateQueries({ queryKey: ['widget', 'climate', 'states'] });

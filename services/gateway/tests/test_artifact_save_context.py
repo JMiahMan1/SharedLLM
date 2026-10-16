@@ -3,7 +3,7 @@
 Root cause (mission 44): the TTSRequest / image-generation interceptors called
 workspace_runtime /files/write WITHOUT user_context. Non-system workspaces
 reject such writes with 400 'User context is required for this workspace', so
-every TTS save silently failed while the interceptor still reported SUCCESS —
+every TTS save silently failed while the interceptor still reported SUCCESS;
 the model looped on TTSRequest and the workspace stayed empty.
 """
 

@@ -130,7 +130,7 @@ def test_extract_action_json_no_infinite_recursion_on_unparseable():
     object (different identity) on every match even when the replacement text
     is identical. The old guard ``repaired is not text`` was therefore always
     True, so a persistently-unparseable payload (common with the local 35B
-    model) recursed forever and raised ``RecursionError`` — killing the entire
+    model) recursed forever and raised ``RecursionError``, killing the entire
     mission job before any tool action (e.g. a git commit/push) could run.
 
     The fix compares by CONTENT (``!=``) and bounds the recursion depth, so an
@@ -140,7 +140,7 @@ def test_extract_action_json_no_infinite_recursion_on_unparseable():
     from services.gateway.agent_loop import extract_action_json
 
     # Unterminated JSON (missing closing braces) that still contains a quoted
-    # string — the exact shape that sent the old code into infinite recursion.
+    # string, the exact shape that sent the old code into infinite recursion.
     text = '{"action": "WorkspaceShellRequest", "payload": {"command": "git push"'
     norm = extract_action_json(text)
     assert norm is None
@@ -201,7 +201,7 @@ def test_translate_git_remote_add():
 def test_translate_gh_repo_create():
     # `gh` runs NATIVELY inside the workspace sandbox (which has the `gh` CLI
     # plus the injected GITHUB_TOKEN), so the shell->git interception must NOT
-    # rewrite `gh repo create ...` into a git-op payload — it returns None so the
+    # rewrite `gh repo create ...` into a git-op payload; it returns None so the
     # command executes as an ordinary (credentialed) shell command.
     assert _translate()("gh repo create my-repo --private") is None
     assert _translate()('gh repo create my-repo --description "My project"') is None
@@ -266,7 +266,7 @@ def test_translate_git_remote_shows():
 
 def test_translate_unknown_git_does_not_abort_push():
     # Regression: `git remote -v` is unknown, but it must NOT abort the whole
-    # pipeline — the sibling `git push` must still be intercepted and routed
+    # pipeline; the sibling `git push` must still be intercepted and routed
     # through the credentialed git tool (otherwise the push hits the raw shell
     # with no credentials). This is exactly the failure that let mission 48's
     # `git remote -v && git push origin HEAD` bypass the tool.

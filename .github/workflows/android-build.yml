@@ -52,7 +52,7 @@ jobs:
         yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || yes | sdkmanager --licenses || true
         $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools" || true
 
-    # Keystore is NOT in git — restore from Actions secrets before any Gradle sign step
+    # Keystore is NOT in git; restore it from Actions secrets before any Gradle sign step
     - name: Restore release keystore from secrets
       env:
         RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}

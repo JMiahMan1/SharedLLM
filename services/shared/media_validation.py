@@ -6,7 +6,7 @@ tools like gTTS/ffmpeg, future video generation). A common silent failure is a
 "successful" write that is really an HTML error page, an empty file, or a
 container that does not match its extension. This module sniffs magic bytes and
 container structure with zero dependencies, so the loop can fail loudly
-instead of reporting a fake SUCCESS — the extension is a claim, the bytes are
+instead of reporting a fake SUCCESS: the extension is a claim, the bytes are
 the truth.
 """
 

@@ -157,7 +157,7 @@ test.describe('dashboard: one health widget, phone width', () => {
     await open(page);
     const card = page.locator('[data-testid="health-activity-widget"]');
     // The mocked daily step total must reach the card. A widget that mounts but
-    // renders an empty panel — a "looks broken" dashboard — would pass every
+    // renders an empty panel (a "looks broken" dashboard) would pass every
     // structural assertion above, so assert the number itself.
     await expect(card).toContainText('7,330');
     await expect(card).toContainText('10,000');

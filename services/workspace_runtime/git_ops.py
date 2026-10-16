@@ -3,7 +3,7 @@
 Every git command runs INSIDE the workspace's dedicated sandbox container
 (see ``services.workspace_sandbox``), so the IDE's git/commit/push operations
 are confined to that workspace's directory, a non-root user, a private network,
-and resource limits — exactly like the agent loop's shell commands.
+and resource limits, exactly like the agent loop's shell commands.
 
 This module is imported by ``main.py`` at the bottom of the file (after all
 shared helpers are defined) to avoid a circular import. It exposes ``git_router``
@@ -60,7 +60,7 @@ log = logging.getLogger("workspace_runtime.git")
 git_router = APIRouter()
 
 
-# ── Sandbox-backed git command runner ────────────────────────────────────────
+# Sandbox-backed git command runner
 def _git_repo_present(workspace_path: str | Path) -> bool:
     """True when the workspace directory is a git repository (has a .git).
 
@@ -171,7 +171,7 @@ async def create_review_branch(
     return branch_name
 
 
-# ── Endpoints ────────────────────────────────────────────────────────────────
+# Endpoints
 @git_router.post("/git/status")
 async def git_status(req: WorkspaceRef, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
@@ -412,7 +412,7 @@ async def _count_unpushed(ws_id: str, workspace_path: Path, remote_name: str, br
     """Return local commits absent from the remote-tracking ref.
 
     Negative means the check could not run (remote-tracking ref missing / git
-    error) — callers treat that as "unknown", not as a failed push.
+    error); callers treat that as "unknown", not as a failed push.
     """
     res = await run_git(ws_id, workspace_path, ["git", "rev-list", "--count", f"{remote_name}/{branch_name}..{branch_name}"])
     if res["returncode"] != 0:

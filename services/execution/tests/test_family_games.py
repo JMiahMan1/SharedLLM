@@ -87,7 +87,7 @@ def test_memory_miss_flips_the_wrong_cards_back():
     revealed_before = set(state.revealed)
     # Pick two cards from *different* pairs by content. The board is shuffled
     # (family_games.py random.shuffle), so board[1] and board[2] are sometimes
-    # the same pair and the flip legitimately matches — this test used to fail
+    # the same pair and the flip legitimately matches; this test used to fail
     # roughly one run in four.
     first = state.board[0]
     partner = state.board.index(first, 1)

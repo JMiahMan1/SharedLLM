@@ -10,7 +10,7 @@
 REPO_DIR="$(git rev-parse --show-toplevel)"
 DEPLOY_SCRIPT="$REPO_DIR/scripts/deploy.sh"
 
-echo "[post-merge] New commits detected — triggering SharedLLM auto-deploy..."
+echo "[post-merge] New commits detected; triggering SharedLLM auto-deploy..."
 
 if [ ! -f "$DEPLOY_SCRIPT" ]; then
     echo "[post-merge] ERROR: $DEPLOY_SCRIPT not found. Skipping auto-deploy."

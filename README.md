@@ -8,13 +8,13 @@ conversational AI and one app (web + Android).
 
 Requests are handled in three tiers, balancing speed and intelligence:
 
-1. **Tier 1: FastPath (semantic matcher)** — keyword and embedding match
+1. **Tier 1: FastPath (semantic matcher)**: keyword and embedding match
    (`nomic-embed-text-v1.5`) for common commands, bypassing the LLM entirely.
    Use case: "turn off the lights". Under ~100 ms.
-2. **Tier 2: Librarian** — single-turn LLM with tool access (up to 3 tool
+2. **Tier 2: Librarian**: single-turn LLM with tool access (up to 3 tool
    turns) for ambiguous home commands, document retrieval and general
    questions. Seconds.
-3. **Tier 3: Raven** — the autonomous agent for coding and system repair. Runs
+3. **Tier 3: Raven**: the autonomous agent for coding and system repair. Runs
    a multi-step agent loop (up to 60 iterations, `raven_max_iterations`) with
    tool feedback, in workspaces managed by the Workspace Runtime. See
    `docs/RAVEN_LEARNING_MEMORY.md`.
@@ -44,12 +44,12 @@ bridge services through Caddy (`docs/CADDY_CROSS_NETWORK_IMPLEMENTATION.md`).
 | **ui** | via caddy | React app (also the Android app via Capacitor) |
 | **dns** | 15353 (host), 172.26.0.254 (bridge) | Name server for all containers (`docs/DNS_SERVICE.md`) |
 | **osrm**, **osrm-foot**, **nominatim** | internal | Road/foot routing and self-hosted geocoding for geo |
-| **capabilities-sync** | — | One-shot: indexes system capabilities into RAG |
+| **capabilities-sync** | none | One-shot: indexes system capabilities into RAG |
 | **redis** | 6379 | Job queue, sessions, history, caches |
 
 Configuration: `docs/CONFIG.md`. Secrets (`INTERNAL_SECRET`, `FERNET_KEY`)
 live only in the server's `.env`; everything else is a GlobalSetting in
-Identity, editable in Admin > Settings.
+Identity, editable in Admin > LLM & Settings.
 
 ## Deployment
 
@@ -60,7 +60,7 @@ built on the server.
 bash scripts/deploy_remote.sh jeremiah@192.168.2.205 /home/jeremiah/SharedLLM <service> [<service>...]
 ```
 
-See `AGENTS.md` for the deploy rules and `docs/SCRIPTS.md` for the scripts.
+See `CONTRIBUTING.md` for the project rules (including deploys) and `docs/SCRIPTS.md` for the scripts.
 
 ## Key Components
 
@@ -71,6 +71,6 @@ See `AGENTS.md` for the deploy rules and `docs/SCRIPTS.md` for the scripts.
 - **Family hub**: Nextcloud Talk chat, games, drawing, music, recipes, voice
   signatures (`docs/FAMILY_HUB.md`).
 - **Capability enforcement**: per-workspace policies (read, write, git, pytest)
-  that confine autonomous agents to what they are allowed to do.
+  that confine Raven to what it is allowed to do in each workspace.
 
 Docs index: `docs/INDEX.md`. Backlog: `docs/PENDING_TASKS.md`.

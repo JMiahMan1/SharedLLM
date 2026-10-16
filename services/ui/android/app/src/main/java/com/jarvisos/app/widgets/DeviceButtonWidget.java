@@ -41,7 +41,7 @@ public class DeviceButtonWidget extends AppWidgetProvider {
         views.setOnClickPendingIntent(R.id.btn_refresh, WidgetUpdater.refreshPendingIntent(context));
 
         for (int i = 0; i < MAX_PINS; i++) {
-            views.setTextViewText(LABEL_IDS[i], "—");
+            views.setTextViewText(LABEL_IDS[i], "-");
             views.setTextViewText(STATE_IDS[i], "");
             views.setOnClickPendingIntent(HIT_IDS[i], WidgetUpdater.refreshPendingIntent(context));
         }

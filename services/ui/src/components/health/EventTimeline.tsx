@@ -18,7 +18,7 @@ interface Props {
 /**
  * Maps the server's `icon` string onto a component. The server sends the name
  * so the vocabulary lives in one place, but an unknown name must not blank the
- * row — hence the fallback rather than a lookup that can return undefined.
+ * row, hence the fallback rather than a lookup that can return undefined.
  */
 const ICONS: Record<string, LucideIcon> = {
   dumbbell: Dumbbell,
@@ -69,7 +69,7 @@ function EventRow({ event }: { event: TimelineEvent }) {
 /**
  * The caller's own event timeline, grouped by day.
  *
- * Steps are not events and are deliberately absent — a day bucket is a
+ * Steps are not events and are deliberately absent: a day bucket is a
  * measurement, and the bar chart covers that. What is here is something that
  * happened: a workout, a drive, a badge earned.
  */

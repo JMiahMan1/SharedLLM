@@ -57,8 +57,8 @@ describe('formatMetricValue', () => {
   });
 
   it('refuses to render a non-finite value', () => {
-    expect(formatMetricValue(NaN, 'count')).toBe('—');
-    expect(formatMetricValue(Infinity, 'distance')).toBe('—');
+    expect(formatMetricValue(NaN, 'count')).toBe('No data');
+    expect(formatMetricValue(Infinity, 'distance')).toBe('No data');
   });
 });
 

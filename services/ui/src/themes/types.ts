@@ -1,7 +1,7 @@
 /**
  * Health widget theme package schema (schemaVersion 1).
  *
- * Themes are data packages — never hardcoded in widget components.
+ * Themes are data packages, never hardcoded in widget components.
  * A pack is a portable JSON document that can be imported, edited,
  * exported, enabled/disabled, or removed at runtime.
  */
@@ -106,7 +106,7 @@ export interface ThemePackage {
   scope?: 'site' | 'android_widget' | 'both';
   /**
    * Theme icon. A single emoji/glyph keeps packs portable as plain JSON and
-   * needs no image assets — e.g. "🌌" for Aurora, "🌸" for Bloom.
+   * needs no image assets, e.g. "🌌" for Aurora, "🌸" for Bloom.
    */
   icon?: string;
 }

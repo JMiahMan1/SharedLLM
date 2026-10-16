@@ -9,7 +9,7 @@ modules' imports is a var that two modules disagree about.
 That is not hypothetical. conftest.py's _load_env_files() reads the developer's
 real .env, and EXECUTION_EXTERNAL_HOST was only ever set there
 (=192.168.2.205). Two test modules clobbered it to "localhost" at import, and two
-others reload services.config mid-session — so
+others reload services.config mid-session, so
 services/execution/abs_client.py and services/config.py ended up holding
 different snapshots of the same name, and test_abs_stream_url.py compared one
 against the other. It failed on a developer machine and passed in CI, which told
@@ -81,7 +81,7 @@ def _root_conftest() -> object:
 def _test_env_defaults() -> list[str]:
     """conftest's _TEST_ENV_DEFAULTS keys, read by AST so a syntax error cannot
     hide them. Values are not always literals (some are tempfile paths), so only
-    the keys matter here — the applied values are asserted against os.environ."""
+    the keys matter here; the applied values are asserted against os.environ."""
     tree = ast.parse(CONFTEST.read_text(encoding="utf-8"))
     for node in tree.body:
         if not isinstance(node, ast.AnnAssign | ast.Assign):
@@ -144,7 +144,7 @@ def _services_tree_env_reads() -> set[str]:
       * DEVICE_REGISTRY_PATH is read through a module constant
         (services/execution/device_registry.py: DB_PATH_ENV = "DEVICE_REGISTRY_PATH",
         then os.environ.get(DB_PATH_ENV, ...)), so a reader that only looks at
-        literal call arguments cannot see it. Pinning it is still correct — it
+        literal call arguments cannot see it. Pinning it is still correct: it
         points at the production device list otherwise.
       * Some pins are consumed by tests rather than by service code. A pin that
         only a test reads is live, not dead.
@@ -292,7 +292,7 @@ def test_no_real_deployment_secret_reaches_the_test_environment(secret: str):
 
 def test_the_environ_isolation_fixture_really_restores():
     """The autouse fixture is what stops one test's env edit from becoming the
-    next test's baseline — the mechanism that made the ABS test order-dependent.
+    next test's baseline, the mechanism that made the ABS test order-dependent.
     Drive the underlying generator directly so a no-op body cannot pass."""
     conftest = _root_conftest()
     fixture_fn = conftest._isolate_environ.__wrapped__
@@ -352,7 +352,7 @@ def _conftest_in_subprocess(queried: list[str], ambient: dict[str, str], scrub_p
     The in-process tests cannot see the defect this guards: they run *after*
     conftest has already applied its pins, so an ordering bug is invisible to
     them. Only a fresh interpreter can prove a pin actually wins against a value
-    the runner exported — which is exactly how five test_music_proxy tests came
+    the runner exported, which is exactly how five test_music_proxy tests came
     to return 401 against a real INTERNAL_SECRET while every one of them passed
     in isolation.
 
@@ -419,7 +419,7 @@ def test_every_pin_lands_with_exactly_the_value_listed():
 def test_the_passthrough_opt_out_still_yields_to_the_dotenv():
     """SHAREDLLM_TEST_PASSTHROUGH_ENV exists for `local_only` runs that really
     point at live infrastructure, and is never set in CI. It must reach the
-    developer's own .env value — otherwise it is a switch that does nothing."""
+    developer's own .env value; otherwise it is a switch that does nothing."""
     real = _real_env_value("HA_URL")
     if real is None:
         pytest.skip("HA_URL is not set in this checkout's .env")
@@ -450,7 +450,7 @@ def test_the_passthrough_opt_out_is_off_by_default():
 # the route saw the URL. In the full suite an earlier module had already
 # imported main, ALPACA_AUDIO_URL was captured as "", and four tests failed
 # with a 503 that read like a missing-deployment error. Same file, same code,
-# opposite outcome — a failure that says nothing about the thing it appears to
+# opposite outcome: a failure that says nothing about the thing it appears to
 # be about.
 #
 # Conftest is imported before any test module and pins by direct assignment, so

@@ -47,7 +47,7 @@ public class HealthRingCalcTest {
     public void neverRecordedIsDistinctFromNoReadingToday() {
         // Both are "no number", but they mean different things and collapsing
         // them tells the reader their tracker has never worked.
-        HealthRingCalc.Ring never = HealthRingCalc.build(0, 10000, "—", false);
+        HealthRingCalc.Ring never = HealthRingCalc.build(0, 10000, "-", false);
         assertEquals(-1, never.percent);
         assertEquals("No steps recorded yet", never.caption);
 

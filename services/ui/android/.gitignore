@@ -52,7 +52,7 @@ captures/
 # Comment next line if keeping position of elements in Navigation Editor is relevant for you
 .idea/navEditor.xml
 
-# Keystore files — release keystore is NEVER committed (CI secret + local only)
+# Keystore files: release keystore is NEVER committed (CI secret + local only)
 *.jks
 *.keystore
 !debug.keystore

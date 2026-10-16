@@ -23,7 +23,7 @@ reads the same endpoint.
   calendars). Repeating events (RRULE/RDATE minus EXDATE) are expanded into the
   window, one entry per occurrence, keeping the event's length. Each entry
   carries the event's UID as `id`, plus `all_day` and `recurring`.
-  Not handled: per-occurrence overrides (RECURRENCE-ID) — the series is shown.
+  Not handled: per-occurrence overrides (RECURRENCE-ID); the series is shown.
 - Skylight: its own API, already expanded; `id` is the Skylight event id.
 - iCal: fetched and parsed per read; read-only.
 - Times are made aware with pytz `localize` in `TIMEZONE` (never
@@ -39,7 +39,7 @@ unreachable" and poll every 30 s instead of every 5 minutes.
   default writable source; one hour long.
 - **Edit / delete** act on the event's `id` (Nextcloud UID or Skylight id).
   The old title-substring match is kept only for callers without an id
-  (voice/LLM tools) — it changes every event whose title contains the words.
+  (voice/LLM tools), and it changes every event whose title contains the words.
   An edit that moves the time keeps the event's length; an untouched time is
   not sent (re-saving it turned all-day events into midnight appointments).
   A repeating Nextcloud event is edited or deleted as a whole series, and the
@@ -50,14 +50,14 @@ unreachable" and poll every 30 s instead of every 5 minutes.
 ## Background
 
 `services/execution/leave_by.py` (every 5 minutes) reads each person's next
-few hours and sends a "leave by" notice for events with a location — see
-`docs/BACKGROUND_JOBS.md`. There are no other calendar reminders.
+few hours and sends a "leave by" notice for events with a location (see
+`docs/BACKGROUND_JOBS.md`). There are no other calendar reminders.
 
 ## Tests
 
 - `services/execution/tests/test_calendar_handlers.py`,
-  `test_calendar_window_and_uid.py` — merge, failures, noise calendars,
+  `test_calendar_window_and_uid.py`: merge, failures, noise calendars,
   window, recurrence, EXDATE, local time, edit/delete by UID, read-only iCal
-- `services/gateway/tests/test_calendar_proxy.py` — window forwarding
-- `services/ui/src/components/calendar/CalendarApp.test.tsx` — range per
+- `services/gateway/tests/test_calendar_proxy.py`: window forwarding
+- `services/ui/src/components/calendar/CalendarApp.test.tsx`: range per
   view, edit by id, read-only events

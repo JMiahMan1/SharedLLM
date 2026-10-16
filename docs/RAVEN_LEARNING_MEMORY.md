@@ -1,4 +1,4 @@
-# Raven — How It Works and How It Learns
+# Raven: How It Works and How It Learns
 
 > The one Raven doc: what the agent is, how a mission runs, which tools it has,
 > how it remembers what it learned, and how to teach it something new.
@@ -7,7 +7,7 @@
 
 ## 1. What Raven is
 
-Raven is the autonomous software-engineering agent inside SharedLLM. Given a
+Raven is SharedLLM's own autonomous software-engineering agent. Given a
 mission ("build a Python CLI that…"), it plans, creates a dedicated workspace,
 writes code and tests, runs lint/test gates, commits and pushes with `gh`/git,
 and reflects on what it learned. It runs on the local model named by the
@@ -26,7 +26,7 @@ Gateway (port 11435)
   ├── background_worker.py   ── RavenWorker: job queue, health checks, retry
   ├── tool_registry.py       ── OpenAI-compatible tool schemas for external clients
   ├── tool_builder.py        ── decide(): use_existing → chain → build
-  └── state_machine.py       ── checkpoint/resume
+  └── state_machine.py       ── StateMachine wrapper (unused; checkpoints live in agent_loop.py)
 prompts/raven_*.md           ── autonomous protocol, plan, reflection, narrator
 ```
 
@@ -65,12 +65,12 @@ the scan. All three settings are edited in Raven Ops.
 
 - **Jarvis Lab → Missions** (admins): start, watch live, pause/resume, stop,
   delete, inspect a mission's result, files and timeline, and send follow-up
-  instructions (`POST /api/raven/missions/{id}/refine`).
+  instructions (`POST /api/raven/missions/{id_or_slug}/refine`).
 - **Admin → Raven Ops**: the health-watch settings, proposed fixes, running
   and recent missions, and the audit log (every mission's full event log).
 
 The mission list rows are summaries; the detail views load the full mission
-(`GET /api/raven/missions/{id}`) for its log and result.
+(`GET /api/raven/missions/{id_or_slug}`) for its log and result.
 
 The worker's other loops: the cleanup loop (every `CLEANUP_INTERVAL_SECONDS`,
 default 300; environment only) syncs each user's Home Assistant entities into
@@ -84,7 +84,7 @@ Notify are described in their own docs.
 | Workspace | `resolve_mission_workspace()` finds or creates the sandbox; maintenance tasks ("fix the errors") use the Default Workspace |
 | Model | role aliases (`coding`, `assistant`) resolved from Identity settings |
 | Planning | `raven_plan_prompt` produces a step plan |
-| Checkpoint | state restored from Redis when resuming |
+| Checkpoint | `raven:checkpoint:{mission_id}` in Redis, saved each iteration and restored when resuming |
 | Main loop | up to `raven_max_iterations` (default and ceiling `MAX_TOOL_ITERATIONS` = 60): infer → extract tool call(s) → execute → record |
 | Loop detection | `detect_repetitive_failure`, `detect_repetitive_action`, `detect_no_progress` escalate PROBE → REDIRECT → ABORT |
 | Reflection | `raven_reflection_prompt` produces a reusable lesson |
@@ -134,36 +134,40 @@ missions dispatch directly from the agent loop.
 
 | Store | Where | Written by | Read by |
 |---|---|---|---|
-| `system_learnings` | RAG (sqlite-vec) | `execution/learning` handler, called from `_persist_learning` | `_fetch_rag_context` on every mission |
+| `system_learnings` | RAG (sqlite-vec) | `execution/learning` handler (`services/execution/handlers/learning.py`), called from `_persist_learning` | `_fetch_rag_context` on every mission |
 | Mission history | RAG, `POST /rag/sync/missions` | after each mission | `RavenRecallRequest`, self-repair |
 | In-mission context | Redis checkpoint + `_compact_conversation` | during the loop | the same mission |
-| Workspace journal | `raven_memory.md` in each workspace | the mission itself | the next mission in that workspace |
+| Workspace journal | `raven_memory.md` in each workspace | `_persist_learning` (appends the same lesson) and the mission itself | the next mission in that workspace |
 
 ### Write path
 
 1. **Reflection**: after successful tool calls, `raven_reflection_prompt`
-   produces a `reflection_summary` — a short, reusable lesson.
+   produces a `reflection_summary`: a short, reusable lesson.
 2. **Gate**: `should_persist_learning()` rejects empty, error-only and
    incomplete results.
 3. **Persist**: `_persist_learning()` posts the reflection (or, if none, the
    raw summary) to `execution/learning`, which stores it in `system_learnings`
-   with a stable `lesson-<sha1[:10]>` id, topic `Raven lesson: <query>` and
-   task-aware tags (`python`/`javascript`/`go`/`rust`,
-   `workspace`/`git`/`repair`/`deployment`, `learning`). Summaries are cut to
-   400 characters to fit the context budget.
+   with a stable `lesson-<sha1[:10]>` id, topic `Raven lesson: <query>` (query
+   cut to 80 characters), structured `rule`/`root_cause`/`outcome`/`confidence`
+   fields and task-aware tags (`python`/`javascript`/`go`/`rust`,
+   `workspace`/`git`/`repair`/`deployment`, `web`/`search`/`scrape`,
+   `learning`). Summaries are cut to 400 characters to fit the context budget.
+   The same lesson is appended to the workspace's `raven_memory.md`.
 
 ### Read path
 
 `_fetch_rag_context()` injects, before planning:
 
-- `[PROTOCOL — ALWAYS-ON CURRICULUM]` — the seeded protocol lessons, pinned.
-- `[SYSTEM_LEARNINGS — PAST LESSONS: read and APPLY these …]` — the most
-  relevant earned lessons.
-- `[WORKSPACE TOOLCHAIN]` — binaries probed from the workspace shell image
+- `[PROTOCOL: ALWAYS-ON CURRICULUM. …]`: the seeded protocol lessons, pinned.
+- `[SYSTEM_LEARNINGS: PAST LESSONS. …]`: the most relevant earned lessons.
+- `[WORKSPACE TOOLCHAIN: …]`: binaries probed from the workspace shell image
   (`services/execution/toolchain.py`, run by **workspace_runtime** at startup,
   synced to RAG; read back from `GET /rag/toolchain`).
-- `[NEXTCLOUD RESOURCES]` and `[HOME ASSISTANT SNAPSHOT]` — from
+- `[NEXTCLOUD RESOURCES: …]` and `[HOME ASSISTANT SNAPSHOT: …]`: from
   `/rag/resources/nextcloud` and `/rag/resources/ha`.
+- `[WORKSPACE_MEMORY: …]`: when the mission has a workspace, the first 8000
+  characters of that workspace's `raven_memory.md` journal (read through
+  execution `/execute/workspace_file_read`).
 
 Raven cites lessons it applies as `Apply: [id]`; applied lessons are marked so
 reuse is counted. `POST /rag/dream` consolidates the store (COMPACT oversized
@@ -188,12 +192,12 @@ summaries, MERGE duplicates sharing a rule, PRUNE superseded lessons).
 
 Where to extend:
 
-- `tool_builder.py` `_TOOLS` / `decide()` — teach a new capability or chain.
-- `ALLOWED_TOOLS` in `agent_loop.py` — make a tool available inside missions.
-- `SINGLE_TURN_TOOL_ENDPOINTS` in `orchestrator.py` — the Librarian path too.
-- `RAVEN_KEYWORDS` / `RAVEN_COMMAND_VERBS` in `intent_engine.py` — what
+- `tool_builder.py` `_TOOLS` / `decide()`: teach a new capability or chain.
+- `ALLOWED_TOOLS` in `agent_loop.py`: make a tool available inside missions.
+- `SINGLE_TURN_TOOL_ENDPOINTS` in `orchestrator.py`: the Librarian path too.
+- `RAVEN_KEYWORDS` / `RAVEN_COMMAND_VERBS` in `intent_engine.py`: what
   triggers a mission.
-- `prompts/raven_autonomous_protocol.md` — changes every future mission.
+- `prompts/raven_autonomous_protocol.md`: changes every future mission.
 
 Proven chains: greenfield build (create → `gh repo create` → settings → write
 × N → lint/test → add → commit → push); tool discovery via

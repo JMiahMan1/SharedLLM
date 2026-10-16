@@ -7,7 +7,7 @@
  * is therefore a single fenced JSON block *appended* to human-readable text:
  * old clients show the text, Jarvis reads the block.
  *
- * Anything malformed degrades to plain text rather than throwing — a bad card
+ * Anything malformed degrades to plain text rather than throwing; a bad card
  * must never blank out a conversation.
  */
 

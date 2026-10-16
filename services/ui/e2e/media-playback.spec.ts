@@ -10,9 +10,7 @@ const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 const TEST_USER = process.env.TEST_USER;
 const TEST_PASS = process.env.TEST_PASS;
 
-// ──────────────────────────────────────────────────────────────
 // Helpers
-// ──────────────────────────────────────────────────────────────
 
 /**
  * Login as admin user. Dismisses biometric modal if present.
@@ -75,7 +73,7 @@ async function loginAsAdmin(page: Page): Promise<boolean> {
         }
         return false;
       }
-      // Navigated away from /login — treat as success
+      // Navigated away from /login: treat as success
     }
 
     // Capture token and user from the page context
@@ -112,7 +110,7 @@ async function goToMedia(page: Page, retries: number = 1): Promise<boolean> {
         window.dispatchEvent(new PopStateEvent('popstate'));
       });
     } else {
-      // No token — must do full navigation
+      // No token: must do full navigation
       await page.goto(`${UI_URL}/media`, { waitUntil: 'networkidle', timeout: 30000 });
     }
 
@@ -208,9 +206,7 @@ async function waitForLocalPlayerOverlay(page: Page, timeout: number = 15000): P
   return false;
 }
 
-// ──────────────────────────────────────────────────────────────
 // Test Suites
-// ──────────────────────────────────────────────────────────────
 
 test.describe('@live ABS Audiobook → Office TV', () => {
   test.beforeEach(async ({ page }) => {
@@ -220,9 +216,9 @@ test.describe('@live ABS Audiobook → Office TV', () => {
     if (!ok) test.skip();
   });
 
-  test('@live ABS audiobook plays on Office TV — full playback chain', async ({ page }) => {
+  test('@live ABS audiobook plays on Office TV: full playback chain', async ({ page }) => {
     const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available — skipping');
+    test.skip(!officeTvCard, 'Office TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
@@ -251,9 +247,9 @@ test.describe('@live ABS Audiobook → Office TV', () => {
     }
   });
 
-  test('@live ABS audiobook — media status API reports correct state after play', async ({ page }) => {
+  test('@live ABS audiobook: media status API reports correct state after play', async ({ page }) => {
     const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available — skipping');
+    test.skip(!officeTvCard, 'Office TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
@@ -299,9 +295,9 @@ test.describe('@live MA Music → Office TV', () => {
     if (!ok) test.skip();
   });
 
-  test('@live MA music plays on Office TV — full playback chain', async ({ page }) => {
+  test('@live MA music plays on Office TV: full playback chain', async ({ page }) => {
     const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available — skipping');
+    test.skip(!officeTvCard, 'Office TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
@@ -327,9 +323,9 @@ test.describe('@live MA Music → Office TV', () => {
     }
   });
 
-  test('@live MA music — media status API reports correct state after play', async ({ page }) => {
+  test('@live MA music: media status API reports correct state after play', async ({ page }) => {
     const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available — skipping');
+    test.skip(!officeTvCard, 'Office TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
@@ -369,7 +365,7 @@ test.describe('@live MA Music → Office TV', () => {
 
   test('@live MA playlist plays on Office TV', async ({ page }) => {
     const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available — skipping');
+    test.skip(!officeTvCard, 'Office TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
@@ -417,7 +413,7 @@ test.describe('@live ABS Audiobook → Web Player (Browser)', () => {
     if (!ok) test.skip();
   });
 
-  test('@live ABS audiobook plays via Web Player — audio loads from streaming endpoint', async ({ page }) => {
+  test('@live ABS audiobook plays via Web Player: audio loads from streaming endpoint', async ({ page }) => {
     const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
@@ -446,7 +442,7 @@ test.describe('@live ABS Audiobook → Web Player (Browser)', () => {
     }
   });
 
-  test('@live ABS audiobook — streaming endpoint is called and returns data', async ({ page }) => {
+  test('@live ABS audiobook: streaming endpoint is called and returns data', async ({ page }) => {
     const absResponse = await page.evaluate(async () => {
       try {
         const resp = await fetch('/api/media/audiobookshelf/last-played');
@@ -487,7 +483,7 @@ test.describe('@live ABS Audiobook → Web Player (Browser)', () => {
     }
   });
 
-  test('@live ABS audiobook — Web Player transport controls work', async ({ page }) => {
+  test('@live ABS audiobook: Web Player transport controls work', async ({ page }) => {
     const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
@@ -528,7 +524,7 @@ test.describe('@live MA Music → Web Player (Browser)', () => {
     if (!ok) test.skip();
   });
 
-  test('@live MA music plays via Web Player — audio loads from streaming endpoint', async ({ page }) => {
+  test('@live MA music plays via Web Player: audio loads from streaming endpoint', async ({ page }) => {
     const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
@@ -554,7 +550,7 @@ test.describe('@live MA Music → Web Player (Browser)', () => {
     }
   });
 
-  test('@live MA music — streaming endpoint returns valid response', async ({ page }) => {
+  test('@live MA music: streaming endpoint returns valid response', async ({ page }) => {
     const maResponse = await page.evaluate(async () => {
       try {
         const resp = await fetch('/api/media/music-assistant/recent');
@@ -627,7 +623,7 @@ test.describe('@live ABS Audiobook → Web Player (Android App / Mobile)', () =>
     }
   });
 
-  test('@live ABS audiobook — streaming endpoint works from mobile viewport', async ({ page }) => {
+  test('@live ABS audiobook: streaming endpoint works from mobile viewport', async ({ page }) => {
     const absResponse = await page.evaluate(async () => {
       try {
         const resp = await fetch('/api/media/audiobookshelf/last-played');
@@ -729,7 +725,7 @@ test.describe('@live MA Music → Web Player (Android App / Mobile)', () => {
     }
   });
 
-  test('@live MA music — streaming endpoint works from mobile viewport', async ({ page }) => {
+  test('@live MA music: streaming endpoint works from mobile viewport', async ({ page }) => {
     const maResponse = await page.evaluate(async () => {
       try {
         const resp = await fetch('/api/media/music-assistant/recent');
@@ -769,7 +765,7 @@ test.describe('@live ABS Audiobook → Other Devices', () => {
     if (!ok) test.skip();
   });
 
-  test('@live ABS audiobook — API returns valid book data for playback', async ({ request }) => {
+  test('@live ABS audiobook: API returns valid book data for playback', async ({ request }) => {
     const resp = await request.get('/api/media/audiobookshelf/last-played');
     expect(resp.status()).toBe(200);
     const data = await resp.json();
@@ -783,7 +779,7 @@ test.describe('@live ABS Audiobook → Other Devices', () => {
     expect(book.progress).toBeDefined();
   });
 
-  test('@live MA music — API returns valid track data for playback', async ({ request }) => {
+  test('@live MA music: API returns valid track data for playback', async ({ request }) => {
     const resp = await request.get('/api/media/music-assistant/recent');
     expect(resp.status()).toBe(200);
     const data = await resp.json();
@@ -797,7 +793,7 @@ test.describe('@live ABS Audiobook → Other Devices', () => {
   });
 });
 
-test.describe('@live Playback Controls — Device', () => {
+test.describe('@live Playback Controls: Device', () => {
   test.beforeEach(async ({ page }) => {
     const logged = await loginAsAdmin(page);
     if (!logged) test.skip();
@@ -807,7 +803,7 @@ test.describe('@live Playback Controls — Device', () => {
 
   test('@live pause and resume works on device playback', async ({ page }) => {
     const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available — skipping');
+    test.skip(!officeTvCard, 'Office TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
@@ -828,7 +824,7 @@ test.describe('@live Playback Controls — Device', () => {
 
   test('@live volume slider changes display value on device', async ({ page }) => {
     const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available — skipping');
+    test.skip(!officeTvCard, 'Office TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
@@ -851,7 +847,7 @@ test.describe('@live Playback Controls — Device', () => {
   });
 });
 
-test.describe('@live Playback Controls — Web Player', () => {
+test.describe('@live Playback Controls: Web Player', () => {
   test.beforeEach(async ({ page }) => {
     const logged = await loginAsAdmin(page);
     if (!logged) test.skip();

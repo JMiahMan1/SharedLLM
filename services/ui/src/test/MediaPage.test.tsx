@@ -53,7 +53,7 @@ const ACTIVE_REMOTE = {
   },
 };
 
-describe('Media page — active remote player', () => {
+describe('Media page: active remote player', () => {
   beforeEach(() => {
     server.use(
       http.post('/execute/media/status', () => HttpResponse.json(ACTIVE_REMOTE)),
@@ -92,7 +92,7 @@ describe('Media page — active remote player', () => {
   });
 });
 
-describe('Media page — long-form tracks', () => {
+describe('Media page: long-form tracks', () => {
   // An audiobook: 1h 06m 40s long, 1h 02m 05s in.
   const LONG_TRACK = {
     status: 'SUCCESS',
@@ -144,7 +144,7 @@ describe('Media page — long-form tracks', () => {
   });
 });
 
-describe('Media page — poisoned device names', () => {
+describe('Media page: poisoned device names', () => {
   /** The exact string Music Assistant still holds for the old web player. */
   const PROFILE_BLOB =
     '{"id":1,"username":"default","display_name":"Shared/Default User","is_admin":true,' +

@@ -143,7 +143,7 @@ describe('the day view charts activity by the hour', () => {
     // No chart at all: an empty 24-bar chart reads as "you did not move".
     expect(screen.queryByTestId('step-hour-chart')).not.toBeInTheDocument();
     // And with no hours there is no peak hour to claim either.
-    expect(screen.getByTestId('history-peak-hour')).toHaveTextContent('—');
+    expect(screen.getByTestId('history-peak-hour')).toHaveTextContent('No data');
   });
 
   it('draws the rest of today as still to come', async () => {

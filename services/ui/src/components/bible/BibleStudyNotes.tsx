@@ -52,7 +52,7 @@ const ORDER: BibleStudyNoteKind[] = ['commentary', 'introduction', 'heading', 'f
  * against the NIV wording is not a note on the NKJV wording.
  *
  * Every kind the study Bible actually carries is offered as a filter. When it
- * carries none, the server's own sentence is shown rather than an empty panel —
+ * carries none, the server's own sentence is shown rather than an empty panel:
  * that sentence is the difference between "nothing to read" and "nothing is
  * installed".
  */

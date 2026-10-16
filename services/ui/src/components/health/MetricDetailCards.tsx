@@ -182,7 +182,7 @@ function UnavailableMetrics({ reasons }: { reasons: Record<string, string> }) {
       <ul className="mt-2 space-y-1">
         {entries.map(([key, reason]) => (
           <li key={key} className="text-[11px] text-slate-500">
-            <span className="text-slate-400 font-medium capitalize">{key.replace(/_/g, ' ')}</span> — {reason}
+            <span className="text-slate-400 font-medium capitalize">{key.replace(/_/g, ' ')}</span>: {reason}
           </li>
         ))}
       </ul>

@@ -58,7 +58,7 @@ and on the shipped default pack (covered by `healthTheme.test.ts`).
    `[data-site-theme-active]` block that remaps the most widely used utility
    colours so a theme visibly restyles the whole interface.
 3. `useActiveThemeId()` (`useSyncExternalStore` over the registry) is how
-   widgets read the active theme — this is the only supported way for a widget
+   widgets read the active theme. It is the only supported way for a widget
    to be themed.
 
 ## Scopes
@@ -90,7 +90,7 @@ User packs are stored locally and can be synced to the account with
 
 ## Generated assets
 
-A pack is a flat JSON document, so it cannot ship image **files** — it round-trips through
+A pack is a flat JSON document, so it cannot ship image **files**: it round-trips through
 `localStorage`, a `Blob` export and a `GET/PUT /api/users/me/theme` column, and the import
 control accepts only `application/json`. Generated art therefore has to arrive as a
 **string**, either a `url("data:image/svg+xml,…")` value or a public-dir path, attached
@@ -98,21 +98,21 @@ under an `assets` key beside `tokens`.
 
 `assets` is **not** part of the schema: `validateThemePackage` only knows `HealthThemeTokens`,
 and the server validates only `kind` and `schemaVersion`. It is validated by the code that
-reads it. That is the right trade — the alternative (a required asset field) would need six
+reads it. That is the right trade: the alternative (a required asset field) would need six
 places changed together (the interface, the validator's two loops, the README, this doc, and
 the Identity handler) for every new asset kind.
 
-`alpaca/scripts/install_theme_pack.py` is the reference producer: it validates a model answer
+`scripts/install_theme_pack.py` in the separate alpaca repository is the reference producer: it validates a model answer
 against the contract below and writes a real `.pack.json` into
 `services/ui/src/themes/packs/`. A motif tile must be:
 
-- **square, with `width` == `height` == the viewBox extent** — CSS repeats it on a square
+- **square, with `width` == `height` == the viewBox extent**. CSS repeats it on a square
   lattice, so anything else seams at every edge;
-- **`fill="none"` with `stroke-width` 1–1.5 and `stroke-opacity` 0.06–0.22** — the tile is a
+- **`fill="none"` with `stroke-width` 1-1.5 and `stroke-opacity` 0.06-0.22**. The tile is a
   whisper behind the UI, which is what `motifPattern()` produces today;
 - **coloured with `var(--site-accent)` / `var(--site-accent-alt)`**, so one tile works on
   every theme rather than being right on exactly one;
-- **free of `<text>` and `font-family`** — the UI ships Google Fonts only and the Android
+- **free of `<text>` and `font-family`**. The UI ships Google Fonts only and the Android
   widget receives colours alone, so a glyph falls back to whatever the render host has.
 
 `clearSiteTheme()` (`siteTheme.ts`) **hardcodes the name of every CSS variable it
@@ -126,7 +126,7 @@ do not reach it unless that config contract is extended.
 
 ## Tests
 
-- `src/themes/healthTheme.test.ts` — schematic, registry, scopes, icons
-- `src/themes/siteTheme.test.ts` — CSS var mapping, server load/save, offline
-- `src/themes/ThemePackageManager.test.tsx` — import/export/edit/disable/remove
-- `services/identity/tests/test_user_theme.py` — per-user endpoints
+- `src/themes/healthTheme.test.ts`: schematic, registry, scopes, icons
+- `src/themes/siteTheme.test.ts`: CSS var mapping, server load/save, offline
+- `src/themes/ThemePackageManager.test.tsx`: import/export/edit/disable/remove
+- `services/identity/tests/test_user_theme.py`: per-user endpoints

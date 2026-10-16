@@ -1,4 +1,4 @@
-# raven reflection prompt — Template
+# raven reflection prompt: Template
 
 This is a fill-in-the-blank template. It is tracked in git as a reference.
 The actual prompt content goes in `prompts/raven_reflection_prompt.md` (git-ignored).
@@ -45,14 +45,14 @@ The actual prompt content goes in `prompts/raven_reflection_prompt.md` (git-igno
 > [The content should be complete and self-contained. Do not reference
 > external files or variables that the LLM cannot access.]
 >
-> [Keep prompts focused — include only instructions relevant to this
+> [Keep prompts focused; include only instructions relevant to this
 > specific role (assistant, librarian, code helper, etc.).]
 
 ## Best Practices for Writing System Prompts
 
 ### Structure
 
-- **Identity first:** Start with "You are..." — clearly define who the model is
+- **Identity first:** Start with "You are..." and clearly define who the model is
 - **Rules in order:** List instructions from most important to least
 - **Use sections:** Group related instructions with `##` headings
 - **Be explicit:** Say "do X" not "try to X" or "it would be nice to X"
@@ -61,19 +61,19 @@ The actual prompt content goes in `prompts/raven_reflection_prompt.md` (git-igno
 
 - **Role & identity:** The model's name, personality, worldview
 - **Scope:** What the model should handle vs. defer to other systems
-- **Tone:** Formal, casual, technical, friendly — be specific
+- **Tone:** Formal, casual, technical, friendly; be specific
 - **Constraints:** What the model must NEVER do (hallucinate, guess credentials)
 - **Format:** How the model should structure responses (JSON, plain text, etc.)
 - **Fallbacks:** What to do when uncertain or when the request is out of scope
 
 ### What to Avoid
 
-- `[ ]` or `{placeholders}` — these confuse the model
+- `[ ]` or `{placeholders}`: these confuse the model
 - References to files or paths the model cannot see
 - Contradictory instructions (e.g., "be concise" and "give full explanations")
-- Instructions better handled by code (e.g., "look up the current time" —
+- Instructions better handled by code (e.g., "look up the current time":
   use tools, not prompt text)
-- Overly long prompts (>4K tokens) — they dilute important instructions
+- Overly long prompts (>4K tokens): they dilute important instructions
 
 ### Prompt Engineering Tips
 
@@ -88,7 +88,7 @@ The actual prompt content goes in `prompts/raven_reflection_prompt.md` (git-igno
 
 ## Security
 
-- **Never commit `raven_reflection_prompt.md`** — it contains production prompt content
+- **Never commit `raven_reflection_prompt.md`**: it contains production prompt content
 - Keep `raven_reflection_prompt.md.sample` as a lightweight reference template only
 - Actual prompts are seeded into the Identity `GlobalSettings` table at runtime
 - If leaked, rotate the prompt and re-seed immediately

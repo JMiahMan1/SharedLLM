@@ -3,7 +3,7 @@ import { rethrowWithServerDetail } from '../services/api';
 
 /**
  * The response interceptor rejects the raw axios error, whose message is only
- * "Request failed with status code 400" — the service's own `detail` is lost.
+ * "Request failed with status code 400", and the service's own `detail` is lost.
  * Anything an operator has to act on goes through this helper instead, so a
  * refusal is never flattened into a status code they cannot do anything about.
  */

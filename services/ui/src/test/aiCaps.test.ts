@@ -24,9 +24,9 @@ describe('statusOf', () => {
 
 describe('capabilityLabel', () => {
   it('names the state in words', () => {
-    expect(capabilityLabel(cap(true, 'a', 'Edit'))).toBe('Edit — ready');
-    expect(capabilityLabel(cap(false, 'a', 'Edit'))).toBe('Edit — unavailable');
-    expect(capabilityLabel(cap(null, 'a', 'Edit'))).toBe('Edit — unconfirmed');
+    expect(capabilityLabel(cap(true, 'a', 'Edit'))).toBe('Edit: ready');
+    expect(capabilityLabel(cap(false, 'a', 'Edit'))).toBe('Edit: unavailable');
+    expect(capabilityLabel(cap(null, 'a', 'Edit'))).toBe('Edit: unconfirmed');
   });
 });
 

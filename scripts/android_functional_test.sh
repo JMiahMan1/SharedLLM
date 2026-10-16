@@ -40,7 +40,7 @@ ensure_personal_profile_only() {
 # Install path: always personal profile only.
 #   adb install -r app-debug.apk
 #   adb shell pm install-existing --user 0 com.jarvisos.app
-# NEVER install into work profile (user 10) — MDM removes unapproved apps.
+# Never install into the work profile (user 10): MDM removes unapproved apps.
 launch_app() {
   "$ADB" shell am force-stop "$PKG" || true
   "$ADB" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || \
@@ -50,14 +50,14 @@ launch_app() {
 
 test_package_installed() {
   # Personal profile only (user 0). Work profile (user 10) is MDM-managed and
-  # will auto-remove unapproved packages — never install or assert there.
+  # will auto-remove unapproved packages, so never install or assert there.
   if "$ADB" shell pm path --user 0 "$PKG" >/dev/null 2>&1; then
     ok "package $PKG installed on user 0 (personal)"
   else
     bad "package $PKG missing on user 0"
   fi
   if "$ADB" shell pm path --user 10 "$PKG" >/dev/null 2>&1; then
-    bad "package $PKG also present on work profile (user 10) — uninstall it"
+    bad "package $PKG also present on work profile (user 10); uninstall it"
   else
     ok "package $PKG absent from work profile (user 10)"
   fi

@@ -1,7 +1,7 @@
 apply plugin: 'com.android.application'
 
 // Single source of truth for marketing version: services/ui/package.json
-// (web OTA bundle + Android versionName stay in lockstep — a bugfix release
+// (web OTA bundle + Android versionName stay in lockstep; a bugfix release
 // bumps package.json once; versionCode still increments for APK installs).
 def uiPackageJson = file('../../package.json')
 def uiVersion = '1.4.0'
@@ -44,7 +44,7 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        // Self-signed release keystore — no Play Store. Same key signs debug
+        // Self-signed release keystore, no Play Store. Same key signs debug
         // and release so device upgrades never hit a signature mismatch.
         // Keystore file is NOT in git; passwords come only from env (CI secrets)
         // or a local gitignored keystore.properties.

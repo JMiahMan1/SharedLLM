@@ -237,7 +237,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                     log.error(f"[media/play] play_media service call failed: {result.get('error')}")
                     return ExecutionResult(status="FAILURE", message=f"Failed to play '{req.query}': {result.get('error')}", service="media_play")
 
-        # No usable match: do NOT play a random/last-resort track — the user
+        # No usable match: do NOT play a random/last-resort track; the user
         # asked for a specific thing and nothing matched it (BUG-25).
         log.warning(f"[media/play] MASS search returned no usable match for query='{req.query}' (config_entry={mass_entry}); returning FAILURE")
         return ExecutionResult(status="FAILURE", message=f"No match for '{req.query}'.", service="media_play")
@@ -410,7 +410,7 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
             pod_title = pod.get("title", req.query)
             log.info(f"[media/podcast] Found podcast in Audiobookshelf: '{pod_title}' (id={pod_id})")
             # BUG-26: play a real episode (latest, or one matching the query),
-            # not the podcast item itself — the legacy item stream route is
+            # not the podcast item itself; the legacy item stream route is
             # gone on live ABS 2.x.
             play_res = await abs_handler.handle_audiobookshelf(
                 AudiobookshelfRequest(
@@ -502,7 +502,7 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
     try:
         from ..nextcloud_client import resolve_credentials, webdav_url
         from ..http_client import request as http_request
-        # BUG-26: ctx IS the UserContext — the old `.user_context` read raised
+        # BUG-26: ctx IS the UserContext; the old `.user_context` read raised
         # AttributeError (swallowed below), silently killing this fallback.
         nc_url, nc_user, nc_pass = resolve_credentials(ctx)
         if nc_url and nc_user and nc_pass:

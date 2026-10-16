@@ -115,7 +115,7 @@ def test_gateway_extracts_bearer_token(monkeypatch):
 
     # Inference now runs through the Redis-backed job queue, which is created in
     # the app lifespan. A bare TestClient does not run that, so stub the queue
-    # the same way services/tests/test_gateway_model_selection.py does — this
+    # the same way services/tests/test_gateway_model_selection.py does; this
     # test is about identity resolution, not inference.
     from unittest.mock import AsyncMock
 

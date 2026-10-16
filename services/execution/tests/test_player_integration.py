@@ -1,5 +1,5 @@
 """
-Comprehensive integration tests for player changes.
+Integration tests for player changes.
 
 Tests cover:
 - resolve_mass_entity scenarios (MA player routing, fallback, idle players)
@@ -792,7 +792,7 @@ class TestGatewayStreamEndpoint:
         ):
             # P2-T10 (BUG-19): GET never starts playback. With no running
             # session it must 409, and only read the queue on the browser
-            # (Sendspin) player — never send player_queues/play_media.
+            # (Sendspin) player; never send player_queues/play_media.
             with pytest.raises(Exception) as exc_info:
                 await stream_music_assistant("music://track/12345", cast(Request, FakeRequest()))
 

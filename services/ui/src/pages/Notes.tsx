@@ -78,7 +78,7 @@ function categoryFor(folder: string): string {
 }
 
 /**
- * Notes — a Keep-style surface over the Nextcloud markdown notes the rest of
+ * Notes: a Keep-style surface over the Nextcloud markdown notes the rest of
  * Jarvis already uses. Pins and colours are view preferences kept on-device;
  * note content stays plain markdown in Nextcloud.
  */
@@ -194,7 +194,7 @@ export default function Notes() {
     const category = categoryFor(draft.folder);
     setSaving(true);
     try {
-      // write (replace), never append — append is quick-capture only.
+      // write (replace), never append; append is quick-capture only.
       const saved = await saveNote({
         title,
         content: draft.content,
@@ -345,8 +345,8 @@ export default function Notes() {
             {search
               ? 'No notes match that search.'
               : loadError
-                ? (listRes?.message || 'Could not load notes — is Nextcloud connected?')
-                : 'No notes yet — take one above.'}
+                ? (listRes?.message || 'Could not load notes. Is Nextcloud connected?')
+                : 'No notes yet. Take one above.'}
           </p>
         </div>
       ) : (

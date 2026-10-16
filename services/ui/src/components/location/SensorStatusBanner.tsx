@@ -11,7 +11,7 @@ import { sensorStatus, isHealthy, worstOf, type SensorStatusView } from '../../l
  * Renders nothing at all when both sensors are healthy, so it adds zero noise in
  * the common case. When something is wrong it states what broke, what it costs
  * the user's data, and either offers a one-tap re-enable or points at the phone's
- * OS settings — whichever is actually true.
+ * OS settings, whichever is actually true.
  *
  * Mobile parity: every control is ≥44px on coarse pointers, and there is no
  * hover-only affordance (the whole card is the tap target where it can be).
@@ -116,7 +116,7 @@ export const SensorStatusBanner = () => {
       if (ok) toast.success(`${id === 'location' ? 'Location sharing' : 'Step tracking'} is on`);
       // enableSensor already toasts the specific failure; do not double-report.
     } catch {
-      toast.error('Could not turn that on — check your phone permissions');
+      toast.error('Could not turn that on. Check your phone permissions');
     } finally {
       setBusy(null);
     }

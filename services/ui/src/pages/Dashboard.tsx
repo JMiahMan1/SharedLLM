@@ -37,7 +37,7 @@ import BentoBoxDashboard from '../components/dashboard/BentoBoxDashboard';
 import DashboardSettingsPanel from '../components/dashboard/DashboardSettingsPanel';
 import { useWidgetStore } from '../stores/widgetStore';
 
-// ── Per-section Error Boundary ───────────────────────────────────────────────
+// Per-section Error Boundary
 
 interface SectionBoundaryState { hasError: boolean; error: Error | null }
 interface SectionBoundaryProps { children: ReactNode; label: string }
@@ -81,7 +81,7 @@ class SectionErrorBoundary extends Component<SectionBoundaryProps, SectionBounda
   }
 }
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// Types
 
 type ServiceSummary = {
   key: string;
@@ -102,7 +102,7 @@ const SERVICE_ICON_MAP = {
   redis: Activity,
 } as const;
 
-// ── Service Status Card ──────────────────────────────────────────────────────
+// Service Status Card
 
 const ServiceCard = ({ service, onClick }: { service: ServiceSummary; onClick: () => void }) => {
   const Icon = service.icon;
@@ -133,7 +133,7 @@ const ServiceCard = ({ service, onClick }: { service: ServiceSummary; onClick: (
   );
 };
 
-// ── Log Entry Card ────────────────────────────────────────────────────────────
+// Log Entry Card
 
 const LOG_LEVEL_COLORS: Record<string, string> = {
   error: 'text-red-400',
@@ -169,7 +169,7 @@ const LogEntryCard = ({ log }: { log: LogEntry }) => {
   );
 };
 
-// ── Workspace Card ────────────────────────────────────────────────────────────
+// Workspace Card
 
 const WorkspaceCard = ({ workspace }: { workspace: Workspace }) => (
   <div className="flex items-start gap-3 p-4 rounded-xl bg-black/20 border border-white/5 hover:border-emerald-500/15 transition-all">
@@ -194,7 +194,7 @@ const WorkspaceCard = ({ workspace }: { workspace: Workspace }) => (
   </div>
 );
 
-// ── Search hook ──────────────────────────────────────────────────────────────
+// Search hook
 
 interface SearchResponse {
   query: string;
@@ -271,7 +271,7 @@ function useSearch(query: string) {
   };
 }
 
-// ── Dashboard ────────────────────────────────────────────────────────────────
+// Dashboard
 
 const Dashboard = () => {
   const queryClient = useQueryClient();
@@ -303,8 +303,8 @@ const Dashboard = () => {
   const { data: serviceInfo } = useServiceInfo();
 
   // Admin only (the log is the whole system's). The central log is mostly the
-  // gateway's request lines, so the panel asks for warnings and errors only —
-  // failed requests — instead of keyword-filtering lines that never matched.
+  // gateway's request lines, so the panel asks for warnings and errors only
+  // (failed requests) instead of keyword-filtering lines that never matched.
   const { data: problems = [] } = useQuery<LogEntry[]>({
     queryKey: ['recent-logs', 'problems'],
     queryFn: () => api.getLogs(20, ['warning', 'error']),
@@ -368,7 +368,7 @@ const Dashboard = () => {
           survive the app closing is otherwise invisible until someone asks. */}
       {isTracking && <LocationBackgroundNotice />}
 
-      {/* ── Header ── */}
+      {/* Header */}
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white">
@@ -432,7 +432,7 @@ const Dashboard = () => {
         </div>
       </header>
 
-      {/* ── Search Results (anchored directly beneath the search bar) ── */}
+      {/* Search Results (anchored directly beneath the search bar) */}
       {(searchResults || searchError) && (
         <SectionErrorBoundary label="Search Results">
           <section className="glass-panel p-6 border-indigo-500/20 bg-indigo-950/5">
@@ -478,7 +478,7 @@ const Dashboard = () => {
         </SectionErrorBoundary>
       )}
 
-      {/* ── System health banner (only shown when degraded) ── */}
+      {/* System health banner (only shown when degraded) */}
       {!overallHealthOk && unhealthyCount > 0 && (
         <div className="glass-panel px-5 py-4 border-amber-500/20 bg-amber-950/10 flex items-center gap-3">
           <AlertTriangle size={18} className="text-amber-400 shrink-0" />
@@ -489,7 +489,7 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* ── Widget Grid (BentoBox) ── */}
+      {/* Widget Grid (BentoBox) */}
       <SectionErrorBoundary label="Widget Grid">
         <section>
           <BentoBoxDashboard />
@@ -534,7 +534,7 @@ const Dashboard = () => {
       </SectionErrorBoundary>
       )}
 
-      {/* ── Logs + Workspaces + Settings + Raven ── */}
+      {/* Logs + Workspaces + Settings + Raven */}
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         {isAdmin && (
         <SectionErrorBoundary label="Recent Problems">
@@ -701,7 +701,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* ── Service Detail Modal ── */}
+      {/* Service Detail Modal */}
       <Modal isOpen={Boolean(selectedService)} onClose={() => setSelectedService(null)} title={selectedService?.label}>
         <div className="space-y-3">
           {selectedService?.details.map((detail) => (
@@ -713,7 +713,7 @@ const Dashboard = () => {
         </div>
       </Modal>
 
-      {/* ── Voice Assistant ── */}
+      {/* Voice Assistant */}
       <VoiceAssistantOverlay
         isOpen={voiceOpen}
         onClose={() => setVoiceOpen(false)}
@@ -723,7 +723,7 @@ const Dashboard = () => {
         }}
       />
 
-      {/* ── Dashboard Settings ── */}
+      {/* Dashboard Settings */}
       <DashboardSettingsPanel
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}

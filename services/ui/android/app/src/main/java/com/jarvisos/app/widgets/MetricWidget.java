@@ -40,7 +40,7 @@ public class MetricWidget extends AppWidgetProvider {
 
         try {
             if (WidgetApi.apiKey(context) == null) {
-                views.setTextViewText(R.id.metric_value, "—");
+                views.setTextViewText(R.id.metric_value, "-");
                 views.setTextViewText(R.id.metric_sub, "Sign in to Jarvis OS");
                 return views;
             }
@@ -48,7 +48,7 @@ public class MetricWidget extends AppWidgetProvider {
             JSONObject states = WidgetApi.entityStates(context, ids);
             JSONObject e = states.optJSONObject(entityId);
             if (e == null) {
-                views.setTextViewText(R.id.metric_value, "—");
+                views.setTextViewText(R.id.metric_value, "-");
                 views.setTextViewText(R.id.metric_sub, entityId);
             } else {
                 String state = e.optString("state", "?");
@@ -59,7 +59,7 @@ public class MetricWidget extends AppWidgetProvider {
                 views.setTextViewText(R.id.metric_sub, friendly);
             }
         } catch (Exception ex) {
-            views.setTextViewText(R.id.metric_value, "—");
+            views.setTextViewText(R.id.metric_value, "-");
             views.setTextViewText(R.id.metric_sub, ex.getMessage() != null ? ex.getMessage() : "offline");
         }
         return views;

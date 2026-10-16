@@ -3,9 +3,9 @@
 
 Two implementations share one interface:
 
-* ``SqliteVecAdapter`` — uses the ``sqlite-vec`` ``vec0`` virtual table for
+* ``SqliteVecAdapter``: uses the ``sqlite-vec`` ``vec0`` virtual table for
   fast, disk-backed approximate/exact nearest-neighbour search.
-* ``NumpyVecAdapter`` — a pure-Python/numpy fallback used when the
+* ``NumpyVecAdapter``: a pure-Python/numpy fallback used when the
   ``sqlite-vec`` extension cannot be loaded. It stores serialized float32
   blobs in a regular table and computes cosine similarity in Python.
 
@@ -13,7 +13,7 @@ All adapters operate on the unified ``vec_rag_items`` table (or ``vec_store``
 for the fallback), keyed by the same ``id`` used in ``rag_items``. Filtering by
 collection/user is done via a JOIN against ``rag_items``, so the dimension
 mismatch problem described in the migration blueprint (hardcoded ``float[384]``)
-is avoided entirely — the dimension is supplied at table-creation time by the
+is avoided entirely; the dimension is supplied at table-creation time by the
 caller after dynamic detection.
 """
 from __future__ import annotations
@@ -64,7 +64,7 @@ class SqliteVecAdapter(VectorStoreAdapter):
 
     def add(self, doc_id: str, embedding: list[float], collection: str, user_id: str) -> None:
         blob = serialize_vector(embedding)
-        # vec0 virtual tables do NOT honor INSERT OR REPLACE — upsert explicitly
+        # vec0 virtual tables do NOT honor INSERT OR REPLACE, so upsert explicitly
         # so re-syncing an existing id (e.g. HA entities) updates the vector
         # instead of raising "UNIQUE constraint failed on primary key".
         self.conn.execute("DELETE FROM vec_rag_items WHERE id = ?", [doc_id])

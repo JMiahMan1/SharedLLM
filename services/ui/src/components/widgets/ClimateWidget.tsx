@@ -20,7 +20,7 @@ import { useHaptics } from '../../hooks/useHaptics';
 import { WidgetCard } from './WidgetCard';
 
 /**
- * Climate — a Nest-style thermostat widget for one or many Home Assistant
+ * Climate: a Nest-style thermostat widget for one or many Home Assistant
  * climate entities.
  *
  * Layouts (Google Home / Material 3 Expressive pattern):
@@ -34,7 +34,7 @@ import { WidgetCard } from './WidgetCard';
  * itself gated by the per-user entity permission check (device assignment, plus
  * any admin-set entity protection). The listing this widget draws from is
  * filtered by that same server-side check, so an entity the user may not touch
- * never appears here at all — there is no second, client-side permission rule
+ * never appears here at all. There is no second, client-side permission rule
  * that could drift away from the backend's.
  */
 
@@ -211,7 +211,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
     busyKey: string
   ) => {
     if (!accessible.has(entityId)) {
-      // The entity dropped out of the server-filtered list — a lock was added,
+      // The entity dropped out of the server-filtered list: a lock was added,
       // or the assignment was removed. Say so rather than firing a doomed call.
       toast.error(`Access Denied: ${entityId} is no longer available to your account.`);
       return false;
@@ -529,7 +529,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
     // show the band instead of an empty "--°".
     const dual = attrs.hvac_mode === 'heat_cool' && typeof low === 'number' && typeof high === 'number';
     const headline = typeof target === 'number' ? formatTemp(target)
-      : dual ? `${formatTemp(low)}–${formatTemp(high)}`
+      : dual ? `${formatTemp(low)}-${formatTemp(high)}`
       : formatTemp(current);
     const fillValue = typeof target === 'number' ? target : dual ? (low + high) / 2 : undefined;
     const { min, max } = setpointRange(attrs);
@@ -700,7 +700,7 @@ interface DeviceSetupDialogProps {
 /**
  * Device picker + layout chooser. Opens as a bottom sheet on phones and a
  * centred dialog from `sm` up, and lists every climate entity Home Assistant
- * reported — nothing is pre-selected or hard-coded.
+ * reported; nothing is pre-selected or hard-coded.
  */
 export function DeviceSetupDialog({
   entities, selected, layout, saving, onCancel, onSave,

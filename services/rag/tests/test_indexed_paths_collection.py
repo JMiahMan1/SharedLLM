@@ -2,7 +2,7 @@
 
 The endpoint hardcoded ``collection_name='nextcloud_files'``, so it could not
 report what any other collection held. The storage indexer needs it to compute
-which of *its own* files disappeared upstream — a question that is meaningless
+which of *its own* files disappeared upstream, a question that is meaningless
 against a hardcoded collection, and wrong the moment a second provider exists.
 """
 import asyncio

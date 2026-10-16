@@ -75,7 +75,7 @@ public class DashboardWidget extends AppWidgetProvider {
                 : new JSONObject();
             for (int i = 0; i < 4; i++) {
                 if (i >= cellIds.size()) {
-                    views.setTextViewText(CELL_LABEL_IDS[i], "—");
+                    views.setTextViewText(CELL_LABEL_IDS[i], "-");
                     views.setTextViewText(CELL_VALUE_IDS[i], "");
                     views.setOnClickPendingIntent(CELL_HIT_IDS[i], WidgetUpdater.refreshPendingIntent(context));
                     continue;

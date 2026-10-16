@@ -14,7 +14,7 @@ export type MetricFormat = 'count' | 'duration' | 'distance';
 
 /** How a value reads, per the server's `format` field. */
 export function formatMetricValue(value: number, format: MetricFormat): string {
-  if (!Number.isFinite(value)) return '—';
+  if (!Number.isFinite(value)) return 'No data';
   if (format === 'duration') {
     const mins = Math.round(value);
     if (mins < 60) return `${mins} min`;

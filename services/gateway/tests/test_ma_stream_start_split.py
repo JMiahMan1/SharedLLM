@@ -3,7 +3,7 @@
 Plan: every GET (incl. Range/seek) used to re-run
 ``player_queues/play_media(option=replace)``, restarting the queue on each
 byte-range request. Fix: POST starts playback (and caches the resolved stream
-URL), GET only ever fetches bytes — it never starts playback.
+URL), GET only ever fetches bytes; it never starts playback.
 
 pytest: two Range GETs after a start -> ``play_media`` called 0 times.
 """
@@ -170,7 +170,7 @@ def test_two_range_gets_after_start_send_no_play_media(client):
 
     p1, p2, p3, p4 = _patch_stack(gateway_main, ma, session)
     with p1, p2, p3, p4:
-        # 1. Start playback (POST) — this is the only place play_media runs.
+        # 1. Start playback (POST); this is the only place play_media runs.
         start = client.post(
             "/api/media/stream/music-assistant?uri=library://track/123"
         )
@@ -209,7 +209,7 @@ def test_two_range_gets_after_start_send_no_play_media(client):
 
 
 def test_get_without_cache_resolves_queue_without_play_media(client):
-    """Cold GET resolves the stream from queue state — never starts playback."""
+    """Cold GET resolves the stream from queue state; never starts playback."""
     from services.gateway import main as gateway_main
 
     queue_state = {

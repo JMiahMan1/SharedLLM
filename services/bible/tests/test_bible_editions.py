@@ -237,7 +237,7 @@ def test_a_note_dict_only_needs_an_osis(loaded):
     assert summary["skipped"] == 0
 
 def _edition(session, code):
-    """Look an edition up by its code — the primary key is the row id."""
+    """Look an edition up by its code; the primary key is the row id."""
     return session.exec(
         select(corpus.BibleEdition).where(corpus.BibleEdition.code == code)
     ).first()

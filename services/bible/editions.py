@@ -54,7 +54,7 @@ def _lines(session: Session) -> list[str]:
         kinds = [str(k) for k in (entry.get("note_kinds") or [])]
         rows.append(
             f"  {entry['code']:<18} {entry['name']}"
-            + (f" — {entry['publisher']}" if entry["publisher"] else "")
+            + (f" ({entry['publisher']})" if entry["publisher"] else "")
             + f"  [{entry['note_count']} notes"
             + (f", {', '.join(kinds)}" if kinds else "")
             + f", {entry['license_class']}]"
@@ -63,7 +63,7 @@ def _lines(session: Session) -> list[str]:
         rows.append("  (no study editions installed)")
     known = [e for e in edition_catalogue(session) if not e["installed"]]
     for entry in known:
-        rows.append(f"  {entry['code']:<18} {entry['name']} — not installed")
+        rows.append(f"  {entry['code']:<18} {entry['name']} (not installed)")
         if entry["note"]:
             rows.append(f"      {entry['note']}")
     return rows
@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         SQLModel.metadata.create_all(engine)
         # An existing corpus predates the edition columns. Bring it forward the
         # same way the service does, or a database the running service can read
-        # would look empty here — which reads as "not installed" and is wrong.
+        # would look empty here, which reads as "not installed" and is wrong.
         applied = migrations.apply(engine)
         with Session(engine) as session:
             if args.command == "list":

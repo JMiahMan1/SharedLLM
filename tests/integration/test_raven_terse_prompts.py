@@ -8,21 +8,21 @@ Apply-citation instruction. Passing means the learning system (protocol
 lessons pinned into every mission, toolchain/resource inventory blocks) is
 actually steering behavior.
 
-  1. ``terse-fact``      — bare factual question; expects a dedicated
+  1. ``terse-fact``:       bare factual question; expects a dedicated
                           workspace, a WebSearchRequest fact check, an
                           ``answer.md`` artifact and an ``Apply: [id]``
                           citation in the plan.
-  2. ``terse-flyer``     — bare document request; expects scenario
+  2. ``terse-flyer``:      bare document request; expects scenario
                           curriculum (typesetting/publishing) + toolchain
                           discovery (pandoc/pdflatex) to produce a real
                           PDF in the workspace root.
-  3. ``terse-git``       — bare git task; expects lesson-proto-git to
+  3. ``terse-git``:        bare git task; expects lesson-proto-git to
                           steer a clone + repository summary artifact.
-  4. ``terse-media``     — bare TTS/narration request; expects
+  4. ``terse-media``:      bare TTS/narration request; expects
                           lesson-proto-media to generate an audio artifact.
-  5. ``terse-report``    — bare research request; expects lesson-proto-report
+  5. ``terse-report``:     bare research request; expects lesson-proto-report
                           (multi-source web synthesis) into report.md.
-  6. ``terse-orchestrate`` — bare multi-source request; expects cross-domain
+  6. ``terse-orchestrate``:  bare multi-source request; expects cross-domain
                           chaining (web + Home Assistant) into one artifact.
 
 Requires LIVE_E2E=1 and a reachable gateway (GATEWAY_URL). Missions take
@@ -239,7 +239,7 @@ def test_raven_terse_protocol_recall():
 
     ws_id = result.get("workspace_id") or ""
     assert ws_id and ws_id.startswith("raven-"), (
-        f"[terse-fact] no dedicated workspace created (got {ws_id!r}) — "
+        f"[terse-fact] no dedicated workspace created (got {ws_id!r}); "
         "protocol workspace lesson not applied"
     )
 
@@ -251,7 +251,7 @@ def test_raven_terse_protocol_recall():
 
     output_log = _mission_output_log(mid)
     assert "Apply:" in output_log, (
-        "[terse-fact] plan has no Apply: citation — lesson application not recorded"
+        "[terse-fact] plan has no Apply: citation; lesson application not recorded"
     )
 
 
@@ -504,7 +504,7 @@ def test_raven_terse_research_report_mission():
 
     output_log = _mission_output_log(mid)
     assert "Apply:" in output_log, (
-        "[terse-report] plan has no Apply: citation — lesson application not recorded"
+        "[terse-report] plan has no Apply: citation; lesson application not recorded"
     )
 
 
@@ -553,5 +553,5 @@ def test_raven_terse_orchestration_mission():
 
     output_log = _mission_output_log(mid)
     assert "Apply:" in output_log, (
-        "[orchestrate] plan has no Apply: citation — lesson application not recorded"
+        "[orchestrate] plan has no Apply: citation; lesson application not recorded"
     )

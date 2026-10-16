@@ -26,7 +26,7 @@ from services.rag.store import (
 DIM = 8
 
 
-# ──────────────────────────────── store / adapter ───────────────────────────
+# store / adapter
 
 def test_serialize_roundtrip():
     v = [0.1, -0.2, 0.3, 0.4]
@@ -87,7 +87,7 @@ def test_build_adapter_falls_back_to_numpy_without_extension():
     assert isinstance(adapter, NumpyVecAdapter)
 
 
-# ──────────────────────────────── db schema ─────────────────────────────────
+# db schema
 
 def test_init_schema_creates_tables(tmp_path):
     db_path = str(tmp_path / "rag.db")
@@ -126,7 +126,7 @@ def test_dimension_detection_uses_model_not_hardcoded():
     assert db.detect_dimension(fake_embed_bad, fallback=384) == 384
 
 
-# ──────────────────────────────── API logic ─────────────────────────────────
+# API logic
 # These call the endpoint functions directly with monkeypatched globals so we
 # never need fastembed or the native extension.
 

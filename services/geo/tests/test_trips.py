@@ -517,7 +517,7 @@ def test_estimate_steps_running_faster_cadence():
 
 
 def test_estimate_steps_rejects_wheeled_activities():
-    """Cycling/dirtbiking/horseback have no bipedal stride — no step estimate."""
+    """Cycling/dirtbiking/horseback have no bipedal stride, so no step estimate."""
     points = [{"t": time.time() + i * 10, "lat": 33.16 + i * 0.001, "lon": -111.56, "spd": 5.0} for i in range(30)]
     for activity in ("cycling", "mountain_biking", "dirtbiking", "horseback_riding"):
         assert geo._estimate_steps_from_gps(activity, points) is None

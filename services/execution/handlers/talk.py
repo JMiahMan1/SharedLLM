@@ -335,7 +335,7 @@ async def _bank_game_stars(user: str, total_stars: int, reason: str) -> None:
     """Record a game's stars in geo's ledger so they outlive the round.
 
     A geo outage must not break a game that is already being played, so a
-    failure here is logged and swallowed — the game itself is unaffected.
+    failure here is logged and swallowed; the game itself is unaffected.
     """
     if not user or user == "family" or total_stars <= 0:
         return
@@ -438,7 +438,7 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
 
     if command == "stop":
         games.registry.drop(req.token)
-        await say("🛑 Game over — good game.")
+        await say("🛑 Game over. Good game.")
         return ExecutionResult(status="SUCCESS", message="Game stopped.", service="talk_game")
 
     if command == "start":
@@ -462,7 +462,7 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
     if state is None:
         return ExecutionResult(
             status="FAILURE",
-            message="No game is running here — say 'start a game' first.",
+            message="No game is running here. Say 'start a game' first.",
             service="talk_game",
         )
 
@@ -480,7 +480,7 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
 
         # Wrong answers stay quiet unless everyone has had a go.
         if all(p.attempts for p in state.players.values()) and len(state.players) > 1:
-            await say(f"The answer was {state.answers[0]} — next question coming.", None)
+            await say(f"The answer was {state.answers[0]}. Next question coming.", None)
             games.registry.start_trivia(req.token)
             fresh = games.registry.get(req.token)
             await say(games.trivia_prompt(fresh))

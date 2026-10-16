@@ -11,18 +11,18 @@ OPTIONAL = "OPTIONAL"   # Nice to have, graceful degradation possible
 
 # Schema: key -> (priority, description, impact_if_missing)
 GATEWAY_CONFIG_SCHEMA = {
-    # Core infrastructure — service is non-functional without these
+    # Core infrastructure: service is non-functional without these
     "identity_svc_url": (CRITICAL, "Identity service URL", "Cannot resolve credentials or settings"),
     "redis_url": (CRITICAL, "Redis connection URL", "Job queue and history broken"),
 
-    # LLM models — resolved at runtime from UI settings, not required at startup
+    # LLM models: resolved at runtime from UI settings, not required at startup
     "assistant_model": (OPTIONAL, "Assistant model", "Chat falls back to defaults"),
     "coding_model": (OPTIONAL, "Coding model", "Coding tasks fall back to assistant model"),
     "librarian_model": (OPTIONAL, "Librarian model", "Librarian queries fall back to assistant model"),
     "active_llm_provider": (REQUIRED, "Active LLM provider", "Cannot route inference requests"),
     "llm_local_url": (REQUIRED, "Local LLM service URL", "Ollama inference unreachable"),
 
-    # Service URLs — degraded but partially functional without these
+    # Service URLs: degraded but partially functional without these
     "execution_svc_url": (REQUIRED, "Execution service URL", "Tool execution broken"),
     "rag_svc_url": (OPTIONAL, "RAG service URL", "Context injection disabled"),
     "storage_svc_url": (OPTIONAL, "Storage service URL", "File storage operations broken"),
@@ -82,13 +82,13 @@ def validate_config(settings: dict[str, str]) -> ConfigValidationResult:
         if not value or value in ("auto", "none", "null"):
             if priority == CRITICAL:
                 result.critical_failures.append(f"{key}: {impact}")
-                log.critical(f"[ConfigValidation] CRITICAL: {key} missing — {impact}")
+                log.critical(f"[ConfigValidation] CRITICAL: {key} missing: {impact}")
             elif priority == REQUIRED:
                 result.required_failures.append(f"{key}: {impact}")
-                log.error(f"[ConfigValidation] REQUIRED: {key} missing — {impact}")
+                log.error(f"[ConfigValidation] REQUIRED: {key} missing: {impact}")
             else:
                 result.optional_failures.append(f"{key}: {impact}")
-                log.warning(f"[ConfigValidation] OPTIONAL: {key} missing — {impact}")
+                log.warning(f"[ConfigValidation] OPTIONAL: {key} missing: {impact}")
         else:
             result.ok.append(key)
 

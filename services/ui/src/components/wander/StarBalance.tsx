@@ -68,7 +68,7 @@ export default function StarBalance({ userId, admin = false }: { userId?: string
           return;
         }
         if (mirrored.status === 'SKIPPED') {
-          toast(`Recorded ${count} — Skylight mirror skipped`, { icon: '⚠️', duration: 6000 });
+          toast(`Recorded ${count}, Skylight mirror skipped`, { icon: '⚠️', duration: 6000 });
           return;
         }
       }
@@ -178,7 +178,7 @@ export default function StarBalance({ userId, admin = false }: { userId?: string
               ? 'Recorded in the ledger; not mirrored to Skylight.'
               : `Recorded in the ledger, but the Skylight mirror failed${
                   outcome.message ? `: ${outcome.message}` : '.'
-                } Retrying the mirror is safe — do not grant again.`}
+                } Retrying the mirror is safe; do not grant again.`}
         </p>
       )}
 

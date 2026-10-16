@@ -138,7 +138,7 @@ describe('ActivitySharingPanel as a non-admin', () => {
     await user.click(screen.getByTestId('audience-users'));
 
     const chip = await screen.findByTestId('sharing-user-jeremiah');
-    // Mobile parity (AGENTS.md): the chip is a primary tap target on a phone.
+    // Mobile parity (CONTRIBUTING.md): the chip is a primary tap target on a phone.
     expect(chip.className).toMatch(/min-h-11/);
   });
 });

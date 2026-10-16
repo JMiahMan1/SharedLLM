@@ -48,7 +48,7 @@ def _mkv_bytes(doc_type: bytes) -> bytes:
     return b"\x1a\x45\xdf\xa3\x80" + b"\x00" * 32 + doc_type + b"\x00" * 32
 
 
-# ── sniffing ─────────────────────────────────────────────────────────────────
+# sniffing
 
 
 @pytest.mark.unit
@@ -81,7 +81,7 @@ class TestSniffMediaFormat:
         assert sniff_media_format(data) == expected
 
 
-# ── validate_media_bytes ─────────────────────────────────────────────────────
+# validate_media_bytes
 
 
 @pytest.mark.unit
@@ -159,7 +159,7 @@ class TestValidateMediaBytes:
         assert result["expected"] == []
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# helpers
 
 
 @pytest.mark.unit
@@ -184,7 +184,7 @@ class TestHelpers:
         assert rewrite_media_extension("plain", "mp3") == "plain"
 
 
-# ── gateway wiring: run_post_write_lint routes media files ───────────────────
+# gateway wiring: run_post_write_lint routes media files
 
 
 @pytest.mark.unit
@@ -237,7 +237,7 @@ class TestPostWriteLintMediaRouting:
                     "detail": {
                         "passed": False,
                         "verified": True,
-                        "results": [{"tool": "media-sniffer", "returncode": 1, "output": "INVALID — file declares '.mp3' but content is actually WAV"}],
+                        "results": [{"tool": "media-sniffer", "returncode": 1, "output": "INVALID: file declares '.mp3' but content is actually WAV"}],
                     },
                 },
             )
@@ -255,7 +255,7 @@ class TestPostWriteLintMediaRouting:
         assert "actually WAV" in feedback
 
 
-# ── execution wiring: handle_workspace_lint media branch ─────────────────────
+# execution wiring: handle_workspace_lint media branch
 
 
 @pytest.mark.unit

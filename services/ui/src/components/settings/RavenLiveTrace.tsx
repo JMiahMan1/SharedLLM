@@ -93,7 +93,7 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
   const finished = TERMINAL.includes(missionStatus);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Mission #${missionId ?? ''} — live`} size="4xl">
+    <Modal isOpen={isOpen} onClose={onClose} title={`Mission #${missionId ?? ''} (live)`} size="4xl">
       <div className="flex flex-col h-[70vh] sm:h-[600px] bg-black border-t border-white/10 overflow-hidden text-sm">
         <div className="bg-white/5 border-b border-white/10 px-4 py-1 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">

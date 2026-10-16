@@ -94,7 +94,7 @@ def test_visibility_not_applied_for_non_repo_action():
 def test_repo_create_never_normalized_to_note_create():
     # User reported: "repo_create failed because it tried to use an unknown
     # action 'note_create'". Verify no path turns a repo_create payload into a
-    # note action — the verb must stay a valid git op.
+    # note action; the verb must stay a valid git op.
     for p in [
         {"action": "repo_create", "repo_name": "my-repo", "private": True},
         {"action": "GitOperationRequest", "repo_name": "my-repo", "repo_url": "https://x/y.git"},

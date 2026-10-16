@@ -80,7 +80,7 @@ test.describe('@live Workspace IDE', () => {
     await expect(modal.getByRole('button', { name: /lint/i })).toBeVisible();
     await expect(modal.getByRole('button', { name: /sync to nextcloud/i })).toBeVisible();
 
-    // Raven Chat — dispatches real missions
+    // Raven Chat: dispatches real missions
     await modal.getByTitle('Raven Chat').click();
     await expect(modal.getByText('Raven Chat')).toBeVisible();
     await expect(modal.getByPlaceholder(/describe a task/i)).toBeVisible();

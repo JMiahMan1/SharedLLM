@@ -60,7 +60,7 @@ def _manifest(tmp_path: Path, **overrides) -> Path:
     return path
 
 
-# ── NKJV is the primary translation ──────────────────────────────────────────
+# NKJV is the primary translation
 
 
 def test_the_manifest_marks_one_primary_translation():
@@ -112,7 +112,7 @@ def test_two_primary_translations_are_a_manifest_error(tmp_path):
     assert "more than one translation primary" in str(exc.value)
 
 
-# ── providers ────────────────────────────────────────────────────────────────
+# providers
 
 
 def test_the_manifest_declares_an_online_provider():
@@ -206,7 +206,7 @@ def test_a_colliding_abbreviation_loses_to_the_longer_book_name(token, name, exp
     assert providers._osis(token, name) == expected
 
 
-# ── api.bible fetch ──────────────────────────────────────────────────────────
+# api.bible fetch
 
 
 def _chapter_payload(book_id: str, number: int, verses: int = 2) -> dict:
@@ -347,7 +347,7 @@ def test_fetching_without_a_key_says_which_setting_to_set(tmp_path):
     assert "bible_api_key" in str(exc.value)
 
 
-# ── importer ─────────────────────────────────────────────────────────────────
+# importer
 
 
 def test_importing_a_json_translation_succeeds_and_records_the_run(session, corpus_file):
@@ -407,7 +407,7 @@ def test_recent_runs_are_newest_first(session, corpus_file):
     assert [r["code"] for r in runs] == ["nope", "kjv"]
 
 
-# ── the admin endpoints ──────────────────────────────────────────────────────
+# the admin endpoints
 
 
 def test_the_admin_page_reports_the_catalogue_providers_and_history(loaded_client: TestClient):
@@ -526,7 +526,7 @@ def test_the_admin_routes_need_the_internal_secret(engine, monkeypatch):
         assert bare.get("/admin/imports").status_code == 403
         assert bare.post("/admin/imports", json={"code": "kjv"}).status_code == 403
 
-# ── asking a provider what it can supply ────────────────────────────────────
+# asking a provider what it can supply
 def _async_registry(factory):
     """``_provider_registry`` is async because it reads the live key from Identity."""
 
@@ -642,7 +642,7 @@ def test_the_declared_provider_is_configured_once_its_key_exists():
     assert registry.get("api.bible").unconfigured_reason() == ""
 
 
-# ── the key is read live, so saving it in the app works without a restart ──────
+# the key is read live, so saving it in the app works without a restart
 
 
 class _SettingsResponse:

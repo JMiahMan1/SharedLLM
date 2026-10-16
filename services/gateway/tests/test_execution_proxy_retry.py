@@ -60,7 +60,7 @@ class ExecPost:
 
     async def __call__(self, url, *args, **kwargs):
         if "/execute/" not in str(url):
-            # Log emission or other side traffic — irrelevant to the assertions.
+            # Log emission or other side traffic; irrelevant to the assertions.
             return MockAioResponse(json_data={"status": "SUCCESS"})
         self.count += 1
         if self.fail_first and self.count == 1:

@@ -7,7 +7,7 @@
 * optional ``w=`` is forwarded to Music Assistant's imageproxy as ``size=``
   (param name confirmed from MA-generated production image URLs,
   ``.../imageproxy/<id>?size=512&fmt=jpg``; full resize end-to-end still
-  (VERIFY) — see docs/MEDIA_UPSTREAM_API_NOTES.md);
+  (VERIFY); see docs/MEDIA_UPSTREAM_API_NOTES.md);
 * the image body is streamed instead of buffered.
 """
 from services.gateway.tests.conftest_media import mock_upstream

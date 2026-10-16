@@ -1,7 +1,7 @@
 """Sandbox image freshness: existing wsbox-* containers must be recreated when
 the sandbox image changed (deploys rebuild :latest but docker compose up -d
 only recreates service containers, so stale sandboxes would lack tools the
-toolchain probe advertises — e.g. pdflatex after a texlive deploy)."""
+toolchain probe advertises, e.g. pdflatex after a texlive deploy)."""
 
 from docker.errors import NotFound
 

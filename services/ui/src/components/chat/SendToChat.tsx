@@ -97,7 +97,7 @@ function ConversationPicker({
     <Sheet title="Send to…" onClose={onClose} testId="send-to-chat">
       {isLoading && <p className="py-6 text-center text-sm text-slate-400">Loading conversations…</p>}
       {!isLoading && conversations.length === 0 && (
-        <p className="py-6 text-center text-sm text-slate-400">No conversations yet — start one on the Chat tab.</p>
+        <p className="py-6 text-center text-sm text-slate-400">No conversations yet. Start one on the Chat tab.</p>
       )}
       <ul className="space-y-1">
         {conversations.map((conversation) => (

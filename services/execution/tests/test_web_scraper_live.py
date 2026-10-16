@@ -1,4 +1,4 @@
-"""Live webscraper integration tests — hit the execution service directly.
+"""Live webscraper integration tests: hit the execution service directly.
 
 These tests exercise the full webscraper pipeline: Playwright → screenshot →
 vision_ocr (Qwen2.5-VL) → structured extraction.

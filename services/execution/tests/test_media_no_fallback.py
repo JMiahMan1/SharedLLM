@@ -1,7 +1,7 @@
 """BUG-02: execution media endpoints must not fall back to the first user.
 
 With the first-user fallback removed, a request whose user_context lacks HA
-credentials must error — never silently execute with user 1's credentials.
+credentials must error, never silently execute with user 1's credentials.
 """
 import os
 

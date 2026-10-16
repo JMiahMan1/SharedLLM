@@ -21,7 +21,7 @@ install_hook() {
     local dest_file="$HOOKS_DIR/$hook_name"
 
     if [ ! -f "$source_file" ]; then
-        echo "WARN: Hook source not found: $source_file — skipping."
+        echo "WARN: Hook source not found: $source_file; skipping."
         return
     fi
 

@@ -21,7 +21,7 @@ public final class VerseDaily {
         }
     }
 
-    private static final String NO_TEXT = "—";
+    private static final String NO_TEXT = "-";
 
     private VerseDaily() {}
 

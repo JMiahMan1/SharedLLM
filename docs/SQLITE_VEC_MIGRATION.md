@@ -1,4 +1,4 @@
-# RAG Vector Store — SQLite + `sqlite-vec`
+# RAG Vector Store: SQLite + `sqlite-vec`
 
 Reference for the RAG service's storage (`services/rag/db.py`,
 `services/rag/store.py`). The ChromaDB → `sqlite-vec` migration this file was
@@ -26,7 +26,7 @@ the relational data next to the vectors, and needs no separate process.
 | Table | What |
 |---|---|
 | `rag_items` | Every document: `id`, `collection_name`, `user_id`, `content`, `metadata` (JSON), timestamps, usage/applied counters, lesson columns (`rule`, `root_cause`, `outcome`, `confidence`, `supersedes`) |
-| `vec_rag_items` | `vec0(id text primary key, embedding float[dim], collection_name text, user_id text)` — one vector per item; collection and user are metadata columns so KNN is filtered in the same query |
+| `vec_rag_items` | `vec0(id text primary key, embedding float[dim], collection_name text, user_id text)`: one vector per item; collection and user are metadata columns so KNN is filtered in the same query |
 | `rag_fts` | FTS5 keyword index (BM25) used alongside the vector search; maintained on write, best effort |
 | `vec_store` | Plain-table vectors used only by the numpy fallback |
 | `mission_history`, `conversation_memory`, `network_topology`, `telemetry_alerts` | Relational-vector use cases (post-mortems, intercom memory, service topology, alert summaries) |
@@ -85,14 +85,14 @@ which one is active (`backend: sqlite-vec | numpy`).
 | `GET /api/storage/stats` | signed in | Counts for both usernames; shared `system_*` collections counted once. |
 | `GET /api/storage/status` | signed in | Indexer state and the running crawl (`crawl.phase`, `done/total`, `error`). |
 | `POST /api/storage/list`, `/index` | signed in | Uses the caller's Nextcloud credentials; indexing runs only when started (no schedule). |
-| `POST /api/storage/purge/{collection}` | signed in | Deletes the caller's rows under both usernames; returns `removed`. |
+| `POST /api/storage/purge/{collection}` | signed in | Deletes the caller's rows (optionally narrowed by a `filter`) under both usernames; returns `removed`. |
 | `GET /api/storage/learning` | signed in | Raven lessons. |
 | `PATCH`/`DELETE /api/storage/learning/{id}` | admin | RAG refuses ids outside `system_learnings` (404). |
 | `GET /api/storage/collection/{name}` | admin | Admin page's raw collection inspector. |
 
 ## Tests
 
-`services/rag/tests/` — schema migrations (`test_rag_search.py`), batch
+`services/rag/tests/`: schema migrations (`test_rag_search.py`), batch
 embedding, single-commit and per-user HA syncs (`test_ha_sync_embed_batches.py`), cost
 budget, curriculum. The `sqlite_vec`-dependent tests skip where the extension
 is not installed.

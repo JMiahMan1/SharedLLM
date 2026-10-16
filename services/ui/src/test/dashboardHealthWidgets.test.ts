@@ -16,7 +16,7 @@ const SKELETONS = read('components/widgets/skeletons/WidgetSkeletons.tsx');
  * The dashboard used to carry two health widgets: `health_hero`, whose registry
  * label was "Today", and `health_activity`, labelled "Health". Both fetched step
  * data and both drew a ring, so the same numbers appeared twice under two
- * different names — and "Today" gave no hint that it was a health widget at all.
+ * different names, and "Today" gave no hint that it was a health widget at all.
  *
  * These tests guard the fix. The behavioural one matters most: it fails if
  * anything ever registers a second widget that reads step data, whichever way it
@@ -49,7 +49,7 @@ describe('dashboard health widgets', () => {
 
   it('leaves no orphaned entries in the lazy map or skeleton map', () => {
     // A key registered in one map but not the others renders nothing, or a
-    // skeleton with no widget — both look like a broken dashboard.
+    // skeleton with no widget; both look like a broken dashboard.
     const registered = new Set(defaultWidgetDefs.map((d) => d.key));
     for (const [name, source] of [
       ['BentoBoxDashboard LazyWidgets', BENTO],
@@ -72,7 +72,7 @@ describe('dashboard health widgets', () => {
 
   it('only one widget component fetches step data for the dashboard', () => {
     // The strongest guard: any dashboard widget that calls a step endpoint is a
-    // candidate duplicate, so assert exactly one does — whatever it is named.
+    // candidate duplicate, so assert exactly one does, whatever it is named.
     const widgetDir = resolve(process.cwd(), 'src', 'components', 'widgets') + '/';
     const registered = new Set(defaultWidgetDefs.map((d) => d.key));
     const stepReaders: string[] = [];

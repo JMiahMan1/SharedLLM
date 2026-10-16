@@ -1,4 +1,4 @@
-"""`GET /events` — a dated timeline of things that happened.
+"""`GET /events`: a dated timeline of things that happened.
 
 A module test cannot tell you this route is reachable, that it is
 consent-gated, or that it degrades to an empty timeline rather than an error.

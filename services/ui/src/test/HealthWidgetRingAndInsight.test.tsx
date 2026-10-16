@@ -133,7 +133,7 @@ describe('HealthActivityWidget ring and insight', () => {
 
     // `thin` means too little history for the zone to mean anything. The widget
     // turns the ring's own note off (it would be a second wrapped line in a small
-    // cell) and says it in the insight line instead — so assert the message
+    // cell) and says it in the insight line instead, so assert the message
     // appears *somewhere* rather than in a component the widget opted out of.
     await waitFor(() =>
       expect(screen.getByText(/not enough history|needs 7 days/i)).toBeInTheDocument()
@@ -155,7 +155,7 @@ describe('HealthActivityWidget ring and insight', () => {
     render();
 
     // The ring centre prints the total as well as the card header, so the number
-    // appears more than once — assert presence, not uniqueness.
+    // appears more than once; assert presence, not uniqueness.
     await waitFor(() => expect(screen.getAllByText('7,330').length).toBeGreaterThanOrEqual(1));
     expect(screen.getByText(/10,000/)).toBeInTheDocument();
   });

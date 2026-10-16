@@ -36,7 +36,7 @@ DNS_REFRESH_INTERVAL = float(os.environ.get("DNS_REFRESH_INTERVAL", "30.0"))
 # How long to wait for an upstream resolver before giving up.
 #
 # This was a hardcoded 2s socket timeout, which silently dropped every lookup
-# whenever the upstream was slower than that — the upstream on this LAN has been
+# whenever the upstream was slower than that, and the upstream on this LAN has been
 # measured answering anywhere from 0.6s to 8.7s. A dropped lookup is not reported
 # as a failure to the caller: this resolver returns nothing, Docker's embedded
 # resolver turns that into SERVFAIL, and the service using it just sees
@@ -44,7 +44,7 @@ DNS_REFRESH_INTERVAL = float(os.environ.get("DNS_REFRESH_INTERVAL", "30.0"))
 # to look "down" from inside containers while both were running fine.
 #
 # Overridable so a slow or remote upstream can be tuned without a code change,
-# matching the other knobs above. Raising this cannot break resolution — it only
+# matching the other knobs above. Raising this cannot break resolution; it only
 # stops giving up before a slow-but-valid answer arrives.
 DNS_UPSTREAM_TIMEOUT = float(os.environ.get("DNS_UPSTREAM_TIMEOUT", "5.0"))
 
@@ -802,7 +802,7 @@ async def main():
     async def refresh_dns_mappings():
         """Fetch DNS mappings + failover settings from Identity and update resolver.
 
-        The source of truth is the `dns_mappings` global setting — the same store
+        The source of truth is the `dns_mappings` global setting, the same store
         the UI (DnsManagementPanel via gateway /api/dns) edits. Each host may carry
         several IPs; the resolver returns only the reachable ones when health-aware
         failover is enabled."""

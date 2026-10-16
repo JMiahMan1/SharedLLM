@@ -19,6 +19,11 @@ OpenAI-compatible surface at `/v1/chat/completions`. Base URL:
   `Authorization: Bearer <key>`. A missing or unknown key is a **401**; routes
   that read or write family data never fall back to another account
   (`_resolve_identity_from_request`). Admin routes also check `is_admin`.
+  The gateway checks the key against Identity's strict
+  `GET /api/internal/validate-api-key`, passing it in the `X-Api-Key` header
+  (never the query string, since URLs land in access logs).
+- **Local media streaming** (`HTMLAudioElement` cannot set headers) may pass the
+  same key as `?token=`; it is validated exactly like the bearer key.
 - **Service-to-service** calls use `X-Internal-Secret` (from `.env`; never
   sent by clients).
 - **Chat surfaces** (`/api/chat`, `/v1/chat/completions`) accept the bearer
@@ -151,12 +156,17 @@ Creating, changing and deleting a workspace (`POST /api/workspaces`,
 - `POST /api/discovery/sync`: fetch Home Assistant entities and trigger RAG sync
 - `POST /api/generate`: Ollama-compatible generate proxy
 - `GET /api/tags`: model list proxy (Ollama style)
-- `POST /api/show`: model info inspector proxy (Ollama style)
-- `POST /api/embeddings`: single embedding generation proxy (Ollama style)
-- `POST /api/embed`: batch embedding generation proxy (Ollama style)
+- `POST /api/show`: model info inspector proxy (Ollama style; signed-in caller)
+- `POST /api/embeddings`: single embedding generation proxy (Ollama style; signed-in caller)
+- `POST /api/embed`: batch embedding generation proxy (Ollama style; signed-in caller)
 - `GET /api/version`: lightweight version endpoint
 - `GET /v1/models`: OpenAI-compatible list models endpoint
-- `POST /v1/embeddings`: OpenAI-compatible batch embeddings generation endpoint
+- `POST /v1/embeddings`: OpenAI-compatible batch embeddings generation endpoint (signed-in caller)
+- `GET /api/presence/all`, `GET /api/presence/rooms`, `GET /api/presence/{user_id}`:
+  who is in which room (from the execution service). Signed-in caller only
+
+"Signed-in caller" routes return **401** without a valid API key (or the
+internal secret for service-to-service calls).
 
 ## Logs
 

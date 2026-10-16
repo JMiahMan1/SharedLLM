@@ -1,6 +1,6 @@
 """Unit tests for git push verification (lessons from Aider/Hermes).
 
-These run fast and need no model or downstream service — they mock the
+These run fast and need no model or downstream service; they mock the
 sandbox git execution so we can prove the push-confirmation logic is correct:
 `git push` exiting 0 is no longer blindly trusted; we confirm the ref actually
 advanced and no commits remain unpushed.

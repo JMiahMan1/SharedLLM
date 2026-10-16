@@ -93,7 +93,7 @@ def load_prompt_sync(prompt_key: str) -> str:
 
         try:
             if loop is None:
-                # No running loop (e.g. sync/test context) — run directly.
+                # No running loop (e.g. sync/test context): run directly.
                 _settings_cache = asyncio.run(_fetch()) or {}
             else:
                 # A loop is already running (async endpoint). Run the fetch in a

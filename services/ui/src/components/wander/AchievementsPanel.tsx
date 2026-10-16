@@ -15,7 +15,7 @@ interface AchievementsPanelProps {
  *
  * Achievements are derived server-side from the same step buckets and workouts
  * the rest of the page shows, so this panel can never disagree with them. The
- * audience/privacy work (sharing with other users) is a later slice — this is
+ * audience/privacy work (sharing with other users) is a later slice; this is
  * the owner's own view.
  */
 export default function AchievementsPanel({ userId }: AchievementsPanelProps) {
@@ -164,7 +164,7 @@ export default function AchievementsPanel({ userId }: AchievementsPanelProps) {
             </div>
           ) : (
             <p className="text-xs text-slate-500">
-              No badges yet — your first recorded steps or workout unlocks one.
+              No badges yet. Your first recorded steps or workout unlocks one.
             </p>
           )}
         </>

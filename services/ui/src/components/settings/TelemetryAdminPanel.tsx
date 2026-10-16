@@ -33,7 +33,7 @@ const TelemetryAdminPanel = () => {
   });
 
   // `enabled` already gates these on activeEntity, so the query functions can
-  // assert it. The data endpoint wraps its rows in `{ entity_id, data }` —
+  // assert it. The data endpoint wraps its rows in `{ entity_id, data }`;
   // unwrap here so consumers get the array they expect.
   const { data: enrolledEntityData } = useQuery<TelemetryDataPoint[]>({
     queryKey: ['telemetry-data', activeEntity],

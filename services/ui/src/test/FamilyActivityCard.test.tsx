@@ -78,7 +78,7 @@ describe('FamilyActivityCard', () => {
     const sam = screen.getByTestId('feed-user-sam');
     expect(sam.textContent).toContain('41,000 steps');
     expect(sam.textContent).toContain('2 workouts');
-    // Sam shared totals + workouts only — no points/badges leak into the row
+    // Sam shared totals + workouts only; no points/badges leak into the row
     expect(sam.textContent).not.toContain('pts');
     expect(sam.textContent).not.toContain('badges');
     // You always lead; everyone else ranks by shared steps

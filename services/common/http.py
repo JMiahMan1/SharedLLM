@@ -8,8 +8,8 @@ gateway/execution DNS-recovery behaviour) without churning every connection.
 
 NOTE: this client verifies TLS. Services that talk to hosts with self-signed
 certificates (e.g. Home Assistant, Roku, webOS) must use their own
-``TCPConnector(ssl=False)`` session or execution's ``get_session(host_of(url))``
-— do NOT route those through ``get_client()``.
+``TCPConnector(ssl=False)`` session or execution's ``get_session(host_of(url))``.
+Do NOT route those through ``get_client()``.
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def get_client_insecure() -> aiohttp.ClientSession:
     """Return a pooled client that does NOT verify TLS.
 
     For hosts with self-signed certificates (Home Assistant, Nextcloud, Roku,
-    webOS, etc.). Do NOT use for public endpoints — use ``get_client()``.
+    webOS, etc.). Do NOT use for public endpoints; use ``get_client()``.
     """
     global _client_insecure
     if _session_dead(_client_insecure):

@@ -4,14 +4,19 @@
 
 Implemented, differently from this proposal (reviewed 2026-10-15). Jobs live
 in the Redis-backed `InferenceJobQueue` (`services/gateway/messaging.py`), and
-`AgentLoop` checkpoints mission state to Redis every iteration
-(`_save_checkpoint`) and restores it on resume (see
-`services/gateway/state_machine.py`), so a restarted mission continues instead
-of starting from iteration 0.
+`AgentLoop` (`services/gateway/agent_loop.py`) checkpoints mission state to
+Redis every iteration (`_save_checkpoint`, key `raven:checkpoint:{mission_id}`,
+holding the iteration, last 20 `action_log` entries, last result, workspace id
+and written files) and restores it in its checkpoint/resume block, so a
+restarted mission continues instead of starting from iteration 0. Expired
+leases are reclaimed by `InferenceJobQueue.reclaim_expired_jobs()`. The
+`raven:job:{job_id}` hash, `_rehydrate_pending_jobs` and `resume_from`
+parameter below were never built. (`services/gateway/state_machine.py` holds
+an unused `StateMachine` wrapper.)
 
 ## Context
 
-Raven jobs are stored in Redis with a 1-hour TTL. If the worker process crashes or the container restarts mid-job, the Redis entry survives but **in-memory state** (current iteration number, `action_log` history, partial results) is lost. The job is re-queued via lease reclamation, but it restarts from iteration 0 — repeating work already done and potentially causing side-effect duplication (e.g., running pytest twice).
+Raven jobs are stored in Redis with a 1-hour TTL. If the worker process crashes or the container restarts mid-job, the Redis entry survives but **in-memory state** (current iteration number, `action_log` history, partial results) is lost. The job is re-queued via lease reclamation, but it restarts from iteration 0, repeating work already done and potentially causing side-effect duplication (e.g., running pytest twice).
 
 For long-running repair sessions (10+ iterations), this waste is significant and risks idempotency violations.
 
@@ -93,11 +98,11 @@ When `background_worker._process_inference_job` picks up a re-queued job:
 
 ## Consequences
 
-- ✅ Jobs survive worker restarts/crashes without repeating work
-- ✅ Audit trail: checkpoint data shows exact iteration progression
-- ✅ Can implement "resume later" feature for very long tasks
-- ⚠️ Additional Redis memory usage (≈1KB per active job)
-- ⚠️ Need to ensure all tool side-effects are truly idempotent or guarded by `--force` flags
+- Pro: jobs survive worker restarts/crashes without repeating work
+- Pro: audit trail, since checkpoint data shows the exact iteration progression
+- Pro: makes a "resume later" feature possible for very long tasks
+- Con: additional Redis memory usage (about 1 KB per active job)
+- Con: every tool side effect must be truly idempotent or guarded by `--force` flags
 
 ## Validation
 

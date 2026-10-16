@@ -55,11 +55,11 @@ export default function InterlinearPanel({
                     );
                     const cls = 'min-w-[4.5rem] rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-center';
                     return word.x ? (
-                      <a key={i} href={word.x} target="_blank" rel="noopener noreferrer" className={`${cls} hover:bg-white/10`} title={word.l ? `${word.l} — ${word.d}` : word.d}>
+                      <a key={i} href={word.x} target="_blank" rel="noopener noreferrer" className={`${cls} hover:bg-white/10`} title={word.l ? `${word.l}: ${word.d}` : word.d}>
                         {body}
                       </a>
                     ) : (
-                      <span key={i} className={cls} title={word.l ? `${word.l} — ${word.d}` : word.d}>
+                      <span key={i} className={cls} title={word.l ? `${word.l}: ${word.d}` : word.d}>
                         {body}
                       </span>
                     );

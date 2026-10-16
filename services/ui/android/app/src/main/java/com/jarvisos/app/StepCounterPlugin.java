@@ -109,7 +109,7 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
             return;
         }
         if (state == PermissionState.DENIED && isPermanentlyDenied()) {
-            // System will not show the dialog again — UI must deep-link to Settings.
+            // System will not show the dialog again; UI must deep-link to Settings.
             JSObject ret = new JSObject();
             ret.put("granted", false);
             ret.put("permanentlyDenied", true);
@@ -141,7 +141,7 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         PermissionState state = getPermissionState("activityRecognition");
         boolean granted = state == PermissionState.GRANTED;
         // If this permission was requested so polling could start, attach the
-        // sensor listener now — otherwise steps stay at 0 until the next open.
+        // sensor listener now, otherwise steps stay at 0 until the next open.
         if (granted && stepSensor != null && !listening) {
             listening = sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_UI);
         }
@@ -356,7 +356,7 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         // (prefs_version < 2): day_steps kept yesterday's total and the rollover
         // delta was added on top. The buggy value therefore looks like
         // yesterday_total + today_so_far with only a small delta, and the
-        // ledger still holds yesterday_total — so both parts of the signature
+        // ledger still holds yesterday_total, so both parts of the signature
         // are checkable. Runs once per install; afterwards prefs_version = 2
         // and this branch is dead.
         int prefsVersion = prefs.getInt(KEY_PREFS_VERSION, 0);

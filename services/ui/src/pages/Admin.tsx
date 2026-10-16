@@ -309,7 +309,7 @@ const Admin = () => {
             toast.success(`${wasActive}: Image is up to date.`);
           }
         } else {
-          toast.error(`${wasActive}: Pull failed — ${pullStatusData.error || pullStatusData.progress}`);
+          toast.error(`${wasActive}: Pull failed: ${pullStatusData.error || pullStatusData.progress}`);
         }
       }
     }
@@ -872,7 +872,7 @@ const Admin = () => {
                 </h3>
                 <p className="mt-1 text-sm text-slate-400">
                   Stars are recorded in the ledger first, then mirrored to that
-                  person&rsquo;s Skylight account — so a Skylight outage cannot lose
+                  person&rsquo;s Skylight account, so a Skylight outage cannot lose
                   the award, and a failed mirror is reported rather than hidden.
                 </p>
               </div>
@@ -1744,7 +1744,7 @@ const Admin = () => {
                   </div>
                   <div className="rounded-2xl border border-orange-500/20 bg-orange-500/5 p-4">
                     <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">Updates</p>
-                    <p className="mt-1 text-2xl font-bold text-orange-400">{!updatesData || updatesData.check_error ? '—' : updatesData.updates_available}</p>
+                    <p className="mt-1 text-2xl font-bold text-orange-400">{!updatesData || updatesData.check_error ? 'No data' : updatesData.updates_available}</p>
                   </div>
                 </div>
 
@@ -1769,7 +1769,7 @@ const Admin = () => {
                    );
                    const hasUpdate = !!updateInfo?.has_update;
                    const checkError = updateInfo?.check_error;
-                   // When the registry check fails we cannot prove "up to date" —
+                   // When the registry check fails we cannot prove "up to date";
                    // still offer one-click pull & restart after a CI push.
                    const canForceUpdate = !hasUpdate && !!checkError && checkError !== 'no_image_tag';
                    const isPulling = activePullService === service.name || activePullService === serviceKey;
@@ -1817,7 +1817,7 @@ const Admin = () => {
                                {!hasUpdate && !isPulling && checkError === 'no_image_tag' && (
                                  <span
                                    className="flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-amber-400"
-                                   title="Container image has no tag. Pull is unavailable — rebuild the image with a tag and recreate the container."
+                                   title="Container image has no tag. Pull is unavailable. Rebuild the image with a tag and recreate the container."
                                  >
                                    No Image Tag
                                  </span>
@@ -2135,7 +2135,7 @@ const Admin = () => {
       >
         <div className="space-y-4">
           <p className="text-sm text-slate-400">
-            A user&apos;s own credentials always win. Grant a service only when this user has none of their own —
+            A user&apos;s own credentials always win. Grant a service only when this user has none of their own;
             Jarvis then uses the system default user&apos;s credentials for it.
           </p>
           {sharesUser && (

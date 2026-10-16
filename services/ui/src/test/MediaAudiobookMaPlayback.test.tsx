@@ -114,7 +114,7 @@ beforeEach(async () => {
   );
 });
 
-describe('Media page — playing an audiobook on a Music Assistant player', () => {
+describe('Media page: playing an audiobook on a Music Assistant player', () => {
   it('asks the gateway for the MA library URI instead of sending audiobookshelf://', async () => {
     renderWithProviders(<Media />);
     await playOnMaPlayer('Narnia');
@@ -165,7 +165,7 @@ describe('Media page — playing an audiobook on a Music Assistant player', () =
     renderWithProviders(<Media />);
     await playOnMaPlayer('Narnia');
 
-    // Nothing is sent to MA — a fallback URI would reproduce the original bug.
+    // Nothing is sent to MA; a fallback URI would reproduce the original bug.
     await waitFor(() => expect(resolveCalls).toHaveLength(1));
     expect(maCommand).not.toHaveBeenCalled();
     expect(webPlay).not.toHaveBeenCalled();

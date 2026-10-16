@@ -1,5 +1,5 @@
 """
-Raven Test Suite — Git Coding Path (Genesis + Modify).
+Raven Test Suite: Git Coding Path (Genesis + Modify).
 
 Treats Raven as a black box: dispatches missions to the Raven mission endpoint,
 waits for completion, then independently verifies the side effects in the real
@@ -82,7 +82,7 @@ GITHUB_USER = _resolve_github_user()
 
 MISSION_POLL_INTERVAL = 15          # seconds
 MISSION_TIMEOUT = 25 * 60           # seconds (Raven can be slow)
-# Coding model is intentionally NOT sent in the payload — Raven must rely on its
+# Coding model is intentionally NOT sent in the payload; Raven must rely on its
 # internal configuration (settings.coding_model). We only send `query`.
 
 pytestmark = pytest.mark.integration
@@ -227,7 +227,7 @@ def _gh_delete_repo(repo: str) -> bool:
         return True
     if resp.status_code == 403:
         _log(
-            f"GitHub repo delete {repo}: 403 (token lacks delete_repo scope) — "
+            f"GitHub repo delete {repo}: 403 (token lacks delete_repo scope), "
             f"left for manual cleanup"
         )
         return False

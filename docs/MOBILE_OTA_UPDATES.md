@@ -8,9 +8,9 @@ or the app will restart in a loop.
 | Piece | Location |
 | --- | --- |
 | Client updater | `services/ui/src/lib/appUpdater.ts` (CapGo `@capgo/capacitor-updater`) |
-| Version/bundle API | `services/gateway/main.py` — `/api/app-updates/*` |
+| Version/bundle API | `services/gateway/main.py`: `/api/app-updates/*` |
 | Bundle packaging | `services/ui/build.js` (`packageOtaBundle`) |
-| Publishing | `scripts/deploy_local_build.sh`, `scripts/deploy_remote.sh` |
+| Publishing | `scripts/deploy_local_build.sh`, `scripts/deploy_remote.sh`, `.github/workflows/android-build.yml` |
 | Published artifacts | `data/app_updates/{version.json,bundle.zip,jarvis-os.apk}` |
 
 ## The core invariant
@@ -21,8 +21,8 @@ or the app will restart in a loop.
 The client decides "am I up to date?" by comparing the SHA it is running
 (`/version.json`, embedded in the bundle) against the advertised SHA. If the two
 can never match, the app downloads the bundle, applies it, restarts, still sees
-itself as out of date, and repeats — **an endless reload loop**, roughly every
-5–10 seconds.
+itself as out of date, and repeats: **an endless reload loop**, roughly every
+5-10 seconds.
 
 This happened in production: the deploy script wrote `version.json` from the
 *server's git HEAD*, while the bundle it published had been built from an
@@ -36,35 +36,36 @@ the same commit are not counted as a disagreement.
 
 ### How the invariant is now enforced
 
-1. **Build** — `build.js` refuses to package a bundle without a real git SHA,
+1. **Build.** `build.js` refuses to package a bundle without a real git SHA,
    and writes `version.json` into `dist/` before zipping. `services/ui/Dockerfile`
    fails the build if `GIT_SHA` is not passed, and `docker-compose.yml` passes it
    for the `ui` service like every other service.
-2. **Publish** — the deploy scripts read the SHA out of the container's own
+2. **Publish.** The deploy scripts read the SHA out of the container's own
    `version.json` rather than inventing one from `git rev-parse`, and abort if
-   `docker cp` of `bundle.zip` fails (previously `|| true`, which silently left
-   stale bundles behind).
-3. **Serve** — `/api/app-updates/version` reads `version.json` *out of the
+   `docker cp` of `bundle.zip` or `version.json` fails (previously `|| true`,
+   which silently left stale bundles behind).
+3. **Serve.** `/api/app-updates/version` reads `version.json` *out of the
    bundle.zip it will actually serve* and advertises that SHA. If the bundle's
    SHA cannot be read, it reports `bundle_available: false` rather than
    advertising a version it cannot back up.
-4. **Client** — `appUpdater.ts` records the SHA it is about to install. On the
+4. **Client.** `appUpdater.ts` records the SHA it is about to install. On the
    next launch, if it is not running that SHA, the version is blacklisted and
    never retried, so a server-side mistake degrades to "no update" rather than a
    reload loop.
 
 ## `set()` vs `next()`
 
-`CapacitorUpdater.set()` **destroys the JS context and reloads immediately** —
-it does not stage a bundle for later, and its promise never resolves. Code after
+`CapacitorUpdater.set()` **destroys the JS context and reloads immediately**.
+It does not stage a bundle for later, and its promise never resolves. Code after
 a `set()` call does not run.
 
 Accordingly:
 
 - **Silent/background checks** (3 s after launch, then every 6 h) use `next()`,
   which activates on the next cold start.
-- **Only an explicit user-initiated check** (Settings → Check for updates) uses
-  `set()`, so the app never restarts under the user without them asking.
+- **Only an explicit user-initiated check** (Settings → Live Over-The-Air
+  Updates → **Check Now**) uses `set()`, so the app never restarts under the
+  user without them asking.
 
 ## Key names
 
@@ -77,21 +78,24 @@ an older `Dockerfile` wrote the camelCase spelling.
 **`services/ui/package.json` `version` is the single marketing version** for
 both the web OTA bundle and the Android `versionName`. `build.gradle` reads it
 at build time; `build.js` and `services/ui/Dockerfile` embed it in
-`version.json`. Never hardcode a version elsewhere.
+`version.json`. Never hardcode a version elsewhere. (`build.gradle` keeps a
+literal only as the fallback for a checkout without `package.json`.)
 
 **`git_sha` is the single build identity.** Web bundle, APK, and
-`/api/app-updates/version` all come from the same short commit. A bugfix
-release is one commit: bump `package.json` if the marketing version changes,
-push, build UI + APK from that SHA, deploy both artifacts together.
+`/api/app-updates/version` all come from the same commit. A bugfix release is
+one commit: bump `package.json` if the marketing version changes, push, and let
+CI build the UI image and the APK from that SHA.
 
 | Channel | Carries | Advances when |
 | --- | --- | --- |
 | OTA `bundle.zip` | Web/JS fixes | Any `services/ui/src` (or shared web) change |
-| APK `versionCode` | Native/widget/plugin fixes | Android/Java/Capacitor native changes — **must** bump `versionCode` |
+| APK `versionCode` | Native/widget/plugin fixes | Every CI APK build: `build.gradle` uses `GITHUB_RUN_NUMBER` (minimum 30) |
 
 A web-only fix does **not** require a new APK (users get it via OTA at the same
-`git_sha`). A native-only fix **does** require a new APK; bump `versionCode` so
-the published build exceeds older installs.
+`git_sha`). A native-only fix **does** require a new APK. `versionCode` needs no
+manual bump: each run of the APK workflow has a higher run number, so the
+published build exceeds older installs. A local Gradle build without
+`GITHUB_RUN_NUMBER` gets versionCode 30.
 
 ## Native APK updates
 
@@ -100,36 +104,46 @@ the running build, the app offers it for manual install.
 
 **The server never takes the advertised version on trust.** `apk_version_code`
 is read out of `AndroidManifest.xml` inside the APK it is actually serving
-(`services/gateway/apk_manifest.py`, pure stdlib — no `aapt` needed). This is
+(`services/gateway/apk_manifest.py`, pure stdlib, no `aapt` needed). This is
 deliberate: an earlier version parsed `versionCode` out of
 `services/ui/android/app/build.gradle` on every *bundle* deploy, so the
 advertised number drifted ahead of the published artifact (server said 23, the
 APK on disk was 22) and a user who installed the newest APK on offer was told
-to update forever. One source of truth — the artifact — removes that class of
-bug entirely.
+to update forever. One source of truth, the artifact, removes that class of
+bug.
 
-Consequences worth knowing:
+Consequences:
 
-- The publish endpoint **rejects** an APK whose `versionCode` it cannot read,
-  rather than advertising a number it cannot honour.
+- The publish endpoint **rejects** an APK whose `versionCode` it cannot read
+  (HTTP 400), rather than advertising a number it cannot honour. A claimed
+  `apk_version_code` form field that disagrees with the file is logged and
+  ignored.
 - An APK present but unreadable is **withheld** (`apk_available: false`); a
   misdescribed APK is worse than none.
 - A bundle-only deploy never changes the advertised APK version, so deploying
   web code can never invent a pending native update.
 - The deploy scripts deliberately no longer write `apk_version_code`.
 
-`versionName` is **not** hardcoded in Gradle — it is parsed from
+`versionName` is **not** hardcoded in Gradle: it is parsed from
 `services/ui/package.json` so a release cannot ship web `1.4.0` against Android
 `1.3.1`.
 
+The APK is served at `/api/app-updates/jarvis-os.apk`; the old
+`/api/app-updates/app-debug.apk` name redirects there (307).
+
 ### Publishing
 
-`.github/workflows/android-build.yml` publishes the built release APK to
-`POST /api/app-updates/publish` on every push that touches `services/ui/**`
-(never on pull requests). It does not send a version code — the gateway derives
-it. Requires the `APK_PUBLISH_URL` and `INTERNAL_SECRET` repository secrets;
-without them the step skips with a notice and the APK remains available as a
-workflow artifact.
+`.github/workflows/android-build.yml` runs on pushes and pull requests to
+`main` and `microservices` that touch `services/ui/**` (and on manual
+dispatch). It builds a debug and a release APK, uploads them and the OTA web
+bundle as workflow artifacts, and on pushes (never on pull requests) publishes
+the release APK to `POST /api/app-updates/publish` with the `X-Internal-Secret`
+header. It does not send a version code; the gateway derives it. Publishing
+needs the `APK_PUBLISH_URL` and `INTERNAL_SECRET` repository secrets; without
+them the step skips with a notice and the APK remains available as the
+`jarvis-os-release-apk` workflow artifact. An HTTP 413 from the proxy in front
+of the server fails the step with a hint to raise nginx's
+`client_max_body_size`.
 
 ## Self-signed APK (no Play Store)
 
@@ -139,23 +153,26 @@ Jarvis OS is a personal home app and will **never** ship on Google Play.
 | --- | --- |
 | Keystore | **Not in git.** Local: `services/ui/android/app/release.keystore` (alias `jarvisos`); CI: secret `RELEASE_KEYSTORE` (base64) |
 | Passwords | env `KEYSTORE_PASSWORD` / `KEY_PASSWORD` (GitHub Actions secrets). Local fallback: gitignored `keystore.properties`. **No default password in source.** |
-| Signing | `build.gradle` — **both** `debug` and `release` use this keystore |
+| Signing | `build.gradle`: **both** `debug` and `release` build types use this keystore |
 | CI artifact | `jarvis-os-release-apk` → `app-release.apk` (signed) |
-| In-app install | `ApkInstall` Capacitor plugin → FileProvider → system installer |
+| In-app install | `ApkInstall` Capacitor plugin (`ApkInstallPlugin.java`) → FileProvider → system installer |
 
 The keystore file and passwords must never appear in the repository. CI restores
-the keystore from secrets before `assembleRelease` / `assembleDebug`.
+the keystore from secrets (and fails if any of the three secrets is missing)
+before `assembleDebug` / `assembleRelease`.
 
 Because debug and release share one certificate, OTA-era installs upgrade in
 place without uninstall. First transition from an old debug-keystore build may
 require one uninstall/install if signatures differ.
 
-Android still shows the system “Install?” sheet (or requires a one-time
-“Install unknown apps” grant for Jarvis OS). Fully silent installs are not
+Android still shows the system "Install?" sheet (or requires a one-time
+"Install unknown apps" grant for Jarvis OS). Fully silent installs are not
 possible on a non-rooted personal device without Play/MDM.
 
-Publish path: CI signs → `deploy_remote.sh` copies APK to
-`data/app_updates/jarvis-os.apk` → Settings → Check for updates → Download APK.
+Publish path: CI signs and publishes the APK to the gateway (above);
+`deploy_remote.sh` can also download the `jarvis-os-release-apk` artifact and
+copy it to `data/app_updates/jarvis-os.apk`. On the phone: Settings → Live
+Over-The-Air Updates → **Check Now**, then Download and Install.
 
 ## Verifying a deploy
 

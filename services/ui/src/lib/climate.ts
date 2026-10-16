@@ -111,7 +111,7 @@ export function snap(value: number, min: number, max: number, step: number): num
   return clamp(Math.round(snapped * 100) / 100, min, max);
 }
 
-/** HA sends numbers, numeric strings, or nothing at all — normalise to a number. */
+/** HA sends numbers, numeric strings, or nothing at all; normalise to a number. */
 export function numberAttr(value: unknown): number | undefined {
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
   if (typeof value === 'string' && value.trim() !== '') {

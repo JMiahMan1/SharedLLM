@@ -149,7 +149,7 @@ async def test_dream_sums_usage_and_applied_counts(tmp_path):
     await rag_main.dream_learnings()
 
     # Priority scoring favors higher applied+usage (RSI self-improvement signal)
-    # over raw confidence — lesson-low has more reuse evidence.
+    # over raw confidence: lesson-low has more reuse evidence.
     survivor = next(i for i in await _learnings() if i["id"] == low)
     assert survivor["usage_count"] == 8
     assert survivor["applied_count"] == 3

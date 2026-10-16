@@ -39,7 +39,7 @@ export interface ApkUpdateStatus {
   updateAvailable: boolean;
   /**
    * Server has an APK but not enough metadata to compare versions. We refuse
-   * to call this "up to date" — the honest answer is that we do not know.
+   * to call this "up to date"; the honest answer is that we do not know.
    */
   indeterminate: boolean;
   apkUrl: string | null;
@@ -53,7 +53,7 @@ export interface ApkUpdateStatus {
   apkSha256?: string;
   /**
    * versionCode of the running native build, or `undefined` when it is not
-   * knowable — a browser is not running an APK at all, so there is no honest
+   * knowable: a browser is not running an APK at all, so there is no honest
    * number to quote. Never substitute a placeholder for display.
    */
   nativeBuildNumber?: number;
@@ -124,13 +124,13 @@ let isInitialized = false;
 let currentRuntimeSha: string = typeof __BUILD_SHA__ === 'string' ? __BUILD_SHA__ : 'unknown';
 
 // Native build last known to CapGo. Bumping versionCode (new APK) must drop any
-// OTA web bundle that predates it — otherwise CapGo keeps serving stale JS over
+// OTA web bundle that predates it, otherwise CapGo keeps serving stale JS over
 // the freshly installed APK assets (sensor UI, plugins, widget auth, etc.).
 const LAST_NATIVE_BUILD_KEY = 'jarvis_last_native_build';
 
 // --- OTA loop guard --------------------------------------------------------
 // `CapacitorUpdater.set()` destroys the JS context and reloads the app
-// immediately — it does not merely stage a bundle for later. So an update check
+// immediately; it does not merely stage a bundle for later. So an update check
 // that always reports "newer" becomes an endless download -> reload cycle. That
 // is exactly what happens when the SHA the server advertises is not the SHA
 // baked into the bundle it actually serves.
@@ -161,7 +161,7 @@ function writeLocal(key: string, value: string | null): void {
     if (value === null) localStorage.removeItem(key);
     else localStorage.setItem(key, value);
   } catch {
-    // storage unavailable — the guard degrades to a no-op rather than throwing
+    // storage unavailable: the guard degrades to a no-op rather than throwing
   }
 }
 
@@ -230,7 +230,7 @@ export async function getRunningVersion(): Promise<{ version: string; gitSha: st
       return { version: data.version || '', gitSha: currentRuntimeSha };
     }
   } catch {
-    // ignore — fall back to embedded build SHA
+    // ignore and fall back to embedded build SHA
   }
   // No version.json: say nothing rather than a made-up version number.
   return { version: '', gitSha: currentRuntimeSha };
@@ -258,7 +258,7 @@ export async function initAppUpdater(): Promise<void> {
 
     // New APK install/upgrade: discard any OTA bundle from a previous native
     // build so the APK's bundled assets are what the WebView loads.
-    // MUST record the build (and notify ready) BEFORE reset() — reset destroys
+    // MUST record the build (and notify ready) BEFORE reset(): reset destroys
     // this JS context and reloads the app; nothing after it runs.
     const lastBuild = parseInt(readLocal(LAST_NATIVE_BUILD_KEY) || '0', 10) || 0;
     const needsNativeReset = nativeBuildNumber > lastBuild;
@@ -276,7 +276,7 @@ export async function initAppUpdater(): Promise<void> {
     if (needsNativeReset) {
       try {
         console.log(
-          `[AppUpdater] Native build ${nativeBuildNumber} > ${lastBuild} — reset CapGo to bundled assets`,
+          `[AppUpdater] Native build ${nativeBuildNumber} > ${lastBuild}; reset CapGo to bundled assets`,
         );
         await CapacitorUpdater.reset({ toLastSuccessful: false });
       } catch (err) {
@@ -347,7 +347,7 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
           `(still running "${currentRuntimeSha}" after installing it). Update skipped.`;
         console.warn(`[AppUpdater] ${reason}`);
         if (!options.silent) {
-          toast.error('Update on the server is mislabelled — skipping to avoid a restart loop.', {
+          toast.error('Update on the server is mislabelled. Skipping to avoid a restart loop.', {
             id: 'app-update',
             duration: 8000,
           });
@@ -373,8 +373,8 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
         // Background check: stage only. `next()` activates on the next cold
         // start instead of yanking the app out from under the user.
         await CapacitorUpdater.next({ id: bundle.id });
-        console.log('[AppUpdater] Update staged — will activate on next app launch.');
-        toast('Jarvis OS update ready — it will apply next time you open the app.', {
+        console.log('[AppUpdater] Update staged; will activate on next app launch.');
+        toast('Jarvis OS update ready. It will apply next time you open the app.', {
           icon: '🚀',
           duration: 6000,
           id: 'app-update-ready',
@@ -614,7 +614,7 @@ export async function downloadAndInstallApk(apkUrl: string): Promise<void> {
     }
     toast.loading('Downloading update…', { id: 'apk-install', duration: 60000 });
     await ApkInstall.installApk({ url: apkUrl });
-    toast.success('Installer opened — tap Install.', { id: 'apk-install', duration: 5000 });
+    toast.success('Installer opened. Tap Install.', { id: 'apk-install', duration: 5000 });
   } catch (err) {
     // No browser fallback on purpose: a silent hand-off to a browser is what
     // made this look broken. Say what happened and leave the link visible.

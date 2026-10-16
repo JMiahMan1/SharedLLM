@@ -4,7 +4,7 @@
 #
 # Builds docker images LOCALLY on the remote server (bypassing GHCR and
 # GitHub Actions, which may be down) and redeploys the stack.
-# All docker commands run on the remote host — nothing is built on localhost.
+# All docker commands run on the remote host; nothing is built on localhost.
 #
 # Defaults to the services changed by the two most recent commits; pass
 # explicit service names to override.
@@ -205,7 +205,7 @@ ssh $SSH_OPTS "$HOST" << EOF
     # The advertised git_sha MUST be the SHA baked into the bundle we publish.
     # Deriving it from the server's git HEAD instead lets metadata and bundle
     # drift apart, and the mobile app then downloads, applies, restarts, and
-    # still sees itself as out of date — an endless reload loop.
+    # still sees itself as out of date: an endless reload loop.
     UI_CONTAINER=\$(docker ps --filter 'name=sharedllm_ui' --format '{{.Names}}' | head -1)
     if [ -n "\$UI_CONTAINER" ]; then
         echo "Staging OTA update bundle from \$UI_CONTAINER to data/app_updates..."

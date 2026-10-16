@@ -245,7 +245,7 @@ const Wander = () => {
 
   // Open the trip-locations map modal for a given trip
   const openTripLocations = useCallback(async (trip: Trip) => {
-    setTripLocationsTitle(`${trip.user_name || 'Trip'} — Route Map`);
+    setTripLocationsTitle(`${trip.user_name || 'Trip'}: Route Map`);
     // Seed from the trip card so the modal opens immediately even if the API is slow/fails.
     const seedStart = trip.start_location;
     const seedEnd = trip.end_location;
@@ -556,7 +556,7 @@ const Wander = () => {
                       <span>{formatActivityLabel(trip)}</span>
                     </div>
 
-                    {/* Shared Ride Badge — renders rider names properly (no [object Object]) */}
+                    {/* Shared Ride Badge: renders rider names properly (no [object Object]) */}
                     {isShared && trip.shared_with && trip.shared_with.length > 0 && (
                       <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 text-xs font-semibold">
                         <Users size={12} />
@@ -643,7 +643,7 @@ const Wander = () => {
                         <Zap size={10} className="text-amber-400" />
                         Top Speed
                       </span>
-                      <span className="text-sm font-bold text-amber-300 mt-0.5">{trip.top_speed_mph != null ? `${trip.top_speed_mph} mph` : '—'}</span>
+                      <span className="text-sm font-bold text-amber-300 mt-0.5">{trip.top_speed_mph != null ? `${trip.top_speed_mph} mph` : 'No data'}</span>
                     </div>
 
                     <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-white/[0.02]">
@@ -731,7 +731,7 @@ const Wander = () => {
       {/* A phone that stopped reporting must never look like "nobody moved". */}
       <SensorStatusBanner />
 
-      {/* A failed fetch must not render as "no trips" — prefer a visible
+      {/* A failed fetch must not render as "no trips"; prefer a visible
           warning over a silent empty state. */}
       {loadError && (
         <div
@@ -767,7 +767,7 @@ const Wander = () => {
                 </span>
               </div>
               <p className="text-xs sm:text-sm text-slate-400">
-                Family presence, places, and trips — Inspired by Elijah&apos;s journey in the wilderness (1 Kings 17:3–6). Steps and workouts live on Health.
+                Family presence, places, and trips. Inspired by Elijah&apos;s journey in the wilderness (1 Kings 17:3-6). Steps and workouts live on Health.
               </p>
             </div>
           </div>
@@ -1000,7 +1000,7 @@ const Wander = () => {
           </div>
           <h3 className="text-base font-semibold text-slate-200">No recorded trips found</h3>
           <p className="text-xs text-slate-400 max-w-md mx-auto">
-            Trips are logged automatically whenever GPS speed exceeds 10 MPH — with real telemetry, there&apos;s nothing to seed or simulate.
+            Trips are logged automatically whenever GPS speed exceeds 10 MPH. With real telemetry, there&apos;s nothing to seed or simulate.
           </p>
         </div>
       ) : (
@@ -1104,7 +1104,7 @@ const Wander = () => {
                 <span>GPS Verified Trip</span>
               </div>
               <p className="text-slate-400">
-                Distance ({roundForDisplay(editingTrip.distance_miles)} miles) comes from recorded GPS and can&apos;t be altered. Place names can be edited, or picked from nearby stores, restaurants, and zones — the street address stays stored with the coordinates.
+                Distance ({roundForDisplay(editingTrip.distance_miles)} miles) comes from recorded GPS and can&apos;t be altered. Place names can be edited, or picked from nearby stores, restaurants, and zones; the street address stays stored with the coordinates.
               </p>
             </div>
 
@@ -1151,7 +1151,7 @@ const Wander = () => {
                       {suggestLoading && <p className="text-[11px] text-slate-500">Looking around…</p>}
                       {!suggestLoading && suggestions.length === 0 && (
                         <p className="text-[11px] text-slate-500">
-                          No named places nearby — keep the address or type a name.
+                          No named places nearby. Keep the address or type a name.
                         </p>
                       )}
                       {suggestions.map((s) => (
@@ -1192,7 +1192,7 @@ const Wander = () => {
                 ))}
               </select>
               {editActivityType !== 'driving' && (
-                <p className="text-[11px] text-slate-500">Non-driving activities don&apos;t consume fuel — cost fields will be zeroed.</p>
+                <p className="text-[11px] text-slate-500">Non-driving activities don&apos;t consume fuel, so cost fields will be zeroed.</p>
               )}
             </div>
 

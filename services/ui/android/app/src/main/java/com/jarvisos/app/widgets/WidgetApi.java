@@ -112,14 +112,14 @@ public final class WidgetApi {
         float homeLat = p.getFloat(TokenBridgePlugin.KEY_HOME_LAT, (float) TokenBridgePlugin.DEFAULT_HOME_LAT);
         float homeLng = p.getFloat(TokenBridgePlugin.KEY_HOME_LNG, (float) TokenBridgePlugin.DEFAULT_HOME_LNG);
         if (!p.contains(TokenBridgePlugin.KEY_LAST_LAT)) {
-            // No fix yet — treat as home so we don't nag with confirms on first use
+            // No fix yet: treat as home so we don't nag with confirms on first use
             return false;
         }
         float lastLat = p.getFloat(TokenBridgePlugin.KEY_LAST_LAT, homeLat);
         float lastLng = p.getFloat(TokenBridgePlugin.KEY_LAST_LNG, homeLng);
         long ts = p.getLong(TokenBridgePlugin.KEY_LAST_TS, 0L);
         if (System.currentTimeMillis() - ts > 30 * 60 * 1000L) {
-            // Stale fix — don't force confirm
+            // Stale fix: don't force confirm
             return false;
         }
         return haversineM(homeLat, homeLng, lastLat, lastLng) > thresholdMeters;
@@ -237,7 +237,7 @@ public final class WidgetApi {
         body.put("domain", JSONObject.NULL);
         body.put("area", JSONObject.NULL);
         body.put("state", JSONObject.NULL);
-        // Default server limit is 200 — homes routinely exceed that (e.g. 693).
+        // Default server limit is 200, but homes routinely exceed that (e.g. 693).
         body.put("limit", 1000);
         JSONObject resp = post(context, "/execute/entity/search", body);
         JSONObject byId = new JSONObject();

@@ -6,7 +6,7 @@ import type { SensorsState } from '../context/LocationContext';
 /**
  * The regression these guard is the one that started this work: a phone that had
  * stopped reporting rendered stale/empty data and looked identical to a quiet
- * day. So the important assertion is not "the banner renders" — it is "the
+ * day. So the important assertion is not "the banner renders"; it is "the
  * banner renders NOTHING when healthy, and something specific when not".
  *
  * `vi.hoisted` rather than `vi.doMock` + dynamic import: the latter caches the
@@ -83,7 +83,7 @@ describe('SensorStatusBanner', () => {
     render(<SensorStatusBanner />);
     expect(screen.getByTestId('sensor-notice-location')).toBeInTheDocument();
     expect(screen.getByTestId('sensor-settings-location')).toBeInTheDocument();
-    // Crucially: do not offer a re-enable that cannot possibly work.
+    // Above all, do not offer a re-enable that cannot possibly work.
     expect(screen.queryByTestId('sensor-enable-location')).toBeNull();
 
     await userEvent.click(screen.getByTestId('sensor-settings-location'));

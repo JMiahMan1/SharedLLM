@@ -179,7 +179,7 @@ async function runTest(opts) {
   let exitCode = 0;
 
   try {
-    // ── Step 1: Login ──
+    // Step 1: Login
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('Step 1: Login');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
@@ -207,7 +207,7 @@ async function runTest(opts) {
       pass(`Logged in successfully (now at: ${postLoginUrl})`);
     }
 
-    // ── Step 2: Navigate to Media page ──
+    // Step 2: Navigate to Media page
     console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('Step 2: Media Page');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
@@ -244,7 +244,7 @@ async function runTest(opts) {
       pass('Continuing despite navigation error');
     }
 
-    // ── Step 3: Check localStorage and find play button ──
+    // Step 3: Check localStorage and find play button
     console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('Step 3: Trigger Play');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
@@ -282,7 +282,7 @@ async function runTest(opts) {
       console.log('⏳ Waiting for initPlayer to execute (10s)...');
       await new Promise(r => setTimeout(r, 10000));
 
-      // ── Step 4: Verify sendspin flow ──
+      // Step 4: Verify sendspin flow
       console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('Step 4: Sendspin Connection Flow');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
@@ -359,7 +359,7 @@ async function runTest(opts) {
     fail('Test crashed with exception');
     exitCode = 1;
   } finally {
-    // ── Summary ──
+    // Summary
     console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('Test Summary');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');

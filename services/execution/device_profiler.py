@@ -1,6 +1,6 @@
 # services/execution/device_profiler.py
 """
-Device Profiler — Network scan + HA pairing + control capability mapping.
+Device Profiler: Network scan + HA pairing + control capability mapping.
 
 Scans the local network, pairs discovered devices with Home Assistant entities,
 and generates a profile for each device detailing:
@@ -325,7 +325,7 @@ async def profile_device(
     if control["wol_supported"] and control["wol_mac"]:
         recommendations.append(f"WOL available for power-on (MAC: {control['wol_mac']})")
     elif control["wol_supported"] and not control["wol_mac"]:
-        recommendations.append("WOL supported but MAC not discovered — check HA device registry")
+        recommendations.append("WOL supported but MAC not discovered; check HA device registry")
     if device_type == "roku":
         recommendations.append("Use ECP + MA sibling delegation for music playback")
         recommendations.append("Use media_player.play_media for announcements (audio/wav)")
@@ -347,7 +347,7 @@ async def profile_device(
     if device_type == "mqtt":
         recommendations.append("Use MQTT publish/subscribe for control")
     if not network["ip"]:
-        recommendations.append("Device IP not discovered — run network scan or check HA registry")
+        recommendations.append("Device IP not discovered; run network scan or check HA registry")
 
     return {
         "entity_id": entity_id,
@@ -459,7 +459,7 @@ def resolve_by_friendly_name(
     if query_lower in cap_map:
         return cap_map[query_lower]["entity_id"], cap_map[query_lower]
 
-    # Partial match — find best overlap
+    # Partial match: find best overlap
     best_score = 0
     best_key = None
     for key in cap_map:

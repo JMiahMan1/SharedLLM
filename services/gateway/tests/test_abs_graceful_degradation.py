@@ -74,7 +74,7 @@ def _ctx_for(client):
     return _Ctx()
 
 
-# ─── ABS Graceful Degradation ──────────────────────────────────────────────
+# ABS Graceful Degradation
 
 
 @pytest.mark.asyncio

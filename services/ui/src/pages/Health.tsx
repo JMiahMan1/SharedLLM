@@ -152,7 +152,7 @@ const Health = () => {
       }
       trigger('success');
       toast.success(
-        `${ACTIVITY_LABELS[activityType] || activityType} started — breadcrumbs recording`,
+        `${ACTIVITY_LABELS[activityType] || activityType} started, recording breadcrumbs`,
       );
       await queryClient.invalidateQueries({ queryKey: activeWorkoutQueryKey(currentUsername) });
     },
@@ -341,7 +341,7 @@ const Health = () => {
             <div className="glass-panel p-6 rounded-2xl border border-white/5 text-center">
               <p className="text-sm text-slate-400">No workouts recorded yet.</p>
               <p className="text-xs text-slate-500 mt-1">
-                Start one above — walks and runs also estimate steps from GPS when your
+                Start one above. Walks and runs also estimate steps from GPS when your
                 phone&apos;s pedometer isn&apos;t available.
               </p>
             </div>
@@ -444,7 +444,7 @@ function StepsCard({
               </p>
               <p className="text-[11px] text-slate-500 mt-1">
                 of {formatCount(summary.goal)} goal
-                {summary.reachedGoal ? ' — reached' : ''}
+                {summary.reachedGoal ? ' (reached)' : ''}
               </p>
               <button
                 type="button"
@@ -521,13 +521,13 @@ function StepsCard({
                 </p>
               </div>
               {/* On the day view a "daily average" and a "best day" are both
-                  just today's total again — the one number worth pairing with
+                  just today's total again; the one number worth pairing with
                   it is when the day happened. */}
               {range === 'D' ? (
                 <div>
                   <p className="text-[10px] uppercase tracking-wider text-slate-500">Busiest hour</p>
                   <p data-testid="history-peak-hour" className="text-lg font-bold text-white tabular-nums">
-                    {rangeData.peak ? hourOfDay(rangeData.peak.hour) : '—'}
+                    {rangeData.peak ? hourOfDay(rangeData.peak.hour) : 'No data'}
                   </p>
                 </div>
               ) : (
@@ -541,7 +541,7 @@ function StepsCard({
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-slate-500">Best</p>
                     <p className="text-lg font-bold text-white tabular-nums">
-                      {rangeData.best ? formatCount(rangeData.best.steps) : '—'}
+                      {rangeData.best ? formatCount(rangeData.best.steps) : 'No data'}
                     </p>
                   </div>
                 </>
@@ -562,7 +562,7 @@ function StepsCard({
 
             {/* A day is one bar wide, so the day view charts the hours inside
                 it instead. The phone's own clock decides which hours are
-                "ahead" — the day is not over. */}
+                "ahead" because the day is not over. */}
             {range === 'D' && (
               <>
                 <h4 className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
@@ -735,7 +735,7 @@ function TrendsPanel({ currentUsername }: { currentUsername?: string }) {
                 value={
                   (trends.steps_avg ?? trends.steps_average) != null
                     ? formatCount(trends.steps_avg ?? trends.steps_average ?? 0)
-                    : '—'
+                    : 'No data'
                 }
               />
               <Stat label="Workouts" value={formatCount(trends.workout_count)} />
@@ -761,7 +761,7 @@ function TrendsPanel({ currentUsername }: { currentUsername?: string }) {
             <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 text-[11px] text-slate-500">
               {loading
                 ? 'Analyzing your activity with AI…'
-                : 'AI analysis unavailable right now — the stats above are live from your recorded data.'}
+                : 'AI analysis unavailable right now. The stats above are live from your recorded data.'}
             </div>
           )}
         </div>
@@ -771,7 +771,7 @@ function TrendsPanel({ currentUsername }: { currentUsername?: string }) {
             Fitness and health analysis only runs when you ask for it.
           </p>
           <p className="text-xs text-slate-600">
-            The steps and workouts below are recorded data — no analysis is generated until
+            The steps and workouts below are recorded data; no analysis is generated until
             you request it.
           </p>
           <button
@@ -846,7 +846,7 @@ function WorkoutCard({ workout }: { workout: Workout }) {
         </div>
         <div className="p-2 rounded-lg bg-white/[0.02]">
           <span className="text-[9px] text-slate-500 uppercase">Pace</span>
-          <p className="text-xs font-bold text-white">{pace ? `${pace} /mi` : '—'}</p>
+          <p className="text-xs font-bold text-white">{pace ? `${pace} /mi` : 'No data'}</p>
         </div>
       </div>
 

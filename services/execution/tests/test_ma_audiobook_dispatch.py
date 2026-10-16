@@ -3,7 +3,7 @@
 Two bugs this guards, both found by playing a book on a real MA HASS player:
 
 1. MA is not a URL player. ``_dispatch_stream`` used to hand it the gateway's
-   HLS URL, which MA filed as the track *title* — the player reported the tail of
+   HLS URL, which MA filed as the track *title*: the player reported the tail of
    the URL as ``media_title`` and stayed idle while the call returned SUCCESS.
    MA only accepts ``library://audiobook/<n>``, so the URI must be resolved first
    (services/shared/ma_library.py).
@@ -188,7 +188,7 @@ class TestMusicAssistantGetsALibraryUri:
 
     @pytest.mark.asyncio
     async def test_non_ma_player_still_gets_the_hls_url(self):
-        """Roku/Chromecast/DLNA/TV cannot resolve an MA URI — they need the URL."""
+        """Roku/Chromecast/DLNA/TV cannot resolve an MA URI; they need the URL."""
         from contextlib import ExitStack
 
         plain = {

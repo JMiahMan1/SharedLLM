@@ -26,7 +26,7 @@ public final class WidgetAlarm {
                 am.set(AlarmManager.RTC_WAKEUP, trigger, pi);
             }
         } catch (SecurityException ignored) {
-            // Exact alarm permission missing — inexact is fine
+            // Exact alarm permission missing; inexact is fine
             am.set(AlarmManager.RTC, trigger, pi);
         }
     }

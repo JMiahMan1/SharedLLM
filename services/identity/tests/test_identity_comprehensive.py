@@ -1,4 +1,4 @@
-"""Comprehensive tests for Identity service - user resolution, device assignment, settings."""
+"""Tests for the Identity service: user resolution, device assignment, settings."""
 import os
 
 

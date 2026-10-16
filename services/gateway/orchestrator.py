@@ -60,7 +60,7 @@ COLLECTION_HEADERS = {
     # system_capabilities), and answered "no results were found" while the
     # evidence sat unread in its own system prompt.
     "calibre_files": (
-        "LIBRARY — TEXT FROM YOUR BOOK LIBRARY — ALREADY RETRIEVED FOR THIS "
+        "LIBRARY: TEXT FROM YOUR BOOK LIBRARY, ALREADY RETRIEVED FOR THIS "
         "QUESTION. Answer from these passages and cite the bracketed source and "
         "chapter. Do not call ContextSearchRequest to look them up again; only "
         "search the library if these passages plainly do not answer the question."
@@ -151,7 +151,7 @@ def _collections_for_query(query: str, *, include_library: bool = False) -> list
     return collections
 
 
-# --- Default service URLs (Docker DNS) — overridable via Identity settings ---
+# --- Default service URLs (Docker DNS), overridable via Identity settings ---
 _DEFAULTS = cast(dict[str, str], {
     "identity_svc_url": IDENTITY_SVC,
     "execution_svc_url": EXECUTION_SVC,
@@ -350,7 +350,7 @@ def _get(settings: dict[str, str], key: str, default: str = "") -> str:
 
 def strip_json_from_response(text: str) -> str:
     """
-    Robustly extract natural language from LLM output.
+    Extract natural language from LLM output.
     Handles: pure JSON, markdown-wrapped JSON, thinking tags, tool call artifacts.
     Returns the most human-readable portion of the text.
     """
@@ -508,7 +508,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     #
     # BUT: a job carrying a `_mission_id` was explicitly submitted through the
     # Raven mission pipeline (POST /api/raven/missions). Such jobs MUST run the
-    # autonomous AgentLoop regardless of the query prose — otherwise an
+    # autonomous AgentLoop regardless of the query prose; otherwise an
     # open-ended mission whose text lacks the literal "raven" keyword is
     # misrouted to the single-turn Librarian path, which cannot create
     # workspaces (observed: WorkspaceCreateRequest "not supported in the
@@ -623,7 +623,7 @@ async def _fetch_rag_context(
                                     # NOT the full prose (which would bloat the 15k-char
                                     # budget). The model applies the rule, not the story.
                                     rag_context += (
-                                        "\n[SYSTEM_LEARNINGS — PAST LESSONS: each is a "
+                                        "\n[SYSTEM_LEARNINGS: PAST LESSONS. Each is a "
                                         "reusable rule. When you apply one, cite it once as "
                                         "`Apply: [id]` in your plan so it is recorded as used.]\n"
                                     )
@@ -663,13 +663,13 @@ async def _fetch_rag_context(
     except Exception as e:
         log.error(f"RAG search failed: {e}")
 
-    # ── ALWAYS-ON CURRICULUM + ENVIRONMENT AWARENESS ─────────────────────────
+    # ALWAYS-ON CURRICULUM + ENVIRONMENT AWARENESS
     # Terse prompts only work when Raven can fill in the gaps itself. These
     # pinned blocks teach the transferable protocol (dedicated workspace,
     # WebSearch for facts, answer.md, `Apply: [id]` citations), list the CLI
     # tools the workspace container actually has, and surface the resources it
     # can pull in (Nextcloud files, Home Assistant entities). All fetches are
-    # best-effort with short timeouts — never block a mission on them.
+    # best-effort with short timeouts; never block a mission on them.
     if not skip_curriculum:
         try:
             from services.gateway.main import shared_http_client
@@ -685,7 +685,7 @@ async def _fetch_rag_context(
                         _proto = (await _pr.json()).get("items") or []
                         if _proto:
                             rag_context += (
-                                "\n[PROTOCOL — ALWAYS-ON CURRICULUM: follow these conventions on "
+                                "\n[PROTOCOL: ALWAYS-ON CURRICULUM. Follow these conventions on "
                                 "EVERY task, even when the prompt does not mention them. When you "
                                 "apply one, cite it once as `Apply: [id]` in your plan.]\n"
                             )
@@ -711,12 +711,12 @@ async def _fetch_rag_context(
                         _tools = (await _tr.json()).get("tools") or []
                         if _tools:
                             rag_context += (
-                                "\n[WORKSPACE TOOLCHAIN — CLI tools available in the workspace "
-                                "shell: use them instead of assuming tools exist]\n"
+                                "\n[WORKSPACE TOOLCHAIN: CLI tools available in the workspace "
+                                "shell; use them instead of assuming tools exist]\n"
                             )
                             for _t in _tools:
                                 _tv = f" {_t.get('version')}" if _t.get("version") else ""
-                                rag_context += f"- {_t.get('name')}{_tv} — {_t.get('description', '')}\n"
+                                rag_context += f"- {_t.get('name')}{_tv}: {_t.get('description', '')}\n"
                 except Exception as e:
                     log.warning(f"[Orchestrator] toolchain fetch skipped: {e}")
 
@@ -731,7 +731,7 @@ async def _fetch_rag_context(
                         _files = (await _nr.json()).get("files") or []
                         if _files:
                             rag_context += (
-                                "\n[NEXTCLOUD RESOURCES — files you can pull into the workspace "
+                                "\n[NEXTCLOUD RESOURCES: files you can pull into the workspace "
                                 "via StorageFileReadRequest then WorkspaceFileWriteRequest]\n"
                             )
                             for _f in _files:
@@ -750,7 +750,7 @@ async def _fetch_rag_context(
                         _ents = (await _hr.json()).get("entities") or []
                         if _ents:
                             rag_context += (
-                                "\n[HOME ASSISTANT SNAPSHOT — entities you can read state from "
+                                "\n[HOME ASSISTANT SNAPSHOT: entities you can read state from "
                                 "or control]\n"
                             )
                             for _e in _ents:
@@ -791,7 +791,7 @@ async def _fetch_rag_context(
                     _mem = (_data.get("result") or {}).get("content") or _data.get("content") or ""
                     if _mem and _mem.strip():
                         rag_context += (
-                            "\n[WORKSPACE_MEMORY — this workspace's prior lessons: read and "
+                            "\n[WORKSPACE_MEMORY: this workspace's prior lessons. Read and "
                             "APPLY these to avoid repeating past work]\n"
                             + _mem.strip()[:8000]
                             + "\n"
@@ -806,10 +806,10 @@ async def _fetch_rag_context(
         if weather_ctx:
             rag_context += f"\n[WEATHER]\n{weather_ctx}\n"
 
-    # ── DREAM FEEDBACK — RSI self-test loop ─────────────────────────
+    # DREAM FEEDBACK: RSI self-test loop
     # After dreaming consolidates lessons, this injects two things:
     # 1. VALIDATION CHECKLIST: lessons that have been applied (used) but
-    #    never tested — Raven should run them as verification tasks
+    #    never tested; Raven should run them as verification tasks
     #    before completing the current mission. Results go to
     #    POST /rag/dream/validate so future dreaming can weight them.
     # 2. PRIORITY HITS: top-scoring lessons (by applied_count +
@@ -833,8 +833,8 @@ async def _fetch_rag_context(
                     _pending = (await _dp.json()).get("validations_pending") or []
                     if _pending:
                         rag_context += (
-                            "\n[DREAM — VALIDATE ON NEXT MISSION: "
-                            "before completing, self-test each of these "
+                            "\n[DREAM: VALIDATE ON NEXT MISSION. "
+                            "Before completing, self-test each of these "
                             "consolidated lessons by running its rule as "
                             "a command/test in the workspace. Report "
                             "results via POST /rag/dream/validate]\n"
@@ -1525,7 +1525,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 tool_data = _prose[0]
                 log.info(f"[_single_turn_inference] Recovered prose tool call: {tool_data.get('action')}")
         if not tool_data:
-            # Detect empty tool_code tags — model tried but produced nothing
+            # Detect empty tool_code tags: model tried but produced nothing
             if "<tool_code>" in ans and "</tool_code>" in ans:
                 import re as _re
                 _tc_inner = _re.search(r"<tool_code>\s*(.*?)\s*</tool_code>", ans, _re.DOTALL)
@@ -1543,7 +1543,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 messages.append({"role": "user", "content": "You must emit your tool call as a JSON object now, or provide a brief final answer."})
                 continue
 
-            # No tool call — this is our final answer
+            # No tool call; this is our final answer
             if chunk_callback and turn == 0:
                 clean_ans = strip_json_from_response(ans)
                 from services.gateway.llm_providers import strip_thinking_blocks
@@ -1586,7 +1586,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         _META_KEYS = {"action", "tool", "name", "@type", "type", "payload", "function", "id", "operation", "command"}
 
         if _is_ha_action:
-            # action is an HA action — look for a tool/name/@type to route with
+            # action is an HA action; look for a tool/name/@type to route with
             for _k in ("tool", "name", "@type"):
                 if _k in tool_data:
                     _tn = tool_data.pop(_k)
@@ -1605,13 +1605,13 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                         log.info(f"[_single_turn_inference] Remapped routing: {tool_data['action']} payload.action={_candidate}")
                         break
         else:
-            # action is a tool name (routing key) — ensure payload has valid HA action
+            # action is a tool name (routing key); ensure payload has valid HA action
             if _cand_norm in SINGLE_TURN_TOOL_ENDPOINTS or _cand_norm == "controlplanerequest":
                 _pl = tool_data.get("payload")
                 if not isinstance(_pl, dict):
                     _pl = {}
                 if "action" in _pl and _pl["action"] in SINGLE_TURN_TOOL_ENDPOINTS:
-                    # payload.action is also a tool name, not an HA action — remove it
+                    # payload.action is also a tool name, not an HA action; remove it
                     _pl.pop("action")
                 if "action" not in _pl:
                     sub = _pl.get("sub_action") or _pl.get("device_action") or tool_data.get("sub_action") or tool_data.get("device_action")
@@ -1709,7 +1709,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 await event_callback({"type": "step", "n": "final"})
             return await _closing_turn(messages, model, options, _step_stream("final") if event_callback else chunk_callback, tool_result)
 
-    # Final answer processing — strip JSON/thinking artifacts for clean natural language
+    # Final answer processing: strip JSON/thinking artifacts for clean natural language
     log.info(f"[_single_turn_inference] Final answer length: {len(ans)} chars, preview: {ans[:200]}")
     final_clean = strip_json_from_response(ans)
     from services.gateway.llm_providers import strip_thinking_blocks

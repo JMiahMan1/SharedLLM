@@ -76,7 +76,7 @@ beforeEach(() => {
   );
 });
 
-describe('Media page — this device (web player)', () => {
+describe('Media page: this device (web player)', () => {
   it('plays a book from Jump back in through the resolved Music Assistant URI', async () => {
     renderWithProviders(<Media />);
     await userEvent.click(await screen.findByRole('button', { name: /Chronicles of Narnia/i }));
@@ -127,7 +127,7 @@ describe('Media page — this device (web player)', () => {
   });
 });
 
-describe('Media page — device picker', () => {
+describe('Media page: device picker', () => {
   it('lists a speaker once even when both Home Assistant and Music Assistant report it', async () => {
     server.use(
       http.post('/execute/media/status', () => HttpResponse.json({
@@ -177,7 +177,7 @@ describe('Media page — device picker', () => {
   });
 });
 
-describe('Media page — when a provider is down', () => {
+describe('Media page: when a provider is down', () => {
   it('says playlists could not load (not "no playlists") and retries', async () => {
     let calls = 0;
     server.use(
@@ -194,7 +194,7 @@ describe('Media page — when a provider is down', () => {
   });
 });
 
-describe('Media page — browse', () => {
+describe('Media page: browse', () => {
   it('plays an Audiobookshelf podcast via the resolved URI', async () => {
     server.use(
       http.get('/api/media/audiobookshelf/search', () => HttpResponse.json({

@@ -62,7 +62,7 @@ Read or write files in user cloud storage (Nextcloud).
 
 ### ContextSearchRequest
 Search semantic memories, documents, and indexed knowledge.
-- Fields: `tool`, `query`, `collection_name` (REQUIRED — an omitted collection is refused, not guessed: `calibre_files` for the book library, `nextcloud_files` for files, `system_learnings` for past lessons, `ha_entities` for the house), optional `k` (number of results, default 5).
+- Fields: `tool`, `query`, `collection_name` (REQUIRED; an omitted collection is refused, not guessed: `calibre_files` for the book library, `nextcloud_files` for files, `system_learnings` for past lessons, `ha_entities` for the house), optional `k` (number of results, default 5).
 - Example: `{"tool": "ContextSearchRequest", "query": "Macduff trusting God in trial", "collection_name": "calibre_files"}`
 
 ### CalibreRequest
@@ -72,7 +72,7 @@ Read-only access to the personal Calibre book library. Use it when you need a sp
 - Examples:
   - `{"tool": "CalibreRequest", "action": "search", "query": "wesley sermons"}`
   - `{"tool": "CalibreRequest", "action": "fetch_text", "book_id": 617, "max_chars": 20000}`
-- This tool has NO delete or write action — never invent one. If a fetch is refused because a book is stored only as PDF, say so instead of guessing its text.
+- This tool has NO delete or write action. Never invent one. If a fetch is refused because a book is stored only as PDF, say so instead of guessing its text.
 
 ### BibleRequest
 Read-only access to the installed Bible corpus: scripture text, verse search, study notes by edition, verse of the day, and the catalogue of installed translations. Scripture text is NOT in RAG (`calibre_files` holds books, not the installed translations), so use this tool for any Bible quote and `study_notes` for commentary.
@@ -82,7 +82,7 @@ Read-only access to the installed Bible corpus: scripture text, verse search, st
   - `{"tool": "BibleRequest", "action": "read", "ref": "John 3:16", "version": "nkjv"}`
   - `{"tool": "BibleRequest", "action": "study_notes", "ref": "Romans 1:16", "edition": "nkjv-tomholland"}`
   - `{"tool": "BibleRequest", "action": "catalogue"}`
-- Quote scripture only from this tool's text and cite `{reference} ({version})`. This tool has NO write action — reading position and marks belong to the person reading.
+- Quote scripture only from this tool's text and cite `{reference} ({version})`. This tool has NO write action; reading position and marks belong to the person reading.
 
 ### ClimateRequest
 Control thermostat/climate.

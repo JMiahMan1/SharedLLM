@@ -51,7 +51,7 @@ public class ConfigureActionButtonActivity extends Activity {
     private static final String[] ICON_BG_LABELS = {
         "None", "Slate", "Navy", "Green", "Purple", "Sky"
     };
-    /** True only while pickEntity() is writing the field — blocks the results list from reopening. */
+    /** True only while pickEntity() is writing the field; blocks the results list from reopening. */
     private boolean suppressEntityResults;
     private final List<String> entityIds = new ArrayList<>();
     private final List<String> entityLabels = new ArrayList<>();
@@ -270,7 +270,7 @@ public class ConfigureActionButtonActivity extends Activity {
                 entityStatus.setVisibility(View.VISIBLE);
                 entityStatus.setText(labels.isEmpty()
                     ? "No matches for “" + q + "”"
-                    : labels.size() + " matches — tap to select");
+                    : labels.size() + " matches. Tap to select");
             });
         }), 250);
     }
@@ -398,8 +398,8 @@ public class ConfigureActionButtonActivity extends Activity {
                 nbg.setStroke(MaterialIcons.dp(getResources(), 2),
                     selected ? 0xFF4ADE80 : 0xFF64748B);
                 none.setBackground(nbg);
-                none.setContentDescription("None — transparent tile, no background");
-                none.setTooltipText("None — transparent tile, no background");
+                none.setContentDescription("None: transparent tile, no background");
+                none.setTooltipText("None: transparent tile, no background");
                 none.setOnClickListener(v -> {
                     selectedIconBg = 0;
                     buildIconBgRow();
@@ -435,7 +435,7 @@ public class ConfigureActionButtonActivity extends Activity {
         TextView status = findViewById(R.id.icon_bg_selected);
         if (status == null) return;
         if (selectedIconBg == 0) {
-            status.setText("None — transparent tile (icon floats on the wallpaper)");
+            status.setText("None: transparent tile (icon floats on the wallpaper)");
         } else {
             String name = "Color";
             for (int i = 0; i < ICON_BG_CHOICES.length; i++) {
@@ -444,7 +444,7 @@ public class ConfigureActionButtonActivity extends Activity {
                     break;
                 }
             }
-            status.setText(name + " chip on the dark tile — tap None for no background");
+            status.setText(name + " chip on the dark tile. Tap None for no background");
         }
     }
 
@@ -510,14 +510,14 @@ public class ConfigureActionButtonActivity extends Activity {
                 if (gen != loadGeneration || isFinishing()) return;
                 entityProgress.setVisibility(View.GONE);
                 if (error[0] != null) {
-                    entityStatus.setText(error[0] + " — type entity_id manually");
+                    entityStatus.setText(error[0] + ". Type entity_id manually");
                     return;
                 }
                 if (ids.isEmpty()) {
-                    entityStatus.setText("No controllable entities found — type entity_id");
+                    entityStatus.setText("No controllable entities found. Type entity_id");
                     return;
                 }
-                entityStatus.setText(ids.size() + " entities — type to search");
+                entityStatus.setText(ids.size() + " entities. Type to search");
                 entityIds.clear();
                 entityIds.addAll(ids);
                 entityLabels.clear();

@@ -1,6 +1,6 @@
-"""BUG-14 (P2-T5): ABS search is server-side and parallel — no library enumeration.
+"""BUG-14 (P2-T5): ABS search is server-side and parallel, with no library enumeration.
 
-Plan row: handlers/audiobookshelf.py:80-107, abs_client.py:137 — search pulled
+Plan row: handlers/audiobookshelf.py:80-107, abs_client.py:137: search pulled
 every item of every library (up to 51x500). Fix: per-library
 GET /api/libraries/{id}/search?q=&limit= run in parallel with asyncio.gather.
 Author-name queries keep returning books via GET /api/authors/:id?include=items
@@ -92,7 +92,7 @@ async def test_search_server_side_parallel_no_listing_calls():
     # Authors include distinct authors of returned items (legacy chip behavior).
     assert [a["name"] for a in result.detail["authors"]] == ["J.R.R. Tolkien"]
     assert result.detail["total"] == 3
-    # One server-side search per library — no /items enumeration ever.
+    # One server-side search per library; no /items enumeration ever.
     assert search_mock.await_count == 2
     assert list_mock.await_count == 0
 

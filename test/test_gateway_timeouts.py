@@ -6,7 +6,7 @@ import pytest
 #
 # NOTE: this deliberately does not use respx. respx patches httpx, but the
 # gateway talks to Identity and Ollama over aiohttp, so respx mocks never
-# intercepted anything here — the test was really exercising the "downstream is
+# intercepted anything here; the test was really exercising the "downstream is
 # genuinely unreachable" path all along.
 #
 # The contract under test is that the gateway degrades in a structured way

@@ -1,6 +1,6 @@
 # services/execution/handlers/gh.py
 """
-GhHandler — Allows Raven and external clients to run `gh` (GitHub CLI) commands
+GhHandler: allows Raven and external clients to run `gh` (GitHub CLI) commands
 from within a workspace. This is the tool used to create repositories, open PRs,
 manage issues, etc.
 

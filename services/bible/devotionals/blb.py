@@ -58,7 +58,7 @@ class BlbDevotionalSource(DevotionalSource):
         return DevotionalEntry(
             source=self.code,
             work=work,
-            title=f"{title} — Day {day_of_year}",
+            title=f"{title}, Day {day_of_year}",
             day_of_year=day_of_year,
             kind="link",
             url=self.url_for(work, day_of_year),

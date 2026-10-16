@@ -115,7 +115,7 @@ async def _read(client: BibleClient, req: BibleRequest) -> ExecutionResult:
             service=SERVICE,
             detail={"reference": note, "count": 0},
         )
-    header = f"{body.get('reference') or ref} ({body.get('version')}) — {len(verses)} verses:"
+    header = f"{body.get('reference') or ref} ({body.get('version')}), {len(verses)} verse{'' if len(verses) == 1 else 's'}:"
     message = _clip("\n".join([header, "", *_verse_lines(verses)]))
     return ExecutionResult.ok(
         message,

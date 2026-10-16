@@ -24,7 +24,7 @@ The gateway lifespan also warms RAG's lesson cache once at startup
 
 | Service | Job | Function | Interval | What it does |
 |---|---|---|---|---|
-| automation | Timer dispatch | `services/automation/main.py:scheduler_loop` | 1–60 s (sleeps until the next due timer, capped at 60 s) | Fires due `timer:*` keys at their target service with retries and run history; reschedules recurring timers. A malformed timer is logged and skipped. A fired timer (`/execute/trigger`) always puts a notice on the owner's phone (telemetry `once` key per firing) and also speaks on `target_device` when it names one. Status: `GET /api/automation/status`. |
+| automation | Timer dispatch | `services/automation/main.py:scheduler_loop` | 1-60 s (sleeps until the next due timer, capped at 60 s) | Fires due `timer:*` keys at their target service with retries and run history; reschedules recurring timers. A malformed timer is logged and skipped. A fired timer (`/execute/trigger`) always puts a notice on the owner's phone (telemetry `once` key per firing) and also speaks on `target_device` when it names one. Status: `GET /api/automation/status`. |
 | telemetry | Report scheduler | `services/telemetry/main.py:scheduler_loop` | 30 s | Queues `tel:job:*` reports whose `next_run_at` has passed. |
 | telemetry | Report worker | `services/telemetry/main.py:worker_loop` | 20 s | Generates queued reports (deferred while Alpaca is busy, retried with backoff) and pushes a notification. |
 | execution | Energy telemetry | `services/execution/main.py:telemetry_ingestion_loop` | 60 s | Reads each power-tracked HA entity and ingests a usage snapshot. |
@@ -48,9 +48,9 @@ UI or a tool), execution device discovery (on demand), RAG reindex, and the
 gateway media event hubs (opened per subscriber, closed after 60 s idle).
 Identity has no background jobs.
 
-## Alpaca desktop (`/Users/jeremiahsummers/Code/alpaca/audio_server.py`, container `audio-server`)
+## Alpaca desktop (`audio_server.py` in the alpaca repo, container `audio-server`)
 
 | Job | Function | Interval | What it does |
 |---|---|---|---|
-| Music job queue | `_music_worker` | event-driven | Runs queued music/song jobs one at a time; finished jobs are kept for `MUSIC_JOB_KEEP_S`. |
+| Music job queue | `_music_worker` | event-driven | Runs queued music/song jobs one at a time; finished jobs are kept for `MUSIC_JOB_KEEP_S` (env `AUDIO_MUSIC_JOB_KEEP_S`, 1800 s). |
 | Idle unloader | `_idle_unloader` → `_idle_unload_once` | 15 s | Unloads TTS or music models idle longer than `AUDIO_IDLE_UNLOAD_S` (180 s) to give VRAM back. |

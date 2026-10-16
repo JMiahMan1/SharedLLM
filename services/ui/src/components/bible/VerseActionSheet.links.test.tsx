@@ -111,7 +111,7 @@ describe('sharing to the family chat', () => {
 
 describe('verseShareText', () => {
   it('matches the chat’s verse line', () => {
-    expect(verseShareText('John 3:16', ' For God so loved ', 'nkjv')).toBe('📖 John 3:16 (NKJV) — "For God so loved"');
-    expect(verseShareText('John 3:16', 'For God', undefined, '  ')).toBe('📖 John 3:16 — "For God"');
+    expect(verseShareText('John 3:16', ' For God so loved ', 'nkjv')).toBe('📖 John 3:16 (NKJV): "For God so loved"');
+    expect(verseShareText('John 3:16', 'For God', undefined, '  ')).toBe('📖 John 3:16: "For God"');
   });
 });

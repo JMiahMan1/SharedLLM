@@ -41,7 +41,7 @@ def _slugify_workspace_id(workspace_id: str) -> str:
 def _known_workspace_slugs() -> set[str] | None:
     """Slug set of every registered workspace id, or None if lookup failed.
 
-    Returns None on any error so the reaper can skip the sweep entirely —
+    Returns None on any error so the reaper can skip the sweep entirely;
     failing closed (keep everything) instead of destroying live sandboxes.
     """
     try:
@@ -178,7 +178,7 @@ except Exception as e:
     client = None
 
 
-# ─── Background Pull Tracking ──────────────────────────────────────────────────
+# Background Pull Tracking
 # Tracks non-blocking image pulls so the UI can poll progress without
 # holding an HTTP connection open. Keyed by compose service name.
 _pull_status: dict[str, dict] = {}
@@ -268,7 +268,7 @@ def _fix_volume_permissions(container) -> list[str]:
     return fixed
 
 
-# ─── Auth Dependency ───────────────────────────────────────────────────────────
+# Auth Dependency
 
 def verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Internal-Secret")):
     if x_internal_secret != INTERNAL_SECRET:
@@ -276,7 +276,7 @@ def verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Interna
     return True
 
 
-# ─── Health ────────────────────────────────────────────────────────────────────
+# Health
 
 
 START_TIME = time.time()
@@ -295,7 +295,7 @@ def health_prefixed():
     return health()
 
 
-# ─── Container Management ──────────────────────────────────────────────────────
+# Container Management
 
 def _format_uptime(uptime_seconds: float) -> str:
     """Format uptime seconds into a human-readable duration."""
@@ -328,7 +328,7 @@ def _get_image_pull_time(container) -> str | None:
 
 
 def _get_container_info(container):
-    """Extract comprehensive info from a container."""
+    """Extract the details of a container."""
     inspect = container.attrs
     state = inspect.get("State", {})
     health = state.get("Health") or {}
@@ -1046,7 +1046,7 @@ def exec_in_container(service_name: str, body: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ─── Integration: DNS Sync Webhook ───────────────────────────────────────────
+# Integration: DNS Sync Webhook
 
 if __name__ == "__main__":
     import uvicorn

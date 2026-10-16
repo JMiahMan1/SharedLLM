@@ -50,7 +50,7 @@ RECONNECT_BACKOFF_FACTOR = 2.0
 RECONNECT_JITTER = 0.5
 
 # Heartbeat: MA server pings us; websockets library replies with pong automatically.
-# We do NOT send our own pings — the MA server expects to initiate heartbeat.
+# We do NOT send our own pings; the MA server expects to initiate heartbeat.
 # The websockets library's default ping_interval (20s) is sufficient for keep-alive.
 HEARTBEAT_INTERVAL = 15.0
 
@@ -94,7 +94,7 @@ class MAWebSocketClient:
         self._mass_url = mass_url.rstrip("/")
         self._mass_token = mass_token
 
-        # Token is passed as a query parameter — this is how MA's WebSocket
+        # Token is passed as a query parameter; this is how MA's WebSocket
         # middleware expects authentication (not via headers).
         #
         # MA is exposed in two different ways in this deployment:
@@ -505,7 +505,7 @@ class MAWebSocketClient:
         msg_type = data.get("type")
         event_type = data.get("event")
 
-        # ── Event messages ──────────────────────────────────────────────
+        # Event messages
         # MA sends events with or without a "type" field:
         #   {"event": "queue_updated", "data": {...}}
         #   {"type": "EVENT", "event": "player_updated", "data": {...}}
@@ -514,7 +514,7 @@ class MAWebSocketClient:
             log.info(f"[MA-WS] Received event: {event_type}, keys={list(evt_data.keys()) if isinstance(evt_data, dict) else type(evt_data).__name__}")
             await self._dispatch_event(event_type, evt_data)
 
-        # ── Result messages ─────────────────────────────────────────────
+        # Result messages
         # Response to a command we sent
         elif msg_type == "RESULT":
             result = data.get("result", {})
@@ -527,7 +527,7 @@ class MAWebSocketClient:
                     future.set_result(result)
                     log.info(f"[MA-WS] Resolved pending response for msg_id={msg_id}")
 
-        # ── Error messages ──────────────────────────────────────────────
+        # Error messages
         elif msg_type == "ERROR":
             error = data.get("error", {})
             msg_id = data.get("message_id")
@@ -541,11 +541,11 @@ class MAWebSocketClient:
             self._ma_error_code = error_code
             self._ma_error_details = str(details)
             self._last_error = RuntimeError(f"MA error: {error_code}: {details}")
-            # Resolve the waiting command immediately — never wait the full
+            # Resolve the waiting command immediately; never wait the full
             # timeout for a command MA has already rejected (BUG-23).
             self._fail_pending_response(msg_id, details)
 
-        # ── Partial results (no type field, from commands like play_media) ─
+        # Partial results (no type field, from commands like play_media)
         elif "message_id" in data and "result" in data:
             partial = data.get("partial")
             result = data.get("result", {})
@@ -557,14 +557,14 @@ class MAWebSocketClient:
                     future.set_result(result)
                     log.info(f"[MA-WS] Resolved response for msg_id={msg_id}")
 
-        # ── MA server_info response (sent automatically after connect) ────
+        # MA server_info response (sent automatically after connect)
         elif data.get("server_id") is not None and data.get("server_version") is not None:
             log.info(f"[MA-WS] Received MA server_info: name={data.get('name')}, version={data.get('server_version')}")
             self._server_info = data
             self._authenticated = True
             self._auth_event.set()
 
-        # ── MA error responses without type field ───────────────────────
+        # MA error responses without type field
         elif data.get("error_code") is not None or ("message_id" in data and "details" in data):
             error_code = data.get("error_code", "unknown")
             details = data.get("details", "")
@@ -575,7 +575,7 @@ class MAWebSocketClient:
             log.error(f"[MA-WS] MA error response (no type field): msg_id={msg_id}, error_code={error_code!r}, details={details!r}")
             self._fail_pending_response(msg_id, details)
 
-        # ── Unknown message types ───────────────────────────────────────
+        # Unknown message types
         else:
             log.warning(f"[MA-WS] Unknown message type: msg_type={msg_type!r}, event={event_type!r}, all_keys={list(data.keys())}")
 
@@ -590,7 +590,7 @@ class MAWebSocketClient:
             data: The event data payload
         """
         # Update queue state for queue-related events. Player events describe
-        # the PLAYER (volume, active source) — they must never replace queue
+        # the PLAYER (volume, active source), so they must never replace queue
         # state (BUG-23); callbacks below still receive every event.
         if event_type in (EVENT_QUEUE_UPDATED, EVENT_QUEUE_ENDED, EVENT_QUEUE_STARTED, EVENT_QUEUE_VOLATILE_UPDATED) and self._event_matches_tracked_queue(data):
             self._queue_state = data
@@ -633,7 +633,7 @@ class MAWebSocketClient:
         if isinstance(current_item, dict):
             log.info(f"[MA-WS] current_item keys: {list(current_item.keys())}")
             media_item = current_item.get("media_item", {})
-            # ── Construct stream URL from streamdetails for opensubsonic/library ──
+            # Construct stream URL from streamdetails for opensubsonic/library
             streamdetails = current_item.get("streamdetails", {})
             if isinstance(streamdetails, dict) and streamdetails.get("item_id"):
                 provider = streamdetails.get("provider", "")
@@ -735,7 +735,7 @@ class MAWebSocketClient:
         # Add jitter to prevent thundering herd. The old expression
         # `1.0 - 2.0 * hash(str(time.time())) % 1` always evaluated to 1.0
         # ((2.0 * int) % 1 is identically 0), i.e. a constant offset with no
-        # randomness at all — use a real uniform sample instead (BUG-23).
+        # randomness at all; use a real uniform sample instead (BUG-23).
         jitter = random.uniform(0, delay * RECONNECT_JITTER)
         delay = max(0.1, delay + jitter)
 
@@ -822,7 +822,7 @@ class MAWebSocketClient:
                 self._queue_id = event_queue_id
             return True
         if not (isinstance(event_queue_id, str) and event_queue_id):
-            # No queue_id on the event — cannot attribute it to another queue.
+            # No queue_id on the event, so we cannot attribute it to another queue.
             return True
         return event_queue_id == self._queue_id
 

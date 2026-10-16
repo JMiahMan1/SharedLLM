@@ -94,7 +94,7 @@ def _forwarded_user(captured):
     return captured["calls"][0]["params"]["user"]
 
 
-# ── who sees what ───────────────────────────────────────────────────────────
+# who sees what
 def test_admin_without_a_scope_gets_the_whole_frame(chores_client, monkeypatch):
     captured = _patch_execution(monkeypatch)
     resp = chores_client(user="jeremiah", is_admin=True).get("/api/integrations/skylight/chores")

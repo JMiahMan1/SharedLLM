@@ -298,7 +298,7 @@ async def test_read_leads_with_reference_version_and_verse_text(monkeypatch):
     _stub(monkeypatch, read=read)
     result = await bible_handler.handle_bible(_request("read", ref="John 3:16", version="nkjv"))
     assert result.status == "SUCCESS"
-    assert result.message.startswith("John 3:16 (nkjv) — 1 verses:")
+    assert result.message.startswith("John 3:16 (nkjv), 1 verse:")
     assert "John 3:16 For God so loved the world..." in result.message
     assert result.detail["count"] == 1
 

@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed
+Proposed, not implemented (reviewed 2026-10-15). `aiobreaker` is not in any
+requirements file, no service wraps its outbound calls in a breaker, and no
+`/metrics` breaker gauges exist.
 
 ## Context
 
@@ -12,7 +14,7 @@ We need **fail-fast** behavior when services are unhealthy, and automatic recove
 
 ## Decision
 
-Integrate `aiobreaker` (already listed in `requirements.txt`) around all outbound HTTP calls from:
+Integrate `aiobreaker` around all outbound HTTP calls from:
 
 * `gateway/agent_loop.py` (tool dispatch)
 * `gateway/orchestrator.py` (RAG fetch)

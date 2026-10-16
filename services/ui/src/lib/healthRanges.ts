@@ -193,7 +193,7 @@ export function heroInsight(
 
   if (today > 0 && today >= goal) {
     return {
-      headline: `Goal met — ${today.toLocaleString()} steps today`,
+      headline: `Goal met: ${today.toLocaleString()} steps today`,
       detail: `${series.label} total is ${series.total.toLocaleString()}.`,
       tone: 'high',
     };
@@ -202,7 +202,7 @@ export function heroInsight(
   if (today > 0 && thin) {
     return {
       headline: `${today.toLocaleString()} steps so far today`,
-      detail: `Keep going — a fair comparison needs ${series.baseline_min_days} days of history.`,
+      detail: `Keep going. A fair comparison needs ${series.baseline_min_days} days of history.`,
       tone: 'neutral',
     };
   }
@@ -234,7 +234,7 @@ export function heroInsight(
   if (series.has_gaps) {
     return {
       headline: 'Some days are missing from this range',
-      detail: 'A gap is not a zero — those days simply have no reading.',
+      detail: 'A gap is not a zero; those days simply have no reading.',
       tone: 'neutral',
     };
   }

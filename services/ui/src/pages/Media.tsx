@@ -15,7 +15,7 @@ import { NowPlayingCard, type NowPlayingView } from '../components/media/NowPlay
 import { MediaExplorer } from '../components/media/MediaExplorer';
 import type { DeviceOption, MediaStatus, PlayRequest } from '../components/media/types';
 
-/* ── helpers ─────────────────────────────────────────────────────────── */
+/* helpers */
 
 const STATUS_POLL_MS = 3000;
 /** After the user moves a volume slider, ignore polled volumes this long. */
@@ -109,7 +109,7 @@ function ShelfMessage({ title, detail, onRetry }: { title: string; detail?: stri
   );
 }
 
-/* ── page ────────────────────────────────────────────────────────────── */
+/* page */
 
 const Media = () => {
   const { trigger } = useHaptics();
@@ -140,7 +140,7 @@ const Media = () => {
   const volumeTimerRef = useRef<number | null>(null);
   const [remoteTime, setRemoteTime] = useState(0);
 
-  /* ── device status ─────────────────────────────────────────────── */
+  /* device status */
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -269,7 +269,7 @@ const Media = () => {
     return () => clearInterval(id);
   }, [remotePlaying, remoteDuration]);
 
-  /* ── favourites (Music Assistant items) ────────────────────────── */
+  /* favourites (Music Assistant items) */
 
   const activeUri = isWebPlayer ? maPlayer.mediaUri : remoteStatus?.media_content_id || null;
   const maItemUri = activeUri && activeUri.includes('://') ? activeUri : null;
@@ -303,7 +303,7 @@ const Media = () => {
     }
   }, [maItemUri, isFavorite]);
 
-  /* ── playback ──────────────────────────────────────────────────── */
+  /* playback */
 
   /** Start `req` on the selected device; `key` is the row showing a spinner. */
   const playItem = useCallback(async (req: PlayRequest, key: string) => {
@@ -437,7 +437,7 @@ const Media = () => {
     }
   }, [trigger]);
 
-  /* ── shelves ───────────────────────────────────────────────────── */
+  /* shelves */
 
   const playlistsQ = useQuery({ queryKey: ['ma-playlists'], queryFn: () => api.getMusicAssistantPlaylists(), retry: 1, staleTime: 60_000 });
   const recentQ = useQuery({ queryKey: ['ma-recent'], queryFn: () => api.getMusicAssistantRecent(), retry: 1, staleTime: 60_000 });
@@ -474,7 +474,7 @@ const Media = () => {
 
   const shelvesFailed = (recentQ.isError || !!lastPlayedQ.data?.notice || lastPlayedQ.isError) && jumpBackIn.length === 0;
 
-  /* ── render ────────────────────────────────────────────────────── */
+  /* render */
 
   const remoteView: NowPlayingView = {
     title: detail?.name && maItemUri === remoteStatus?.media_content_id ? detail.name : remoteStatus?.media_title,
@@ -505,7 +505,7 @@ const Media = () => {
       case 'RECONNECTING':
         return (
           <p className="text-sm text-amber-300 text-center">
-            Connection lost — reconnecting{maPlayer.reconnectAttempts ? ` (try ${maPlayer.reconnectAttempts} of ${maPlayer.maxReconnectAttempts})` : ''}…
+            Connection lost. Reconnecting{maPlayer.reconnectAttempts ? ` (try ${maPlayer.reconnectAttempts} of ${maPlayer.maxReconnectAttempts})` : ''}…
           </p>
         );
       case 'FAILED':

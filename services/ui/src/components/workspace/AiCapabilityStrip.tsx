@@ -80,7 +80,7 @@ export default function AiCapabilityStrip({ capabilities, loading, onRefresh }: 
                     {cap.label}
                   </span>
                   <span className="text-slate-500">
-                    — {s === 'ok' ? 'ready' : s === 'no' ? 'unavailable' : 'unconfirmed'}
+                    ({s === 'ok' ? 'ready' : s === 'no' ? 'unavailable' : 'unconfirmed'})
                   </span>
                 </span>
                 {cap.detail && <p className="ml-5 mt-0.5 text-slate-500">{cap.detail}</p>}

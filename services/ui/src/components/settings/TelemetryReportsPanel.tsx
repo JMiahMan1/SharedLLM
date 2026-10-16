@@ -75,7 +75,7 @@ export default function TelemetryReportsPanel() {
       setReports(data.reports);
       setNotifications(data.notifications);
     } catch {
-      // Scheduler not reachable yet — keep the panel usable
+      // Scheduler not reachable yet; keep the panel usable
     } finally {
       setLoading(false);
     }
@@ -91,7 +91,7 @@ export default function TelemetryReportsPanel() {
         setReports(data.reports);
         setNotifications(data.notifications);
       } catch {
-        // Scheduler not reachable yet — keep the panel usable
+        // Scheduler not reachable yet; keep the panel usable
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -135,7 +135,7 @@ export default function TelemetryReportsPanel() {
     setRequesting(true);
     try {
       await api.requestTelemetryReport({ type: reportType, period, timezone });
-      toast.success('Report queued — it runs when the local model is free');
+      toast.success('Report queued. It runs when the local model is free');
       await refresh();
     } catch {
       toast.error('Could not queue the report');
@@ -253,8 +253,8 @@ export default function TelemetryReportsPanel() {
       {activeJob && (
         <p className="text-[11px] text-slate-500" data-testid="active-schedule">
           {activeJob.enabled
-            ? `Next run: ${activeJob.next_run_at ? new Date(activeJob.next_run_at).toLocaleString() : '—'}`
-            : 'Paused — no scheduled runs until resumed'}
+            ? `Next run: ${activeJob.next_run_at ? new Date(activeJob.next_run_at).toLocaleString() : 'Not scheduled'}`
+            : 'Paused: no scheduled runs until resumed'}
           {activeJob.last_status ? ` · last: ${activeJob.last_status}` : ''}
         </p>
       )}
@@ -276,7 +276,7 @@ export default function TelemetryReportsPanel() {
         {loading ? (
           <p className="text-xs text-slate-500">Loading…</p>
         ) : reports.length === 0 ? (
-          <p className="text-xs text-slate-500">No reports yet — request one whenever you want.</p>
+          <p className="text-xs text-slate-500">No reports yet. Request one whenever you want.</p>
         ) : (
           reports.map((report) => (
             <article

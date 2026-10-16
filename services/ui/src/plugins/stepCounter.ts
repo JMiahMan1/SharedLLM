@@ -8,7 +8,7 @@ export interface StepCounterAvailability {
 
 export interface StepPermissionResult {
   granted: boolean;
-  /** Android "Don't ask again" / previously denied forever — open system settings. */
+  /** Android "Don't ask again" / previously denied forever: open system settings. */
   permanentlyDenied?: boolean;
 }
 
@@ -42,7 +42,7 @@ export interface StepLedgerHour {
 
 /**
  * Hours recorded for `day` (defaults to today). Empty when the phone has
- * never reported hourly steps — that absence is meaningful, so it is not
+ * never reported hourly steps; that absence is meaningful, so it is not
  * padded out to 24 zero buckets.
  */
 export interface StepLedgerHours {
@@ -57,7 +57,7 @@ export interface StepCounterPluginInterface {
   getTodaySteps(): Promise<StepReading>;
   /** Durable history: survives reboots, app kills and days the app never ran. */
   getDayHistory(options?: { days?: number }): Promise<StepLedgerHistory>;
-  /** Days recorded after `since` (exclusive), oldest first — used for backfill. */
+  /** Days recorded after `since` (exclusive), oldest first; used for backfill. */
   getDaysSince(options: { since?: string; max?: number }): Promise<StepLedgerHistory>;
   /** Hour-by-hour breakdown for one local day (the phone's own timezone). */
   getHourlySteps(options?: { day?: string }): Promise<StepLedgerHours>;
@@ -71,7 +71,7 @@ export interface StepCounterPluginInterface {
   ): Promise<PluginListenerHandle>;
 }
 
-// Fallback stub for web browsers (no hardware pedometer — report unavailable,
+// Fallback stub for web browsers (no hardware pedometer: report unavailable,
 // never fabricate a reading).
 const webFallback: StepCounterPluginInterface = {
   isAvailable: async () => ({ available: false, permissionGranted: false }),

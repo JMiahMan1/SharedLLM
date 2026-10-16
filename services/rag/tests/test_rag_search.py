@@ -1,5 +1,5 @@
 """
-Comprehensive tests for RAG search across BOTH vector backends.
+Tests for RAG search across BOTH vector backends.
 
 The production path uses sqlite-vec (``SqliteVecAdapter``). The local/dev
 environment may lack the native extension, in which case the tests fall back to
@@ -29,7 +29,7 @@ DIM = 16
 
 def _fake_embed(texts):
     """Deterministic bag-of-words embedding so cosine similarity tracks word
-    overlap — lets us assert semantic relevance without loading a real model."""
+    overlap, which lets us assert semantic relevance without loading a real model."""
     out = []
     for t in texts:
         v = np.zeros(DIM, dtype=np.float32)
@@ -65,7 +65,7 @@ async def _search(query, user_id, collection, k=5):
     )).results
 
 
-# ───────────────────────────── API logic (both backends) ─────────────────────
+# API logic (both backends)
 
 @pytest.mark.parametrize("adapter_cls", [NumpyVecAdapter, SqliteVecAdapter])
 def test_ingest_then_vector_search_returns_doc(tmp_path, adapter_cls, monkeypatch):
@@ -150,7 +150,7 @@ def test_bm25_keyword_search_works(tmp_path, adapter_cls, monkeypatch):
     assert len(results) >= 1
 
 
-# ───────────────────────────── reindex (stale-vector recovery) ───────────────
+# reindex (stale-vector recovery)
 
 @pytest.mark.parametrize("adapter_cls", [NumpyVecAdapter, SqliteVecAdapter])
 def test_reindex_rebuilds_vector_store(tmp_path, adapter_cls, monkeypatch):
@@ -206,7 +206,7 @@ def test_reindex_embeds_in_bounded_batches(tmp_path, monkeypatch):
     assert rag_main.adapter.count() == 10
 
 
-# ───────────────────── legacy schema migration (production path) ──────────────
+# legacy schema migration (production path)
 
 def test_legacy_vec_table_is_migrated_and_reindexed(tmp_path):
     """The exact production scenario: a DB whose vec_rag_items was created with
@@ -242,7 +242,7 @@ def test_legacy_vec_table_is_migrated_and_reindexed(tmp_path):
     db.init_schema(conn, DIM)
     new_cols = {r[1] for r in conn.execute("PRAGMA table_info(vec_rag_items)").fetchall()}
     assert "collection_name" in new_cols and "user_id" in new_cols
-    # Vector was PRESERVED during migration — no reindex required.
+    # Vector was PRESERVED during migration; no reindex required.
     assert conn.execute("SELECT COUNT(*) FROM vec_rag_items").fetchone()[0] == 1
 
     # Wire the app globals; scoped search must work against the preserved vector.

@@ -134,7 +134,7 @@ def test_star_banking_failure_never_breaks_a_game(talk, monkeypatch):
     assert result is not None
 
 
-# ─── _bank_game_stars, the real body ───────────────────────────────────────────
+# _bank_game_stars, the real body
 # The tests above all monkeypatch _bank_game_stars away, so they only ever
 # exercised the caller. That is how a NameError lived in the real body for so
 # long: `get_client` was never imported, every star raise raised it, and the
@@ -198,7 +198,7 @@ def test_bank_game_stars_really_posts_to_geo(monkeypatch):
 
     asyncio.run(talk_module._bank_game_stars("kiddo", 3, "Trivia round"))
 
-    assert len(calls) == 1, "geo was never called — stars are silently not banked"
+    assert len(calls) == 1, "geo was never called, so stars are silently not banked"
     assert calls[0]["url"].endswith("/api/geo/stars")
     assert calls[0]["json"] == {
         "user_id": "kiddo",

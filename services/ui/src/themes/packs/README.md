@@ -1,6 +1,6 @@
 # Health theme packs
 
-Theme packs are portable JSON documents. Widgets **never** hardcode palettes — they resolve themes through `themeRegistry`.
+Theme packs are portable JSON documents. Widgets **never** hardcode palettes; they resolve themes through `themeRegistry`.
 
 ## Schematic (`schemaVersion: 1`)
 
@@ -39,7 +39,7 @@ Theme packs are portable JSON documents. Widgets **never** hardcode palettes —
 
 ### Required token colors
 
-`bg`, `surface`, `text`, `textMuted`, `border`, `accent`, `onAccent`, `progress`, `ring` — hex `#RGB` / `#RRGGBB` / `#AARRGGBB`.
+`bg`, `surface`, `text`, `textMuted`, `border`, `accent`, `onAccent`, `progress`, `ring`: hex `#RGB` / `#RRGGBB` / `#AARRGGBB`.
 
 ### Optional tokens
 
@@ -52,7 +52,7 @@ A pack **cannot carry files**. It round-trips through `localStorage`, a `Blob` e
 control only accepts `application/json`. So an asset has to be a **string**: a
 `url("data:image/svg+xml,…")` value or a public-dir path.
 
-`assets` is a **non-schema key** sitting beside `tokens` — `validateThemePackage` only knows
+`assets` is a **non-schema key** sitting beside `tokens`; `validateThemePackage` only knows
 the `HealthThemeTokens` list, so it is validated only by the code that reads it. That is
 deliberate: the server hard-validates `kind` and `schemaVersion` only, so a new asset field
 rides through `PUT /api/users/me/theme` untouched.
@@ -86,4 +86,4 @@ Validation helpers: `validateThemePack`, `validateThemePackage`, `parseThemePack
 
 ## Default pack
 
-`jarvis-default.pack.json` ships the six stock themes (Aurora, Bloom, Iron, Tron, Neon, Clean Athletic). It is **data**, not component code — edit the JSON or import a replacement under a different pack id.
+`jarvis-default.pack.json` ships the six stock themes (Aurora, Bloom, Iron, Tron, Neon, Clean Athletic). It is **data**, not component code. Edit the JSON or import a replacement under a different pack id.

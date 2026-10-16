@@ -250,7 +250,7 @@ const AdminPinManager = ({
           <div className="text-left">
             <p className="text-white text-sm font-medium">Admin PIN</p>
             <p className="text-xs text-slate-400">
-              {configured ? 'Required to unlock admin features on this device' : 'Not set — set to protect admin access'}
+              {configured ? 'Required to unlock admin features on this device' : 'Not set. Set one to protect admin access'}
             </p>
           </div>
         </div>
@@ -414,7 +414,7 @@ const NotificationsRow = () => {
   );
 };
 
-/** Always-on info-gathering sensors — each can be turned off; related services stop with it. */
+/** Always-on info-gathering sensors. Each can be turned off; related services stop with it. */
 const SensorsSection = () => {
   const { sensors, enableSensor, disableSensor, openSensorSettings } = useLocation();
   const { trigger } = useHaptics();
@@ -442,14 +442,14 @@ const SensorsSection = () => {
       icon: <MapPin size={18} />,
       label: 'Location tracking',
       onDesc: 'GPS breadcrumbs, trips, and presence',
-      offDesc: 'Off — no location is recorded',
+      offDesc: 'Off: no location is recorded',
     },
     {
       id: 'steps',
       icon: <Footprints size={18} />,
       label: 'Step counter',
       onDesc: 'Hardware pedometer syncs to Wander',
-      offDesc: 'Off — pedometer not read or synced',
+      offDesc: 'Off: pedometer not read or synced',
     },
   ];
 
@@ -779,7 +779,7 @@ const AppUpdatesSection = () => {
                   setApkError(null);
                   setApkPhase('installing');
                   void installVerifiedApk()
-                    .then(() => toast.success('Installer opened — tap Install.', { id: 'apk-install' }))
+                    .then(() => toast.success('Installer opened. Tap Install.', { id: 'apk-install' }))
                     .catch((err) => {
                       setApkPhase('ready');
                       setApkError(err instanceof Error ? err.message : String(err));

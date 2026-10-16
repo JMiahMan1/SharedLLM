@@ -14,7 +14,7 @@ service.
     `services/ui/src/pages/Media.tsx`): `players/all`, `players/cmd/*`,
     `player_queues/play_media|next|previous|seek`. All are in the allowlist.
   - Frame shape confirmed: `{"message_id": <str>, "command": <str>, "args": {}}`
-    with MA answering `{message_id, result|error_code}` — error frame shape
+    with MA answering `{message_id, result|error_code}`. The error frame shape
     `{"error_code": "forbidden", "message_id": <same id>}` matches what
     `sendJsonRpc` in `maWebPlayer.ts` already parses.
 - **Live verification 2026-10-05:** fetched
@@ -29,7 +29,7 @@ service.
 - **Still (VERIFY):** none for the allowlist itself. New commands the UI starts
   sending must be added to §7.3 and re-checked against
   `/api-docs/commands.json` (Swagger UI at `/api-docs/swagger`, spec at
-  `/api-docs/openapi.json` — the OpenAPI spec only carries examples, the
+  `/api-docs/openapi.json`; the OpenAPI spec only carries examples, the
   full command list is `commands.json`).
 
 ## Signed media tokens (P1-T0 / §7.4)
@@ -39,27 +39,30 @@ service.
 - **Device-facing TTL (2026-09-27):** `DEVICE_TOKEN_TTL_SECONDS = 43200` (12h)
   is used by `media_file_url` (8888) and `abs_client.get_session_track_url`
   (gateway ABS session stream) because HA/Cast/Roku fetch those URLs for hours with no
-  `?mt=` refresh path — §7.4's "refresh 5 min before expiry" only applies to
+  `?mt=` refresh path; §7.4's "refresh 5 min before expiry" only applies to
   the UI. Verification is TTL-agnostic (checks `exp` only), so no verify site
   changed; the default UI TTL stays 3600s.
 - **Still (VERIFY):** expiry behavior of `?mt=` acceptance across each caller
-  (imageproxy, stream, events, 8888 file server, sendspin WS) — covered as
-  each caller is wired in BUG-07/08 tests.
+  (imageproxy, stream, events, 8888 file server), covered as each caller is
+  wired in BUG-07/08 tests. `WS /api/sendspin` and `WS /api/ma-jsonrpc` still
+  take `?token=<api key>`, not `?mt=`.
 
 ## Device-facing ABS stream URL (P1-T7 follow-up, 2026-09-27)
 
-- The URL handed to HA/MA must be reachable from the LAN, so it is built from
-  `EXECUTION_EXTERNAL_HOST` (`http://<lan-ip>:11435`, Caddy publishes :11435
-  and routes `/api/*` → gateway). The previous
+- The URL handed to HA/MA must be reachable from the LAN, so it is built as
+  `http://<EXECUTION_EXTERNAL_HOST>:11435` (Caddy publishes :11435 and routes
+  `/api/*` → gateway). The previous
   `http://gateway:11435/...` value is a docker-internal alias that devices
-  cannot resolve — verified: `GATEWAY_INTERNAL_URL` (`.env:143`) is the compose
+  cannot resolve. Verified: `GATEWAY_INTERNAL_URL` (in `.env`) is the compose
   service name, and no `GATEWAY_EXTERNAL_HOST` exists in the repo. Fallback
   chain when `EXECUTION_EXTERNAL_HOST` is unset: `GATEWAY_INTERNAL_URL` →
   `http://localhost:11435`.
-- **Stream proxy timeouts:** `stream/abs` and `stream/ma` upstream sessions
-  used `ClientTimeout(300.0, ...)` (aiohttp *total* covers body streaming),
+- **Stream proxy timeouts:** the ABS item stream and MA stream upstream
+  sessions used `ClientTimeout(300.0, ...)` (aiohttp *total* covers body streaming),
   which cut any uninterrupted stream at ~5 minutes. Now
-  `total=None, connect=15.0`. Behavior verified by code inspection; a live
+  `total=None, connect=15.0` (the ABS item stream route was later deleted, see
+  BUG-26/BUG-33 below; the MA stream and ABS session proxies keep that
+  timeout). Behavior verified by code inspection; a live
   long-stream check against production is still (VERIFY).
 
 ## Imageproxy host gate → rebase (P1-T5 rework, 2026-09-27)
@@ -68,17 +71,16 @@ service.
   mass/abs/ha hosts) was verified against production and **broke real cover
   art**: `path=http://192.168.2.20:8095/imageproxy/...` (the actual MA
   image host, probed live → 400) plus Nabu Casa / docker-alias HA
-  `entity_picture` URLs. Deviation approved under the owner directive
-  "ensure your changes DO NOT break ANY Player functionality" (2026-09-27),
-  same precedent as the BUG-08 `.part` decision; plan row amended.
+  `entity_picture` URLs. Deviation approved by the owner on 2026-09-27
+  (no change may break player functionality), same precedent as the BUG-08 `.part` decision; plan row amended.
 - **New behavior (verified by `gateway/tests/test_imageproxy_ssrf.py`):**
   configured host → fetched as-is; unknown host → rebased onto the
   configured base for the path-implied service (metadata IP never contacted);
-  `/api/image/serve/...` now implies `ha` (was `ma` — HA entity_picture on
+  `/api/image/serve/...` now implies `ha` (was `ma`; HA entity_picture on
   Nabu Casa-style hosts); 400 only when the implied service has no base.
 - Probed live: test-key identity has MA configured (reaches MA via
   `/api/media/detail`) yet its host matches none of the earlier allowlist
-  candidates — mismatched-host rebasing is therefore required, not
+  candidates, so mismatched-host rebasing is therefore required, not
   theoretical. **Still (VERIFY):** re-probe the real user's cover URL after
   deploy.
 
@@ -92,13 +94,13 @@ service.
   default verification); `verify_ssl=False` is merged to `ssl=False` by
   `_merge_ssl_params` (genuinely unverified). Therefore:
   - `http_client.get_session(verify=False)` (plain connector, no ssl arg)
-    was a **no-op** — sessions verified regardless; the bug was intent +
+    was a **no-op**: sessions verified regardless; the bug was intent +
     explicit `ssl=False`/`verify_ssl=False` sites.
   - Direct `TCPConnector(verify_ssl=False)` sites (webos.py:124/212,
     audiobookshelf.py:516, ha_config.py:178) genuinely disable
     verification. **Left as-is deliberately:** not in BUG-09 plan scope
     and enabling verification could break self-signed TVs/ABS endpoints
-    (owner directive: do not break player functionality). Recorded here
+    (owner decision: do not break player functionality). Recorded here
     so the choice is visible.
   - `announce_handlers.py` / `device_discovery.py` `ssl=False` LAN scans
     are intentional (plain-HTTP discovery), out of scope.
@@ -107,9 +109,9 @@ service.
   `MEDIA_ALLOW_INSECURE_TLS=true`, then "TLS verification DISABLED"
   warning); session cache keyed by `(host, effective_verify)`;
   `_ha_session`/`_abs_session`/`_mass_ha_session` defaults flipped to
-  `True` (behavior-neutral — they previously passed verify=False into the
+  `True` (behavior-neutral: they previously passed verify=False into the
   no-op branch); Roku ECP `verify_ssl=False` removed (requests are
-  `http://...:8060` — SSL never involved, zero behavior change);
+  `http://...:8060`, so SSL is never involved and behavior is unchanged);
   `media.py:550` keeps explicit `verify=False` as the self-signed
   Nextcloud escape hatch (effective behavior unchanged unless the env
   gate is enabled).
@@ -123,12 +125,12 @@ service.
 - **MA imageproxy `size` param (plan VERIFY):** partially verified against
   live MA `192.168.2.20:8095`:
   - MA's own production image URLs (observed in HA `entity_picture` data)
-    are `.../imageproxy/<image_id>?size=512&fmt=jpg` — so `size=` is the
+    are `.../imageproxy/<image_id>?size=512&fmt=jpg`, so `size=` is the
     param name MA itself emits/accepts on this route.
   - Functional probes from a workstation: `/imageproxy?path=<urlencoded
     remote url>&size={64,512}&fmt=jpg` → 400 empty body; path-segment form
     `/imageproxy/<urlsafe-b64 url>?size=…` → 400 "Invalid image id" (the id
-    must be an MA-internal image id, not an arbitrary URL) — i.e. probes
+    must be an MA-internal image id, not an arbitrary URL), so the probes
     could not exercise resizing end-to-end without a real library image id.
     **Still (VERIFY):** full resize round-trip with a real MA image id.
   - `/api-docs` returns the HTML docs shell (not machine-readable openapi).
@@ -140,8 +142,8 @@ service.
   upstream 304 returned as empty 304. Body is streamed in 64 KiB chunks
   (was fully buffered); request timeout raised to total=30s (streaming
   covers body delivery; images previously had total=10s end-to-end).
-- Tests: `gateway/tests/test_imageproxy_cache.py` (4). Note: the gateway's
-  request log also captures logging-service POSTs — helpers must filter
+- Tests: `gateway/tests/test_imageproxy_cache.py` (4). The gateway's
+  request log also captures logging-service POSTs, so helpers must filter
   upstream requests by host.
 
 ## ABS API route verification (P2-T3 / BUG-12, 2026-09-27)
@@ -152,8 +154,8 @@ service.
   route discovery: ABS auth runs before routing and 401s every path
   (including nonexistent `/api/v1/...` ones).
 - Verified YES: `GET /api/items/:id` (L108), `GET /api/me/progress/:id`
-  (L183), **`PATCH /api/me/progress/:id`** (L185 — code used POST+wrong
-  path), `GET /api/me/items-in-progress` (L191), `POST /api/items/:id/play`
+  (L183), **`PATCH /api/me/progress/:id`** (L185; the code used POST and the
+  wrong path), `GET /api/me/items-in-progress` (L191), `POST /api/items/:id/play`
   (L117), `POST /api/session/:id/sync` (L242), `POST /api/session/:id/close`
   (L243), `GET /api/libraries/:id/search` (L84), `GET
   /api/libraries/:id/personalized` (L82), plus `POST /session/local` (L238),
@@ -161,7 +163,7 @@ service.
   (L179), `GET /libraries/:id/collections` (L80), `GET /libraries/:id/series`
   (L78), `GET /me/progress` (L176).
 - Verified NO: `/api/v1/items/:id`, `/api/v1/users/:id/progress`,
-  `/users/:id/progress` — no such routes (why get_book/progress were dead).
+  `/users/:id/progress`: no such routes (why get_book/progress were dead).
 - Changes in `execution/abs_client.py`: fixed get_book (+`?expanded=1`),
   get_progress (→ `/api/me/progress`, token-scoped; `user_id` kept for
   compat), get_book_progress, update_progress (new `abs_patch` helper,
@@ -171,7 +173,7 @@ service.
   `search_library_items`, `get_personalized_shelves`.
 - `?expanded=1` param: route verified; the expanded param itself is from
   ABS docs/client usage (accepted; harmless if ignored).
-- Tests: `execution/tests/test_abs_client_paths.py` — 15 parametrized
+- Tests: `execution/tests/test_abs_client_paths.py`: 15 parametrized
   method+path assertions (includes the aiohttp 3.14 `stream_writer` shim
   for aioresponses, same as gateway conftest_media).
 - yarl normalizes query strings alphabetically (`limit` before `q`).
@@ -180,13 +182,13 @@ service.
 
 - `GET /api/me/items-in-progress` response verified from ABS source
   (`server/controllers/MeController.js` `getAllLibraryItemsInProgress`,
-  L485-518): items = `toOldJSONMinified()` + `progressLastUpdate` ONLY —
+  L485-518): items = `toOldJSONMinified()` + `progressLastUpdate` only,
   no `currentTime`/`progress`/`isComplete`. Percent cannot come from this
   endpoint alone (the plan's literal single call would still show 0%).
 - `GET /api/me/progress` (`getAllMediaProgress` L112-115) returns
   `{mediaProgress: [...]}`; each record (`MediaProgress.getOldMediaProgress`
   L155-176) carries `libraryItemId`, `duration`, `currentTime`, `isFinished`,
-  `progress` (0..1), `lastUpdate` — enough for percent + is_complete.
+  `progress` (0..1), `lastUpdate`: enough for percent + is_complete.
 - Fix: handlers join the two with ONE `/api/me/progress` fetch
   (`_all_progress_by_item`), so upstream calls are fixed (2) regardless of
   item count, vs old 1+N for last_played; the `progress` action now shows
@@ -202,15 +204,15 @@ service.
   `{book: [{libraryItem: toOldJSONExpanded}], narrators: [{name,numBooks}],
   tags, genres, series: [{series, books: [<plain item JSON>]}],
   authors: [{id, name, numBooks}]}`. The book where-clause matches
-  **title/subtitle/asin/isbn only** — author, narrator and series names are
+  **title/subtitle/asin/isbn only**; author, narrator and series names are
   separate result keys, so an author-name query returns ZERO books.
 - Podcast-library search (`podcastFilters.js` `search` L361): returns
   `{podcast: [{libraryItem}], tags, genres, episodes: [{libraryItem with
-  recentEpisode}]}` — matches title+author; no authors/series keys.
+  recentEpisode}]}` and matches title+author; no authors/series keys.
 - `limit` applies per result section (default 12); handler requests
   `max(req.limit, 25)` per library.
 - Author chip flow (Media.tsx): tapping a chip re-runs search with the
-  author's NAME as the query and renders whatever `books` come back — so
+  author's NAME as the query and renders whatever `books` come back, so
   author-name queries must keep returning books. Solved WITHOUT the
   forbidden `/items` listing via `GET /api/authors/{id}?include=items`
   (ApiRouter L217, `AuthorController.findOne` L40-86) whose `libraryItems`
@@ -225,11 +227,11 @@ service.
 ## ABS liveness ping route (P2-T7 / BUG-16, 2026-09-27)
 
 - `GET /ping` **verified**: ABS `server.js` registers it on the ROOT router
-  (L385, `router.get('/ping', …)` → `{success: true}`) — mounted via
+  (L385, `router.get('/ping', …)` → `{success: true}`), mounted via
   `app.use(RouterBasePath, router)` (L318) BEFORE `router.use('/api', auth, …)`
-  (L338), so it is unauthenticated and needs no token — ideal liveness probe.
+  (L338), so it is unauthenticated and needs no token: an ideal liveness probe.
 - `/api/books` **does not exist**: no match anywhere in `server/routers/
-  ApiRouter.js` — the old status probe hit a route ABS never had (only worked
+  ApiRouter.js`; the old status probe hit a route ABS never had (only worked
   when ABS's SPA/static fallback answered 200).
 - Endpoint now resolves the caller's identity and pings the user's own
   `audiobookshelf_url` (trailing-slash normalized) instead of reading the
@@ -242,9 +244,9 @@ service.
   every failure mode: connection errors, receive-loop timeout (20s),
   socket CLOSED/ERROR before a result, and MA `error_code` responses.
   Previously all of these returned `[]`, which `search_ma` treated as an
-  authoritative "no matches" — the HA-proxy fallback never ran.
+  authoritative "no matches", so the HA-proxy fallback never ran.
 - Legitimately-empty results still return `[]` on purpose (do NOT fall
-  through to HA on empty — that produced spurious FAILUREs, see comment
+  through to HA on empty; that produced spurious FAILUREs, see the comment
   in `search_ma`).
 - `library_only=True` keeps `config.providers=["library"]` (explicitly
   listing every provider hangs in MA 2.9.x, per the original docstring);
@@ -260,7 +262,7 @@ service.
 ## HA music_assistant.get_library service contract (P2-T9 / BUG-18, 2026-09-27)
 
 Source: Home Assistant core `dev` branch, integration lives IN HA core at
-`homeassistant/components/music_assistant/` — verified by fetching
+`homeassistant/components/music_assistant/`, verified by fetching
 `services.yaml`, `services.py`, `const.py`, `schemas.py`, `helpers.py`
 (cached in `.tmp/ha_ma_*`).
 
@@ -278,8 +280,8 @@ Source: Home Assistant core `dev` branch, integration lives IN HA core at
   `LIBRARY_RESULTS_SCHEMA` = `{"items": [...], "limit": int, "offset": int,
   "order_by": str, "media_type": MediaType}` (`const.py`: `ATTR_ITEMS="items"`).
   There is **no per-type key** (`tracks`/`playlists`/... do NOT exist). HA's
-  service API wraps it: `{"changed_states": [...], "service_response": {...}}`
-  — the old code read top-level keys, so browse always returned `[]`.
+  service API wraps it: `{"changed_states": [...], "service_response": {...}}`;
+  the old code read top-level keys, so browse always returned `[]`.
 - Item dicts come from `schemas.media_item_dict_from_mass_item`: always
   `media_type, uri, name, version, image` (+ favorite/explicit and per-type
   extras such as duration/discart/fanart).
@@ -297,9 +299,9 @@ Source: Home Assistant core `dev` branch, integration lives IN HA core at
   `option=replace`, then up to 15s of stream-URL discovery over the MA WS via
   `player_queues/get`, cached per user+URI for 2h); `GET` = bytes only. A GET
   that finds no stream URL answers **409 "Playback session not started for
-  this URI. Start playback first."** — it never calls `play_media`
+  this URI. Start playback first."** and never calls `play_media`
   (acceptance: two Range GETs → 0 `play_media` calls,
-  `tests/test_ma_stream_start_split.py`).
+  `services/gateway/tests/test_ma_stream_start_split.py`).
 - Cold-GET discovery order: `get_stream_url` → queue-state
   `current_item.media_item.stream_url` (only with a matching `queue_item_id`)
   → `current_item.stream_url` → constructed
@@ -308,14 +310,14 @@ Source: Home Assistant core `dev` branch, integration lives IN HA core at
   the cold path reuses the same `_extract_stream_url` as live events.
 - The `responseURL` helpers in `services/ui/src/services/api.ts`
   (`getAudiobookStreamUrl`, `getMusicAssistantStreamUrl`) had **zero callers**
-  (repo-wide grep) — deleted with their stale "Mobile-local audio streaming"
+  (repo-wide grep) and were deleted with their stale "Mobile-local audio streaming"
   comment.
 - Interaction to re-verify on the live stack: `@live` e2e
   `e2e/media-playback.spec.ts:578/:749` await a **200** from
   GET `/api/media/stream/music-assistant` after clicking Web Player. The
   browser Web Player (`lib/maWebPlayer.ts`) starts playback itself through
   `/api/ma-jsonrpc` (+ sendspin audio straight to MA), so the queue is playing
-  before the GET — but a cold queue now yields 409 instead of auto-starting.
+  before the GET, but a cold queue now yields 409 instead of auto-starting.
 
 ## Gateway test config freeze pitfall (P2-T10 follow-up, 2026-09-27)
 
@@ -325,7 +327,7 @@ Source: Home Assistant core `dev` branch, integration lives IN HA core at
   gateway `main` first therefore wins: `test_music_proxy.py` (which sets both
   to its own values at module import) got 401/503 whenever an
   earlier-alphabetical file (e.g. `test_ma_jsonrpc_allowlist.py`) imported the
-  app first — full-suite order dependence, not a product bug.
+  app first: full-suite order dependence, not a product bug.
   `services/gateway/tests/conftest_media.py` now **force-sets** both values (it loads before
   every module in the directory), so config can only ever freeze the gateway
   test values. Prefer forcing over `setdefault` here.
@@ -338,7 +340,7 @@ middleware: `emit_log` (`services/gateway/main.py`) posts every REQUEST/RESPONSE
 log line to `{LOGGING_SVC}/log` through the same client, with exceptions
 swallowed. Those calls consume `side_effect` lists and inflate call counts
 (observed: real call + 2 log emits = 3). Filter doubles by URL (e.g. count
-only `/execute/…` targets) or return a benign stub for non-target URLs —
+only `/execute/…` targets) or return a benign stub for non-target URLs;
 see `tests/test_execution_proxy_retry.py::ExecPost`.
 
 ## MA WS client reconnect/error/state hardening (P2-T14 / BUG-23, 2026-09-27)
@@ -346,14 +348,14 @@ see `tests/test_execution_proxy_retry.py::ExecPost`.
 Five sub-bugs fixed in `services/gateway/ma_ws_client.py` (plan row 112; the
 row's refs `444-455,501,525,552,670,680` were pre-P2-T11 and stale):
 
-1. **Reconnect never started** — `_message_loop` logged the close and set
+1. **Reconnect never started**: `_message_loop` logged the close and set
    `_connected = False`, but nothing ever started the existing `_reconnect`
    (it could only self-reschedule after a first attempt had run). The loop
    now arms `_schedule_reconnect()` from both `ConnectionClosed` (any close
    code, so a graceful MA restart with 1000/1001 reconnects too) and the
    generic-error exit. Guards: no-op when `_shutdown_event` is set
    (deliberate `disconnect()`) or a reconnect task is already pending.
-2. **ERROR frames did not resolve futures** — `send_command` waited the FULL
+2. **ERROR frames did not resolve futures**: `send_command` waited the FULL
    timeout after MA had already rejected the command. Both error branches
    (typed `{"type":"ERROR","message_id":…,"error":{…}}` and the no-type
    `error_code`/`details` shape) now call `_fail_pending_response(msg_id,
@@ -362,29 +364,30 @@ row's refs `444-455,501,525,552,670,680` were pre-P2-T11 and stale):
    `get_ma_error()` sees typed errors too. Both main.py call sites already
    wrap `send_command` in `except Exception` → HTTP 502, so they now fail
    fast with the real reason instead of a timed-out `None`.
-3. **`player_updated` overwrote queue state** — the payload is player-shaped
+3. **`player_updated` overwrote queue state**: the payload is player-shaped
    (volume/active source); assigning it to `_queue_state` destroyed
    `current_item`/`queue_id`. Player events no longer touch `_queue_state`;
    registered callbacks still receive every event.
-4. **"Jitter" was a constant, not random** — the old expression
+4. **"Jitter" was a constant, not random**: the old expression
    `delay * RECONNECT_JITTER * (1.0 - 2.0 * hash(str(time.time())) % 1)`
    evaluates `2.0 * int % 1`, which is identically `0.0` (any integer-valued
    float ≥ 2^52 has no fractional part), so the bracket was always `1.0` and
    the jitter was a fixed `0.5 * delay` offset with zero spread across
    processes. Replaced per plan with `random.uniform(0, delay *
    RECONNECT_JITTER)`.
-5. **No `queue_id` filter** — any queue event (including another player's)
+5. **No `queue_id` filter**: any queue event (including another player's)
    replaced our queue state and stream URL. New `_queue_id` is adopted from
    (a) `ingest_queue_state` (authoritative: the `player_queues/get` answer),
    (b) the first queue event seen, (c) `queue_id` on outgoing command args
    (`_track_queue_id`), which arms the filter before the first event can
-   arrive. Gateway commands address queues by player id — main.py passes
-   `queue_id=target_player_id` to both `play_media` and `player_queues/get`
-   (MA keys the per-player queue by the player id) — so command args are a   reliable source. Events whose `queue_id` differs from the tracked one are
+   arrive. Gateway commands address queues by player id (main.py passes
+   `queue_id=target_player_id` to both `play_media` and `player_queues/get`,
+   and MA keys the per-player queue by the player id), so command args are a
+   reliable source. Events whose `queue_id` differs from the tracked one are
    ignored for state/stream extraction but still dispatched to callbacks;
    events with no `queue_id` are accepted (cannot be attributed).
 
-Tests: `test_ma_ws_client.py::TestBug23Hardening` (6 — one per sub-bug plus
+Tests: `test_ma_ws_client.py::TestBug23Hardening` (6: one per sub-bug plus
 command-arg tracking). Plan-driven updates to 3 existing tests: the
 player-event dispatch test now asserts queue state is preserved, the
 full-command integration test's event carries the command's `queue_id`
@@ -400,7 +403,7 @@ never exits cleanly. aiosqlite's connection worker thread is non-daemon and only
 stops when `Connection.close()`/`stop()` sends its sentinel (or `__del__` fires on
 GC). Both registries hold the connection in a module global (`_db`) that is never
 closed and never garbage-collected, so at interpreter shutdown
-`threading._shutdown` joins the blocked worker forever — the pytest summary is
+`threading._shutdown` joins the blocked worker forever; the pytest summary is
 printed first, then the process hangs.
 
 Verification: faulthandler dump showed main thread in `threading._shutdown` joining
@@ -420,7 +423,7 @@ Upstream check: HA core's `music_assistant` integration `services.yaml`
 cached `.tmp/ha_music_assistant_services.yaml`). Our schema
 (`MediaPlayRequest.enqueue: Literal["add", "next", "replace"]`) is a subset,
 so `req.enqueue` maps 1:1 and must pass through to `music_assistant.play_media`
-unchanged — the old code rewrote `replace` → `play`, silently dropping
+unchanged. The old code rewrote `replace` → `play`, silently dropping
 clear-queue semantics.
 
 Contract change in `services/execution/handlers/media.py::play_music`
@@ -432,7 +435,7 @@ instead of the two fallbacks: `music_assistant.get_library` with
 mis-resolves arbitrary strings). If `play_media` on a *found* match fails, the
 error is surfaced as `FAILURE "Failed to play '<query>': <reason>"`.
 
-Tests: `test_media_music_no_random_fallback.py` (5 — no-match ×2, enqueue
+Tests: `test_media_music_no_random_fallback.py` (5: no-match ×2, enqueue
 pass-through ×3 incl. direct-URI) + plan-driven update of
 `test_execution_main.py::test_media_play_valid` (now supplies a real search
 match; adds `test_media_play_no_match_is_failure`). Execution suite: **389
@@ -456,13 +459,13 @@ every route below).
 - `GET /api/items/{podcastId}?expanded=1` → `media.episodes[]` = FLAT
   episode objects: `id`, `title`, `publishedAt` (ms), `pubDate`, `season`,
   `episode`, `audioTrack`, `duration`, `libraryItemId`, `podcastId` (88
-  episodes for Culture Apothecary). `GET /api/items/{episodeId}` → 404 —
+  episodes for Culture Apothecary). `GET /api/items/{episodeId}` → 404;
   episodes are NOT standalone items.
 - **Starting a session:** book → `POST /api/items/{bookId}/play` (no body);
   podcast episode → `POST /api/items/{podcastItemId}/play/{episodeId}`
   (no body) → 200 session `{id, userId, libraryItemId, episodeId,
   mediaType: "podcast"|"book", …}`.
-- **Audio:** `GET /public/session/{sid}/track/{i}` — unauthenticated (the
+- **Audio:** `GET /public/session/{sid}/track/{i}` is unauthenticated (the
   session id is the capability; the `/public` router is mounted without API
   auth). Podcasts: track **0** (index 1 serves the same playlist). Books:
   track **1** (index 0 → 404). The track URL 302-redirects to HLS:
@@ -472,40 +475,40 @@ every route below).
   (`output-0.ts`, ~6 s segments, `video/mp2t`, ~105 KB each). The `/hls`
   router is likewise unauthenticated.
 - **Book HLS was not live at probe time:** the book session 302s correctly
-  but `{abs}/hls/{bookSid}/output.m3u8` → 404 even after waiting ~25 s —
+  but `{abs}/hls/{bookSid}/output.m3u8` → 404 even after waiting ~25 s;
   the transcode pipeline had not produced the playlist. Podcast episode
   HLS was available immediately.
 - No item listing route: `GET /api/items?libraryId=…` → 404; use
   `GET /api/libraries/{id}/items` (`{results,total}`) or library search.
 
 Gateway implementation (BUG-26), `services/gateway/main.py`:
-- `GET /api/media/stream/abs-session/{sid}/{i}` — mt-token auth (authoritative,
+- `GET /api/media/stream/abs-session/{sid}/{i}`: mt-token auth (authoritative,
   §7.4) or header auth; resolves the user's `audiobookshelf_url` (400 if
-  unset — no key needed, session routes are unauthenticated); fetches
+  unset; no key needed, session routes are unauthenticated); fetches
   `/public/session/{sid}/track/{i}` following the 302; mpegurl bodies get
   every relative segment URI rewritten to
-  `{request.base_url}/api/media/stream/abs-session/{sid}/{i}/{segment}?user=&mt=`
-  — devices fetch segments without headers, so each rewritten URL carries a
+  `{request.base_url}/api/media/stream/abs-session/{sid}/{i}/{segment}?user=&mt=`.
+  Devices fetch segments without headers, so each rewritten URL carries a
   signed media token (the request's own `mt` when present, else a fresh one
   minted for the identity user); non-mpegurl upstream content streams through;
   upstream error statuses pass through with their body.
-- `GET /api/media/stream/abs-session/{sid}/{i}/{segment}` — same auth;
+- `GET /api/media/stream/abs-session/{sid}/{i}/{segment}`: same auth;
   proxies `{abs}/hls/{sid}/{segment}` bytes (Range forwarded;
   Content-Range/Length/Type passed through).
-- The m3u8/segment base is the user's configured `audiobookshelf_url` —
+- The m3u8/segment base is the user's configured `audiobookshelf_url`,
   verified 2026-09-28 that `/public` and `/hls` are both served under that
   prefix live; no host guessing (fail-fast).
 - Test-side gotcha: aioresponses JSON-encodes `payload=`; raw upstream
   bodies (m3u8 text, ts bytes, plain-text errors) must use `body=` (+
-  `content_type=`) — `conftest_media.mock_upstream` now supports both.
+  `content_type=`); `conftest_media.mock_upstream` now supports both.
 
-### Book sessions work — the missing playlist was a cold-transcode race (BUG-33, 2026-09-28)
+### Book sessions work: the missing playlist was a cold-transcode race (BUG-33, 2026-09-28)
 
 Live probe of a book (item `510e38dd-3196-4755-8a9b-7c81208c373b`, "God's Smuggler (Unabridged)", one 8.8h track, `media.tracks[0].index == 1`):
 
 - `POST /api/items/{bookId}/play` (no body) → 200 session. `bookId` is **not** the same value as the item's `libraryItemId` (the item JSON also carries an ebook `bookId` field).
 - `GET /public/session/{sid}/track/0` → 404, `track/1` → **302** to `/hls/{sid}/output.m3u8` (root-relative), `track/2` → 404. The redirect appears **immediately**, even while the playlist does not exist.
-- `GET /hls/{sid}/output.m3u8` → 404 at first (25s in), then 200 `application/vnd.apple.mpegurl`: VOD, `TARGETDURATION 6`, **5291 segments** (`output-0.ts`…`output-5290.ts`, 136606 bytes). Minutes later a **new** session for the same book was ready in 0.2s (warm transcode cache) — so the earlier "book HLS is broken" conclusion was wrong; it was a cold-start race. Any client (or gateway) must tolerate tens of seconds before the playlist exists.
+- `GET /hls/{sid}/output.m3u8` → 404 at first (25s in), then 200 `application/vnd.apple.mpegurl`: VOD, `TARGETDURATION 6`, **5291 segments** (`output-0.ts`…`output-5290.ts`, 136606 bytes). Minutes later a **new** session for the same book was ready in 0.2s (warm transcode cache), so the earlier "book HLS is broken" conclusion was wrong; it was a cold-start race. Any client (or gateway) must tolerate tens of seconds before the playlist exists.
 - `GET /hls/{sid}/output-0.ts` → 200 `video/mp2t` 44932 bytes, and `Range: bytes=0-1023` → 206 + `Content-Range`. `output-1.m3u8`/`index.m3u8` do not exist.
 - `POST /api/items/{podcastId}/play` with **no** episode id → session + 302,
   but the playlist **never** appears (404 for a full 120s poll): a podcast

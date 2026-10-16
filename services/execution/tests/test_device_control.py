@@ -20,9 +20,7 @@ valid_context = {
     "ha_token": "mock-token",
 }
 
-# ─── Entity Search ───────────────────────────────────────────────────────────────
-
-
+# Entity Search
 def test_entity_search_by_query(mocker):
     """Test searching entities by query term."""
     mocker.patch("services.execution.ha_client.get_states", return_value=[
@@ -179,9 +177,7 @@ def test_entity_search_missing_query(mocker):
     assert len(data["detail"]["entities"]) == 2
 
 
-# ─── HA Service Call ─────────────────────────────────────────────────────────────
-
-
+# HA Service Call
 def test_ha_service_turn_on(mocker):
     """Test calling turn_on service via HA service endpoint."""
     mocker.patch("services.execution.ha_client.call_service", return_value={"ok": True, "status_code": 200})
@@ -270,11 +266,9 @@ def test_ha_service_without_service_data(mocker):
     assert data["status"] == "SUCCESS"
 
 
-# ─── Entity Discovery ────────────────────────────────────────────────────────────
-
-
+# Entity Discovery
 def test_discovery_entities_no_credentials():
-    """Entity discovery is 400 without credentials — it never borrows another account's HA."""
+    """Entity discovery is 400 without credentials; it never borrows another account's HA."""
     resp = client.get("/discovery/entities", headers={"X-Internal-Secret": "test-secret"})
     assert resp.status_code == 400
     assert "ha_url" in resp.json()["detail"]

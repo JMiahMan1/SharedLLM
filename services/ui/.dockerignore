@@ -1,4 +1,4 @@
-# Host-built artifacts must never leak into the image — the build regenerates
+# Host-built artifacts must never leak into the image. The build regenerates
 # them, and a stale dist/ or version.json makes the OTA bundle unidentifiable.
 node_modules/
 dist/

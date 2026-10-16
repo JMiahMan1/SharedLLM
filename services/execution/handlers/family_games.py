@@ -185,7 +185,7 @@ def trivia_prompt(state: GameState, hint: bool = False) -> str:
     lines = ["🧠 Trivia time", state.question]
     if hint:
         lines.append(f"(hint: {next((q['hint'] for q in TRIVIA_QUESTIONS if q['question'] == state.question), 'think!')})")
-    lines.append("Reply with your answer — everyone plays at once.")
+    lines.append("Reply with your answer. Everyone plays at once.")
     return "\n".join(lines)
 
 
@@ -231,7 +231,7 @@ def apply_memory_flip(state: GameState, who: str, words: list[str]) -> dict[str,
 
     flipped_words = [state.board[i] for i in indexes]
     if len(indexes) == 1:
-        return {"flipped": flipped_words, "matched": False, "stars": player.stars, "message": f"{flipped_words[0]} — now pick its partner."}
+        return {"flipped": flipped_words, "matched": False, "stars": player.stars, "message": f"{flipped_words[0]}. Now pick its partner."}
 
     if state.board[indexes[0]] == state.board[indexes[1]]:
         player.stars += 1
@@ -250,7 +250,7 @@ def apply_memory_flip(state: GameState, who: str, words: list[str]) -> dict[str,
     for i in indexes:
         if i not in state.revealed[: len(state.revealed) - 2]:
             state.revealed.remove(i)
-    return {"flipped": flipped_words, "matched": False, "stars": player.stars, "message": "Not a pair — those flip back."}
+    return {"flipped": flipped_words, "matched": False, "stars": player.stars, "message": "Not a pair, those flip back."}
 
 
 def game_card(state: GameState, headline: str, detail: str | None = None) -> dict[str, Any]:

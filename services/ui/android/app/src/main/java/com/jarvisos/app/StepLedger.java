@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Durable, reboot-safe step ledger — the on-device source of truth.
+ * Durable, reboot-safe step ledger: the on-device source of truth.
  *
  * The hardware TYPE_STEP_COUNTER only reports steps since boot, so any "today"
  * number is app arithmetic and a reboot destroys the raw baseline. This ledger

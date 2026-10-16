@@ -85,7 +85,7 @@ public class HealthWidget extends AppWidgetProvider {
 
         try {
             if (WidgetApi.apiKey(context) == null) {
-                views.setTextViewText(R.id.health_steps, "—");
+                views.setTextViewText(R.id.health_steps, "-");
                 views.setTextViewText(R.id.health_goal, "Sign in to Jarvis OS");
                 return views;
             }
@@ -107,8 +107,8 @@ public class HealthWidget extends AppWidgetProvider {
                 // the distinct states they are rather than collapsing into one
                 // caption on one path and not the other.
                 HealthRingCalc.Ring ring =
-                    HealthRingCalc.build(0, steps.optInt("goal", 0), "—", false);
-                views.setTextViewText(R.id.health_steps, "—");
+                    HealthRingCalc.build(0, steps.optInt("goal", 0), "-", false);
+                views.setTextViewText(R.id.health_steps, "-");
                 views.setTextViewText(R.id.health_goal, ring.caption);
                 views.setTextViewText(R.id.health_sub, "Open the app to start tracking");
                 views.setProgressBar(R.id.health_progress, 100, 0, false);
@@ -152,7 +152,7 @@ public class HealthWidget extends AppWidgetProvider {
                 views.setProgressBar(R.id.health_progress, 100, ring.percent, false);
             }
         } catch (Exception ex) {
-            views.setTextViewText(R.id.health_steps, "—");
+            views.setTextViewText(R.id.health_steps, "-");
             views.setTextViewText(R.id.health_goal, "Unavailable");
             views.setTextViewText(
                 R.id.health_sub,

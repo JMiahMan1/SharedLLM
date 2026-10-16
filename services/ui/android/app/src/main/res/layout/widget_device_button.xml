@@ -44,7 +44,7 @@
             android:padding="6dp">
             <TextView android:id="@+id/btn_label_1"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:gravity="center" android:maxLines="2" android:text="—"
+                android:gravity="center" android:maxLines="2" android:text="-"
                 android:textColor="#F1F5F9" android:textSize="12sp" android:textStyle="bold" />
             <TextView android:id="@+id/btn_state_1"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -59,7 +59,7 @@
             android:gravity="center" android:orientation="vertical" android:padding="6dp">
             <TextView android:id="@+id/btn_label_2"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:gravity="center" android:maxLines="2" android:text="—"
+                android:gravity="center" android:maxLines="2" android:text="-"
                 android:textColor="#F1F5F9" android:textSize="12sp" android:textStyle="bold" />
             <TextView android:id="@+id/btn_state_2"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -74,7 +74,7 @@
             android:gravity="center" android:orientation="vertical" android:padding="6dp">
             <TextView android:id="@+id/btn_label_3"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:gravity="center" android:maxLines="2" android:text="—"
+                android:gravity="center" android:maxLines="2" android:text="-"
                 android:textColor="#F1F5F9" android:textSize="12sp" android:textStyle="bold" />
             <TextView android:id="@+id/btn_state_3"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -89,7 +89,7 @@
             android:gravity="center" android:orientation="vertical" android:padding="6dp">
             <TextView android:id="@+id/btn_label_4"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:gravity="center" android:maxLines="2" android:text="—"
+                android:gravity="center" android:maxLines="2" android:text="-"
                 android:textColor="#F1F5F9" android:textSize="12sp" android:textStyle="bold" />
             <TextView android:id="@+id/btn_state_4"
                 android:layout_width="match_parent" android:layout_height="wrap_content"

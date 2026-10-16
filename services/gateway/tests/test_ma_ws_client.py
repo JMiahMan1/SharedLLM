@@ -1,5 +1,5 @@
 """
-Comprehensive tests for the MA WebSocket client.
+Tests for the MA WebSocket client.
 
 Tests cover:
 - Connection flow (connect/disconnect)
@@ -375,7 +375,7 @@ class TestEventHandling:
         await client._dispatch_event("player_updated", event_data)
 
         callback.assert_called_once_with("player_updated", event_data)
-        # Player events describe the player, not the queue — they must never
+        # Player events describe the player, not the queue, so they must never
         # replace queue state (BUG-23).
         assert client._queue_state == prior_state
 
@@ -926,7 +926,7 @@ class TestIntegration:
         client.register_event_callback("queue_updated", on_queue_update)
 
         # Simulate receiving a queue updated event. queue_id must match the
-        # command's queue_id — MA keys queues by player id (BUG-23 filter).
+        # command's queue_id; MA keys queues by player id (BUG-23 filter).
         stream_url = "http://ha.sumemail.com:8096/flow/session1/queue1/1/player1.mp3"
         event_data = {
             "state": "playing",

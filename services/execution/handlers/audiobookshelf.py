@@ -1,6 +1,6 @@
 # services/execution/handlers/audiobookshelf.py
 """
-Audiobookshelf (ABS) handler — search, play, resume, and track audiobook progress.
+Audiobookshelf (ABS) handler: search, play, resume, and track audiobook progress.
 Integrates with Home Assistant media_player for playback on any supported device.
 """
 import asyncio
@@ -26,7 +26,7 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
         )
     if username and password:
         # Prefer a fresh token; the stored API key may be stale/expired. If the
-        # login does not come back we still have the stored key, but say so —
+        # login does not come back we still have the stored key, but say so:
         # silently continuing hides a broken login route behind a working cache.
         fresh = await abs_client.abs_login(abs_url, username, password)
         if fresh:
@@ -140,7 +140,7 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
     q = req.query or ""
     search_limit = max(req.limit, 25)
 
-    # BUG-14: server-side search per library, run in parallel — library items
+    # BUG-14: server-side search per library, run in parallel; library items
     # are never enumerated (was up to 51x500 items downloaded per query).
     responses = await asyncio.gather(
         *(abs_client.search_library_items(abs_url, abs_key, lib["id"], q, limit=search_limit) for lib in libraries),
@@ -312,7 +312,7 @@ async def _play_book_session(abs_url: str, abs_key: str, req, book_id: str) -> E
     is why audiobooks appeared to "play" while nothing came out:
 
     * **Music Assistant players** stream the book themselves, from MA's own
-      Audiobookshelf provider. MA is not a URL player — hand it the gateway HLS
+      Audiobookshelf provider. MA is not a URL player; hand it the gateway HLS
       URL and it files the URL as the track *title*, leaving the player idle. It
       needs MA's own ``library://audiobook/<n>`` URI, so this resolves that first.
     * **Everything else** (Roku, Chromecast, DLNA, TVs) can only be handed a URL,
@@ -358,14 +358,14 @@ async def _play_book_session(abs_url: str, abs_key: str, req, book_id: str) -> E
 
 # How long to wait for a player to actually start moving before calling the
 # play a failure. HA service calls return as soon as the *call* is accepted, and
-# the accepted call is not the same as playback — an MA player handed an
+# the accepted call is not the same as playback: an MA player handed an
 # unresolvable URL accepts the call and then sits idle forever.
 PLAYBACK_VERIFY_ATTEMPTS = 6
 PLAYBACK_VERIFY_INTERVAL = 2.0
 # States in which a player is doing something with the media we handed it.
 PLAYING_STATES = {"playing", "buffering"}
 # A title that is really our stream URL means the player treated the URL as
-# metadata — the exact MA failure this module works around. Used to explain a
+# metadata, the exact MA failure this module works around. Used to explain a
 # failed verify instead of reporting a bare "did not start".
 _URL_TITLE_MARKERS = ("http://", "https://", "?user=", "&mt=", "abs-session")
 
@@ -403,7 +403,7 @@ async def _verify_playback(
                     # no media controller for this. Report it rather than pass.
                     return False, (
                         f"player reported playing '{last_title}', which is our stream URL being "
-                        "used as the track title — it cannot resolve this media"
+                        "used as the track title; it cannot resolve this media"
                     )
                 return True, last_title
         if attempt < attempts - 1:
@@ -411,7 +411,7 @@ async def _verify_playback(
     if _looks_like_stream_url(last_title):
         return False, (
             f"player never started ({last_state}) and stored our stream URL as its title "
-            f"('{last_title}') — it has no media controller for this media"
+            f"('{last_title}'); it has no media controller for this media"
         )
     return False, f"player never started playing (state stayed '{last_state}')"
 
@@ -435,7 +435,7 @@ async def _dispatch_stream(
         await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", full_entity_id)
         await asyncio.sleep(2)
 
-    # Detect if this is a Roku device — needs two-step MASS flow
+    # Detect if this is a Roku device; it needs two-step MASS flow
     from . import roku as roku_handler
     is_roku = await roku_handler.is_roku_device(ha_url, ha_token, full_entity_id)
 
@@ -498,8 +498,8 @@ async def _ma_media_id(
     Returns ``(media_id, note)``; ``media_id`` is None when MA cannot be asked or
     does not know the item, and ``note`` explains why.
 
-    MA only resolves *library items* — a book (``library://audiobook/<n>``) or a
-    podcast (``library://podcast/<n>``) — and both carry the ABS item id in their
+    MA only resolves *library items*: a book (``library://audiobook/<n>``) or a
+    podcast (``library://podcast/<n>``), and both carry the ABS item id in their
     ``provider_mappings``, so the lookup is by id for both. What MA cannot do is
     address an individual podcast *episode*: a search for any episode title
     returns nothing, and ``library://podcast/<n>?episode=<i>`` is rejected. So a
@@ -595,7 +595,7 @@ async def _handle_play_podcast_episode(abs_url: str, abs_key: str, req) -> Execu
     # returns library://podcast/N whose provider_mappings carries this exact ABS
     # podcast item id. So resolve by the podcast id + podcast title.
     #
-    # MA has no episode-level URI — `library://podcast/16?episode=0` errors 999 —
+    # MA has no episode-level URI (`library://podcast/16?episode=0` errors 999),
     # so this starts the show; MA picks the episode. Callers that need a specific
     # episode should use a player that can fetch a URL.
     podcast_title = ((item.get("media") or {}).get("metadata") or {}).get("title")

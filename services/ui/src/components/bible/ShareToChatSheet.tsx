@@ -81,7 +81,7 @@ export default function ShareToChatSheet({
         </div>
 
         <p className="text-xs text-slate-300 rounded-xl bg-white/5 border border-white/10 p-3 mb-3 line-clamp-4">
-          📖 <span className="font-semibold text-amber-200">{reference}</span> — “{text}”
+          📖 <span className="font-semibold text-amber-200">{reference}</span>: “{text}”
         </p>
         <input
           type="text"

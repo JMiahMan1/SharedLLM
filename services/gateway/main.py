@@ -142,7 +142,7 @@ def _split_reasoning(message: str, thinking: str | None) -> tuple[str, str | Non
     if not extracted:
         return message, thinking
     # Never return an empty answer just because the model only produced
-    # reasoning — the original text is more useful than nothing.
+    # reasoning; the original text is more useful than nothing.
     return (content or message), (extracted or None)
 
 
@@ -378,7 +378,7 @@ async def execute_inference(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _parse_llm_json_object(raw: Any) -> Any:
     """
-    Robust JSON extractor for LLM outputs.
+    Tolerant JSON extractor for LLM outputs.
     Mirrors extract_action_json logic from agent_loop for consistency.
     """
     text = str(raw or "").strip()
@@ -485,7 +485,7 @@ async def get_telemetry_model():
     Deliberately separate from the assistant model: scheduled report runs must
     never share the voice assistant's model, so a report can neither slow down
     nor be slowed by an in-flight conversation. Falls back to librarian, then
-    coding, and only then to the assistant — never silently shares the assistant
+    coding, and only then to the assistant, and never silently shares the assistant
     while another role is configured.
     """
     settings = await get_llm_settings()
@@ -1505,7 +1505,7 @@ async def resolve_chat_workspace(body: dict, user_id: str) -> dict | None:
 
     def _match_named_workspace(query: str) -> dict | None:
         # "in the <name> workspace", "<name> workspace", "workspace <name>",
-        # "the <name> workspace" — case-insensitive against id/display_name/local_path
+        # "the <name> workspace": case-insensitive against id/display_name/local_path
         patterns = [
             r"\bin (?:the |my |our )?([A-Za-z0-9_-]+(?: [A-Za-z0-9_-]+)*) workspace\b",
             r"\bthe ([A-Za-z0-9_-]+(?: [A-Za-z0-9_-]+)*) workspace\b",
@@ -2371,7 +2371,7 @@ async def _resolve_acting_identity(request: Request, as_user: str | None = None)
     """Resolve whose credentials an action should run as.
 
     `as_user="admin"` lets an authenticated admin post as the shared Admin
-    (default) identity — user ID 1, the same account Identity falls back to
+    (default) identity: user ID 1, the same account Identity falls back to
     in /api/resolve. Anything else keeps the caller's own identity, and a
     client can never name an arbitrary user: any other value is ignored, and
     a non-admin asking for "admin" gets a 403.
@@ -3005,7 +3005,7 @@ async def chat_handler(request: Request, background_tasks=None):
     rag_context = ""
     # MISSION LOCK: Disable RAG to prevent architectural hallucinations
     if "MISSION LOCK" in query:
-        log.info("[RAG] MISSION LOCK detected — bypassing all collections to ensure focus.")
+        log.info("[RAG] MISSION LOCK detected; bypassing all collections to ensure focus.")
     else:
         try:
             collections = ["ha_entities", "nextcloud_files", "system_capabilities", "system_learnings"]
@@ -3835,7 +3835,7 @@ async def _get_arcade_featured_slugs() -> list[str]:
     """Admin-curated featured slugs from Identity's GlobalSetting.
 
     Stored as a JSON array string under `arcade_featured_games`. A missing or
-    malformed value simply means "no curation" — the caller falls back to
+    malformed value simply means "no curation"; the caller falls back to
     rating-based picks.
     """
     try:
@@ -5139,13 +5139,13 @@ async def global_search(q: str, request: Request):
 
     Searches *all* of the caller's collections (HA entities, Nextcloud files,
     system capabilities/learnings, missions, conversations, network topology,
-    telemetry, etc.) — not just Nextcloud files — across both the resolved
+    telemetry, etc.), not just Nextcloud files, across both the resolved
     Jarvis user and the linked Nextcloud user, then merges the best hits.
     """
     if not q or not q.strip():
         return {"status": "SUCCESS", "answer": "No query provided.", "files": []}
 
-    # Resolve user(s) for multi-tenancy — mirror /api/storage/stats. No fallback
+    # Resolve user(s) for multi-tenancy, mirroring /api/storage/stats. No fallback
     # to the admin: an unproven caller is a 401, not the owner's index.
     creds = await _resolve_identity_from_request(request)
     jarvis_user = creds.get("user") or ""
@@ -5475,7 +5475,7 @@ async def _api_key_is_valid(api_key: str) -> bool:
 async def _sd_request_authorized(request: Request) -> bool:
     """Gate the image/music/OCR routes on a *verified* key, not a present one.
 
-    This used to be ``bool(api_key)`` — a presence check, so any non-empty
+    This used to be ``bool(api_key)``, a presence check, so any non-empty
     string authorized the caller. Combined with the default-user fallback in
     ``resolve_identity`` that made these routes, including GPU-spending image
     generation, reachable by an anonymous caller. It now validates the key
@@ -5498,7 +5498,7 @@ async def _sd_proxy_base_url() -> str:
     """Resolve the SD/image proxy base URL from Identity settings (llm_local_url).
 
     The alpaca SD backend is only reachable through the user-configured LLM proxy
-    (Settings > AI & Compute > llm_local_url) — the legacy ALPACA_SD_URL default
+    (Settings > AI & Compute > llm_local_url); the legacy ALPACA_SD_URL default
     (port 8081 direct) is refused from the server. Fail loudly when unconfigured.
     """
     settings = await get_dynamic_llm_settings()
@@ -6126,7 +6126,7 @@ async def ask_in_workspace(workspace_id: str, request: Request):
         raise HTTPException(status_code=503, detail=f"The model did not answer: {exc}") from exc
 
 
-# ─── Workspace chats: conversations that open as tabs and continue ────────────
+# Workspace chats: conversations that open as tabs and continue
 
 async def _chat_call(request: Request, method: str, path: str = "", json_body: dict | None = None, params: dict | None = None):
     from services.gateway.workspace_chat import identity_chat
@@ -6342,7 +6342,7 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
                 status_code=400,
                 detail=(
                     "No Calibre library path configured. Set the 'calibre_library_path' "
-                    "setting (Admin > Settings) or pass library_path with the request."
+                    "setting (Admin > LLM & Settings) or pass library_path with the request."
                 ),
             )
         provider_settings["library_path"] = library_path
@@ -7178,7 +7178,7 @@ async def execute_raven_mission(id: int, request: Request):
         mission_model = target["coding_model"]
         if target["mission_type"] == "admin_fix":
             # System-triggered repair missions always run on the coding model
-            # currently selected in the config DB — never a stale frozen value.
+            # currently selected in the config DB, never a stale frozen value.
             mission_model = await resolve_current_coding_model()
         await job_queue.enqueue_job("raven_admin", {
             "query": target["proposed_mission"],
@@ -7260,7 +7260,7 @@ async def _fetch_relevant_lessons(query: str, client=None, limit: int = 5) -> st
             tag = ""
             if outcome:
                 tag = f" [{outcome}{', conf ' + format(conf, '.2f') if isinstance(conf, (int, float)) else ''}]"
-            # one compact line — the transferable takeaway only, not the narrative
+            # one compact line: the transferable takeaway only, not the narrative
             rule_one = rule.split("\n")[0].strip()
             if len(rule_one) > 260:
                 rule_one = rule_one[:257] + "..."
@@ -7282,7 +7282,7 @@ async def _warm_rag_lesson_cache() -> None:
     mission after a gateway/rag restart hits that cold start inside lesson
     injection, it can blow past even a generous timeout and the learning loop
     silently drops. Warming it at gateway startup (before any mission runs)
-    keeps the injection fast and reliable. Fails safe — never raises.
+    keeps the injection fast and reliable. Fails safe: never raises.
     """
     try:
         await asyncio.sleep(2)  # let startup settle before hammering RAG
@@ -7308,7 +7308,7 @@ async def _build_raven_system_prompt(query: str) -> str:
     so the same prompt can be copied and run standalone against any capable model.
 
     Relevant PAST LESSONS are injected (smart, relevance-ranked, capped) so Raven
-    starts each mission informed by what worked/failed before — closing the
+    starts each mission informed by what worked/failed before, closing the
     learning loop. The model no longer has to remember to call RavenRecallRequest.
     """
     async with borrow_http_client() as client:
@@ -7316,7 +7316,7 @@ async def _build_raven_system_prompt(query: str) -> str:
         protocols = await fetch_autonomous_protocols()
         lessons_block = await _fetch_relevant_lessons(query)
     lesson_section = (
-        f"[Raven Lessons — learned from PAST missions, most relevant to THIS task]\n"
+        f"[Raven Lessons: learned from PAST missions, most relevant to THIS task]\n"
         f"{lessons_block}\n\n"
         if lessons_block
         else ""
@@ -7328,26 +7328,26 @@ async def _build_raven_system_prompt(query: str) -> str:
             "Do NOT stop after preparing the text, and do NOT hand-roll audio yourself. "
             "Use the `TTSRequest` tool for every piece of spoken text. Payload fields: "
             "`text` (the speech text), `text_file` (a workspace file whose content "
-            "becomes the speech text — PREFERRED for anything longer than a short "
+            "becomes the speech text; PREFERRED for anything longer than a short "
             "paragraph, since it keeps file contents OUT of your context window; it "
-            "also accepts PDF/EPUB/DOCX/HTML source documents — their text layer is "
-            "extracted automatically), `voice` "
+            "also accepts PDF/EPUB/DOCX/HTML source documents (their text layer is "
+            "extracted automatically)), `voice` "
             "(optional; omit to use the default Kokoro voice), `file_path` (output audio "
-            "filename — use a `.wav` extension, e.g. `narration.wav`, since the engine "
+            "filename; use a `.wav` extension, e.g. `narration.wav`, since the engine "
             "produces WAV audio), `workspace_id` (your workspace). Example:\n"
             '  {"@type": "TTSRequest", "text_file": "part_00.txt", '
             '"file_path": "narration_00.wav", "workspace_id": "<your workspace id>"}\n'
             "The audio is automatically decoded and saved into your workspace as a binary "
             "file, and the result returns the saved path. The engine automatically splits "
             "long text at sentence boundaries with natural pauses, so ONE `TTSRequest` per "
-            "chapter/section is fine — you do NOT need to split text yourself.\n"
+            "chapter/section is fine; you do NOT need to split text yourself.\n"
             "The engine reads Bible references (e.g. `John 3:16` -> `John chapter 3, "
             "verse 16`), years, eras, and small numbers naturally, so leave them exactly "
             "as they appear in the source. You may also use SSMD markup for explicit "
             "pause control in the text: `...p` (paragraph pause), `...s` (sentence "
             "pause), `...c` (clause/comma pause), `...500ms` (custom duration), "
             "say-as `[123]{as=\"cardinal\"}` annotations, and voice-bound "
-            "`<div voice=\"...\">` blocks — the engine renders these verbatim.\n"
+            "`<div voice=\"...\">` blocks; the engine renders these verbatim.\n"
             "AUDIOBOOK PROTOCOL (learned from the Docket-TTS audiobook pipeline): (1) "
             "Prepare the narration text as one clean file PER chapter/section "
             "(e.g. `narration_chapter_01.txt`, ...) using shell `cat`/`sed`/a write tool; "
@@ -7357,14 +7357,14 @@ async def _build_raven_system_prompt(query: str) -> str:
             "numbered `1. ...`/`1) ...` line). The TTS engine automatically adds a "
             "slightly longer beat after (a) headings/titles, (b) each list item, and "
             "(c) scripture references, so do NOT invent your own pause punctuation or "
-            "write a script to inject silences — just keep the structure on separate "
+            "write a script to inject silences; just keep the structure on separate "
             "lines exactly as in the source. (2) DO NOT write a Python/JS script "
             "to normalize pronunciation and DO NOT expand scripture references or years "
-            "yourself — the TTS engine already reads Bible verses correctly and "
+            "yourself; the TTS engine already reads Bible verses correctly and "
             "years/dates correctly (e.g. `1995` as `nineteen ninety-five`, `1400 BC` as "
             "`fourteen hundred "
             "B.C.`). Leave verses and years exactly as they appear in the source. (3) DO "
-            "NOT read those text files into context — "
+            "NOT read those text files into context; "
             "use `text_file` to point at them. If your workspace holds the source "
             "material only as a PDF/EPUB/DOCX (e.g. `Week 2 - Scripture.pdf`), read it "
             "once with WorkspaceFileReadRequest to see its embedded text, write the "
@@ -7375,11 +7375,11 @@ async def _build_raven_system_prompt(query: str) -> str:
             "calm, realistic audiobook narration prefer a warm natural voice such as "
             "`am_michael` and pass it as `voice` on every call. (5) After "
             "the calls return, verify every .wav exists and is non-empty, then assemble "
-            "the complete audiobook: write a concat list and run ffmpeg — "
+            "the complete audiobook: write a concat list and run ffmpeg: "
             "`printf \"file '%s'\\n\" chapter_*.wav > concat.txt && "
             "ffmpeg -f concat -safe 0 -i concat.txt -c:a libmp3lame -b:a 128k "
-             "audiobook.mp3` — and report the final file. Never re-read or re-narrate a "
-             "file you have already processed — reading file contents into context "
+             "audiobook.mp3`, and report the final file. Never re-read or re-narrate a "
+             "file you have already processed; reading file contents into context "
              "exhausts your window and causes failures. (6) To REBUILD an existing "
              "audiobook with the current engine (e.g. after a TTS normalization or pause "
              "improvement), use the `audiobookregeneraterequest` tool in ONE call: pass "
@@ -7387,20 +7387,20 @@ async def _build_raven_system_prompt(query: str) -> str:
              "PDF/EPUB/DOCX source documents, in order; documents are extracted to text "
              "before synthesis) and "
              "optional `output_mp3` + `voice`. It re-synthesizes every chapter to WAV and "
-             "concatenates them into the MP3 automatically — do NOT hand-re-run chapter-"
+             "concatenates them into the MP3 automatically; do NOT hand-re-run chapter-"
              "by-chapter TTSRequest calls for a full rebuild."
-             "\n[VERIFY — narrated output feedback loop] After synthesizing and "
+             "\n[VERIFY: narrated output feedback loop] After synthesizing and "
             "concatenating, VERIFY the narration actually read verses, years and numbers "
             "correctly by transcribing a sample of the audio back to text. Use the "
             "`STTRequest` tool (workspace id + `file_path`, e.g. "
             "`{\"@type\": \"STTRequest\", \"file_path\": \"chapter_01.wav\", "
-            "\"workspace_id\": \"<your workspace id>\"}`) — it runs Whisper and returns the "
+            "\"workspace_id\": \"<your workspace id>\"}`); it runs Whisper and returns the "
             "transcript. Cut a short clip with `ffmpeg -y -v error -t 30 -i chapter_01.wav "
             "clip.wav` if a whole chapter is long. Check the transcript against the "
             "expected spoken forms: e.g. source `John 3:16` should come back as "
             "`John chapter 3, verse 16`, `1995` as `nineteen ninety-five`, `1400 BC` as "
             "`fourteen hundred B.C.`, `66 books` as `sixty-six books`. Whisper prints "
-            "numbers as numerals (e.g. `verses 16 through 17`) — that is fine, the "
+            "numbers as numerals (e.g. `verses 16 through 17`); that is fine, the "
             "wording is what matters. If verses/years are NOT read correctly, stop and "
             "report it (the engine normalization may have a gap) rather than shipping the "
             "audiobook."
@@ -7604,13 +7604,13 @@ async def kill_mission(request: Request, id_or_slug: str):
         real_id = mission_data["id"]
         _ensure_mission_owner(creds, mission_data)
 
-        # 1. Update status in database — only if mission is still active.
+        # 1. Update status in database, only if mission is still active.
         # Never overwrite a terminal state (completed / failed / cancelled).
         TERMINAL_STATES = {"completed", "failed", "cancelled"}
         if mission_data.get("status") in TERMINAL_STATES:
             log.warning(
                 f"[AUDIT] Kill on already-terminal mission {real_id} "
-                f"(status={mission_data.get('status')}) — skipping DB patch."
+                f"(status={mission_data.get('status')}); skipping DB patch."
             )
         else:
             resp = await client.patch(
@@ -7648,8 +7648,8 @@ async def kill_mission(request: Request, id_or_slug: str):
 async def cancel_mission(request: Request, id_or_slug: str):
     """Close/cancel a Raven mission in ANY state (queued, executing, paused, failed).
 
-    Unlike ``/kill`` — which only sets the DB status and publishes a kill flag that
-    the running agent loop checks between steps — this fully purges the backing
+    Unlike ``/kill`` (which only sets the DB status and publishes a kill flag that
+    the running agent loop checks between steps), this fully purges the backing
     Redis job (and its lease/metadata) so the singleton worker can never claim a
     job whose mission no longer exists. This is the safe way to clear orphaned
     ``queued`` missions that have no active worker.
@@ -7808,7 +7808,7 @@ async def refine_mission(request: Request, id_or_slug: str, body: MissionRefineR
 
         if mission_data.get("mission_type") == "admin_fix":
             # System-triggered repair missions always run on the coding model
-            # currently selected in the config DB — never a stale frozen value.
+            # currently selected in the config DB, never a stale frozen value.
             model = await resolve_current_coding_model()
 
         assert job_queue is not None, "Job queue not initialized"
@@ -7949,7 +7949,7 @@ async def get_mission_logs(id_or_slug: str, request: Request):
 
 @app.websocket("/api/raven/missions/{id_or_slug}/stream")
 async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str = ""):
-    # Validate auth token — a missing token must be rejected, not silently
+    # Validate auth token: a missing token must be rejected, not silently
     # allowed to replay mission history and subscribe to the live feed.
     if not token:
         await websocket.close(code=1008, reason="Missing token")
@@ -8569,7 +8569,7 @@ async def get_user_presence(user_id: str, request: Request):
 
 
 # NOTE: the path is deliberately "/api/users/location/all" and not
-# "/api/users/locations" — the latter is captured by the earlier
+# "/api/users/locations": the latter is captured by the earlier
 # PATCH /api/users/{user_id} route, which answers 405 for GET.
 @app.get("/api/users/location/all")
 async def get_all_user_locations(request: Request):
@@ -8833,7 +8833,7 @@ async def vehicle_lookup_detail(vehicle_id: str):
 
 @app.get("/api/geo/telemetry/{user_id}")
 async def get_geo_telemetry(request: Request, user_id: str, hours: float = 24.0):
-    """Fine-grained GPS telemetry for one person — own, admin, or opted-in only."""
+    """Fine-grained GPS telemetry for one person: own, admin, or opted-in only."""
     target, viewer, is_admin = await _read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
@@ -8872,7 +8872,7 @@ async def get_geo_people(request: Request, viewer: str | None = None):
 
 @app.get("/api/geo/android_auto")
 async def get_geo_android_auto(request: Request, user_id: str | None = None):
-    """Android auto-reporting configuration — own data only unless admin."""
+    """Android auto-reporting configuration: own data only unless admin."""
     target, viewer, is_admin = await _read_target(request, user_id)
     params = {"user_id": target, "viewer": viewer, "is_admin": is_admin}
     async with shared_http_client() as client:
@@ -9590,7 +9590,7 @@ async def proxy_get_points(request: Request, user_id: str | None = None):
 async def proxy_activity_summary(
     request: Request, user_id: str | None = None, window: str = "week"
 ):
-    """Running totals — own data always; anyone else's only with opt-in."""
+    """Running totals: own data always; anyone else's only with opt-in."""
     target, viewer, is_admin = await _read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
@@ -10822,7 +10822,7 @@ def _read_bundle_version(bundle_path: Path) -> dict:
     The SHA a client ends up running is whatever is inside the bundle, so the
     bundle is the only trustworthy source for the version we advertise. Serving
     metadata that disagrees with the bundle makes the mobile app download,
-    apply, restart, and find itself still "out of date" — an endless reload
+    apply, restart, and find itself still "out of date", an endless reload
     loop. See services/ui/src/lib/appUpdater.ts.
     """
     try:
@@ -10880,7 +10880,7 @@ async def get_app_update_version(request: Request):
     bundle_meta = _read_bundle_version(local_bundle) if bundle_available else {}
 
     if not bundle_available:
-        # No staged bundle — the gateway proxies the UI container's copy, so the
+        # No staged bundle; the gateway proxies the UI container's copy, so the
         # UI container's own version.json describes what clients would receive.
         try:
             async with shared_http_client() as client:
@@ -11225,7 +11225,7 @@ async def get_ma_playlists(request: Request):
     # failure here is what let an anonymous caller read this data.
     creds = await _resolve_identity_from_request(request)  # [media/playlists]
     # BUG-21: an unreachable execution service is a gateway upstream failure,
-    # not a 500 — report it explicitly so the UI can distinguish it from empty.
+    # not a 500; report it explicitly so the UI can distinguish it from empty.
     try:
         async with shared_http_client() as client:
             resp = await client.get(
@@ -11434,7 +11434,7 @@ async def search_abs(q: str, request: Request, limit: int = 20):
     return {"status": "SUCCESS", "books": [], "podcasts": [], "authors": [], "total": 0, "notice": "ABS unavailable"}
 
 
-# ─── ABS connectivity status ─────────────────────────────────────────────
+# ABS connectivity status
 
 @app.get("/api/media/audiobookshelf/status")
 async def get_abs_status(request: Request):
@@ -11473,7 +11473,7 @@ async def get_abs_status(request: Request):
         return {"status": "ERROR", "error": str(e), "reachable": False}
 
 
-# ─── Unified media endpoints (§7.5) ──────────────────────────────────────
+# Unified media endpoints (§7.5)
 #
 # These endpoints normalize Music Assistant item mappings and Audiobookshelf
 # payloads into the Pydantic models in ``services/gateway/media_models.py``.
@@ -11970,7 +11970,7 @@ async def post_abs_progress(req: AbsProgressRequest, request: Request):
     return await _proxy_execution_with_identity(request, "/execute/audiobookshelf", payload=payload)
 
 
-# ─── Execution service proxy routes (for UI access) ──────────────────────
+# Execution service proxy routes (for UI access)
 
 async def _resolve_user_context(request: Request, body: dict) -> Any:
     """Resolve user context from the authenticated request only.
@@ -11982,7 +11982,7 @@ async def _resolve_user_context(request: Request, body: dict) -> Any:
     body.pop("user_context", None)
 
     # Resolve only from the authenticated request; never fall back to the
-    # first user (BUG-02) — unauthenticated calls must fail with 401.
+    # first user (BUG-02); unauthenticated calls must fail with 401.
     try:
         creds_data = await _resolve_identity_from_request(request)
     except HTTPException as e:
@@ -12153,7 +12153,7 @@ async def _resolve_abs_session_creds(request: Request) -> dict:
     """Auth (signed media token is authoritative) + identity for ABS session streams.
 
     ABS session routes (/public/session/:sid/track/:i and /hls/:sid/...) need no
-    API key — the session id itself is the capability — so only the user's
+    API key (the session id itself is the capability), so only the user's
     ABS URL matters. Mirrors the sibling MA stream route's auth semantics (§7.4).
     """
     creds = await _resolve_identity_from_media_token(request)
@@ -12181,7 +12181,7 @@ ABS_PLAYLIST_READY_TIMEOUT = float(os.getenv("ABS_PLAYLIST_READY_TIMEOUT", "90")
 
 # The playlist itself appears *before* the first segment does. A TV, speaker or
 # cast device that gets a 200 playlist and then a 404 on its very first segment
-# treats the stream as fatally broken and gives up — no retry, no audio. So the
+# treats the stream as fatally broken and gives up: no retry, no audio. So the
 # first segment is polled too. A 1-byte Range keeps the probe cheap.
 ABS_FIRST_SEGMENT_POLL_INTERVAL = float(os.getenv("ABS_FIRST_SEGMENT_POLL_INTERVAL", "1.0"))
 ABS_FIRST_SEGMENT_MAX_ATTEMPTS = int(os.getenv("ABS_FIRST_SEGMENT_MAX_ATTEMPTS", "30"))
@@ -12209,7 +12209,7 @@ async def _await_abs_first_segment(client: aiohttp.ClientSession, playlist_url: 
     request.
 
     Segments are host-relative to the playlist, so the URL is joined against the
-    playlist URL rather than the configured ABS base — ABS serves HLS off the
+    playlist URL rather than the configured ABS base; ABS serves HLS off the
     server origin, not under a router base path (see ``_abs_playlist_url``).
     """
     segment = _first_segment_uri(playlist)
@@ -12390,12 +12390,12 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
     if "mpegurl" in ctype.lower():
         body = await resp.text()
         await resp.release()
-        # Wait for segment 0 *before* closing the session — returning the playlist
+        # Wait for segment 0 *before* closing the session; returning the playlist
         # earlier only moves the 404 to the device, which treats it as fatal.
         if playlist_url is None:
             # ABS served the playlist without redirecting, so we never learned its
             # URL and cannot join segments against it. Serve what we have rather
-            # than guessing a base — a wrong guess would rewrite the segments to
+            # than guessing a base, since a wrong guess would rewrite the segments to
             # a URL that 404s.
             log.warning(
                 f"[stream/abs-session] Session {session_id} track {track_index} returned a "
@@ -12609,7 +12609,7 @@ async def sendspin_proxy(websocket: WebSocket):
         await websocket.close(code=1008, reason="MA not configured")
         return
 
-    # Build MA sendspin URL (NO query string token — auth via message)
+    # Build MA sendspin URL (NO query string token; auth via message)
     ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
     ws_scheme = "ws" if ma_scheme == "http" else "wss"
     ma_sendspin_url = f"{ws_scheme}://{ma_host}:{ma_port}/sendspin"
@@ -12656,7 +12656,7 @@ async def sendspin_proxy(websocket: WebSocket):
         log.info("[sendspin] STEP 5: Sending auth to MA (token redacted)")
         await ma_ws.send(auth_msg)
 
-        # MA responds to auth — expect server/hello
+        # MA responds to auth; expect server/hello
         log.info("[sendspin] STEP 6: Waiting for MA auth response...")
         try:
             auth_response = await asyncio.wait_for(ma_ws.recv(), timeout=10.0)
@@ -12690,7 +12690,7 @@ async def sendspin_proxy(websocket: WebSocket):
             log.info(f"[sendspin] client/hello with message_id={hello_msg['message_id']}")
             await ma_ws.send(json.dumps(hello_msg))
 
-            # MA sends server/hello back — forward to browser
+            # MA sends server/hello back; forward to browser
             log.info("[sendspin] STEP 9: Waiting for MA server/hello response...")
             try:
                 hello_response = await asyncio.wait_for(ma_ws.recv(), timeout=10.0)
@@ -12723,7 +12723,7 @@ async def sendspin_proxy(websocket: WebSocket):
 
         async def forward_client_to_ma():
             """Forward browser messages to MA (handles both text and binary frames)."""
-            log.info("[sendspin] STEP 13: Proxy loop started — browser→MA direction active")
+            log.info("[sendspin] STEP 13: Proxy loop started: browser→MA direction active")
             try:
                 while True:
                     message = await websocket.receive()
@@ -12758,7 +12758,7 @@ async def sendspin_proxy(websocket: WebSocket):
 
         async def forward_ma_to_client():
             """Forward MA messages to browser (handles both text and binary frames)."""
-            log.info("[sendspin] STEP 13: Proxy loop started — MA→browser direction active")
+            log.info("[sendspin] STEP 13: Proxy loop started: MA→browser direction active")
             try:
                 while True:
                     message = await ma_ws.recv()
@@ -12802,7 +12802,7 @@ async def sendspin_proxy(websocket: WebSocket):
             forward_ma_to_client(),
             graceful_disconnect(),
         )
-        log.info("[sendspin] STEP 15: Proxy loops complete — both directions ended")
+        log.info("[sendspin] STEP 15: Proxy loops complete: both directions ended")
     except InvalidStatus as e:
         log.error(f"[sendspin] MA sendspin connection failed (status {e.response}): {e}", exc_info=True)
         with suppress(Exception):
@@ -12905,7 +12905,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
             creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
-        log.info(f"[ma-jsonrpc] STEP 2 PASS: Identity resolved — user={creds.get('user', 'unknown')}")
+        log.info(f"[ma-jsonrpc] STEP 2 PASS: Identity resolved: user={creds.get('user', 'unknown')}")
     except HTTPException as e:
         log.error(f"[ma-jsonrpc] STEP 2 FAIL: Identity resolution HTTP error: status={e.status_code}, detail={e.detail}")
         await websocket.close(code=1008, reason="Authentication failed")
@@ -12971,7 +12971,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                 """Forward browser JSON-RPC commands to MA (allowlist-checked)."""
                 from services.gateway.ma_allowlist import validate_ma_frame
 
-                log.info("[ma-jsonrpc] STEP 5: Proxy loop started — browser→MA direction active")
+                log.info("[ma-jsonrpc] STEP 5: Proxy loop started: browser→MA direction active")
                 try:
                     while True:
                         msg = await websocket.receive()
@@ -13017,7 +13017,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
 
             async def forward_ma_to_client():
                 """Forward MA events/responses to browser."""
-                log.info("[ma-jsonrpc] STEP 5: Proxy loop started — MA→browser direction active")
+                log.info("[ma-jsonrpc] STEP 5: Proxy loop started: MA→browser direction active")
                 try:
                     while True:
                         message = await ma_ws.recv()
@@ -13028,7 +13028,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                             log.info(f"[ma-jsonrpc] Proxy: MA→browser ({len(message)} bytes binary)")
                             await websocket.send_bytes(message)
                 except WebSocketDisconnect:
-                    # Browser closed the tab/moved on — expected, not an error.
+                    # Browser closed the tab/moved on; expected, not an error.
                     log.info("[ma-jsonrpc] Proxy: Browser disconnected from gateway (MA→browser)")
                 except Exception as e:
                     log.error(f"[ma-jsonrpc] Proxy: MA→Client forward error: {e}", exc_info=True)
@@ -13041,7 +13041,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                 forward_client_to_ma(),
                 forward_ma_to_client(),
             )
-            log.info("[ma-jsonrpc] STEP 7: Proxy loops complete — both directions ended")
+            log.info("[ma-jsonrpc] STEP 7: Proxy loops complete: both directions ended")
     except InvalidStatus as e:
         log.error(f"[ma-jsonrpc] MA JSON-RPC connection failed (status {e.response}): {e}")
         with suppress(Exception):
@@ -13052,10 +13052,10 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
             await websocket.close(code=1011, reason=str(e))
 
 
-# ── Music Assistant stream: start (POST) vs bytes (GET) — BUG-19 ──────────────
+# Music Assistant stream: start (POST) vs bytes (GET), BUG-19
 # Every GET (including Range/seek) used to re-run player_queues/play_media
 # (option=replace), restarting the queue on each byte-range request. Starting
-# playback is now an explicit POST; GET only ever fetches bytes — from the
+# playback is now an explicit POST; GET only ever fetches bytes: from the
 # session cache, or by resolving an ALREADY-RUNNING queue (never play_media).
 
 _MA_STREAM_CACHE: dict[str, tuple[float, str]] = {}
@@ -13117,7 +13117,7 @@ async def _ma_discover_and_select(creds: dict[str, Any], player_id: str | None) 
 
     auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
 
-    # ── Step 1: Discover MA players via JSON-RPC ──────────────────────────
+    # Step 1: Discover MA players via JSON-RPC
     log.info("[stream/ma] Discovering MA players...")
     available_players: dict[str, dict[str, Any]] = {}
     async with shared_http_client() as client:
@@ -13155,7 +13155,7 @@ async def _ma_discover_and_select(creds: dict[str, Any], player_id: str | None) 
         log.error("[stream/ma] No MA players found")
         raise HTTPException(status_code=404, detail="No Music Assistant players available")
 
-    # ── Step 2: Select the browser Sendspin player ────────────────────────
+    # Step 2: Select the browser Sendspin player
     log.info("[stream/ma] Selecting browser player...")
 
     def _player_text(player: dict[str, Any]) -> str:
@@ -13209,7 +13209,7 @@ async def _ma_discover_and_select(creds: dict[str, Any], player_id: str | None) 
 def _ma_pick_stream_url(ma_client: Any, mass_url: str, target_player_id: str) -> str | None:
     """Single-pass stream URL resolution from MA's current state.
 
-    Never sends commands — priorities mirror the original poll loop:
+    Never sends commands. Priorities mirror the original poll loop:
     1. MA-provided stream URL (queue_updated events),
     2. queue_state current_item.media_item.stream_url,
     3. queue_state current_item.stream_url,
@@ -13427,7 +13427,7 @@ async def start_music_assistant_stream(uri: str, request: Request, player_id: st
                     detail=f"MA did not resolve queue state within {stream_timeout}s. Queue state: {queue_desc}. Session ID: {session_id}"
                 )
 
-            # ── Step 4: Disconnect MA WebSocket (no longer needed) ──────────────
+            # Step 4: Disconnect MA WebSocket (no longer needed)
             await ma_client.disconnect()
             log.info("[stream/ma] WebSocket closed after stream URL resolved")
         except HTTPException:
@@ -13449,12 +13449,12 @@ async def start_music_assistant_stream(uri: str, request: Request, player_id: st
 
 @app.get("/api/media/stream/music-assistant")
 async def stream_music_assistant(uri: str, request: Request, player_id: str | None = None):
-    """Fetch bytes for a Music Assistant stream — NEVER starts playback (BUG-19).
+    """Fetch bytes for a Music Assistant stream; NEVER starts playback (BUG-19).
 
     This endpoint is browser-local only: the browser's Sendspin player owns the
     queue, and the gateway proxies the resolved MA bytes back to that same
     browser. We never mutate a random physical player to make the stream work,
-    and (since BUG-19) we never re-send player_queues/play_media from GET —
+    and (since BUG-19) we never re-send player_queues/play_media from GET;
     every Range/seek request would otherwise restart the queue.
 
     Cache hit: proxy immediately (no players/all discovery, no WebSocket).
@@ -13552,7 +13552,7 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
     # them as-is), so only hosts the user has actually configured may be
     # contacted (SSRF). An unknown host is never fetched: instead of failing
     # outright, the request is REBASED onto the configured base for the service
-    # implied by the path — the original host is discarded — which keeps
+    # implied by the path (the original host is discarded), which keeps
     # mismatched-host MA/HA covers working (owner directive: never break player
     # functionality). 400 remains only when that service is not configured.
     rebase = False
@@ -13584,7 +13584,7 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
                 svc = "abs"
             elif "/api/image/serve" in p:
                 # HA entity_picture (…/api/image/serve/…), even on an
-                # external host such as Nabu Casa — fetch from configured HA.
+                # external host such as Nabu Casa; fetch from configured HA.
                 svc = "ha"
             elif p.startswith("/imageproxy") or "/api/image" in p:
                 svc = "ma"
@@ -13703,7 +13703,7 @@ async def resolve_ma_library_uri(req: MALibraryURIRequest, request: Request):
     """Map an Audiobookshelf item id to the URI Music Assistant can actually play.
 
     MA streams an audiobook from its own Audiobookshelf provider and only accepts
-    its own ``library://audiobook/<n>`` URI — it is not a URL player, and handing
+    its own ``library://audiobook/<n>`` URI; it is not a URL player, and handing
     it a stream URL leaves the player idle with the URL as its track title. The
     numeric ``<n>`` is MA-internal, so only MA can produce it: this endpoint owns
     that lookup (``services/shared/ma_library.py``) so the browser and the
@@ -13717,7 +13717,7 @@ async def resolve_ma_library_uri(req: MALibraryURIRequest, request: Request):
         raise HTTPException(status_code=422, detail="abs_item_id is required")
     # Authenticate strictly before touching MA. `_resolve_ma_credentials` goes
     # through `resolve_identity`, which falls back to the system default user for
-    # *any* string — measured: an anonymous request and `Bearer sk-not-a-real-key`
+    # *any* string. Measured: an anonymous request and `Bearer sk-not-a-real-key`
     # both got a 200 here, i.e. an open MA lookup. This endpoint reaches MA's
     # library index, so an unauthenticated caller must be refused outright.
     await _require_authenticated(request)

@@ -13,8 +13,8 @@ interface MiniRouteMapProps {
 
 /**
  * Lightweight static route preview using OpenStreetMap tiles.
- * Renders a polyline fitted to the breadcrumb bounds. Interaction is off —
- * it's a thumbnail — but an optional onClick opens the full Route Map modal.
+ * Renders a polyline fitted to the breadcrumb bounds. Interaction is off
+ * (it's a thumbnail), but an optional onClick opens the full Route Map modal.
  */
 export default function MiniRouteMap({ points, height = 140, className = "", onClick, title }: MiniRouteMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);

@@ -7,7 +7,7 @@ commands keep working when HA is down and skip one network hop on the
 FastPath.
 
 Device registry lives in the Identity service as the GlobalSetting
-``esphome_devices`` — a JSON list:
+``esphome_devices``, a JSON list:
 
     [{"name": "office-light", "host": "192.168.2.87",
       "port": 6053, "noise_psk": "base64-key-from-device-yaml",
@@ -392,7 +392,7 @@ async def call_entity(device_name: str, entity_name: str, params: dict | None = 
     return result
 
 
-# ─── Handing a device Jarvis's own endpoint ────────────────────────────────────
+# Handing a device Jarvis's own endpoint
 #
 # Devices that call Jarvis themselves (the watch syncs steps and asks
 # questions over HTTP) need Jarvis's address and an API key. Rather than have
@@ -479,7 +479,7 @@ async def push_jarvis_endpoint(device_name: str, url: str, mint_key) -> dict:
     return await _with_connection(cfg, op)
 
 
-# ─── Companion pairing ─────────────────────────────────────────────────────────
+# Companion pairing
 #
 # A user adds a device from Jarvis; the method follows what the device can do:
 #   code   it declares the API actions pair_begin and pair_confirm (it has a

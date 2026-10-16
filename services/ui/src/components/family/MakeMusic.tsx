@@ -151,7 +151,7 @@ export default function MakeMusic() {
       <input
         value={prompt}
         onChange={(event) => setPrompt(event.target.value)}
-        placeholder="Describe the song — 'a bouncy tune about a very slow turtle'"
+        placeholder="Describe the song, e.g. 'a bouncy tune about a very slow turtle'"
         aria-label="Song prompt"
         className="glass-input min-h-11 w-full px-3 py-2 text-base sm:text-sm"
       />

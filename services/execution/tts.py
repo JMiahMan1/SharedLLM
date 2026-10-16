@@ -316,7 +316,7 @@ class KokoroTTSEngine:
         return "male" if m_count > f_count else "female"
 
     def _normalize_text(self, text: str) -> str:
-        """Robust normalization for high-quality TTS. Ported/expanded from Docket-TTS.
+        """Normalization for high-quality TTS. Ported/expanded from Docket-TTS.
 
         Plain narrative text moves through unchanged, and scripture references /
         years / small numbers are expanded for natural speech. SSMD is handled

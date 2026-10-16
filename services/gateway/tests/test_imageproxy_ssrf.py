@@ -6,8 +6,8 @@ now only contacts configured hosts:
 
 * a full URL on an allowed host (mass/abs/ha) is fetched as before;
 * a full URL on any other host is **rebased** onto the configured base for the
-  service implied by the path — the unknown host is discarded and never
-  contacted (SSRF stays closed) — which keeps mismatched-host MA/HA covers
+  service implied by the path: the unknown host is discarded and never
+  contacted (SSRF stays closed), which keeps mismatched-host MA/HA covers
   working (owner directive: never break player functionality);
 * 400 only when the implied target service itself is not configured.
 """
@@ -59,7 +59,7 @@ def test_imageproxy_proxies_configured_ma_host(client, upstream):
 
 def test_imageproxy_rebases_mismatched_ma_host(client, upstream):
     """MA reports a cover on a host that differs from configured mass_url
-    (docker alias / LAN IP) — must keep working via the configured base."""
+    (docker alias / LAN IP) must keep working via the configured base."""
     mock_upstream(upstream, "GET", "http://ma.local:8095/imageproxy", payload="imgbytes")
     resp = client.get(
         "/api/media/imageproxy",

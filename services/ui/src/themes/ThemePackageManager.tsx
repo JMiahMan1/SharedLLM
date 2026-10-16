@@ -27,7 +27,7 @@ function swatchStyle(tokens: ThemePackage['tokens']): React.CSSProperties {
 
 /**
  * UI for browsing, importing, editing, and removing health theme packages.
- * All palettes come from the registry — none are hardcoded here.
+ * All palettes come from the registry; none are hardcoded here.
  */
 export function ThemePackageManager({
   selectedThemeId,
@@ -498,7 +498,7 @@ export function ThemePackageManager({
 
       {!compact && (
         <p className="text-[11px] opacity-50 leading-relaxed">
-          Packs are JSON ({'{ kind: "jarvis.health-theme-pack" }'}). Builtin packs are read-only —
+          Packs are JSON ({'{ kind: "jarvis.health-theme-pack" }'}). Builtin packs are read-only;
           clone a theme into a user pack to edit. Export shares the full pack file.
         </p>
       )}

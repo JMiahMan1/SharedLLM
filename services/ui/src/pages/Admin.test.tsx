@@ -7,7 +7,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../test/setup';
 
 // The Users & Devices tab has two entity dropdowns (device assignment and
-// entity protection), so the mock honours `testId` — `getByTestId` throws on
+// entity protection), so the mock honours `testId`; `getByTestId` throws on
 // duplicates rather than quietly picking the first one.
 vi.mock('../components/ui/EntitySearchDropdown', () => ({
   default: ({
@@ -179,7 +179,7 @@ describe('Admin page', () => {
     fireEvent.click(await screen.findByText('System Services'));
     expect(await screen.findByText('geo')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('Check Failed')).toBeInTheDocument());
-    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.getByText('No data')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /^restart$/i }));
     expect(confirm).toHaveBeenCalled();

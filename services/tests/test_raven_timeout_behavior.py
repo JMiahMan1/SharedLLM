@@ -74,7 +74,7 @@ def test_timeout_clean_termination_flow():
 
 def test_heartbeat_interval_config():
     """Verify heartbeat interval is configurable and sane."""
-    assert RAVEN_CONFIG["heartbeat_interval"] in range(5, 61)  # 5–60 seconds reasonable
+    assert RAVEN_CONFIG["heartbeat_interval"] in range(5, 61)  # 5-60 seconds reasonable
     assert RAVEN_CONFIG["hung_threshold"] > RAVEN_CONFIG["heartbeat_interval"]
 
 

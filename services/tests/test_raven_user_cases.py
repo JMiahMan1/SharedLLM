@@ -1,20 +1,20 @@
 """
-Raven Autonomous Agent — Live Integration Tests
+Raven Autonomous Agent: Live Integration Tests
 
 These tests hit the actual gateway at http://192.168.2.205:11435 (or localhost:11435)
 and verify the full Raven mission lifecycle works end-to-end with real LLM inference.
 
 User Cases:
-1. Code Audit — Lint → Read → Patch → Lint → Commit
-2. Git Sync & Conflict Resolution — Status → Pull → Report
-3. Log Analysis & Debugging — Docker logs → Identify error → Fix
-4. Dependency Update — Read requirements → Search → Update
-5. File Conversion — Search files → Shell convert
-6. System Health Check — Docker status → Service checks → Report
-7. Error Recovery — Tool fails → Retry with correction
-8. Context-Driven Investigation — ContextSearch → Follow-up action
-9. Multi-Step Refactoring — Search → Read multiple → Patch → Commit
-10. Infrastructure Repair — Check Docker → Restart → Verify
+1. Code Audit: Lint → Read → Patch → Lint → Commit
+2. Git Sync & Conflict Resolution: Status → Pull → Report
+3. Log Analysis & Debugging: Docker logs → Identify error → Fix
+4. Dependency Update: Read requirements → Search → Update
+5. File Conversion: Search files → Shell convert
+6. System Health Check: Docker status → Service checks → Report
+7. Error Recovery: Tool fails → Retry with correction
+8. Context-Driven Investigation: ContextSearch → Follow-up action
+9. Multi-Step Refactoring: Search → Read multiple → Patch → Commit
+10. Infrastructure Repair: Check Docker → Restart → Verify
 
 Additionally tests:
 - extract_action_json() parsing with real LLM output formats
@@ -49,7 +49,7 @@ RAVEN_REFLECTION_PROMPT = _env.get(f"PROMPT_{PROMPT_RAVEN_REFLECTION}", "")
 # GATEWAY CONFIGURATION
 # ============================================================================
 
-# Try multiple gateway endpoints — order: remote → public → Caddy → local
+# Try multiple gateway endpoints in order: remote → public → Caddy → local
 GATEWAY_ENDPOINTS = [
     "http://192.168.2.205:11435",
     "http://ai.local:11435",
@@ -78,7 +78,7 @@ print(f"[LIVE TESTS] Using gateway: {GATEWAY_URL}")
 
 # Polling config for mission lifecycle tests
 MISSION_POLL_INTERVAL = 5.0  # seconds
-MISSION_POLL_TIMEOUT = 900.0  # 15 minutes — Raven missions take 10-20min for full orchestration
+MISSION_POLL_TIMEOUT = 900.0  # 15 minutes; Raven missions take 10-20min for full orchestration
 
 
 def poll_mission_status(mission_id: int, timeout: float = MISSION_POLL_TIMEOUT) -> dict:
@@ -297,7 +297,7 @@ async def test_coder_model_available():
 
 
 # ============================================================================
-# LIVE TESTS: Mission Lifecycle — Full CRUD
+# LIVE TESTS: Mission Lifecycle (Full CRUD)
 # ============================================================================
 
 @pytest.mark.asyncio
@@ -329,7 +329,7 @@ async def test_mission_create_and_poll_completion():
         # Mission should have either a result or an error_summary
         assert result.get("result") is not None or result.get("error_summary") is not None
     else:
-        # Background worker not processing — acceptable on remote gateway without live workers
+        # Background worker not processing; acceptable on remote gateway without live workers
         print(f"[LIVE TEST] Mission {mission['id']} stayed in '{status}' (background worker not running)")
 
 
@@ -394,7 +394,7 @@ async def test_mission_kill():
     # Create a mission then kill it
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
-        json={"query": "Kill test — list files in /tmp", "model": "qwen2.5-coder:7b"},
+        json={"query": "Kill test: list files in /tmp", "model": "qwen2.5-coder:7b"},
         timeout=10.0,
     )
     mission_id = resp.json()["mission"]["id"]
@@ -414,7 +414,7 @@ async def test_mission_pause_resume():
     """Verify POST /api/raven/missions/{id}/pause and /resume work."""
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
-        json={"query": "Pause test — list gateway logs", "model": "qwen2.5-coder:7b"},
+        json={"query": "Pause test: list gateway logs", "model": "qwen2.5-coder:7b"},
         timeout=10.0,
     )
     mission_id = resp.json()["mission"]["id"]
@@ -440,7 +440,7 @@ async def test_mission_logs_endpoint():
     # First create a completed mission to have logs
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
-        json={"query": "Log test — check system uptime", "model": "qwen2.5-coder:7b"},
+        json={"query": "Log test: check system uptime", "model": "qwen2.5-coder:7b"},
         timeout=10.0,
     )
     mission_id = resp.json()["mission"]["id"]
@@ -461,7 +461,7 @@ async def test_mission_delete():
     # Create a mission
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
-        json={"query": "Delete test — list /etc", "model": "qwen2.5-coder:7b"},
+        json={"query": "Delete test: list /etc", "model": "qwen2.5-coder:7b"},
         timeout=10.0,
     )
     mission_id = resp.json()["mission"]["id"]
@@ -480,12 +480,12 @@ async def test_mission_nonexistent():
 
 
 # ============================================================================
-# LIVE TESTS: User Cases — Real Mission Creation
+# LIVE TESTS: User Cases (Real Mission Creation)
 # ============================================================================
 
 @pytest.mark.asyncio
 async def test_live_user_case_1_audit():
-    """Case 1: Code Audit — Create mission, verify it creates and completes."""
+    """Case 1 (Code Audit): Create mission, verify it creates and completes."""
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
         json={"query": "Audit the codebase for lint errors and fix them.", "model": "qwen2.5-coder:7b"},
@@ -501,7 +501,7 @@ async def test_live_user_case_1_audit():
 
 @pytest.mark.asyncio
 async def test_live_user_case_2_git_sync():
-    """Case 2: Git Sync — Create mission, verify it creates."""
+    """Case 2 (Git Sync): Create mission, verify it creates."""
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
         json={"query": "Check workspace status and report if we need to pull.", "model": "qwen2.5-coder:7b"},
@@ -514,7 +514,7 @@ async def test_live_user_case_2_git_sync():
 
 @pytest.mark.asyncio
 async def test_live_user_case_3_log_analysis():
-    """Case 3: Log Analysis — Create mission, verify it creates."""
+    """Case 3 (Log Analysis): Create mission, verify it creates."""
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
         json={"query": "Show the last 20 lines of logs for the sharedllm_gateway container.", "model": "qwen2.5-coder:7b"},
@@ -527,7 +527,7 @@ async def test_live_user_case_3_log_analysis():
 
 @pytest.mark.asyncio
 async def test_live_user_case_4_dependency_update():
-    """Case 4: Dependency Update — Create mission, verify it creates."""
+    """Case 4 (Dependency Update): Create mission, verify it creates."""
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
         json={"query": "Review requirements.txt for outdated dependencies.", "model": "qwen2.5-coder:7b"},
@@ -540,7 +540,7 @@ async def test_live_user_case_4_dependency_update():
 
 @pytest.mark.asyncio
 async def test_live_user_case_5_file_conversion():
-    """Case 5: File Conversion — Create mission, verify it creates."""
+    """Case 5 (File Conversion): Create mission, verify it creates."""
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
         json={"query": "Find all PNG images in Assets and convert them to WebP.", "model": "qwen2.5-coder:7b"},
@@ -553,7 +553,7 @@ async def test_live_user_case_5_file_conversion():
 
 @pytest.mark.asyncio
 async def test_live_user_case_6_system_health():
-    """Case 6: System Health — Create mission, verify it creates and completes."""
+    """Case 6 (System Health): Create mission, verify it creates and completes."""
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
         json={"query": "Check system health and report on all services.", "model": "qwen2.5-coder:7b"},
@@ -568,7 +568,7 @@ async def test_live_user_case_6_system_health():
 
 @pytest.mark.asyncio
 async def test_live_user_case_7_error_recovery():
-    """Case 7: Error Recovery — Create mission, verify it creates."""
+    """Case 7 (Error Recovery): Create mission, verify it creates."""
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
         json={"query": "Fix the broken API endpoint in main.py.", "model": "qwen2.5-coder:7b"},
@@ -581,7 +581,7 @@ async def test_live_user_case_7_error_recovery():
 
 @pytest.mark.asyncio
 async def test_live_user_case_8_context_investigation():
-    """Case 8: Context Investigation — Create mission, verify it creates."""
+    """Case 8 (Context Investigation): Create mission, verify it creates."""
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
         json={"query": "Investigate why Home Assistant devices are not showing up.", "model": "qwen2.5-coder:7b"},
@@ -594,7 +594,7 @@ async def test_live_user_case_8_context_investigation():
 
 @pytest.mark.asyncio
 async def test_live_user_case_9_multistep_refactoring():
-    """Case 9: Multi-Step Refactoring — Create mission, verify it creates."""
+    """Case 9 (Multi-Step Refactoring): Create mission, verify it creates."""
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
         json={"query": "Refactor the gateway handlers to use async properly.", "model": "qwen2.5-coder:7b"},
@@ -607,7 +607,7 @@ async def test_live_user_case_9_multistep_refactoring():
 
 @pytest.mark.asyncio
 async def test_live_user_case_10_infrastructure_repair():
-    """Case 10: Infrastructure Repair — Create mission, verify it creates."""
+    """Case 10 (Infrastructure Repair): Create mission, verify it creates."""
     resp = httpx.post(
         f"{GATEWAY_URL}/api/raven/missions",
         json={"query": "The gateway service is down, restart it and verify.", "model": "qwen2.5-coder:7b"},
@@ -619,7 +619,7 @@ async def test_live_user_case_10_infrastructure_repair():
 
 
 # ============================================================================
-# EDGE CASE: JSON Parse Robustness
+# EDGE CASE: JSON Parse Tolerance
 # ============================================================================
 
 def test_extract_action_json_with_real_llm_format():

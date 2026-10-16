@@ -24,7 +24,7 @@ interface Props {
   /**
    * Ring diameter in px. The Health page uses the default; the dashboard widget
    * passes a smaller one so the same component serves both. Sizing here rather
-   * than in a second ring implementation is deliberate — the two surfaces must
+   * than in a second ring implementation is deliberate; the two surfaces must
    * not be able to drift apart.
    */
   size?: number;

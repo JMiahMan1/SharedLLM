@@ -2,11 +2,11 @@
 
 Progressive, fully offline (no gateway/LLM required):
 
-1. SEED  — start with a few tiny, basic commands and record which succeed.
-2. LEARN — the successful commands become the "proven" set Raven can reuse.
-3. CHAIN — string the proven commands into one batched JSON array and verify the
+1. SEED: start with a few tiny, basic commands and record which succeed.
+2. LEARN: the successful commands become the "proven" set Raven can reuse.
+3. CHAIN: string the proven commands into one batched JSON array and verify the
    parser preserves them as an executable sequence (one reasoning cycle).
-4. DRIVE — verify the agent loop's queue replays the whole chain from a single
+4. DRIVE: verify the agent loop's queue replays the whole chain from a single
    inference (every queued step runs with skip_inference=True).
 
 This is the mechanism behind the user's ask: Raven should reuse commands it has
@@ -20,7 +20,7 @@ import json
 
 from services.gateway.agent_loop import _next_batch_step, extract_action_batch
 
-# A small library of basic commands Raven "learns" — each is tiny and proven.
+# A small library of basic commands Raven "learns"; each is tiny and proven.
 SEED_COMMANDS = [
     {"@type": "WorkspaceShellRequest", "command": "echo hello", "workspace_id": "ws"},
     {"@type": "WorkspaceShellRequest", "command": "ruff check .", "workspace_id": "ws"},
@@ -91,7 +91,7 @@ def test_seed_and_chain_drives_single_inference():
 
     assert [_sig(e) for e in executed] == learned_sigs
     # The batch is produced by a single inference, then replayed with no further
-    # LLM calls — that is the whole point of proven-command chaining.
+    # LLM calls; that is the whole point of proven-command chaining.
     assert inferences == 1
 
 

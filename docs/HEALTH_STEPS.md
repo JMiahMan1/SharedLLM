@@ -2,21 +2,23 @@
 
 ## Capture chain
 
-1. **Native pedometer** — `StepCounterPlugin.java` (Android `TYPE_STEP_COUNTER`
+1. **Native pedometer.** `StepCounterPlugin.java` (Android `TYPE_STEP_COUNTER`
    sensor, `ACTIVITY_RECOGNITION` permission) tracks steps since midnight,
    handling midnight rollover and reboots. Exposed to JS by
    `services/ui/src/plugins/stepCounter.ts` (`isAvailable`, `getTodaySteps`,
-   `startPolling`, `stepUpdate`). On web the plugin reports unavailable and
-   never fabricates a count.
-2. **Client sync** — `context/LocationContext.tsx` posts
-   `POST /api/geo/steps` (`{user_id, steps, timestamp}`) on a single 30 s
-   cadence (`ensureStepSyncTimer`). Daily steps are also piggybacked on
-   location updates, and a midnight timer re-baselines the count.
-3. **Geo storage** — `services/geo/main.py` writes a Redis hash
-   `geo:steps:{user}` (field = local day, value = max seen) with
-   `APP_TIMEZONE` day boundaries. Reads are cut to the requested window
-   (`days=N` returns only the last N local days, however sparse).
-4. **Health reports** — the telemetry service's scheduled `health` reports
+   `getDayHistory`, `getDaysSince`, `startPolling`, `stepUpdate`). On web the
+   plugin reports unavailable and never fabricates a count.
+2. **Client sync.** `context/LocationContext.tsx` posts
+   `POST /api/geo/steps` (`{user_id, steps, timestamp}` plus the phone's
+   timezone) on a single 30 s cadence (`ensureStepSyncTimer`). Daily steps are
+   also piggybacked on location updates, and a midnight timer re-baselines the
+   count.
+3. **Geo storage.** `services/geo/main.py` writes a Redis hash
+   `geo:steps:{user}` (field = local day, value = max seen). The day is taken in
+   the timezone the phone reports, falling back to `APP_TIMEZONE` when none
+   valid is sent. Reads are cut to the requested window (`days=N`, at most 30,
+   returns only the last N local days, however sparse).
+4. **Health reports.** The telemetry service's scheduled `health` reports
    read `/steps` and `/workouts`; only workouts that started inside the
    report's window count. No schedules existed on the server on 2026-10-15
    (Settings → Reports creates them).
@@ -25,12 +27,14 @@
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/geo/steps` | ingest a pedometer reading (validated 0–200000) |
-| `GET /api/geo/steps?days=N` | `{daily_steps, today, goal}` |
+| `POST /api/geo/steps` | ingest a pedometer reading (validated 0-200000) |
+| `GET /api/geo/steps?days=N` | `{daily_steps, today, goal, sources}` (N up to 30) |
+| `GET /api/geo/steps/sources?days=N` | per-device history `{source: {day: steps}}` (`hourly=true` for hours) |
+| `GET /api/geo/steps/ranges?range=D\|W\|M\|3M\|Y` | pre-aggregated history for longer ranges |
 | `GET /api/geo/steps/goal` | per-user daily goal |
-| `PUT /api/geo/steps/goal` | set the goal (1000–100000) |
+| `PUT /api/geo/steps/goal` | set the goal (1000-100000) |
 | `GET /api/geo/workouts`, `POST /workouts/start`, `GET /workouts/active`, `POST /workouts/stop`, `GET /workouts/{id}/route` | workout sessions and routes |
-| `GET /api/geo/activity/summary?window=today\|week\|month` | your own activity totals for a window |
+| `GET /api/geo/activity/summary?window=today\|week\|month\|all` | your own activity totals for a window |
 | `GET /api/geo/activity/feed?window=…` | opt-in activity of people who share with you |
 | `GET/PUT /api/users/me/activity-sharing` | private-by-default sharing settings (audience + scopes) |
 
@@ -40,15 +44,15 @@ The goal is stored as `geo:steps_goal:{user}`; the default remains 10,000.
 
 | Surface | File | Notes |
 |---|---|---|
-| **Health page** | `pages/Health.tsx` | ring + 7-day bars, goal editor, achievements, opt-in AI trends, workout start/stop + history. Reached at `/fitness` (sidebar + mobile bottom bar) — `/health` is reserved for service health checks. |
-| Wander | `pages/Wander.tsx` | family presence, places and trips only — steps/workouts moved to Health |
+| **Health page** | `pages/Health.tsx` | ring + 7-day bars, goal editor, achievements, opt-in AI trends, workout start/stop + history. Reached at `/fitness` (sidebar + mobile bottom bar); `/health` is reserved for service health checks. |
+| Wander | `pages/Wander.tsx` | family presence, places and trips only; steps/workouts moved to Health |
 | Dashboard Health widget | `components/widgets/HealthActivityWidget.tsx` | today + 7-day average, best day, estimated miles; all values real; tapping opens `/fitness` |
 | Android home-screen widget | `android/.../widgets/HealthWidget.java` | today, progress, 7-day average; tints from the active theme |
-| Settings → Sensors | `pages/Settings.tsx` | enable/disable step + location sensors |
+| Settings → Sensors & Privacy | `pages/Settings.tsx` | enable/disable step + location sensors |
 
 Widget tiles are derived from real data only: **7-day average**, **best day**,
 and **estimated miles** (steps × 0.7 m stride, labelled "est."). Stairs/active
-minutes/calories are deliberately *not* shown — there is no data source, and
+minutes/calories are deliberately *not* shown: there is no data source, and
 inventing numbers would make the dashboard disagree with Wander.
 
 ## Family activity feed
@@ -57,7 +61,7 @@ Sharing is opt-in and private by default: Settings → *Activity sharing*
 (`components/settings/ActivitySharingPanel.tsx`) picks an audience (everyone in
 the circle, or specific people) and scopes (*totals*, *workouts*,
 *achievements*). Identity stores the row (`UserActivitySharing`); geo enforces
-it when serving `GET /activity/summary` (your own data — never requires
+it when serving `GET /activity/summary` (your own data never requires
 sharing) and `GET /activity/feed` (only enabled rows whose audience includes
 the viewer; each entry is projected down to the scopes that person chose, and
 an empty feed is a normal empty list, never an error).
@@ -70,31 +74,34 @@ scopes shown (`data-testid="family-activity-card"`, `feed-window-*`,
 
 ## Navigation
 
-The split also unloaded the mobile bottom bar. It now pins five destinations —
-Home, Wander, Family, Media, Health — plus a **More** button that opens a
-bottom sheet with Calendar, Notes, Lab (admins) and Settings
-(`components/layout/BottomNav.tsx`, `data-testid="more-sheet"`). The sheet
-closes on selection, backdrop tap or Escape.
+The mobile bottom bar pins five destinations (Home, Wander, Family, Media,
+Health) plus a **More** button that opens a bottom sheet with every other page
+the user may open (Bible, Notes, Calendar, Workspaces, Knowledge, Docs,
+Settings, and Lab and Admin for admins). The pinned set comes from
+`pinnedOnMobile` in `components/layout/navItems.ts`; the sheet is in
+`components/layout/BottomNav.tsx` (`data-testid="more-sheet"`) and closes on
+selection, backdrop tap or Escape.
 
 ## Known gaps
 
 - **Background step sync rides on location sharing.** With Steps on, the
   app starts `LocationTrackingService` with `steps: true`; on start and on
-  every heartbeat (5 min, ~10 min in Doze) it takes one pedometer reading
+  every heartbeat (5 min, about 10 min in Doze) it takes one pedometer reading
   through `StepCounterPlugin.recordReading` (same ledger and day/hour rules
   as the app) and sends the day's count as `daily_steps` with its location
-  uploads — only when the reading and the fix are from the same local day.
+  uploads, only when the reading and the fix are from the same local day.
   Steps keep syncing with the app closed, and the regular readings keep the
   midnight credit window satisfied. With location sharing off, steps still
   sync only while the app runs.
 - Distance is an estimate from stride length, not GPS.
-- Health Connect (`ACTIVITY_RECOGNITION` runtime grant) is still pending.
+- Health Connect is not integrated yet (`health_connect` is only reserved as a
+  step source name).
 
 ## Tests
 
-- `services/geo/tests` — steps storage, workouts
-- `services/ui/src/test/HealthAnalysisOptIn.test.tsx` — analysis stays opt-in on the Health page
-- `services/ui/src/test/BottomNav.test.tsx` — pinned tabs + More sheet
+- `services/geo/tests`: steps storage, workouts
+- `services/ui/src/test/HealthAnalysisOptIn.test.tsx`: analysis stays opt-in on the Health page
+- `services/ui/src/test/BottomNav.test.tsx`: pinned tabs + More sheet
 - Typecheck/lint cover the widget metric math
 
 ## Midnight rollover (and the inflated-count bug)
@@ -102,36 +109,43 @@ closes on selection, backdrop tap or Escape.
 Android's `TYPE_STEP_COUNTER` only reports **steps since boot**, so every
 "today" number is app arithmetic. Two rules matter:
 
-**Plugin (`StepCounterPlugin.computeTodaySteps`).** When the local date changes,
-the delta since the previous reading is credited to the new day **only if the
-previous reading was within the last hour** (`MIDNIGHT_CREDIT_WINDOW_MS`).
-That covers the normal case (a reading just before midnight and one just after,
-e.g. overnight) while refusing to attribute a long gap to today. The new day's
-total is **only that delta** — never the previous day's accumulated
+**Plugin (`StepDayAccumulator.accumulate`, called from
+`StepCounterPlugin.recordReading`).** When the local date changes, the delta
+since the previous reading is credited to the new day **only if the previous
+reading was within the last hour** (`MIDNIGHT_CREDIT_WINDOW_MS`). That covers
+the normal case (a reading just before midnight and one just after, e.g.
+overnight) while refusing to attribute a long gap to today. The new day's
+total is **only that delta**, never the previous day's accumulated
 `day_steps` added on top (a `+=` here once carried a full 10,000-step day into
 the next morning whenever the app stayed awake across midnight; fixed in the
 1.4.12 build). In-flight installs are repaired once by a `prefs_version`
-migration that recognizes the buggy signature (`day_steps` ≥ yesterday's
-ledger row by a small margin) and subtracts yesterday back out, rewriting both
-prefs and the ledger row via `StepLedger.replaceDay`.
+migration that recognizes the buggy signature (`day_steps` above yesterday's
+ledger row by less than 1,000) and subtracts yesterday back out of the stored
+`day_steps`. The migration does not rewrite the ledger row:
+`StepLedger.replaceDay` exists for that, but nothing calls it, and
+`recordDay` keeps the larger value.
 
 Before this rule, the delta was *always* credited to the new day. If the app
 went a whole day without a reading (app never opened, so the plugin never
-polled), every step from that missing day landed on today — which is exactly
+polled), every step from that missing day landed on today, which is exactly
 the "it didn't reset at midnight" report: a missing 2026-09-25 bucket and an
 inflated 2026-09-26 total. Steps taken during a long gap are now dropped rather
-than misattributed; the location service's regular readings (see gaps) now keep that window met while sharing is on.
+than misattributed; the location service's regular readings (see Known gaps)
+keep that window met while sharing is on.
 
 **Server (`_record_daily_steps`).** The day is derived from the reading's own
 `timestamp` (not arrival time), and each day keeps the **max** value seen, so a
 late-arriving post cannot seed a new day and a reboot (counter drops) cannot
-reduce a recorded day. `services/geo/tests/test_steps.py` pins all of this.
+reduce a recorded day. The zone each day was filed under is kept
+(`geo:steps_tz:{user}:{source}`), so a day first bucketed in the wrong zone can
+be re-filed even though the max rule would otherwise block a lower value.
+`services/geo/tests/test_steps.py` pins all of this.
 
 ## Device ledger (source of truth) and multi-source fusion
 
 **On-device ledger.** `StepLedger.java` keeps a tiny SQLite database
 (`step_ledger.db`): one row per day per source plus a small anchor table. It is
-the source of truth for days the app never got to sync — the day rollup is
+the source of truth for days the app never got to sync: the day rollup is
 persisted on every reading, so history survives reboots (the raw
 `TYPE_STEP_COUNTER` resets on boot), app kills and days when the app never
 opened. The plugin exposes it as `getDayHistory` / `getDaysSince`, and

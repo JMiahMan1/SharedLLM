@@ -90,7 +90,7 @@ def test_the_catalogue_never_hands_a_reader_a_command(loaded_client: TestClient)
         assert "import_" not in note
 
 
-# ── reading ─────────────────────────────────────────────────────────────────
+# reading
 
 
 def test_read_a_passage(loaded_client: TestClient):
@@ -169,7 +169,7 @@ def test_verse_of_day_rejects_an_unknown_scope(loaded_client: TestClient):
     assert loaded_client.get("/verse-of-day", params={"scope": "apocrypha"}).status_code == 422
 
 
-# ── reading state ───────────────────────────────────────────────────────────
+# reading state
 
 
 def test_state_starts_at_defaults(loaded_client: TestClient):
@@ -262,7 +262,7 @@ def test_state_rejects_out_of_range_typography(loaded_client: TestClient):
     assert loaded_client.put("/state", params={"username": "sam"}, json={"font_scale": 9}).status_code == 422
 
 
-# ── events, marks, stats ────────────────────────────────────────────────────
+# events, marks, stats
 
 
 def test_an_event_is_recorded(loaded_client: TestClient):
@@ -307,7 +307,7 @@ def test_a_note_pointer_is_a_mark_of_its_own(loaded_client: TestClient):
             "version_code": "kjv",
             "kind": "note",
             "note_path": "Bible/John 3_16.md",
-            "note_preview": "John 3:16 — For God so loved the world",
+            "note_preview": "John 3:16: For God so loved the world",
         },
     )
     assert response.status_code == 200, response.text
@@ -382,7 +382,7 @@ def test_streaks_are_reported_separately_from_reading(loaded_client: TestClient)
     assert body["read_streak_current"] == 1
 
 
-# ── achievements ────────────────────────────────────────────────────────────
+# achievements
 
 
 def test_achievements_are_earned_and_banked_once(loaded_client: TestClient):
@@ -424,7 +424,7 @@ def test_no_family_chat_token_means_no_chat_card(loaded_client: TestClient, monk
     assert "FAMILY_CHAT_TOKEN" in announced["status"]
 
 
-# ── family sharing ──────────────────────────────────────────────────────────
+# family sharing
 
 
 def test_reading_your_own_activity_needs_no_consent(loaded_client: TestClient):
@@ -489,7 +489,7 @@ async def _nobody():
     return []
 
 
-# ── blb deep links ──────────────────────────────────────────────────────────
+# blb deep links
 
 
 def test_blb_link_for_a_verse(monkeypatch):
@@ -519,7 +519,7 @@ def test_blb_link_rejects_a_bad_reference(monkeypatch):
         bible_main.blb_link("Notabook 1:1")
 
 
-# ── daily card ──────────────────────────────────────────────────────────────
+# daily card
 
 
 def test_daily_is_one_call_for_the_widget(loaded_client: TestClient):

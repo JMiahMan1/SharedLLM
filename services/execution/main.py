@@ -178,11 +178,11 @@ async def resolve_internal_user(user_id: int | None = None, rag_user: str | None
 
 
 async def resolve_first_user() -> dict[str, Any] | None:
-    """Resolve the first (ID=1) user in the system — the system default.
+    """Resolve the first (ID=1) user in the system (the system default).
 
     Only for system-level callers that have no user of their own (background
     workers, discovery sweeps). Never use it to fill in a missing credential for
-    a *named* user — that would silently borrow another person's services.
+    a *named* user; that would silently borrow another person's services.
     """
     return await resolve_internal_user(user_id=1)
 
@@ -218,8 +218,7 @@ async def _check_internal_secret(x_internal_secret: str | None):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
-# ─── App ───────────────────────────────────────────────────────────────────────
-
+# App
 async def telemetry_ingestion_loop(interval_seconds: int = 60):
     """Background task: periodically read each enrolled power/energy entity's
     current HA state and ingest it as a telemetry snapshot, so the Energy
@@ -328,7 +327,7 @@ def _kokoro_model_files() -> list[tuple[str, str]]:
 
     One list for both the startup fetch and the download route. They drifted
     once already, and the file that fell out of both was the phoneme vocabulary
-    pykokoro 0.10 made mandatory — so a download that reported success left an
+    pykokoro 0.10 made mandatory, so a download that reported success left an
     engine that could not load.
     """
     from services.execution.tts import KOKORO_CONFIG_FILENAME
@@ -677,7 +676,7 @@ def create_media_server_app():
                 headers={"Accept-Ranges": "bytes"},
             )
 
-        # Video files from disk (.mp4) — FileResponse handles Range automatically
+        # Video files from disk (.mp4); FileResponse handles Range automatically
         mp4_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
         if os.path.exists(mp4_path):
             return FileResponse(
@@ -691,7 +690,7 @@ def create_media_server_app():
 
         # Progressive download: serve .mp4.part files while download is in progress.
         # Kept intentionally (progressive playback must not wait for the full
-        # download) — now gated behind the signed media token like everything else.
+        # download); it is now gated behind the signed media token like everything else.
         part_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4.part")
         if os.path.exists(part_path):
             return FileResponse(
@@ -837,13 +836,12 @@ from services.execution.entity_access import (  # noqa: E402
 
 
 def _ensure_ha_creds(ctx: UserContext) -> None:
-    """BUG-02: media commands require explicit HA creds — never fall back to another user's."""
+    """BUG-02: media commands require explicit HA creds; never fall back to another user's."""
     if not ctx.ha_url or not ctx.ha_token:
         raise HTTPException(status_code=400, detail="Missing Home Assistant credentials in user_context")
 
 
-# ─── Domain Endpoints ──────────────────────────────────────────────────────────
-
+# Domain Endpoints
 @app.post("/execute/light", response_model=ExecutionResult)
 async def execute_light(req: LightControlRequest):
     if not await verify_entity_access(req.user_context, req.entity_id):
@@ -884,7 +882,7 @@ async def execute_media_resolve_stream(req: ResolveStreamRequest):
     if not video_url:
         return ExecutionResult(status="FAILURE", message="Could not find stream on YouTube", service="resolve_stream")
 
-    # Step 2: Extract a direct, in-memory audio stream URL — no download needed
+    # Step 2: Extract a direct, in-memory audio stream URL; no download needed
     stream_url, title = await video_handler.extract_audio_stream_url(video_url)
     if not stream_url:
         log.warning(f"[media/resolve_stream] Audio URL extraction failed for '{video_url}', falling back to progressive download")
@@ -1160,8 +1158,7 @@ async def execute_trigger(payload: dict[str, Any]):
         return _ok(f"Triggered {timer_data.get('title')} but alert failed: {e}", "automation_trigger")
 
 
-# ─── Ouroboros Autonomous Loop Endpoints ──────────────────────────────────────────────────
-
+# Ouroboros Autonomous Loop Endpoints
 @app.post("/execute/docker_logs")
 async def execute_docker_logs(req: DockerLogsRequest):
     """
@@ -1641,8 +1638,7 @@ async def execute_index_capabilities():
         return _fail(f"Subprocess error: {e!s}", "capability_indexer")
 
 
-# ─── Infrastructure Endpoints ────────────────────────────────────────────────────────
-
+# Infrastructure Endpoints
 @app.get("/execute/tts/voices")
 async def list_tts_voices():
     """List available voices for the active TTS engine."""
@@ -2258,7 +2254,7 @@ async def discovery_profile_all(subnet: str | None = None, ha_url: str = "", ha_
 @app.post("/discovery/network_scan", response_model=ExecutionResult)
 async def discovery_network_scan(req: NetworkDeviceScanRequest):
     """
-    Comprehensive network scan for smart TVs and media devices.
+    Network scan for smart TVs and media devices.
     Auto-detects local subnet if not specified.
     """
     from services.execution.handlers.network_scan import scan_network
@@ -2322,10 +2318,10 @@ async def health():
     if not identity_ok["healthy"]:
         overall_status = "unhealthy"
 
-    # Check RAG Service — bounded SHORT timeout and NO retry. RAG is the service
+    # Check RAG Service with a bounded SHORT timeout and NO retry. RAG is the service
     # the Raven worker hammers hardest, so under worker load its /health can lag.
     # If this sub-check inherited the default 3s timeout + retries, a slow RAG
-    # would make *this* service's /health endpoint itself time out — which then
+    # would make *this* service's /health endpoint itself time out, which then
     # cascades into the gateway marking Execution UNREACHABLE (a false alarm that
     # flips the whole gateway to DEGRADED). A degraded RAG only downgrades
     # Execution to "degraded"; it must never block Execution's own health probe.
@@ -2487,7 +2483,7 @@ async def _load_mass_ha_creds(user_id: str) -> dict[str, Any]:
     HA's `music_assistant.*` services when `ha_url`/`ha_token` are. The MA config
     entry id (needed by the HA path) is discovered from HA when it is missing.
 
-    Raises ServiceNotConfiguredError when the user has neither pair — callers
+    Raises ServiceNotConfiguredError when the user has neither pair; callers
     surface that instead of borrowing someone else's.
     """
     creds = await resolve_internal_user(rag_user=user_id)
@@ -2715,7 +2711,7 @@ async def get_ma_library(user_id: str = "", media_type: str = "TRACKS", offset: 
 
 @app.get("/execute/media/music-assistant/search")
 async def search_ma(user_id: str = "", query: str = "", media_type: str = "", limit: int = 20, artist: str = "", album: str = "", library_only: bool = True):
-    """Search MA for media items — prefer the direct MA token API, fall back to HA proxy."""
+    """Search MA for media items: prefer the direct MA token API, fall back to HA proxy."""
     try:
         creds = await _resolve_mass_ha_creds(user_id)
         mass_url = creds.get("mass_url") or ""
@@ -2725,7 +2721,7 @@ async def search_ma(user_id: str = "", query: str = "", media_type: str = "", li
         # This is authoritative: the MA token search uses config.providers=["library"]
         # and is the only reliable path (the HA music_assistant.search service and the
         # MA REST /api endpoint are unreliable in MA 2.9.x). Return its results directly,
-        # including an empty list when there are no matches — do NOT fall through to HA
+        # including an empty list when there are no matches. Do NOT fall through to HA
         # on an empty result, which previously produced spurious FAILURE responses.
         if mass_url and mass_token:
             from services.execution.handlers.mass_client import search as _direct_search
@@ -2934,8 +2930,7 @@ async def execute_ha_config(req: "HAConfigRequest"):
     return await ha_config_handler.handle_ha_config(req.model_dump())
 
 
-# ─── Device & Light Grouping (Section 3.14) ───────────────────────────────────
-
+# Device & Light Grouping (Section 3.14)
 @app.post("/execute/groups/media", response_model=ExecutionResult)
 async def execute_media_group(req: MediaGroupRequest):
     """Manage media device groups."""
@@ -2959,8 +2954,7 @@ async def execute_light_pattern(req: LightPatternRequest):
     return await groups.handle_light_pattern(req, req.user_context or UserContext(user=""))
 
 
-# ─── Presence Detection (Section 3.8) ─────────────────────────────────────────
-
+# Presence Detection (Section 3.8)
 @app.get("/execute/presence/{user_id}")
 async def get_user_presence(user_id: str, x_internal_secret: str = Header(None)):
     """Get current presence data for a user from Redis."""
@@ -3032,8 +3026,7 @@ async def execute_location(req: dict, x_internal_secret: str = Header(None)):
     return await handle_location(parsed)
 
 
-# ─── Speech-to-Text (Section 3.9) ─────────────────────────────────────────────
-
+# Speech-to-Text (Section 3.9)
 @app.post("/execute/stt/transcribe")
 async def transcribe_audio(file: UploadFile = File(...), model: str = "base", language: str = "en"):
     """Transcribe audio file using Whisper STT."""
@@ -3266,8 +3259,7 @@ async def execute_audiobook_regenerate(req: AudiobookRegenerateRequest):
     )
 
 
-# ─── Voice Command Routing ────────────────────────────────────────────────────
-
+# Voice Command Routing
 @app.post("/execute/voice/command")
 async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)):
     """Route voice command transcript to appropriate handler."""
@@ -3337,7 +3329,7 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
             return await media.handle_media_transport(media_req)
 
 
-# ─── Skylight Integration Proxy ────────────────────────────────────────────────
+# Skylight Integration Proxy
 # Skylight has no official/public API. We talk to the same private app API
 # (app.ourskylight.com) the community has reverse-engineered. Authentication is
 # OAuth2 Authorization-Code + PKCE (the legacy /api/sessions email/password login
@@ -3724,7 +3716,7 @@ def _skylight_chore_ids(chore_id: str) -> tuple[str, str, str | None]:
 
 
 async def _skylight_setting(key: str) -> str:
-    """Read one Identity setting. Empty string when absent — callers decide
+    """Read one Identity setting. Empty string when absent; callers decide
     whether that is fatal (for the stars path it is)."""
     try:
         from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET
@@ -3752,14 +3744,14 @@ async def push_skylight_stars(
 
     The private API path is configuration, not a guess: set
     `skylight_stars_path` (e.g. "/rewards") in Identity settings. Without it
-    this returns a clear failure instead of posting to a URL we invented —
+    this returns a clear failure instead of posting to a URL we invented;
     a silently-wrong path would look like a grant that never lands.
     """
     path = await _skylight_setting("skylight_stars_path")
     if not path:
         return {
             "status": "FAILURE",
-            "message": "skylight_stars_path is not configured — set it in Settings to the frames path that awards stars",
+            "message": "skylight_stars_path is not configured. Set it in Settings to the frames path that awards stars",
         }
     if not path.startswith("/"):
         return {"status": "FAILURE", "message": f"skylight_stars_path must start with '/': {path!r}"}

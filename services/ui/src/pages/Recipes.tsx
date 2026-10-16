@@ -29,7 +29,7 @@ function notesOf(response: ExecutionResponse | undefined): RecipeSummary[] {
  * The same notes storage the rest of the house uses means one backup, one sync
  * and one mobile app. Because notes resolve to the caller's own account, an
  * admin can switch to the Admin identity with the shared "Send as" control to
- * keep one house cookbook — and every other member keeps their own.
+ * keep one house cookbook, and every other member keeps their own.
  */
 export default function Recipes() {
   const queryClient = useQueryClient();
@@ -127,7 +127,7 @@ export default function Recipes() {
           )}
         </div>
         <p className="text-xs text-slate-400">
-          Saved in Nextcloud under <code className="text-slate-300">{RECIPES_DIR}/</code> — yours, or the house account
+          Saved in Nextcloud under <code className="text-slate-300">{RECIPES_DIR}/</code>: yours, or the house account
           when an admin switches.
         </p>
         {isAdmin && <SendAsSelector value={sendAs} onChange={(next) => { startNew(); setSendAs(next); }} />}
@@ -138,7 +138,7 @@ export default function Recipes() {
           {isLoading && <p className="text-xs text-slate-500">Loading recipes…</p>}
           {!isLoading && recipes.length === 0 && (
             <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
-              No recipes yet — add the first one on the right.
+              No recipes yet. Add the first one on the right.
             </p>
           )}
           {recipes.map((recipe) => (

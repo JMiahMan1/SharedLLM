@@ -1,5 +1,5 @@
 /**
- * Comprehensive Recursive E2E Crawler Test
+ * Full Recursive E2E Crawler Test
  *
  * Dynamically traverses every clickable element starting from the Dashboard,
  * validates resulting UI states, and reports findings. Designed for a React
@@ -28,8 +28,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ─── Configuration ───────────────────────────────────────────────────────────
-
+// Configuration
 const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 const MAX_DEPTH = 3;
 const CRAWL_TIMEOUT_MS = 8000;
@@ -67,7 +66,7 @@ try {
   // Credentials are optional at collection time; tests skip in describe.
 }
 
-// Routes we consider "top-level pages" — used for context-aware validation
+// Routes we consider "top-level pages", used for context-aware validation
 const KNOWN_ROUTES: Record<string, { titlePattern: RegExp; headingPattern: RegExp }> = {
   '/': { titlePattern: /Jarvis Dashboard/, headingPattern: /Jarvis Dashboard/i },
   '/admin': { titlePattern: /Jarvis OS/, headingPattern: /System Operations/i },
@@ -80,8 +79,7 @@ const KNOWN_ROUTES: Record<string, { titlePattern: RegExp; headingPattern: RegEx
   '/media': { titlePattern: /Jarvis OS/, headingPattern: /Music/i },
 };
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
+// Types
 interface CrawlError {
   url: string;
   elementDescription: string;
@@ -107,8 +105,7 @@ interface ClickContext {
   elementHref?: string;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
+// Helpers
 async function loginAsDefault(page: Page): Promise<void> {
   await page.goto(`${UI_URL}/login`);
 
@@ -262,8 +259,7 @@ async function safeClick(locator: Locator, description: string): Promise<boolean
   }
 }
 
-// ─── Crawler Core ────────────────────────────────────────────────────────────
-
+// Crawler Core
 /**
  * Helper to wait for React to render content (not just network idle).
  * React SPAs may have network idle before components are mounted.
@@ -583,11 +579,11 @@ async function crawlPage(
       await test.step(`  Element: "${description}" (${tag}${role ? ` [${role}]` : ''})`, async () => {
         report.totalClicks++;
 
-        // ── Pre-click validation ──────────────────────────────────────────
+        // Pre-click validation
         const { clickable } = await isClickable(locator);
         if (!clickable) {
           report.elementMetadata.push({ text, tag, url: currentUrl, role: role || undefined });
-          return; // skip — not interactable
+          return; // skip: not interactable
         }
 
         const inViewport = await isInViewport(locator);
@@ -604,11 +600,11 @@ async function crawlPage(
         // Record metadata for reporting
         report.elementMetadata.push({ text, tag, url: currentUrl, role: role || undefined });
 
-        // ── Capture pre-click state ───────────────────────────────────────
+        // Capture pre-click state
         const beforeUrl = page.url();
         const beforeTitle = await page.title();
 
-        // ── Click ─────────────────────────────────────────────────────────
+        // Click
         const clicked = await safeClick(locator, description);
         if (!clicked) {
           report.errors.push({
@@ -621,13 +617,13 @@ async function crawlPage(
           return;
         }
 
-        // ── Wait for state to settle ──────────────────────────────────────
+        // Wait for state to settle
         await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
         await page.waitForTimeout(1500);
         await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
         await page.waitForTimeout(500);
 
-        // ── Validate post-click state ─────────────────────────────────────
+        // Validate post-click state
         const validationResult = await validatePostClick(page, { elementText: text, elementTag: tag, elementRole: role }, beforeUrl);
 
         if (validationResult.status === 'error') {
@@ -659,13 +655,13 @@ async function crawlPage(
           }
         }
 
-        // ── Attempt to revert to parent ───────────────────────────────────
+        // Attempt to revert to parent
         await test.step(`  Reverting to parent: ${beforeTitle}`, async () => {
           await revertToParent(page, beforeUrl);
           await page.waitForTimeout(500);
         });
 
-        // ── If we navigated to a new page, recursively crawl it ───────────
+        // If we navigated to a new page, recursively crawl it
         if (validationResult.isNavigation && depth < MAX_DEPTH) {
           // Only recurse for pages that are different from current (not a toggle)
           await test.step(`  Recursing into: ${validationResult.isNewUrl}`, async () => {
@@ -677,11 +673,10 @@ async function crawlPage(
   });
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
+// Tests
 test.describe('@live E2E Recursive UI Crawler', () => {
   test.skip(!LOGIN_USER || !LOGIN_PASS, 'Credentials not found. Create a .env.test file with TEST_USER and TEST_PASS.');
-  test('@live comprehensive crawl from Dashboard', async ({ page }) => {
+  test('@live full crawl from Dashboard', async ({ page }) => {
     // Validate credentials are provided
     if (!LOGIN_USER || !LOGIN_PASS) {
       throw new Error('Credentials not found. Create a .env.test file with TEST_USER and TEST_PASS variables.');
@@ -697,9 +692,9 @@ test.describe('@live E2E Recursive UI Crawler', () => {
       errors.push(err.message);
     });
 
-    console.log('[CRAWLER] Starting comprehensive E2E crawl...');
+    console.log('[CRAWLER] Starting full E2E crawl...');
 
-    // ── Step 1: Login ───────────────────────────────────────────────────────
+    // Step 1: Login
     await test.step('Login with default credentials', async () => {
       await loginAsDefault(page);
       await page.waitForLoadState('networkidle', { timeout: NAV_TIMEOUT_MS }).catch(() => {});
@@ -709,7 +704,7 @@ test.describe('@live E2E Recursive UI Crawler', () => {
       await page.waitForTimeout(1000);
     });
 
-    // ── Step 2: Navigate to Dashboard ───────────────────────────────────────
+    // Step 2: Navigate to Dashboard
     await test.step('Navigate to Dashboard (root)', async () => {
       await page.goto(`${UI_URL}/`, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS }).catch(() => {});
       await page.waitForLoadState('networkidle', { timeout: NAV_TIMEOUT_MS }).catch(() => {});
@@ -717,7 +712,7 @@ test.describe('@live E2E Recursive UI Crawler', () => {
       await page.waitForTimeout(1000);
     });
 
-    // ── Step 3: Verify Dashboard loaded correctly ──────────────────────────
+    // Step 3: Verify Dashboard loaded correctly
     await test.step('Verify Dashboard loaded', async () => {
       const title = await page.title();
       expect(title).toMatch(/Jarvis/i, 'Page title should contain "Jarvis"');
@@ -736,7 +731,7 @@ test.describe('@live E2E Recursive UI Crawler', () => {
       }
     });
 
-    // ── Step 4: Validate Dashboard Widgets ──────────────────────────────────
+    // Step 4: Validate Dashboard Widgets
     await test.step('Validate Dashboard Widgets', async () => {
       // Wait for widgets to be fully rendered
       await waitForReactRender(page, NAV_TIMEOUT_MS);
@@ -784,7 +779,7 @@ test.describe('@live E2E Recursive UI Crawler', () => {
       }
     });
 
-    // ── Step 5: Run the recursive crawler ───────────────────────────────────
+    // Step 5: Run the recursive crawler
     const report: CrawlReport = {
       totalClicks: 0,
       successfulClicks: 0,
@@ -799,23 +794,23 @@ test.describe('@live E2E Recursive UI Crawler', () => {
       await crawlPage(page, report, 0, ['Dashboard']);
     });
 
-    // ── Step 5: Report ─────────────────────────────────────────────────────
+    // Step 5: Report
     await test.step('Crawl report', async () => {
-      console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('\n==================================================');
       console.log('  CRAWLER REPORT');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('==================================================');
       console.log(`  Total elements scanned:    ${report.totalClicks}`);
       console.log(`  Successful interactions:     ${report.successfulClicks}`);
       console.log(`  Navigations triggered:       ${report.navigationClicks}`);
       console.log(`  DOM mutations triggered:     ${report.domMutationClicks}`);
       console.log(`  Errors detected:             ${report.errors.length}`);
       console.log(`  Unique URLs visited:         ${report.visitedUrls.size}`);
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      console.log('==================================================\n');
 
       if (report.errors.length > 0) {
         console.log('  ERRORS DETECTED:');
         for (const err of report.errors) {
-          console.log(`    ✗ [${err.errorType}] ${err.elementDescription} on ${err.url} — ${err.error}`);
+          console.log(`    ✗ [${err.errorType}] ${err.elementDescription} on ${err.url}: ${err.error}`);
         }
       }
 
@@ -856,7 +851,7 @@ test.describe('@live E2E Recursive UI Crawler', () => {
       await page.waitForTimeout(2000);
     });
 
-    // ── Collect sidebar nav items ─────────────────────────────────────────
+    // Collect sidebar nav items
     const report: CrawlReport = {
       totalClicks: 0,
       successfulClicks: 0,
@@ -981,11 +976,11 @@ test.describe('@live E2E Recursive UI Crawler', () => {
       }
     });
 
-    // ── Report ────────────────────────────────────────────────────────────
+    // Report
     await test.step('Sidebar navigation report', async () => {
       console.log(`\n  Sidebar: ${report.totalClicks} links scanned, ${report.successfulClicks} navigations, ${report.errors.length} errors`);
       for (const err of report.errors) {
-        console.log(`    ✗ [${err.errorType}] "${err.elementDescription}" — ${err.error}`);
+        console.log(`    ✗ [${err.errorType}] "${err.elementDescription}": ${err.error}`);
       }
 
       expect(report.totalClicks).toBeGreaterThan(0);
@@ -1019,7 +1014,7 @@ test.describe('@live E2E Recursive UI Crawler', () => {
       await page.waitForTimeout(2000);
     });
 
-    // ── Crawl all tabs ──────────────────────────────────────────────────
+    // Crawl all tabs
     await test.step('Crawl Admin tabs (tab-role elements)', async () => {
       // First, click the first tab group to see what tabs are available
       const tabs = page.locator('[role="tab"], button:has-text("Users"), button:has-text("Device"), button:has-text("Telemetry"), button:has-text("Intercom"), button:has-text("Raven"), button:has-text("LLM"), button:has-text("Database")');
@@ -1102,7 +1097,7 @@ test.describe('@live E2E Recursive UI Crawler', () => {
             });
           }
 
-          // Don't revert tabs — they're toggled in place
+          // Don't revert tabs; they're toggled in place
         });
       }
     });
@@ -1110,7 +1105,7 @@ test.describe('@live E2E Recursive UI Crawler', () => {
     await test.step('Tab crawler report', async () => {
       console.log(`\n  Tabs: ${report.totalClicks} scanned, ${report.successfulClicks} successful, ${report.errors.length} errors`);
       for (const err of report.errors) {
-        console.log(`    ✗ [${err.errorType}] "${err.elementDescription}" — ${err.error}`);
+        console.log(`    ✗ [${err.errorType}] "${err.elementDescription}": ${err.error}`);
       }
       expect(report.totalClicks).toBeGreaterThan(0);
     });
@@ -1138,7 +1133,7 @@ test.describe('@live E2E Recursive UI Crawler', () => {
       await page.waitForTimeout(2000);
     });
 
-    // ── Crawl interactive elements that trigger dropdowns/modals ──────────
+    // Crawl interactive elements that trigger dropdowns/modals
     await test.step('Crawl dropdown/modal triggering elements', async () => {
       // Elements with aria-expanded or that trigger popovers
       const dropdownSelectors = [
@@ -1202,11 +1197,11 @@ test.describe('@live E2E Recursive UI Crawler', () => {
                 }
               }
 
-              // Close the dropdown — try Escape first, then click elsewhere
+              // Close the dropdown: try Escape first, then click elsewhere
               await page.keyboard.press('Escape').catch(() => {});
               await page.waitForTimeout(500);
             } else {
-              // Might be a toggle — try clicking again to close
+              // Might be a toggle; try clicking again to close
               if (ariaExpanded === 'false') {
                 await safeClick(locator, description);
                 await page.waitForTimeout(500);
@@ -1220,7 +1215,7 @@ test.describe('@live E2E Recursive UI Crawler', () => {
     await test.step('Dropdown crawler report', async () => {
       console.log(`\n  Dropdowns: ${report.totalClicks} scanned, ${report.successfulClicks} opened, ${report.errors.length} errors`);
       for (const err of report.errors) {
-        console.log(`    ✗ [${err.errorType}] "${err.elementDescription}" — ${err.error}`);
+        console.log(`    ✗ [${err.errorType}] "${err.elementDescription}": ${err.error}`);
       }
       expect(report.totalClicks).toBeGreaterThan(0);
     });

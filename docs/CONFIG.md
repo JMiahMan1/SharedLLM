@@ -11,7 +11,7 @@
 3. **Runtime** (Identity GlobalSettings): everything else. Each service calls
    `resolve_runtime_config()` from its FastAPI `lifespan` at startup, which
    reads `GET {IDENTITY_SVC_URL}/api/settings` and fills the module-level
-   variables in `services/config.py`. Settings are edited in Admin > Settings.
+   variables in `services/config.py`. Settings are edited in Admin > LLM & Settings.
 
 `.env` is **seed-only**: on a fresh install `services/identity/seed.py` turns
 its values into GlobalSetting rows once; after that the database wins. The
@@ -65,17 +65,20 @@ Feature settings read directly from Identity by the service that uses them
 `REDIS_URL` is environment-only (it differs between bridge and host).
 
 **Not here:** Music Assistant and per-service logins are per-user credentials
-in Identity, with admin grants for sharing — see `docs/PER_USER_CREDENTIALS.md`.
+in Identity, with admin grants for sharing; see `docs/PER_USER_CREDENTIALS.md`.
 
 ## Paths and stores
 
-| Variable | Default | Where |
+| Variable | Value (`docker-compose.yml`) | Where |
 |---|---|---|
-| `RAG_DB_PATH` | `/data/rag.db` | RAG's SQLite + sqlite-vec store (`services/rag/db.py`) |
+| `RAG_DB_PATH` | `/data/rag.db` (also the code default) | RAG's SQLite + sqlite-vec store (`services/rag/db.py`) |
 | `IDENTITY_DATABASE_URL` | `sqlite:////data/identity.db` | Identity |
 | `BIBLE_DATABASE_URL` | `sqlite:////data/bible.db` | Bible |
 | `WORKSPACE_DATABASE_URL` | `sqlite:////data/workspace_runtime.db` | Workspace runtime |
-| `MODELS_DIR` | `/workspaces/models` (execution, compose) | Kokoro TTS models |
+| `MODELS_DIR` | `/workspaces/models` (execution) | Kokoro TTS models |
+
+Apart from `RAG_DB_PATH`, `services/config.py` has no code default for these,
+so the compose file must set them.
 
 ## Adding a setting
 
@@ -83,7 +86,7 @@ in Identity, with admin grants for sharing — see `docs/PER_USER_CREDENTIALS.md
    an unset value must be visible as "not configured").
 2. Add it to `resolve_runtime_config()`'s `settings_map`.
 3. Seed it in `services/identity/models.py` / `seed.py` so it appears in
-   Admin > Settings.
+   Admin > LLM & Settings.
 
 Never add a new runtime value to `.env`, and never put a secret value in code,
 tests or docs; tests read `INTERNAL_SECRET` from the environment.

@@ -1,8 +1,8 @@
 /**
  * Device self-registration.
  *
- * On login the app reports what it is — a stable per-install id, the model,
- * the OS, and the APK version code — so the server can answer "which build is
+ * On login the app reports what it is (a stable per-install id, the model,
+ * the OS, and the APK version code) so the server can answer "which build is
  * this device on?" and "does it need an update?" without guessing.
  *
  * Two rules this module exists to enforce:

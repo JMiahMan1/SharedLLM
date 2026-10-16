@@ -21,7 +21,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // Capacitor 8: bridge is created inside super.onCreate() via load().
-        // registerPlugin() only queues on the builder — after super.onCreate()
+        // registerPlugin() only queues on the builder; after super.onCreate()
         // the bridge already exists, so late plugins are dropped and JS gets
         // "plugin is not implemented on android".
         registerPlugin(StepCounterPlugin.class);
@@ -70,7 +70,7 @@ public class MainActivity extends BridgeActivity {
 
     /**
      * A home-screen tap that would open the garage while away routes here
-     * (jarvis://confirm-garage) — a widget tap cannot show a dialog itself.
+     * (jarvis://confirm-garage) because a widget tap cannot show a dialog itself.
      */
     private void maybeConfirmGarage(Intent intent) {
         if (intent == null || intent.getData() == null) return;
@@ -151,7 +151,7 @@ public class MainActivity extends BridgeActivity {
                 WebView webView = getBridge().getWebView();
                 WebSettings settings = webView.getSettings();
                 // Allow audio streaming and playback without requiring synchronous user gestures
-                // (crucial for Sendspin / Music Assistant WebSocket streaming audio)
+                // (required for Sendspin / Music Assistant WebSocket streaming audio)
                 settings.setMediaPlaybackRequiresUserGesture(false);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);

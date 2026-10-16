@@ -698,7 +698,7 @@ async def lifespan(app: FastAPI):
 
     # Report the workspace shell toolchain (which CLI binaries exist + versions)
     # to the RAG service so missions always know what the wsbox shell can run.
-    # Runs HERE because the wsbox sandbox reuses this image — probing the
+    # Runs HERE because the wsbox sandbox reuses this image; probing the
     # execution service instead advertised binaries that do not exist in the
     # shell (e.g. pdflatex/tshark), causing exit-127 command failures.
     # Best-effort and non-blocking: a failed probe/sync only logs a warning.
@@ -868,7 +868,7 @@ def resolve_safe_path(base: Path, relative: str, must_exist: bool = True) -> Pat
     workspace root, but allows absolute paths for system workspaces.
     """
     try:
-        # If path is already absolute, use it directly (system workspaces) —
+        # If path is already absolute, use it directly (system workspaces);
         # but still confined to the workspace root. Absolute inputs come from
         # models echoing back resolved_path values, which always live under
         # the root; anything else is traversal.
@@ -2021,7 +2021,7 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
         if existing:
             # Idempotent acquire: a workspace that already exists is treated as
             # "acquired" rather than an error, so callers (e.g. Raven's
-            # WorkspaceCreateRequest — the sandbox it must work out of, like a
+            # WorkspaceCreateRequest: the sandbox it must work out of, like a
             # chroot) can adopt it as their working environment on re-runs
             # instead of failing with "already exists". Re-materialize the
             # backing directory in case it was removed, then return the record.
@@ -2047,7 +2047,7 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
         session.refresh(ws)
         # Materialize the full workspace directory path on disk immediately so the
         # agent can use it. We do this at creation time (rather than lazily at write
-        # time) so that filesystem/permission errors surface here — before the agent
+        # time) so that filesystem/permission errors surface here, before the agent
         # starts writing files and fails mid-mission. A missing backing directory is
         # also what previously pushed the agent into the Default Workspace.
         resolved_path = resolve_safe_path(get_workspace_root(), ws.local_path, must_exist=False)
@@ -2702,11 +2702,11 @@ async def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_inte
                 # The model-emitted test_cmd may reference targets that do not
                 # exist yet (or a bare 'pytest -q' that collects nothing). The
                 # write itself succeeded and lint passed, so do not fail the
-                # whole workflow on a phantom test target — record it as
+                # whole workflow on a phantom test target; record it as
                 # skipped and proceed.
                 log.warning(
                     f"[Pytest] targets {_sanitize_targets(req.pytest_targets)} do not exist in "
-                    f"workspace '{workspace['id']}' — skipping pytest gate (write succeeded)"
+                    f"workspace '{workspace['id']}', skipping pytest gate (write succeeded)"
                 )
                 pytest_result = {
                     "status": "SUCCESS",

@@ -10,7 +10,7 @@ points are described at the bottom.
 ## The rule
 
 1. **A user's own credentials always win.** If you configured a service
-   yourself, that is what Jarvis uses for you — always, with no exceptions.
+   yourself, that is what Jarvis uses for you, every time.
 2. **The system default user owns the shared credentials.** That is the account
    named `default` (or whatever it has been renamed to), typically displayed as
    "User 1". Identity identifies it by `is_system_default`, falling back to
@@ -21,7 +21,7 @@ points are described at the bottom.
    `SHARED_CREDENTIAL_SERVICES` (`home_assistant`, `music_assistant`,
    `audiobookshelf`, `nextcloud`).
 4. **No grant, no credentials.** An unconfigured service is reported as
-   unconfigured — the caller gets an error naming the user and the service, not
+   unconfigured: the caller gets an error naming the user and the service, not
    the default user's account and not an empty success.
 5. **Grants are revocable and recorded.** Each grant stores who granted it,
    when, and an optional note. Emptying the list deletes the grant. Deleting a
@@ -38,7 +38,7 @@ points are described at the bottom.
 
 `POST /api/resolve` returns the credentials plus two new fields:
 
-- `credential_sources`: one entry per service — `own` (the user configured it),
+- `credential_sources`: one entry per service: `own` (the user configured it),
   `granted` (borrowed from the system default under a grant), `shared` (the
   service is shared by design, e.g. Skylight) or `absent` (not configured and
   not granted).
@@ -70,18 +70,18 @@ valid keys, and a non-admin write gives a 403. The gateway proxies both routes
   query parameters from the gateway.
 - **The gateway** passes the caller's own HA credentials to `/discovery/entities`
   and reports `status: FAILURE` for a user with no Home Assistant configured.
-- The execution `UserContext` schema now carries `mass_url` / `mass_token` —
+- The execution `UserContext` schema now carries `mass_url` / `mass_token`;
   they used to be dropped by `extra="ignore"`, which is why execution had to
   re-resolve identity for every MA call.
 
 ## UI
 
-- **Settings → Identity** — every configured service (Home Assistant, Music
+- **Settings → Accounts & Integrations** (`/identity`): every configured service (Home Assistant, Music
   Assistant, Audiobookshelf, Nextcloud) shows a "Shared Service Access" card:
   the four per-service toggles, who granted them and when, and an optional note.
   Admins can toggle; everyone else sees their current grants read-only. There is
   also a new Music Assistant tile and an Audiobookshelf API-key field.
-- **Settings → Admin → Users** — each user row has a "Shared service access"
+- **Admin → Users & Devices**: each user row has a "Shared service access"
   button that opens the same editor for that user.
 
 The old "Data Sharing Rule (RAG)" toggle was removed: it posted a

@@ -5,7 +5,7 @@ Integration tests for the HONEST Raven lessons feature:
    ``list_learnings`` with its structured fields (rule / root_cause /
    outcome / confidence / supersedes) and a starting ``applied_count`` of 0.
 2. The ``/rag/learning/{id}/applied`` handler (``mark_learning_applied``)
-   increments ``applied_count`` WITHOUT touching ``usage_count`` — proving the
+   increments ``applied_count`` WITHOUT touching ``usage_count``, proving the
    "actually applied" metric is distinct from mere retrieval.
 3. The gateway-side apply-citation scanner (mirrors agent_loop.py:4096)
    extracts lesson ids the model cites via ``Apply: [id]``.
@@ -81,7 +81,7 @@ async def test_structured_lesson_roundtrip_and_applied_bump(tmp_path):
     rag_main._bump_retrieved([doc_id])
     before = (await rag_main.list_learnings("default"))["items"][0]
     assert before["usage_count"] == 1
-    assert before["applied_count"] == 0  # not applied yet — honest
+    assert before["applied_count"] == 0  # not applied yet, honest
 
     # Model cited this lesson -> apply enforcement PATCH.
     applied = await rag_main.mark_learning_applied(doc_id)

@@ -35,7 +35,7 @@ export default function StepHourChart({ hours, currentHour, className = '' }: Pr
     return (
       <p data-testid="hour-chart-missing" className="text-xs text-slate-400 leading-relaxed">
         No hourly detail yet. Your phone starts recording steps by the hour once it
-        has the current app build — until then only the daily total is available.
+        has the current app build. Until then only the daily total is available.
       </p>
     );
   }
@@ -98,7 +98,7 @@ export default function StepHourChart({ hours, currentHour, className = '' }: Pr
       </figcaption>
 
       {/* The bars are decorative; the hours they draw are listed for anyone who
-          cannot see them. Only recorded hours are listed — an hour with no
+          cannot see them. Only recorded hours are listed; an hour with no
           reading is not a fact worth announcing. */}
       <ul className="sr-only">
         {hours.map((b) => (

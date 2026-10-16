@@ -6,7 +6,7 @@ import type { HealthStatus } from '../services/api';
  * Gateway readiness (`/health/ready`): every backing service's status.
  *
  * One query for the header pulse, the sidebar footer and the dashboard's
- * service board. They used to poll it separately every 5–10 s, and each poll
+ * service board. They used to poll it separately every 5 to 10 s, and each poll
  * fans out to every service, so a single open tab kept the whole stack busy.
  */
 export function useSystemHealth() {

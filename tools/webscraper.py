@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WebScraper - Reusable web scraping tool with Playwright + Tesseract OCR
+WebScraper - Reusable web scraping tool with Camoufox/Playwright and vision OCR
 Captures screenshots of product pages and extracts prices/text using OCR.
 
 Usage:
@@ -230,7 +230,7 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
         except Exception:
             ocr_shot_path = screenshot_path
 
-        # Vision OCR (Qwen2.5-VL via proxy) — primary method
+        # Vision OCR (Qwen2.5-VL via proxy) is the primary method
         try:
             from vision_ocr import extract_text
             ocr_result_data = extract_text(str(ocr_shot_path), task="price_scrape", model=ocr_model or None, proxy_url=ocr_proxy or None, max_size=768)

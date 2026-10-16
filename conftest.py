@@ -93,7 +93,7 @@ _TEST_ENV_DEFAULTS = {
     # itself with a per-test fixture; the fix belongs here.
     "INTERNAL_SECRET": "test-secret",
     "FERNET_KEY": _test_fernet_key,
-    # Service topology — localhost everywhere, matching CI, never the docker
+    # Service topology: localhost everywhere, matching CI, never the docker
     # service aliases (which only resolve inside the compose network).
     "GATEWAY_INTERNAL_URL": "http://gateway:11435",
     "EXECUTION_EXTERNAL_HOST": "localhost",
@@ -108,14 +108,14 @@ _TEST_ENV_DEFAULTS = {
     "MODELS_DIR": "/app/models",
     "COMPOSE_PROJECT_DIR": "/app",
     "MASS_CONFIG_ENTRY_ID": "1",
-    # Models — a named local model, so a test that resolves "which model"
+    # Models: a named local model, so a test that resolves "which model"
     # gets a stable answer instead of whatever the developer last deployed.
     "DEFAULT_MODEL": "test-model:q4_k_m",
     "ASSISTANT_MODEL": "test-model:q4_k_m",
     "CODING_MODEL": "test-model:q4_k_m",
     "LIBRARIAN_MODEL": "test-model:q4_k_m",
     "DEFAULT_TTS_VOICE": "af_heart",
-    # Third-party integrations — dummies. The live URLs and tokens belong in
+    # Third-party integrations: dummies. The live URLs and tokens belong in
     # .env, never in a test run.
     "HA_URL": "http://localhost:8123",
     "OSRM_URL": "",
@@ -140,7 +140,7 @@ _TEST_ENV_DEFAULTS = {
     "GIT_TOKEN": "test-git-token",
     "GIT_WEBHOOK_SECRET": "test-webhook-secret",
     "UPSTREAM_DNS": "127.0.0.1",
-    # Filesystem — tmp paths, so a test can never write into a real deployment.
+    # Filesystem: tmp paths, so a test can never write into a real deployment.
     "WORKSPACE_ROOT": tempfile.gettempdir(),
     "WORKSPACE_REGISTRY_PATH": os.path.join(tempfile.gettempdir(), "workspaces.json"),
     "LOCAL_NOTES_ROOT": os.path.join(tempfile.gettempdir(), "notes"),
@@ -149,7 +149,7 @@ _TEST_ENV_DEFAULTS = {
     "VOLUME_MANIFEST_PATH": os.path.join(tempfile.gettempdir(), "volumes.json"),
     "LEGACY_ENV_PATH": os.path.join(_root, ".env"),
     "TEMP_MEDIA_DIR": os.path.join(tempfile.gettempdir(), "sharedllm_media"),
-    # Device registry — an in-memory store so a test can never read or write the
+    # Device registry: an in-memory store so a test can never read or write the
     # real device list. Set at import time by two execution test modules before
     # conftest's isolation fixture existed.
     "DEVICE_REGISTRY_PATH": ":memory:",
@@ -169,7 +169,7 @@ _TEST_ENV_DEFAULTS = {
     "EMBEDDING_MODEL": "nomic-ai/nomic-embed-text-v1.5",
     # Identity seeding requires a password and refuses to boot without one.
     "DEFAULT_ADMIN_PASSWORD": "test-admin-password",
-    # Mail — dummies. The real relay credentials live in .env.
+    # Mail: dummies. The real relay credentials live in .env.
     "MAIL_URL": "http://localhost:8025",
     "MAIL_ADMIN_URL": "http://localhost:8025/admin",
     "MAIL_ADMIN": "test-admin",
@@ -178,7 +178,7 @@ _TEST_ENV_DEFAULTS = {
     "MAIL_USER_PASS": "test-user-pass",
     # Alpaca dashboard, which owns the podcast mixer and the /api/podcast/*
     # routes the execution handlers call. (ALPACA_AUDIO_URL above is the
-    # audio-server itself — speaker identification needs OpenVoice's reference
+    # audio-server itself; speaker identification needs OpenVoice's reference
     # encoder, and only that container has torch.)
     "ALPACA_WEB_URL": "http://web.test:5000",
     # Presentation
@@ -192,7 +192,7 @@ _TEST_ENV_DEFAULTS = {
 #
 #  * Pinning first with setdefault looked correct and was not. It defers to
 #    whatever is already in the environment, so a CI `env:` block or a developer's
-#    exported shell variable overrode every "deterministic" default — which is
+#    exported shell variable overrode every "deterministic" default, which is
 #    exactly how five test_music_proxy tests kept returning 401 against a real
 #    INTERNAL_SECRET while services/config.py had captured a different one.
 #  * Pinning first with a plain assignment would let _load_env_files() overwrite

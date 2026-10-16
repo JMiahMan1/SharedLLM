@@ -141,7 +141,7 @@ async def search_youtube(query: str) -> str | None:
 async def extract_audio_stream_url(video_url: str) -> tuple[str | None, str | None]:
     """
     Extract a direct, in-memory audio CDN URL from a YouTube video using yt-dlp.
-    Does NOT download anything — returns the CDN URL that can be proxied directly.
+    Does NOT download anything; it returns the CDN URL that can be proxied directly.
 
     Returns (stream_url, title) or (None, None) on failure.
     The returned URL is typically a short-lived (~6h) signed Google CDN URL.
@@ -332,7 +332,7 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
             if os.path.exists(tmp_path):
                 current_size = os.path.getsize(tmp_path)
                 if current_size >= threshold:
-                    log.info(f"[video] Progressive threshold reached: {current_size / 1024 / 1024:.1f} MB / {threshold / 1024 / 1024:.0f} MB — returning control to caller")
+                    log.info(f"[video] Progressive threshold reached: {current_size / 1024 / 1024:.1f} MB / {threshold / 1024 / 1024:.0f} MB; returning control to caller")
                     asyncio.create_task(_wait_for_download(proc, tmp_path, media_id))
                     return media_id, title
 

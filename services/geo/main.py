@@ -1,5 +1,5 @@
 # services/geo/main.py
-"""SharedLLM `geo` service — Life360-style family location (wraps Home Assistant).
+"""SharedLLM `geo` service: Life360-style family location (wraps Home Assistant).
 
 Backend: Home Assistant (https://ha.sumemail.com:8095). Reads `person` /
 `device_tracker` / `zone` entity states via the HA REST API (token resolved at
@@ -457,7 +457,7 @@ async def record_point(
     asyncio.create_task(_safe_presence_transition(r, clean_id, lat, lon, ts, accuracy or 0.0))
 
 
-# ─── Arrival / departure notices ──────────────────────────────────────────────
+# Arrival / departure notices
 #
 # Each person's current HA zone is kept in geo:zone_state:{user}. Entering a
 # zone, or leaving one (by ZONE_EXIT_MARGIN_M past its edge, so GPS jitter at
@@ -704,7 +704,7 @@ async def _record_daily_steps(
     consumers (and the widgets) keep working unchanged.
 
     The day comes from the reading's own timestamp, never the arrival time, and
-    each bucket keeps the max seen — the Android TYPE_STEP_COUNTER resets on
+    each bucket keeps the max seen; the Android TYPE_STEP_COUNTER resets on
     reboot and can arrive late, neither of which may reduce a recorded day.
 
     The day is computed in the *phone's* zone (`user_timezone`), not the
@@ -812,7 +812,7 @@ async def _get_daily_steps(r, clean_id: str, days: int = 30) -> dict:
 
     Prefers the hardware pedometer buckets in Redis. When empty, falls back to
     the HA companion daily_steps sensor so the UI is not blank while the phone
-    app is being updated (real sensor data only — never fabricated).
+    app is being updated (real sensor data only, never fabricated).
     """
     tz = ZoneInfo(APP_TIMEZONE)
     result: dict[str, int] = {}
@@ -1669,7 +1669,7 @@ async def get_user_default_vehicle(user_id: str) -> dict:
 def group_shared_trips(trips: list[dict]) -> list[dict]:
     """Group trips that occurred in the same timeframe and location as shared trips.
 
-    Manually-assigned riders (shared_manually=True) are preserved as-is —
+    Manually-assigned riders (shared_manually=True) are preserved as-is;
     auto-detection never overrides an explicit user assignment.
     """
     n = len(trips)
@@ -1776,7 +1776,7 @@ def _poi_label_from_nominatim(data: dict) -> str | None:
         val = addr.get(key)
         if val and isinstance(val, str) and val.strip() and not val.strip().isdigit():
             # Nominatim sometimes puts the type slug here ("supermarket") and the
-            # proper name in display_name's first segment — prefer a titled form.
+            # proper name in display_name's first segment, so prefer a titled form.
             display = (data.get("display_name") or "").split(",")[0].strip()
             if display and display.lower() != val.strip().lower():
                 return display
@@ -1785,7 +1785,7 @@ def _poi_label_from_nominatim(data: dict) -> str | None:
 
 
 def _street_label_from_nominatim(data: dict) -> str | None:
-    """Street / neighbourhood-only label — last resort before coordinates."""
+    """Street / neighbourhood-only label, the last resort before coordinates."""
     if not isinstance(data, dict):
         return None
     addr = data.get("address") or {}
@@ -1852,7 +1852,7 @@ async def _resolve_place_name(lat: float, lon: float) -> str:
     if zone_name:
         return zone_name
 
-    # 2–3. Nominatim: prefer a named POI within the radius, else street.
+    # 2-3. Nominatim: prefer a named POI within the radius, else street.
     data = await _nominatim_reverse_details(lat, lon)
     if data:
         poi = _poi_label_from_nominatim(data)
@@ -1878,7 +1878,7 @@ async def _resolve_place_name(lat: float, lon: float) -> str:
     return f"Location ({round(lat, 3)}, {round(lon, 3)})"
 
 
-# Back-compat alias — trips use the cached resolver to avoid Nominatim on every fix.
+# Back-compat alias: trips use the cached resolver to avoid Nominatim on every fix.
 def _resolve_zone_name(lat: float, lon: float):
     return _resolve_place_name_cached(lat, lon)
 
@@ -1969,7 +1969,7 @@ async def _overpass_nearby_pois(lat: float, lon: float) -> list[dict]:
     """Named businesses / places within ~250 m via OSM Overpass.
 
     Returns best-first [{name, kind, latitude, longitude, distance_m}] or []
-    when Overpass is unreachable — callers fall back to the geocoded address.
+    when Overpass is unreachable; callers fall back to the geocoded address.
     """
     query = (
         f"[out:json][timeout:6];"
@@ -2096,7 +2096,7 @@ def _address_candidates_from_nominatim(data: dict | None) -> list[dict]:
 async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -> dict | None:
     """Persist an active trip as completed. Returns the completed trip, or None
     if it was too short to keep (< 0.2 mi). Always clears the active-trip key
-    when the caller asks via the returned dict semantics — caller deletes."""
+    when the caller asks via the returned dict semantics (the caller deletes it)."""
     dist = float(trip.get("distance_miles", 0.0))
     end_t = float(trip.get("last_moving_time", now_ts))
     dur = max(60, int(end_t - float(trip.get("start_time", now_ts))))
@@ -2296,7 +2296,7 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
             pass
 
     # 0. An active trip that went idle (>= 5 min) belongs to the previous
-    #    drive — finalize it before considering new movement, otherwise a
+    #    drive. Finalize it before considering new movement, otherwise a
     #    later drive keeps advancing the stale trip.
     if active_raw:
         try:
@@ -2598,7 +2598,7 @@ async def update_trip(
     if update.notes is not None:
         trip["notes"] = update.notes
 
-    # Editable place names / addresses — coordinates stay untouched.
+    # Editable place names / addresses; coordinates stay untouched.
     for field, key in (("start_name", "start_location"), ("end_name", "end_location")):
         value = getattr(update, field)
         if value is None:
@@ -2627,7 +2627,7 @@ async def update_trip(
             loc.pop("address", None)
         trip[key] = loc
 
-    # Recompute fuel used and cost — only meaningful for driving
+    # Recompute fuel used and cost (only meaningful for driving).
     dist = float(trip.get("distance_miles", 0.0))
     if trip.get("activity_type", "driving") == "driving":
         mpg = float(trip.get("mpg", 25.0))
@@ -2637,7 +2637,7 @@ async def update_trip(
         trip["fuel_used_gal"] = gallons
         trip["trip_cost_usd"] = cost
     else:
-        # Non-drive activities burn no fuel — zero out any stale fuel data
+        # Non-drive activities burn no fuel, so zero out any stale fuel data
         trip["fuel_used_gal"] = 0.0
         trip["trip_cost_usd"] = 0.0
         trip.pop("vehicle_id", None)
@@ -2806,7 +2806,7 @@ def _is_street_only_name(name: str | None) -> bool:
                  r"pharmacy|clinic|bank|church|school|park|restaurant|cafe|"
                  r"dollar|gas|fuel|auto|tire|dental|vet|gym|salon)\b", n, re.I):
         return False
-    # Single capitalized words that aren't street suffixes alone — keep.
+    # Single capitalized words that aren't street suffixes alone: keep.
     # Otherwise: pure "North Green Trail" / "30912, North Green Trail" → street.
     return True
 
@@ -2818,7 +2818,7 @@ async def _resolve_place_if_better(stored: str | None, lat: float, lon: float) -
     resolved = await _resolve_place_name_cached(lat, lon)
     resolved_is_street = _is_street_only_name(resolved) or resolved.startswith("Location (")
     if not resolved_is_street:
-        # Re-resolve found an HA zone or business — always prefer it.
+        # Re-resolve found an HA zone or business, so always prefer it.
         source = "coords" if resolved.startswith("Location (") else (
             "osm" if ", " in resolved else "ha_zone"
         )
@@ -2847,7 +2847,7 @@ async def get_location_suggestions(
     Returns the current resolved place plus candidate labels: HA zones the
     point falls inside, named businesses/POIs within ~250 m (OSM Overpass),
     and address components (street / area / city). Coordinates themselves are
-    GPS telemetry and are never edited by clients — only the display name and
+    GPS telemetry and are never edited by clients; only the display name and
     stored address change.
     """
     if not _verify_internal_secret(x_internal_secret, query_secret):
@@ -2975,7 +2975,7 @@ _STRIDE_MODEL = {
         "anchors": [(2.0, 0.90), (3.0, 1.10), (4.0, 1.30), (5.0, 1.50), (6.0, 1.70)],
         "cadence": 2.8,
     },
-    "horseback_riding": {"anchors": [], "cadence": 0.0},  # no bipedal stride — no steps
+    "horseback_riding": {"anchors": [], "cadence": 0.0},  # no bipedal stride, so no steps
 }
 _STRIDE_MODEL.setdefault("mountain_biking", {"anchors": [], "cadence": 0.0})
 _STRIDE_MODEL.setdefault("cycling", {"anchors": [], "cadence": 0.0})
@@ -2988,8 +2988,8 @@ def _estimate_steps_from_gps(activity_type: str, points: list[dict]) -> int | No
     mounted activities (no steps) or when there isn't enough data.
 
     Uses BOTH independent estimates and cross-validates them:
-      1. distance / stride(speed)   — stride-length model
-      2. duration * cadence(speed)  — cadence model
+      1. distance / stride(speed)   (stride-length model)
+      2. duration * cadence(speed)  (cadence model)
     Blending them by speed proximity to the model's calibrated mid-range
     gives better accuracy than either alone (~±8% vs pure stride models).
     """
@@ -3827,7 +3827,7 @@ async def set_step_goal(
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
-    """Set the user's daily step goal (1000–100000).
+    """Set the user's daily step goal (1000 to 100000).
 
     This route accepted ``x_internal_secret`` but never called
     ``_verify_internal_secret``, so with geo published on its own port anyone
@@ -4173,7 +4173,7 @@ async def _llm_trends_analysis(prompt: str, user: str) -> str | None:
             "messages": [{"role": "user", "content": prompt}],
             "rag_user": user,
             # Reasoning models blend their  trace into `content` unless the
-            # caller opts out — that put the model's thinking straight into the
+            # caller opts out; that put the model's thinking straight into the
             # Wander AI Insight card. We want the conclusion only.
             "think": False,
             "enable_thinking": False,
@@ -4253,16 +4253,16 @@ def _build_trends_context(user: str, days: int, daily_steps: dict, workouts: lis
         lines.append(
             "Analyze this family member's activity. In 3-5 sentences: note the trend in daily steps "
             "(rising/falling/steady, vs the common 10,000-step goal), highlight notable workouts, and give "
-            "one specific, encouraging, actionable suggestion. Be warm and concrete — no generic advice, "
+            "one specific, encouraging, actionable suggestion. Be warm and concrete: no generic advice, "
             "no bullet points, no headings. Reference actual numbers from the data. Use ONLY the numbers "
-            "provided above — never invent or assume values."
+            "provided above; never invent or assume values."
         )
     else:
         lines.append(
             "This family member has no pedometer or workout data recorded yet. In 2-3 sentences, "
             "acknowledge that activity tracking hasn't started and encourage them to open the app "
             "on their phone to begin syncing steps and recording their first workout. Do NOT invent "
-            "any statistics — no data exists yet."
+            "any statistics, because no data exists yet."
         )
     return "\n".join(lines)
 
@@ -4335,7 +4335,7 @@ async def _collect_activity_stats(r, clean: str, days: int) -> dict:
     }
 
 
-# ─── Opt-in activity sharing (private by default) ────────────────────────────
+# Opt-in activity sharing (private by default)
 
 ACTIVITY_WINDOWS = {"today": 1, "week": 7, "month": 30, "all": 365}
 
@@ -4343,7 +4343,7 @@ ACTIVITY_WINDOWS = {"today": 1, "week": 7, "month": 30, "all": 365}
 async def _fetch_activity_sharing() -> dict:
     """Read every user's sharing preference from Identity (internal).
 
-    Failure returns an empty set — the safe default is "nobody shares".
+    Failure returns an empty set; the safe default is "nobody shares".
     """
     try:
         async with get_client_insecure() as client:
@@ -4438,7 +4438,7 @@ async def _require_may_view(
 
 
 async def _activity_points(r, clean: str) -> tuple[int, int]:
-    """(points, achievements_earned) from the ledger — exact, not estimated."""
+    """(points, achievements_earned) from the ledger: exact, not estimated."""
     definitions = achievements.load_definitions()
     ledger = await achievements.load_points_ledger(r, clean)
     return achievements.total_points(ledger, definitions), len(ledger)
@@ -4635,7 +4635,7 @@ async def analyze_activity_trends(
     try:
         lock_acquired = bool(await r.set(lock_key, "1", nx=True, ex=TRENDS_ANALYSIS_LOCK_TTL))
         if not lock_acquired:
-            # Another caller is already generating — return what we have.
+            # Another caller is already generating; return what we have.
             cached = await r.get(analysis_cache_key)
             if cached:
                 try:

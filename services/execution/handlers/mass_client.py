@@ -14,7 +14,7 @@ from services.execution.http_client import get_session, host_of
 
 
 class MASearchError(Exception):
-    """Direct Music Assistant search failed — callers should fall back (HA proxy)."""
+    """Direct Music Assistant search failed; callers should fall back (HA proxy)."""
 
 
 @asynccontextmanager
@@ -139,7 +139,7 @@ async def search(
     The WebSocket JSON-RPC path is the real MA API and works correctly.
 
     Raises MASearchError on any failure (connection, timeout, MA error_code)
-    so callers can fall back to the HA proxy — failures must never look like
+    so callers can fall back to the HA proxy; failures must never look like
     an empty result set (BUG-17).
     """
     if not mass_url or not mass_token or not query:

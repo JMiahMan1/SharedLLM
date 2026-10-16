@@ -3,7 +3,7 @@ External agentic chat loop for SharedLLM.
 
 Lets any standard OpenAI- or Ollama-compatible chat client (OpenAI SDK,
 Ollama tool-calling, OpenWebUI) drive the FULL Raven tool surface with
-thinking visible — so chat-window conversations double as Raven
+thinking visible, so chat-window conversations double as Raven
 teaching/learning training data.
 
 Flow per turn (bounded multi-turn):
@@ -264,7 +264,7 @@ async def run_external_agent(
             "role": "system",
             "content": (
                 "You are Raven, the SharedLLM autonomous assistant. You have function "
-                "tools — use them to complete the user's task. When a task needs a "
+                "tools; use them to complete the user's task. When a task needs a "
                 "tool, emit native tool_calls (never describe the call in prose). "
                 "If you cannot emit native tool_calls, write one call per line as "
                 "call:ToolName{\"arg\": value} and it will be executed for you. "

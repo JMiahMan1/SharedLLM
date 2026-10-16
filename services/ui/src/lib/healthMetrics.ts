@@ -175,7 +175,7 @@ export function formatCount(value: number): string {
  * A 0-23 hour as a person says it: "9am", "12pm", "11pm".
  *
  * Hours are the *phone's* local hours, so the caller must not re-derive them
- * from the browser's clock — that mismatch is what makes a traveller's chart
+ * from the browser's clock. That mismatch is what makes a traveller's chart
  * disagree with the rest of their day. Midnight is 12am, not 0am.
  */
 export function hourOfDay(hour: number): string {
@@ -246,9 +246,9 @@ export function syncStatus(
 export function syncAdvice(status: SyncStatus): string | null {
   switch (status.freshness) {
     case 'never':
-      return 'No sync yet — open the app on your phone';
+      return 'No sync yet. Open the app on your phone';
     case 'stale':
-      return `Not updated since ${status.label} — open the app on your phone`;
+      return `Not updated since ${status.label}. Open the app on your phone`;
     case 'aging':
       return null;
     default:

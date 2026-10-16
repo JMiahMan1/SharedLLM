@@ -1,4 +1,4 @@
-"""Tests for services/shared/ma_library.py — the ABS item -> MA library URI resolver.
+"""Tests for services/shared/ma_library.py: the ABS item -> MA library URI resolver.
 
 The bug this guards: Music Assistant is not a URL player. Handed an
 ``audiobookshelf://`` id or a stream URL it stores that text as the track *title*

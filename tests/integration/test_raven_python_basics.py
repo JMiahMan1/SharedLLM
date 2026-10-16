@@ -11,7 +11,7 @@ Each mission:
   2. Raven SELF-VERIFIES by running it (the prompt requires a
      concrete, observable stdout contract).
   3. After the run succeeds, Raven APPENDS a dated lesson to
-     ``raven_memory.md`` inside its workspace — its own per-task
+     ``raven_memory.md`` inside its workspace, its own per-task
      learning journal ("Raven should have a learning memory it writes to
      for tasks").
   4. The test then DOUBLE-CHECKS independently: it clones the repo

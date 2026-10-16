@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONObject;
 
-/** Launcher configure activity for DashboardWidget — 4 searchable entity cells. */
+/** Launcher configure activity for DashboardWidget: 4 searchable entity cells. */
 public class ConfigureDashboardActivity extends Activity {
     private int appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID;
     private final EditText[] fields = new EditText[DashboardConfig.MAX_CELLS];
@@ -38,7 +38,7 @@ public class ConfigureDashboardActivity extends Activity {
     private int searchGeneration;
     private int activeCell = -1;
     private android.os.Handler searchHandler;
-    /** True only while pickEntity() writes a cell — blocks that cell's results from reopening. */
+    /** True only while pickEntity() writes a cell; blocks that cell's results from reopening. */
     private final boolean[] suppressCellResults = new boolean[DashboardConfig.MAX_CELLS];
 
     @SuppressWarnings("unchecked")
@@ -244,7 +244,7 @@ public class ConfigureDashboardActivity extends Activity {
                 entityStatus.setVisibility(View.VISIBLE);
                 entityStatus.setText(labels.isEmpty()
                     ? "No matches for “" + q + "”"
-                    : labels.size() + " matches — tap to select");
+                    : labels.size() + " matches. Tap to select");
             });
         }), 250);
     }
@@ -322,11 +322,11 @@ public class ConfigureDashboardActivity extends Activity {
                 if (gen != loadGeneration || isFinishing()) return;
                 entityProgress.setVisibility(View.GONE);
                 if (error[0] != null) {
-                    entityStatus.setText(error[0] + " — type entity_id manually");
+                    entityStatus.setText(error[0] + ". Type entity_id manually");
                     return;
                 }
                 if (ids.isEmpty()) {
-                    entityStatus.setText("No entities found — type entity_id");
+                    entityStatus.setText("No entities found. Type entity_id");
                     return;
                 }
                 entityIds.clear();
@@ -337,7 +337,7 @@ public class ConfigureDashboardActivity extends Activity {
                 liveStates.putAll(states);
                 liveNames.clear();
                 liveNames.putAll(names);
-                entityStatus.setText(ids.size() + " entities — type to search");
+                entityStatus.setText(ids.size() + " entities. Type to search");
                 for (int i = 0; i < previews.length; i++) {
                     refreshPreview(i);
                     updateResultsList(i, textAt(i));

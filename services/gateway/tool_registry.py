@@ -1,9 +1,9 @@
 """
 OpenAI/Ollama-compatible tool registry for SharedLLM's agent tool surface.
 
-This module exposes SharedLLM capabilities — `gh`, `git`, workspace file writes,
+This module exposes SharedLLM capabilities (`gh`, `git`, workspace file writes,
 and the alpaca Stable Diffusion image tools (generations / edits / model listing)
-— as OpenAI ``tools`` schemas so external clients (OpenAI SDK, Ollama tool-calling,
+) as OpenAI ``tools`` schemas so external clients (OpenAI SDK, Ollama tool-calling,
 OpenWebUI) can drive them.
 
 It also provides :func:`resolve_tool_call`, which maps a model-emitted tool call to
@@ -164,7 +164,7 @@ _RAVEN_MISSION_TOOL = {
     "function": {
         "name": TOOL_RAVEN_MISSION,
         "description": (
-            "Dispatch a background Raven mission — an autonomous agent that plans, "
+            "Dispatch a background Raven mission: an autonomous agent that plans, "
             "writes code, creates its own workspace, builds, tests, and can push to "
             "GitHub. Use this for complex multi-step engineering tasks such as "
             "'build a 3D game', 'create a service and deploy it', or 'implement an app'. "
@@ -305,7 +305,7 @@ _PODCAST_RENDER_TOOL = {
             "with that host's curated voice, ducks a procedurally synthesized "
             "music bed under the speech, and writes the result as a WAV. Use this "
             "for anything with narration, a voice-over, a briefing, or a "
-            "multi-voice explainer — not for a single short utterance, which "
+            "multi-voice explainer. Not for a single short utterance, which "
             "TTSRequest already covers."
         ),
         "parameters": {
@@ -365,7 +365,7 @@ _SPEAKER_IDENTIFY_TOOL = {
             "Runs entirely on this server. Returns a ranked list with "
             "similarity scores and a margin, so a near miss is visibly a near "
             "miss. Use this when you need to attach an identity to audio that "
-            "arrived from a caller, a visitor panel, or a voice message — for "
+            "arrived from a caller, a visitor panel, or a voice message, for "
             "example to log who spoke, or to greet someone by name."
         ),
         "parameters": {
@@ -440,8 +440,8 @@ def get_tool_schemas() -> list[dict]:
 # Full Raven action surface.
 #
 # Every entry mirrors one Raven AgentLoop action (same tool name Raven itself
-# emits) so external OpenAI/Ollama chat clients — and the training transcripts
-# they produce — map 1:1 onto Raven's native tool calls.
+# emits) so external OpenAI/Ollama chat clients (and the training transcripts
+# they produce) map 1:1 onto Raven's native tool calls.
 # Entry: (tool_name, service, method, path, requires_workspace, description,
 #         payload_hint)
 # ---------------------------------------------------------------------------

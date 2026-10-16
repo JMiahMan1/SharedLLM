@@ -47,7 +47,7 @@ class User(SQLModel, table=True):  # type: ignore
     git_url: str | None = None
     git_user: str | None = None
 
-    # Encrypted at rest — stored as Fernet ciphertext (base64 string)
+    # Encrypted at rest, stored as Fernet ciphertext (base64 string)
     nextcloud_pass_enc: str | None = None
     ha_token_enc: str | None = None
     github_token_enc: str | None = None
@@ -457,7 +457,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "llm_cloud_url", "value": "https://openrouter.ai/api/v1/chat/completions", "description": "Base URL for cloud inference"},
 
     # --- LLM MODELS (SINGLE SOURCE OF TRUTH) ---
-    # Model settings default to "" (unconfigured) — they MUST be set explicitly via the UI or .env.
+    # Model settings default to "" (unconfigured); they MUST be set explicitly via the UI or .env.
     {"key": "assistant_model", "value": "", "description": "Global assistant model"},
     {"key": "coding_model", "value": "", "description": "Global coding model"},
     {"key": "librarian_model", "value": "", "description": "Global librarian/RAG model"},

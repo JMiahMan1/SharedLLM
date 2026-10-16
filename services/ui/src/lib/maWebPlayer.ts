@@ -1,4 +1,5 @@
-/* ── MA Web Player hook ─────────────────────────────────────────────────────
+/**
+ * MA Web Player hook
  *
  * The app's own Music Assistant player, mirroring the MA frontend's web player:
  * 1. Sendspin protocol for the audio (via the gateway's /api/sendspin proxy)
@@ -155,7 +156,7 @@ function clientName(): string {
 
 const sameId = (a: string, b: string) => a === b || a.includes(b) || b.includes(a);
 
-/* ── Hook ────────────────────────────────────────────────────────────────── */
+/* Hook */
 
 export function useMAWebPlayer() {
   const playerRef = useRef<SendspinPlayer | null>(null);
@@ -416,7 +417,7 @@ export function useMAWebPlayer() {
     audio.crossOrigin = 'anonymous';
     document.body.appendChild(audio);
     audioRef.current = audio;
-    audio.onerror = () => setError('Audio element error — check browser audio permissions');
+    audio.onerror = () => setError('Audio element error. Check browser audio permissions');
 
     try {
       const player = new SendspinPlayer({
@@ -568,7 +569,7 @@ export function useMAWebPlayer() {
     teardown('shutdown');
   }, [teardown]);
 
-  /* ── Commands ───────────────────────────────────────────────────────── */
+  /* Commands */
 
   /** Connects if needed; throws a readable error when MA cannot be reached. */
   const ensureConnected = useCallback(async () => {

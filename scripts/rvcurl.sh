@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rvcurl.sh — resilient curl wrapper for the SharedLLM gateway/RAG.
+# rvcurl.sh: resilient curl wrapper for the SharedLLM gateway/RAG.
 # Retries on connection failures / timeouts (HTTP 000) with backoff, and uses a
 # generous per-attempt timeout so the high LAN jitter (mdev ~144ms on the local
 # subnet) never aborts a legitimate request.

@@ -117,7 +117,7 @@ public class WidgetActionReceiver extends BroadcastReceiver {
                     .setPositiveButton("Open", (dialog, which) -> executeToggle(app, entity, service))
                     .setNegativeButton("Cancel", null)
                     .create();
-                // TYPE_SYSTEM_DIALOG requires system UID — use application overlay / activity window instead
+                // TYPE_SYSTEM_DIALOG requires system UID; use application overlay / activity window instead
                 try {
                     d.getWindow().setType(android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
                 } catch (Exception ignored) {
@@ -125,8 +125,8 @@ public class WidgetActionReceiver extends BroadcastReceiver {
                 }
                 d.show();
             } catch (Exception e) {
-                // No window token (background) — fall back to toast + require second path
-                postToast(app, "Away from home — open Jarvis OS to confirm garage");
+                // No window token (background): fall back to toast + require second path
+                postToast(app, "Away from home. Open Jarvis OS to confirm garage");
             }
         });
     }

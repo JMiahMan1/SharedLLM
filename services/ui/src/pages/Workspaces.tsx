@@ -72,7 +72,7 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
           .map((e) => ({ path: e.path, size: e.size ?? 0 }));
         if (entries.length > 0) out[ws.id] = entries;
       } catch {
-        /* workspace may be unreachable — skip */
+        /* workspace may be unreachable; skip */
       }
     }
     setEntriesByWs(out);
@@ -193,7 +193,7 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
       {loading ? (
         <p className="mt-4 text-sm text-slate-400">Scanning workspaces for audio, video, image, PDF and document artifacts...</p>
       ) : artifactCount === 0 ? (
-        <p className="mt-4 text-sm text-slate-400">No artifacts found yet — run a Raven mission that produces files.</p>
+        <p className="mt-4 text-sm text-slate-400">No artifacts found yet. Run a Raven mission that produces files.</p>
       ) : (
         <div className="mt-4 space-y-3">
           {Object.entries(entriesByWs).map(([wsId, files]) => (
@@ -450,7 +450,7 @@ const Workspaces = () => {
     onError: (err: Error) => toast.error(err.message || 'Failed to save workspace'),
   });
 
-  // Inline toggles (star / share) patch a single field — they must UPDATE, never
+  // Inline toggles (star / share) patch a single field; they must UPDATE, never
   // create, even when the edit modal is closed.
   const updateMutation = useMutation({
     mutationFn: (data: { id: string } & Partial<Workspace>) => {

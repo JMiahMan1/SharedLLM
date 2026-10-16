@@ -1,4 +1,4 @@
-# MEDIA OVERHAUL — Remaining Backlog
+# Media Overhaul: Remaining Backlog
 
 > **Status 2026-10-15.** Phases 0-2 are done (P0-T3 … P2-T34 in `git log`:
 > test infrastructure, all security bugs BUG-01…09, backend bugs BUG-10…33,
@@ -11,22 +11,25 @@
 >
 > **Audit 2026-10-15** (Media + Remote, without the §6 rewrite): the Media page
 > was split into `components/media/*` with one play path (Audiobookshelf items
-> always resolved to an MA URI — the web player used to guess an unplayable
+> always resolved to an MA URI; the web player used to guess an unplayable
 > one), a deduped device picker, real error states, and a web player that
 > reconnects by itself; the app-wide provider now reports web-player state
 > (heartbeat) so the dashboard no longer shows a closed app as playing; the
 > Remote page sends real d-pad/power/mute commands to the TV's actual
-> companion `remote.*` entity. Ledger rows below are marked. What follows is
+> companion `remote.*` entity. The dashboard `ActiveMediaWidget` drives the
+> in-app web player directly (through `context/webPlayerContext.ts`) instead of
+> sending transport commands that only changed the server's record. Ledger rows
+> below are marked. What follows is
 > the plan for the remaining phases 3-9.
 
 ---
 
 ## HOW TO USE THIS DOCUMENT (read fully before touching code)
 
-You are implementing a large redesign of the **Media** feature of Jarvis OS (repo root `SharedLLM/`). This document is the single source of truth. Follow it **in order**. Do not skip phases. Do not invent scope.
+This is the plan for the redesign of the **Media** feature of Jarvis OS (repo root `SharedLLM/`) and the single source of truth for it. Work through it in order, without skipping phases or adding scope.
 
 ### Hard rules
-1. **Temp files:** ALWAYS use `<repo>/.tmp/` for scratch files, screenshots, downloads, and logs. NEVER use `/tmp` or `/var/folders` (from `AGENTS.md`, no exceptions).
+1. **Temp files:** use `<repo>/.tmp/` for scratch files, screenshots, downloads, and logs, never `/tmp` or `/var/folders` (see CONTRIBUTING.md).
 2. **One task = one commit.** Each task below has an ID (for example `P1-T3`). Commit message format: `fix(media): P1-T3 <short summary>` or `feat(media): …`. Do not batch tasks.
 3. **Tests before fixes (TDD for bugs).** For every bug ID (`BUG-xx`), first write a test that FAILS on current code, run it, and confirm it fails. Then fix the bug and confirm the test passes. Paste both run outputs into the commit body (just the summary lines).
 4. **Gate after every task.** All of these must pass before you commit (see §9.1 for the exact commands):
@@ -81,15 +84,15 @@ Browser / Capacitor WebView
      ├─ GET /api/media/detail?uri=, POST /api/media/favorite
      └─ <img src="/api/media/imageproxy?path=…&token=…">
  └─ components/widgets/ActiveMediaWidget.tsx (dashboard; separate 5s poll, duplicate logic)
- └─ components/LocalAudioPlayer.tsx (DEAD CODE: only imported by a test)
- └─ lib/webPlayer.ts (multi-tab coordination: effectively inert; only player-id persistence is live)
+ └─ components/LocalAudioPlayer.tsx (dead code, only imported by a test; since deleted)
+ └─ lib/webPlayer.ts (multi-tab coordination: effectively inert; since deleted)
 Android: MainActivity.java (WebView autoplay allowed), widgets/MediaWidget.java (native widget; parses wrong fields)
          Manifest declares FOREGROUND_SERVICE_MEDIA_PLAYBACK but NO service exists.
 ```
 
 Routing: `App.tsx:122` renders `<ProtectedRoute><Media/></ProtectedRoute>`. **Each route builds its own shell** (`App.tsx:35-69`), so the whole layout remounts on every navigation.
 
-Design tokens: `src/index.css:17-55` (`--site-*`, `--color-surface-*`, `--radius-*`), theme engine `src/themes/siteTheme.ts`, and utility classes `.glass-panel`, `.glass-card`, `.glass-input`, `.glass-button`, `.skeleton`. Media currently hard-codes `cyan/purple/pink/amber` Tailwind colors, which **ignore the active theme**. Note: `tailwind.config.js` is a v3 file that Tailwind v4 ignores (no `@config` in `index.css`).
+Design tokens: `src/index.css:17-55` (`--site-*`, `--color-surface-*`, `--radius-*`), theme engine `src/themes/siteTheme.ts`, and utility classes `.glass-panel`, `.glass-card`, `.glass-input`, `.glass-button`, `.skeleton`. Media currently hard-codes `cyan/purple/pink/amber` Tailwind colors, which **ignore the active theme**. `tailwind.config.js` is a v3 file that Tailwind v4 ignores (no `@config` in `index.css`).
 
 ---
 
@@ -111,7 +114,7 @@ Paths are relative to `services/ui/src/`.
 
 | ID | Sev | Where | Problem | Fix / required test |
 |---|---|---|---|---|
-| BUG-40 | P1 | — | **Fixed 2026-10-15** (`dd9e8df2`): the MA web player lives in `context/MediaPlayerContext.tsx` above the router; Media replays its state on return | Remaining: the E2E (play → navigate → still playing, mini-player visible) once the mini-player exists |
+| BUG-40 | P1 | page lifecycle | **Fixed 2026-10-15** (`dd9e8df2`): the MA web player lives in `context/MediaPlayerContext.tsx` above the router; Media replays its state on return | Remaining: the E2E (play → navigate → still playing, mini-player visible) once the mini-player exists |
 | BUG-41 | P1 | `Media.tsx:288-293` `formatTime` | No hours: a 10h audiobook shows `605:12` | Shared `formatDuration()` → `H:MM:SS` when ≥1h. Unit test: 0, 59, 3600, 36012, NaN |
 | BUG-42 | P1 | `Media.tsx:705-738,814,852,877,949` | **Fixed 2026-10-15**: explorer rows await the play and show their own spinner. Explorer spinner can never show: async calls are not awaited (the `finally` clears immediately) and the keys never match (`ma-${uri}` vs `uri`) | Await the promise; one `itemKey()` helper. Component test: click → spinner visible until the promise resolves |
 | BUG-43 | P1 | `Media.tsx:992-993` | **Fixed 2026-10-15** (play): a podcast resolves to its MA `library://podcast/<n>` like a book; an episode list is still to do. ABS **podcast** passed as `'playlist'` → plays a raw podcast id via MA (broken) | Podcasts open the Podcast detail view (episode list); play an episode. Component test |
@@ -125,7 +128,7 @@ Paths are relative to `services/ui/src/`.
 | BUG-51 | P1 | `maWebPlayer.ts:285-288,313-314,291` | Previous track's art/title sticks; favorite never applied (`null` vs `undefined`) | Replace metadata wholesale on a track change. Unit tests on the event reducer |
 | BUG-52 | P1 | `maWebPlayer.ts:262,268` | Player-id filter uses `includes` both ways | Strict equality. Unit test |
 | BUG-53 | P1 | `maWebPlayer.ts:726,744,762,787,804` | Transport sends with `expectResult=false` → MA errors are swallowed | Await results; surface a toast. Unit test |
-| BUG-54 | P1 | `ActiveMediaWidget.tsx:129-145,246-252,55-58` | Seek fires a request on every pointermove; volume on every step; position never resets | Widget uses the shared store and `<Scrubber>`/`<VolumeSlider>` (commit on release, debounce 150ms) |
+| BUG-54 | P1 | `ActiveMediaWidget.tsx:129-145,246-252,55-58` | **Partly fixed 2026-10-15**: seek and volume drags are debounced (200 ms, only the settled value is sent), a zero position from a new track is applied, and when the active player is this app's web player the widget drives it directly through `useOptionalWebPlayer()` (`context/webPlayerContext.ts`); the widget is not yet on a shared store or `<Scrubber>`. Seek fires a request on every pointermove; volume on every step; position never resets | Widget uses the shared store and `<Scrubber>`/`<VolumeSlider>` (commit on release, debounce 150ms) |
 | BUG-55 | P1 | `android/.../widgets/MediaWidget.java:39-61` | **Already fixed**: `MediaStatus.java` parses `detail.active`. Parses `detail.player`, but the API returns `detail.active` | Parse `detail.active`. Manual device check + a JUnit test if the Android test harness exists (it probably doesn't, so use the manual checklist) |
 | BUG-56 | P1 | `maWebPlayer.ts:116-127,1062-1098` | Lock-screen artwork uses the raw MA path (broken); no `setPositionState`/seek/stop handlers; stale session after unmount | Full MediaSession (§6.7). Unit test with a mocked `navigator.mediaSession` |
 | BUG-57 | P2 | `Media.tsx:1151-1163` | **Fixed**: the web player connects on first play only. Web player auto-connects on every page visit (it registers an MA player speculatively) | Connect lazily: first time the Web Player is chosen as output, or when restoring a session that was playing |
@@ -137,14 +140,14 @@ Paths are relative to `services/ui/src/`.
 | BUG-63 | P2 | `Media.tsx:689,1393` | The same query key `['ma-playlists']` with different options | Central query-key factory + options (§6.3) |
 | BUG-64 | P2 | `Media.tsx:300`, `maWebPlayer.ts:99,111` | API token in `<img>` and WS URLs | Signed short-lived media token (§7.4) for img/stream; WS auth via the first message or `Sec-WebSocket-Protocol` (§7.4) |
 | BUG-65 | P2 | device list | **Fixed 2026-10-15**: MA players with an HA entity (`ma_player_id`) and our own web player are listed once. The same speaker appears twice (HA entity from the MA integration + `ma:` player) | Dedupe by the MA player id ↔ HA entity mapping (`services/shared/ma_player.py`). Unit test |
-| BUG-66 | P2 | `lib/webPlayer.ts` | **Fixed 2026-10-15**: `lib/webPlayer.ts` deleted (multi-tab lock not reimplemented: last tab to connect wins). Multi-tab coordination is dead code; `destroy()` permanently nulls the BroadcastChannel handler | Rewrite as `features/media/engine/tabLock.ts` (§6.6) |
+| BUG-66 | P2 | `lib/webPlayer.ts` (deleted) | **Fixed 2026-10-15**: `lib/webPlayer.ts` deleted (multi-tab lock not reimplemented: last tab to connect wins). Multi-tab coordination is dead code; `destroy()` permanently nulls the BroadcastChannel handler | Rewrite as `features/media/engine/tabLock.ts` (§6.6) |
 | BUG-67 | P2 | `main.tsx:43` | `CapacitorApp.removeAllListeners()` removes everyone's listeners | Keep handles; remove only its own |
 | BUG-68 | P2 | `ActiveMediaWidget.tsx`, `LocalAudioPlayer.tsx`, `Modal.tsx` | **Partly fixed 2026-10-15**: `LocalAudioPlayer.tsx` (unused) deleted; Media and Remote meet 44 px; `ActiveMediaWidget` not reviewed here. Missing aria-labels, keyboard support, and touch targets under 44px | Covered by the new components + axe tests |
 | BUG-69 | P2 | Hard-coded `cyan/purple/pink/amber` classes | Media ignores the active theme | Use `var(--site-*)` tokens + dynamic artwork accent (§6.5) |
 | BUG-70 | P2 | `maWebPlayer.ts` (256, 471, …) and `Media.tsx` | **Mostly fixed 2026-10-15**: hot-path `console.log`s removed from `maWebPlayer.ts` and `Media.tsx`. Dozens of `console.log` calls on hot paths | A `mediaLog` helper gated by `localStorage['jarvis_debug_media']==='1'` |
-| BUG-71 | P2 | `vite.config.ts:40-46` | The `ma-stream-test` debug harness ships in the production build | Remove it from `rollupOptions.input`; delete `src/ma-stream-test.ts` and `e2e/ma-stream.spec.ts` once the new tests cover streaming |
-| BUG-72 | P2 | `services/ui/debug-media*.mjs` | **Fixed 2026-10-15**: deleted. Hard-coded LAN IP + credentials; write to `/tmp` | Delete them |
-| BUG-73 | P1 | `e2e/web-player-sendspin.spec.ts:15-36` | Throws at module load when env vars are missing, which breaks collection of the **whole** Playwright suite | Replace with `test.skip(!process.env.X, …)` inside `describe`; move it to the `@live` project (§9.3) |
+| BUG-71 | P2 | `vite.config.ts:40-46` | **Fixed**: `src/ma-stream-test.ts` and `e2e/ma-stream.spec.ts` are gone and `vite.config.ts` has no `ma-stream-test` entry. The `ma-stream-test` debug harness ships in the production build | Remove it from `rollupOptions.input`; delete `src/ma-stream-test.ts` and `e2e/ma-stream.spec.ts` once the new tests cover streaming |
+| BUG-72 | P2 | `services/ui/debug-media*.mjs` (deleted) | **Fixed 2026-10-15**: `debug-media.mjs` and `debug-media-console.mjs` deleted. Hard-coded LAN IP + credentials; write to `/tmp` | Delete them |
+| BUG-73 | P1 | `e2e/web-player-sendspin.spec.ts:15-36` | **Fixed**: missing `UI_URL`/`TEST_USER`/`TEST_PASS` now `test.skip` inside the suite. Throws at module load when env vars are missing, which breaks collection of the **whole** Playwright suite | Replace with `test.skip(!process.env.X, …)` inside `describe`; move it to the `@live` project (§9.3) |
 
 ### 3.4 UI/UX issue ledger (every item must be resolved; none is optional)
 These are the design and usability problems in the current UI: `pages/Media.tsx`, `ActiveMediaWidget.tsx`, and the explorer modal. "Resolved by" points to the section or task that fixes it. "Verify" is how you prove it. **P6-T5** (below) is a dedicated pass that walks this whole table.
@@ -154,10 +157,10 @@ These are the design and usability problems in the current UI: `pages/Media.tsx`
 | UX-01 | The device selector is the first thing on the page and dominates it. It's a horizontal pill strip titled "Select Device" (Media.tsx:120-221) | Output chip in the header + Output sheet (§4.2) | Visual baseline; E2E output.spec |
 | UX-02 | The Web Player tile always shows a **green "online" dot**, even when disconnected or failed (Media.tsx:141) | Output rows show the real `connection.web` state (connecting/connected/reconnecting/failed) | Component test for each state |
 | UX-03 | Jargon for users: "Browser / Android App", "(HA/MA Device)", "Connected to MA", "Music Assistant" as a tab name, "Identity service" (Media.tsx:144,174,542,568,770,2206) | Copy rules (§3.5): plain language only ("This device", "Kitchen Speaker", "Music", "Audiobooks") | `grep -rn "HA/MA\|Identity service\|Music Assistant" src/features/media` finds only settings links |
-| UX-04 | Broken copy: "Web Player Connection Failed — " ends with a dangling dash (Media.tsx:544) | StateViews error copy + Retry button | Component test |
+| UX-04 | Broken copy: "Web Player Connection Failed" was followed by a dangling dash (Media.tsx:544) | StateViews error copy + Retry button | Component test |
 | UX-05 | A "Select a device above to enable playback" warning shows even though the Web Player is a valid default (Media.tsx:557-563) | There is always an active output (defaults to this device), so the message is removed | Component test: no warning on first load |
 | UX-06 | The empty state shows a big **Play icon that isn't a button** ("No Active Playback"). It looks clickable and does nothing (Media.tsx:399-403,431) | Nothing loaded → no mini-player. Listen Now shelves are the call to action | Visual baseline |
-| UX-07 | Cover art is tiny (64–80px) with no hero moment (Media.tsx:393) | Now Playing sheet with large art + blurred backdrop (§4.2) | Visual baseline |
+| UX-07 | Cover art is tiny (64-80px) with no hero moment (Media.tsx:393) | Now Playing sheet with large art + blurred backdrop (§4.2) | Visual baseline |
 | UX-08 | Mobile layout stacks art → text → transport → volume with borders between them; controls are not thumb-reachable | Mini-player (bottom) + Now Playing with controls in the lower third (§4.2) | Mobile visual baseline |
 | UX-09 | A red **Stop** square sits next to Next. It looks destructive, is rarely needed, and is easy to mis-tap (Media.tsx:453-458) | Stop moves to the Now Playing "…" menu; mini-player has only play/pause + next | Component test |
 | UX-10 | The volume readout shows "M" when muted, in monospace (Media.tsx:473) | `VolumeSlider`: icon state + `aria-valuetext`; no cryptic letters | Component test |
@@ -175,7 +178,7 @@ These are the design and usability problems in the current UI: `pages/Media.tsx`
 | UX-22 | Playing an item from the explorer gives **no feedback**: the modal stays open, no spinner (BUG-42), no confirmation | Tapping an item shows pending on that item, then the mini-player updates, with a polite live-region announcement | Journey 1 |
 | UX-23 | Items are disabled with **no explanation** when there's no target (Media.tsx:812,852,875) | Never disabled; there's always an output | Component test |
 | UX-24 | Play affordances are **hover-only** (`opacity-0 group-hover:opacity-100`), so they're invisible on touch (Media.tsx:612,634,824…) | The whole card is the play target; a visible play button overlay on the art for touch (`@media (hover: none)`) | Mobile visual baseline |
-| UX-25 | Weak hierarchy: a plain `h1 Media`, uppercase 10–12px section labels everywhere | Typography scale (§6.5): page title, shelf titles 18–20px semibold, sentence case | Visual baseline |
+| UX-25 | Weak hierarchy: a plain `h1 Media`, uppercase 10-12px section labels everywhere | Typography scale (§6.5): page title, shelf titles 18-20px semibold, sentence case | Visual baseline |
 | UX-26 | Emoji in the UI ("🎧 Browser Audio") (Media.tsx:125) | Removed; lucide icons only | grep for emoji in `features/media` |
 | UX-27 | A constant `animate-pulse` on the Web Player tile and banners distracts and ignores reduced-motion (Media.tsx:138,540) | Motion only on state change; honor reduced motion (§4.4) | Reduced-motion E2E |
 | UX-28 | The same Music icon is used for tracks, albums, artists, and playlists; type is only a tiny pill | Artwork + kind-specific fallback icons + round art for artists | Visual baseline |
@@ -197,7 +200,7 @@ These are the design and usability problems in the current UI: `pages/Media.tsx`
 | UX-44 | Audiobook lists have no cover, duration, or progress | `MediaCard` with `ProgressRing` + "2h 13m left" | Component test |
 | UX-45 | **"Reconnecting…" toast spam**: status polling goes through the axios retry interceptor with toasts (api.ts:242-296) | Background requests (polling, the event-stream fallback, heartbeats) pass an axios config flag `silent: true` that skips the retry toast. Show the single offline banner (§4.5) instead | Vitest on the interceptor; E2E `offline` sees 0 toasts |
 | UX-46 | Failures are labelled "Jarvis server" because `describeFailedTarget` doesn't know `/execute/media/*` (api.ts:230) | Add media prefixes → "Media service" | Unit test |
-| UX-47 | BottomNav already has 7–8 cramped items. The mini-player must not make the bottom of the screen claustrophobic | Mini-player floats with an 8px gap and rounded corners, auto-hides on scroll down in long lists and reappears on scroll up, and never overlaps the FAB/toasts (z-scale §6.4) | Mobile visual baseline + scroll E2E |
+| UX-47 | BottomNav already has 7-8 cramped items. The mini-player must not make the bottom of the screen claustrophobic | Mini-player floats with an 8px gap and rounded corners, auto-hides on scroll down in long lists and reappears on scroll up, and never overlaps the FAB/toasts (z-scale §6.4) | Mobile visual baseline + scroll E2E |
 | UX-48 | Landscape phones and tablets are not considered | Now Playing switches to a two-column layout (art left, controls right) when `aspect-ratio > 1` and height < 500px | Visual baseline at 844×390 |
 | UX-49 | No visible focus styles on custom buttons | Global `:focus-visible` ring using `--site-accent-focus` in `features/media` | Keyboard E2E + visual |
 | UX-50 | Inconsistent naming ("Jump Back In", "Browse All Media", "Select Device", "Explorer") | Copy table (§3.5) | grep |
@@ -215,7 +218,7 @@ These are the design and usability problems in the current UI: `pages/Media.tsx`
 | Browse All Media | **Library** |
 | No Active Playback | *(no mini-player; Listen Now is the call to action)* |
 | Requires … Identity service | **Connect your music services** → [Open settings] |
-| Web Player Connection Failed — | **Couldn't connect this device.** [Try again] |
+| Web Player Connection Failed (with a trailing dash) | **Couldn't connect this device.** [Try again] |
 | Failed to load playlists. Check your server connection. | **Couldn't load playlists from your music server.** [Retry] |
 
 Sentence case everywhere. No emoji. No product or protocol names in primary UI (settings screens may use them).
@@ -255,7 +258,7 @@ All detail routes are deep-linkable, and the browser/Android back button works.
 1. Header row: title "Listen Now", search field (desktop inline; mobile icon that routes to `/media/search`), output chip showing the current output ("Kitchen Speaker ▾") that opens the Output picker.
 2. **"Playing in your home"** strip: one card per player currently `playing`/`paused` (any room). Each card shows art, title, room name, and a tiny play/pause. Tap = make it the controlled player. Hidden when none.
 3. **Continue listening**: horizontal shelf of audiobooks + podcast episodes in progress, each with a **progress ring** on the artwork and "2h 13m left".
-4. **Recently played**: artwork grid (2 columns mobile, 4–6 desktop). Tap = play.
+4. **Recently played**: artwork grid (2 columns mobile, 4-6 desktop). Tap = play.
 5. **Your playlists**: horizontal shelf.
 6. **Favorites**: shelf (tracks/albums).
 7. **Radio**: shelf (if MA has radio items).
@@ -399,7 +402,7 @@ services/ui/src/components/ui/Sheet.tsx     # generic vaul/Radix sheet, reused b
 services/ui/src/components/layout/AppShell.tsx
 ```
 `pages/Media.tsx` becomes: `export { default } from '../features/media/pages/MediaRoutes'`, which holds the nested `<Routes>` for §4.1.
-Delete when replaced: `components/LocalAudioPlayer.tsx`, `lib/webPlayer.ts`, `lib/maWebPlayer.ts` (after the engine takes over), `src/test/MediaPlayback.test.tsx` (it tests dead code), `src/ma-stream-test.ts`.
+Delete when replaced: `lib/maWebPlayer.ts` (after the engine takes over). Already gone: `components/LocalAudioPlayer.tsx`, `lib/webPlayer.ts`, `src/test/MediaPlayback.test.tsx`, `src/ma-stream-test.ts`.
 
 ### 6.3 Store contract (implement exactly; extend only if needed)
 ```ts
@@ -500,7 +503,7 @@ Defaults: `staleTime: 60_000`, `retry: 1`, `refetchOnWindowFocus: false`, `place
 Plain TS classes, no React:
 - `maRpc.ts`: `connect(): Promise<void>` returns one shared promise (BUG-46). `call(command, args, {timeoutMs=10000})` uses a pending `Map<message_id, {resolve, reject, timer}>` (BUG-48). On close, reject all pending calls. Auto-reconnect with backoff + jitter (BUG-50). `onEvent(cb)` delivers MA server events (`player_updated`, `queue_updated`, `queue_items_updated`, `queue_time_updated`) to the store's `ingest`. Filtering uses strict equality on `player_id`/`queue_id` (BUG-52).
 - `sendspinEngine.ts`: owns **exactly one** `<audio>` element (BUG-49), created lazily and removed on `dispose()`. `unlockAudio()` is a single function (it replaces the 4 copies at maWebPlayer.ts:165-188, 657-670, 714-723, 818-827), called from the first user gesture handler installed by the provider. Keep the access to Sendspin private fields (`core.wsManager.ws`, `scheduler`) behind **one** adapter file `sendspinInternals.ts` with a comment and a unit test that fails if the shape changes after a library upgrade.
-- `tabLock.ts`: the BroadcastChannel `jarvis-media`. When tab B starts web playback, it broadcasts `claim`; tab A pauses its web audio and shows "Playing in another tab — Take over". Heartbeat every 2s; the lock expires after 6s. Unit-test it with a fake BroadcastChannel.
+- `tabLock.ts`: the BroadcastChannel `jarvis-media`. When tab B starts web playback, it broadcasts `claim`; tab A pauses its web audio and shows "Playing in another tab" with a "Take over" button. Heartbeat every 2s; the lock expires after 6s. Unit-test it with a fake BroadcastChannel.
 - The engine lives for the app lifetime. The page never calls `destroy` (BUG-40). The provider disposes only on logout.
 
 ### 6.7 MediaSession (web and Android WebView)
@@ -564,6 +567,7 @@ Put it in `services/gateway/ma_allowlist.py` as a `frozenset`, and unit-test tha
 - Accepted as `?mt=` by: `/api/media/imageproxy`, `/api/media/stream/*`, `/api/media/events`, the execution 8888 file server, `WS /api/sendspin`, and `WS /api/ma-jsonrpc`.
 - The UI keeps a `mediaToken` in memory (not storage), refreshes it 5 min before expiry, and `Artwork`/engine build URLs with it. On a 401/403 from the proxy, refresh once and retry.
 - Keep accepting `?token=` for **one release** behind env `MEDIA_ALLOW_LEGACY_TOKEN=true`, logged as a deprecation warning (redacted). The Android widget (`WidgetApi.java`) must be updated in Phase 8 before legacy support is removed.
+- As built: `?mt=` is accepted by the ABS session streams, `/api/media/events` and the execution 8888 file server. `WS /api/sendspin` and `WS /api/ma-jsonrpc` still authenticate with `?token=<api key>`, and no `MEDIA_ALLOW_LEGACY_TOKEN` switch exists yet.
 
 ### 7.5 New/changed REST endpoints for the new UI (gateway, all authenticated)
 
@@ -581,7 +585,7 @@ Put it in `services/gateway/ma_allowlist.py` as a `frozenset`, and unit-test tha
 Response models are Pydantic in `services/gateway/media_models.py`. Mirror them as TS types in `features/media/types.ts`. **Contract test:** a pytest that dumps each model's JSON schema to `services/ui/src/features/media/__generated__/schemas.json`, and a vitest test that validates fixture responses against those schemas (use `ajv` as a dev dependency). CI then fails if they drift.
 
 ### 7.6 Docs
-Rewrite `docs/MEDIA_PLAYER.md` to describe the new architecture (the current doc describes endpoints that no longer exist). Update `docs/api_reference.md` with §7.5.
+Done: `docs/MEDIA_PLAYER.md` describes the shipped architecture. Keep it and `docs/api_reference.md` (§7.5 endpoints) current as the remaining phases land.
 
 ---
 
@@ -613,7 +617,7 @@ player scope, the unified endpoints and the schema contract test. Details:
 
 ### Phase 4: Persistent shell and global player (fixes BUG-40)
 - P4-T1 `AppShell` layout route (§6.4). E2E: navigate across 5 routes, and assert via a `data-testid="app-shell"` element identity check (`page.evaluate` storing a marker on it) that the shell did not remount.
-- P4-T2 ~~Mount the player above the routes; remove the `destroyWebPlayer()` unmount~~ — done via `MediaPlayerContext` (`dd9e8df2`); fold it into `MediaEngineProvider` when that exists.
+- P4-T2 ~~Mount the player above the routes; remove the `destroyWebPlayer()` unmount~~: done via `MediaPlayerContext` (`dd9e8df2`); fold it into `MediaEngineProvider` when that exists.
 - P4-T3 `components/ui/Sheet.tsx` + a11y tests (BUG-61).
 - P4-T4 `MiniPlayer` (mobile floating + desktop dock) with the bottom padding vars and z-index scale.
 - P4-T5 `NowPlayingSheet` (shared art transition, dynamic accent, all controls in §4.2, reduced motion).
@@ -636,8 +640,8 @@ player scope, the unified endpoints and the schema contract test. Details:
 - P5-T5 `BookPage` (chapters, resume, progress write-back every 15s via `/api/media/abs/progress`, speed, −15/+30).
 - P5-T6 `PodcastPage` (episodes, per-episode progress; fixes BUG-43).
 - P5-T7 `ItemContextMenu` everywhere (Play next, Add to queue, Go to artist/album, Favorite).
-- P5-T8 Replace `pages/Media.tsx` with the nested routes. Delete dead code (§6.2 list). Delete `debug-media*.mjs` (BUG-72), the `ma-stream-test` entry (BUG-71), and `MediaPlayback.test.tsx`.
-- P5-T9 Rebuild `ActiveMediaWidget` on the store + shared components (BUG-54, BUG-68).
+- P5-T8 Replace `pages/Media.tsx` with the nested routes. Delete dead code (§6.2 list). (`debug-media*.mjs`, the `ma-stream-test` entry and `MediaPlayback.test.tsx` are already gone.)
+- P5-T9 Rebuild `ActiveMediaWidget` on the store + shared components (BUG-54, BUG-68). Keep its direct control of the in-app web player (today via `useOptionalWebPlayer()` in `context/webPlayerContext.ts`).
 **Phase done when:** each page has a component test (msw) for loading/empty/error/partial/happy, and an E2E spec per page on all hermetic projects.
 
 ### Phase 6: Visual polish and theming
@@ -659,8 +663,8 @@ player scope, the unified endpoints and the schema contract test. Details:
 - P7-T5 Images: `loading="lazy"`, `decoding="async"`, and a `w=` param sized to the rendered size ×DPR (BUG-11).
 
 ### Phase 8: Android native
-- P8-T1 ~~`MediaPlaybackService` + session plugin + manifest~~ — done as `MediaPlaybackService` + `JarvisMediaPlugin` (`dd9e8df2`).
-- P8-T2 ~~JS bridge~~ — done as `src/plugins/jarvisMedia.ts`, driven by `MediaPlayerContext`. Remaining: a native audio player so playback survives the app being swiped away.
+- P8-T1 ~~`MediaPlaybackService` + session plugin + manifest~~: done as `MediaPlaybackService` + `JarvisMediaPlugin` (`dd9e8df2`).
+- P8-T2 ~~JS bridge~~: done as `src/plugins/jarvisMedia.ts`, driven by `MediaPlayerContext`. Remaining: a native audio player so playback survives the app being swiped away.
 - P8-T3 BUG-55 (widget parsing) + move the widget to signed media tokens.
 - P8-T4 BUG-67.
 - P8-T5 Build: `cd services/ui && npm run build && npx cap sync android && cd android && ./gradlew assembleDebug`. **Done when** the build succeeds and the §9.4 device checklist passes.
@@ -755,12 +759,12 @@ Rules for tests:
 ---
 
 ## 10. HOW TO VERIFY AN UPSTREAM API (the procedure for every "(VERIFY)")
-1. **MA:** open `http://<mass_url>/api-docs` (MA 2.x serves its command reference there), or send the command through the existing admin debug route after BUG-04 makes it admin-only:
+1. **MA:** open `http://<mass_url>/api-docs` (MA 2.x serves its command reference there), or use the admin-only debug routes (`/api/ma-jsonrpc/debug/players`, `/debug/queues`, `/debug/player/{player_id}`):
    ```bash
    # run in repo root; outputs go to .tmp/
-   curl -s -H "X-API-Key: $JARVIS_ADMIN_KEY" "$UI_URL/api/ma-jsonrpc/debug/players" > .tmp/ma-players.json
+   curl -s -H "Authorization: Bearer $JARVIS_ADMIN_KEY" "$UI_URL/api/ma-jsonrpc/debug/players" > .tmp/ma-players.json
    ```
-   For arbitrary commands, write a tiny script `.tmp/ma_cmd.py` that opens `ws(s)://<gateway>/api/ma-jsonrpc?mt=<media token>` and sends `{"message_id":"1","command":"<cmd>","args":{…}}`. Record the request and response in `docs/MEDIA_UPSTREAM_API_NOTES.md`.
+   For arbitrary commands, write a tiny script `.tmp/ma_cmd.py` that opens `ws(s)://<gateway>/api/ma-jsonrpc?token=<api key>` and sends `{"message_id":"1","command":"<cmd>","args":{…}}`. Record the request and response in `docs/MEDIA_UPSTREAM_API_NOTES.md`.
 2. **ABS:** `curl -s -H "Authorization: Bearer $ABS_KEY" "$ABS_URL/api/<path>" > .tmp/abs-<name>.json`. Official reference: https://api.audiobookshelf.org.
 3. **HA:** REST `GET $HA_URL/api/states/<entity>`, and WebSocket via `.tmp/ha_ws.py` (auth message, then `subscribe_entities`).
 4. Turn every recorded response into a fixture under `e2e/fixtures/media/` or `services/*/tests/fixtures/`, so tests use **real** shapes.
@@ -778,8 +782,8 @@ If you have no access to live servers, stop at the first (VERIFY) that blocks yo
 ---
 
 ## Critical files (quick index)
-- UI: `services/ui/src/pages/Media.tsx`, `src/lib/maWebPlayer.ts`, `src/lib/webPlayer.ts`, `src/components/widgets/ActiveMediaWidget.tsx`, `src/services/api.ts` (media methods ~1384-1540, 1779-1792), `src/App.tsx`, `src/components/layout/{MobileShell,BottomNav,Sidebar,Header}.tsx`, `src/index.css`, `src/themes/siteTheme.ts`, `src/hooks/{useHaptics,useDebounce}.ts`, `src/main.tsx`, `vite.config.ts`, `playwright.config.ts`
-- Android: `services/ui/android/app/src/main/java/com/jarvisos/app/MainActivity.java`, `…/widgets/MediaWidget.java`, `…/WidgetApi.java`, `android/app/src/main/AndroidManifest.xml`
-- Gateway: `services/gateway/main.py` (~8281-8640 media routes, 8537 user ctx, 8760-9102 sendspin/jsonrpc, 9269 MA stream, 9603 imageproxy, 9706 detail, 9721 favorite, 2255 logging), `services/gateway/ma_ws_client.py`, `services/gateway/media_device_cache.py`, `services/gateway/tool_registry.py`
+- UI: `services/ui/src/pages/Media.tsx`, `src/pages/Remote.tsx`, `src/components/media/*`, `src/lib/maWebPlayer.ts`, `src/context/MediaPlayerContext.tsx`, `src/context/webPlayerContext.ts`, `src/plugins/jarvisMedia.ts`, `src/components/widgets/ActiveMediaWidget.tsx`, `src/services/api.ts` (media methods), `src/App.tsx`, `src/components/layout/{MobileShell,BottomNav,Sidebar,Header}.tsx`, `src/index.css`, `src/themes/siteTheme.ts`, `src/hooks/{useHaptics,useDebounce}.ts`, `src/main.tsx`, `vite.config.ts`, `playwright.config.ts`
+- Android: `services/ui/android/app/src/main/java/com/jarvisos/app/MainActivity.java`, `…/MediaPlaybackService.java`, `…/JarvisMediaPlugin.java`, `…/widgets/MediaWidget.java`, `…/widgets/WidgetApi.java`, `android/app/src/main/AndroidManifest.xml`
+- Gateway: `services/gateway/main.py` (the `/api/media/*` routes, `WS /api/sendspin`, `WS /api/ma-jsonrpc`), `services/gateway/ma_allowlist.py`, `services/gateway/ma_scope.py`, `services/gateway/media_events.py`, `services/gateway/media_models.py`, `services/gateway/ma_ws_client.py`, `services/gateway/media_device_cache.py`, `services/gateway/tool_registry.py`
 - Execution: `services/execution/main.py`, `handlers/{media,media_status,mass_client,mass_ha_client,audiobookshelf,android_tv,roku,video}.py`, `abs_client.py`, `ha_client.py`, `media_playback_service.py`, `media_playback_registry.py`, `schemas.py`
-- Shared: `services/shared/ma_player.py`; identity keys in `services/identity/schemas.py:40-43`
+- Shared: `services/shared/ma_player.py`, `services/shared/media_token.py`; identity keys in `services/identity/schemas.py:40-43`

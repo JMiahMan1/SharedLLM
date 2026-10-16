@@ -1,5 +1,5 @@
 """
-Raven Test Suite — Comprehensive E2E Curriculum (Paths A, B, C, D)
+Raven Test Suite: Full E2E Curriculum (Paths A, B, C, D)
 
 Treats Raven as a black box:
 - Dispatches missions to '/api/raven/missions' with ONLY the 'query' prompt payload.
@@ -44,7 +44,7 @@ DEFAULT_ADMIN_PASSWORD = os.getenv(
 )
 
 MISSION_POLL_INTERVAL = 15          # seconds
-MISSION_TIMEOUT = 45 * 60           # seconds (Raven can be slow — 45 min per mission)
+MISSION_TIMEOUT = 45 * 60           # seconds (Raven can be slow; 45 min per mission)
 
 
 def _resolve_github_user() -> str:
@@ -164,7 +164,7 @@ def _login() -> str:
 
 
 def _dispatch_mission(api_key: str, query: str) -> int:
-    """Dispatches a mission with ONLY the query — fully prompt-driven, no API hints."""
+    """Dispatches a mission with ONLY the query: fully prompt-driven, no API hints."""
     payload = {"query": query}
     resp = requests.post(
         f"{GATEWAY_BASE}/api/raven/missions",
@@ -282,7 +282,7 @@ def test_raven_comprehensive_curriculum():
         # ===================================================================
         _log("=== PATH B: Existing Path (Modify) ===")
         query_b = (
-            f"Re-use the existing workspace '{workspace_id}' — it already has a git repo "
+            f"Re-use the existing workspace '{workspace_id}'; it already has a git repo "
             f"wired to GitHub as '{repo_name}'. Add a new file called 'MODIFY.md' with the "
             f"content 'Modify Phase Verification', commit it with the message "
             f"'feat: add modify verification log', and push to main. "
@@ -306,7 +306,7 @@ def test_raven_comprehensive_curriculum():
         # PATH C: File-Grounded Code Synthesis
         # ===================================================================
         _log("=== PATH C: File-Grounded Synthesis ===")
-        # The API spec is embedded in the prompt — no external file seeding needed.
+        # The API spec is embedded in the prompt; no external file seeding needed.
         query_c = (
             f"In workspace '{workspace_id}', do the following:\n"
             f"1. Create a file at 'docs/mock_api.md' with this exact content:\n\n"
@@ -316,7 +316,7 @@ def test_raven_comprehensive_curriculum():
             f"The request payload must be JSON: "
             f'{{\"gravity_level\": \"zero\", \"device_signature\": \"signature-9988-abc\"}}\n\n'
             f"2. Read 'docs/mock_api.md' and write a Python script 'query_api.py' that makes "
-            f"exactly the API call described — using the real endpoint, auth header, token, and "
+            f"exactly the API call described, using the real endpoint, auth header, token, and "
             f"payload from the spec.\n"
             f"3. Commit both files and push to main."
         )
@@ -337,7 +337,7 @@ def test_raven_comprehensive_curriculum():
         # ===================================================================
         _log("=== PATH D: Learning Usage Path ===")
         # D1: Ask Raven to probe port availability and explicitly save a lesson.
-        # No external port blocking — Raven explores the real environment and records findings.
+        # No external port blocking; Raven explores the real environment and records findings.
         query_d1 = (
             f"In workspace '{workspace_id}', run a network probe: use shell commands to test "
             f"whether localhost ports 9099 and 9098 are already in use or available. "
@@ -351,7 +351,7 @@ def test_raven_comprehensive_curriculum():
         _wait_for_mission(api_key, mid_d1)
         _log("PATH D1 Verification: mission completed")
 
-        # D2: Fresh mission — Raven must recall the lesson from D1 autonomously.
+        # D2: Fresh mission. Raven must recall the lesson from D1 autonomously.
         # The gateway injects relevant past lessons via _fetch_relevant_lessons at prompt build time.
         # We give Raven a generic task with no port hints whatsoever.
         query_d2 = (

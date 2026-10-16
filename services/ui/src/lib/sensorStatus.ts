@@ -25,7 +25,7 @@ export interface SensorStatusView {
   health: SensorHealth;
   /** Short headline: what is wrong, in the user's terms. */
   title: string;
-  /** What it means for their data — the part that makes the notice actionable. */
+  /** What it means for their data: the part that makes the notice actionable. */
   detail: string;
   /** A one-tap re-enable is meaningful here. */
   canEnable: boolean;
@@ -45,12 +45,12 @@ const LABELS: Record<string, SensorLabel> = {
   location: {
     title: 'Location sharing',
     gap: 'Your location is missing from the family map and trip tracking.',
-    lagging: 'Reconnecting automatically — a short drive may be missing from your trips.',
+    lagging: 'Reconnecting automatically. A short drive may be missing from your trips.',
   },
   steps: {
     title: 'Step tracking',
     gap: 'Your daily steps and streaks will have gaps.',
-    lagging: 'Reconnecting automatically — today’s total may lag a little.',
+    lagging: 'Reconnecting automatically. Today’s total may lag a little.',
   },
 };
 
@@ -67,12 +67,12 @@ function labelFor(sensor: string): SensorLabel {
 /**
  * Classify a sensor for display.
  *
- * Precedence, highest first — the order is the whole design:
- *   1. `unavailable` — the hardware or API does not exist; nothing to enable.
- *   2. `denied` — the OS refused; only the OS settings can undo it.
- *   3. `recovering` — a transient failure is being retried on its own.
- *   4. `off` — the user (or a previous denial) turned it off; re-enable works.
- *   5. `ok` — healthy, so render nothing.
+ * Precedence, highest first. The order is the whole design:
+ *   1. `unavailable`: the hardware or API does not exist; nothing to enable.
+ *   2. `denied`: the OS refused; only the OS settings can undo it.
+ *   3. `recovering`: a transient failure is being retried on its own.
+ *   4. `off`: the user (or a previous denial) turned it off; re-enable works.
+ *   5. `ok`: healthy, so render nothing.
  */
 export function sensorStatus(sensor: string, state: SensorStatusInput): SensorStatusView {
   const label = labelFor(sensor);

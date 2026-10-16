@@ -141,7 +141,7 @@ describe('worstOf', () => {
     expect(worstOf([denied, off])?.health).toBe('denied');
   });
 
-  it('prefers recovering over off — a live retry needs less attention than a dead switch', () => {
+  it('prefers recovering over off: a live retry needs less attention than a dead switch', () => {
     const recovering = sensorStatus('steps', enabled({ recovering: true }));
     const off = sensorStatus('location', {
       enabled: false,

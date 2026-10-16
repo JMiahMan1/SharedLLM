@@ -36,7 +36,7 @@ fi
 echo "[OK] Services to deploy on ${HOST}: $SERVICES"
 
 # Function to wait ONLY for the image build (Build & Push Images) to finish.
-# It does NOT wait for E2E/test pipelines — those run independently and do not
+# It does NOT wait for E2E/test pipelines; those run independently and do not
 # block deployment.
 wait_for_build() {
     local branch="$1"
@@ -110,7 +110,7 @@ done
 
 # .env is SEED-ONLY: services read it once at boot to learn their settings, and
 # from then on Identity's GlobalSetting rows are the runtime source of truth
-# (editable in Admin > Settings). It is still synced, because a fresh host has
+# (editable in Admin > LLM & Settings). It is still synced, because a fresh host has
 # never seen it and INTERNAL_SECRET, FERNET_KEY, the network URLs and PUID/PGID
 # have no other source.
 #
@@ -141,7 +141,7 @@ echo "Deploying to $HOST:$DIR"
 # server on a stale commit. Fall back to the real branch in that case.
 if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "HEAD" ]; then
     BRANCH="${DEPLOY_BRANCH:-microservices}"
-    echo "WARN: detached HEAD — deploying branch '$BRANCH' explicitly."
+    echo "WARN: detached HEAD; deploying branch '$BRANCH' explicitly."
 else
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
 fi
@@ -299,7 +299,7 @@ if ssh $SSH_OPTS "$HOST" << EOF
 
     # A recreate removes the old container before the new one registers, so
     # wait for it to exist again instead of reading logs from a name that is
-    # (briefly) gone — that read used to abort the whole deploy.
+    # (briefly) gone. That read used to abort the whole deploy.
     CONTAINER_WAIT=0
     while [ \$CONTAINER_WAIT -lt 120 ]; do
         if docker ps -a --filter "name=\$GATEWAY_CONTAINER" --format '{{.Names}}' | grep -q .; then
@@ -376,7 +376,7 @@ if ssh $SSH_OPTS "$HOST" << EOF
     # The advertised git_sha MUST be the SHA baked into the bundle we publish.
     # Deriving it from the server's git HEAD instead lets metadata and bundle
     # drift apart, and the mobile app then downloads, applies, restarts, and
-    # still sees itself as out of date — an endless reload loop.
+    # still sees itself as out of date: an endless reload loop.
     UI_CONTAINER=\$(docker ps --filter 'name=sharedllm_ui' --format '{{.Names}}' | head -1)
     if [ -n "\$UI_CONTAINER" ]; then
         echo "Staging OTA update bundle from \$UI_CONTAINER to data/app_updates..."

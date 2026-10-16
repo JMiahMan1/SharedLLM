@@ -5,7 +5,7 @@ Policy under test (services/identity/main.py):
 * A user's own HA / Music Assistant / Audiobookshelf / Nextcloud credentials are
   always used when they are configured.
 * The system default user (``is_system_default``, or id 1, or username
-  "default" — i.e. "User 1" even after a rename) owns the shared credentials.
+  "default", i.e. "User 1" even after a rename) owns the shared credentials.
 * Any other user only borrows those shared credentials for a service an admin
   explicitly granted to them. Without a grant the service is simply absent, and
   the consumer must fail loudly rather than fall back to the admin's account.
@@ -105,7 +105,7 @@ def _resolve(client: TestClient, username: str) -> dict:
     return resp.json()
 
 
-# ─── Resolution policy ────────────────────────────────────────────────────────
+# Resolution policy
 
 
 def test_own_credentials_are_used(client: TestClient, session: Session):
@@ -240,7 +240,7 @@ def test_skylight_prefers_the_users_own_account(client: TestClient, session: Ses
     assert other["credential_sources"]["skylight"] == "shared"
 
 
-# ─── Grant endpoints ──────────────────────────────────────────────────────────
+# Grant endpoints
 
 
 def test_admin_can_opt_in_for_itself(client: TestClient, session: Session):
@@ -331,7 +331,7 @@ def test_deleting_a_user_drops_their_grant(client: TestClient, session: Session)
     assert _resolve(client, "casey")["mass_url"] is None
 
 
-# ─── Self-service credential writes ───────────────────────────────────────────
+# Self-service credential writes
 
 
 def test_self_service_can_set_the_audiobookshelf_api_key(client: TestClient, session: Session):

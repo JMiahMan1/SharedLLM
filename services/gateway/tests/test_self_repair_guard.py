@@ -2,7 +2,7 @@
 
 Covers: no silent fallback chains for the coding model (only the config DB
 value), per-container cooldown, and dedup against already-pending admin_fix
-missions — so the coder agent is not re-triggered on every health-check cycle.
+missions, so the coder agent is not re-triggered on every health-check cycle.
 """
 
 import json

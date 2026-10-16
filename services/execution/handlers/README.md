@@ -11,14 +11,14 @@ isolated to prevent cross-contamination between device types.
 | `android_tv.py` | Android TV / Google TV | ADB commands, media_player services |
 | `webos.py` | LG WebOS TVs | media_player services, power management |
 | `samsung.py` | Samsung Tizen TVs | media_player services, KEY_POWER fallbacks |
-| `media.py` | All platforms | Unified routing — detects platform and delegates |
+| `media.py` | All platforms | Unified routing: detects platform and delegates |
 | `video.py` | All platforms | yt-dlp URL resolution and local streaming |
 
 ## Device Discovery & Profiling
 
 Three new modules provide network-level device management:
 
-### `device_registry.py` — Persistent IP/MAC Store
+### `device_registry.py`: Persistent IP/MAC Store
 JSON file at `/data/device_registry.json` (volume-mounted as `execution_data`).
 Stores per-entity: IP, MAC, hostname, integration, friendly_name, discovery method,
 last_verified timestamp, and stale flags.
@@ -34,23 +34,23 @@ last_verified timestamp, and stale flags.
 | `list_devices()` | Return all registered devices |
 | `remove_device(entity_id)` | Delete a device record |
 
-### `device_discovery.py` — Multi-Strategy IP Discovery
+### `device_discovery.py`: Multi-Strategy IP Discovery
 Ordered pipeline (stops on first success):
 
-1. **Persistent registry cache** — instant if previously discovered
-2. **HA device registry** — config entries + device registry connections for MAC
-3. **HA entity attributes** — some integrations expose `ip_address`/`mac_address`
-4. **ARP table scan** — matches hostname to `arp -a` output
-5. **mDNS resolution** — resolves `.local` hostnames derived from friendly_name
-6. **SSDP broadcast** — Roku (`roku:ecp`), DLNA, Cast discovery
-7. **Batched network scan** — probes known ports in groups of 30 (1s timeout)
+1. **Persistent registry cache**: instant if previously discovered
+2. **HA device registry**: config entries + device registry connections for MAC
+3. **HA entity attributes**: some integrations expose `ip_address`/`mac_address`
+4. **ARP table scan**: matches hostname to `arp -a` output
+5. **mDNS resolution**: resolves `.local` hostnames derived from friendly_name
+6. **SSDP broadcast**: Roku (`roku:ecp`), DLNA, Cast discovery
+7. **Batched network scan**: probes known ports in groups of 30 (1s timeout)
 
 | Function | Purpose |
 | :--- | :--- |
 | `discover_device(entity_id, ha_url, ha_token, device_type)` | Full pipeline |
 | `bulk_scan(ha_url, ha_token, subnet)` | Scan all media_player entities |
 
-### `device_profiler.py` — Capability Mapping
+### `device_profiler.py`: Capability Mapping
 Generates complete device profiles pairing HA entity info with network data
 and control method documentation.
 

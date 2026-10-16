@@ -3,10 +3,10 @@
 The repo had no push backend at all, so reports only ever appeared in-app. Two
 transports are supported behind one interface:
 
-* **Web Push (VAPID)** — self-contained and enabled by default. Subscriptions
+* **Web Push (VAPID)**: self-contained and enabled by default. Subscriptions
   live in Redis, keys are generated once and reused, and delivery goes through
   ``pywebpush`` when it is installed.
-* **FCM** — used for the native Android app. It activates only when Firebase
+* **FCM**: used for the native Android app. It activates only when Firebase
   credentials are present (``GOOGLE_APPLICATION_CREDENTIALS`` /
   ``TELEMETRY_FCM_CREDENTIALS``); without them nothing is attempted and the
   notification stays in the in-app outbox.
@@ -42,7 +42,7 @@ def _redis():
     return redis.from_url(REDIS_URL, decode_responses=True)
 
 
-# ── subscriptions ───────────────────────────────────────────────────────────
+# subscriptions
 
 async def save_subscription(user: str, subscription: dict[str, Any]) -> None:
     rc = _redis()
@@ -82,7 +82,7 @@ async def list_subscriptions(user: str) -> list[dict[str, Any]]:
     return out
 
 
-# ── VAPID keys ──────────────────────────────────────────────────────────────
+# VAPID keys
 
 async def ensure_vapid_keys() -> dict[str, str] | None:
     """Return the server's VAPID key pair, generating one on first use."""
@@ -141,7 +141,7 @@ async def vapid_public_key() -> str | None:
     return keys["public_key"] if keys else None
 
 
-# ── transports ──────────────────────────────────────────────────────────────
+# transports
 
 def _fcm_available() -> bool:
     return bool(
@@ -156,7 +156,7 @@ async def _send_webpush(subscription: dict, payload: dict, keys: dict) -> bool:
     except Exception as e:
         # Missing dependency is a deployment gap, not a delivery failure:
         # surface it loudly and keep the in-app outbox working.
-        log.error("pywebpush is not installed — Web Push disabled (%s)", e)
+        log.error("pywebpush is not installed, Web Push disabled (%s)", e)
         return False
     try:
         await asyncio.to_thread(
@@ -170,7 +170,7 @@ async def _send_webpush(subscription: dict, payload: dict, keys: dict) -> bool:
     except WebPushException as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
         if status in (404, 410):
-            return False  # dead subscription — caller prunes it
+            return False  # dead subscription; caller prunes it
         log.warning("Web push failed: %s", e)
         return False
     except Exception as e:

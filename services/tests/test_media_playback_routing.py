@@ -83,7 +83,7 @@ class TestPort8888InCode(unittest.TestCase):
 
     These assertions used to grep handlers/video.py and handlers/media.py for the
     literal ":8888/media/". That rotted the moment commit d6148ccb moved URL
-    construction into execution/media_links.py so the token could be attached —
+    construction into execution/media_links.py so the token could be attached,
     the handlers stopped containing the string and the two tests failed while
     the code they described was correct and better. They now assert the helper's
     behaviour, and assert the handlers *delegate* to it rather than building a
@@ -140,7 +140,7 @@ class TestPort8888InCode(unittest.TestCase):
 
     def test_no_handler_hardcodes_a_media_port(self):
         """A hand-built URL would skip the token, so no handler may contain a
-        media URL literal at all — not 8888 (bypasses signing) and not 8003."""
+        media URL literal at all: not 8888 (bypasses signing) and not 8003."""
         for rel in ("handlers/video.py", "handlers/media.py", "handlers/roku.py"):
             content = self._read(rel)
             for bad in (":8888/media/", ":8003/media/"):

@@ -16,7 +16,7 @@ log = logging.getLogger("execution.media_playback_service")
 
 # Single source of truth for targets that mean "this client plays locally"
 # (was previously two divergent tuples: status only checked local/web_player,
-# which left browser/android routed to the HA path — BUG-24).
+# which left browser/android routed to the HA path, BUG-24).
 LOCAL_PLAYER_ALIASES = frozenset({"local", "web_player", "browser", "android"})
 
 # The app's web player reports itself every 15 s while it plays (and on every

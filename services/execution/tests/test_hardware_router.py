@@ -41,9 +41,7 @@ def one_mapped_device(monkeypatch):
     return esphome_client
 
 
-# ── translation table ────────────────────────────────────────────────────────────
-
-
+# translation table
 def test_translate_light_turn_on_with_brightness():
     params = hardware_router._translate_ha_call(
         "light", "turn_on", {"brightness_pct": 55}
@@ -70,9 +68,7 @@ def test_translate_scene_unsupported():
     assert hardware_router._translate_ha_call("scene", "turn_on", {}) is None
 
 
-# ── HA-entity correlation ────────────────────────────────────────────────────────
-
-
+# HA-entity correlation
 @pytest.mark.asyncio
 async def test_find_device_explicit_mapping_wins(one_mapped_device):
     name = await esphome_client.find_device_for_ha_entity("LIGHT.OFFICE_LIGHT")
@@ -114,9 +110,7 @@ async def test_find_device_skips_unreachable_devices(one_mapped_device):
         assert await esphome_client.find_device_for_ha_entity("light.office_light") is None
 
 
-# ── routing behavior ─────────────────────────────────────────────────────────────
-
-
+# routing behavior
 @pytest.mark.asyncio
 async def test_ha_success_short_circuits(one_mapped_device):
     with patch.object(
@@ -132,7 +126,7 @@ async def test_ha_success_short_circuits(one_mapped_device):
 
 @pytest.mark.asyncio
 async def test_ha_http_error_does_not_fall_back(one_matched_device=one_mapped_device):
-    """4xx from HA is a real answer — never re-executed via ESPHome."""
+    """4xx from HA is a real answer, never re-executed via ESPHome."""
     with (
         patch.object(hardware_router, "_call_ha", AsyncMock(return_value=dict(HA_HTTP_404))),
         patch.object(
@@ -199,9 +193,7 @@ async def test_fallback_untranslatable_task_fails_cleanly(one_mapped_device):
     assert "cannot be translated" in result.message
 
 
-# ── endpoint wiring ──────────────────────────────────────────────────────────────
-
-
+# endpoint wiring
 def test_ha_service_route_uses_router(one_mapped_device):
     """POST /execute/ha_service goes through execute_device_command."""
     from fastapi.testclient import TestClient

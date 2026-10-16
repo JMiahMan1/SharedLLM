@@ -1,8 +1,8 @@
 # Entity Protection (locking devices to admins and chosen users)
 
 Some things in the house should not be adjustable by everyone. A lock, a
-thermostat, the media server, the alarm panel. An admin — or the system default
-user — can put an entity under a **lock** and name the handful of users who may
+thermostat, the media server, the alarm panel. An admin (or the system default
+user) can put an entity under a **lock** and name the handful of users who may
 still use it. Everyone else does not merely get a 403 when they try: the entity
 is not in their device list at all, so it never appears on their dashboard.
 
@@ -29,7 +29,7 @@ enforcement lives in `services/execution/entity_access.py`.
    "protected but inactive" state: releasing a lock deletes the row.
 6. **Failures are loud.** An unknown username in a permit list is rejected
    outright rather than stored as a typo'd grant, and a corrupt permit list in
-   the database raises a 500 naming the entity — it never degrades to "no
+   the database raises a 500 naming the entity; it never degrades to "no
    permits, everyone locked out" or "permits ignored, lock open".
 
 ## API
@@ -41,7 +41,7 @@ enforcement lives in `services/execution/entity_access.py`.
 | `GET /api/internal/user-device-assignments?username=…` | internal secret | `device_ids`, `protected_entity_ids`, `permitted_entity_ids` (execution only) |
 
 `{entity_id}` is a single path segment matched against
-`^[a-z0-9_]+\.[a-z0-9_]+$` — anything else is a 400. A username that does not
+`^[a-z0-9_]+\.[a-z0-9_]+$`; anything else is a 400. A username that does not
 exist is a 400 listing the offenders, and **nothing is written**: you cannot
 half-apply a permit list. A non-admin write or read is a 403; no header is a
 401. The gateway proxies both routes so the UI can reach them.
@@ -64,7 +64,7 @@ permission payload per user in a
 | Identity answers | normal evaluation |
 | Identity unreachable, cache has an answer | the cached answer, plus a `stale=True` flag. A locked entity stays locked; ordinary entities keep working. |
 | Identity unreachable, nothing cached | allow, with a loud WARNING |
-| The user's row is unknown to Identity | nothing assigned, nothing permitted — fail closed |
+| The user's row is unknown to Identity | nothing assigned, nothing permitted (fail closed) |
 
 The cache has no TTL on purpose. A stale answer is replaced the instant the next
 fetch lands, so its age *is* the outage duration; a TTL would only add a second
@@ -72,7 +72,7 @@ failure mode (silently expiring back to the "no history" fail-open row). Only
 values are cached, never failures.
 
 `/execute/entity/search` deliberately does **not** hide everything during an
-outage — `perms is None` means "we do not know who you are", and hiding the whole
+outage: `perms is None` means "we do not know who you are", and hiding the whole
 house would be a worse failure than showing a light you can no longer control.
 
 The no-cache case is the one real exposure, and it is bounded: it applies only to
@@ -102,19 +102,19 @@ covers the composite night-mode path that calls handlers directly.
   users who keep access, optionally add a note, and Protect. Protecting an
   already-locked entity edits that lock in place rather than creating a second
   one. Admins and the default account are listed as "Always allowed, lock or
-  not" and are deliberately not offered as checkboxes — a permit for them would
+  not" and are deliberately not offered as checkboxes; a permit for them would
   be a no-op that reads as if it did something.
 - **The climate and device-control widgets no longer guess.** They used to
   re-derive "may this user control X" client-side from `GET /api/users/devices`,
   which hid exactly the case that matters: an entity an admin explicitly
   permitted to someone who has no assignment row. They now trust the
   server-filtered listing, and when a configured entity is missing they report
-  only how many are unavailable — not the ids the server withheld.
+  only how many are unavailable, not the ids the server withheld.
 - **`WidgetDef.adminOnly`** is a new, ready-to-use flag for management-oriented
   cards. It is enforced in the single shared `isWidgetVisible` predicate that
   both `widgetStore` visibility paths use, and the store's `isAdmin` defaults to
   `false` so an admin-only card cannot flash for a normal user. **No widget is
-  currently marked** — this is the mechanism, available to whoever decides which
+  currently marked**; this is the mechanism, available to whoever decides which
   cards should be management-only.
 
 ## Where the old behavior was removed
@@ -125,7 +125,7 @@ covers the composite night-mode path that calls handlers directly.
   `DELETE /api/devices/{id}`, `POST /api/devices/{id}/revoke` and
   `POST /api/users/devices` previously accepted any authenticated user, so
   anyone could self-assign a locked entity and walk straight past the lock.
-  Reads are unchanged — a user may still list their own assignments.
+  Reads are unchanged: a user may still list their own assignments.
 - The `authorize_action` climate entry is gone (above), and the climate handler
   now checks entity access itself.
 
@@ -139,7 +139,7 @@ covers the composite night-mode path that calls handlers directly.
   `/execute/tv_cast` and `/execute/video/play` will act on any entity id a
   caller names. A lock does still hide the entity from search, so this is only
   reachable by asking for the id directly. The group and intercom routes were
-  checked and are not a gap — they are group-definition CRUD, not entity
+  checked and are not a gap: they are group-definition CRUD, not entity
   control.
 - A device assignment that names a locked entity is not surfaced anywhere; an
   admin has to notice the lock hides the assignment.

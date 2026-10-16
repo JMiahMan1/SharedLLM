@@ -222,7 +222,7 @@ const Remote = () => {
           <div className="glass-panel rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-slate-300 flex items-center gap-2"><Volume2 size={16} className="text-slate-400" />Volume</span>
-              <span className="text-sm text-slate-400 tabular-nums">{muted ? 'Muted' : volume === null ? '—' : `${volume}%`}</span>
+              <span className="text-sm text-slate-400 tabular-nums">{muted ? 'Muted' : volume === null ? 'No data' : `${volume}%`}</span>
             </div>
             <div className="flex items-center gap-2">
               <button type="button" onClick={() => stepVolume(-5)} className="min-w-11 min-h-11 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-white" aria-label="Volume down">

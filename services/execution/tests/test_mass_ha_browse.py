@@ -5,10 +5,10 @@ Verified against homeassistant/components/music_assistant on HA core dev
 (2026-09-27):
 - services.yaml get_library: config_entry_id required: true; media_type
   select options = artist | album | audiobook | playlist | podcast | track | radio
-  (lowercase singular — "TRACKS" is invalid).
+  (lowercase singular; "TRACKS" is invalid).
 - services.py handle_get_library returns LIBRARY_RESULTS_SCHEMA
   {"items": [...], "limit", "offset", "order_by", "media_type"} which HA wraps
-  as {"changed_states": [...], "service_response": {...}} — top-level keys are
+  as {"changed_states": [...], "service_response": {...}}; top-level keys are
   never "tracks"/"playlists"/etc.
 """
 import os

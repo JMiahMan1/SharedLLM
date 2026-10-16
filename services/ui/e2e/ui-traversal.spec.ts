@@ -1,5 +1,5 @@
 /**
- * Comprehensive E2E UI Traversal Test Suite
+ * Full E2E UI Traversal Test Suite
  *
  * Systematically navigates through the UI starting from the Dashboard,
  * interacting with every clickable element and verifying that resulting
@@ -27,8 +27,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ─── Configuration ───────────────────────────────────────────────────────────
-
+// Configuration
 const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 const MAX_DEPTH = 2;
 const MAX_CLICKS_PER_PAGE = 15;
@@ -36,8 +35,7 @@ const NAV_TIMEOUT_MS = 15000;
 const ELEMENT_TIMEOUT_MS = 3000;
 const SETTLE_TIMEOUT_MS = 8000;
 
-// ─── Credential Loading ──────────────────────────────────────────────────────
-
+// Credential Loading
 function loadCredentials(): { user: string; pass: string } {
   const envTestPath = path.resolve(__dirname, '../../../.env.test');
   if (fs.existsSync(envTestPath)) {
@@ -71,8 +69,7 @@ try {
   // Credentials are optional at collection time; tests skip in describe.
 }
 
-// ─── Route Registry ──────────────────────────────────────────────────────────
-
+// Route Registry
 interface RouteExpectation {
   headingPattern: RegExp;
   titlePattern?: RegExp;
@@ -103,8 +100,7 @@ function getRouteExpectation(url: string): RouteExpectation | null {
   return null;
 }
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
+// Types
 interface CrawlError {
   url: string;
   element: string;
@@ -143,8 +139,7 @@ function newReport(): CrawlReport {
   };
 }
 
-// ─── Login Helper ────────────────────────────────────────────────────────────
-
+// Login Helper
 async function loginAsDefault(page: Page): Promise<void> {
   await page.goto(`${UI_URL}/login`);
   await page.getByPlaceholder('Enter username').waitFor({ state: 'visible', timeout: 10000 });
@@ -160,14 +155,13 @@ async function loginAsDefault(page: Page): Promise<void> {
   await page.getByPlaceholder('Enter password').fill(LOGIN_PASS);
   await page.getByRole('button', { name: /sign in/i }).click();
 
-  // Wait for app to render (not just network idle — React SPA)
+  // Wait for app to render (not just network idle; React SPA)
   await waitForReactRender(page, NAV_TIMEOUT_MS);
   await page.waitForLoadState('networkidle', { timeout: NAV_TIMEOUT_MS }).catch(() => {});
   await page.waitForTimeout(2000);
 }
 
-// ─── Core Helpers ────────────────────────────────────────────────────────────
-
+// Core Helpers
 /** Wait for React to mount content in #root beyond mere network idle. */
 async function waitForReactRender(page: Page, timeoutMs: number = 10000): Promise<void> {
   await page.waitForFunction(
@@ -263,8 +257,7 @@ async function safeClick(locator: Locator): Promise<boolean> {
   }
 }
 
-// ─── Element Discovery ───────────────────────────────────────────────────────
-
+// Element Discovery
 /** Find all clickable elements on the current page, deduplicated. */
 async function findClickableElements(page: Page): Promise<ClickableElement[]> {
   const selectors = [
@@ -325,8 +318,7 @@ async function findClickableElements(page: Page): Promise<ClickableElement[]> {
   return elements;
 }
 
-// ─── Post-Click Validation ───────────────────────────────────────────────────
-
+// Post-Click Validation
 interface ValidationResult {
   status: 'success' | 'error';
   details: string[];
@@ -377,7 +369,7 @@ async function validatePostClick(
       findings.push('blocking overlay present');
     }
   } else {
-    // DOM mutation — check that content is still present and not blocked
+    // DOM mutation: check that content is still present and not blocked
     const bodyText = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
     if (bodyText < 5) {
       findings.push('page content lost after click');
@@ -397,8 +389,7 @@ async function validatePostClick(
   };
 }
 
-// ─── State Reversion ─────────────────────────────────────────────────────────
-
+// State Reversion
 async function revertToParent(page: Page, beforeUrl: string): Promise<void> {
   // Strategy 1: goBack
   try {
@@ -422,8 +413,7 @@ async function revertToParent(page: Page, beforeUrl: string): Promise<void> {
   } catch { /* ignore */ }
 }
 
-// ─── Recursive Crawler ───────────────────────────────────────────────────────
-
+// Recursive Crawler
 async function crawlPage(
   page: Page,
   report: CrawlReport,
@@ -456,10 +446,10 @@ async function crawlPage(
         report.totalClicks++;
         clickCount++;
 
-        // ── Pre-click validation ──
+        // Pre-click validation
         const { ok, reason } = await isInteractable(locator);
         if (!ok) {
-          console.log(`  [SKIP] "${description}" — ${reason}`);
+          console.log(`  [SKIP] "${description}": ${reason}`);
           return;
         }
 
@@ -469,10 +459,10 @@ async function crawlPage(
           await page.waitForTimeout(300);
         }
 
-        // ── Capture pre-click state ──
+        // Capture pre-click state
         const beforeUrl = page.url();
 
-        // ── Click ──
+        // Click
         const clicked = await safeClick(locator);
         if (!clicked) {
           report.errors.push({
@@ -485,13 +475,13 @@ async function crawlPage(
           return;
         }
 
-        // ── Wait for state to settle ──
+        // Wait for state to settle
         await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
         await page.waitForTimeout(1500);
         await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
         await page.waitForTimeout(500);
 
-        // ── Validate post-click state ──
+        // Validate post-click state
         const result = await validatePostClick(page, text, beforeUrl);
 
         if (result.status === 'error') {
@@ -508,7 +498,7 @@ async function crawlPage(
             type: errorType,
             timestamp: Date.now(),
           });
-          console.log(`  [ERROR] "${description}" — ${result.details.join('; ')}`);
+          console.log(`  [ERROR] "${description}": ${result.details.join('; ')}`);
         } else {
           report.successfulClicks++;
           if (result.isNavigation) {
@@ -516,17 +506,17 @@ async function crawlPage(
             console.log(`  [NAV] "${description}" → ${result.newUrl}`);
           } else {
             report.domMutationClicks++;
-            console.log(`  [DOM] "${description}" — content changed in place`);
+            console.log(`  [DOM] "${description}": content changed in place`);
           }
         }
 
-        // ── Revert to parent state ──
+        // Revert to parent state
         await test.step('Reverting to parent', async () => {
           await revertToParent(page, beforeUrl);
           await page.waitForTimeout(500);
         });
 
-        // ── Recurse into navigated page ──
+        // Recurse into navigated page
         if (result.isNavigation && result.status === 'success' && depth < MAX_DEPTH) {
           await test.step(`Recursing into: ${result.newUrl}`, async () => {
             // Navigate back to the clicked page for recursion
@@ -548,13 +538,11 @@ async function crawlPage(
   });
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
-test.describe('@live Comprehensive E2E UI Traversal', () => {
+// Tests
+test.describe('@live Full E2E UI Traversal', () => {
   test.skip(!LOGIN_USER || !LOGIN_PASS, 'Credentials not found. Create a .env.test file with TEST_USER and TEST_PASS.');
 
-  // ── 1. Recursive Crawler from Dashboard ────────────────────────────────────
-
+  // 1. Recursive Crawler from Dashboard
   test('@live recursive crawl from Dashboard', async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on('pageerror', (err) => consoleErrors.push(err.message));
@@ -585,21 +573,21 @@ test.describe('@live Comprehensive E2E UI Traversal', () => {
     });
 
     await test.step('Crawl report & assertions', async () => {
-      console.log('\n═══════════════════════════════════════════');
+      console.log('\n==================================================');
       console.log('  CRAWLER REPORT');
-      console.log('═══════════════════════════════════════════');
+      console.log('==================================================');
       console.log(`  Total clicks:        ${report.totalClicks}`);
       console.log(`  Successful:          ${report.successfulClicks}`);
       console.log(`  Navigations:         ${report.navigationClicks}`);
       console.log(`  DOM mutations:       ${report.domMutationClicks}`);
       console.log(`  Errors:              ${report.errors.length}`);
       console.log(`  Unique URLs visited: ${report.visitedUrls.size}`);
-      console.log('═══════════════════════════════════════════\n');
+      console.log('==================================================\n');
 
       if (report.errors.length > 0) {
         console.log('  ERRORS:');
         for (const err of report.errors) {
-          console.log(`    [${err.type}] "${err.element}" on ${err.url} — ${err.error}`);
+          console.log(`    [${err.type}] "${err.element}" on ${err.url}: ${err.error}`);
         }
       }
 
@@ -613,9 +601,8 @@ test.describe('@live Comprehensive E2E UI Traversal', () => {
     });
   });
 
-  // ── 2. Sidebar Navigation Crawler ──────────────────────────────────────────
-
-  test('@live sidebar navigation — all routes', async ({ page }) => {
+  // 2. Sidebar Navigation Crawler
+  test('@live sidebar navigation: all routes', async ({ page }) => {
     await test.step('Login', async () => {
       await loginAsDefault(page);
     });
@@ -714,7 +701,7 @@ test.describe('@live Comprehensive E2E UI Traversal', () => {
     await test.step('Sidebar report', async () => {
       console.log(`\n  Sidebar: ${report.totalClicks} links, ${report.successfulClicks} navigations, ${report.errors.length} errors`);
       for (const err of report.errors) {
-        console.log(`    [${err.type}] "${err.element}" — ${err.error}`);
+        console.log(`    [${err.type}] "${err.element}": ${err.error}`);
       }
       expect(report.totalClicks).toBeGreaterThan(0);
       const critical = report.errors.filter(e => ['blank-page', '404', '500'].includes(e.type));
@@ -722,9 +709,8 @@ test.describe('@live Comprehensive E2E UI Traversal', () => {
     });
   });
 
-  // ── 3. Admin Tab Crawler ───────────────────────────────────────────────────
-
-  test('@live Admin page — all tabs and content validation', async ({ page }) => {
+  // 3. Admin Tab Crawler
+  test('@live Admin page: all tabs and content validation', async ({ page }) => {
     await test.step('Login and navigate to Admin', async () => {
       await loginAsDefault(page);
       await page.goto(`${UI_URL}/admin`, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS }).catch(() => {});
@@ -773,7 +759,7 @@ test.describe('@live Comprehensive E2E UI Traversal', () => {
           if (headingVisible) {
             report.successfulClicks++;
             report.domMutationClicks++;
-            console.log(`  [OK] Tab "${tab.label}" — heading verified`);
+            console.log(`  [OK] Tab "${tab.label}": heading verified`);
 
             // Crawl a few elements within the tab panel
             const panelElements = await findClickableElements(page);
@@ -809,7 +795,7 @@ test.describe('@live Comprehensive E2E UI Traversal', () => {
               error: `Expected heading ${tab.expectHeading} not visible`,
               type: 'validation', timestamp: Date.now(),
             });
-            console.log(`  [FAIL] Tab "${tab.label}" — heading not found`);
+            console.log(`  [FAIL] Tab "${tab.label}": heading not found`);
           }
         });
       }
@@ -818,16 +804,15 @@ test.describe('@live Comprehensive E2E UI Traversal', () => {
     await test.step('Admin tab report', async () => {
       console.log(`\n  Admin: ${report.totalClicks} clicks, ${report.successfulClicks} successful, ${report.errors.length} errors`);
       for (const err of report.errors) {
-        console.log(`    [${err.type}] "${err.element}" — ${err.error}`);
+        console.log(`    [${err.type}] "${err.element}": ${err.error}`);
       }
       expect(report.totalClicks).toBeGreaterThan(0);
       expect(report.successfulClicks).toBeGreaterThan(0, 'At least one tab should load content');
     });
   });
 
-  // ── 4. Widget Context Menu Crawler ─────────────────────────────────────────
-
-  test('@live Dashboard widgets — gear icon & context menu interactions', async ({ page }) => {
+  // 4. Widget Context Menu Crawler
+  test('@live Dashboard widgets: gear icon & context menu interactions', async ({ page }) => {
     await test.step('Login and navigate to Dashboard', async () => {
       await loginAsDefault(page);
       await page.goto(`${UI_URL}/`, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS }).catch(() => {});
@@ -930,8 +915,7 @@ test.describe('@live Comprehensive E2E UI Traversal', () => {
     });
   });
 
-  // ── 5. Dropdown & Modal Crawler ────────────────────────────────────────────
-
+  // 5. Dropdown & Modal Crawler
   test('@live dropdown and modal interactions across pages', async ({ page }) => {
     await test.step('Login', async () => {
       await loginAsDefault(page);
@@ -1013,8 +997,7 @@ test.describe('@live Comprehensive E2E UI Traversal', () => {
     });
   });
 
-  // ── 6. API Health Checks ───────────────────────────────────────────────────
-
+  // 6. API Health Checks
   test('@live API endpoints return healthy responses', async ({ request }) => {
     await test.step('Health endpoint', async () => {
       const resp = await request.get(`${UI_URL}/health/ready`);

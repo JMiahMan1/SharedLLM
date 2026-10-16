@@ -1,8 +1,8 @@
 """Music Assistant JSON-RPC command allowlist (MEDIA_OVERHAUL §7.3, BUG-04).
 
 Only commands the UI is allowed to send through the browser WebSocket proxy
-(WS /api/ma-jsonrpc) may reach Music Assistant. Anything else — in particular
-admin/config commands — is answered locally with an error frame and never
+(WS /api/ma-jsonrpc) may reach Music Assistant. Anything else (in particular
+admin/config commands) is answered locally with an error frame and never
 forwarded upstream.
 
 The list is the §7.3 allowlist from docs/MEDIA_OVERHAUL.md. Command names were

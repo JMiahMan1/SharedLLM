@@ -476,11 +476,11 @@ const LocationPanel = () => {
           <div className="glass-card p-3 space-y-1.5 text-xs font-mono rounded-xl bg-slate-900/50">
             <div className="flex justify-between">
               <span className="text-slate-400">Latitude</span>
-              <span className="text-slate-200">{typeof latitude === 'number' ? latitude.toFixed(6) : '—'}</span>
+              <span className="text-slate-200">{typeof latitude === 'number' ? latitude.toFixed(6) : 'No data'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Longitude</span>
-              <span className="text-slate-200">{typeof longitude === 'number' ? longitude.toFixed(6) : '—'}</span>
+              <span className="text-slate-200">{typeof longitude === 'number' ? longitude.toFixed(6) : 'No data'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Speed (Live)</span>
@@ -488,7 +488,7 @@ const LocationPanel = () => {
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Accuracy</span>
-              <span className="text-slate-200">{typeof accuracy === 'number' ? `${accuracy.toFixed(1)}m` : '—'}</span>
+              <span className="text-slate-200">{typeof accuracy === 'number' ? `${accuracy.toFixed(1)}m` : 'No data'}</span>
             </div>
           </div>
         )}

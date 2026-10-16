@@ -1472,7 +1472,7 @@ export default function WorkspaceIDE({
     setSdBusy(true);
     try {
       // If the user already wrote their own identity instruction in the shared
-      // prompt box, use theirs alone — stacking two identity blocks makes the
+      // prompt box, use theirs alone; stacking two identity blocks makes the
       // model over-weight the face and ignore the new scene.
       const prompt = scene
         ? hasIdentityInstruction(sdPrompt)
@@ -1493,7 +1493,7 @@ export default function WorkspaceIDE({
         return;
       }
       const saved = res?.detail?.output_path || rel;
-      toast.success(`New image saved — ${saved}`);
+      toast.success(`New image saved: ${saved}`);
       await loadDir(currentPath);
       await openByPath(saved);
     } catch (e: unknown) {
@@ -1802,7 +1802,7 @@ export default function WorkspaceIDE({
                 className="w-full px-2 py-1.5 text-xs rounded bg-black/40 border border-white/10 focus:border-indigo-500 outline-none disabled:opacity-40"
               />
               <p className="text-[10px] text-slate-600 leading-relaxed">
-                Open the diff in the editor with the <span className="text-slate-400">Diff</span> button above — it renders full-size with syntax highlighting.
+                Open the diff in the editor with the <span className="text-slate-400">Diff</span> button above. It renders full-size with syntax highlighting.
               </p>
               {gitLog.length > 0 && (
                 <div>
@@ -2010,7 +2010,7 @@ export default function WorkspaceIDE({
               <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
                 <div className="flex items-center gap-2 min-w-0">
                   <GitPullRequest size={14} className="text-indigo-400 shrink-0" />
-                  <span className="text-sm text-slate-300 truncate">Git Diff — working tree vs HEAD</span>
+                  <span className="text-sm text-slate-300 truncate">Git Diff: working tree vs HEAD</span>
                 </div>
                 <button
                   onClick={() => setShowDiff(false)}
@@ -2221,7 +2221,7 @@ export default function WorkspaceIDE({
                         )}
                         {!swapBlocked && swapCap?.available === null && (
                           <p className="mt-1 text-[11px] text-slate-500">
-                            Unconfirmed — this backend may only accept one image. Try it; the answer
+                            Unconfirmed: this backend may only accept one image. Try it; the answer
                             is recorded either way.
                           </p>
                         )}
@@ -2264,7 +2264,7 @@ export default function WorkspaceIDE({
                         >
                           <option value="auto">One or more people</option>
                           <option value="one">Just one person</option>
-                          <option value="many">A group — keep each face distinct</option>
+                          <option value="many">A group (keep each face distinct)</option>
                         </select>
                         <button
                           onClick={() => void runFacePreserve()}

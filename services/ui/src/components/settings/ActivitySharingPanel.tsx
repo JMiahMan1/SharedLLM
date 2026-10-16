@@ -15,11 +15,11 @@ const SCOPES: Array<{ id: string; label: string; description: string }> = [
   { id: 'totals', label: 'Totals', description: 'Steps, workout distance, and driving' },
   { id: 'workouts', label: 'Workouts', description: 'Workout count and recent workouts' },
   { id: 'achievements', label: 'Achievements', description: 'Points and badges earned' },
-  { id: 'bible', label: 'Bible', description: 'Reading streaks, days read and Bible badges — never what was read or highlighted' },
+  { id: 'bible', label: 'Bible', description: 'Reading streaks, days read and Bible badges, never what was read or highlighted' },
 ];
 
 /**
- * Opt-in activity sharing. Private by default — nothing is visible to anyone
+ * Opt-in activity sharing. Private by default: nothing is visible to anyone
  * else until this is switched on and saved.
  */
 export default function ActivitySharingPanel() {
@@ -111,7 +111,7 @@ export default function ActivitySharingPanel() {
           <p className="text-xs text-slate-500 mt-1">
             {state.enabled
               ? 'Your activity is visible to the people you chose below.'
-              : 'Private — nothing is visible to anyone else.'}
+              : 'Private: nothing is visible to anyone else.'}
           </p>
         </div>
         <Toggle

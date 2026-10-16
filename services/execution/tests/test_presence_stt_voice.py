@@ -4,8 +4,7 @@ Run from services/execution/ directory: python -m pytest tests/test_presence_stt
 """
 import pytest
 
-# ─── Presence Tests ───────────────────────────────────────────────────────────
-
+# Presence Tests
 class TestPresenceTracker:
     """Test ESPresense presence tracking."""
 
@@ -65,8 +64,7 @@ class TestPresenceTracker:
         assert result == []
 
 
-# ─── Voice Command Logic Tests ────────────────────────────────────────────────
-
+# Voice Command Logic Tests
 class TestVoiceCommandLogic:
     """Test voice command keyword detection logic."""
 
@@ -101,8 +99,7 @@ class TestVoiceCommandLogic:
             assert result == expected, f"Failed for '{transcript}'"
 
 
-# ─── Intercom Presence Routing Tests ──────────────────────────────────────────
-
+# Intercom Presence Routing Tests
 class TestIntercomPresenceRouting:
     """Test intercom routing via presence data."""
 

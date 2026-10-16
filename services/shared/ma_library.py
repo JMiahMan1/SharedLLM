@@ -5,7 +5,7 @@ Why this exists
 Music Assistant streams an audiobook itself, through its own Audiobookshelf
 provider. It is *not* a generic URL player: handing it an HLS URL (which is
 what the gateway proxy produces) makes it store the URL as if it were a track
-title — the player then reports ``media_title`` of ``"1?user=...&mt=..."`` and
+title: the player then reports ``media_title`` of ``"1?user=...&mt=..."`` and
 never plays anything. MA only accepts its own library URI, which is
 
     library://audiobook/<numeric MA item id>
@@ -14,7 +14,7 @@ and that numeric id is *not* the Audiobookshelf UUID. It is only obtainable from
 MA's ``music/search`` response, whose items carry ``provider_mappings`` pairing
 each library URI back to its upstream ``provider_domain``/``provider_id``. The
 Home Assistant service surface strips that field, so the lookup has to go over
-MA's own JSON-RPC — see ``docs/MEDIA_UPSTREAM_API_NOTES.md``.
+MA's own JSON-RPC; see ``docs/MEDIA_UPSTREAM_API_NOTES.md``.
 
 This module is the single resolver for that mapping. Both the HA-entity path in
 ``services/execution/handlers/audiobookshelf.py`` and the browser's native-MA
@@ -24,7 +24,7 @@ URI is this book?".
 Design notes
 ------------
 * Failure is always explicit. A miss returns a message naming the item and the
-  search terms — never a guessed URI and never a silent fallback to a raw URL,
+  search terms, never a guessed URI and never a silent fallback to a raw URL,
   because a fallback reproduces the exact bug this module exists to fix.
 * ``websockets`` is used rather than an MA HTTP call because ``music/search``
   is the only command that returns ``provider_mappings``, and MA serves it over
@@ -101,7 +101,7 @@ def _message_id() -> str:
 async def _rpc(ws, command: str, args: dict, timeout: float = WS_CALL_TIMEOUT):
     """Send one JSON-RPC command and return its ``result``.
 
-    Raises MALibraryLookupError on any error frame, missing frame, or timeout —
+    Raises MALibraryLookupError on any error frame, missing frame, or timeout;
     MA answers with ``{"error_code": n, "error": "..."}`` rather than closing,
     so a caller that ignores errors would otherwise treat the reply as success.
     """
@@ -158,7 +158,7 @@ def _match_by_abs_id(items: list[dict], abs_item_id: str) -> dict | None:
     """The first item MA reports as backed by *this* Audiobookshelf item.
 
     Matches books and podcasts alike; both carry the ABS id in
-    ``provider_mappings``. An empty ``abs_item_id`` matches nothing — guessing the
+    ``provider_mappings``. An empty ``abs_item_id`` matches nothing; guessing the
     first available item would hand MA a URI for the wrong media.
     """
     target = (abs_item_id or "").strip().lower()
@@ -250,7 +250,7 @@ async def resolve_audiobook_uri(
     """Map an Audiobookshelf item id to the MA library URI that plays it.
 
     Works for books (``library://audiobook/<n>``) and podcasts
-    (``library://podcast/<n>``) alike — MA carries the ABS id in each item's
+    (``library://podcast/<n>``) alike; MA carries the ABS id in each item's
     ``provider_mappings``, so the id is the reliable key for both. MA does *not*
     index individual podcast episodes (a search for an episode title returns
     nothing, and ``library://podcast/<n>?episode=<i>`` is rejected), so an episode

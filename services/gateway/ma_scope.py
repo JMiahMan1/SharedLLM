@@ -118,7 +118,7 @@ async def check_ma_frame_scope(raw: str, *, user: str, is_admin: bool) -> str | 
     if perms is None:
         log.warning(
             "[ma-scope] ALLOW %s -> %s: Identity unreachable and no cached "
-            "permissions — player scope cannot be enforced right now",
+            "permissions; player scope cannot be enforced right now",
             user,
             sorted(refs),
         )

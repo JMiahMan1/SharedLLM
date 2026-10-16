@@ -5,10 +5,10 @@ Live ABS 2.x replaced ``/api/items/:id/stream`` with session playback:
 ``GET /public/session/:sid/track/:i`` -> 302 -> an HLS playlist whose segment
 URIs are relative to the ABS host. The gateway:
 
-- ``GET /api/media/stream/abs-session/{sid}/{i}`` — mt-token auth, fetches the
+- ``GET /api/media/stream/abs-session/{sid}/{i}``: mt-token auth, fetches the
   session track, and rewrites the m3u8's relative segment URIs to this
   gateway's own segment route (the ABS host never reaches the device).
-- ``GET /api/media/stream/abs-session/{sid}/{i}/{segment}`` — proxies one
+- ``GET /api/media/stream/abs-session/{sid}/{i}/{segment}``: proxies one
   segment's bytes from the ABS ``/hls`` route.
 """
 from services.gateway.tests.conftest_media import mock_upstream
@@ -75,7 +75,7 @@ class TestAbsSessionTrackEndpoint:
         body = resp.text
         assert "#EXTM3U" in body
         assert "#EXT-X-PLAYLIST-TYPE:VOD" in body
-        # Segment URIs are rewritten to the gateway's own route (with mt) —
+        # Segment URIs are rewritten to the gateway's own route (with mt);
         # the ABS host never reaches the device.
         gateway_seg = (
             "http://testserver/api/media/stream/abs-session/sess1/0/output-0.ts"
@@ -231,7 +231,7 @@ class TestAbsSessionPlaylistReadiness:
             upstream, "GET", "https://abs.example.com/hls/sess1/output.m3u8",
             body=M3U8, status=200, content_type="application/vnd.apple.mpegurl", repeat=3,
         )
-        # The first segment resolves at the origin too — not under the base path.
+        # The first segment resolves at the origin too, not under the base path.
         mock_upstream(
             upstream, "GET", "https://abs.example.com/hls/sess1/output-0.ts",
             body=b"\x00" * 32, status=206, content_type="video/mp2t", repeat=3,
@@ -295,7 +295,7 @@ class TestAbsFirstSegmentReadiness:
 
     Live: ABS served the playlist (200) while ffmpeg was still writing
     ``output-0.ts``, so a device fetched a perfectly good playlist and then got a
-    404 on its very first segment request — which TVs, speakers and cast devices
+    404 on its very first segment request, which TVs, speakers and cast devices
     treat as a dead stream. They do not retry. So the gateway must not return the
     playlist until the first segment resolves.
     """
@@ -427,7 +427,7 @@ class TestAbsFirstSegmentReadiness:
 
 
 class TestMaLibraryUriEndpoint:
-    """POST /api/media/ma-library-uri — the ABS id -> MA library URI mapping.
+    """POST /api/media/ma-library-uri: the ABS id -> MA library URI mapping.
 
     The browser used to send MA a hand-built ``audiobookshelf://<uuid>``, which MA
     rejects (no media controller for that media type) so the player stays silent.
@@ -502,7 +502,7 @@ class TestMaLibraryUriEndpointRequiresAuth:
 
     Regression guard. `_resolve_ma_credentials` resolves through
     `resolve_identity`, which **falls back to the system default user for any
-    string** — so before the strict gate this endpoint answered 200 for a request
+    string**, so before the strict gate this endpoint answered 200 for a request
     with no Authorization header at all, and for `Bearer sk-not-a-real-key`. That
     handed an unauthenticated caller a window onto the whole ABS library index
     (titles, covers, item ids). The gate must be `_require_authenticated`, which

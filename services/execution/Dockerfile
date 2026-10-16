@@ -34,11 +34,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ghostscript \
     && rm -rf /var/lib/apt/lists/*
 # mDNS (.local) name resolution for host-networked services (vision OCR proxy
-# at jeremiah-home-desktop.local:11434 etc.) — mirror the host's nsswitch so
+# at jeremiah-home-desktop.local:11434 etc.): mirror the host's nsswitch so
 # .local names resolve the same way the host does.
 RUN sed -i 's/^hosts:.*/hosts:          files mdns4_minimal [NOTFOUND=return] dns/' /etc/nsswitch.conf
 
-# GitHub CLI (gh) — used by the gh workspace tool (repo create, PRs, issues).
+# GitHub CLI (gh), used by the gh workspace tool (repo create, PRs, issues).
 # Authentication is injected at runtime via the GH_TOKEN env (no credential store).
 RUN set -eux; \
     ARCH="$(uname -m)"; \
@@ -72,7 +72,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxshmfence1 \
     libgtk-3-0 \
     && rm -rf /var/lib/apt/lists/*
-# Install camoufox browser for anti-bot evasion FIRST — it pins a specific
+# Install camoufox browser for anti-bot evasion FIRST: it pins a specific
 # playwright version, so any playwright install must come after it.
 RUN pip install --no-cache-dir camoufox
 ENV XDG_CACHE_HOME=/home/sharedllm/.cache

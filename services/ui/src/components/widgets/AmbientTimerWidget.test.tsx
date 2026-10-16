@@ -9,7 +9,7 @@ import { playChime } from '../../lib/chime';
 
 vi.mock('../../lib/chime', () => ({ playChime: vi.fn(), unlockChime: vi.fn() }));
 
-// Mock the API methods — vi.mock is hoisted to top of file
+// Mock the API methods (vi.mock is hoisted to top of file)
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
   return {

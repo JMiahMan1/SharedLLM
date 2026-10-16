@@ -172,7 +172,7 @@ export const EntityProtectionPanel: FC<{ users: UserProfile[] }> = ({ users }) =
           )}
           {choosable.length === 0 ? (
             <p className="text-[10px] text-slate-500">
-              There are no other users to permit — only admins exist on this system.
+              There are no other users to permit; only admins exist on this system.
             </p>
           ) : (
             <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -227,7 +227,7 @@ export const EntityProtectionPanel: FC<{ users: UserProfile[] }> = ({ users }) =
                 <p className="mt-1 text-[10px] text-slate-500">
                   Locked by <span className="font-mono">@{protection.granted_by}</span>
                   {protection.granted_at ? ` on ${formatWhen(protection.granted_at)}` : ''}
-                  {protection.note ? ` — “${protection.note}”` : ''}
+                  {protection.note ? `: “${protection.note}”` : ''}
                 </p>
               )}
             </div>

@@ -7,7 +7,7 @@ Raven). Two layers:
 1. Pre-check ``/admin/slots`` before starting a run. If every slot is busy the
    run is deferred without consuming an attempt.
 2. When the run does start, pass ``queue_timeout`` so Alpaca's own shared slot
-   queue holds the request instead of rejecting it — that covers the race where
+   queue holds the request instead of rejecting it; that covers the race where
    a slot frees up right after the pre-check.
 """
 from __future__ import annotations

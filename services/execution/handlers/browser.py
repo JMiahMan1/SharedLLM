@@ -122,7 +122,7 @@ async def _searxng_json_search(req: WebSearchRequest) -> ExecutionResult | None:
             resp.raise_for_status()
             data = await resp.json()
     except Exception:
-        # Surface to the Playwright fallback — the JSON endpoint being down or
+        # Surface to the Playwright fallback; the JSON endpoint being down or
         # returning non-JSON is exactly the rare case it exists for.
         raise
 
@@ -162,7 +162,7 @@ async def _searxng_json_search(req: WebSearchRequest) -> ExecutionResult | None:
                     status="FAILURE",
                     message=(
                         "Web search is unavailable: every engine was blocked. "
-                        "This is not 'no results' — the SearXNG instance could not "
+                        "This is not 'no results'; the SearXNG instance could not "
                         f"reach these engines:\n\n" + "\n".join(lines) + "\n\n"
                         "Web search requires working upstream search engines; try again "
                         "later or configure the SearXNG instance with working engines."
@@ -237,7 +237,7 @@ async def _playwright_fallback(req: WebSearchRequest) -> ExecutionResult:
 def _is_cloudflare_challenge(title: str | None, content: str) -> bool:
     """Detect a Cloudflare interstitial page (challenge or 'Just a moment' check).
 
-    NOTE: 'challenge-platform' is deliberately NOT a marker — Cloudflare injects
+    NOTE: 'challenge-platform' is deliberately NOT a marker: Cloudflare injects
     challenge-platform scripts into normal pages served via its CDN, so it is a
     false positive on real content.
     """

@@ -7,7 +7,7 @@ playback now:
 2. picks the requested episode (title match) or the latest by ``publishedAt``,
 3. starts a playback session (``POST /api/items/{podcast}/play/{episode}``),
 4. hands the device a gateway-routed, mt-token-signed HLS URL
-   (``/api/media/stream/abs-session/{sid}/0``) — never the raw ABS key.
+   (``/api/media/stream/abs-session/{sid}/0``), never the raw ABS key.
 Also: the Nextcloud fallback must pass ``ctx`` (the UserContext), not a
 nonexistent ``ctx.user_context`` attribute.
 """
@@ -299,7 +299,7 @@ class TestNextcloudFallbackCredentialArg:
     @pytest.mark.asyncio
     async def test_resolve_credentials_receives_ctx(self):
         """BUG-26: the fallback read ``ctx.user_context`` (AttributeError,
-        swallowed) — it must pass the UserContext itself."""
+        swallowed); it must pass the UserContext itself."""
         ctx = _media_ctx()
         req = MediaPlayRequest(user_context=ctx, entity_id="media_player.tv", query="nc show")
         from services.execution import nextcloud_client

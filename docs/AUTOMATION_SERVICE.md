@@ -8,25 +8,26 @@ timers that are due and dispatches each one to an internal service.
 
 ## How it works
 
-```
-Execution timer handler ── writes ──> Redis  timer:{user_id}:{timer_id}
-Automation scheduler   ── SCAN timer:* ──> due?  ── dispatch ──> execution /execute/trigger
+```text
+Execution timer handler -- writes --> Redis  timer:{user_id}:{timer_id}
+Automation scheduler   -- SCAN timer:* --> due?  -- dispatch --> execution /execute/trigger
                                                                 (or an allowlisted target)
 ```
 
 - **Loop**: scans `timer:*` with `SCAN` (never `KEYS`), fires everything due,
-  then sleeps until the next timer is due — at least 1 s, at most 60 s, so new
+  then sleeps until the next timer is due (at least 1 s, at most 60 s), so new
   timers are still picked up promptly.
 - **Dispatch**: a timer without `target` posts `{"timer": …}` to execution's
   `POST /execute/trigger` (which plays the alert on `target_device` through
   Home Assistant). A timer with `target: {service, path, method?, payload?}`
-  is sent to that service instead; `service` must be one of `execution`,
+  is sent to that service instead (the payload gains `timer` and `user_id`);
+  `service` must be one of `execution`,
   `identity`, `geo`, `rag` and `path` a plain absolute path, so a timer can
   never reach an arbitrary host. Calls carry `X-Internal-Secret`.
 - **Recurring timers**: after firing, `expires_at` is advanced past the fire
   time from the `recurrence` text (`every N minutes/hours/days/weeks`,
   hourly, daily, weekly, monthly, yearly; unrecognised text advances one
-  day — wrong-but-bounded beats an endless refire). One-time timers are
+  day, since wrong-but-bounded beats an endless refire). One-time timers are
   deleted after a successful run.
 - **Failures**: a failed dispatch is retried with exponential backoff (30 s,
   doubling, capped at 30 min) up to `max_attempts` (default 5); then the timer
@@ -62,7 +63,7 @@ handler, not here.
 ## Configuration
 
 `INTERNAL_SECRET`, `REDIS_URL` and the network-scoped service URLs come from
-`.env` / `resolve_runtime_config()` like every service (`docs/CONFIG.md`).
+`.env` / `resolve_runtime_config()` like every service (see `docs/CONFIG.md`).
 Dependencies: `aiohttp`, `redis`, `fastapi`, `uvicorn`.
 
 ## Operations

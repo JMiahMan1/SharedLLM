@@ -1,9 +1,7 @@
-/* ──────────────────────────────────────────────────────────────
-   Fonts
+/* Fonts
    Must stay the FIRST rule in this file: @import is only valid ahead
    of every other rule, and "@import \"tailwindcss\"" expands into
-   hundreds of rules, so any @import after it is dropped by the build.
-────────────────────────────────────────────────────────────── */
+   hundreds of rules, so any @import after it is dropped by the build. */
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @import "tailwindcss";
@@ -14,9 +12,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ──────────────────────────────────────────────────────────────
-   CSS Variables
-────────────────────────────────────────────────────────────── */
+/* CSS Variables */
 :root {
   --color-bg-base: #030711;
   --site-bg-glow-a: rgba(88, 28, 220, 0.18);
@@ -34,7 +30,7 @@ body {
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.45), 0 1px 0 var(--color-border-soft) inset;
   --shadow-panel: 0 8px 48px rgba(0, 0, 0, 0.6), 0 1px 0 var(--color-border-soft) inset;
 
-  /* Semantic tokens — these are what a theme pack actually drives. */
+  /* Semantic tokens: these are what a theme pack actually drives. */
   --site-text: #f1f5f9;
   --site-text-muted: #94a3b8;
   --site-accent: #8b5cf6;
@@ -62,9 +58,7 @@ body {
   --site-pattern: none;
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Base
-────────────────────────────────────────────────────────────── */
+/* Base */
 @layer base {
   *, *::before, *::after {
     box-sizing: border-box;
@@ -91,12 +85,10 @@ body {
   }
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Component Classes
-────────────────────────────────────────────────────────────── */
+/* Component Classes */
 @layer components {
 
-  /* Panels — primary containers */
+  /* Panels: primary containers */
   .glass-panel {
     background: linear-gradient(135deg, var(--site-panel-a) 0%, var(--site-panel-b) 100%);
     backdrop-filter: blur(20px) saturate(160%);
@@ -106,7 +98,7 @@ body {
     box-shadow: var(--shadow-panel);
   }
 
-  /* Menus/popovers — floating over content, so near-opaque */
+  /* Menus/popovers: floating over content, so near-opaque */
   .glass-menu {
     background: linear-gradient(135deg, var(--site-menu-a) 0%, var(--site-menu-b) 100%);
     backdrop-filter: blur(24px) saturate(180%);
@@ -116,7 +108,7 @@ body {
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04);
   }
 
-  /* Cards — widget inner cards */
+  /* Cards: widget inner cards */
   .glass-card {
     background: var(--site-card-bg);
     backdrop-filter: blur(12px);
@@ -190,7 +182,7 @@ body {
     pointer-events: none;
   }
 
-  /* Expanded-overlay close button — themeable via --wc-* vars set by the
+  /* Expanded-overlay close button, themeable via --wc-* vars set by the
      widget (defaults keep the existing dark look). */
   .wc-overlay-close {
     color: var(--wc-ink, #cbd5e1);
@@ -255,9 +247,7 @@ body {
   .row-span-3 { grid-row: span 3; }
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Animations
-────────────────────────────────────────────────────────────── */
+/* Animations */
 @keyframes shimmer {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(200%); }
@@ -306,9 +296,7 @@ body {
   animation: shimmer 1.6s infinite;
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Scrollbar
-────────────────────────────────────────────────────────────── */
+/* Scrollbar */
 ::-webkit-scrollbar {
   width: 5px;
   height: 5px;
@@ -327,21 +315,17 @@ body {
   background: rgba(255, 255, 255, 0.20);
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Range inputs
-────────────────────────────────────────────────────────────── */
+/* Range inputs */
 input[type="range"] {
   accent-color: var(--site-accent);
   cursor: pointer;
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Active theme overrides
+/* Active theme overrides
    Applied only while a theme pack is active. These remap the most
    widely used utility colors onto the theme's semantic tokens so a
    theme visibly restyles the whole interface instead of only the
-   widget surfaces.
- ────────────────────────────────────────────────────────────── */
+   widget surfaces. */
 [data-site-theme-active] .text-slate-500,
 [data-site-theme-active] .text-slate-400 {
   color: var(--site-text-muted) !important;
@@ -400,9 +384,7 @@ input[type="range"] {
   background: var(--color-border-mid);
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Theme modes (optional body class)
-────────────────────────────────────────────────────────────── */
+/* Theme modes (optional body class) */
 .day-mode {
   background-image:
     var(--site-pattern, none),
@@ -417,14 +399,12 @@ input[type="range"] {
     radial-gradient(ellipse 60% 40% at 80% 100%, var(--site-bg-glow-b) 0%, transparent 60%);
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Light-scheme utility overrides.
+/* Light-scheme utility overrides.
    The interface was authored dark-first with raw Tailwind utils
    (text-white, bg-black/20, bg-white/5, text-slate-600/700). When a
    light pack is active those become invisible, so remap the most
    common ones onto the theme's semantic tokens. Scope is
-   [data-theme-scheme="light"] so dark packs are untouched.
- ────────────────────────────────────────────────────────────── */
+   [data-theme-scheme="light"] so dark packs are untouched. */
 [data-theme-scheme="light"] .text-white {
   color: var(--site-text) !important;
 }

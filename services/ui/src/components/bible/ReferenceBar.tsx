@@ -235,7 +235,7 @@ export default function ReferenceBar({
             {versions.map((v) => (
               <option key={v.code} value={v.code}>
                 {v.name}
-                {v.installed ? '' : ' — not on this server'}
+                {v.installed ? '' : ' (not on this server)'}
               </option>
             ))}
           </select>

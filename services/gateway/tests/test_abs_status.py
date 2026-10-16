@@ -1,10 +1,10 @@
-"""BUG-16 (P2-T7): /api/media/audiobookshelf/status — auth + per-user creds + real ping route.
+"""BUG-16 (P2-T7): /api/media/audiobookshelf/status: auth + per-user creds + real ping route.
 
 The endpoint used to take no auth, read the GLOBAL identity settings list
 (`abs_url` unbound when settings fetch != 200 → UnboundLocalError) and ping
 `/api/books?limit=1`, which is not a real ABS route. Fix: require the caller's
 identity, use their `audiobookshelf_url`, ping `GET /ping` (verified in ABS
-server.js:385 — root router, pre-auth).
+server.js:385, root router, pre-auth).
 """
 from unittest.mock import AsyncMock, patch
 
@@ -52,7 +52,7 @@ def _ctx(client):
 
 
 def test_status_requires_auth(client):
-    """Unauthenticated callers get 401 — the endpoint resolves identity first."""
+    """Unauthenticated callers get 401; the endpoint resolves identity first."""
     with patch.object(
         gateway_main,
         "_resolve_identity_from_request",

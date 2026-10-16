@@ -16,7 +16,7 @@ ENV PYTHONUNBUFFERED=1
 RUN update-alternatives --install /usr/bin/fd fd /usr/bin/fd-find 100 2>/dev/null || true
 
 # Install Node.js for frontend/tooling support (npm packages)
-# deb.nodesource's nodejs bundles npm — do NOT install Debian's npm (it conflicts)
+# deb.nodesource's nodejs bundles npm; do NOT install Debian's npm (it conflicts)
 RUN     curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
     apt-get update && apt-get install -y nodejs
 
@@ -54,12 +54,12 @@ RUN pip install --no-cache-dir \
     line-profiler
 
 # ===========================================================================
-# COMPREHENSIVE WORKSPACE SANDBOX TOOLCHAIN
+# WORKSPACE SANDBOX TOOLCHAIN
 # The per-workspace sandbox (wsbox) reuses this image, so every tool an
 # autonomous agent needs must be present here and usable directly in the shell.
 # `gh`/`git`/cloud CLIs authenticate via the GITHUB_TOKEN/GIT_TOKEN (and other
 # Identity integration secrets) that the execution layer injects into the
-# sandbox environment at command time — never from a .env file.
+# sandbox environment at command time, never from a .env file.
 # ===========================================================================
 
 # --- GitHub CLI apt repository (Google Cloud SDK installs via tarball below:
@@ -241,7 +241,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m playwright install chromium
 
 # Copy service source LAST so the (source-independent) toolchain layers above
-# stay cached across code changes — only this layer rebuilds on each push.
+# stay cached across code changes; only this layer rebuilds on each push.
 # The per-commit build stamp must come down here with it: declared at the top,
 # GIT_SHA was in scope for every RUN above, so each commit still rebuilt (and
 # every deploy re-pulled) ~4.7 GB of toolchain layers.

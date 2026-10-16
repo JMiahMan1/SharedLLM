@@ -227,7 +227,7 @@ interface DeviceDetailSheetProps {
  * Everything one device has reported, opened from its row.
  *
  * A row can only show a name and a battery percentage; this is where the rest
- * of what the device syncs lives — its record, its own step counts, its
+ * of what the device syncs lives: its record, its own step counts, its
  * battery over the day, and how it has been used. It stops short of the full
  * picture on purpose and links out to Health and Wander, which are built for
  * reading history across every device rather than one.

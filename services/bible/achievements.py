@@ -3,7 +3,7 @@
 Same shape as the geo engine (see ``services/geo/achievements.py``) so the two
 systems read alike, but the inputs are different: everything here is derived
 from the reading-state tables in ``models.py`` rather than from Redis step
-buckets. Badges are therefore derived, not stored — nothing to backfill, and a
+buckets. Badges are therefore derived, not stored: nothing to backfill, and a
 rules fix corrects history immediately.
 
 Definitions live in ``achievements.json`` so a new badge or threshold does not
@@ -133,7 +133,7 @@ def load_definitions(path: Path | None = None) -> list[Achievement]:
     return out
 
 
-# ── metric helpers (pure, so the rules are unit-testable) ────────────────────
+# metric helpers (pure, so the rules are unit-testable)
 
 
 def _parse_day(day: Any) -> date | None:

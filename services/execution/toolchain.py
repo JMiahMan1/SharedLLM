@@ -6,11 +6,11 @@ wsbox sandboxes reuse) for the CLI tools Raven can actually run and reports
 them to the RAG service as ``type="binary"`` capabilities (with version +
 scenario tags). The gateway renders these as a truthful ``[WORKSPACE
 TOOLCHAIN]`` block in every mission prompt, so Raven always knows its full
-toolset — writing, programming, typesetting, publishing, image editing,
-media, and more — without hardcoding anything in prompt text.
+toolset (writing, programming, typesetting, publishing, image editing,
+media, and more) without hardcoding anything in prompt text.
 
 The probe is started by the workspace_runtime service (NOT the execution
-service — the two images differ, and advertising execution-only binaries
+service; the two images differ, and advertising execution-only binaries
 such as pdflatex/tshark to the shell caused exit-127 command failures). It
 is best-effort and never blocks startup: missing binaries are skipped, and
 a failed sync is logged as a warning.
@@ -111,7 +111,7 @@ async def sync_toolchain_to_rag() -> dict:
     in docker-compose.
     Retries the POST a few times with a short backoff so the sync survives
     the deploy window where RAG may not be serving yet (containers restart
-    together). A permanent failure only logs a warning — best-effort.
+    together). A permanent failure only logs a warning (best-effort).
     """
     import asyncio
 

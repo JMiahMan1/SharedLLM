@@ -1,6 +1,6 @@
 # services/execution/handlers/docker_logs.py
 """
-DockerLogsHandler — Telemetry "pain receptor" for the Ouroboros autonomous loop.
+DockerLogsHandler: telemetry "pain receptor" for the Ouroboros autonomous loop.
 
 Fetches recent stdout/stderr from Docker containers via the Docker socket,
 optionally filtering by log level (ERROR, WARN, etc.).

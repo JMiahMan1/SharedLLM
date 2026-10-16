@@ -192,7 +192,7 @@ def make_client(monkeypatch):
     return _make
 
 
-# ── authentication ──────────────────────────────────────────────────────────
+# authentication
 @pytest.mark.parametrize("verb,path", ROUTES)
 def test_anonymous_callers_are_rejected(anon_client, monkeypatch, verb, path):
     captured = _patch_bible(monkeypatch)
@@ -215,7 +215,7 @@ def test_health_needs_no_credentials(monkeypatch):
     assert TestClient(app).get("/api/bible/health").status_code == 200
 
 
-# ── identity is taken from the token, never from the request ────────────────
+# identity is taken from the token, never from the request
 @pytest.mark.parametrize(
     "path",
     ["/api/bible/state", "/api/bible/marks", "/api/bible/streaks", "/api/bible/daily"],
@@ -277,7 +277,7 @@ def test_events_forward_only_the_three_metadata_fields(make_client, monkeypatch)
     assert "note" not in sent, "free text must not ride along on a reading event"
 
 
-# ── family sharing: viewer is forwarded, consent is the bible service's job ──
+# family sharing: viewer is forwarded, consent is the bible service's job
 def test_activity_summary_sends_the_viewer_so_consent_can_be_checked(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
     make_client(user="michele").get("/api/bible/activity/summary", params={"user_id": "jeremiah"})
@@ -300,7 +300,7 @@ def test_activity_feed_is_scoped_to_the_caller(make_client, monkeypatch):
     assert captured["calls"][-1]["params"]["viewer"] == "michele"
 
 
-# ── translation of upstream failures ────────────────────────────────────────
+# translation of upstream failures
 def test_study_notes_forward_only_what_the_caller_asked_for(make_client, monkeypatch):
     """Study notes are reference material, so no username travels with them."""
     captured = _patch_bible(
@@ -393,7 +393,7 @@ def test_a_genuine_upstream_fault_is_502(make_client, monkeypatch):
     assert make_client(user="michele").get("/api/bible/stats").status_code == 502
 
 
-# ── transport ───────────────────────────────────────────────────────────────
+# transport
 def test_unset_optional_params_are_dropped_not_forwarded_as_none(make_client, monkeypatch):
     """yarl raises on a None query value, so this would be a 500 without the drop."""
     captured = _patch_bible(monkeypatch, payload={})
@@ -416,7 +416,7 @@ def test_the_daily_route_is_a_single_get_for_the_android_widget(make_client, mon
     assert resp.status_code == 200
     assert captured["calls"][-1]["verb"] == "get"
 
-# ── read-aloud ──────────────────────────────────────────────────────────────
+# read-aloud
 def test_the_voice_list_never_carries_a_username(make_client, monkeypatch):
     """These are engine voices, not reading state; nothing personal travels."""
     captured = _patch_bible(monkeypatch, payload={"voices": ["af_heart"], "count": 1})
@@ -514,7 +514,7 @@ def test_a_missing_voice_file_still_names_its_fix_on_the_piece_route(make_client
     assert "/execute/tts/download" in resp.json()["detail"]
 
 
-# ── imports are an administrator's job ──────────────────────────────────────
+# imports are an administrator's job
 def test_a_family_member_cannot_import_a_translation(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
     resp = make_client(user="michele", is_admin=False).post(
@@ -758,7 +758,7 @@ def test_a_shelf_import_refusal_reaches_the_operator_as_422(make_client, monkeyp
     assert "Exodus" in resp.json()["message"]
 
 
-# ── asking about the passage being read ─────────────────────────────────────
+# asking about the passage being read
 def test_asking_about_a_passage_is_scoped_to_its_reader(make_client, monkeypatch):
     """The caller names the question; the username never comes from the body."""
     captured = _patch_bible(monkeypatch, payload={"answer": "It is about love.", "reference": "John 3:16"})
@@ -826,7 +826,7 @@ def test_the_ask_waits_longer_than_a_reading_route(
     assert gateway_main._BIBLE_STUDY_TIMEOUT.total >= 300.0
 
 
-# ── games: the caller plays and is scored as themselves ──
+# games: the caller plays and is scored as themselves
 def test_a_game_attempt_is_scored_as_the_caller(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
     make_client(user="michele").post(

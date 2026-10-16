@@ -27,7 +27,7 @@ old second editor (whose Save called `append`) is gone.
 | action | behaviour |
 |---|---|
 | `create` | write a new note (`# title` + `Category:` header + body) |
-| `write` | **full replace** — this is what the editor's Save uses; returns `detail.path` |
+| `write` | **full replace**, used by the editor's Save; returns `detail.path` |
 | `append` | quick-capture only: adds `- [ ] <content>` to the end |
 | `read` | return the file body in `message` |
 | `delete` | remove the file |
@@ -47,38 +47,38 @@ that, every save of an opened note stacked another header on top.
 
 ## UI behaviour
 
-- **Quick capture** — the "Take a note…" bar opens an empty editor; the title
+- **Quick capture**: the "Take a note…" bar opens an empty editor; the title
   falls back to the first line of the body, then `Untitled note`.
-- **Folders** — the page lists `Notes/` recursively; the editor's Folder field
+- **Folders**: the page lists `Notes/` recursively; the editor's Folder field
   is a sub-folder inside it (one level). Changing a note's title or folder
   writes the new file, then deletes the old one once the new one is saved.
-- **Teach Jarvis** — `POST /api/communication/notes/sync_rag`: execution reads
+- **Teach Jarvis** (`POST /api/communication/notes/sync_rag`): execution reads
   the notes, the gateway chunks them like the storage indexer and writes them
   to RAG's `nextcloud_files` collection (the one chat searches) under the
   caller, replacing each note's old passages by path. Only counts come back.
   Deleted notes stay indexed until the next storage re-index.
-- **Cards** — markdown checklists are parsed and rendered as real checkboxes;
+- **Cards**: markdown checklists are parsed and rendered as real checkboxes;
   toggling one calls `check_off` and re-reads the note. Non-checklist notes
   show a text preview with the stored `# title` / `Category:` header stripped.
-- **Search** — filters on title and (for the first 24 notes) body text.
-- **Pin and colour** — view preferences, stored per device in
+- **Search**: filters on title and (for the first 24 notes) body text.
+- **Pin and colour**: view preferences, stored per device in
   `jarvis_notes_meta_v1` (localStorage) and never sent to the LLM. Note
   *content* stays in Nextcloud. On a touch screen the pin is always shown and
   colour is set in the editor; hover reveals both on a desktop. Delete asks
   first.
-- **Previews** — only the first 24 notes are fetched for previews so a large
+- **Previews**: only the first 24 notes are fetched for previews so a large
   notebook does not turn one page load into hundreds of WebDAV reads.
-- **Failures** — a failed list shows the backend message (e.g. "Nextcloud
+- **Failures**: a failed list shows the backend message (e.g. "Nextcloud
   credentials missing") instead of an empty-looking notebook.
 
 ## Tests
 
-- `services/ui/src/test/Notes.test.tsx` — list/preview/checklist, save uses
+- `services/ui/src/test/Notes.test.tsx`: list/preview/checklist, save uses
   `write`, opens without the header, rename moves the file, pin persistence,
   search, failure surfacing
-- `services/ui/src/pages/Recipes.test.tsx` — edit in place, rename, delete
-- `services/gateway/tests/test_notes_rag_sync.py` — indexing writes to RAG
-- `services/ui/src/test/notesMeta.test.ts` — checklist parsing, previews,
+- `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
+- `services/gateway/tests/test_notes_rag_sync.py`: indexing writes to RAG
+- `services/ui/src/test/notesMeta.test.ts`: checklist parsing, previews,
   sorting, pin/colour storage
-- `services/execution/tests/test_note_actions.py` — `write` replaces (single
+- `services/execution/tests/test_note_actions.py`: `write` replaces (single
   PUT) without stacking headers, `check_off` toggles and reports missing items

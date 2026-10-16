@@ -2,7 +2,7 @@
 
 identity/schemas.py emits ``audiobookshelf_url`` / ``audiobookshelf_api_key``
 (there is no ``abs_url`` / ``abs_api_key`` key), but the imageproxy ABS branch
-read ``abs_url``/``abs_api_key`` — so every ABS cover request 400'd with
+read ``abs_url``/``abs_api_key``, so every ABS cover request 400'd with
 "Audiobookshelf not configured". The host-inference for full URLs had the same
 wrong key, routing full ABS URLs (without /api/items/ in the path) to HA.
 """

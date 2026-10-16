@@ -192,8 +192,7 @@ class LLMInfoRequest(BaseRequest):
     model: str | None = Field(None, description="Model name for 'show' action (e.g., 'qwen3.6-35b-a3b:q4_k_m')")
 
 
-# ─── Media / Music ──────────────────────────────────────────────────────────────
-
+# Media / Music
 class MediaPlayRequest(BaseRequest):
     """Unified media play request supporting all content types and devices."""
     user_context: UserContext
@@ -252,8 +251,7 @@ class MediaStateSyncRequest(BaseRequest):
 
 
 
-# ─── Lights ─────────────────────────────────────────────────────────────────────
-
+# Lights
 class LightControlRequest(BaseRequest):
     user_context: UserContext
     entity_id: str
@@ -263,8 +261,7 @@ class LightControlRequest(BaseRequest):
     rgb_color: tuple[int, int, int] | None = None
 
 
-# ─── ESPHome direct control ─────────────────────────────────────────────────────
-
+# ESPHome direct control
 class EsphomeRequest(BaseRequest):
     """Control an ESPHome device directly over its native API.
 
@@ -294,8 +291,7 @@ class EsphomePairRequest(BaseRequest):
     )
 
 
-# ─── Generic HA Service Call ────────────────────────────────────────────────────
-
+# Generic HA Service Call
 class HAServiceRequest(BaseRequest):
     user_context: UserContext
     domain: str          # e.g. "light", "switch", "media_player"
@@ -319,8 +315,7 @@ class LogbookRequest(BaseRequest):
     days: int = Field(1, ge=1, le=7)
 
 
-# ─── Announcements ──────────────────────────────────────────────────────────────
-
+# Announcements
 class AnnouncementRequest(BaseRequest):
     user_context: UserContext
     entity_id: str | None = Field(None, description="Exact HA entity ID (e.g., media_player.office_tv_chrome). If omitted, resolved from device_name.")
@@ -339,8 +334,7 @@ class AnnouncementRequest(BaseRequest):
 
 
 
-# ─── TV / SmartPowerSync ────────────────────────────────────────────────────────
-
+# TV / SmartPowerSync
 class TVCastRequest(BaseRequest):
     """
     Encapsulates the 'SmartPowerSync' pattern:
@@ -353,8 +347,7 @@ class TVCastRequest(BaseRequest):
     power_on_wait_ms: int = Field(3000, ge=0, le=15000)
 
 
-# ─── Video Playback (YouTube via yt-dlp) ───────────────────────────────────────
-
+# Video Playback (YouTube via yt-dlp)
 class VideoPlayRequest(BaseRequest):
     """
     Plays video on a media player by extracting a direct MP4 stream URL via yt-dlp.
@@ -365,8 +358,7 @@ class VideoPlayRequest(BaseRequest):
     query: str = Field(..., description="YouTube URL or search query (e.g., 'Brandon Lake live worship')")
 
 
-# ─── Media Status ───────────────────────────────────────────────────────────────
-
+# Media Status
 class MediaStatusRequest(BaseRequest):
     """Query what is currently playing across media devices."""
     user_context: UserContext
@@ -388,8 +380,7 @@ class EntitySearchRequest(BaseRequest):
     )
 
 
-# ─── Personal Data (Calendar / Notes) ──────────────────────────────────────────
-
+# Personal Data (Calendar / Notes)
 class CalendarRequest(BaseRequest):
     user_context: UserContext
     action: Literal["list", "read", "add", "delete", "update"]
@@ -417,8 +408,7 @@ class NoteRequest(BaseRequest):
     path: str | None = None # Specific file path for read/write operations
 
 
-# ─── Timers / Alarms ────────────────────────────────────────────────────────────
-
+# Timers / Alarms
 class TimerRequest(BaseRequest):
     user_context: UserContext
     action: Literal["add", "list", "delete", "pause", "resume"]
@@ -474,8 +464,7 @@ class TalkRequest(BaseRequest):
     participants: list[str] | None = Field(None, description="create_group: Nextcloud user ids to invite")
     attendee_id: int | None = Field(None, description="remove_participant: the attendee to remove")
 
-# ─── File Operations (Workspace vs Storage) ───────────────────────────────────
-
+# File Operations (Workspace vs Storage)
 class WorkspaceFileReadRequest(BaseRequest):
     """
     Reads a file from the local Git workspace (/workspace/SharedLLM).
@@ -575,7 +564,7 @@ class WorkspaceFilePatchRequest(BaseRequest):
             patch_data = data.get("patch") or data.get("patches")
             if patch_data and "chunks" not in data:
                 if isinstance(patch_data, str):
-                    # Robustly parse unified diff including context
+                    # Parse unified diff including context
                     old_lines = []
                     new_lines = []
                     for line in patch_data.splitlines():
@@ -684,8 +673,7 @@ class DiscoverySyncRequest(BaseRequest):
     """
     user_context: UserContext
 
-# ─── Workspace / Code Orchestration ──────────────────────────────────────────
-
+# Workspace / Code Orchestration
 class WorkspaceFileAction(BaseRequest):
     """Orchestrates file writes and patches within a Git-backed workspace."""
     user_context: UserContext
@@ -723,8 +711,7 @@ class GhRequest(BaseRequest):
     cwd: str | None = Field(".", description="Working directory relative to the workspace root")
     timeout: int = Field(120, ge=1, le=300, description="Command timeout in seconds")
 
-# ─── Browser / Web Agent ────────────────────────────────────────────────────────
-
+# Browser / Web Agent
 class WebSearchRequest(BaseRequest):
     """Performs a web search via SearXNG JSON API."""
     user_context: UserContext
@@ -775,8 +762,7 @@ class CodeSearchRequest(BaseRequest):
     output_file: str | None = Field(None, description="Optional JSON output file path for results")
 
 
-# ─── Ouroboros Autonomous Loop ───────────────────────────────────────────────
-
+# Ouroboros Autonomous Loop
 class DockerLogsRequest(BaseRequest):
     """
     Fetches recent log output from one or more Docker containers.
@@ -867,7 +853,7 @@ class CapabilityIndexRequest(BaseRequest):
 
 class SystemLearningRequest(BaseRequest):
     """
-    Persists a verified lesson to the System Learnings RAG — a true source of truth
+    Persists a verified lesson to the System Learnings RAG, a true source of truth
     the agent applies on future missions.
 
     A lesson is NOT a narrative journal entry. It is a structured, reusable rule:
@@ -911,7 +897,7 @@ class TTSRequest(BaseRequest):
     The engine auto-inserts natural pauses after headings/titles, list items,
     and scripture references, and expands scripture references / years /
     small numbers into natural spoken English. You can also pass SSMD markup
-    (Speech Synthesis Markdown) directly — explicit breaks like ``...p``,
+    (Speech Synthesis Markdown) directly: explicit breaks like ``...p``,
     ``...500ms``, say-as annotations ``[123]{as="cardinal"}``, and voice-bound
     blocks ``<div voice="...">`` are rendered verbatim by the engine.
     """

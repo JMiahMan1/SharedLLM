@@ -1,35 +1,22 @@
 # SharedLLM Tools
 
-Utility scripts for debugging and verifying system functionality.
+Command-line tools that the execution service runs as subprocesses. They are
+copied into the execution image, so a change here rebuilds that image
+(`.github/workflows/build-images.yml`).
 
-## Directory Structure
+| Tool | Used by | Purpose |
+|---|---|---|
+| `code_search.py` | `services/execution/handlers/code_search.py` | Search GitHub and GitLab repositories for code (`--query`, `--sources`, `--language`, `--owner`, `--repo`) |
+| `webscraper.py` | `services/execution/handlers/webscraper.py` | Capture product pages with Camoufox or Playwright and extract prices and text from the screenshots with `vision_ocr.py` |
+| `vision_ocr.py` | `webscraper.py` | Extract text from screenshots with the Qwen2.5-VL vision model through the local LLM proxy (reads `INTERNAL_SECRET` from the environment) |
 
-### `debug/`
+Each tool can also be run by hand, for example:
 
-Diagnostic scripts for inspecting system state, network, and integrations.
-
-- `debug_android_off.py` — Debug Android device power state
-- `debug_chroma_group.py` — Inspect ChromaDB metadata by group
-- `debug_remote.py` — Debug remote API connectivity
-- `diagnose_resolution.py` — Diagnose DNS/service resolution issues
-- `list_devices.py` — List discovered devices
-- `scan_remotes.py` — Scan remote endpoints
-
-### `verify/`
-
-Verification scripts for confirming fixes and system behavior.
-
-- `verify_cast_playback.py` — Verify Cast device playback
-- `verify_fireplace.py` — Verify fireplace integration
-- `verify_fix_devices.py` — Verify device routing fixes
-- `verify_ma_cleaning_import.py` — Verify Music Assistant cleaning imports
-- `verify_pause_fix.py` — Verify pause/resume fix
-- `verify_resolution_logic.py` — Verify media resolution logic
-- `verify_robustness.py` — Robustness verification
-- `verify_rumble_cast.py` — Verify Rumble Cast integration
-- `verify_youtube_click.py` — Verify YouTube click-through
+```bash
+python tools/code_search.py --query "get_password_hash" --sources github gitlab
+```
 
 ## Related
 
-- `scripts/` — Operational scripts (deploy, benchmark, CI, legacy tests)
-- `test/` — pytest test suites (unit, integration, local hardware tests)
+- `scripts/`: deploy, CI, benchmark and live diagnostic scripts (`docs/SCRIPTS.md`)
+- `tests/`, `test/`, `services/*/tests/`: pytest suites (`TESTING.md`)

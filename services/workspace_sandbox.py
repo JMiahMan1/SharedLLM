@@ -1,8 +1,8 @@
 """Per-workspace sandbox execution.
 
 Every Raven workspace gets its OWN isolated Docker container. All workspace
-commands (shell, git, lint, search) execute INSIDE that container — never on
-the host — with only that workspace's directory mounted, a private network, a
+commands (shell, git, lint, search) execute INSIDE that container, never on
+the host, with only that workspace's directory mounted, a private network, a
 non-root user, and resource limits. This is what makes a workspace a "safe
 place to run commands that could do damage if run on the host system": a
 runaway `rm -rf`, a fork bomb, or a malicious script is contained to the
@@ -76,7 +76,7 @@ def _detect_host_root() -> str:
     /proc/self/mountinfo to find the real host source of the /workspaces bind
     mount instead of the container-internal path. Without this the sandbox binds
     an empty, auto-created host directory and cannot see the workspace's files
-    or its .git — which breaks git status / branch operations inside the sandbox.
+    or its .git, which breaks git status / branch operations inside the sandbox.
     """
     try:
         with open("/proc/self/mountinfo") as fh:
@@ -184,7 +184,7 @@ def _get_or_recreate(client: Any, cname: str, img: str) -> Any | None:
     is stale.
 
     Deploys rebuild ``ghcr.io/...:latest`` and ``docker compose up -d`` only
-    recreates the *service* containers — existing ``wsbox-*`` sandboxes keep
+    recreates the *service* containers; existing ``wsbox-*`` sandboxes keep
     their original image indefinitely. The toolchain probe advertises tools
     from the fresh image, so a stale sandbox then fails with ``command not
     found`` (e.g. ``pdflatex`` after a texlive deploy) even though the tool is
@@ -258,7 +258,7 @@ _SANDBOX_CRED_ENV_KEYS = (
 
 # Non-secret environment keys copied into sandbox execs. The sandbox runs
 # arbitrary repo code, so the service's full environment (INTERNAL_SECRET,
-# FERNET_KEY, cloud keys, ...) must never be passed through wholesale —
+# FERNET_KEY, cloud keys, ...) must never be passed through wholesale;
 # only this baseline plus the scoped _SANDBOX_CRED_ENV_KEYS overlay.
 _SANDBOX_BASE_ENV_KEYS = (
     "PATH",
@@ -345,10 +345,10 @@ def ensure_workspace_container(
         working_dir=host_path,
         environment=cred_env or None,
         # Mount the workspace at its IDENTICAL absolute path inside the container.
-        # Only this directory is visible — the agent cannot reach any other
+        # Only this directory is visible; the agent cannot reach any other
         # workspace or host path. The trailing ",z" applies the shared SELinux
         # relabel so a non-privileged sandbox container (container_t) can read
-        # the host workspace when the host enforces SELinux — without it, ls/git
+        # the host workspace when the host enforces SELinux. Without it, ls/git
         # inside the sandbox fail with "Permission denied" even as root because
         # the source lives under /home (user_home_t). Ignored on non-SELinux hosts.
         volumes={mount_source: {"bind": host_path, "mode": "rw,z"}},

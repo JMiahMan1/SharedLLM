@@ -58,7 +58,7 @@ const DOMAIN_LABELS: Record<string, string> = {
 
 const ACTIVE_STATES = new Set(['on', 'playing', 'open', 'home', 'cooling', 'heating', 'unlocked', 'cleaning']);
 
-// Stable empty reference — returning a fresh [] from the zustand selector
+// Stable empty reference: returning a fresh [] from the zustand selector
 // makes React's useSyncExternalStore see a new snapshot every call while
 // widget settings haven't loaded, causing "Maximum update depth exceeded".
 const EMPTY_PINNED_DEVICES: string[] = [];
@@ -136,7 +136,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     setLoading(true);
     setError(null);
     try {
-      // Load device states — isolated: failure here is shown as error
+      // Load device states (isolated): failure here is shown as error
       const state = await api.getDeviceStates(['light', 'switch', 'media_player', 'cover', 'climate', 'lock', 'fan']);
       setDevices(state);
       setActivityCutoff(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -145,16 +145,16 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       setError('Failed to load devices. Check that Home Assistant is reachable.');
     }
 
-    // Load user device assignments — isolated: failure here only logs
+    // Load user device assignments (isolated): failure here only logs
     try {
       const userDevices = await api.getDevices();
       setAssignments(userDevices);
     } catch (err) {
       console.error('Failed to load device assignments:', err);
-      // Non-fatal — keep whatever assignments we already had
+      // Non-fatal; keep whatever assignments we already had
     }
 
-    // Load system users for admin assignments panel — isolated
+    // Load system users for admin assignments panel (isolated)
     if (role === 'admin') {
       try {
         const users = await api.getUsers();
@@ -182,7 +182,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   // Can the current user control this device?
   //
   // `devices` comes from `/execute/entity/search`, which already drops every
-  // entity this user may neither see nor control — honouring both the device
+  // entity this user may neither see nor control, honouring both the device
   // assignment and any admin-set entity protection. Presence in that list is
   // therefore the permission answer. This used to be re-derived from the
   // assignment list, which was wrong twice over: it hid entities an admin had
@@ -269,7 +269,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
         const nowPinned = !currentPinned.includes(entityId);
         toast.success(
           nowPinned
-            ? 'Pinned — shows on home-screen Device Buttons widget'
+            ? 'Pinned: shows on home-screen Device Buttons widget'
             : 'Removed from favorites / home widget'
         );
         try {
@@ -354,7 +354,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       if (pinnedDevices.includes(d.entity_id)) return true;
       if (isActive(d.state)) return true;
       if (d.last_activated && d.last_activated >= activityCutoff) return true;
-      // No timestamp from HA — keep the device rather than hide it
+      // No timestamp from HA; keep the device rather than hide it
       if (!d.last_activated) return true;
       return false;
     });
@@ -791,7 +791,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-xs text-slate-500">Target Temperature</p>
-                      <p className="text-2xl font-black text-white mt-1">{temperature == null ? '—' : `${temperature}°`}</p>
+                      <p className="text-2xl font-black text-white mt-1">{temperature == null ? 'No data' : `${temperature}°`}</p>
                     </div>
                     <div className="flex gap-2">
                       <button

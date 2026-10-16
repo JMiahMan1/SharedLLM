@@ -184,7 +184,7 @@ class OllamaProvider(BaseLLMProvider):
             slots = data.get("slots", {})
             if slots.get("available", 0) > 0:
                 return True
-            # Slots are busy — poll until one opens (capped exponential backoff)
+            # Slots are busy; poll until one opens (capped exponential backoff)
             deadline = loop.time() + self.slot_wait_timeout
             poll_interval = OLLAMA_SLOT_POLL_INTERVAL
             while loop.time() < deadline:
@@ -391,7 +391,7 @@ class OpenRouterProvider(BaseLLMProvider):
             "temperature": options.get("temperature", 0.7) if options else 0.7,
             "stream": bool(chunk_callback)
         }
-        # Forward enable_thinking if set — disables qwen3-style extended reasoning
+        # Forward enable_thinking if set; it disables qwen3-style extended reasoning
         if options and "enable_thinking" in options:
             payload["enable_thinking"] = options["enable_thinking"]
 
@@ -412,7 +412,7 @@ class OpenRouterProvider(BaseLLMProvider):
                 # put its entire answer in the thinking block (some model configs do this)
                 return content if content.strip() else reasoning
 
-            # Streaming — reasoning_content is internal thinking, do NOT stream it
+            # Streaming: reasoning_content is internal thinking, do NOT stream it
             # to chunk_callback. Accumulate separately as a fallback only.
             full_content = ""
             full_reasoning = ""

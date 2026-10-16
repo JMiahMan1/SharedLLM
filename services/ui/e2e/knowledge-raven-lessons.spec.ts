@@ -51,7 +51,7 @@ test.describe('@live Knowledge Hub - Raven Lessons (grouped compact list)', () =
     const count = await rows.count();
     expect(count).toBeGreaterThan(0);
     // There are 9 lessons in the store; grouping must yield FEWER group rows
-    // than that — proving the compact grouped list, not one card per lesson.
+    // than that, proving the compact grouped list, not one card per lesson.
     expect(count).toBeLessThan(9);
   });
 

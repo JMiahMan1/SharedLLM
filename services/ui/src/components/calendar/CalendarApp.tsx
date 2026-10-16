@@ -22,7 +22,7 @@ import PeoplePanel from './PeoplePanel';
 import type { CalendarEvent } from '../../types/widget';
 import type { ExecutionResponse } from '../../services/api';
 
-// ─── Date helpers (native, no luxon) ──────────────────────────────────────
+// Date helpers (native, no luxon)
 const DAY_MS = 86_400_000;
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
@@ -238,7 +238,7 @@ const buildByDay = (events: CalendarEvent[], rangeStart: Date, rangeEnd: Date) =
   return map;
 };
 
-// Warm "paper-planner" (OpenSkyLight) palette — used in light mode.
+// Warm "paper-planner" (OpenSkyLight) palette, used in light mode.
 const LIGHT_VARS = `
   --os-paper:#f5efe3;
   --os-paper-deep:#ece4d2;
@@ -259,7 +259,7 @@ const LIGHT_VARS = `
   --os-display:'Fraunces',Georgia,'Times New Roman',serif;
 `;
 
-// Glass / neon palette — matches the rest of the SharedLLM site (dark default).
+// Glass / neon palette; matches the rest of the SharedLLM site (dark default).
 const DARK_VARS = `
   --os-paper:rgba(255,255,255,0.03);
   --os-paper-deep:rgba(255,255,255,0.07);
@@ -280,7 +280,7 @@ const DARK_VARS = `
   --os-display:'Outfit',ui-sans-serif,system-ui,sans-serif;
 `;
 
-// ─── Warm EventCard ──────────────────────────────────────────────────────────
+// Warm EventCard
 const EventCard = ({ ev, size = 'md', onSelect, people }: { ev: CalendarEvent; size?: 'md' | 'lg'; onSelect?: (ev: CalendarEvent) => void; people?: CalendarPerson[] }) => {
   const color = calendarColor(ev.calendar, people);
   const allDay = isAllDay(ev);
@@ -376,7 +376,7 @@ const EditEventModal = ({ event, onClose, people, readOnly }: { event: CalendarE
         </div>
         {readOnly && (
           <p className="rounded-xl px-3 py-2 text-xs" style={{ background: 'var(--os-paper-deep)', color: 'var(--os-ink-soft)' }}>
-            This calendar is a read-only subscription — change the event where it comes from.
+            This calendar is a read-only subscription. Change the event where it comes from.
           </p>
         )}
         {event.recurring && !readOnly && (
@@ -708,7 +708,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
               );
             })}
             {visibleEvents.length === 0 && !isLoading && (
-              <div className="mt-16 text-center os-display text-3xl" style={{ color: 'var(--os-ink-faint)' }}>Nothing coming up — enjoy the quiet</div>
+              <div className="mt-16 text-center os-display text-3xl" style={{ color: 'var(--os-ink-faint)' }}>Nothing coming up. Enjoy the quiet</div>
             )}
           </div>
         </div>
@@ -812,12 +812,12 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
       {unavailable.length > 0 && (
         <div className="my-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs" style={{ background: 'var(--os-sun-soft)', borderColor: 'var(--os-sun)', color: 'var(--os-ink)' }}>
           <RefreshIcon size={14} className="animate-spin" />
-          {unavailable.map((i) => integrationMeta(i.type).label).join(', ')} temporarily unreachable — showing cached events and retrying.
+          {unavailable.map((i) => integrationMeta(i.type).label).join(', ')} temporarily unreachable; showing cached events and retrying.
         </div>
       )}
       {softUnavailable.length > 0 && (
         <p className="my-2 text-[11px] italic" style={{ color: 'var(--os-ink-faint)' }}>
-          {softUnavailable.map((i) => integrationMeta(i.type).label).join(', ')} returned no events — retrying quietly.
+          {softUnavailable.map((i) => integrationMeta(i.type).label).join(', ')} returned no events; retrying quietly.
         </p>
       )}
 
@@ -853,7 +853,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
                 <div className="flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: isHardDown ? 'var(--os-ink-faint)' : meta.color }} />
                   <div>
-                    <p className="text-sm font-bold" style={{ color: 'var(--os-ink)' }}>{meta.label}{isHardDown ? ' — temporarily unreachable' : ''}</p>
+                    <p className="text-sm font-bold" style={{ color: 'var(--os-ink)' }}>{meta.label}{isHardDown ? ' (temporarily unreachable)' : ''}</p>
                     <p className="text-[10px]" style={{ color: isSoftDown ? 'var(--os-ink-faint)' : 'var(--os-ink-soft)' }}>{isDisabled ? 'Disabled' : i.writable ? 'Read & write' : 'Read-only'}{isSoftDown ? ' · no data, retrying' : isHardDown ? ' · retrying' : ''}</p>
                   </div>
                 </div>

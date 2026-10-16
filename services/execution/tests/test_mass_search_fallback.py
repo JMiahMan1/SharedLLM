@@ -1,7 +1,7 @@
 """BUG-17 (P2-T8): mass_client.search raises typed MASearchError; caller falls back.
 
 `mass_client.search` used to swallow every exception (and MA error_code
-responses / timeouts) into `[]`, so `search_ma`'s HA fallback never ran — an
+responses / timeouts) into `[]`, so `search_ma`'s HA fallback never ran; an
 empty list looked like "no matches" instead of "direct search failed". It also
 never received `artist`/`album`/`library_only`, which only the HA path honored.
 """

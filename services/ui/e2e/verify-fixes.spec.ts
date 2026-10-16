@@ -187,7 +187,7 @@ test('@live Web Player playlist Next/Previous uses maPlayer (sendspin client/com
   await nextBtn.click();
 
   // Deterministic hard check: `players/cmd/next` was sent over the MA JSON-RPC
-  // socket (the same call MA's own web player uses). This is the actual fix —
+  // socket (the same call MA's own web player uses). This is the actual fix:
   // a raw sendspin controller `client/command` "next" does NOT advance the MA
   // queue, so the track stayed the same.
   await expect

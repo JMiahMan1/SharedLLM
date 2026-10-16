@@ -43,7 +43,7 @@ public class MediaWidget extends AppWidgetProvider {
             views.setTextViewText(R.id.media_artist, DeviceButtonWidget.truncate(lines.subtitle, 28));
             views.setTextViewText(R.id.media_play, lines.playing ? "⏸" : "▶");
         } catch (Exception e) {
-            views.setTextViewText(R.id.media_title, "—");
+            views.setTextViewText(R.id.media_title, "-");
             views.setTextViewText(R.id.media_artist, e.getMessage() != null ? e.getMessage() : "offline");
         }
         return views;

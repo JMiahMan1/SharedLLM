@@ -73,7 +73,7 @@ def _parse_env_users() -> dict:
     """
     users: dict[str, dict] = {}
 
-    # ── Always include the DEFAULT system user from bare env vars ──────────────
+    # Always include the DEFAULT system user from bare env vars
     default = {
         "username": "default",
         "display_name": "Shared/Default User",
@@ -97,7 +97,7 @@ def _parse_env_users() -> dict:
     }
     users["default"] = default
 
-    # ── Parse USER_{USERNAME}_{SETTING} vars ──────────────────────────────────
+    # Parse USER_{USERNAME}_{SETTING} vars
     for key, value in os.environ.items():
         if not key.startswith("USER_"):
             continue
@@ -162,7 +162,7 @@ def _parse_env_users() -> dict:
 def seed_from_env(session: Session, force: bool = False) -> int:
     """
     Seed the database from environment variables.
-    Only creates records that do not already exist — never overwrites or deletes.
+    Only creates records that do not already exist; never overwrites or deletes.
     """
     count = 0
     existing: GlobalSetting | None = None
@@ -227,11 +227,11 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             count += 1
         session.commit()
     else:
-        log.info("[seed] Users already exist — skipping user seeding.")
+        log.info("[seed] Users already exist, skipping user seeding.")
 
-    # ── Reconcile default system user's integration secrets from .env ──────────
+    # Reconcile default system user's integration secrets from .env
     # The default user is created only once. If the .env token wasn't present in
-    # the container PROCESS environment at first-seed time (it usually isn't —
+    # the container PROCESS environment at first-seed time (it usually isn't:
     # `os.getenv` is empty inside containers), the credentials stay blank and
     # downstream services can't resolve them at runtime. Backfill any empty
     # integration secrets directly from the .env FILE so Identity is the single
@@ -278,7 +278,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             session.commit()
             log.info("[seed] Reconciled default system user integration secrets from .env")
 
-    # ── Seed Global Settings ──────────────────────────────────────────────────
+    # Seed Global Settings
     for ds in DEFAULT_GLOBAL_SETTINGS:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == ds["key"])).first()
         if not existing:
@@ -287,7 +287,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 setting.description = ds.get("description")
             session.add(setting)
 
-    # ── Seed OLLAMA_URL from .env (seed-only, not in DEFAULT_GLOBAL_SETTINGS) ─
+    # Seed OLLAMA_URL from .env (seed-only, not in DEFAULT_GLOBAL_SETTINGS)
     env_ollama_url = os.getenv("OLLAMA_URL")
     if not env_ollama_url:
         env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
@@ -304,7 +304,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             session.add(existing)
             log.info(f"[seed] Backfilled empty llm_local_url from .env: {env_ollama_url}")
 
-    # ── Seed additional .env vars into GlobalSettings ─────────────────────────
+    # Seed additional .env vars into GlobalSettings
     env_to_global = {
         "SEARXNG_URL": "searxng_url",
         "RAG_HOSTNAME": "rag_hostname",
@@ -342,7 +342,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 session.add(existing)
                 log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {shown}")
 
-    # ── Per-user mailbox credentials ───────────────────────────────────────────
+    # Per-user mailbox credentials
     # MAIL_USER / MAIL_USER_PASS belong to one person, not the whole system, so
     # they are applied to the Jarvis user with that username. A value that
     # matches nobody is reported rather than parked in global settings, where
@@ -353,7 +353,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         owner = session.exec(select(User).where(User.username == mail_user.lower())).first()
         if owner is None:
             log.warning(
-                "[seed] MAIL_USER=%s matches no Jarvis user — not seeded. "
+                "[seed] MAIL_USER=%s matches no Jarvis user; not seeded. "
                 "Create that user first, or set mail credentials on their account.",
                 mail_user,
             )
@@ -369,7 +369,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 session.add(owner)
                 log.info("[seed] Applied MAIL_USER credentials to Jarvis user '%s'", owner.username)
 
-    # ── Seed network-aware service URLs (BRIDGE_*/HOST_*) ──────────────────────
+    # Seed network-aware service URLs (BRIDGE_*/HOST_*)
     # Two explicit sets so the same variable is never reused for different
     # network URLs. Each service detects its network at runtime and reads the
     # correct set; these are the transparent source of truth in the Config DB.
@@ -405,7 +405,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 session.add(existing)
                 log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {env_val}")
 
-    # ── Seed models from .env (seed-only, overrides DEFAULT_GLOBAL_SETTINGS) ──
+    # Seed models from .env (seed-only, overrides DEFAULT_GLOBAL_SETTINGS)
     env_models = {
         "ASSISTANT_MODEL": "assistant_model",
         "CODING_MODEL": "coding_model",
@@ -424,7 +424,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 session.add(existing)
                 log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {env_val}")
 
-    # ── Seed execution service paths from .env ──
+    # Seed execution service paths from .env
     env_paths = {
         "TEMP_MEDIA_DIR": "temp_media_dir",
         "WORKSPACE_ROOT": "workspace_root",
@@ -444,7 +444,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 session.add(existing)
                 log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {env_val}")
 
-    # ── Seed SKYLIGHT_PASS (encrypted) ────────────────────────────────────────
+    # Seed SKYLIGHT_PASS (encrypted)
     skylight_pass = os.getenv("SKYLIGHT_PASS")
     if skylight_pass:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == "skylight_pass_enc")).first()
@@ -456,7 +456,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             session.add(existing)
             log.info("[seed] Backfilled empty skylight_pass_enc")
 
-    # ── Seed prompts from prompts/*.md files ────────────────────────────────────
+    # Seed prompts from prompts/*.md files
     # Reads markdown files from the prompts/ directory and seeds them into
     # GlobalSettings. The filename (minus .md) becomes the setting key.
     # Never overwrites existing values unless force=True.
@@ -486,7 +486,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
     except Exception as e:
         log.warning(f"[seed] Failed to seed prompts from .md files: {e}")
 
-    # ── Seed DNS records from INITIAL_DNS_RECORDS env var ──────────────────────
+    # Seed DNS records from INITIAL_DNS_RECORDS env var
     env_dns_records = os.getenv("INITIAL_DNS_RECORDS", "")
     if env_dns_records:
         has_dns_records = session.exec(select(DnsRecord)).first() is not None

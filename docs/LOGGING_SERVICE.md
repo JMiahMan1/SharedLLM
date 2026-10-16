@@ -4,20 +4,20 @@ Redis-backed log ingestion, storage, and real-time streaming for the SharedLLM S
 
 ## Architecture
 
-```ascii
-┌─────────────┐     POST /api/logs     ┌─────────────┐
-│  Gateway    │ ──────────────────────▶ │  Logging    │
-│  Execution  │                        │  Service    │
-│  Identity   │                        │             │
-└─────────────┘                        └──────┬──────┘
-                                               │
-                             ┌─────────────────┼─────────────────┐
-                             ▼                 ▼                 ▼
-                      ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-                      │ Redis       │   │ Redis       │   │ WebSocket   │
-                      │ Sorted Set  │   │ PubSub      │   │ Clients     │
-                      │ logs:entries│   │ logs:stream │   │ (UI)        │
-                      └─────────────┘   └─────────────┘   └─────────────┘
+```text
++-------------+     POST /api/logs     +-------------+
+|  Gateway    | ---------------------> |  Logging    |
+|  Execution  |                        |  Service    |
+|  Identity   |                        |             |
++-------------+                        +------+------+
+                                              |
+                            +-----------------+-----------------+
+                            v                 v                 v
+                     +-------------+   +-------------+   +-------------+
+                     | Redis       |   | Redis       |   | WebSocket   |
+                     | Sorted Set  |   | PubSub      |   | Clients     |
+                     | logs:entries|   | logs:stream |   | (UI)        |
+                     +-------------+   +-------------+   +-------------+
 ```
 
 ## Storage Model
@@ -75,7 +75,7 @@ POST /logs
 ### Fetch Recent Logs
 
 ```text
-GET /logs?limit=50&service=gateway&user_id=…     (same as GET /api/logs)
+GET /logs?limit=50&service=gateway&user_id=...   (same as GET /api/logs)
 GET /api/admin/logs?limit=100&service=execution
 ```
 
@@ -146,15 +146,15 @@ read logs: it shows the user's own notices from the telemetry outbox.
 
 ## Retention Cleanup
 
-- A background task removes entries older than `LOG_RETENTION_DAYS`.
+- A background task removes entries older than `LOG_RETENTION_DAYS` (hourly).
 - Every write trims the set to the newest `LOG_MAX_ENTRIES`.
 
-Logs are automatically purged — no manual intervention required.
+Logs are purged automatically; nothing needs doing by hand.
 
 ## Security
 
 - Every HTTP endpoint requires the `X-Internal-Secret` header (compared in constant time)
-- Sensitive fields are automatically redacted: `api_key`, `authorization`, `cookie`, `password`, `token`, etc.
+- Sensitive fields are redacted: `api_key`, `authorization`, `cookie`, `password`, `secret`, `token`, the GitHub/GitLab/Home Assistant/Nextcloud credential fields, etc.
 - Bearer tokens, GitHub PATs, and GitLab tokens are pattern-matched and redacted
 - Log messages and context fields are truncated to 4000 characters
 
@@ -162,10 +162,10 @@ Logs are automatically purged — no manual intervention required.
 
 The previous SQLite backend has been replaced with Redis. Key benefits:
 
-- **No single-writer bottleneck** — Redis handles concurrent writes efficiently
-- **Automatic rotation** — TTL-based cleanup, no manual pruning needed
-- **Real-time streaming** — PubSub replaces manual WebSocket connection management
-- **Persistence** — the logs live in Redis, which runs with `appendonly yes`; the logging container itself mounts no volume
-- **Scalability** — Sorted set queries are O(log(N)+M) vs SQLite's O(N) full scans
+- **No single-writer bottleneck**: Redis handles concurrent writes
+- **Automatic rotation**: the hourly retention sweep plus the per-write cap, no manual pruning
+- **Real-time streaming**: PubSub replaces manual WebSocket connection management
+- **Persistence**: the logs live in Redis, which runs with `appendonly yes`; the logging container itself mounts no volume
+- **Scalability**: sorted set queries are O(log(N)+M) vs SQLite's O(N) full scans
 
 The old SQLite logs were not migrated.

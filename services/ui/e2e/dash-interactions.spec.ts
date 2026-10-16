@@ -76,7 +76,7 @@ test.describe('@live Dashboard Interaction Deep Test', () => {
       await page.waitForTimeout(2500);
       console.log('Quick Notes save clicked. Widget text now:', (await quickNotes.innerText()).replace(/\n+/g, ' | ').slice(0, 200));
     } else {
-      console.log('Quick Notes: no title input visible — widget may render notes list only. Widget text:', (await quickNotes.innerText()).replace(/\n+/g, ' | ').slice(0, 200));
+      console.log('Quick Notes: no title input visible; widget may render notes list only. Widget text:', (await quickNotes.innerText()).replace(/\n+/g, ' | ').slice(0, 200));
     }
 
     const notesText = await quickNotes.innerText();

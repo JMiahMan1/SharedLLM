@@ -16,7 +16,7 @@ RUN npm install --legacy-peer-deps
 COPY . .
 
 # Inject version info into a JSON file for the UI to consume.
-# Key name must be `git_sha` — the gateway's OTA endpoint and the mobile
+# Key name must be `git_sha`: the gateway's OTA endpoint and the mobile
 # updater both key off that. build.js overwrites this file after the Vite build
 # with the same schema; this copy is the fallback if packaging is skipped.
 # Version comes from package.json (single source of truth, matches Android versionName).

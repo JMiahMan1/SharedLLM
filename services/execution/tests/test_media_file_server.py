@@ -4,7 +4,7 @@ The server had no auth and guessable ids (``vid-`` + 8 hex). Per §7.4 these
 URLs are fetched header-less by devices (HA, Roku, browser), so auth is a
 short-lived signed media token in the query string (``?user=...&mt=...``):
 missing/expired/tampered token → 403, valid → 200. In-progress ``.part`` files
-stay served (progressive playback — owner decision) but behind the same auth.
+stay served (progressive playback, owner decision) but behind the same auth.
 """
 import os
 import secrets
@@ -94,7 +94,7 @@ def test_no_unsigned_media_url_builders():
 
     A raw ``http://{host}:8888/media/<id>`` f-string anywhere in production
     execution code would hand devices an unsigned URL that the (now auth-gated)
-    file server rejects with 403 — breaking playback.
+    file server rejects with 403, breaking playback.
     """
     import pathlib
     import re

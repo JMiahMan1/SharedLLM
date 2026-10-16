@@ -47,7 +47,9 @@ graph TD
 HMAC-SHA256 over `{user, scope:"media", exp}` signed with `MEDIA_TOKEN_SECRET`
 (falling back to `INTERNAL_SECRET`); TTL is 1 hour for UI use, 12 hours for
 device URLs embedded in HA/Cast/Roku playback (`services/shared/media_token.py`).
-Caddy redacts `token` and `mt` query values from its access log.
+Caddy redacts `token` and `mt` query values from its access log. The gateway
+checks a presented key against Identity in an `X-Api-Key` header, never in the
+URL, so keys stay out of Identity's access log.
 
 `/api/media/events` (SSE) accepts either the bearer header (native) or
 `?mt=&user=` (browser `EventSource`).
@@ -179,28 +181,28 @@ with `422` before reaching HA.
 
 | Command | Extra field | Effect |
 | --- | --- | --- |
-| `play`, `resume` | — | `media_play` |
-| `pause` | — | `media_pause` |
-| `stop` | — | `media_stop` |
-| `next`, `previous` | — | `media_next_track` / `media_previous_track` |
+| `play`, `resume` | none | `media_play` |
+| `pause` | none | `media_pause` |
+| `stop` | none | `media_stop` |
+| `next`, `previous` | none | `media_next_track` / `media_previous_track` |
 | `seek` | `position` (s) | `media_seek`; missing position → explicit FAILURE |
-| `volume_set` | `volume_level` (0–1) | `volume_set` |
-| `volume_up`, `volume_down` | — | `volume_set` step |
+| `volume_set` | `volume_level` (0-1) | `volume_set` |
+| `volume_up`, `volume_down` | none | `volume_set` step |
 | `volume_mute`, `mute` | `muted` (bool) | `volume_mute` |
-| `home`, `back`, `power_off` | — | `remote.send_command` (TV) |
+| `home`, `back` | none | `remote.send_command` (TV) |
 | `shuffle_set` | `shuffle` (bool) | `media_player.shuffle_set` |
 | `repeat_set` | `repeat` (`off`/`one`/`all`) | `media_player.repeat_set` |
 | `join` | `group_members` (list) | `media_player.join` |
-| `unjoin` | — | `media_player.unjoin` |
-| `power_on`, `power_off` | — | `media_player.turn_on` / `turn_off` (bits 128 / 256); else the brand POWER key |
-| `up`, `down`, `left`, `right`, `select`, `menu` | — | remote key press (Remote page d-pad) |
+| `unjoin` | none | `media_player.unjoin` |
+| `power_on`, `power_off` | none | `media_player.turn_on` / `turn_off` (bits 128 / 256); else the brand POWER key |
+| `up`, `down`, `left`, `right`, `select`, `menu` | none | remote key press (Remote page d-pad) |
 
 Any other command (e.g. `unmute`) is a `422`.
 
 **Remote keys** go to the TV's companion `remote.*` entity, found through HA's
 device registry (`ha_client.find_companion_remote`: same device → name match →
-same-named entity, cached 10 min). The names rarely match — live,
-`media_player.office_tv` is driven by `remote.office_tv_remote` — and HA does
+same-named entity, cached 10 min). The names rarely match (live,
+`media_player.office_tv` is driven by `remote.office_tv_remote`), and HA does
 not fail a call to a missing entity, so guessing the name lost key presses
 silently.
 
@@ -233,7 +235,7 @@ fields as above. Rules:
 * A local report that is not `playing` never takes the "chosen device" back
   from a speaker the person picked (it is acknowledged and dropped).
 * `status` treats a stored local `playing` row older than 2 min (paused: 30 min)
-  as gone — the app was closed mid-song — and does not report it as active.
+  as gone (the app was closed mid-song) and does not report it as active.
 * Picking an HA speaker on the Media page records it as the chosen device
   (`state: "idle"`), which `transport` without an `entity_id` then targets.
 
@@ -242,10 +244,10 @@ fields as above. Rules:
 The only way the browser talks to MA. Two server-side gates apply to every
 client→MA frame:
 
-1. **Command allowlist** (`services/gateway/ma_allowlist.py`, 47 commands) —
+1. **Command allowlist** (`services/gateway/ma_allowlist.py`, 47 commands):
    anything else is answered with
    `{"error_code": "forbidden", "message_id": "<same id>"}` and never forwarded.
-2. **Per-user player scope** (`services/gateway/ma_scope.py`) — commands that
+2. **Per-user player scope** (`services/gateway/ma_scope.py`): commands that
    reference `player_id`/`queue_id`/`target_player`/`source_queue_id`/
    `target_queue_id`/`child_player_ids` must map to an entity the user may
    control (same rules as `verify_entity_access`). The user's own web player
@@ -273,7 +275,7 @@ client→MA frame:
 `/{segment}` sibling). ABS 2.x removed `GET /api/items/:id/stream`, so playback
 is session-based: the execution service starts a session
 (`POST /api/items/{bookId}/play`, or `.../play/{episodeId}` for podcasts) and
-hands the device this URL. A session id is the capability — no ABS key is used
+hands the device this URL. A session id is the capability; no ABS key is used
 on `/public/session/...` or `/hls/...`. The playlist only appears once ABS has
 started transcoding; a cold session is polled and answers `504` if it never
 appears. Book tracks are 1-based (`media.tracks[0].index`), podcast episodes 0.
@@ -326,24 +328,27 @@ page is hidden).
 Files: `pages/Media.tsx` (controller), `components/media/` (`DeviceSelector`,
 `NowPlayingCard`, `MediaExplorer`, shared types), `pages/Remote.tsx`,
 `lib/maWebPlayer.ts` (the web player engine), `context/MediaPlayerContext.tsx`
-(app-wide mount, state reporting, Android bridge), `plugins/jarvisMedia.ts` +
-Android `MediaPlaybackService` / `JarvisMediaPlugin`.
+(app-wide mount, state reporting, Android bridge), `context/webPlayerContext.ts`
+(the bare context and `useOptionalWebPlayer()`, so widgets can reach the player
+without importing the engine), `components/widgets/ActiveMediaWidget.tsx`
+(dashboard card), `plugins/jarvisMedia.ts` + Android `MediaPlaybackService` /
+`JarvisMediaPlugin`.
 
 ### Media page
 
-* **Play on** — "This device" (the web player) first, then every HA media
+* **Play on**: "This device" (the web player) first, then every HA media
   player, then Music Assistant players that HA does not also expose (matched
   via `ma_player_id` from `status`; our own Sendspin player is never listed
   twice). Offline devices sort last and are dimmed. A speaker that is already
   playing when the page opens is selected automatically, once; after the person
   picks a device the page never overrides them. Picking a speaker does **not**
   stop the web player (the chip says "Playing now").
-* **Player card** — title/artist/cover, scrubber (drag keyed on the track, rAF
+* **Player card**: title/artist/cover, scrubber (drag keyed on the track, rAF
   coalesced; LIVE bar when `duration <= 0`), previous / play-pause / next /
   stop, volume + mute, favourite heart for MA items. Web player: resume uses
   `players/cmd/play` (it never re-sends the URI, which restarted the track).
   Remote speaker: `/execute/media/transport` (HA) or MA commands (`ma:` ids).
-* **Jump back in** — Audiobookshelf books in progress (finished books are
+* **Jump back in**: Audiobookshelf books in progress (finished books are
   skipped) merged with MA recently played, newest first, six at most.
 * **Playlists**, **Browse all media** (a dialog: MA search/playlists/recent;
   ABS libraries → books, ABS search for books, podcasts and authors).
@@ -381,6 +386,17 @@ foreground. Nothing loaded: the service is stopped (it is not touched at all
 until something has played). Swiping the app away from recents still stops
 playback (the service is `START_NOT_STICKY`; there is no web player to resume).
 
+### Dashboard widget
+
+`ActiveMediaWidget` polls `POST /execute/media/status` every 5 s and shows the
+active player. When that player is this app's own web player
+(`entity_id: "web_player"`), play, pause, next, previous, seek and volume go
+straight to the in-app player through `useOptionalWebPlayer()`: the server only
+holds the web player's last report, so a `/execute/media/transport` call would
+change that record while the audio kept playing. Every other player (and any
+other command) goes through `/execute/media/transport`. Seek and volume drags
+are debounced (200 ms) so only the settled value is sent.
+
 ### Remote page
 
 Lists HA media players from `status` (TVs first; the web player is excluded),
@@ -415,23 +431,23 @@ safe-area inset.
 
 ## 9. Troubleshooting
 
-* **401 on every media route** — the caller was not proven; sign in again.
+* **401 on every media route**: the caller was not proven; sign in again.
   There is no anonymous fallback by design.
-* **“Music Assistant is unreachable”** — per-user `mass_url`/`mass_token`
+* **“Music Assistant is unreachable”**: per-user `mass_url`/`mass_token`
   missing or MA down; check Identity settings, then MA on its own port. The
   same pattern names ABS failures.
-* **Transport does nothing** — check `supported_features`: a feature the
+* **Transport does nothing**: check `supported_features`: a feature the
   entity does not advertise falls through to the brand handler, and an
   unmappable command is rejected loudly. For remote keys, check which
   `remote.*` entity the execution log says it sent to (`[android_tv] Sending …
   to remote.…`); it must be the TV's companion entity.
-* **Dashboard says the web player is playing but nothing is** — the app stopped
+* **Dashboard says the web player is playing but nothing is**: the app stopped
   reporting (closed, offline). It clears itself after 2 min.
-* **Web player keeps "reconnecting"** — the gateway's `/api/sendspin` or
+* **Web player keeps "reconnecting"**: the gateway's `/api/sendspin` or
   `/api/ma-jsonrpc` proxy cannot reach MA; after 10 tries the card offers
   Reconnect.
-* **Stream 409** — playback has not been started (or has ended); POST the
+* **Stream 409**: playback has not been started (or has ended); POST the
   stream route first. **504** on an ABS session means ABS never produced the
   HLS playlist.
-* **Stale player list** — the SSE hub stops after 60 s without listeners;
+* **Stale player list**: the SSE hub stops after 60 s without listeners;
   reconnect and wait for the snapshot.

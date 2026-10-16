@@ -45,7 +45,7 @@ class MockAioResp:
 
     @property
     def content(self):
-        # Streaming reads r.content.iter_chunked(...) — return self which provides it.
+        # Streaming reads r.content.iter_chunked(...); return self which provides it.
         return self
 
     async def iter_chunked(self, n):

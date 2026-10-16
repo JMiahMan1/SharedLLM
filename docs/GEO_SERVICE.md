@@ -3,7 +3,7 @@
 **Port:** 8009 · **Image:** `ghcr.io/jmiahman1/sharedllm-geo:latest` · **Code:** `services/geo/`
 
 Life360-style family location and activity layer: live positions, places,
-trips, steps, workouts, achievements and stars — self-hosted, nothing sent to
+trips, steps, workouts, achievements and stars. Self-hosted, nothing sent to
 Google.
 
 ## Data sources
@@ -18,7 +18,7 @@ Google.
   `LocationTrackingService` keeps posting with the app closed when the user
   allowed "Allow all the time" (see `docs/FAMILY_HUB.md`).
 - **OSRM** (`osrm` roads, `osrm-foot` paths) for map matching and ETAs, and
-  **Nominatim** for place names — both self-hosted (below). With `OSRM_URL`
+  **Nominatim** for place names, both self-hosted (below). With `OSRM_URL`
   unset or OSRM down, map matching returns nothing and raw fixes are used.
 
 ## Endpoints (`services/geo/main.py`; gateway proxies under `/api/geo/*`)
@@ -53,9 +53,9 @@ jump checked against OSRM) goes through `process_trip_point`:
   phantom; anything under 0.2 mi is dropped.
 
 So trip detection needs a phone that reports every ~30 s while moving. A
-phone that only sends its 5–10 minute heartbeat (no "Allow all the time",
+phone that only sends its 5-10 minute heartbeat (no "Allow all the time",
 battery optimisation on, or an OEM that kills the service) never produces a
-trip — its fixes are stored, but no two are close enough in time to measure a
+trip: its fixes are stored, but no two are close enough in time to measure a
 speed. Seen live 2026-10-15: Michele's phone reported every ~600 s for days,
 so none of the 15 trips were hers.
 
@@ -98,8 +98,8 @@ routed via Caddy `:8009`.
 
 ## Clients
 
-- **In-app** (React): Leaflet maps — `components/geo/LiveFamilyMap.tsx`,
-  `MiniRouteMap.tsx`, `TripLocationsMap.tsx`. Freshness: live < 2 min, recent
+- **In-app** (React): Leaflet maps (`components/geo/LiveFamilyMap.tsx`,
+  `MiniRouteMap.tsx`, `TripLocationsMap.tsx`). Freshness: live < 2 min, recent
   < 15 min, last seen up to 24 h (dimmed pin); members within 60 m cluster;
   the map starts at the home zone and auto-fits once. The UI reads positions
   from `GET /api/users/location/all` (signed-in members only, as is

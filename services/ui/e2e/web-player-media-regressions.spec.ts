@@ -2,7 +2,7 @@
  * Regression tests for the MA Web Player / device playback media surface.
  *
  * These specifically guard against regressions the team hit in the field:
- *  1. Album art not rendering (gradient + music-note fallback) — MA sends the
+ *  1. Album art not rendering (gradient + music-note fallback). MA sends the
  *     cover as a MediaItemImage object / internal-IP imageproxy URL; the UI
  *     must proxy it through /api/media/imageproxy and actually load pixels.
  *  2. Next / Previous not advancing the track (web player + MA/HA devices).
@@ -117,7 +117,7 @@ test.describe('@live Web Player media regressions', () => {
     expect(stillActive).not.toMatch(/unknown title/i);
     // Best-effort: title should change when there is a next item.
     if (titleBefore && titleBefore.toLowerCase() !== 'unknown title') {
-      // Not asserting strict inequality — some playlists have a single item.
+      // Not asserting strict inequality; some playlists have a single item.
       expect(true).toBe(true);
     }
   });

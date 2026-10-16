@@ -41,7 +41,7 @@ export const defaultWidgetDefs: WidgetDef[] = [
   // dashboard showed the same numbers twice under two different names. The
   // Health widget is the one to keep: it also carries data freshness, the 7-day
   // average, best day and distance. The hero's baseline-relative insight is not
-  // lost — the Health page renders the same `heroInsight` and `ActivityRings`.
+  // lost; the Health page renders the same `heroInsight` and `ActivityRings`.
   { key: 'energy_insights', label: 'Energy Insights', icon: Zap, minSize: 'small', defaultSize: 'medium' },
   // Medium, not small: the add-timer form alone is taller than a 200px cell.
   { key: 'ambient_timer', label: 'Ambient Timer', icon: Timer, minSize: 'small', defaultSize: 'medium' },
@@ -66,7 +66,7 @@ export const defaultWidgetDefs: WidgetDef[] = [
  *
  * This lives as one function on purpose. The `set` wrapper below and
  * `getActiveWidgets` used to carry two hand-rolled copies of the same filter,
- * which meant a rule added to one was silently missing from the other — and
+ * which meant a rule added to one was silently missing from the other, and
  * `BentoBoxDashboard` subscribes to `visibleWidgets`, the copy the `set`
  * wrapper produces. Filtering in one place and not the other is a bypass, so
  * there is now nowhere for a rule to be forgotten.
@@ -97,7 +97,7 @@ export function isWidgetVisible(
 
 /**
  * Widgets display pinned-first, then in user order. The key tiebreaker keeps
- * the sequence stable when two widgets share an order_index — legacy or
+ * the sequence stable when two widgets share an order_index. Legacy or
  * imported rows defaulting to 0 would otherwise shuffle between renders.
  */
 function compareWidgetInstances(a: WidgetInstance, b: WidgetInstance): number {

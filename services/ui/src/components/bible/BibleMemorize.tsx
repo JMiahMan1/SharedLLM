@@ -118,7 +118,7 @@ export default function BibleMemorize({ page }: { page?: string }) {
             <h2 className="text-lg font-bold text-white">Hide it in your heart</h2>
             <p className="text-sm text-slate-300 leading-relaxed">
               {verses.length === 0
-                ? 'Pick a set below, or add any verse — from here or from the reader.'
+                ? 'Pick a set below, or add any verse from here or from the reader.'
                 : `${verses.length} verse${verses.length === 1 ? '' : 's'} on your list, ${data?.mastered ?? 0} mastered.`}
             </p>
           </div>
@@ -131,7 +131,7 @@ export default function BibleMemorize({ page }: { page?: string }) {
           className="mt-4 w-full min-h-12 rounded-xl bg-fuchsia-500 text-white font-semibold flex items-center justify-center gap-2 hover:bg-fuchsia-400 disabled:opacity-50"
         >
           {busy === 'practice' ? <Loader2 size={16} className="animate-spin" /> : <Brain size={16} />}
-          {due ? `Practise ${due} due verse${due === 1 ? '' : 's'}` : 'Nothing due — come back tomorrow'}
+          {due ? `Practise ${due} due verse${due === 1 ? '' : 's'}` : 'Nothing due. Come back tomorrow'}
         </button>
       </section>
 
@@ -389,7 +389,7 @@ function RecallCard({
       {result ? (
         <div className="space-y-3">
           <p className={`text-center text-lg font-bold ${result.passed ? 'text-emerald-300' : 'text-amber-200'}`} data-testid="bible-recall-verdict">
-            {result.passed ? 'Got it!' : 'Not quite — it will come back tomorrow.'} {Math.round(result.score * 100)}%
+            {result.passed ? 'Got it!' : 'Not quite. It will come back tomorrow.'} {Math.round(result.score * 100)}%
           </p>
           <p className="text-center text-sm text-slate-400">
             {result.verse.mastered

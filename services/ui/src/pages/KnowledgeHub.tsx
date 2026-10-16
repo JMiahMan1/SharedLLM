@@ -43,7 +43,7 @@ const REINDEX_PROVIDERS: {
     id: 'calibre',
     label: 'Calibre library',
     heading: 'Reindex the Calibre Library',
-    blurb: 'Re-read every book on the shelf and rebuild the calibre_files collection from its extracted text. Requires the calibre_library_path setting (Admin > Settings).',
+    blurb: 'Re-read every book on the shelf and rebuild the calibre_files collection from its extracted text. Requires the calibre_library_path setting (Admin > LLM & Settings).',
   },
 ];
 
@@ -353,7 +353,7 @@ const KnowledgeHub = () => {
         </div>
       </header>
 
-      {/* RAG Semantic Search — the home for semantic memory / indexed storage */}
+      {/* RAG Semantic Search: the home for semantic memory / indexed storage */}
       <section className="glass-panel p-6 border-indigo-500/20 bg-indigo-950/5">
         <div className="flex items-center gap-2 mb-4 flex-wrap">
           <Search size={16} className="text-indigo-300" />
@@ -368,7 +368,7 @@ const KnowledgeHub = () => {
             type="text"
             value={ragQuery}
             onChange={(e) => setRagQuery(e.target.value)}
-            placeholder="Ask the brain — search indexed files, Home Assistant devices, missions…"
+            placeholder="Ask the brain: search indexed files, Home Assistant devices, missions…"
             className="glass-input w-full py-3 pl-10 pr-28 text-sm"
             aria-label="Semantic memory search"
           />
@@ -1022,7 +1022,7 @@ const KnowledgeHub = () => {
                    <span className="flex items-center gap-2">
                      <RefreshCw size={14} className="animate-spin shrink-0" />
                      <span>
-                       Crawling {crawl.kind || 'library'} —{' '}
+                       Crawling {crawl.kind || 'library'}:{' '}
                        {CRAWL_PHASE_LABELS[crawl.phase ?? ''] || crawl.phase || 'working'}
                        {typeof crawl.total === 'number' && crawl.total > 0
                          ? `: ${crawl.done ?? 0}/${crawl.total}`

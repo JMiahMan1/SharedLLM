@@ -124,7 +124,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   //
   // React state is not safe to consult from the message-clearing guards below:
   // they run inside async continuations, and reading `sensorsRef.current` there
-  // can observe the value from *before* the patch that set it — which silently
+  // can observe the value from *before* the patch that set it, which silently
   // wiped the "retrying automatically" notice. These refs are written in the
   // same tick as the patch, so a guard always sees current truth.
   const stepRecoveringRef = useRef(false);
@@ -149,7 +149,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     // Compute from the ref, write the ref synchronously, then commit state.
     //
     // This used to assign `sensorsRef.current` *inside* the setSensors updater,
-    // which React does not run until render — so the ref was stale for the rest
+    // which React does not run until render, so the ref was stale for the rest
     // of the tick. Every async gate that read it (startTracking, the sync
     // guards, the message-clearing guards) was therefore reading pre-patch
     // values, which silently clobbered messages set moments earlier.
@@ -164,8 +164,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   /**
    * Which part of the sensor pipeline last set the visible message.
    *
-   * The step counter has two independent failure sources — the *service*
-   * (native listener/poll) and the *read* (fetching today's count) — and they
+   * The step counter has two independent failure sources: the *service*
+   * (native listener/poll) and the *read* (fetching today's count). They
    * must not clear each other's notice. Without this, a successful service start
    * wiped "no hardware step counter" set moments earlier by the read path.
    */
@@ -190,7 +190,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         ownerRef.current = null;
         patchSensor(id, { recovering: false, message: null });
       } else {
-        // Another subsystem owns the current notice — leave it in place.
+        // Another subsystem owns the current notice; leave it in place.
         patchSensor(id, { recovering: true });
       }
     },
@@ -210,7 +210,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
   /**
    * Clear a sensor's message, unless it is currently recovering or owned by a
-   * different subsystem — in either case the notice is still the truth.
+   * different subsystem; in either case the notice is still the truth.
    */
   const clearMessageUnlessRecovering = useCallback((id: SensorId, owner: NoticeOwner) => {
     const recoveringRef = id === 'steps' ? stepRecoveringRef : locationRecoveringRef;
@@ -258,12 +258,12 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
               enabled: false,
               permission: 'denied',
               message: req.permanentlyDenied
-                ? 'Step permission blocked — enable it in system Settings'
-                : 'Physical activity permission denied — steps turned off',
+                ? 'Step permission blocked. Enable it in system Settings'
+                : 'Physical activity permission denied: steps turned off',
             });
             await storageSet(KEY_STEPS_ENABLED, 'false');
             await stopStepService();
-            toast.error('Step tracking disabled — permission denied');
+            toast.error('Step tracking disabled: permission denied');
             logSensor('steps', 'permission denied by user');
             return;
           }
@@ -278,7 +278,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         clearMessageUnlessRecovering('steps', 'read');
       }
     } catch (err) {
-      // A throw here is never a permission denial (see lib/sensorFailure) — the
+      // A throw here is never a permission denial (see lib/sensorFailure). The
       // plugin only signals denial through requestPermission()'s return value.
       // The old code scanned the message for "permission" and permanently
       // disabled step tracking, which is how both phones silently went stale.
@@ -286,7 +286,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         'steps',
         'read',
         true,
-        `${sensorErrorMessage(err, 'Step counter unavailable')} — retrying automatically`,
+        `${sensorErrorMessage(err, 'Step counter unavailable')}. Retrying automatically`,
       );
       logSensor('steps', 'refresh failed (transient, will retry)', err);
     }
@@ -298,7 +298,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
    * one yet.
    *
    * This deliberately has no fallback literal. Three copies of this logic used
-   * to end in `|| 'me'`, which wrote readings under the literal key `me` —
+   * to end in `|| 'me'`, which wrote readings under the literal key `me`;
    * `geo:steps_meta:me` sat unreadable in production for a week. A reading we
    * cannot attribute is worse than a reading we skip: skipping is visible and
    * recoverable, a bogus key is invisible and permanent.
@@ -324,7 +324,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
    *
    * Browsers and pre-hourly builds have no hourly ledger, and a day the phone
    * never recorded has no buckets at all. Both return `[]` so the caller sends
-   * no `hourly` key — an absent measurement, never 24 fabricated zeros.
+   * no `hourly` key: an absent measurement, never 24 fabricated zeros.
    */
   const readHourlySteps = useCallback(async (day?: string): Promise<Array<{ hour: number; steps: number }>> => {
     if (!Capacitor.isNativePlatform()) return [];
@@ -415,12 +415,12 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       const user = await resolveSyncUsername();
       if (!user) {
         logSensor('steps', 'sync skipped: no username in storage (not writing a placeholder)');
-        setNotice('steps', 'read', 'Not signed in — steps are not being uploaded yet');
+        setNotice('steps', 'read', 'Not signed in, so steps are not being uploaded yet');
         return;
       }
 
       // Hours only ever gain a bucket when a pedometer delta was credited, and
-      // that same delta is what moved the day total — so the unchanged-total
+      // that same delta is what moved the day total, so the unchanged-total
       // early return above cannot leave new hour data stranded.
       const hourly = await readHourlySteps();
       const resp = await fetch(`${serverUrl}/api/geo/steps`, {
@@ -461,7 +461,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
    * Start the native step listener. **Never switches the sensor off.**
    *
    * The step plugin reports permission only through `requestPermission()`'s
-   * return value — it puts no code on a thrown error — so anything thrown here
+   * return value (it puts no code on a thrown error), so anything thrown here
    * is transient by construction. The previous implementation disabled steps and
    * persisted `KEY_STEPS_ENABLED='false'` on *any* failure, which meant a single
    * bridge hiccup silently ended tracking until the user went digging in
@@ -483,7 +483,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         if (reading.available && typeof reading.steps === 'number') {
           const changed = dailyStepsRef.current !== reading.steps;
           dailyStepsRef.current = reading.steps;
-          // Push new step counts immediately — don't wait for a GPS fix
+          // Push new step counts immediately; don't wait for a GPS fix
           if (changed) void syncDailySteps();
         }
       });
@@ -505,7 +505,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           'steps',
           'service',
           true,
-          `${sensorErrorMessage(err, 'Step counter unavailable')} — retrying automatically`,
+          `${sensorErrorMessage(err, 'Step counter unavailable')}. Retrying automatically`,
         );
       }
       return false;
@@ -643,7 +643,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       error: null,
       interval: newInterval,
     }));
-    // Successful fix — clear any sticky sensor banner (timeout, old TokenBridge miss, etc.)
+    // Successful fix: clear any sticky sensor banner (timeout, old TokenBridge miss, etc.)
     patchSensor('location', { permission: 'granted', message: null });
 
     if (lastLocationRef.current) {
@@ -717,7 +717,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           if (err?.code === 1) {
             patchSensor('location', { enabled: false, permission: 'denied', message: err.message });
             void storageSet(KEY_LOCATION_ENABLED, 'false');
-            toast.error('Location permission denied — tracking turned off');
+            toast.error('Location permission denied: tracking turned off');
           } else {
             patchSensor('location', { message: err.message });
           }
@@ -740,7 +740,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
             setState((s) => ({ ...s, error: msg, isTracking: false }));
             patchSensor('location', { enabled: false, permission: 'denied', message: msg });
             await storageSet(KEY_LOCATION_ENABLED, 'false');
-            toast.error('Location tracking disabled — permission denied');
+            toast.error('Location tracking disabled: permission denied');
             return;
           }
         }
@@ -759,15 +759,15 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
             }
             if (err) {
               logSensor('location', 'native watch error', err);
-              // Transient timeout while acquiring a fix is not a hard failure —
+              // Transient timeout while acquiring a fix is not a hard failure;
               // only surface permission-class errors as blocking errors.
               if (err.code === 1) {
                 setState((s) => ({ ...s, error: err.message, isTracking: false }));
                 patchSensor('location', { enabled: false, permission: 'denied', message: err.message });
                 void storageSet(KEY_LOCATION_ENABLED, 'false');
-                toast.error('Location permission denied — tracking turned off');
+                toast.error('Location permission denied: tracking turned off');
               } else if (err.code === 3) {
-                // POSITION_UNAVAILABLE / TIMEOUT — keep watching, soft message only
+                // POSITION_UNAVAILABLE / TIMEOUT: keep watching, soft message only
                 patchSensor('location', { message: 'Waiting for GPS fix…' });
                 logSensor('location', 'waiting for GPS fix', err.message);
               } else {
@@ -778,7 +778,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           }
         );
 
-        // Opportunistic first fix — failures are non-fatal; the watch is live.
+        // Opportunistic first fix; failures are non-fatal; the watch is live.
         try {
           const position = await Geolocation.getCurrentPosition(gpsOptions);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -794,7 +794,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         void backfillStepHistory();
 
         // One intentional 30 s cadence for step sync (see ensureStepSyncTimer):
-        // the old pair of timers raced each other — whichever registered first
+        // the old pair of timers raced each other: whichever registered first
         // won, which accidentally disabled the intended stationary gate.
         ensureStepSyncTimer();
       } catch (err) {
@@ -805,14 +805,14 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           setState((s) => ({ ...s, error: msg, isTracking: false }));
           patchSensor('location', { enabled: false, permission: 'denied', message: msg });
           await storageSet(KEY_LOCATION_ENABLED, 'false');
-          toast.error('Location tracking disabled — permission denied');
+          toast.error('Location tracking disabled: permission denied');
         } else {
           // Transient: leave the preference ON and let the retry loop recover.
           // The old code matched the substrings "permission"/"denied" in the
           // message, so any error mentioning permissions killed tracking for
           // good. Only a coded PERMISSION_DENIED is allowed to disable.
           setState((s) => ({ ...s, error: msg }));
-          markRecovering('location', 'service', true, `${msg} — retrying automatically`);
+          markRecovering('location', 'service', true, `${msg}. Retrying automatically`);
         }
       }
     } finally {
@@ -886,8 +886,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
               enabled: false,
               permission: 'denied',
               message: req.permanentlyDenied
-                ? 'Blocked in system settings — open Settings to allow'
-                : 'Permission denied — steps stay off',
+                ? 'Blocked in system settings. Open Settings to allow'
+                : 'Permission denied, so steps stay off',
             });
             await storageSet(KEY_STEPS_ENABLED, 'false');
             toast.error('Step permission denied');
@@ -914,7 +914,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         // persisting an off-state they have to undo in Settings.
         patchSensor('steps', {
           enabled: true,
-          message: `${sensorErrorMessage(err, 'Step counter unavailable')} — retrying automatically`,
+          message: `${sensorErrorMessage(err, 'Step counter unavailable')}. Retrying automatically`,
         });
         stepRetryAttemptRef.current = 0;
         stepRetryAtRef.current = 0;
@@ -1031,7 +1031,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 // no step event has fired yet.
   //
   // This used to poll for `getHours() === 0 && getMinutes() === 0` on a 30 s
-  // interval — a 60-second window. Backgrounded or killed across midnight and
+  // interval, a 60-second window. Backgrounded or killed across midnight and
   // the reset never ran. It now tracks which local day the current reading
   // belongs to and reacts to an actual date change, so the reset happens on the
   // next tick regardless of when the app was open.
@@ -1076,7 +1076,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Refresh hardware step count when app returns to foreground — and push it,
+  // Refresh hardware step count when app returns to foreground, and push it;
   // otherwise the server only sees steps after the next GPS fix
   useEffect(() => {
     const onVisible = () => {

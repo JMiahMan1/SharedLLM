@@ -99,12 +99,12 @@ log "Changes detected in: $CHANGED_FILES"
 
 # --- Step 2: Pull and Restart ---
 if [ -n "$INFRA_CHANGE" ]; then
-    log "Infrastructure changes detected — pulling all images."
+    log "Infrastructure changes detected; pulling all images."
     log "Running: $COMPOSE pull && $COMPOSE up -d"
     $COMPOSE pull 2>&1 | tee -a "$LOG_FILE"
     $COMPOSE up -d 2>&1 | tee -a "$LOG_FILE"
 elif [ "$SHARED_FILE_CHANGE" = true ]; then
-    log "Shared config change detected — pulling all images."
+    log "Shared config change detected; pulling all images."
     log "Running: $COMPOSE pull && $COMPOSE up -d"
     $COMPOSE pull 2>&1 | tee -a "$LOG_FILE"
     $COMPOSE up -d 2>&1 | tee -a "$LOG_FILE"
@@ -130,7 +130,7 @@ else
 fi
 
 if [ -n "$CADDY_CHANGE" ]; then
-    log "Caddy configuration change detected — restarting caddy."
+    log "Caddy configuration change detected; restarting caddy."
     $COMPOSE restart caddy 2>&1 | tee -a "$LOG_FILE"
 fi
 

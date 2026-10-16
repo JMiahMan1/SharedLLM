@@ -314,7 +314,7 @@ async def test_collect_status_counts_due_and_failed(rc, timer):
     assert status["next_due_at"] is not None
 
 
-# ── The scheduler loop itself ────────────────────────────────────────────────
+# The scheduler loop itself
 #
 # Every other test in this file calls _fire_timer directly, so none of them
 # execute the loop that calls it. That is how `for key in _iter_timer_keys(...)`

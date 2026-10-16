@@ -116,7 +116,7 @@ async def _speak(session, *, reference: str = "Genesis 1", index: int = 0, voice
     )
 
 
-# ── cutting the passage up ──────────────────────────────────────────────────
+# cutting the passage up
 
 
 def test_the_first_piece_is_the_short_one():
@@ -161,7 +161,7 @@ def test_a_piece_is_cached_under_its_own_words():
     )
 
 
-# ── planning and speaking pieces ────────────────────────────────────────────
+# planning and speaking pieces
 
 
 def test_a_plan_needs_no_engine(loaded, monkeypatch):
@@ -222,7 +222,7 @@ async def test_a_piece_past_the_end_is_refused(loaded, monkeypatch):
     assert str(count) in str(excinfo.value)
 
 
-# ── the routes ──────────────────────────────────────────────────────────────
+# the routes
 
 
 def test_the_plan_route_lists_the_pieces(loaded_client: TestClient, monkeypatch):

@@ -19,7 +19,7 @@ Two independent defects stacked:
 Fixing only one leaves it broken, which is why both are guarded here.
 
 The Identity *setting keys* (``host_searxng_url``) are lowercase by convention
-and must stay that way — see the note in ``settings_map``.
+and must stay that way; see the note in ``settings_map``.
 """
 import importlib
 import json
@@ -137,7 +137,7 @@ class TestMatchesTheNetUrlHelper:
         cfg = _load_config(env)
         # `_net_url` and SEARXNG must both honour HOST_* in host mode. When only
         # one did, a process resolved identity via one convention and SearXNG via
-        # another — and SearXNG silently fell through to an unrelated value.
+        # another, and SearXNG silently fell through to an unrelated value.
         assert cfg.IDENTITY_SVC_URL == "http://127.0.0.1:8001"
         assert cfg.SEARXNG_URL == "http://host-search:8080"
 
@@ -161,7 +161,7 @@ class TestIdentitySettingKeysStayLowercase:
         assert 'f"{NETWORK_MODE}_searxng_url"' in src
         assert 'f"{NETWORK_MODE}_execution_svc_url"' in src
         # An uppercase variant would never match a stored setting, and these are
-        # Identity setting keys — .env's uppercase HOST_* spelling is a
+        # Identity setting keys; .env's uppercase HOST_* spelling is a
         # different namespace entirely.
         assert 'f"{NETWORK_MODE.upper()}_searxng_url"' not in src
 
@@ -204,7 +204,7 @@ class TestComposeHasNoFoldedOrHardcodedHost:
             # "http://host:8080 - EXECUTION_EXTERNAL_HOST=1.2.3.4", which matches
             # neither this pattern nor the no-private-address rule above.
             if "${" in value:
-                # ${VAR}, ${VAR:?required}, ${VAR:-default} — and nothing else.
+                # ${VAR}, ${VAR:?required}, ${VAR:-default}, and nothing else.
                 assert re.fullmatch(r"\$\{[A-Za-z_][A-Za-z0-9_]*(:[?-][^}]*)?\}", value), (
                     f"{name} has extra text around the reference: {value!r}"
                 )
@@ -215,7 +215,7 @@ class TestComposeHasNoFoldedOrHardcodedHost:
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         with open(os.path.join(root, "docker-compose.yml")) as f:
             text = f.read()
-        # 192.168.x.y / 10.x — the RFC1918 ranges that would break other installs.
+        # 192.168.x.y / 10.x: the RFC1918 ranges that would break other installs.
         assert not re.search(r"\b(?:192\.168|10)\.\d+\.\d+\.\d+\b", text), (
             "docker-compose.yml hardcodes a private address"
         )
@@ -268,6 +268,6 @@ class TestComposeConfigResolves:
     def test_external_host_matches_the_env_file(self):
         env = self._rendered()["services"]["execution"]["environment"]
         # Whatever compose resolved must be a bare host: no scheme, no port,
-        # no folded junk — it is interpolated straight into a URL template.
+        # no folded junk; it is interpolated straight into a URL template.
         assert " " not in env["EXECUTION_EXTERNAL_HOST"]
         assert "://" not in env["EXECUTION_EXTERNAL_HOST"]

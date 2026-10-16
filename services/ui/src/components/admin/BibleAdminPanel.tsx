@@ -103,7 +103,7 @@ export default function BibleAdminPanel() {
           <span className="text-slate-200">{data?.primary || 'nothing yet'}</span>
           {data?.default_version && data.default_version !== data.primary ? (
             <span className="text-amber-300/90">
-              {' '}— not installed, so readers get {data.default_version} until it is.
+              {' '}(not installed, so readers get {data.default_version} until it is).
             </span>
           ) : null}
         </p>

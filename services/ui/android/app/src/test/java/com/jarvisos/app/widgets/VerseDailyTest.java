@@ -57,7 +57,7 @@ public class VerseDailyTest {
     public void aVerseLevelErrorIsShownInsteadOfAnEmptyCard() throws Exception {
         String verse = "{\"error\":\"No verses are loaded for scope \\\"ot\\\". Import a translation.\"}";
         VerseDaily.Lines lines = VerseDaily.fromJson(daily(verse, "{\"entry\":null,\"reason\":\"\"}"));
-        assertEquals("—", lines.text);
+        assertEquals("-", lines.text);
         assertTrue(lines.sub.contains("Import a translation."));
         assertTrue(lines.warning.contains("Import a translation."));
     }
@@ -67,14 +67,14 @@ public class VerseDailyTest {
         JSONObject payload = new JSONObject().put("day", "2026-10-03")
             .put("devotional", new JSONObject().put("entry", JSONObject.NULL));
         VerseDaily.Lines lines = VerseDaily.fromJson(payload);
-        assertEquals("—", lines.text);
+        assertEquals("-", lines.text);
         assertEquals("No verse available today", lines.sub);
     }
 
     @Test
     public void anEmptyPayloadIsStillAReadableCard() {
         VerseDaily.Lines lines = VerseDaily.fromJson(null);
-        assertEquals("—", lines.text);
+        assertEquals("-", lines.text);
         assertEquals("No verse available today", lines.sub);
     }
 

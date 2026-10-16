@@ -3,7 +3,7 @@
 A `.pdf` or `.docx` is a compressed container, not text. Both were classified
 ``full_text``, which sends them down the only path that produces content:
 ``provider.get_content`` reads the response as text. For these formats that is
-a byte stream decoded as characters — mojibake — and it gets chunked, embedded,
+a byte stream decoded as characters (mojibake), and it gets chunked, embedded,
 and stored like a real passage. Every search hit against it is then confidently
 wrong, and there is nothing downstream that can tell a real chunk from noise.
 
@@ -69,7 +69,7 @@ def test_text_documents_are_unaffected_end_to_end():
 def test_chunking_mojibake_is_exactly_the_failure_being_prevented():
     """Documents why a byte stream must not reach ``chunk_text``.
 
-    Not an assertion about desired behaviour — a characterisation of the
+    Not an assertion about desired behaviour; a characterisation of the
     corruption that classifying these formats as ``full_text`` produced.
     """
     pdf_bytes = b"%PDF-1.4\n\x00\x01\x02\xff\xfe garbage"

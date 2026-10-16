@@ -36,9 +36,6 @@ that review were not re-checked one by one; the full list is in git history
 - **Tracebacks to clients**: the gateway's global exception handler returns
   `detail` and the full `traceback` in the 500 body
   (`services/gateway/main.py`, `global_exception_handler`).
-- **Saved password in plain storage**: biometric sign-in replays
-  `jarvis_saved_password` from Capacitor Preferences
-  (`services/ui/src/pages/Login.tsx`). Store a refreshable token instead.
 - **Workspace tests run on the host**: workspace_runtime runs pytest/lint with
   `subprocess.run(cwd=workspace)` in the container that holds the Docker
   socket, executing repo code outside the sandbox (W1).
@@ -55,7 +52,7 @@ that review were not re-checked one by one; the full list is in git history
 - **Terminal context menu** closes ~300 ms after opening
   (`TerminalPane.tsx`, inverted `menuLeaveRef` check) (U1).
 
-## Identity config DB — seeding and runtime integration
+## Identity config DB: seeding and runtime integration
 
 Source: `services/identity/seed.py`, `services/identity/models.py`, `services/config.py`.
 
@@ -75,7 +72,7 @@ value before `resolve_runtime_config()` runs, so the `log_retention_days` /
 `log_max_entries` settings never take effect (defaults 30 days / 10000 always
 apply). Read them from `services.config` at use time.
 
-## Artifact framework (`services/storage`) — not started
+## Artifact framework (`services/storage`): not started
 
 Design: `services/storage/ARTIFACTS.md`; build plan:
 `services/storage/ARTIFACT_IMPLEMENTATION_PLAN.md`. None of it exists in

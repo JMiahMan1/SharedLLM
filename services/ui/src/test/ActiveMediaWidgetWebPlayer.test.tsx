@@ -44,7 +44,7 @@ function playing(entityId: string) {
   };
 }
 
-describe('ActiveMediaWidget — which player the buttons drive', () => {
+describe('ActiveMediaWidget: which player the buttons drive', () => {
   afterEach(() => {
     server.resetHandlers();
     vi.clearAllMocks();

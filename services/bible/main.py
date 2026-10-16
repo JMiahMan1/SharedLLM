@@ -1,12 +1,12 @@
-"""SharedLLM `bible` service — the reading app.
+"""SharedLLM `bible` service: the reading app.
 
 Owns three things and nothing else:
 
-1. **The corpus** — imported public-domain translations in SQLite, served
+1. **The corpus**: imported public-domain translations in SQLite, served
    offline so opening the app never waits on a network round trip.
-2. **Per-reader state** — position, typographic preferences, marks, and the
+2. **Per-reader state**: position, typographic preferences, marks, and the
    reading-event log the achievements are derived from.
-3. **The daily rhythm** — verse of the day, devotional, streaks, achievements.
+3. **The daily rhythm**: verse of the day, devotional, streaks, achievements.
 
 Everything else is somebody else's service: notes are Notes (Nextcloud), study
 help is Jarvis through the gateway LLM proxy, stars are geo's ledger, family
@@ -96,7 +96,7 @@ _START_TIME = time.time()
 DEFAULT_DATABASE_URL = "sqlite:////data/bible.db"
 
 
-# ── secret verification (same contract as every other service) ───────────────
+# secret verification (same contract as every other service)
 
 
 def _verify_internal_secret(header_secret: str | None, query_secret: str | None = None) -> bool:
@@ -155,7 +155,7 @@ async def require_internal_secret_middleware(request, call_next):
 app.include_router(info_router)
 
 
-# ── database ────────────────────────────────────────────────────────────────
+# database
 
 
 def _database_url() -> str:
@@ -183,7 +183,7 @@ def get_session() -> Session:
     return Session(_db())
 
 
-# ── health / info ───────────────────────────────────────────────────────────
+# health / info
 
 
 @app.get("/health")
@@ -220,7 +220,7 @@ def health(session: Session = Depends(get_session)):
     }
 
 
-# ── corpus / reader ─────────────────────────────────────────────────────────
+# corpus / reader
 
 
 @app.get("/versions")
@@ -809,7 +809,7 @@ def _parse_day(raw: str | None) -> date | None:
         raise HTTPException(status_code=400, detail=f"{raw!r} is not an ISO date (YYYY-MM-DD).") from exc
 
 
-# ── devotionals ─────────────────────────────────────────────────────────────
+# devotionals
 
 
 @app.get("/devotional")
@@ -861,7 +861,7 @@ def devotional_sources():
     return {"sources": devotional_registry.describe_sources()}
 
 
-# ── reading state ───────────────────────────────────────────────────────────
+# reading state
 
 
 class MarkPayload(BaseModel):
@@ -1162,7 +1162,7 @@ def _record_event(session: Session, username: str, kind: str, ref: str = "", val
     return row
 
 
-# ── games ───────────────────────────────────────────────────────────────────
+# games
 
 
 class GameAttempt(BaseModel):
@@ -1391,7 +1391,7 @@ async def attempt_game(
     }
 
 
-# ── memorisation ────────────────────────────────────────────────────────────
+# memorisation
 
 
 class MemoryAdd(BaseModel):
@@ -1596,7 +1596,7 @@ async def memory_recall(
     }
 
 
-# ── reading plans ───────────────────────────────────────────────────────────
+# reading plans
 
 
 def _plan_days(row: PlanEnrollment) -> list[int]:
@@ -1791,7 +1791,7 @@ def stop_plan(plan_id: str, username: str = Query(...), session: Session = Depen
     return {"stopped": plan_id}
 
 
-# ── stats / streaks / achievements ──────────────────────────────────────────
+# stats / streaks / achievements
 
 
 @app.get("/stats")
@@ -2010,7 +2010,7 @@ async def _share_card(username: str, card: dict) -> dict:
     return await _post_cards([card])
 
 
-# ── family sharing ──────────────────────────────────────────────────────────
+# family sharing
 
 
 @app.get("/activity/summary")
@@ -2332,7 +2332,7 @@ def _verse_of_day(session: Session) -> dict:
     except LookupError as exc:
         return {"error": str(exc)}
 
-# ── admin: installing translations and study Bibles ─────────────────────────
+# admin: installing translations and study Bibles
 
 
 async def _live_settings() -> dict[str, str]:
@@ -2506,7 +2506,7 @@ def _admin_imports_report(
         if not library_root:
             library_error = (
                 f"The {library.LIBRARY_SETTING} global setting is not set, so the "
-                f"Nextcloud book library is not available. Set it in Admin > Settings "
+                f"Nextcloud book library is not available. Set it in Admin > LLM & Settings "
                 f"to the folder that holds your Bibles, for example /Books/Text."
             )
         return {
@@ -2573,7 +2573,7 @@ async def _library_listing(path: str) -> dict:
             detail=(
                 f"The {library.LIBRARY_SETTING} global setting is not set, so this "
                 "service does not know which shelf of the book library to read. Set "
-                "it in Admin > Settings to the folder that holds your Bibles, for "
+                "it in Admin > LLM & Settings to the folder that holds your Bibles, for "
                 "example /Books/Text."
             ),
         )

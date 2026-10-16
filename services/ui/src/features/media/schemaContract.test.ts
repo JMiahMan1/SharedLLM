@@ -6,7 +6,7 @@
  * by `services/gateway/tests/test_media_schema_contract.py` (regenerate with
  * `UPDATE_MEDIA_SCHEMAS=1 pytest tests/test_media_schema_contract.py -q`).
  * If a gateway field is added, renamed or retyped, either this test fails
- * against the fixtures or the pytest drift guard fails — both mean the two
+ * against the fixtures or the pytest drift guard fails; both mean the two
  * sides have diverged.
  */
 import { describe, expect, it } from 'vitest'

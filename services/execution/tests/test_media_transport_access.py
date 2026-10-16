@@ -1,7 +1,7 @@
 """BUG-03 / P1-T3: /execute/media/transport must enforce verify_entity_access.
 
 A user without an assignment for entity X must be denied (403) when sending
-transport commands to X — the same access check play uses.
+transport commands to X: the same access check play uses.
 """
 import os
 

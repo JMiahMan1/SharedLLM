@@ -40,7 +40,7 @@ def _make_client(sequence):
 
 @pytest.mark.asyncio
 async def test_autowire_prefers_exec_data_url_over_gh_view():
-    """The URL from the repo_create tool result must win — gh repo view is
+    """The URL from the repo_create tool result must win; gh repo view is
     never called, so a flaky `gh repo view` can't leave the workspace unbound
     or bind the WRONG (e.g. SharedLLM) repo."""
     cli, calls = _make_client([])

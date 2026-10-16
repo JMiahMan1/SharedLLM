@@ -42,7 +42,7 @@ describe('ActivitySharingPanel', () => {
 
     expect(await screen.findByTestId('activity-sharing-panel')).toBeInTheDocument();
     expect(screen.getByTestId('sharing-toggle')).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByText(/Private — nothing is visible/i)).toBeInTheDocument();
+    expect(screen.getByText(/Private: nothing is visible/i)).toBeInTheDocument();
     // controls only appear once sharing is on
     expect(screen.queryByTestId('audience-circle')).not.toBeInTheDocument();
   });

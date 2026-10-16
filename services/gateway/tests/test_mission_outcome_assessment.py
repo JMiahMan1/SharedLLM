@@ -2,7 +2,7 @@ from services.gateway.agent_loop import should_persist_learning
 
 
 class TestMissionOutcomeAssessment:
-    """Tests for should_persist_learning — used by both AgentLoop RAG gate and Worker mission status."""
+    """Tests for should_persist_learning, used by both AgentLoop RAG gate and Worker mission status."""
 
     def test_none_result(self):
         assert should_persist_learning("") is False

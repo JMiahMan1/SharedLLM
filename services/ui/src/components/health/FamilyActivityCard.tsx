@@ -10,7 +10,7 @@ const WINDOWS: Array<{ id: ActivityWindow; label: string }> = [
   { id: 'month', label: 'Month' },
 ];
 
-/** '4.2 mi' / '12 mi' — null when the scope was not shared. */
+/** '4.2 mi' / '12 mi', or null when the scope was not shared. */
 function formatMiles(value?: number | null): string | null {
   if (value === undefined || value === null) return null;
   return `${value >= 10 ? Math.round(value) : value.toFixed(1)} mi`;
@@ -51,7 +51,7 @@ function PersonRow({ person }: { person: FeedPerson }) {
           )}
         </p>
         <p className="text-[11px] text-slate-500 truncate">
-          {chips.length ? chips.join(' · ') : 'Sharing enabled — no activity recorded yet'}
+          {chips.length ? chips.join(' · ') : 'Sharing enabled, no activity recorded yet'}
         </p>
       </div>
     </div>
@@ -140,7 +140,7 @@ export default function FamilyActivityCard() {
             </p>
           )}
           <p className="text-[10px] text-slate-600 pt-2 border-t border-white/5 mt-1">
-            Opt-in only — each person controls what they share.
+            Opt-in only. Each person controls what they share.
           </p>
         </>
       )}

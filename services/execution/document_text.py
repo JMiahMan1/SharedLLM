@@ -48,7 +48,7 @@ async def _pandoc(path: str) -> str:
     """Extract text via pandoc as plain text.
 
     The plain writer already emits every block element (heading, list item,
-    paragraph) on its own line — the TTS structure-pause pass relies on that
+    paragraph) on its own line; the TTS structure-pause pass relies on that
     line-delimited structure. Note: ``--split-level`` is an EPUB/HTML chunking
     option taking a heading NUMBER, not a style name, so it has no place here
     (passing e.g. ``paragraph`` makes pandoc reject the whole conversion).

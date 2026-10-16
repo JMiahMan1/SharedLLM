@@ -141,7 +141,7 @@ function App() {
             <Route path="/workspaces" element={<ProtectedRoute isMobile={isMobile}><Workspaces /></ProtectedRoute>} />
             <Route path="/docs" element={<ProtectedRoute isMobile={isMobile}><Docs /></ProtectedRoute>} />
 
-            {/* Jarvis Lab — user view (admin-only access) and admin view */}
+            {/* Jarvis Lab: user view (admin-only access) and admin view */}
             <Route path="/lab" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLab /></AdminElevation></ProtectedRoute>} />
             <Route path="/lab/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLabAdmin /></AdminElevation></ProtectedRoute>} />
           </Routes>

@@ -9,7 +9,7 @@ import type { CredentialShares, ShareableService } from '../../types/api';
  * Per-user credential sharing.
  *
  * A user's own credentials always win. When they have none, Identity hands
- * them the system default user's credentials for any service listed here — the
+ * them the system default user's credentials for any service listed here. The
  * grant is per service, admin-only, revocable and recorded. See
  * docs/PER_USER_CREDENTIALS.md.
  */
@@ -88,7 +88,7 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
             (<span className="text-slate-400 font-mono">{data.shared_owner}</span>)
           </>
         ) : null}
-        {isSystemDefault ? ' — you are the system default user, so these are your own credentials.' : '.'}
+        {isSystemDefault ? '. You are the system default user, so these are your own credentials.' : '.'}
       </p>
 
       <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -116,7 +116,7 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
         <p className="text-[9px] text-slate-500">
           Last changed by <span className="font-mono">{data.granted_by}</span>
           {data.granted_at ? ` on ${new Date(data.granted_at).toLocaleString()}` : ''}
-          {data.note ? ` — “${data.note}”` : ''}
+          {data.note ? `: “${data.note}”` : ''}
         </p>
       ) : null}
 

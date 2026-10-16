@@ -2,15 +2,22 @@
 
 ## Status
 
-Implemented (reviewed 2026-10-15) with different numbers than the table below:
-`RAVEN_MAX_TOTAL_SECONDS` = 1800, `RAVEN_ITERATION_TIMEOUT` = 600,
-`RAVEN_HEARTBEAT_INTERVAL` = 30 (`services/config.py`, overridable as
-Identity settings `raven_max_total_seconds` etc.). The tunables table below is
-the original proposal.
+Partly implemented (reviewed 2026-10-15), with different numbers than the
+table below: `RAVEN_MAX_TOTAL_SECONDS` = 1800, `RAVEN_ITERATION_TIMEOUT` = 600,
+`RAVEN_HEARTBEAT_INTERVAL` = 30 (`services/config.py` and
+`services/gateway/config.py`, overridable as Identity settings
+`raven_max_total_seconds` etc.). What exists: the total-time cap, checked at
+the start of each iteration in `AgentLoop` (`services/gateway/agent_loop.py`,
+"HARD TIMEOUT CHECK"; `raven_max_total_seconds` = 0 means no cap), which
+returns a partial result built by `compose_timeout_partial_result()`, and the
+mission heartbeat. Not built: a per-iteration `wait_for` guard
+(`RAVEN_ITERATION_TIMEOUT` is defined but nothing reads it) and the
+background-worker timeout wrapper. The tunables table below is the original
+proposal.
 
 ## Context
 
-Raven's `AgentLoop` iterates up to `MAX_TOOL_ITERATIONS = 60`. There is no **total elapsed time** cap. A single iteration — LLM inference + tool execution — can take 2-5 minutes (Ollama ~40 tokens/s on 7B, plus tool latency). In pathological cases (model hallucination, infinite reasoning), a job could run for hours, holding the `INFERENCE_LOCK` and blocking all other LLM usage.
+Raven's `AgentLoop` iterates up to `MAX_TOOL_ITERATIONS = 60`. There is no **total elapsed time** cap. A single iteration (LLM inference + tool execution) can take 2-5 minutes (Ollama ~40 tokens/s on 7B, plus tool latency). In pathological cases (model hallucination, infinite reasoning), a job could run for hours, holding the inference lock (today `TIER3_LOCK`, see ADR 010) and blocking all other LLM usage.
 
 Additionally, background worker `_process_inference_job` does not implement a hard timeout around the entire `AgentLoop` call.
 
@@ -71,17 +78,17 @@ except asyncio.TimeoutError:
 
 ## Consequences
 
-- ✅ No runaway jobs; guarantees lock release within bounded time
-- ✅ Predictable maximum latency for Librarian queue
-- ⚠️ Jobs may terminate mid-fix; user receives partial result with explanation
-- ⚠️ Need to tune `MAX_TOTAL_SECONDS` — long enough for complex debugging, short enough to block minimally
-- ✅ Enables SLA: "Raven repair tasks complete within 10 minutes 95% of the time"
+- Pro: no runaway jobs; the lock is released within a bounded time
+- Pro: predictable maximum latency for the Librarian queue
+- Pro: enables an SLA such as "Raven repair tasks complete within 10 minutes 95% of the time"
+- Con: jobs may terminate mid-fix; the user receives a partial result with an explanation
+- Con: `MAX_TOTAL_SECONDS` needs tuning: long enough for complex debugging, short enough to block minimally
 
 ## Validation
 
 - Craft query requiring >10 iterations → verify timeout at ~10m mark
-- Monitor logs: `[AgentLoop] JOB TIMEOUT` appears cleanly with context
-- Ensure `INFERENCE_LOCK` is released on timeout (use `async with` context manager guarantees this)
+- Monitor logs: `[AgentLoop] HARD TIMEOUT` appears cleanly with context
+- Ensure the inference lock is released on timeout (use `async with` context manager guarantees this)
 
 ---
 
@@ -89,13 +96,13 @@ except asyncio.TimeoutError:
 
 | Variable | Default | Recommended | Notes |
 | --- | --- | --- | --- |
-| `RAVEN_MAX_TOTAL_SECONDS` | 600 (10m) | 600–1800 | Based on task complexity |
-| `RAVEN_ITERATION_TIMEOUT` | 180 (3m) | 120–300 | Prevent single step stall |
-| `RAVEN_HEARTBEAT_INTERVAL` | 15s | 10–30s | Already configurable |
+| `RAVEN_MAX_TOTAL_SECONDS` | 600 (10m) | 600-1800 | Based on task complexity |
+| `RAVEN_ITERATION_TIMEOUT` | 180 (3m) | 120-300 | Prevent single step stall |
+| `RAVEN_HEARTBEAT_INTERVAL` | 15s | 10-30s | Already configurable |
 
 **Metrics to Alert:**
 
-- `gateway_raven_jobs_timed_out_total` — count of timeout terminations
-- `gateway_raven_avg_duration_seconds` — p50, p95, p99
+- `gateway_raven_jobs_timed_out_total`: count of timeout terminations
+- `gateway_raven_avg_duration_seconds`: p50, p95, p99
 
 If timeout rate >5% → increase limits or improve model efficiency.

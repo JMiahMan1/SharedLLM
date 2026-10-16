@@ -5,7 +5,7 @@ Live ABS 2.x deleted ``GET /api/items/:id/stream`` (404 live), so both
 (``POST /api/items/{bookId}/play``) and hand the device the gateway-routed,
 mt-token-signed HLS URL for ``/public/session/{sid}/track/{i}``. Book track
 indexes come from the expanded item's ``media.tracks`` (1-based), and the
-playlist is only written once ABS starts transcoding — the gateway polls
+playlist is only written once ABS starts transcoding; the gateway polls
 (BUG-33).
 """
 import pathlib

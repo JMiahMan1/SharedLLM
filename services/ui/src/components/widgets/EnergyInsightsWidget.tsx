@@ -18,7 +18,7 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
         const enrolled = await api.getTelemetryEnrollments();
         const powerEnrollments = enrolled.filter((e) => e.power_tracking);
 
-        // Fetch all entity summaries in parallel — failed ones are skipped gracefully
+        // Fetch all entity summaries in parallel; failed ones are skipped
         const results = await Promise.allSettled(
           powerEnrollments.map((enrollment) =>
             api.getTelemetrySummary(enrollment.entity_id)

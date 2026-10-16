@@ -98,7 +98,7 @@ from services.identity.seed import hash_password, seed_from_env, system_service_
 from services.shared.info_endpoint import info_router
 from services.common.secrets import secret_matches
 
-# ─── Config ────────────────────────────────────────────────────────────────────
+# Config
 
 log = logging.getLogger("identity")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
@@ -260,9 +260,9 @@ def _ensure_schema_upgrades() -> None:
             conn.commit()
 
 
-# ─── Credential sharing policy ────────────────────────────────────────────────
+# Credential sharing policy
 # Every user resolves a service with their OWN credentials. The system default
-# user ("User 1": is_system_default, or id 1, or username "default" — it may
+# user ("User 1": is_system_default, or id 1, or username "default"; it may
 # have been renamed) additionally owns the shared credentials. Any other user
 # may borrow them for a service only when an admin granted that service to them
 # (UserCredentialShare). Ungranted + unconfigured resolves to None so the
@@ -380,7 +380,7 @@ async def _ensure_default_settings(session: Session) -> None:
     }
 
     # Insert missing defaults exactly as defined in DEFAULT_GLOBAL_SETTINGS.
-    # Model settings default to "" (unconfigured) — they MUST be set explicitly
+    # Model settings default to "" (unconfigured); they MUST be set explicitly
     # via the UI before inference will work. No auto-resolution is performed here
     # because silently picking the wrong model causes OOMs and load failures.
     inserted = False
@@ -420,7 +420,7 @@ async def lifespan(app: FastAPI):
 
         force_reseed = os.getenv("FORCE_RESEED", "false").lower() == "true"
         if force_reseed:
-            log.info("[lifespan] FORCE_RESEED=true — re-seeding all data")
+            log.info("[lifespan] FORCE_RESEED=true, re-seeding all data")
         seed_from_env(session, force=force_reseed)
         await _ensure_default_settings(session)
         _migrate_api_key_material(session)
@@ -438,7 +438,7 @@ app.add_middleware(
 
 app.include_router(info_router)
 
-# ─── Dependencies ──────────────────────────────────────────────────────────────
+# Dependencies
 
 def get_session():
     with Session(engine) as session:
@@ -602,7 +602,7 @@ def require_api_key(authorization: str = Header(None), session: Session = Depend
         raise HTTPException(status_code=401, detail="Invalid API Key")
     return user
 
-# ─── Internal API ─────────────────────────────────────────────────────────────
+# Internal API
 
 @app.post("/api/resolve", response_model=ResolvedCredentials)
 def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session), _: None = Depends(require_internal)):
@@ -686,7 +686,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     nextcloud = service_creds["nextcloud"]
 
     # Skylight is one shared system account, so every user logs in with the
-    # configured system email — unless they configured an account of their own.
+    # configured system email, unless they configured an account of their own.
     if any((user.skylight_url, user.skylight_email, user.skylight_pass_enc)):
         skylight_user: User | None = user
         skylight_source = "own"
@@ -803,7 +803,7 @@ def health():
         "start_time": START_TIME
     }
 
-# ─── Public/Admin API ──────────────────────────────────────────────────────────
+# Public/Admin API
 
 @app.get("/api/users/me", response_model=UserRead)
 def get_me(user: User = Depends(require_api_key), session: Session = Depends(get_session)):
@@ -827,7 +827,7 @@ def skylight_status(session: Session, user: User) -> str:
     return "connected" if user.skylight_enabled else "off"
 
 
-# ── profile pictures ────────────────────────────────────────────────────────
+# profile pictures
 
 AVATAR_MAX_BYTES = 1_500_000
 _AVATAR_PRESET = re.compile(r"^[a-z0-9-]{1,40}$")
@@ -1843,7 +1843,7 @@ def internal_user_device_assignments(
     """Internal: what this user may control.
 
     `device_ids` is the plain DeviceAssignment grant (unprotected entities).
-    `protected_entity_ids` is every locked entity — a caller must not treat it
+    `protected_entity_ids` is every locked entity; a caller must not treat it
     as a grant, it only says the entity exists and is locked.
     `permitted_entity_ids` is the subset of locked entities this user may
     actually control. Admins and the system default user get all of them.
@@ -1880,8 +1880,8 @@ def internal_validate_api_key(
     Deliberately has **no** system-default fallback, which is what makes it
     safe to use as an authentication gate. `POST /api/resolve` falls back to
     the default (admin) user whenever nothing matches, so a caller that
-    validated a key through it would accept *any* string — including an
-    anonymous caller's — as the default administrator. This endpoint answers
+    validated a key through it would accept *any* string (including an
+    anonymous caller's) as the default administrator. This endpoint answers
     only "did this exact key authenticate", and 401s otherwise.
 
     Do not add a fallback here; that is the whole point of the endpoint.
@@ -1964,7 +1964,7 @@ def add_device_ui(
         revoked=assignment.revoked
     )
 
-# ─── Auth & Discovery ──────────────────────────────────────────────────────────
+# Auth & Discovery
 
 @app.post("/api/auth/login", response_model=LoginResponse)
 def login(req: LoginRequest, session: Session = Depends(get_session)):
@@ -2141,7 +2141,7 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
     except Exception as e:
         return {"status": "ERROR", "message": str(e)}
 
-# ─── Credential Seeding ──────────────────────────────────────────────────────
+# Credential Seeding
 
 SEEDABLE_CREDENTIALS = {
     "nextcloud_pass": ("nextcloud_pass_enc", "nextcloud_pass"),
@@ -2219,7 +2219,7 @@ def seed_credential(body: dict, request: Request, session: Session = Depends(get
         "has_value": bool(value)
     }
 
-# ─── API Key Management ────────────────────────────────────────────────────────
+# API Key Management
 
 @app.get("/api/users/me/keys")
 def get_my_keys(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
@@ -2398,7 +2398,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
             log.error(f"[discovery] Nextcloud Error: {e!s}")
             errors.append(f"Nextcloud: {e!s}")
 
-    # 3. Scan Audiobookshelf (library users) — basic auth, or the API key header
+    # 3. Scan Audiobookshelf (library users): basic auth, or the API key header
     if abs_url and (abs_key or (abs_user and abs_pass)):
         try:
             headers = {"Authorization": f"Bearer {abs_key}"} if abs_key else {}
@@ -2451,9 +2451,9 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
             log.error(f"[discovery] Mailcow Error: {e!s}")
             errors.append(f"Mailcow: {e!s}")
     elif not mailcow_url:
-        warnings.append("Mailcow: not configured — set mailcow_url to include mailboxes in onboarding")
+        warnings.append("Mailcow: not configured; set mailcow_url to include mailboxes in onboarding")
 
-    # 5. Merge users — one entry per username, combining every source.
+    # 5. Merge users: one entry per username, combining every source.
     #    Display names are matched loosely (case/punctuation) so "Mom" in HA
     #    and "mom" in Nextcloud land on the same person instead of two rows.
     all_usernames = set(ha_users) | set(nc_users) | set(abs_users) | set(mail_users)
@@ -2468,7 +2468,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
         for candidate in (bucket.get("display_name"), *sorted(all_usernames)):
             if not candidate or username == candidate:
                 continue
-            # Never alias onto something that is itself a discovered login —
+            # Never alias onto something that is itself a discovered login;
             # otherwise "Mom" and "kiddo" can collapse into a single person.
             if _norm(candidate) in known_norms and _norm(candidate) != _norm(username):
                 continue
@@ -2522,7 +2522,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
     log.info(f"[discovery] Discovery complete. Found {len(discovered)} users.")
     return DiscoverResponse(users=discovered, warnings=warnings, errors=errors)
 
-# ─── Onboarding: one-time password → per-user token ────────────────────────────
+# Onboarding: one-time password → per-user token
 
 # Every exchange trades a password the user typed once for a long-lived token
 # that Jarvis can use afterwards. The password is never stored.
@@ -2600,7 +2600,7 @@ async def _exchange_audiobookshelf_token(url: str, username: str, password: str)
 async def _create_nextcloud_app_password(admin: User, nc_username: str) -> str:
     """Nextcloud lets an admin mint an app password for any user.
 
-    No password from the user is needed at all here — this is the one service
+    No password from the user is needed at all here; this is the one service
     where onboarding is fully hands-off.
     """
     base = (admin.nextcloud_url or "").rstrip("/")
@@ -2690,7 +2690,7 @@ async def create_service_token(
     }
 
 
-# ─── Admin ─────────────────────────────────────────────────────────────────────
+# Admin
 
 @app.get("/api/settings", response_model=list[GlobalSettingRead])
 def get_settings(
@@ -2708,7 +2708,7 @@ def get_settings(
 
 # Keys that must never be written with a blank/empty value.
 # The UI dropdowns are always populated with real values, so a blank write
-# here means a UI bug or a bad direct API call — both must fail loudly.
+# here means a UI bug or a bad direct API call; both must fail loudly.
 _MODEL_KEYS = {
     "assistant_model", "librarian_model", "coding_model", "vision_ocr_model",
     "telemetry_model",
@@ -2785,7 +2785,7 @@ def manual_seed(body: _SeedRequest | None = None, force: bool = False, session: 
     count = seed_from_env(session, force=should_force)
     return {"status": "SUCCESS", "count": count}
 
-# ─── DNS Management ─────────────────────────────────────────────────────────────
+# DNS Management
 
 def validate_ip(value: str) -> bool:
     """Validate IPv4 address."""
@@ -3146,9 +3146,9 @@ def update_widget_settings(
     session.commit()
     return {"status": "SUCCESS"}
 
-# ─── Raven Missions (Autonomous Ops & User Tasks) ───────────────────────────────
+# Raven Missions (Autonomous Ops & User Tasks)
 
-# ─── Calendar Integration Settings (per-user) ───────────────────────────────
+# Calendar Integration Settings (per-user)
 
 @app.get("/api/calendar/settings")
 def get_calendar_settings(
@@ -3194,10 +3194,10 @@ def update_calendar_settings(
     return {"status": "SUCCESS", "settings": data}
 
 
-# ─── Where each user left off in a workspace (private, per user + workspace) ──
+# Where each user left off in a workspace (private, per user + workspace)
 
 
-# ─── Workspace chats (one conversation per tab, owned by its user) ────────────
+# Workspace chats (one conversation per tab, owned by its user)
 
 _CHAT_MAX_PARTS_BYTES = 512 * 1024
 _CHAT_ROLES = ("user", "assistant")
@@ -3395,7 +3395,7 @@ def delete_workspace_session(
     return {"status": "SUCCESS", "workspace_id": workspace_id}
 
 
-# ─── Per-user website/widget theme (same pack schema as the web client) ──────
+# Per-user website/widget theme (same pack schema as the web client)
 @app.get("/api/users/me/theme")
 def get_user_theme(
     session: Session = Depends(get_session),
@@ -3462,7 +3462,7 @@ def update_user_theme(
     }
 
 
-# ─── Per-user opt-in activity sharing (private by default) ───────────────────
+# Per-user opt-in activity sharing (private by default)
 
 ACTIVITY_SHARE_SCOPES = {"totals", "workouts", "achievements", "bible"}
 ACTIVITY_AUDIENCES = {"circle", "users"}
@@ -3825,7 +3825,7 @@ async def import_nextcloud_users(x_internal_secret: str | None = Header(default=
         }
 
 
-# ─── Device & Light Grouping (Section 3.14) ───────────────────────────────────
+# Device & Light Grouping (Section 3.14)
 
 @app.get("/api/groups/media")
 def list_media_groups(x_internal_secret: str = Header(...)):
@@ -4071,7 +4071,7 @@ def delete_light_pattern(pattern_id: str, x_internal_secret: str = Header(...)):
         return {"status": "SUCCESS", "message": f"Light pattern '{pattern_id}' deleted"}
 
 
-# ─── Device Telemetry Monitoring (Section 3.15) ───────────────────────────────
+# Device Telemetry Monitoring (Section 3.15)
 
 @app.get("/api/telemetry/enroll")
 def list_telemetry_enrollments(x_internal_secret: str = Header(...)):
@@ -4483,7 +4483,7 @@ def get_telemetry_insight_for_entity(entity_id: str, x_internal_secret: str = He
         }
 
 
-# ─── Household Intercom System (Section 3.16) ─────────────────────────────────
+# Household Intercom System (Section 3.16)
 
 @app.get("/api/intercom/sessions")
 def list_intercom_sessions(x_internal_secret: str = Header(...)):
@@ -4669,7 +4669,7 @@ def update_intercom_config(config_data: dict, x_internal_secret: str = Header(..
         return {"status": "SUCCESS", "message": "Intercom configuration updated", **current}
 
 
-# ─── Presence & Location ───────────────────────────────────────────────────────
+# Presence & Location
 
 class LocationUpdate(BaseModel):
     """GPS location update from mobile app."""

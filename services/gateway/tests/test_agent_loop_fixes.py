@@ -53,7 +53,7 @@ def test_a_content_part_with_a_non_string_text_is_still_visible():
 
 def test_timeout_partial_result_surfaces_real_progress_not_batch_placeholder():
     """Regression: a hard-timeout mission reported 'Partial result: [batch]
-    TTSRequest' — the internal batch-continuation placeholder — because the raw
+    TTSRequest' (the internal batch-continuation placeholder) because the raw
     model response was used directly. The timeout partial result must instead
     summarize what was actually accomplished (tool calls, artifacts, steps).
     """
@@ -121,7 +121,7 @@ def test_normalize_tool_rejects_malformed_file_write():
     Observed live (mission 2): the model emitted
       {"file_path":":", "envdiff":"/core.py", "content":":"}
     after a 2048-token truncation. The old code accepted it and executed a
-    write to ':' — poisoning the workspace so the mission looped on garbage.
+    write to ':', poisoning the workspace so the mission looped on garbage.
     """
     from services.gateway.agent_loop import _normalize_tool
 

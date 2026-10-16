@@ -114,7 +114,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
           // Already expired: hold a few ticks so the ring-flash is visible (first expiry only)
           if (t.remainingMs <= 0) {
             if (t.expiredTicks === undefined) {
-              // Re-fetched timer that hit zero again while already notified — drop now
+              // Re-fetched timer that hit zero again while already notified; drop now
               continue;
             }
             const ticks = t.expiredTicks + 1;

@@ -8,7 +8,7 @@ const LS_SITE_THEME = 'jarvis_site_theme_id';
 
 /**
  * The one active Jarvis theme. Every surface (site chrome and every dashboard
- * widget) follows this — per-widget themes are deliberately not supported.
+ * widget) follows this; per-widget themes are deliberately not supported.
  */
 let activeThemeId = 'aurora';
 const activeThemeListeners = new Set<(id: string) => void>();
@@ -57,7 +57,7 @@ function svgTile(svg: string): string {
 
 /**
  * Decorative tiled SVG motifs, data-driven per theme (never hardcoded in
- * components). Each motif is a small seamless tile rendered faintly behind the
+ * components). Each motif is a small repeating tile rendered faintly behind the
  * whole interface so themes can carry a botanical / HUD signature.
  */
 export function motifPattern(
@@ -77,7 +77,7 @@ export function motifPattern(
           `<path d="M58 96c7 5 7 14 0 19-7-5-7-14 0-19z" stroke="${accentAlt}" stroke-opacity="0.16"/>` +
           '</g></svg>'
       );
-    // Full blossoms — a six-petal flower with a pollen centre, tiled sparsely.
+    // Full blossoms: a six-petal flower with a pollen centre, tiled sparsely.
     case 'bloom': {
       const petals = Array.from({ length: 6 }, (_, i) => {
         const a = (i * Math.PI) / 3;
@@ -93,7 +93,7 @@ export function motifPattern(
           '</svg>'
       );
     }
-    // Foliage — soft leaf sprigs on a diagonal.
+    // Foliage: soft leaf sprigs on a diagonal.
     case 'leaf':
       return svgTile(
         '<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140" viewBox="0 0 140 140">' +
@@ -285,7 +285,7 @@ async function hydratePacksFromServer(packs: ThemePack[]): Promise<void> {
       if (pack.id === 'jarvis-default') continue;
       themeRegistry.importPackJson(JSON.stringify(pack), { force: false });
     } catch {
-      // invalid pack from server — ignore, still apply theme_id
+      // invalid pack from server: ignore, still apply theme_id
     }
   }
 }
@@ -326,7 +326,7 @@ export function useSiteTheme() {
           serverPacks = Array.isArray(pref?.packs) ? (pref.packs as ThemePack[]) : [];
         }
       } catch {
-        // offline / not signed in — local only
+        // offline / not signed in: local only
       }
 
       if (!cancelled.value && serverPacks.length) {

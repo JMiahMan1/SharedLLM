@@ -37,7 +37,7 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
         )
 
     # 2. CREDENTIAL RESOLUTION & STATE CHECK
-    #    Strictly this user's own HA credentials — a grant may have supplied them
+    #    Strictly this user's own HA credentials; a grant may have supplied them
     #    in Identity, but the execution service never borrows another account's.
     if not ctx.ha_url or not ctx.ha_token:
         return ExecutionResult(

@@ -159,7 +159,7 @@ export default function VerseActionSheet({
           kind: 'note',
           version_code: version,
           note_path: path,
-          note_preview: `${verse.reference} — ${verse.text.slice(0, 120)}`,
+          note_preview: `${verse.reference}: ${verse.text.slice(0, 120)}`,
         });
       } catch {
         // The note itself is safe; only the pointer failed. Saying so is better

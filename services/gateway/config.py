@@ -95,9 +95,9 @@ SYSTEM_IDENTITY = "raven_system"
 
 # --- Raven agent limits (overridable via Identity settings) ---
 # Hard wall-clock cap for a single Raven mission. Kept deliberately low (30 min)
-# so a model that loops without making distinct progress — e.g. re-running the
+# so a model that loops without making distinct progress (e.g. re-running the
 # same failing step with slightly varied command text to dodge the literal-string
-# loop detector — is force-terminated well before it can saturate RAG/Execution
+# loop detector) is force-terminated well before it can saturate RAG/Execution
 # for an hour. Overridable via RAVEN_MAX_TOTAL_SECONDS env if a legitimately long
 # mission needs more time. Mirrors services/config.py's 1800s default.
 RAVEN_MAX_TOTAL_SECONDS = _safe_int("RAVEN_MAX_TOTAL_SECONDS", 1800)
@@ -116,7 +116,7 @@ RAVEN_ERROR_THRESHOLD = _safe_int("RAVEN_ERROR_THRESHOLD", 5)
 ABS_TIMEOUT = _safe_int("ABS_TIMEOUT", 12)
 
 # --- Phase 2: env-configurable poll intervals (capped backoff / fallback) ---
-# /api/ps has no push/event API, so the Ollama slot wait still polls — but with
+# /api/ps has no push/event API, so the Ollama slot wait still polls, but with
 # an exponential backoff capped at OLLAMA_SLOT_POLL_MAX instead of a fixed 1s.
 OLLAMA_SLOT_POLL_INTERVAL = _safe_float("OLLAMA_SLOT_POLL_INTERVAL", 1.0)
 OLLAMA_SLOT_POLL_MAX = _safe_float("OLLAMA_SLOT_POLL_MAX", 5.0)

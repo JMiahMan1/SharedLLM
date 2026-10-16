@@ -115,7 +115,7 @@ def _repo_clone_url(repo: str) -> str:
 def mission_prompt(lang: str, human: str, stack: str) -> str:
     return f"""Raven, build a complete, fun, playable 3D SPACE SHOOTER called "Starfall" in {human} using {stack}.
 
-Do 100% of the work yourself — you have a workspace, a shell, file tools, the `gh` CLI and git.
+Do 100% of the work yourself: you have a workspace, a shell, file tools, the `gh` CLI and git.
 
 Execution order:
 1. Create a dedicated workspace with id `raven-3d-shooter-{lang}` + a display_name. Use its
@@ -127,7 +127,7 @@ Execution order:
 4. Verify with `gh repo view raven-3d-shooter-{lang}` that everything is on GitHub before done.
 
 ================================================================================
-GAME DESIGN PHILOSOPHY  (you are the lead designer + combat programmer — honor this)
+GAME DESIGN PHILOSOPHY  (you are the lead designer + combat programmer; honor this)
 ================================================================================
 Draw on the design wisdom of Star Fox 64, Rogue Squadron and Panzer Dragoon, but DO
 NOT clone them. Steal the *principles* that made them timeless and make something new.
@@ -139,7 +139,7 @@ accuracy. Every mechanic must reinforce the fantasy of piloting an elite space f
 Design priorities (in order): (1) exceptional game feel, (2) responsive controls,
 (3) constant engagement, (4) memorable encounters, (5) replayability, (6) technical
 simplicity, (7) high polish. For every feature ask: "Does this make the game more fun
-within the next 30 seconds?" If not, simplify it. Build VERTICALLY — start from one
+within the next 30 seconds?" If not, simplify it. Build VERTICALLY: start from one
 polished, playable slice and expand; never build systems you can't immediately test.
 
 CORE MECHANICS (implement all of these):
@@ -177,19 +177,19 @@ ARCHITECTURE (keep it clean + simple so it stays shippable):
 
 IMPORTANT: every headless selftest must feed synthetic fire/movement input that actually lets
 projectiles meet enemies so the SCORE INCREASES (otherwise the game is unwinnable). The concrete
-self-test contract below is NON-NEGOTIABLE — do not let the richer design break it.
+self-test contract below is NON-NEGOTIABLE; do not let the richer design break it.
 
 ================================================================================
-HEADLESS SELF-TEST (automated grading — exact contract, must keep working)
+HEADLESS SELF-TEST (automated grading; exact contract, must keep working)
 ================================================================================
 - Support `--selftest` (or `SELFTEST=1`): run the PURE game-logic update loop for ~120 frames with
    synthetic input and NO window, print EXACTLY `GAME_OK`, exit 0. The selftest must NOT open a window
-   or read input (no {stack} window/init/input calls) — only your update/movement/collision/scoring
+   or read input (no {stack} window/init/input calls); only your update/movement/collision/scoring
    logic, then `print("GAME_OK")`. Module-level imports of the render lib are fine.
 - The selftest MUST prove the score rises (synthetic fire + movement that connects with enemies).
 
 ================================================================================
-PLATFORM + PACKAGING (important — exact requirements)
+PLATFORM + PACKAGING (important: exact requirements)
 ================================================================================
 - It MUST run on modern Linux with Wayland (e.g. Fedora 42). Python: `SDL_VIDEODRIVER=wayland` (or
    dummy); native builds: rely on GLFW/winit Wayland support; web: any browser.
@@ -425,7 +425,7 @@ def _seed_regression(lang: str, repo: str) -> tuple[bool, str | None]:
     """Clone the repo, break the `GAME_OK` assertion in the CI workflow so the
     Linux build fails, and push the regression.
 
-    Returns (seeded_ok, seed_commit_sha). The regression is robust across all
+    Returns (seeded_ok, seed_commit_sha). The regression holds across all
     five languages because the build prompt instructs Raven to fail the CI job
     when stdout lacks `GAME_OK`; mutating that token in `build.yml` makes the
     grep/check look for a string the game never prints.
@@ -601,7 +601,7 @@ def run_one(scenario: str, lang: str, human: str, stack: str, build_cmd: str, se
             return out
 
     # 4) Best-effort LOCAL clone + build + headless self-test. This is a bonus
-    #    verification only — it is SKIPPED (not fatal) when the language toolchain
+    #    verification only; it is SKIPPED (not fatal) when the language toolchain
     #    or a display is unavailable on the test runner. The authoritative gate is
     #    the GitHub Actions CI run in step 5, which needs no local toolchain.
     clone = _run_local(f"rm -rf /tmp/{repo} && gh repo clone {repo} /tmp/{repo}", timeout=120)

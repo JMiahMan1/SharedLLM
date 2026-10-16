@@ -11,11 +11,9 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.waitForTimeout(3000);
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Device Selector — horizontal card list (new design)
-   ────────────────────────────────────────────────────────────── */
+/* Device Selector: horizontal card list (new design) */
 
-test.describe('@live Device Selector — Rendering', () => {
+test.describe('@live Device Selector: Rendering', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
@@ -100,7 +98,7 @@ test.describe('@live Device Selector — Rendering', () => {
   });
 });
 
-test.describe('@live Device Selector — Selection', () => {
+test.describe('@live Device Selector: Selection', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
@@ -167,9 +165,7 @@ test.describe('@live Device Selector — Selection', () => {
   });
 });
 
-/* ──────────────────────────────────────────────────────────────
-   Player Header — layout and controls
-   ────────────────────────────────────────────────────────────── */
+/* Player Header: layout and controls */
 
 test.describe('@live Player Header', () => {
   test.beforeEach(async ({ page }) => {
@@ -242,9 +238,7 @@ test.describe('@live Player Header', () => {
   });
 });
 
-/* ──────────────────────────────────────────────────────────────
-   Media Sections — rendering and data
-   ────────────────────────────────────────────────────────────── */
+/* Media Sections: rendering and data */
 
 test.describe('@live Media Sections', () => {
   test.beforeEach(async ({ page }) => {
@@ -315,9 +309,7 @@ test.describe('@live Media Sections', () => {
   });
 });
 
-/* ──────────────────────────────────────────────────────────────
-   Media Explorer Modal
-   ────────────────────────────────────────────────────────────── */
+/* Media Explorer Modal */
 
 test.describe('@live Media Explorer Modal', () => {
   test.beforeEach(async ({ page }) => {
@@ -347,7 +339,7 @@ test.describe('@live Media Explorer Modal', () => {
     const playlistsHeader = modal.getByRole('heading', { name: /playlists/i, level: 3 });
     await expect(playlistsHeader).toBeVisible({ timeout: 10000 });
 
-    // Playlists must have items > 0 — empty generators are not valid playlists
+    // Playlists must have items > 0; empty generators are not valid playlists
     const hasItems = await modal.locator('text=/\\d+ tracks/').first().isVisible({ timeout: 5000 }).catch(() => false);
     const hasEmpty = await modal.getByText('No playlists found').isVisible({ timeout: 5000 }).catch(() => false);
     expect(hasItems && !hasEmpty).toBe(true);
@@ -484,11 +476,9 @@ test.describe('@live Media Explorer Modal', () => {
   });
 });
 
-/* ──────────────────────────────────────────────────────────────
-   API Data Integrity — verify backend returns correct data
-   ────────────────────────────────────────────────────────────── */
+/* API Data Integrity: verify backend returns correct data */
 
-test.describe('@live API — Data Integrity', () => {
+test.describe('@live API: Data Integrity', () => {
   test('@live media entities API returns playable entities', async ({ request }) => {
     const resp = await request.get(`${UI_URL}/api/entities`);
     expect(resp.status()).toBe(200);
@@ -611,9 +601,7 @@ test.describe('@live API — Data Integrity', () => {
   });
 });
 
-/* ──────────────────────────────────────────────────────────────
-   Navigation
-   ────────────────────────────────────────────────────────────── */
+/* Navigation */
 
 test.describe('@live Navigation', () => {
   test.beforeEach(async ({ page }) => {
@@ -638,11 +626,9 @@ test.describe('@live Navigation', () => {
   });
 });
 
-/* ──────────────────────────────────────────────────────────────
-   Media Playback — full flow
-   ────────────────────────────────────────────────────────────── */
+/* Media Playback: full flow */
 
-test.describe('@live Media Playback — End-to-End', () => {
+test.describe('@live Media Playback: End-to-End', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
@@ -987,11 +973,9 @@ test.describe('@live Media Playback — End-to-End', () => {
   });
 });
 
-/* ──────────────────────────────────────────────────────────────
-   Mobile Viewport
-   ────────────────────────────────────────────────────────────── */
+/* Mobile Viewport */
 
-test.describe('@live Media Page — Mobile', () => {
+test.describe('@live Media Page: Mobile', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test.beforeEach(async ({ page }) => {

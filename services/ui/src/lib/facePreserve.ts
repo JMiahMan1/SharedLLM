@@ -29,7 +29,7 @@ const IDENTITY_RULE =
   'smooth, slim or otherwise alter the face.';
 
 const SINGLE_RULE =
-  'Keep the person’s face exactly as it is in the original photo — same ' +
+  'Keep the person’s face exactly as it is in the original photo: same ' +
   'identity, same features, same skin tone. Do not beautify, smooth or ' +
   'otherwise alter the face.';
 
@@ -71,7 +71,7 @@ export function buildFacePreservePrompt(
  * True when the prompt already carries a strong identity instruction.
  *
  * Used to avoid stacking two identity blocks when the user typed their own
- * "keep the face" wording — repeating it is not harmless, it makes the model
+ * "keep the face" wording; repeating it is not harmless, it makes the model
  * over-weight the face and ignore the new scene.
  */
 export function hasIdentityInstruction(prompt: string | null | undefined): boolean {

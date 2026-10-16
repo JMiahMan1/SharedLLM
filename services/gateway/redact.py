@@ -1,7 +1,7 @@
 """URL redaction for logging (BUG-06).
 
 Secrets routinely travel in query strings (``?token=``, ``?api_key=``,
-``?access_token=``) — WebSocket URLs, proxy targets, request URLs. Never log
+``?access_token=``): WebSocket URLs, proxy targets, request URLs. Never log
 those verbatim: pass URLs through :func:`redact_url` first so the sensitive
 values are masked as ``***``.
 """

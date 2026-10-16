@@ -54,7 +54,7 @@ CODE_EDITING_SHELL_COMMANDS = {
 VERIFICATION_SHELL_COMMANDS = {
     "black", "eslint", "flake8", "pytest", "python", "python3", "git", "gh"
 }
-# Truly dangerous system-level commands — never allowed regardless of context
+# Truly dangerous system-level commands; never allowed regardless of context
 SYSTEM_BLOCKLIST_COMMANDS = {
     "sudo", "su", "dd", "mkfs", "mount", "umount",
     "reboot", "shutdown", "poweroff", "halt",
@@ -70,7 +70,7 @@ def _identity_secrets_to_env(user_ctx) -> dict[str, str]:
     DEFAULT layer injected into every workspace sandbox command.
 
     Secrets are ALWAYS sourced from the Identity service (``user_context``) and
-    never from ``.env``/``os.environ`` — so they reflect what the user actually
+    never from ``.env``/``os.environ``, so they reflect what the user actually
     connected, and a missing integration simply yields no variable instead of
     falling back to a server-side dotenv secret.
     """
@@ -164,7 +164,7 @@ async def _resolve_workspace_info(workspace_id: str | None, user_context: dict |
     """Resolves workspace path and details from workspace_runtime service.
 
     We do NOT silently fall back to ``WORKSPACE_ROOT`` (the Default Workspace)
-    when resolution fails or no ``workspace_id`` is supplied — that would route a
+    when resolution fails or no ``workspace_id`` is supplied; that would route a
     project's file/shell operations into the shared maintenance workspace and
     confuse the agent. We fail loudly instead so a valid ``workspace_id`` is used.
     """
@@ -365,7 +365,7 @@ async def _sandbox_run(
 
     This is the containment boundary: instead of executing on the host (or in
     the shared execution container), the command runs in the per-workspace
-    Docker container built by ``services.workspace_sandbox`` — only the
+    Docker container built by ``services.workspace_sandbox``; only the
     workspace directory is mounted, it runs as a non-root user on a private
     network with resource limits. Falls back to a plain host subprocess only
     when no resolvable workspace is available (legacy/Default-workspace paths).
@@ -760,7 +760,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                 {"error": "command_blocked", "command": final_cmd, "blocked_token": _blocked_token},
             )
 
-        # Strip a redundant leading "cd <dir> &&" — the command already executes with
+        # Strip a redundant leading "cd <dir> &&"; the command already executes with
         # its cwd at the workspace root, and agents often prepend "cd /workspace".
         _cd = re.match(r"^\s*cd\s+(\S+)(?:\s*(?:&&|;)\s*)?", final_cmd)
         if _cd and _cd.group(1) in ("/workspace", ws_root, os.path.dirname(ws_root)):
@@ -785,7 +785,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
             _require_capability(ws_details, required_cap)
 
         # Resolve GitHub auth for this command. Secrets are sourced ONLY from the
-        # Identity service via user_context (already decrypted) — never from
+        # Identity service via user_context (already decrypted), never from
         # .env/os.environ, so a missing integration yields no fallback token.
         def _resolve_gh_tok() -> str | None:
             tok = None
@@ -809,7 +809,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         # (its repo_url, or a repo Raven created via `gh repo create`). There is
         # no hardcoded allow/deny list; any push to a different repo (e.g.
         # SharedLLM from a throwaway test workspace) is refused. We gate `git
-        # push` only — configuring a remote is allowed, and the push itself is
+        # push` only; configuring a remote is allowed, and the push itself is
         # what must be protected (this also avoids order-dependence on
         # create-then-push vs push-then-create).
         if base_command == "git" and len(parsed) > 1 and parsed[1] == "push":
@@ -847,7 +847,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         # integration secrets (github_token, git_token, gitlab_token,
         # nextcloud_*, ha_token, api_key) mapped to standard env names, then
         # overlay the workspace's own env/secret overrides. Secrets come ONLY
-        # from the Identity service (user_context) — never .env/os.environ.
+        # from the Identity service (user_context), never .env/os.environ.
         # This is injected for EVERY command (not just gh/git/python) so all
         # tools (terraform, aws, gcloud, node, rust, ...) see the user's creds.
         ws_env = (ws_details or {}).get("env") or {}
@@ -1045,7 +1045,7 @@ async def handle_workspace_lint(req) -> ExecutionResult:
             A MISSING tool is recorded as skipped (not a code failure) so the
             caller can see verification never actually happened. Previously a
             missing binary was silently dropped, which let the gate report
-            "clean" for code that was never checked at all — wrong information
+            "clean" for code that was never checked at all; wrong information
             that let error-ridden code pass."""
             rc, out, err = await _run([tool, *args, str(abs_path)])
             if rc == -1 and "Tool not found" in err:
@@ -1059,12 +1059,12 @@ async def handle_workspace_lint(req) -> ExecutionResult:
                 passed = False
             return True
 
-        # ── Python ───────────────────────────────────────────────────────────
+        # Python
         if ext == ".py" or forced in ("ruff", "black", "flake8", "python"):
-            # Syntax check first — catches malformed files (missing imports, broken syntax)
+            # Syntax check first: catches malformed files (missing imports, broken syntax)
             rc, out, err = await _run(["python3", "-m", "py_compile", str(abs_path)])
             if rc == -1:
-                return _ok("Python compiler not available — skipping lint.", {"path": req.path, "skipped": True})
+                return _ok("Python compiler not available; skipping lint.", {"path": req.path, "skipped": True})
             verified = True
             results.append({"tool": "py_compile", "returncode": rc, "output": out or err})
             if rc != 0:
@@ -1075,11 +1075,11 @@ async def handle_workspace_lint(req) -> ExecutionResult:
                 # Pyflakes as a second opinion for undefined names (F821/F405)
                 await _lint_step("python3", ["-m", "pyflakes"])
 
-        # ── JavaScript / TypeScript ───────────────────────────────────────────
+        # JavaScript / TypeScript
         elif ext in (".js", ".ts", ".jsx", ".tsx", ".mjs") or forced == "eslint":
             fix_flag = ["--fix"] if req.fix else []
             had_eslint = await _lint_step("eslint", fix_flag)
-            # eslint may be absent in older sandboxes — at minimum syntax-check
+            # eslint may be absent in older sandboxes; at minimum syntax-check
             # JS with node so parse errors are still caught (no silent skip).
             if not had_eslint and ext in (".js", ".jsx", ".mjs"):
                 await _lint_step("node", ["--check", str(abs_path)], label="node --check")
@@ -1087,11 +1087,11 @@ async def handle_workspace_lint(req) -> ExecutionResult:
                 # tsc type-check (no emit) catches undefined names in TS too
                 await _lint_step("tsc", ["--noEmit", "--skipLibCheck"])
 
-        # ── Shell ─────────────────────────────────────────────────────────────
+        # Shell
         elif ext in (".sh", ".bash") or forced == "shellcheck":
             await _lint_step("shellcheck", ["-S", "error"])
 
-        # ── Go ────────────────────────────────────────────────────────────────
+        # Go
         elif ext == ".go" or forced == "go":
             # gofmt -l prints the file path when it is NOT gofmt-clean (exits 0
             # either way) => treat non-empty output as a finding, not a tool miss.
@@ -1110,55 +1110,55 @@ async def handle_workspace_lint(req) -> ExecutionResult:
             # catches the common errors and never silently lies about passing.
             await _lint_step("go", ["build", "-o", "/dev/null", str(abs_path)], label="go build")
 
-        # ── Rust ──────────────────────────────────────────────────────────────
+        # Rust
         elif ext == ".rs" or forced == "rust":
             # rustfmt --check: formatting + parse errors (exits non-zero if unformatted)
             await _lint_step("rustfmt", ["--check", "--edition", "2021"])
             # Real compile/type check. `rustc` on a lone .rs file false-fails for
             # normal bin/lib files (no main / split modules), so only run cargo
-            # when a project is actually present — otherwise report the gap.
+            # when a project is actually present; otherwise report the gap.
             cargo_toml = os.path.join(os.path.dirname(abs_path), "Cargo.toml")
             if os.path.exists(cargo_toml):
                 await _lint_step("cargo", ["check", "--offline"], label="cargo check")
             else:
                 results.append({"tool": "cargo check", "returncode": None, "skipped": True,
-                                "output": "no Cargo.toml here — compile check requires a Cargo project"})
+                                "output": "no Cargo.toml here; compile check requires a Cargo project"})
 
-        # ── C / C++ ───────────────────────────────────────────────────────────
+        # C / C++
         elif ext in (".c", ".h", ".cpp", ".cc", ".cxx", ".hpp") or forced in ("gcc", "clang"):
             cc = "g++" if ext in (".cpp", ".cc", ".cxx", ".hpp") else "gcc"
             await _lint_step(cc, ["-fsyntax-only"])
             await _lint_step("clang", ["-fsyntax-only"])
 
-        # ── Java ──────────────────────────────────────────────────────────────
+        # Java
         elif ext == ".java" or forced == "java":
             await _lint_step("javac", ["-d", "/dev/null"])
 
-        # ── Ruby ──────────────────────────────────────────────────────────────
+        # Ruby
         elif ext == ".rb" or forced == "ruby":
             await _lint_step("ruby", ["-c"])
 
-        # ── Lua ───────────────────────────────────────────────────────────────
+        # Lua
         elif ext == ".lua" or forced == "lua":
             await _lint_step("luac", ["-p"])
 
-        # ── PHP ───────────────────────────────────────────────────────────────
+        # PHP
         elif ext == ".php" or forced == "php":
             await _lint_step("php", ["-l"])
 
-        # ── JSON ─────────────────────────────────────────────────────────────
+        # JSON
         elif ext == ".json" or forced == "json":
             await _lint_step("python3", ["-m", "json.tool"])
 
-        # ── YAML ─────────────────────────────────────────────────────────────
+        # YAML
         elif ext in (".yaml", ".yml") or forced == "yamllint":
             await _lint_step("yamllint", ["-d", "relaxed"])
 
-        # ── Dockerfile ────────────────────────────────────────────────────────
+        # Dockerfile
         elif os.path.basename(req.path) == "Dockerfile" or forced == "hadolint":
             await _lint_step("hadolint", [])
 
-        # ── Audio / Video ─────────────────────────────────────────────────────
+        # Audio / Video
         # A media file is verified by sniffing its actual container bytes and
         # checking them against the declared extension + structural playability
         # (magic-byte check, never trusts the name or the generator's claim).
@@ -1184,12 +1184,12 @@ async def handle_workspace_lint(req) -> ExecutionResult:
                     if _mv["valid"]:
                         results.append({
                             "tool": "media-sniffer", "returncode": 0,
-                            "output": f"VALID {(_mv['format'] or '?').upper()} ({size} bytes) — matches declared {ext} and is structurally playable",
+                            "output": f"VALID {(_mv['format'] or '?').upper()} ({size} bytes), matches declared {ext} and is structurally playable",
                         })
                     else:
                         results.append({
                             "tool": "media-sniffer", "returncode": 1,
-                            "output": f"INVALID — {('; '.join(_mv['issues'])) or 'unrecognized content'}",
+                            "output": f"INVALID: {('; '.join(_mv['issues'])) or 'unrecognized content'}",
                         })
                         passed = False
                 verified = True
@@ -1199,11 +1199,11 @@ async def handle_workspace_lint(req) -> ExecutionResult:
                 verified = True
 
         else:
-            return _ok(f"No linter configured for {ext} files — skipping.", {"path": req.path, "skipped": True})
+            return _ok(f"No linter configured for {ext} files; skipping.", {"path": req.path, "skipped": True})
 
         summary = "PASSED" if passed else "ISSUES_FOUND"
         if not verified:
-            # Every configured checker was missing in the sandbox — the code was
+            # Every configured checker was missing in the sandbox; the code was
             # NEVER actually checked. Surface this loudly so the model can't read
             # "clean" and trust it. This is the root-cause fix for error-ridden
             # code passing review.
@@ -1213,7 +1213,7 @@ async def handle_workspace_lint(req) -> ExecutionResult:
             prefix = ""
         detail = "\n".join(f"[{r['tool']}] rc={r.get('returncode')} {'[SKIPPED]' if r.get('skipped') else ''}\n{r['output']}" for r in results)
         msg = f"{prefix}Lint {summary} for {req.path}:\n{detail}"
-        # Return SUCCESS regardless of lint outcome — lint findings are diagnostic results,
+        # Return SUCCESS regardless of lint outcome; lint findings are diagnostic results,
         # not tool failures. The LLM inspects `passed`/`verified` in the detail to decide
         # next steps. Using "issues found" instead of "failed" avoids triggering the
         # mission failure detector. `verified` lets run_post_write_lint flag untrusted passes.

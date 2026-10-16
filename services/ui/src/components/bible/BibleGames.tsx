@@ -456,7 +456,7 @@ function ReviewList({ results, page, who = 'you' }: { results: BibleGameReviewIt
                 {!r.correct && (
                   <span className="text-[var(--page-muted)]">
                     {' '}
-                    — {who} chose {r.chosen ?? 'nothing'}
+                    ({who} chose {r.chosen ?? 'nothing'})
                   </span>
                 )}
               </span>

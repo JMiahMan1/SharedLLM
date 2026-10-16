@@ -238,7 +238,7 @@ declare module 'axios' {
     __retryCount?: number;
     /**
      * Set for pre-auth / optional calls. A 401 on these must NOT clear the
-     * stored session or redirect to /login — otherwise a call that races
+     * stored session or redirect to /login; otherwise a call that races
      * authentication can log the user out (and loop).
      */
     skipAuthRedirect?: boolean;
@@ -435,7 +435,7 @@ function describeFailedTarget(config: AxiosRequestConfig | undefined, status?: n
   else if (path.startsWith('/api/')) service = 'Gateway';
 
   const detail = status ? ` (HTTP ${status})` : code ? ` (${code})` : '';
-  const target = `${service}${detail} — ${method} ${path}`;
+  const target = `${service}${detail} (${method} ${path})`;
   lastFailedTarget = target;
   return target;
 }
@@ -444,7 +444,7 @@ function describeFailedTarget(config: AxiosRequestConfig | undefined, status?: n
  * Re-throw an upstream failure carrying the server's own explanation.
  *
  * The response interceptor rejects the raw axios error, whose `message` is
- * only ever "Request failed with status code 400" — it drops the `detail` the
+ * only ever "Request failed with status code 400"; it drops the `detail` the
  * service actually sent. That is fine for connectivity noise but not for a
  * refusal an operator has to act on ("Unknown username(s) in the permit list:
  * alise"), so anything a human is expected to read goes through here rather
@@ -558,7 +558,7 @@ apiClient.interceptors.response.use(
       const isLoginRequest = error.config?.url?.includes('/api/auth/login');
       // Pre-auth/optional calls (e.g. the site theme preference, which loads
       // before AuthProvider resolves) are allowed to 401 without tearing down
-      // the session — otherwise the app bounces to /login on every start.
+      // the session; otherwise the app bounces to /login on every start.
       const isOptional = error.config?.skipAuthRedirect === true;
       if (!isLoginRequest && !isOptional) {
         isLoggingOut = true;
@@ -1372,7 +1372,7 @@ export const api = {
     return resp.data;
   },
 
-  // Activity trends — reading data never generates an analysis.
+  // Activity trends: reading data never generates an analysis.
   async getActivityTrends(userId?: string, days = 7, refresh = false): Promise<ActivityTrendsResponse> {
     const params = new URLSearchParams({ days: String(days) });
     withUserParam(params, userId);
@@ -1523,7 +1523,7 @@ export const api = {
    * Lock an entity for everyone but the permit list, or release the lock.
    *
    * Admins only (Identity enforces). `protected: false` removes the lock
-   * entirely — the entity reverts to plain device-assignment rules. A refusal
+   * entirely; the entity reverts to plain device-assignment rules. A refusal
    * is re-thrown with Identity's own wording, because "you asked for a permit
    * for a user that does not exist" is the entire point of the check.
    */
@@ -1643,7 +1643,7 @@ export const api = {
     return resp.data;
   },
 
-  /** Full replace — the editor's Save. Append would duplicate the body. */
+  /** Full replace: the editor's Save. Append would duplicate the body. */
   async writeNote(payload: {
     title: string;
     content: string;
@@ -2150,7 +2150,7 @@ export const api = {
   },
 
   async analyzeTelemetry(entityId: string, hours = 168): Promise<{ status: string; message: string }> {
-    // entity_id is required by the analysis endpoint — without it the call 400s.
+    // entity_id is required by the analysis endpoint; without it the call 400s.
     const resp = await apiClient.post('/api/telemetry/analyze', { entity_id: entityId, hours });
     return resp.data;
   },
@@ -2251,7 +2251,7 @@ export const api = {
    * stream URL instead leaves the player idle with the URI as its track title.
    * The gateway owns that mapping, so the browser never guesses one.
    *
-   * Rejects when MA does not have the book — callers must surface that rather
+   * Rejects when MA does not have the book; callers must surface that rather
    * than falling back to an unplayable URI.
    */
   async resolveMALibraryUri(absItemId: string, title = ''): Promise<{ ma_uri: string; title: string }> {

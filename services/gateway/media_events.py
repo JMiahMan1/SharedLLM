@@ -2,7 +2,7 @@
 
 One hub per user fans normalized player/queue events out to Server-Sent Event
 subscribers. HA states arrive over the HA WebSocket using
-``subscribe_events`` + ``state_changed`` — every supported HA version ships
+``subscribe_events`` + ``state_changed``. Every supported HA version ships
 that, and unlike ``subscribe_entities`` it carries the complete ``new_state``
 instead of partial attribute diffs (an initial REST ``/api/states`` read warms
 the snapshot). Music Assistant events arrive over ``MAWebSocketClient``.

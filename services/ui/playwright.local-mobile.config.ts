@@ -4,7 +4,7 @@ import path from 'path';
 import { defineConfig, devices } from '@playwright/test';
 
 // The pinned browser build (1217) fails to unzip on this machine, so use the
-// newest headless shell that is actually installed. Throwaway local config —
+// newest headless shell that is actually installed. Throwaway local config;
 // CI and the committed playwright.config.ts are untouched.
 const cache = path.join(os.homedir(), 'Library/Caches/ms-playwright');
 const exec = fs.readdirSync(cache)

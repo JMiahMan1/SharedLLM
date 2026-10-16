@@ -198,7 +198,7 @@ def extract_text(
         model: Model name (env: VISION_OCR_MODEL)
         max_size: Max thumbnail size for image
         task: Task type ('general', 'price_scrape', 'document')
-        max_tokens: Max completion tokens (default: task-aware — price_scrape
+        max_tokens: Max completion tokens (default: task-aware; price_scrape
             is capped at 800 so a ~5 t/s vision model finishes inside the
             webscraper handler's timeout; full transcription tasks stay at 2000)
 

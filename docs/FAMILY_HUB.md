@@ -1,4 +1,4 @@
-# Family Hub — Chat, Games, Create
+# Family Hub: Chat, Games, Create
 
 One interactive space for the whole household, designed **mobile-first**:
 phones and tablets are the primary way this gets used, desktops are the
@@ -14,7 +14,7 @@ This page reuses existing systems and must not grow parallel copies:
 | Need | Reuse |
 |---|---|
 | Chat (text, voice) | **Nextcloud Talk** via the existing `/api/communication/talk/*` APIs |
-| Chat UI | `src/components/chat/ChatPanel.tsx` — the **only** chat surface |
+| Chat UI | `src/components/chat/ChatPanel.tsx`, the **only** chat surface |
 | Drawing / recipes / creations | Nextcloud files (same credentials as Notes) |
 | Pictures, music, polish | Raven / Jarvis / Alpaca (`/v1/chat/completions`, image + audio paths) |
 | Points, badges, cheers | Achievements engine + points ledger (`docs/ACHIEVEMENTS.md`) |
@@ -60,7 +60,7 @@ itself on every save; its calendar only printed "Loaded N events").
   Dashboard and Location panel); `BootReceiver` resumes location sharing and
   chat notifications after a reboot or app update.
 - **Games** (trivia, memory), **Draw together**, **Make music**, **Recipes**,
-  **Voice signatures** and **Calls** — sections below. Bible games and
+  **Voice signatures** and **Calls** (sections below). Bible games and
   memorisation are linked from the Games tab (`/bible?tab=play`,
   `/bible?tab=memorize`).
 - **Send to chat** (`components/chat/SendToChat.tsx`): a drawing, Jarvis's
@@ -69,11 +69,11 @@ itself on every save; its calendar only printed "Loaded N events").
 
 ## Explicitly not doing
 
-- No Matrix/Element/Mattermost/Rocket.Chat migration — they replace the
+- No Matrix/Element/Mattermost/Rocket.Chat migration: they replace the
   backend the family already uses and would orphan Skylight and phone clients.
-- No third-party chat-as-a-service (Stream/Sendbird) — proprietary, per-seat
+- No third-party chat-as-a-service (Stream/Sendbird): proprietary, per-seat
   pricing, and the data would leave the house.
-- No bespoke reactions/polls/call stack — Talk ships them.
+- No bespoke reactions/polls/call stack; Talk ships them.
 
 ## Mobile-first checklist (phones and tablets are primary)
 
@@ -108,43 +108,43 @@ earned, only when `FAMILY_CHAT_TOKEN` names a room.
 
 ## Tests
 
-- `src/test/Family.test.tsx` — opens on chat, tab switching, DM open, message
+- `src/test/Family.test.tsx`: opens on chat, tab switching, DM open, message
   send, voice preview → caption → send, a drawing sent to a picked chat.
-- `src/test/ChatFeatures.test.tsx` — envelopes, replies, edits, attachments,
+- `src/test/ChatFeatures.test.tsx`: envelopes, replies, edits, attachments,
   "Show earlier messages".
-- `src/pages/Communication.test.tsx` — timers and announcements; chat,
+- `src/pages/Communication.test.tsx`: timers and announcements; chat,
   calendar and notes are links, not copies.
-- `services/gateway/tests/test_talk_monitor.py` — the monitor answers other
+- `services/gateway/tests/test_talk_monitor.py`: the monitor answers other
   Talk apps and skips questions the app already claimed.
-- `services/execution/tests/test_family_games.py` and friends for games;
+- `services/execution/tests/test_family_games.py` and `test_talk_games.py` for games;
   `src/components/family/*.test.*` for drawing and music;
   `services/gateway/tests/test_chat_notify.py` for notifications.
 
 ## Family games (shipped)
 
 `services/execution/handlers/family_games.py` is a small, dependency-free game
-kit the Jarvis bot runs inside a conversation — no model in the loop, so it
+kit the Jarvis bot runs inside a conversation, with no model in the loop, so it
 never wanders off mid-game:
 
 - **Trivia**: gentle multiple choice, forgiving answer matching (case, articles,
-  punctuation). One ⭐ per correct answer.
+  punctuation). One star per correct answer.
 - **Memory**: pick the words, then duplicate them, shuffle, and flip two at a
   time. A pair stays up; a miss flips back.
 
 One game per room, a leaderboard in every card, and `FAMILY_GAMES_ENABLED` must
-be set or the bot refuses to start — a deployment that does not want a bot
+be set or the bot refuses to start, so a deployment that does not want a bot
 answering in chat never gets one by accident. Gateway:
 `POST /api/communication/talk/game` with `game_command` (start/answer/flip/stop).
 Correct answers are banked in geo's star ledger (`reason: "game"`) so stars
 outlive the round; a geo outage is logged and never breaks a game in progress.
-11 unit + 6 integration tests.
+Tests: `services/execution/tests/test_family_games.py`, `test_talk_games.py`.
 
 ## Draw together (shipped, single-device first)
 
 `components/family/DrawCanvas.tsx` lives on Family → Create: colour and brush
 pickers, undo, clear, download, **Send to chat**, and a **Make it way better**
 pass that sends the PNG to the existing image-edit backend and shows the result
-(which can be sent too). A refusal is reported in place — nothing pretends to
+(which can be sent too). A refusal is reported in place; nothing pretends to
 have worked. A blank canvas is not sent.
 
 Deliberately dependency-free (pointer events, `toDataURL`, the `/api/images/edit`
@@ -161,7 +161,7 @@ reading pixels back.
 
 `/recipes` (also on Family → Create) keeps a shared cookbook as markdown in
 Nextcloud under `Recipes/`. It reuses the notes storage the house already has,
-so there is one backup, one sync and one mobile app — no new service. Opening a
+so there is one backup, one sync and one mobile app, and no new service. Opening a
 recipe and saving edits it in place; changing its name renames the file
 (`lib/noteSave.ts`, shared with Notes); delete asks first.
 
@@ -209,10 +209,11 @@ setting.
 
 `call_join` / `call_leave` go through Nextcloud's own call API
 (`/ocs/v2.php/apps/spreed/api/v4/call/<token>`) and return the call id, call
-token and signalling URL — no second media stack and no TURN server of ours.
+token and signalling URL, with no second media stack and no TURN server of ours.
 The composer has a call button that reflects in-call state and reports a
 refusal in place. Gateway: `POST /api/communication/talk/call`.
 
 **Not yet:** media. Carrying audio/video in-app needs a Talk client library
 (or LiveKit as a fallback), and restrictive networks still need a reachable
-STUN/TURN server — which is infrastructure to run, not code to write. 4 tests.
+STUN/TURN server, which is infrastructure to run, not code to write. Tests:
+`services/execution/tests/test_talk_calls.py`.

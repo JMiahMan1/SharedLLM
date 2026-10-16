@@ -213,7 +213,7 @@ public final class WidgetUpdater {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    /** Each action button has its own config — push per widget id. */
+    /** Each action button has its own config, so push per widget id. */
     public static void pushActionButtons(Context context) {
         AppWidgetManager mgr = AppWidgetManager.getInstance(context);
         int[] ids = mgr.getAppWidgetIds(new ComponentName(context, ActionButtonWidget.class));

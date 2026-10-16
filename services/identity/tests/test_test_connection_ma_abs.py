@@ -3,7 +3,7 @@
 MA was the one configured service the UI could not verify ("not testable yet"),
 and the Audiobookshelf branch demanded a username/password, so an API-key-only
 user could never test. MA 2.10.4 validates the Bearer token (401 for a bad one)
-on its JSON-RPC endpoint, and ABS accepts the API key on `GET /api/me` — both
+on its JSON-RPC endpoint, and ABS accepts the API key on `GET /api/me`; both
 verified live 2026-09-28.
 """
 import json
@@ -85,7 +85,7 @@ def _test(client, service, config):
     ).json()
 
 
-# ── Music Assistant ──────────────────────────────────────────────────────────
+# Music Assistant
 
 def test_ma_requires_url_and_token(test_client):
     resp = test_client.post(
@@ -131,7 +131,7 @@ def test_ma_rejected_token_is_an_error(test_client, monkeypatch):
     assert "401" in data["message"]
 
 
-# ── Audiobookshelf with an API key ───────────────────────────────────────────
+# Audiobookshelf with an API key
 
 def test_abs_api_key_is_enough_to_test(test_client, monkeypatch):
     calls = _patch_client(monkeypatch, 200, payload={"username": "jeremiah"})
@@ -168,7 +168,7 @@ def test_abs_without_any_credential_fails_loudly(test_client):
     assert "api key" in data["message"].lower()
 
 
-# ── GitHub (the branch referenced undefined names and always raised) ─────────
+# GitHub (the branch referenced undefined names and always raised)
 
 def test_github_token_test_does_not_crash(test_client, monkeypatch):
     _patch_client(monkeypatch, 200, payload={"login": "jeremiah"})
@@ -185,7 +185,7 @@ def test_github_requires_token(test_client):
     assert "token" in data["message"].lower()
 
 
-# ── Testing an already-saved integration ─────────────────────────────────────
+# Testing an already-saved integration
 
 def test_blank_secret_is_tested_with_the_saved_one(test_client, monkeypatch):
     """Saved secrets never reach the browser, so Manage -> Test sends the token

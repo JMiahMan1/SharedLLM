@@ -1,15 +1,16 @@
 # DNS Service
 
-`services/dns/main.py` — container `sharedllm_dns`, the one name server every
-SharedLLM container uses. It replaces the earlier dnsmasq / `dns-sync` /
-`dns-forwarder` / DNS-relay designs, none of which run any more.
+`services/dns/main.py` runs as container `sharedllm_dns`, the one name server
+every SharedLLM container uses. It replaces the earlier dnsmasq / `dns-sync` /
+`dns-forwarder` / DNS-relay designs, none of which run any more (the old
+`/api/webhooks/dns-sync` gateway route is gone too).
 
 ## Where it listens
 
 | What | Address |
 |---|---|
-| DNS (UDP/TCP 53) | `172.26.0.254` on the `sharedllm_default` bridge |
-| DNS from the host / LAN | host port `15353` (UDP and TCP) |
+| DNS (UDP 53, `DNS_PORT=53` in compose) | `172.26.0.254` on the `sharedllm_default` bridge |
+| DNS from the host / LAN | host port `15353` (compose maps UDP and TCP, but the service only answers UDP) |
 | HTTP: `/health`, `/registry/status`, `/registry/register` | port `8009` inside the container |
 
 Bridge containers reach it through Docker's embedded resolver. The
@@ -26,15 +27,21 @@ any container spoof names for the stack.
 
 In order:
 
-1. **Static mappings** — the `dns_mappings` global setting in Identity
-   (edited in the UI's DNS panel through the gateway's `/api/dns`), refreshed
-   every `DNS_REFRESH_INTERVAL` (30 s). A host may list several IPs.
-2. **`*.docker` and container names** — live from the Docker socket.
-3. **`host.docker.internal`** — the bridge gateway, `172.26.0.1`.
-4. **Upstream** — `UPSTREAM_DNS` (compose default `1.1.1.1`; several may be
+1. **Static mappings**: the `dns_mappings` global setting in Identity
+   (edited in the UI's DNS panel through the gateway's `/api/dns` routes, or
+   `/api/admin/dns`), refreshed every `DNS_REFRESH_INTERVAL` (30 s). A host
+   may list several IPs. If `IDENTITY_SVC_URL` or `INTERNAL_SECRET` is unset,
+   only the `DNS_MAPPINGS` env var (JSON) is used.
+2. **`*.docker`, container names and container hostnames**: live from the
+   Docker socket.
+3. **`host.docker.internal`**: the bridge gateway, `172.26.0.1`.
+4. **Upstream**: `UPSTREAM_DNS` (compose default `1.1.1.1`; several may be
    comma-separated and are queried at once, first answer wins). Answers are
    cached for their TTL clamped to 30-300 s, "no such name" for 30 s, and an
    answer up to an hour stale stands in when every upstream fails.
+
+Only A records are answered. Any other question type (AAAA included) gets an
+immediate empty NOERROR reply, and an A question with no answer gets SERVFAIL.
 
 ## Health-checked static mappings
 
@@ -62,7 +69,7 @@ addresses; the answer is whichever is up.
 | `dns_mappings` | Identity global setting (JSON: host → IP or list) | `{}` |
 | `dns_failover_enabled`, `dns_health_ports`, `dns_health_path` | Identity global settings | on, see below, none |
 | `UPSTREAM_DNS` | compose / `.env` | `1.1.1.1` |
-| `DNS_HEALTH_PORTS` | env | `11434,80,443,8080,8000,9000` |
+| `DNS_HEALTH_PORTS`, `DNS_HEALTH_PATH` | env (the Identity settings above override them) | `11434,80,443,8080,8000,9000`, none |
 | `DNS_HEALTH_TIMEOUT`, `DNS_HEALTH_TTL`, `DNS_REFRESH_INTERVAL` | env | `1.0`, `15.0`, `30.0` |
 | `DNS_UPSTREAM_TIMEOUT` | env | `5.0` |
 
@@ -73,4 +80,5 @@ dig A jeremiah-home-desktop.local @172.26.0.254          # on the server
 docker exec sharedllm_execution getent hosts jeremiah-home-desktop.local
 ```
 
-Tests: `services/dns/tests/` (health-aware mappings, upstream timeout).
+Tests: `services/dns/tests/` (health-aware mappings, upstream timeout and
+fallback, IPv4-only answers, Docker watcher reconnect).

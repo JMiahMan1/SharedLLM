@@ -7,11 +7,11 @@ scaffold + run a brand-new tool when nothing fits.
 The decision logic backs the ``RavenBuildToolRequest`` action handled in
 ``agent_loop.py``. Three outcomes, tried in order:
 
-1. ``use_existing`` — a single known tool already covers the capability, so
+1. ``use_existing``: a single known tool already covers the capability, so
    Raven should call that tool directly instead of reinventing it.
-2. ``chain`` — no single tool fits, but a small ordered set (<=3) of known
+2. ``chain``: no single tool fits, but a small ordered set (<=3) of known
    tools together covers the capability; Raven executes them in sequence.
-3. ``build`` — nothing fits, so we scaffold a runnable Python tool in the
+3. ``build``: nothing fits, so we scaffold a runnable Python tool in the
    mission workspace and tell Raven to implement ``run()`` and then execute it.
 
 This keeps Raven from duplicating capabilities that already exist and gives it
@@ -185,7 +185,7 @@ def decide(capability: str) -> dict[str, Any]:
     cap = (capability or "").lower().strip()
     matched = _matched_tools(cap)
 
-    # Step 1 — a single existing tool already covers it.
+    # Step 1: a single existing tool already covers it.
     if len(matched) == 1:
         t = matched[0]
         return {
@@ -195,7 +195,7 @@ def decide(capability: str) -> dict[str, Any]:
             "triggers_matched": [trig for trig in t.triggers if trig in cap],
         }
 
-    # Step 2 — multiple existing tools together cover it: return an ordered chain.
+    # Step 2: multiple existing tools together cover it: return an ordered chain.
     if len(matched) >= 2:
         chain = sorted(matched, key=lambda t: t.order)[:3]
         return {
@@ -206,7 +206,7 @@ def decide(capability: str) -> dict[str, Any]:
             ],
         }
 
-    # Step 3 — nothing fits: scaffold a new runnable tool.
+    # Step 3: nothing fits: scaffold a new runnable tool.
     slug = slugify(capability)
     return {
         "decision": "build",

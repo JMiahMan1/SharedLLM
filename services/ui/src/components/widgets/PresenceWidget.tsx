@@ -123,7 +123,7 @@ const PresenceWidget = ({ settingsButton }: IWidgetProps) => {
       >
         <div className="flex items-baseline gap-2">
           <span className="text-2xl font-bold text-white">
-            {loading ? '—' : liveCount}
+            {loading ? '…' : liveCount}
           </span>
           <span className="text-xs text-slate-400">
             {liveCount === 1 ? 'person live' : 'people live'}

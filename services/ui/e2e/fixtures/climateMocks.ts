@@ -87,7 +87,7 @@ export interface ClimateScenario {
 export interface ClimateMocks {
   /** Every ha_service call the UI made, in order. */
   commands: Array<{ domain: string; service: string; entity_id: string; service_data: Record<string, unknown> }>;
-  /** Endpoints that fell through to the generic stub — keep this short. */
+  /** Endpoints that fell through to the generic stub; keep this short. */
   unmocked: string[];
   entities: HaEntity[];
 }
@@ -137,7 +137,7 @@ export async function mockClimateApi(page: Page, scenario: ClimateScenario): Pro
 
   // Registered first so it is consulted last: anything unmocked gets a benign
   // payload instead of a network error against a host that is not running.
-  // Lists are the common shape, so GET defaults to [] — an object there makes
+  // Lists are the common shape, so GET defaults to []; an object there makes
   // the app's `x.filter(...)` blow up and the error boundary eats the page.
   const objectResponses: Array<[RegExp, unknown]> = [
     [/\/api\/health\b/, { status: 'ok' }],

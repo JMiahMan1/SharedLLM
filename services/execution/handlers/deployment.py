@@ -1,6 +1,6 @@
 # services/execution/handlers/deployment.py
 """
-DeploymentHandler — Allows the Ouroboros autonomous loop to restart or
+DeploymentHandler: allows the Ouroboros autonomous loop to restart or
 rebuild SharedLLM containers without needing SSH access.
 
 Strategy:
@@ -12,9 +12,9 @@ Strategy:
     docker-compose directly from Python.
 
 Supported actions:
-    restart      — restart a running container (graceful stop + start)
-    logs         — fetch recent log lines (delegates to docker_logs handler)
-    status       — return container status dict
+    restart        restart a running container (graceful stop + start)
+    logs           fetch recent log lines (delegates to docker_logs handler)
+    status         return container status dict
 
 Security:
     - Container name must start with 'sharedllm_'.
@@ -59,10 +59,10 @@ async def handle_deployment(req) -> dict:
     Dispatch deployment operations based on req.action.
 
     req fields (from DeploymentRequest):
-        action: str          — one of: restart, status, logs
-        container_name: str  — target container (must be sharedllm_*)
-        tail: int            — for 'logs' action (default 100)
-        user_context         — is_admin check for privileged actions
+        action: str            one of: restart, status, logs
+        container_name: str    target container (must be sharedllm_*)
+        tail: int              for 'logs' action (default 100)
+        user_context           is_admin check for privileged actions
     """
     action: str = req.action.lower().strip()
     container_name: str = req.container_name

@@ -1,16 +1,16 @@
 """Teaching curriculum: Raven's web toolset (WebSearch / WebRead / WebScraper).
 
 Companion to ``test_raven_python_basics.py``: that file teaches Raven the
-coding tools; this one teaches the *web* tools and, crucially, the NEW
+coding tools; this one teaches the *web* tools and, most importantly, the NEW
 ``WebScraperRequest`` tool (commit 3d5e605d).
 
 The ladder (each mission is its own test so a failure stops the run):
 
-  1. ``web-search-basics``    — use WebSearchRequest, save titles+URLs.
-  2. ``web-read-basics``      — use WebReadRequest, extract title+paragraphs.
-  3. ``web-scraper-basics``   — use WebScraperRequest (NEW tool), save prices.
-  4. ``web-tool-selection``   — pick the CHEAPEST sufficient tool; justify.
-  5. ``web-chaining-memory``  — chain search→read AND apply past lessons.
+  1. ``web-search-basics``:     use WebSearchRequest, save titles+URLs.
+  2. ``web-read-basics``:       use WebReadRequest, extract title+paragraphs.
+  3. ``web-scraper-basics``:    use WebScraperRequest (NEW tool), save prices.
+  4. ``web-tool-selection``:    pick the CHEAPEST sufficient tool; justify.
+  5. ``web-chaining-memory``:   chain search→read AND apply past lessons.
 
 Each mission:
   * creates a dedicated workspace (exact id given in the prompt),
@@ -237,7 +237,7 @@ def _run_mission(
 def test_raven_web_search_basics():
     prompt = (
         "Raven, create a dedicated workspace with id 'raven-web-search'. "
-        "Use your WebSearchRequest tool (NOT WebScraperRequest — search is the "
+        "Use your WebSearchRequest tool (NOT WebScraperRequest; search is the "
         "right tool here) to search for 'Raspberry Pi 5 current price'. "
         "From the results, save a markdown file `search_results.md` in the "
         "workspace listing the top 5 results: one line per result with the "
@@ -260,7 +260,7 @@ def test_raven_web_read_basics():
     prompt = (
         "Raven, create a dedicated workspace with id 'raven-web-read'. "
         "Use your WebReadRequest tool to read https://en.wikipedia.org/wiki/Raspberry_Pi. "
-        "Note that WebReadRequest truncates long pages around 15000 characters, "
+        "WebReadRequest truncates long pages around 15000 characters, "
         "so capture the title (first heading) and the opening paragraphs early. "
         "Save a markdown file `read_summary.md` in the workspace with the page "
         "title and the first paragraph verbatim (as close as possible). "
@@ -286,7 +286,7 @@ def test_raven_web_scraper_basics():
         "and the named source 'ebay'. The tool returns structured items with "
         "prices and specs. Save a markdown file `prices.md` in the workspace "
         "listing the top 3 items with their prices (one per line, e.g. "
-        "'Item: <name> — $<price>'). If the scraper errors, retry once with a "
+        "'Item: <name>: $<price>'). If the scraper errors, retry once with a "
         "different named source such as 'google_shopping' before giving up. "
         "Then APPEND a dated lesson to `raven_memory.md` describing what "
         "WebScraperRequest returns (structured prices/specs) and any "
@@ -308,8 +308,8 @@ def test_raven_web_tool_selection():
         "Raven, create a dedicated workspace with id 'raven-web-tool-choice'. "
         "Task: find who is the current (2026) US President and his vice president. "
         "You have three web tools with very different costs: WebSearchRequest "
-        "(cheap, fast — returns titles/URLs/snippets), WebReadRequest (medium — "
-        "loads a full page), and WebScraperRequest (expensive — headless browser "
+        "(cheap, fast: returns titles/URLs/snippets), WebReadRequest (medium: "
+        "loads a full page), and WebScraperRequest (expensive: headless browser "
         "scraping, for structured prices). CHOOSE THE CHEAPEST tool that can "
         "complete this task, and do not use any heavier tool. Save a markdown "
         "file `tool_choice.md` in the workspace that states exactly which tool "
@@ -333,8 +333,8 @@ def test_raven_web_chaining_memory():
     prompt = (
         "Raven, create a dedicated workspace with id 'raven-web-chain'. "
         "BEFORE starting, recall your past lessons: your system prompt is "
-        "augmented with [SYSTEM_LEARNINGS — PAST LESSONS] from your previous "
-        "missions — READ those and APPLY them here. "
+        "augmented with [SYSTEM_LEARNINGS: PAST LESSONS] from your previous "
+        "missions. READ those and APPLY them here. "
         "Task: research the Raspberry Pi 5: use WebSearchRequest to find 2-3 "
         "reputable articles about its release and pricing, then use "
         "WebReadRequest to read the most promising one and extract concrete "
@@ -364,7 +364,7 @@ def test_raven_web_challenge_fallback():
         "Task: use WebReadRequest to read "
         "https://www.raspberrypi.com/products/raspberry-pi-5/. "
         "If the result reports a Cloudflare challenge (or 'Just a moment' / "
-        "empty anti-bot page), do NOT give up — switch to your "
+        "empty anti-bot page), do NOT give up; switch to your "
         "WebScraperRequest tool (it uses the camoufox anti-bot browser) with "
         "that product URL and extract the product name, a headline/description, "
         "and the price if visible. Save `challenge_fallback.md` in the "
@@ -404,7 +404,7 @@ def test_raven_web_program_mission():
         "on the web. Steps: "
         "(1) Use WebSearchRequest (2-3 queries) to find example code for a "
         "simple in-memory REST API using ONLY the Python standard library "
-        "(http.server / BaseHTTPRequestHandler — no external packages). "
+        "(http.server / BaseHTTPRequestHandler, no external packages). "
         "(2) Create the workspace and write `app.py` implementing: "
         "POST /items (JSON body {name}, returns {id, name}), GET /items "
         "(list all), GET /items/<id> (one item or 404). Use an in-memory "
@@ -448,13 +448,13 @@ def test_raven_web_program_mission():
 
 def test_raven_memory_usage():
     """Prove Raven actually APPLIES a stored lesson and cites it as
-    `Apply: [id]` in its plan — the measurable memory-usage signal — and
+    `Apply: [id]` in its plan (the measurable memory-usage signal) and
     that lesson documents stay compact (JSON) so they do not waste the
     context budget."""
     prompt = (
         "Raven, create a dedicated workspace with id 'raven-memory-check'. "
         "This mission trains MEMORY USAGE. Your prompt includes a "
-        "[SYSTEM_LEARNINGS — PAST LESSONS] block: each line is "
+        "[SYSTEM_LEARNINGS: PAST LESSONS] block: each line is "
         "`- [id][outcome] (conf) rule`. Pick ONE lesson relevant to this "
         "task (e.g. the one about WebSearchRequest being the cheapest "
         "sufficient tool for straightforward facts). When you apply it in "
@@ -497,7 +497,7 @@ def test_raven_memory_usage():
         raise AssertionError(f"[memory-usage] could not read mission output_log: {e}")
 
     # Proof 3 (context budget): lesson documents in system_learnings are
-    # compact JSON (id + rule), not multi-KB prose — the renderer injects one
+    # compact JSON (id + rule), not multi-KB prose; the renderer injects one
     # short line per lesson and respects the 15k-char mission budget.
     rag_url = GATEWAY_URL.replace(":8080", ":8004")
     try:

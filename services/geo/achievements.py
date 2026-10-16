@@ -1,7 +1,7 @@
 """Goals and achievements.
 
-Achievements are *derived* — computed from the same day buckets and workouts
-the app already records — so there is nothing to backfill and a rules fix
+Achievements are *derived*: computed from the same day buckets and workouts
+the app already records, so there is nothing to backfill and a rules fix
 corrects history immediately. Definitions are data (`achievements.json`) so new
 badges and thresholds do not need a deploy.
 
@@ -123,7 +123,7 @@ def load_definitions(path: Path | None = None) -> list[Achievement]:
     return out
 
 
-# ── metric helpers (pure, so the rules are unit-testable) ────────────────────
+# metric helpers (pure, so the rules are unit-testable)
 
 def _parse_day(day: str) -> date | None:
     try:
@@ -141,7 +141,7 @@ def sum_steps(daily_steps: dict[str, int]) -> float:
 
 
 def max_steps_in_week(daily_steps: dict[str, int]) -> float:
-    """Best ISO week (Mon–Sun) total in the window."""
+    """Best ISO week (Mon to Sun) total in the window."""
     weeks: dict[tuple[int, int], int] = {}
     for day, steps in daily_steps.items():
         parsed = _parse_day(day)
@@ -177,7 +177,7 @@ def longest_goal_streak(daily_steps: dict[str, int], daily_goal: int) -> int:
 def has_goal_after_gap(daily_steps: dict[str, int], daily_goal: int, gap_days: int) -> bool:
     """True when a goal day follows `gap_days` consecutive below-goal days.
 
-    The gap only counts days we actually have data for — an unrecorded day is
+    The gap only counts days we actually have data for; an unrecorded day is
     unknown, not a failure, and must not fabricate a comeback.
     """
     days = sorted(d for d in (_parse_day(k) for k in daily_steps) if d is not None)
@@ -299,7 +299,7 @@ def evaluate(
     return result
 
 
-# ── storage helpers ─────────────────────────────────────────────────────────
+# storage helpers
 
 def clean_goals(raw: dict[str, Any] | None) -> dict[str, int]:
     """Merge stored goals over defaults, ignoring out-of-range junk."""

@@ -1,1 +1,1 @@
-"""SharedLLM `bible` service — the reading app."""
+"""SharedLLM `bible` service: the reading app."""

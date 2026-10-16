@@ -7,7 +7,7 @@ import { seedAuth, mockMediaApi } from '../fixtures/mediaMocks';
 const SHOTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../.tmp/shots');
 fs.mkdirSync(SHOTS_DIR, { recursive: true });
 
-/** 1h 06m 40s long, 1h 02m 05s in — an audiobook, which is what ABS sends. */
+/** 1h 06m 40s long, 1h 02m 05s in: an audiobook, which is what ABS sends. */
 const LONGFORM_STATUS = {
   status: 'SUCCESS',
   message: 'ok',

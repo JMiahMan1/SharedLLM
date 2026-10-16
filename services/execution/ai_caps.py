@@ -159,7 +159,7 @@ async def collect_capabilities() -> list[dict]:
             "New image, same faces",
             image_up,
             (
-                f"{image_detail} — identity is held by instruction, so the face is "
+                f"{image_detail}; identity is held by instruction, so the face is "
                 f"approximated rather than preserved exactly"
                 if image_up
                 else image_detail

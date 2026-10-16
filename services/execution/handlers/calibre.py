@@ -117,7 +117,7 @@ async def _get_book(client: CalibreClient, req: CalibreRequest) -> ExecutionResu
     formats = str(book.get("formats") or "unknown format")
     tags = str(book.get("tags") or "").strip()
     message = (
-        f"{_line(book)} — {formats}"
+        f"{_line(book)}, {formats}"
         + (f"; tags: {tags}" if tags else "")
         + f"; shelf path {book.get('path')}"
         + ("; indexed for RAG search" if book.get("indexed") else "; not yet in the RAG index")

@@ -87,7 +87,7 @@ export default function ArcadeGames() {
           <span className="font-semibold text-slate-200">Arcade</span>
         </div>
         <p className="text-xs text-slate-400 mt-1">
-          The game shelf is offline right now{data?.error ? ` — ${data.error}` : ''}. It comes back on its own; nothing
+          The game shelf is offline right now{data?.error ? ` (${data.error})` : ''}. It comes back on its own; nothing
           is lost.
         </p>
       </div>
@@ -113,7 +113,7 @@ export default function ArcadeGames() {
 
       {data.count === 0 ? (
         <div className="glass-panel p-4 rounded-2xl border border-white/5" data-testid="arcade-empty">
-          <p className="text-xs text-slate-400">No games published yet — make one with Jarvis and it lands here.</p>
+          <p className="text-xs text-slate-400">No games published yet. Make one with Jarvis and it lands here.</p>
         </div>
       ) : (
         <>

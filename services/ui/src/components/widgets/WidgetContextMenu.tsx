@@ -144,7 +144,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
   // Must run on every render: this component returns early while closed, so a
   // hook declared past that point would change the hook count when opened.
   // The menu's real height is only knowable after paint, so nudge it back on
-  // screen once — otherwise a 44px-row menu spills off a phone's bottom edge.
+  // screen once; otherwise a 44px-row menu spills off a phone's bottom edge.
   useEffect(() => {
     if (!menuOpen || !menuRef.current) return;
     const rect = menuRef.current.getBoundingClientRect();

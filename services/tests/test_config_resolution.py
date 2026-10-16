@@ -23,7 +23,7 @@ class TestConfigBootstrap:
     def test_identity_svc_default(self, monkeypatch):
         """IDENTITY_SVC_URL defaults to container name."""
         # services.config resolves this via _net_url(), which reads the
-        # network-aware "{NETWORK_MODE}_IDENTITY_SVC_URL" key — not the bare
+        # network-aware "{NETWORK_MODE}_IDENTITY_SVC_URL" key, not the bare
         # name. Clearing only the bare name left the prefixed value other test
         # modules export in os.environ in play, so this asserted against their
         # leak instead of the real default.

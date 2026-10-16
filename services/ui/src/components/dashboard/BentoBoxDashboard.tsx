@@ -5,7 +5,7 @@ import WidgetContextMenu from '../widgets/WidgetContextMenu';
 import type { WidgetSize, WidgetKey, IActiveMediaWidgetProps } from '../../types/widget';
 import { WidgetSkeletonSelector } from '../widgets/skeletons/WidgetSkeletons';
 
-// ── Grid sizing system ────────────────────────────────────────────────────────
+// Grid sizing system
 // The grid uses auto-rows of 200px. Each size maps to a specific span.
 const SIZE_CLASSES: Record<WidgetSize, { col: string; row: string }> = {
   small:  { col: 'col-span-1',               row: 'row-span-1' }, // ~200px tall
@@ -14,7 +14,7 @@ const SIZE_CLASSES: Record<WidgetSize, { col: string; row: string }> = {
   tall:   { col: 'col-span-1',               row: 'row-span-3' }, // ~620px tall
 };
 
-// ── Lazy widget imports ──────────────────────────────────────────────────────
+// Lazy widget imports
 const LazyWidgets: Record<WidgetKey, React.LazyExoticComponent<React.ComponentType<IActiveMediaWidgetProps>>> = {
   energy_insights:  lazy(() => import('../widgets/EnergyInsightsWidget')),
   ambient_timer:    lazy(() => import('../widgets/AmbientTimerWidget')),
@@ -31,7 +31,7 @@ const LazyWidgets: Record<WidgetKey, React.LazyExoticComponent<React.ComponentTy
   bible_daily:       lazy(() => import('../widgets/BibleDailyWidget')),
 };
 
-// ── Widget-level error boundary ──────────────────────────────────────────────
+// Widget-level error boundary
 interface WidgetErrorBoundaryProps { children: ReactNode; widgetKey: string }
 interface WidgetErrorBoundaryState { hasError: boolean; resetKey: number }
 
@@ -83,7 +83,7 @@ class WidgetErrorBoundary extends Component<WidgetErrorBoundaryProps, WidgetErro
   }
 }
 
-// ── BentoBoxDashboard ────────────────────────────────────────────────────────
+// BentoBoxDashboard
 
 const NOOP = () => {};
 

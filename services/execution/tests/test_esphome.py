@@ -1,7 +1,7 @@
 # services/execution/tests/test_esphome.py
 """Unit tests for direct ESPHome native-API control.
 
-All device connections and the Identity settings fetch are mocked —
+All device connections and the Identity settings fetch are mocked;
 no live devices or services needed.
 """
 
@@ -194,8 +194,7 @@ def test_route_wired_via_testclient(one_device):
     instance.light_command.assert_called_once_with(3, state=True, brightness=None, rgb=None)
 
 
-# ─── configure_jarvis: Jarvis hands a device its own endpoint ──────────────────
-
+# configure_jarvis: Jarvis hands a device its own endpoint
 def _configure_service(args=("url", "api_key")):
     return aioesphomeapi.UserService(
         name="configure_jarvis",
@@ -298,8 +297,7 @@ async def test_jarvis_host_must_be_http(one_device):
     assert "http://" in str(exc.value)
 
 
-# ─── Companion pairing ─────────────────────────────────────────────────────────
-
+# Companion pairing
 def _svc(name, *args):
     return aioesphomeapi.UserService(
         name=name, key=hash(name) & 0xFFFF,

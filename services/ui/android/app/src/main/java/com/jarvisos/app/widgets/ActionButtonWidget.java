@@ -60,7 +60,7 @@ public class ActionButtonWidget extends AppWidgetProvider {
     private static void setLabel(RemoteViews views, String label, String state) {
         views.setTextViewText(R.id.action_label, label);
         views.setContentDescription(R.id.action_root,
-            state.isEmpty() ? label : label + " — " + state);
+            state.isEmpty() ? label : label + ": " + state);
     }
 
     static RemoteViews build(Context context, int appWidgetId) {

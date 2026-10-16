@@ -1,16 +1,15 @@
 # ADR 010: Tiered Inference Concurrency Control (TIER2/TIER3)
 
-**Status:** Accepted (implemented; see "Current state" for what differs)  
-**Date:** 2026-05-12, reviewed 2026-10-15  
-**Supersedes:** ADR 003 (Tiered Inference Lock), the early proposal of the same split  
-**Authors:** Kilo (AI Architect)  
+**Status:** Accepted (implemented; see "Current state" for what differs)\
+**Date:** 2026-05-12, reviewed 2026-10-15\
+**Supersedes:** ADR 003 (Tiered Inference Lock), the early proposal of the same split\
 **Context:** Raven background worker monopolized inference, blocking Librarian
 
 ---
 
 ## Problem
 
-The original `INFERENCE_LOCK` was a single global `asyncio.Lock()` that serialized _all_ LLM inference — both Librarian (fast, 1–2 step) and Raven (long-running, multi-iteration) jobs. This caused critical path blockage: while Raven was performing a 10-minute autonomous audit, simple queries like "turn on the lights" or "what's the weather" were queued behind it, despite needing only a single fast inference.
+The original `INFERENCE_LOCK` was a single global `asyncio.Lock()` that serialized _all_ LLM inference: both Librarian (fast, 1-2 step) and Raven (long-running, multi-iteration) jobs. This caused critical path blockage: while Raven was performing a 10-minute autonomous audit, simple queries like "turn on the lights" or "what's the weather" were queued behind it, despite needing only a single fast inference.
 
 **Symptoms:**
 
@@ -88,5 +87,5 @@ safe starting point on 8 GB with 7-9B models.
 
 **Related ADRs:**
 
-* ADR 006 (Circuit Breaker) – separate resilience work
-* ADR 007 (Hard Timeout) – Raven job timeout enforcement
+* ADR 006 (Circuit Breaker): separate resilience work
+* ADR 007 (Hard Timeout): Raven job timeout enforcement

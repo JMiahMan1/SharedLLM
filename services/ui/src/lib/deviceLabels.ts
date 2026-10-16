@@ -3,7 +3,7 @@
  *
  * Music Assistant keeps whatever name a client registered under, forever. An
  * older build of the web player registered its client name straight from the
- * `jarvis_user` localStorage entry — which is `JSON.stringify(profile)` — so
+ * `jarvis_user` localStorage entry (which is `JSON.stringify(profile)`), so
  * Music Assistant is still holding a player literally named
  *
  *   {"id":1,"username":"default","display_name":"Shared/Default User",…,

@@ -53,7 +53,7 @@ def _net_url(name: str, default: str = "") -> str:
 
     Reads ``{NETWORK_MODE}_{name}_SVC_URL`` (the network-aware BRIDGE_*/HOST_*
     set defined in .env) only. No fallback to legacy ``{name}_SVC_URL`` or
-    hardcoded defaults — if the appropriate network-mode variable is not set
+    hardcoded defaults: if the appropriate network-mode variable is not set
     the caller receives ``default`` (empty string by default) and must fail fast.
     """
     val = os.getenv(f"{NETWORK_MODE.upper()}_{name}_SVC_URL")
@@ -231,7 +231,7 @@ async def resolve_runtime_config():
     settings_map = {
         "llm_local_url": "OLLAMA_URL",
         # These are Identity *setting keys*, which are lowercase by convention
-        # (host_searxng_url, bridge_searxng_url — see services/identity/seed.py),
+        # (host_searxng_url, bridge_searxng_url; see services/identity/seed.py),
         # so NETWORK_MODE is interpolated lowercased here on purpose. Do NOT
         # "fix" these to .upper(): the env-var lookups above use uppercase
         # because that is how .env spells them (HOST_SEARXNG_URL), and the two
@@ -259,7 +259,7 @@ async def resolve_runtime_config():
         "git_url": "GIT_URL",
         "git_user": "GIT_USER",
         "git_token": "GIT_TOKEN",
-        # redis_url is infrastructure-dependent (Docker vs host networking) — read from env only
+        # redis_url is infrastructure-dependent (Docker vs host networking), so read it from env only
         "log_retention_days": "LOG_RETENTION_DAYS",
         "log_max_entries": "LOG_MAX_ENTRIES",
         "rag_retention_days": "RAG_RETENTION_DAYS",

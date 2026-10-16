@@ -20,7 +20,7 @@ def use(monkeypatch, **settings) -> None:
     monkeypatch.setattr(cfg, "BIBLE_DEVOTIONAL_DIR", settings.get("local", ""))
 
 
-# ── day addressing ──────────────────────────────────────────────────────────
+# day addressing
 
 
 def test_day_of_year_matches_the_doy_urls():
@@ -33,7 +33,7 @@ def test_leap_day_falls_on_february_twenty_eighth():
     assert day_of_year(date(2024, 2, 29)) == day_of_year(date(2001, 2, 28))
 
 
-# ── blb ─────────────────────────────────────────────────────────────────────
+# blb
 
 
 def test_blb_is_unconfigured_without_a_base_url():
@@ -70,7 +70,7 @@ def test_blb_url_for_an_unknown_work_is_an_error():
         BlbDevotionalSource("https://bible.test").url_for("nope", 1)
 
 
-# ── local ───────────────────────────────────────────────────────────────────
+# local
 
 
 def write_day(folder, doy: int, body: str) -> None:
@@ -118,7 +118,7 @@ def test_local_falls_back_to_a_plain_day_title(tmp_path):
     assert LocalDevotionalSource(str(tmp_path)).entry_for("default", 3).title == "Day 3"
 
 
-# ── registry ────────────────────────────────────────────────────────────────
+# registry
 
 
 def test_blb_wins_when_both_sources_are_configured(monkeypatch, tmp_path):

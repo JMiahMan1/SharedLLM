@@ -4,7 +4,7 @@ The "Tweak or Fix Results" (refine) flow re-ingests a mission's ``output_log``
 to reconstruct prior conversation turns. If the payload is persisted as a
 Python ``repr`` (single-quoted, invalid JSON) or dropped, the reconstruction
 emits ``{"action": ..., "payload": null}`` assistant turns that teach the
-model to mirror the malformed ``null`` payload — the exact failure behind
+model to mirror the malformed ``null`` payload, the exact failure behind
 ``'NoneType' object does not support item assignment``.
 """
 

@@ -8,14 +8,14 @@ const ALL_ROOMS = [
 async function boot(page: Page, scenario: ClimateScenario): Promise<ClimateMocks> {
   const mocks = await mockClimateApi(page, scenario);
   // A widget that throws is caught by WidgetErrorBoundary and shows "Widget
-  // failed", so the page still looks fine — surface the real error instead.
+  // failed", so the page still looks fine, so surface the real error instead.
   page.on('pageerror', (e) => console.log('[pageerror]', e.message));
   await page.goto('/');
   await expect(page.getByText('Widget failed')).toHaveCount(0);
   return mocks;
 }
 
-/** The bento cell that hosts the widget — the real box a thumb has to live in. */
+/** The bento cell that hosts the widget: the real box a thumb has to live in. */
 function cell(page: Page): Locator {
   return page.locator('div.grid.gap-5 > div').first();
 }
@@ -92,7 +92,7 @@ async function metrics(page: Page, testId: string): Promise<Metrics> {
  * Drag with a real touch sequence.
  *
  * `Input.synthesizeScrollGesture` does not scroll in this headless shell at
- * all — verified against a bare 4000px page, where every speed/scrollType
+ * all. Verified against a bare 4000px page, where every speed/scrollType
  * combination left scrollTop at 0. It "passes" a horizontal assertion only
  * because the target element scrolls itself. A hand-rolled
  * touchStart/touchMove/touchEnd sequence does scroll, so it is the only way
@@ -229,7 +229,7 @@ test.describe('climate widget at phone resolution', () => {
   test('mode strip swipes sideways and still lets the page scroll', async ({ page }, info) => {
     await page.setViewportSize({ width: 360, height: 568 });
     // 'tall' makes the card taller than the phone screen, so the dashboard
-    // really does scroll — that is the case the strip must not swallow.
+    // really does scroll; that is the case the strip must not swallow.
     await boot(page, { devices: ['climate.living_room'], size: 'tall' });
     const dial = page.getByTestId('climate-dial');
     await expect(dial).toBeVisible();

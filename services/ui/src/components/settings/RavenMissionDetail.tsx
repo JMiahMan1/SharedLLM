@@ -12,7 +12,7 @@ import { MissionTimeline } from './MissionTimeline';
 const RUNNING = ['executing', 'running', 'scheduled', 'queued'];
 
 const formatDuration = (secs: number | null | undefined) =>
-  secs == null ? '—' : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  secs == null ? 'No data' : `${Math.floor(secs / 60)}m ${secs % 60}s`;
 
 interface RavenMissionDetailProps {
   missionId: number | null;
@@ -95,7 +95,7 @@ export default function RavenMissionDetail({ missionId, onClose, onRefined }: Ra
               </div>
               <div className="min-w-0">
                 <span className="text-slate-500 uppercase font-black text-[10px] block">Workspace</span>
-                <span className="text-blue-300 font-mono block mt-1 truncate">{mission.workspace_id || '—'}</span>
+                <span className="text-blue-300 font-mono block mt-1 truncate">{mission.workspace_id || 'None'}</span>
               </div>
             </div>
 

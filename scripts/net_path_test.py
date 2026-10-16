@@ -77,7 +77,7 @@ async def run(duration, concurrency, url, timeout):
         # Jitter: stdev of successful latencies.
         print(f"jitter (stdev): {statistics.pstdev(lat):.1f} ms")
     else:
-        print("NO SUCCESSFUL PROBES — path fully down during window")
+        print("NO SUCCESSFUL PROBES: path fully down during window")
 
 
 def main():

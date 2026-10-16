@@ -12,17 +12,17 @@ Source: `../alpaca/arcade/app.py` (Flask, port 5001, container
 | Thing | Where | Notes |
 |---|---|---|
 | Games index (HTML) | `app.py` `"/"` (377) | renders `list_games()` cards |
-| Games index (JSON) | `app.py` `"/api/games"` (684) | `{success, games: [card…]}` with `?category=` filter; each card includes `"rating": _rating_stats(d)` (342), `plays`, `top_score`; regression-tested in `../alpaca` `20cf10c` |
-| Game detail (JSON) | `app.py` `"/api/games/<slug>"` (690) | card + full `scores` list + `prompt` — what the Jarvis Games tab should list |
-| Star ratings | `app.py:95-99` | `ratings.json` per game: votes with `stars` 1-5 → `{count, average}` |
+| Games index (JSON) | `app.py` `"/api/games"` (673) | `{success, games: [card…]}` with `?category=` filter; each card includes `"rating": _rating_stats(d)` (342), `plays`, `top_score`; regression-tested in `../alpaca` `20cf10c` |
+| Game detail (JSON) | `app.py` `"/api/games/<slug>"` (679) | card + full `scores` list + `prompt`: what the Jarvis Games tab should list |
+| Star ratings | `app.py:95-99` | `ratings.json` per game: votes with `stars` 1-5 → `{count, average}`; votes arrive at `POST /api/games/<slug>/rate` (902) |
 | Scores / bests | per game dir (`scores.json`, `bests.json`) | top-five tables; scoring contract writes `/tmp/alpaca_score.json` on every finished run |
 | Web game | `/game/<slug>/index.html` (471) | HTML5/three.js games |
-| Desktop game | `/game/<slug>/game.py` (490) | launched via `/api/games/<slug>/launch` (498) and streamed |
+| Desktop game | `/game/<slug>/game.py` (490) | launched via `/api/games/<slug>/launch` (498) and streamed; `/api/games/<slug>/stop` (540) |
 | Player page | `/play/<slug>` (440) | also `/game/<slug>/screenshot.png` |
 | Achievements | `arcade/achievements.py` | player cards, crowns, "give five stars" etc. |
 | Embed mode | `web/templates/ui_launcher.html` | the launcher supports `?embed=1` so a game screen can be embedded |
 
-So ratings, scores and play routes already exist — we integrate, we do not
+So ratings, scores and play routes already exist: we integrate, we do not
 re-implement.
 
 ## Shipped: game shelf in the Family hub (slice 1)
@@ -34,9 +34,9 @@ re-implement.
 - **Featured order**: admin curation wins (`PUT /api/arcade/featured` stores a
   JSON slug array in the Identity `GlobalSetting` `arcade_featured_games`;
   Identity enforces admin rights on the forwarded credentials), else
-  highest-rated games with ≥1 vote, else best benchmark score.
+  the six highest-rated games with ≥1 vote, else best benchmark score.
 - **UI**: `services/ui/src/components/family/ArcadeGames.tsx` on the Family →
-  Games tab — featured shelf, full list, star ratings, plays, play links.
+  Games tab: featured shelf, full list, star ratings, plays, play links.
 - **Config**: `ALPACA_ARCADE_URL` (default `http://jeremiah-home-desktop.local:5001`)
   and `ALPACA_ARCADE_PUBLIC_URL` (default = the internal URL) decide fetch and
   play targets.
@@ -67,7 +67,7 @@ or `/stop` route yet.
    needs to be exposed publicly.
 3. **Family → Games tab** shows two groups:
    - **Family games** (ours, later slices): Bible Trivia, Bible Memory Verses,
-     Family Trivia, Draw & Guess — state lives in Talk rooms, scores feed the
+     Family Trivia, Draw & Guess. State lives in Talk rooms, scores feed the
      points ledger.
    - **Arcade**: curated/auto-selected games sorted by rating, each with its
      stars and vote count, so the family sees *why* something is featured.
@@ -81,7 +81,7 @@ or `/stop` route yet.
    `/tmp/alpaca_score.json` (or an arcade webhook) forwards finished runs to
    the gateway, which:
    - adds points to the achievements ledger (`docs/ACHIEVEMENTS.md`),
-   - posts a Talk message via the existing bot path — e.g.
+   - posts a Talk message via the existing bot path, e.g.
      "🎮 Michele scored 12,300 on Tetris", and
    - can mirror points into Skylight stars (`docs/FAMILY_HUB.md`).
    Kid-safe by default: initials only, no free-text.

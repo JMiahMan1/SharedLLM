@@ -29,7 +29,7 @@ def wait_for_service(url, timeout=30):
 def ensure_services():
     # These tests drive a real workspace_runtime instance. When it is not
     # running (developer machines, and any CI job that does not stand the
-    # services up) that is a reason to skip, not to fail — failing made the
+    # services up) that is a reason to skip, not to fail; failing made the
     # whole suite red for an absent optional dependency.
     if not wait_for_service(WORKSPACE_RUNTIME_URL):
         pytest.skip(f"Service {WORKSPACE_RUNTIME_URL} not available")
@@ -60,7 +60,7 @@ def test_workspace_lifecycle(api_client):
         # git authoritative, and the webhook rightly skips pulling those.
         "sync_mode": "git",
         # The git-pull webhook authenticates against the workspace's own token
-        # (or the server's GIT_WEBHOOK_SECRET) — never INTERNAL_SECRET. Set one
+        # (or the server's GIT_WEBHOOK_SECRET), never INTERNAL_SECRET. Set one
         # here so the test does not depend on the server's webhook config.
         "webhook_token": WEBHOOK_TOKEN,
     }
