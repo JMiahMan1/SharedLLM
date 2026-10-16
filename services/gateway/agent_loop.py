@@ -2064,6 +2064,10 @@ async def _is_kill_flag_set(mission_id: int) -> bool:
     return await _redis_flag_active(f"raven:mission:kill:{mission_id}")
 
 
+#: How often a paused mission re-checks its pause and kill keys.
+PAUSE_POLL_SECONDS = 5.0
+
+
 async def _await_mission_resume(
     mission_id: int,
     stream_event: Callable[[str, str], Awaitable[Any]],
@@ -2093,15 +2097,23 @@ async def _await_mission_resume(
             return False
         log.warning(f"[AgentLoop] MISSION PAUSED for {mission_id}. Waiting for resume signal.")
         await stream_event("system", "Mission paused, waiting for LLM access to become available.")
-        async for message in pubsub.listen():
-            if message.get("type") != "message":
-                continue
-            if message.get("channel") == kill_key or message.get("data") == "KILL":
+        # Poll rather than listen forever: the pause key expires (an hour) with
+        # nothing published, and listen() then never returned, holding the one
+        # worker every chat reply waits on. A missing key counts as resumed.
+        while True:
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=PAUSE_POLL_SECONDS)
+            if message and (message.get("channel") == kill_key or message.get("data") == "KILL"):
+                killed = True
+            elif message and message.get("data") == "RESUMED":
+                break
+            else:
+                killed = await _redis_flag_active(kill_key)
+                if not killed and not await _redis_flag_active(pause_key):
+                    break
+            if killed:
                 log.warning(f"[AgentLoop] MISSION KILL SIGNAL RECEIVED while paused for {mission_id}. Terminating.")
                 await stream_event("system", "Mission terminated by user.")
                 return True
-            if message.get("data") == "RESUMED":
-                break
         log.info(f"[AgentLoop] Mission {mission_id} resumed.")
         await stream_event("system", "Mission resumed.")
         return False
@@ -3422,6 +3434,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.error(f"[AgentLoop] FATAL: All inference retries failed on iter {agent_iter + 1}: {e}")
             await _clear_checkpoint()
             return f"SYSTEM ERROR: Inference failed after multiple retries. Detail: {e}. Please check the LLM provider status."
+        finally:
+            # Killing a mission cancels its task (CancelledError skips the
+            # handlers above), which left this heartbeat running for good.
+            heartbeat_stop.set()
+            hb_task.cancel()
 
         if skip_inference:
             # tool_data was already dequeued from pending_batch at iteration start;

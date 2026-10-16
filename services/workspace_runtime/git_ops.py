@@ -12,6 +12,7 @@ for the REST endpoints and the async ``*`` functions used internally by the
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
 from pathlib import Path
@@ -175,7 +176,7 @@ async def create_review_branch(
 @git_router.post("/git/status")
 async def git_status(req: WorkspaceRef, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
     ws_id = workspace["id"]
@@ -205,7 +206,7 @@ async def git_status(req: WorkspaceRef, x_internal_secret: str | None = Header(d
 @git_router.post("/git/branches")
 async def git_branches(req: WorkspaceRef, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
     ws_id = workspace["id"]
@@ -239,7 +240,7 @@ async def git_branches(req: WorkspaceRef, x_internal_secret: str | None = Header
 @git_router.post("/git/diff")
 async def git_diff(req: DiffRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_diff")
     workspace_path = Path(workspace["resolved_path"])
     pathspecs = _sanitize_targets(req.pathspecs)
@@ -253,7 +254,7 @@ async def git_diff(req: DiffRequest, x_internal_secret: str | None = Header(defa
 @git_router.post("/git/add")
 async def git_add(req: GitAddRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     pathspecs = _sanitize_targets(req.pathspecs)
@@ -273,7 +274,7 @@ async def git_add(req: GitAddRequest, x_internal_secret: str | None = Header(def
 @git_router.post("/git/commit")
 async def git_commit(req: GitCommitRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     ws_id = workspace["id"]
@@ -328,7 +329,7 @@ async def git_commit(req: GitCommitRequest, x_internal_secret: str | None = Head
 @git_router.post("/git/branch/create")
 async def git_branch_create(req: GitBranchCreateRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     branch_name = _validate_branch_name(req.branch_name)
@@ -358,7 +359,7 @@ async def git_branch_create(req: GitBranchCreateRequest, x_internal_secret: str 
 @git_router.post("/git/push")
 async def git_push(req: GitPushRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     ws_id = workspace["id"]
@@ -426,7 +427,7 @@ async def _count_unpushed(ws_id: str, workspace_path: Path, remote_name: str, br
 @git_router.post("/git/fetch")
 async def git_fetch(req: GitFetchRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     ws_id = workspace["id"]
@@ -455,7 +456,7 @@ async def git_fetch(req: GitFetchRequest, x_internal_secret: str | None = Header
 @git_router.post("/git/pull")
 async def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     ws_id = workspace["id"]
@@ -546,7 +547,7 @@ async def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_int
 @git_router.post("/git/revert")
 async def git_revert(req: GitRevertRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace_data = _resolve_workspace(req, check_recovery=True)
+    workspace_data = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace_data, "git_write")
     path = Path(workspace_data["resolved_path"])
     ws_id = workspace_data["id"]
@@ -577,7 +578,7 @@ async def git_revert(req: GitRevertRequest, x_internal_secret: str | None = Head
 @git_router.post("/git/log")
 async def git_log(req: GitLogRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
     if not _git_repo_present(workspace_path):
@@ -620,7 +621,7 @@ async def git_log(req: GitLogRequest, x_internal_secret: str | None = Header(def
 @git_router.post("/git/checkout")
 async def git_checkout(req: GitCheckoutRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
 
@@ -650,7 +651,7 @@ async def git_checkout(req: GitCheckoutRequest, x_internal_secret: str | None = 
 @git_router.post("/git/stash")
 async def git_stash(req: GitStashRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
 
@@ -693,7 +694,7 @@ async def git_stash(req: GitStashRequest, x_internal_secret: str | None = Header
 @git_router.post("/git/remote")
 async def git_remote(req: GitRemoteRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
 
@@ -745,7 +746,7 @@ async def git_remote(req: GitRemoteRequest, x_internal_secret: str | None = Head
 @git_router.post("/git/show")
 async def git_show(req: GitShowRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
 
@@ -767,7 +768,7 @@ async def git_show(req: GitShowRequest, x_internal_secret: str | None = Header(d
 @git_router.post("/git/rebase")
 async def git_rebase(req: GitRebaseRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
+    workspace = await asyncio.to_thread(_resolve_workspace, req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
 
