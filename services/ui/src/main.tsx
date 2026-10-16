@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import './index.css';
+import './themes/theme-remap.css';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
 import { startBackgroundTask, finishBackgroundTask } from './lib/backgroundTask';

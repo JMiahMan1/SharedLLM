@@ -35,10 +35,10 @@ export default function SiteThemePanel() {
           </h2>
           <p className="text-xs text-slate-500 mt-1">
             Same theme packages as dashboard widgets. Stored per account.
-            Active: <span className="text-purple-400 font-medium">{ready ? themeId : '…'}</span>
+            Active: <span className="text-purple-400 font-medium">{ready ? themeRegistry.resolveTheme(themeId).name : '…'}</span>
           </p>
         </div>
-        <button type="button" className="glass-button px-3 py-1.5 text-xs" onClick={handleSync}>
+        <button type="button" className="glass-button px-3 py-1.5 text-xs pointer-coarse:min-h-11" onClick={handleSync}>
           Sync packs to account
         </button>
       </div>

@@ -228,7 +228,8 @@ export function initials(name: string): string {
 
 /** Stable per-person tint so a family member is recognisable at a glance. */
 export function avatarTint(name: string): string {
-  const palette = ['#863BFF', '#0EA5E9', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#14B8A6', '#F43F5E'];
+  // Dark enough that white initials stay readable (at least 4.5:1) on every tint.
+  const palette = ['#7C3AED', '#0369A1', '#047857', '#B45309', '#BE185D', '#6D28D9', '#0F766E', '#BE123C'];
   let hash = 0;
   for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
   return palette[hash % palette.length];

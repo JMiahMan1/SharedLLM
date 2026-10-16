@@ -9,59 +9,14 @@ import { api } from '../../services/api';
 import { hasChoresFor, type ChoreScope } from '../../lib/choreScope';
 import type { ChoreItem, IWidgetProps } from '../../types/widget';
 import toast from 'react-hot-toast';
+import { PLANNER_DARK, PLANNER_LIGHT, textOn } from '../../themes/plannerPalette';
 
 type ChoresPayload = {
   chores: ChoreItem[];
   assignee_meta?: Record<string, string>;
 };
 
-/* Palette driven by the app's light/dark selection.
-   Light = OpenSkyLight "paper planner" warm palette (matches the screenshot).
-   Dark  = SharedLLM's existing dark theme tokens (blends with the rest of the UI). */
-const OSK_LIGHT = `
-  --osk-paper:#f5efe3;
-  --osk-paper-deep:#ece4d2;
-  --osk-card:#fffdf8;
-  --osk-ink:#34302a;
-  --osk-ink-soft:#756d5f;
-  --osk-ink-faint:#a89f8d;
-  --osk-line:#e3dac6;
-  --osk-ember:#d95b3a;
-  --osk-ember-deep:#bf4526;
-  --osk-ember-soft:#f8ddd2;
-  --osk-sun:#ffd9a0;
-  --osk-sun-soft:#fdf0da;
-  --osk-shadow:0 1px 3px rgba(72,60,38,0.07),0 10px 28px -10px rgba(72,60,38,0.16);
-`;
-/* Dark mode reuses the SharedLLM dark theme (deep navy base, translucent
-   surfaces, slate text, purple accent) so the widget blends with the UI. */
-const OSK_DARK = `
-  --osk-paper: var(--color-bg-base);
-  --osk-paper-deep: var(--color-surface-1);
-  --osk-card: var(--color-surface-0);
-  --osk-ink: #f1f5f9;
-  --osk-ink-soft: #cbd5e1;
-  --osk-ink-faint: #94a3b8;
-  --osk-line: var(--color-border-mid);
-  --osk-ember: #8b5cf6;
-  --osk-ember-deep: #c4b5fd;
-  --osk-ember-soft: rgba(139, 92, 246, 0.18);
-  --osk-sun: #fbbf24;
-  --osk-sun-soft: rgba(251, 191, 36, 0.16);
-  --osk-shadow: var(--shadow-panel);
-`;
 
-/** Readable text color (ink or paper) for a given background hex. */
-function textOn(hex?: string): string {
-  if (!hex) return '#34302a';
-  const h = hex.replace('#', '');
-  if (h.length < 6) return '#34302a';
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.6 ? '#34302a' : '#fffdf8';
-}
 
 /** Deterministic fallback color when Skylight provides no category color. */
 function colorForName(name: string): string {
@@ -95,7 +50,7 @@ function StarBadge({ count }: { count: number }) {
   return (
     <span
       className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-sm font-extrabold"
-      style={{ background: 'var(--osk-sun-soft)', color: 'var(--osk-ember-deep)' }}
+      style={{ background: 'var(--os-sun-soft)', color: 'var(--os-ember-deep)' }}
     >
       <Star size={14} aria-hidden />
       {count}
@@ -263,8 +218,8 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       type="button"
       onClick={() => handleToggleComplete(chore)}
       disabled={completingIds.has(chore.id)}
-      className="flex w-full items-center gap-3 rounded-2xl p-3 text-left shadow-[var(--osk-shadow)] transition disabled:opacity-60"
-      style={{ background: 'var(--osk-card)' }}
+      className="flex w-full items-center gap-3 rounded-2xl p-3 text-left shadow-[var(--os-shadow)] transition disabled:opacity-60"
+      style={{ background: 'var(--os-card)' }}
     >
       <span
         className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-[3px] transition-colors"
@@ -274,7 +229,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       </span>
       <span
         className={`min-w-0 flex-1 truncate text-lg font-bold ${chore.completed ? 'line-through' : ''}`}
-        style={{ color: chore.completed ? 'var(--osk-ink-faint)' : 'var(--osk-ink)' }}
+        style={{ color: chore.completed ? 'var(--os-ink-faint)' : 'var(--os-ink)' }}
       >
         {chore.emoji_icon ? `${chore.emoji_icon} ` : ''}
         {chore.title}
@@ -301,7 +256,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       <div
         key={name}
         className="flex w-full shrink-0 flex-col rounded-[1.25rem] p-3 md:w-80 md:shrink-0"
-        style={{ background: 'var(--osk-paper-deep)' }}
+        style={{ background: 'var(--os-paper-deep)' }}
       >
         <div className="mb-3 flex items-center gap-3">
           <span
@@ -311,10 +266,10 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
             {initials(name)}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-xl font-bold" style={{ color: 'var(--osk-ink)' }}>
+            <div className="truncate text-xl font-bold" style={{ color: 'var(--os-ink)' }}>
               {name}
             </div>
-            <div className="text-sm font-bold" style={{ color: 'var(--osk-ink-faint)' }}>
+            <div className="text-sm font-bold" style={{ color: 'var(--os-ink-faint)' }}>
               {doneCount}/{groupChores.length} done
             </div>
           </div>
@@ -326,7 +281,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
               {g.label && (
                 <div
                   className="mt-1 flex items-center gap-1.5 px-1 text-sm font-extrabold uppercase tracking-wide"
-                  style={{ color: 'var(--osk-ink-faint)' }}
+                  style={{ color: 'var(--os-ink-faint)' }}
                 >
                   {g.Icon ? <g.Icon size={15} /> : null}
                   {g.label}
@@ -344,10 +299,10 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
     if (totalCount === 0) {
       return (
         <div className="osk-chores flex h-full flex-col items-center justify-center text-center">
-          <p className="text-lg font-semibold" style={{ color: 'var(--osk-ink)' }}>
+          <p className="text-lg font-semibold" style={{ color: 'var(--os-ink)' }}>
             No chores assigned
           </p>
-          <p className="text-sm" style={{ color: 'var(--osk-ink-faint)' }}>
+          <p className="text-sm" style={{ color: 'var(--os-ink-faint)' }}>
             All clear for today!
           </p>
         </div>
@@ -357,16 +312,16 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
     const names = Object.keys(assigneeGroups);
     return (
       <>
-        <style>{`.osk-overlay{${isDark ? OSK_DARK : OSK_LIGHT}--wc-ink:var(--osk-ink);--wc-ink-faint:var(--osk-ink-faint);--wc-ink-strong:var(--osk-ink);--wc-border:var(--osk-line);--wc-hover:var(--osk-paper-deep);background:var(--osk-paper)!important;}`}</style>
+        <style>{`.osk-overlay{${isDark ? PLANNER_DARK : PLANNER_LIGHT}--wc-ink:var(--os-ink);--wc-ink-faint:var(--os-ink-faint);--wc-ink-strong:var(--os-ink);--wc-border:var(--os-line);--wc-hover:var(--os-paper-deep);background:var(--os-paper)!important;}`}</style>
         <div className="osk-chores flex h-full flex-col">
           <div className="mb-4 flex shrink-0 items-end gap-4">
             <div className="flex-1">
-              <div className="text-3xl font-bold" style={{ color: 'var(--osk-ink)' }}>
+              <div className="text-3xl font-bold" style={{ color: 'var(--os-ink)' }}>
                 Today&apos;s Chores
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <div className="text-sm font-bold" style={{ color: 'var(--osk-ink-faint)' }}>
+              <div className="text-sm font-bold" style={{ color: 'var(--os-ink-faint)' }}>
                 {completedCount}/{totalCount} done
               </div>
               {renderScopeToggle()}
@@ -451,11 +406,11 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
               style={
                 active
                   ? {
-                      background: 'var(--osk-ember-soft)',
-                      borderColor: 'var(--osk-ember)',
-                      color: 'var(--osk-ember-deep)',
+                      background: 'var(--os-ember-soft)',
+                      borderColor: 'var(--os-ember)',
+                      color: 'var(--os-ember-deep)',
                     }
-                  : { color: 'var(--osk-ink-faint)', borderColor: 'transparent' }
+                  : { color: 'var(--os-ink-faint)', borderColor: 'transparent' }
               }
             >
               <o.Icon size={12} aria-hidden />
@@ -534,7 +489,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       icon="🧹"
       expandedClassName="osk-overlay"
       actions={
-        <span className="text-xs" style={{ color: 'var(--wc-ink-faint, #94a3b8)' }}>
+        <span className="text-xs" style={{ color: 'var(--wc-ink-faint, var(--site-text-muted))' }}>
           {/* The ring already shows the percentage; repeating it here left
               the title three letters wide on a phone. */}
           {completedCount}/{totalCount} done

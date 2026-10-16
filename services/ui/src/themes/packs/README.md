@@ -87,3 +87,26 @@ Validation helpers: `validateThemePack`, `validateThemePackage`, `parseThemePack
 ## Default pack
 
 `jarvis-default.pack.json` ships the six stock themes (Aurora, Bloom, Iron, Tron, Neon, Clean Athletic). It is **data**, not component code. Edit the JSON or import a replacement under a different pack id.
+
+## How a theme reaches the whole site
+
+`applySiteTheme` writes the tokens as CSS variables on `<html>` (`--site-*`, `--ht-*`,
+`--color-bg-base`) and sets `data-theme-scheme` to `light` or `dark`. Components are
+written with plain Tailwind colors, so two stylesheets map those colors onto the tokens:
+
+- `index.css` styles the shared surfaces (`.glass-panel`, `.glass-card`, `.glass-button`,
+  inputs, the `.app-shell` frame and the `.app-bar` header and bottom nav), and paints
+  the page background, glow and motif from the theme.
+- `themes/theme-remap.css` is **generated** by `scripts/gen-theme-css.mjs` from the color
+  classes the source uses. On every theme, purple, violet and indigo become the accent. On
+  dark themes, text too dim to read is raised. On light themes, dark surfaces become the
+  theme surface, pale accent text becomes a darker shade of its hue, and white text on a
+  solid fill (a red SOS button) stays white.
+
+After adding color classes, run `npm run gen:theme-css`. `themeRemap.test.ts` fails when
+the committed file is out of date, and `e2e/themes/theme-contrast.spec.ts` measures text
+contrast on every page under every theme.
+
+Colors a component sets inline (a calendar color, an avatar tint) bypass both files, so
+take them from a token (`var(--site-accent)`) or check them against light and dark text.
+The calendar and chores widget share their palette in `themes/plannerPalette.ts`.

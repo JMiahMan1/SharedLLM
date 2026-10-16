@@ -202,7 +202,7 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
                 {icon}
               </span>
             )}
-            <h2 className="text-xl font-bold" style={{ color: 'var(--wc-ink, #ffffff)' }}>{title}</h2>
+            <h2 className="text-xl font-bold" style={{ color: 'var(--wc-ink, var(--site-text))' }}>{title}</h2>
           </div>
 
           <div className="flex items-center gap-2">
