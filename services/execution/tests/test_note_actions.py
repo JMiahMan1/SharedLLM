@@ -444,3 +444,16 @@ async def test_list_of_a_missing_folder_is_empty(provider, monkeypatch):
     assert result.status == "SUCCESS"
     assert result.detail["notes"] == []
     assert provider.dirs == []
+
+
+async def test_local_append_adds_a_checklist_item(monkeypatch, tmp_path):
+    from services.execution.schemas import NoteRequest
+
+    monkeypatch.setattr(note_handler, "LOCAL_NOTES_ROOT", str(tmp_path))
+    (tmp_path / "Groceries.md").write_text("# Groceries\n", encoding="utf-8")
+    result = await note_handler.handle_note(
+        NoteRequest(user_context={"user": "jeremiah"}, action="append", storage="local", title="Groceries", content="milk")
+    )
+
+    assert result.status == "SUCCESS", result.message
+    assert (tmp_path / "Groceries.md").read_text(encoding="utf-8").endswith("- [ ] milk")

@@ -142,7 +142,6 @@ async def _handle_local_note(req: NoteRequest) -> ExecutionResult:
                 safe_title = "".join([c for c in (req.title or "") if c.isalnum() or c in (" ", "-", "_")]).strip()
                 file_path = Path(LOCAL_NOTES_ROOT) / f"{safe_title}.md"
             existing = file_path.read_text(encoding='utf-8') if file_path.exists() else ""
-            _forget_preview(url)
             new_content = f"{existing}\n\n- [ ] {req.content}"
             file_path.write_text(new_content, encoding='utf-8')
             return ExecutionResult(status="SUCCESS", message=f"Appended to local note '{req.title}'.", service="note_local")
