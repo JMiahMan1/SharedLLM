@@ -12,9 +12,7 @@ import logging
 import os
 from typing import Any
 
-import requests
-
-from services.config import INTERNAL_SECRET, TELEMETRY_SVC_URL
+from services.control_plane.admin_notice import notify_admins
 
 log = logging.getLogger("control_plane.disk_alerts")
 
@@ -75,24 +73,6 @@ def disk_transitions(low: set[str], free: dict[str, float], threshold: int) -> l
                 "data": {"url": DASHBOARD_URL},
             })
     return notices
-
-
-def notify_admins(notice: dict[str, Any]) -> bool:
-    """Send one admin notice through telemetry; True once telemetry accepted it."""
-    payload = {"kind": "admin", **notice, "user": "@admins", "category": "admin"}
-    try:
-        resp = requests.post(
-            f"{TELEMETRY_SVC_URL.rstrip('/')}/api/telemetry/notify",
-            json=payload,
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=15,
-        )
-        if resp.status_code == 200:
-            return True
-        log.warning(f"[disk] telemetry refused {notice.get('tag')}: HTTP {resp.status_code}")
-    except Exception as e:
-        log.warning(f"[disk] telemetry unreachable: {type(e).__name__}: {e}")
-    return False
 
 
 def tick(low: set[str], threshold: int) -> int:

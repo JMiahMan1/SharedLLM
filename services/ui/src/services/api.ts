@@ -1,4 +1,5 @@
 import axios, { type AxiosRequestConfig } from 'axios';
+import type { NetworkStatus, NetworkUsageRow, RouterLogLine } from '../lib/network';
 import { storageGetSync } from '../lib/storage';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
@@ -694,6 +695,22 @@ export const api = {
       note: note ?? null,
     });
     return resp.data;
+  },
+  // Admin > Network: the router monitor (docs/NETWORK.md).
+  async getNetworkStatus(): Promise<NetworkStatus> {
+    return (await apiClient.get('/api/network/status')).data;
+  },
+  async checkNetwork(): Promise<NetworkStatus> {
+    return (await apiClient.post('/api/network/check', {}, { timeout: 60_000 })).data;
+  },
+  async saveRouterSettings(body: { url: string; username: string; password?: string }): Promise<NetworkStatus> {
+    return (await apiClient.put('/api/network/settings', body, { timeout: 60_000 })).data;
+  },
+  async getRouterLog(params: { limit?: number; level?: string; q?: string } = {}): Promise<{ lines: RouterLogLine[] }> {
+    return (await apiClient.get('/api/network/log', { params })).data;
+  },
+  async getNetworkUsage(hours: number): Promise<{ hours: number; devices: NetworkUsageRow[] }> {
+    return (await apiClient.get('/api/network/usage', { params: { hours } })).data;
   },
   async getUserTheme(): Promise<{ theme_id: string; packs: unknown[] }> {
     // Runs before/independently of auth, so a 401 must not log the user out.

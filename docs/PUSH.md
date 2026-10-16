@@ -368,10 +368,11 @@ All in `services/ui/android/app/src/main/java/com/jarvisos/app/`.
 | raven | gateway `notices` | mission finished (to its owner), mission needs approval (to `@admins`: Approve, Reject) |
 | app_updates | gateway `notices` | new APK published (once per build) |
 | health | geo | daily step goal reached, weekly summary |
-| admin | gateway background worker, logging, control_plane, `deploy_remote.sh`, `scripts/notify_admins.sh` | service down (2 failed checks in a row) or back up; error spike (more than `alert_error_spike_threshold` errors in 5 min, or one error more than `alert_error_repeat_threshold` times, once per 30 min per error); deploy finished or failed (with the step); disk nearly full (below `alert_disk_free_percent`) or recovered; desktop GPU services unreachable for `alert_desktop_down_minutes` or back. Backup failed: the stack has no backup job; one added later calls `notify_admins.sh` on failure |
+| admin | gateway background worker, logging, control_plane, `deploy_remote.sh`, `scripts/notify_admins.sh` | service down (2 failed checks in a row) or back up; error spike (more than `alert_error_spike_threshold` errors in 5 min, or one error more than `alert_error_repeat_threshold` times, once per 30 min per error); deploy finished or failed (with the step); disk nearly full (below `alert_disk_free_percent`) or recovered; desktop GPU services unreachable for `alert_desktop_down_minutes` or back; home network (control_plane `router_monitor`, docs/NETWORK.md): internet down or back, router unreachable or restarted, one device crowding a Wi-Fi channel, a congested channel, a device reconnecting over and over, DHCP pool, connection table or router memory nearly full. Backup failed: the stack has no backup job; one added later calls `notify_admins.sh` on failure |
 
 Admin notices replace by tag: `admin:service:<name>`, `admin:desktop`,
-`admin:errors:<fingerprint>`, `admin:disk:<disk>`, `admin:deploy`. Details in
+`admin:errors:<fingerprint>`, `admin:disk:<disk>`, `admin:deploy`,
+`admin:network:<check>`. Details in
 `docs/BACKGROUND_JOBS.md` (Admin alerts).
 
 Scripts and cron jobs on the server notify admins with

@@ -189,6 +189,10 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "git_url", "ALTER TABLE user ADD COLUMN git_url VARCHAR")
         _add_column("user", "git_user", "ALTER TABLE user ADD COLUMN git_user VARCHAR")
         _add_column("user", "git_token_enc", "ALTER TABLE user ADD COLUMN git_token_enc VARCHAR")
+        _add_column("user", "router_url", "ALTER TABLE user ADD COLUMN router_url VARCHAR")
+        _add_column("user", "router_user", "ALTER TABLE user ADD COLUMN router_user VARCHAR")
+        _add_column("user", "router_pass_enc", "ALTER TABLE user ADD COLUMN router_pass_enc VARCHAR")
+        _add_column("user", "router_cert_sha256", "ALTER TABLE user ADD COLUMN router_cert_sha256 VARCHAR")
         _add_column("user", "voice_fingerprint", "ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR")
         _add_column("user", "preferred_tts_voice", "ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR DEFAULT 'af_heart'")
 
@@ -1841,6 +1845,22 @@ def set_entity_protection(
 
 
 # --- Device Matrix (UI Contract) ---
+@app.get("/api/internal/router")
+def internal_router(session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: the home router's read-only login for the control plane's
+    monitor (docs/NETWORK.md). Kept out of /api/resolve, which hands a user's
+    credentials to every service on every request."""
+    user = session.get(User, 1)
+    if not user or not user.router_url:
+        return {"url": None, "user": None, "password": None, "cert_sha256": None}
+    return {
+        "url": user.router_url,
+        "user": user.router_user,
+        "password": decrypt(user.router_pass_enc) if user.router_pass_enc else None,
+        "cert_sha256": user.router_cert_sha256,
+    }
+
+
 @app.get("/api/internal/user-device-assignments")
 def internal_user_device_assignments(
     username: str,
@@ -2167,6 +2187,10 @@ SEEDABLE_CREDENTIALS = {
     "git_token": ("git_token_enc", "git_token"),
     "huggingface_token": ("huggingface_token_enc", "huggingface_token"),
     "skylight_pass": ("skylight_pass_enc", "skylight_pass"),
+    "router_url": ("router_url", "router_url"),
+    "router_user": ("router_user", "router_user"),
+    "router_pass": ("router_pass_enc", "router_pass"),
+    "router_cert_sha256": ("router_cert_sha256", "router_cert_sha256"),
 }
 
 @app.post("/api/admin/seed-credential")
@@ -2206,6 +2230,9 @@ def seed_credential(body: dict, request: Request, session: Session = Depends(get
     # Encrypt credentials only. Plain fields (URLs, usernames) are stored as
     # given: encrypting them stored ciphertext as User 1's Audiobookshelf URL.
     secret = enc_field.endswith("_enc")
+    if field == "router_url" and value != user.router_url:
+        # Another router: its certificate is pinned afresh on first contact.
+        user.router_cert_sha256 = None
     if value:
         setattr(user, enc_field, encrypt(value) if secret else value)
         log.info(f"[seed-credential] Updated {field} for user {user.username}")

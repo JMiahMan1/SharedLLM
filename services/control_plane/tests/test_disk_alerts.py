@@ -3,7 +3,7 @@ once when it recovers (services/control_plane/disk_alerts.py)."""
 import os
 from types import SimpleNamespace
 
-from services.control_plane import disk_alerts
+from services.control_plane import admin_notice, disk_alerts
 
 
 def test_alert_once_per_crossing_and_once_on_recovery():
@@ -55,8 +55,8 @@ def test_notices_go_to_admins_in_the_admin_category(monkeypatch):
         posted.update(url=url, json=json, secret="X-Internal-Secret" in headers)
         return SimpleNamespace(status_code=200)
 
-    monkeypatch.setattr(disk_alerts.requests, "post", post)
-    assert disk_alerts.notify_admins({"title": "Disk nearly full", "body": "x", "tag": "admin:disk:data"})
+    monkeypatch.setattr(admin_notice.requests, "post", post)
+    assert admin_notice.notify_admins({"title": "Disk nearly full", "body": "x", "tag": "admin:disk:data"})
     assert posted["url"].endswith("/api/telemetry/notify") and posted["secret"]
     assert posted["json"]["user"] == "@admins" and posted["json"]["category"] == "admin"
 

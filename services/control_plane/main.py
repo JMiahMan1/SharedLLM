@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 
 import docker
 from services.config import GEO_SVC_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
-from services.control_plane import disk_alerts, osrm_map, registry
+from services.control_plane import disk_alerts, network_routes, osrm_map, registry
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
@@ -178,12 +178,14 @@ async def lifespan(app: FastAPI):
     t.start()
     threading.Thread(target=_osrm_map_loop, name="osrm-map", daemon=True).start()
     threading.Thread(target=_disk_alert_loop, name="disk-alerts", daemon=True).start()
+    network_routes.start()
     log.info(f"Sandbox reaper started (interval={SANDBOX_REAP_INTERVAL}s)")
     yield
 
 
 app = FastAPI(title="Control Plane Service", lifespan=lifespan)
 app.include_router(info_router)
+app.include_router(network_routes.router)
 
 # Initialize Docker client
 try:

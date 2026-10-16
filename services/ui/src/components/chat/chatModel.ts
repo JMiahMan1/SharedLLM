@@ -329,7 +329,8 @@ export function formatBytes(size: string | number | undefined): string {
   if (!Number.isFinite(n) || n <= 0) return '';
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 ** 3) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
 /** Talk attachments are capped here and in the execution service alike. */
