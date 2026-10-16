@@ -130,7 +130,8 @@ def collect(client: RouterClient, last_log_id: int) -> dict[str, Any]:
     # Line ids restart when the router reboots; then every line is new.
     if lines and max(int(ln.get("id", 0)) for ln in lines) < last_log_id:
         last_log_id = 0
-    new_lines = [ln for ln in lines if int(ln.get("id", 0)) > last_log_id]
+    # logd reports times in milliseconds; everything here works in seconds.
+    new_lines = [{**ln, "time": _seconds(ln.get("time", 0))} for ln in lines if int(ln.get("id", 0)) > last_log_id]
 
     return {
         "system": {
@@ -150,6 +151,12 @@ def collect(client: RouterClient, last_log_id: int) -> dict[str, Any]:
         "conntrack": conntrack,
         "log": new_lines,
     }
+
+
+def _seconds(t: Any) -> float:
+    """A Unix time in seconds, from seconds or logd's milliseconds."""
+    t = float(t or 0)
+    return t / 1000.0 if t > 1e11 else t
 
 
 def _interface(i: dict[str, Any]) -> dict[str, Any]:
@@ -318,7 +325,7 @@ def flap_notices(state: dict[str, Any], snap: dict[str, Any], now: float) -> lis
             seen.setdefault(m.group(1).lower(), []).append(float(line.get("time", now)))
     notices = []
     for mac in list(seen):
-        times = [t for t in seen[mac] if now - t <= FLAP_WINDOW_S]
+        times = [t for t in map(_seconds, seen[mac]) if 0 <= now - t <= FLAP_WINDOW_S]
         if not times:
             del seen[mac]
             continue
@@ -461,7 +468,7 @@ def status_view(snap: dict[str, Any], loads: list[dict[str, Any]], internet: boo
 
 def log_entries(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Router log lines as stored for Admin > Network (level from the syslog priority)."""
-    return [{"id": int(ln.get("id", 0)), "time": int(ln.get("time", 0)),
+    return [{"id": int(ln.get("id", 0)), "time": int(_seconds(ln.get("time", 0))),
              "level": _SYSLOG_LEVELS.get(int(ln.get("priority", 6)) & 7, "info"),
              "msg": ln.get("msg", "")} for ln in lines]
 
