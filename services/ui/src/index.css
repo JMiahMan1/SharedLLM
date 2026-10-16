@@ -100,7 +100,9 @@ body {
 
   /* Menus/popovers: floating over content, so near-opaque */
   .glass-menu {
-    background: linear-gradient(135deg, var(--site-menu-a) 0%, var(--site-menu-b) 100%);
+    /* The gradient is translucent; the solid base under it keeps a menu
+       readable where backdrop blur does not apply (a blurred ancestor). */
+    background: linear-gradient(135deg, var(--site-menu-a) 0%, var(--site-menu-b) 100%), var(--color-bg-base);
     backdrop-filter: blur(24px) saturate(180%);
     -webkit-backdrop-filter: blur(24px) saturate(180%);
     border: 1px solid var(--color-border-mid);

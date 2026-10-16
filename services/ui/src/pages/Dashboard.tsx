@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useEffect, useRef, Component, type ReactNode } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
   ArrowUpRight,
@@ -36,6 +36,8 @@ import Modal from '../components/ui/Modal';
 import BentoBoxDashboard from '../components/dashboard/BentoBoxDashboard';
 import DashboardSettingsPanel from '../components/dashboard/DashboardSettingsPanel';
 import { useWidgetStore } from '../stores/widgetStore';
+import { useClearedAt, newerThan } from '../lib/clearedAt';
+import { relativeTime } from '../lib/wanderTrips';
 
 // Per-section Error Boundary
 
@@ -143,6 +145,22 @@ const LOG_LEVEL_COLORS: Record<string, string> = {
   debug: 'text-slate-500',
 };
 
+const PROBLEMS_CLEARED_KEY = 'jarvis_problems_cleared_at';
+
+/** The newest timestamp in a list, so a clear hides exactly what was shown
+ *  even when this device's clock and the server's disagree. */
+function newestStamp(logs: LogEntry[]): string {
+  const times = logs.map((l) => new Date(l.timestamp).getTime()).filter(Number.isFinite);
+  return times.length ? new Date(Math.max(...times)).toISOString() : new Date().toISOString();
+}
+
+/** Uvicorn access lines ('INFO: 1.2.3.4:5 - "GET /x HTTP/1.1" 500 Internal
+ *  Server Error') shown as 'GET /x: 500 Internal Server Error'. */
+function readableLogMessage(message: string): string {
+  const m = /"([A-Z]+) (\S+) HTTP\/[\d.]+" (\d{3})\s*(.*)$/.exec(message);
+  return m ? `${m[1]} ${m[2]}: ${m[3]}${m[4] ? ` ${m[4]}` : ''}` : message;
+}
+
 const LogEntryCard = ({ log }: { log: LogEntry }) => {
   // The logging service stores levels upper-case ("ERROR"); compare folded.
   const level = (log.level || '').toLowerCase();
@@ -162,8 +180,8 @@ const LogEntryCard = ({ log }: { log: LogEntry }) => {
           {log.level}
         </span>
       </div>
-      <p className="text-xs text-slate-400 leading-relaxed break-words">{log.message}</p>
-      <p className="text-[9px] text-slate-600 mt-1">{new Date(log.timestamp).toLocaleString()}</p>
+      <p className="text-xs text-slate-400 leading-relaxed break-words">{readableLogMessage(log.message)}</p>
+      <p className="text-[10px] text-slate-500 mt-1" title={new Date(log.timestamp).toLocaleString()}>{relativeTime(log.timestamp)}</p>
     </div>
   </div>
   );
@@ -274,7 +292,6 @@ function useSearch(query: string) {
 // Dashboard
 
 const Dashboard = () => {
-  const queryClient = useQueryClient();
   const [selectedService, setSelectedService] = useState<ServiceSummary | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const { user } = useAuth();
@@ -305,14 +322,16 @@ const Dashboard = () => {
   // Admin only (the log is the whole system's). The central log is mostly the
   // gateway's request lines, so the panel asks for warnings and errors only
   // (failed requests) instead of keyword-filtering lines that never matched.
-  const { data: problems = [] } = useQuery<LogEntry[]>({
+  const { data: allProblems = [] } = useQuery<LogEntry[]>({
     queryKey: ['recent-logs', 'problems'],
     queryFn: () => api.getLogs(20, ['warning', 'error']),
     refetchInterval: 30000,
     retry: 1,
     enabled: !!isAdmin,
   });
-  const [confirmClear, setConfirmClear] = useState(false);
+  // Clearing hides what is listed now; the system log itself is untouched.
+  const [problemsClearedAt, clearProblems] = useClearedAt(PROBLEMS_CLEARED_KEY);
+  const problems = newerThan(allProblems, problemsClearedAt, (log) => log.timestamp);
 
   const { data: workspaces = [] } = useQuery<Workspace[]>({
     queryKey: ['workspaces'],
@@ -550,34 +569,12 @@ const Dashboard = () => {
                 </div>
               </div>
               {problems.length > 0 && (
-                confirmClear ? (
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() =>
-                        api.clearLogs().then(() => {
-                          queryClient.invalidateQueries({ queryKey: ['recent-logs'] });
-                          toast.success('System log cleared');
-                        }).catch(() => toast.error('Failed to clear logs')).finally(() => setConfirmClear(false))
-                      }
-                      className="min-h-11 text-[10px] font-bold uppercase tracking-widest text-red-300 px-3 rounded-lg border border-red-500/30 bg-red-500/10"
-                    >
-                      Clear whole log
-                    </button>
-                    <button
-                      onClick={() => setConfirmClear(false)}
-                      className="min-h-11 text-[10px] font-bold uppercase tracking-widest text-slate-400 px-3 rounded-lg"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmClear(true)}
-                    className="min-h-11 shrink-0 text-[10px] font-bold uppercase tracking-widest text-red-400 hover:text-red-300 px-3 rounded-lg border border-red-500/20 hover:bg-red-500/10 transition-colors"
-                  >
-                    Clear
-                  </button>
-                )
+                <button
+                  onClick={() => clearProblems(newestStamp(problems))}
+                  className="min-h-11 shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-white px-3 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
+                >
+                  Clear
+                </button>
               )}
             </div>
 

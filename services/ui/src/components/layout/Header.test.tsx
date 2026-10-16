@@ -120,8 +120,31 @@ describe('Header notifications bell', () => {
     fireEvent.click(bell);
     const titles = screen.getAllByText(/Michele (left|arrived)/).map((el) => el.textContent);
     expect(titles).toEqual(['Michele arrived at Home', 'Michele left Home']);
-    // No "Clear All": it used to delete the whole system log.
-    expect(screen.queryByText(/clear all/i)).toBeNull();
+  });
+
+  it('Clear all empties the list on this device and stays cleared', async () => {
+    const first = renderHeader();
+    fireEvent.click(await screen.findByRole('button', { name: /notifications, 2 new/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+    expect(screen.getByText("You're all caught up")).toBeTruthy();
+    expect(screen.queryByText('Michele left Home')).toBeNull();
+
+    first.unmount();
+    renderHeader();
+    fireEvent.click(await screen.findByRole('button', { name: /^notifications$/i }));
+    expect(screen.getByText("You're all caught up")).toBeTruthy();
+  });
+
+  it('closes when tapping outside or pressing Escape', async () => {
+    renderHeader();
+    fireEvent.click(await screen.findByRole('button', { name: /notifications, 2 new/i }));
+    expect(screen.getByText('Michele left Home')).toBeTruthy();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByText('Michele left Home')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /^notifications$/i }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByText('Michele left Home')).toBeNull();
   });
 
   it('clears the new-notice dot once the bell has been opened', async () => {
