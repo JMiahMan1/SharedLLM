@@ -10968,7 +10968,8 @@ async def get_app_update_version(request: Request):
         "version": bundle_meta.get("version") or version_data.get("version", "1.2.0"),
         "git_sha": effective_sha,
         "build_timestamp": bundle_meta.get("build_timestamp") or version_data.get("build_timestamp"),
-        "release_notes": version_data.get("release_notes", "Jarvis OS live update"),
+        # The served bundle's own notes win, for the same reason as git_sha.
+        "release_notes": bundle_meta.get("release_notes") or version_data.get("release_notes", "Jarvis OS live update"),
         "bundle_url": bundle_url,
         "bundle_available": bundle_available,
         "apk_available": apk_available,
@@ -11135,12 +11136,23 @@ async def publish_app_update(request: Request):
         if existing and existing.get("version_code") is not None:
             apk_code = existing["version_code"]
 
-    meta = {
-        "version": str(version),
-        "git_sha": str(git_sha),
-        "build_timestamp": datetime.now(timezone.utc).isoformat(),
-        "release_notes": str(notes),
-    }
+    # version, git_sha and release_notes describe the web bundle. An APK-only
+    # publish (CI's Android build) must not overwrite them, or Settings shows
+    # the APK's notes under a web build they have nothing to do with.
+    apk_only = apk_published and not (isinstance(bundle_file, UploadFile) and bundle_file.filename)
+    meta = {}
+    if apk_only:
+        try:
+            meta = json.loads((APP_UPDATES_DIR / "version.json").read_text())
+        except Exception:
+            meta = {}
+    if not apk_only or not meta:
+        meta.update({
+            "version": str(version),
+            "git_sha": str(git_sha),
+            "build_timestamp": datetime.now(timezone.utc).isoformat(),
+            "release_notes": str(notes),
+        })
     if apk_code is not None:
         meta["apk_version_code"] = apk_code
     (APP_UPDATES_DIR / "version.json").write_text(json.dumps(meta, indent=2))
