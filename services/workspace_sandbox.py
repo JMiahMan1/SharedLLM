@@ -25,6 +25,8 @@ import threading
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from services.common.proc import run_process
+
 # docker is a runtime-only dependency (used for sandbox container execution),
 # not needed at import time. Importing it lazily keeps modules that import this
 # one (e.g. git_ops) importable in environments without the docker SDK installed
@@ -151,14 +153,23 @@ def _docker_client() -> Any:
     return docker.from_env(timeout=5)  # type: ignore[attr-defined]
 
 
+_thread_clients = threading.local()
+
+
 def _get_client() -> Any:
     """Return a Docker client, or None when no daemon is reachable.
 
     A short timeout means environments without Docker (CI runners, dev
     machines) fail fast and fall back to host execution instead of hanging.
+    One client per thread is reused: a new one per command was never closed,
+    leaving its connection pool to the garbage collector.
     """
+    cached = getattr(_thread_clients, "client", None)
+    if cached is not None:
+        return cached
     try:
-        return _docker_client()
+        _thread_clients.client = _docker_client()
+        return _thread_clients.client
     except Exception as e:  # DockerException / requests errors when no daemon
         log.warning(f"[Sandbox] Docker daemon unavailable, sandbox disabled: {e}")
         return None
@@ -527,33 +538,10 @@ async def _host_exec(
     if env:
         run_env.update({k: str(v) for k, v in env.items()})
     try:
-        if shell:
-            proc = await asyncio.create_subprocess_shell(
-                cmd if isinstance(cmd, str) else " ".join(cmd),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=run_env,
-            )
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=run_env,
-            )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            rc = proc.returncode if proc.returncode is not None else 0
-            return {"args": cmd, "returncode": rc, "stdout": stdout.decode(errors="replace"), "stderr": stderr.decode(errors="replace")}
-        except TimeoutError:
-            try:
-                proc.kill()
-                await proc.wait()
-            except Exception:
-                pass
+        rc, out, err = await run_process(cmd, cwd=cwd, env=run_env, shell=shell, timeout=timeout)
+        if rc is None:
             return {"args": cmd, "returncode": 124, "stdout": "", "stderr": f"[host] Command timed out after {timeout}s"}
+        return {"args": cmd, "returncode": rc, "stdout": out, "stderr": err}
     except FileNotFoundError as e:
         return {"args": cmd, "returncode": -1, "stdout": "", "stderr": f"Executable or directory not found: {e}"}
 

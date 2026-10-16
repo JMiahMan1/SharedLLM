@@ -94,6 +94,46 @@ GATEWAY_SVC = "http://localhost:11435"
 # Longest the cleanup loop waits for one user's Home Assistant sync into RAG.
 HA_SYNC_TIMEOUT_SECONDS = int(os.getenv("HA_SYNC_TIMEOUT_SECONDS", "1800"))
 
+
+#: Tasks started and not awaited (notices, follow-ups); the loop holds only a
+#: weak reference, so an unreferenced task can be collected mid-run.
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> asyncio.Task:
+    task = asyncio.ensure_future(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
+
+
+async def _clear_kill_flag(mission_id) -> None:
+    """Drop a kill flag left from an earlier mission with the same id: SQLite
+    reuses ids, and a leftover "KILL" would end a fresh mission at once."""
+    import redis.asyncio as redis
+
+    try:
+        async with redis.from_url(REDIS_URL, decode_responses=True) as r:
+            await r.delete(f"raven:mission:kill:{mission_id}")
+    except Exception as e:
+        log.warning(f"[Worker] Could not clear the kill flag of mission {mission_id}: {e}")
+
+
+#: Time a mission may run past its own limit before the worker stops it.
+MISSION_DEADLINE_GRACE_S = 300
+
+
+async def _mission_deadline() -> float | None:
+    """Seconds the worker lets a mission run: its limit plus a grace period."""
+    from services.gateway.agent_loop import get_dynamic_llm_settings, mission_time_limit
+
+    try:
+        limit = mission_time_limit(await get_dynamic_llm_settings())
+    except Exception as e:  # never block a mission on reading settings
+        log.warning(f"[Worker] Could not read the mission time limit: {e}")
+        return None
+    return None if limit == float("inf") else limit + MISSION_DEADLINE_GRACE_S
+
 class RavenWorker:
     def __init__(self):
         self.is_running = False
@@ -395,6 +435,8 @@ class RavenWorker:
 
             if not connected:
                 log.error(f"Talk Monitor: Redis connection failed after 30 attempts ({REDIS_URL}). Will retry next cycle.")
+                with suppress(Exception):
+                    await r.aclose()
                 await asyncio.sleep(60)
                 continue
 
@@ -641,14 +683,7 @@ class RavenWorker:
                         # this id must not abort the fresh one. The agent-loop kill
                         # watcher polls this key, so a lingering "KILL" would otherwise
                         # terminate a brand-new mission the instant it starts.
-                        try:
-                            import redis.asyncio as redis
-
-                            r_clear = redis.from_url(REDIS_URL, decode_responses=True)
-                            await r_clear.delete(f"raven:mission:kill:{mission_id}")
-                            await r_clear.close()
-                        except Exception:
-                            pass
+                        await _clear_kill_flag(mission_id)
 
                     async def chunk_callback(chunk: Any):
                         if isinstance(chunk, dict):
@@ -668,22 +703,32 @@ class RavenWorker:
                             if mission_id:
                                 async def _monitor_kill(mid, task_to_cancel):
                                     import redis.asyncio as redis
-                                    r_kill = redis.from_url(REDIS_URL, decode_responses=True)
-                                    pubsub = r_kill.pubsub()
-                                    await pubsub.subscribe(f"raven:mission:kill:{mid}")
-                                    try:
-                                        async for message in pubsub.listen():
-                                            if message["type"] == "message" and message["data"] == "KILL":
-                                                log.warning(f"[Worker] KILL SIGNAL RECEIVED for mission {mid}. Cancelling task.")
-                                                task_to_cancel.cancel()
-                                                break
-                                    finally:
-                                        await pubsub.unsubscribe()
-                                        await r_kill.close()
+                                    async with redis.from_url(REDIS_URL, decode_responses=True) as r_kill:
+                                        pubsub = r_kill.pubsub()
+                                        try:
+                                            await pubsub.subscribe(f"raven:mission:kill:{mid}")
+                                            async for message in pubsub.listen():
+                                                if message["type"] == "message" and message["data"] == "KILL":
+                                                    log.warning(f"[Worker] KILL SIGNAL RECEIVED for mission {mid}. Cancelling task.")
+                                                    task_to_cancel.cancel()
+                                                    break
+                                        finally:
+                                            with suppress(Exception):
+                                                await pubsub.unsubscribe()
+                                            with suppress(Exception):
+                                                await pubsub.aclose()
                                 kill_monitor = asyncio.create_task(_monitor_kill(mission_id, orchestration_task))
 
+                            # The loop checks its time limit only between steps, and
+                            # one step (model retries, a long tool) can run for most
+                            # of an hour while every chat reply waits behind this
+                            # worker. The limit plus a grace period is enforced here.
+                            deadline = await _mission_deadline() if mission_id else None
                             try:
-                                ans = await orchestration_task
+                                ans = await asyncio.wait_for(orchestration_task, timeout=deadline)
+                            except TimeoutError:
+                                log.error(f"[Worker] Mission {mission_id} passed its time limit; stopped.")
+                                ans = "Mission stopped: it ran past its time limit."
                             except asyncio.CancelledError:
                                 log.warning(f"[Worker] Orchestration for mission {mission_id} was CANCELLED.")
                                 ans = "Mission aborted by user."
@@ -719,14 +764,7 @@ class RavenWorker:
                         # Clear any stale kill flag for this mission id (see TIER3
                         # path): SQLite reuses ids, so a leftover "KILL" from a
                         # prior run must not abort this fresh one.
-                        try:
-                            import redis.asyncio as redis
-
-                            r_clear = redis.from_url(REDIS_URL, decode_responses=True)
-                            await r_clear.delete(f"raven:mission:kill:{mission_id}")
-                            await r_clear.close()
-                        except Exception:
-                            pass
+                        await _clear_kill_flag(mission_id)
 
                     async def chunk_callback(chunk: Any):
                         if isinstance(chunk, dict):
@@ -809,7 +847,7 @@ class RavenWorker:
                         # Best-effort: persist a mission post-mortem into RAG for
                         # self-repair recall (Section 6: mission_history).
                         task_desc = str(payload.get("query") or payload.get("prompt") or "")
-                        asyncio.ensure_future(
+                        _spawn(
                             push_mission(
                                 mission_id,
                                 task_desc,
@@ -839,7 +877,7 @@ class RavenWorker:
                                 )
                                 if _is_learning_mission:
                                     _dc = aiohttp.ClientTimeout(total=30.0)
-                                    asyncio.ensure_future(
+                                    _spawn(
                                         self._trigger_dream_after_learning(
                                             client, mission_id, payload, user_id=str(payload.get("user_id") or "default"),
                                         )
@@ -1104,7 +1142,7 @@ class RavenWorker:
                         "test in the workspace and report PASS/FAIL."
                     )
                     followup_creds = await resolve_first_user()
-                    asyncio.ensure_future(
+                    _spawn(
                         _enqueue_user_mission(
                             query=followup,
                             system=_system,

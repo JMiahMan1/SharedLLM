@@ -2553,7 +2553,7 @@ async def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: st
 
     # Try text first, fallback to base64 for binary
     try:
-        content = local_file.read_text()
+        content = await asyncio.to_thread(local_file.read_text)
         payload = {
             "provider": {"kind": provider_kind, "settings": provider_settings},
             "path": provider_path,
@@ -2563,7 +2563,7 @@ async def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: st
         }
     except UnicodeDecodeError:
         import base64
-        content_bytes = local_file.read_bytes()
+        content_bytes = await asyncio.to_thread(local_file.read_bytes)
         content_b64 = base64.b64encode(content_bytes).decode("utf-8")
         payload = {
             "provider": {"kind": provider_kind, "settings": provider_settings},
@@ -3129,6 +3129,67 @@ app.include_router(upload_router)
 SANDBOX_UID = int(os.getenv("WORKSPACE_SANDBOX_UID", "1000"))
 SANDBOX_GID = int(os.getenv("WORKSPACE_SANDBOX_GID", "1000"))
 
+class _TerminalSetupError(Exception):
+    """A terminal could not be opened; ``reason`` is what the browser is told."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _open_terminal_exec(workspace_id: str, host_path: str) -> tuple[Any, str, Any]:
+    """Container ready, interactive shell created and attached (runs in a thread).
+
+    Returns the docker client, the exec id and the exec's socket.
+    """
+    try:
+        import docker
+
+        from_env = cast(Any, getattr(docker, "from_env", None))
+        if from_env is None:
+            raise RuntimeError("docker.from_env not available")
+        docker_client = from_env(timeout=5)
+    except Exception as e:
+        raise _TerminalSetupError("Docker unavailable") from e
+    try:
+        try:
+            from services.workspace_sandbox import ensure_workspace_container
+
+            ensure_workspace_container(workspace_id, host_path)
+        except Exception as e:
+            raise _TerminalSetupError("Failed to create workspace container") from e
+        cname = f"wsbox-{re.sub(r'[^a-z0-9]+', '-', workspace_id.lower()).strip('-') or 'workspace'}"
+        try:
+            container = docker_client.containers.get(cname)
+            if container.status != "running":
+                container.start()
+        except Exception as e:
+            raise _TerminalSetupError("Container unavailable") from e
+        try:
+            exec_id = docker_client.api.exec_create(
+                cname,
+                cmd=["/bin/bash", "-i"],
+                environment={"TERM": "xterm-256color"},
+                user=f"{SANDBOX_UID}:{SANDBOX_GID}",
+                workdir=host_path,
+                tty=True,
+                stdin=True,
+                stdout=True,
+                stderr=True,
+            )["Id"]
+        except Exception as e:
+            raise _TerminalSetupError("Failed to create shell") from e
+        try:
+            sock = docker_client.api.exec_start(exec_id, tty=True, socket=True)
+        except Exception as e:
+            raise _TerminalSetupError("Failed to start shell") from e
+    except _TerminalSetupError:
+        with suppress(Exception):
+            docker_client.close()
+        raise
+    return docker_client, exec_id, sock
+
+
 @app.websocket("/ws/workspace/{workspace_id}/terminal")
 async def websocket_terminal(
     websocket: WebSocket,
@@ -3192,72 +3253,18 @@ async def websocket_terminal(
         await websocket.close(code=1009, reason="Workspace resolution failed")
         return
 
-    # ---- Get Docker client and container ----
+    # ---- Container and shell ----
+    # Docker calls block, sometimes for seconds (creating the container, a slow
+    # daemon); made here on the event loop they stalled every other request.
     try:
-        import docker
-        from_env = cast(Any, getattr(docker, "from_env", None))
-        if from_env is None:
-            raise RuntimeError("docker.from_env not available")
-        docker_client = from_env(timeout=5)
-    except Exception as e:
-        log.warning(f"[terminal] Docker unavailable: {e}")
-        await websocket.close(code=1011, reason="Docker unavailable")
-        return
-
-    # Ensure the workspace container exists (create if needed)
-    try:
-        from services.workspace_sandbox import ensure_workspace_container
-        ensure_workspace_container(workspace_id, host_path)
-    except Exception as e:
-        log.error(f"[terminal] Failed to ensure workspace container: {e}")
-        await websocket.close(code=1011, reason="Failed to create workspace container")
-        return
-
-    cname = f"wsbox-{re.sub(r'[^a-z0-9]+', '-', workspace_id.lower()).strip('-') or 'workspace'}"
-
-    try:
-        container = docker_client.containers.get(cname)
-        if container.status != "running":
-            container.start()
-    except Exception as e:
-        log.error(f"[terminal] Failed to get/start container: {e}")
-        await websocket.close(code=1011, reason="Container unavailable")
-        return
-
-    # ---- Create PTY exec ----
-    try:
-        shell_cmd = ["/bin/bash", "-i"]
-        log.debug(f"[terminal] Creating PTY exec for container {cname} at {host_path}")
-        try:
-            test_exec = docker_client.api.exec_create(
-                cname, cmd=["/bin/bash", "-c", "exit 0"]
-            )
-            docker_client.api.exec_start(test_exec["Id"])
-        except Exception:
-            shell_cmd = ["/bin/bash", "-i"]
-
-        exec_resp = docker_client.api.exec_create(
-            cname,
-            cmd=shell_cmd,
-            environment={"TERM": "xterm-256color"},
-            user=f"{SANDBOX_UID}:{SANDBOX_GID}",
-            workdir=host_path,
-            tty=True,
-            stdin=True,
-            stdout=True,
-            stderr=True,
-        )
-        exec_id = exec_resp["Id"]
-    except Exception as e:
-        log.error(f"[terminal] Failed to create exec: {e}")
-        await websocket.close(code=1011, reason="Failed to create shell")
+        docker_client, exec_id, sock = await asyncio.to_thread(_open_terminal_exec, workspace_id, host_path)
+    except _TerminalSetupError as e:
+        log.error(f"[terminal] {e.reason}: {e.__cause__ or e}")
+        await websocket.close(code=1011, reason=e.reason)
         return
 
     # ---- Start streaming ----
-    sock = None
     try:
-        sock = docker_client.api.exec_start(exec_id, tty=True, socket=True)
-
         # Helper to send stdout to client
         async def send_to_client(data: bytes):
             with suppress(Exception):
@@ -3310,7 +3317,7 @@ async def websocket_terminal(
                                 width = ctrl.get("width", 80)
                                 height = ctrl.get("height", 24)
                                 with suppress(Exception):
-                                    docker_client.api.exec_resize(exec_id, width=width, height=height)
+                                    await asyncio.to_thread(docker_client.api.exec_resize, exec_id, width=width, height=height)
                         except Exception:
                             pass
                     if not is_ctrl:
@@ -3353,5 +3360,7 @@ async def websocket_terminal(
                     raw.shutdown(socket.SHUT_RDWR)
             with suppress(Exception):
                 sock.close()
+        with suppress(Exception):
+            docker_client.close()
         with suppress(Exception):
             await websocket.close()

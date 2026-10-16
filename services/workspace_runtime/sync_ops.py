@@ -155,17 +155,23 @@ def run_workspace_sync(
 
     client = _nextcloud_client(identity)
     lock = get_workspace_lock(workspace["id"])
-    with lock:
-        engine = SyncEngine(
-            local_root=Path(workspace["resolved_path"]),
-            remote=client,
-            remote_root=remote_root,
-            records=_load_records(workspace["id"]),
-            excludes=workspace.get("excludes") or [],
-        )
-        report = engine.run(direction=direction, dry_run=dry_run)
-        if not dry_run:
-            _save_records(workspace["id"], engine.records)
+    try:
+        with lock:
+            engine = SyncEngine(
+                local_root=Path(workspace["resolved_path"]),
+                remote=client,
+                remote_root=remote_root,
+                records=_load_records(workspace["id"]),
+                excludes=workspace.get("excludes") or [],
+            )
+            report = engine.run(direction=direction, dry_run=dry_run)
+            if not dry_run:
+                _save_records(workspace["id"], engine.records)
+    finally:
+        # Each run made a new HTTP session and never closed it.
+        close = getattr(client, "close", None)
+        if close:
+            close()
     return report.as_dict()
 
 
