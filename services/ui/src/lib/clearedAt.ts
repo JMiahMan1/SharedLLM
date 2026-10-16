@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { storageGet, storageGetSync, storageSet } from './storage';
 
 /**
@@ -34,4 +34,38 @@ function toIso(value: string | undefined): string {
   if (!value) return '';
   const ms = new Date(value).getTime();
   return Number.isFinite(ms) ? new Date(ms).toISOString() : '';
+}
+
+/** How many dismissed ids to remember; older ones have scrolled out of every list. */
+const DISMISSED_MAX = 300;
+
+/**
+ * Per-item "clear" for the same kind of list: one notice swiped away, on this
+ * device. Kept beside `useClearedAt`, which clears everything up to a moment.
+ */
+export function useDismissed(key: string): [Set<string>, (id: string) => void] {
+  const [ids, setIds] = useState<string[]>(() => parseIds(storageGetSync(key)));
+  useEffect(() => {
+    let live = true;
+    void storageGet(key).then((v) => { if (live && v) setIds(parseIds(v)); });
+    return () => { live = false; };
+  }, [key]);
+  const dismiss = useCallback((id: string) => {
+    setIds((cur) => {
+      const next = [...cur.filter((x) => x !== id), id].slice(-DISMISSED_MAX);
+      void storageSet(key, JSON.stringify(next));
+      return next;
+    });
+  }, [key]);
+  const dismissed = useMemo(() => new Set(ids), [ids]);
+  return [dismissed, dismiss];
+}
+
+function parseIds(raw: string | null | undefined): string[] {
+  try {
+    const v = JSON.parse(raw || '[]');
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
 }

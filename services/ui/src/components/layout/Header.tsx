@@ -8,7 +8,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useLocation } from '../../context/LocationContext';
 import { useSystemHealth } from '../../hooks/useSystemHealth';
 import { relativeTime } from '../../lib/wanderTrips';
-import { useClearedAt, newerThan } from '../../lib/clearedAt';
+import { useClearedAt, useDismissed, newerThan } from '../../lib/clearedAt';
+import SwipeToDismiss from '../ui/SwipeToDismiss';
 import { navPagesFor } from './navItems';
 
 // Navigation search index: the header box is a *command-palette* style finder
@@ -28,6 +29,7 @@ const EXTRA_ITEMS: NavItem[] = [
 const SEEN_KEY = 'jarvis_notifications_seen_at';
 /** When "Clear all" was last used; older notices stay hidden on this device. */
 const CLEARED_KEY = 'jarvis_notifications_cleared_at';
+const DISMISSED_KEY = 'jarvis_notifications_dismissed';
 
 const Header = () => {
   const { user, logout } = useAuth();
@@ -113,7 +115,9 @@ const Header = () => {
   // "Clear all" hides the current notices on this device; the outbox keeps
   // them (they are also the phone's notification history).
   const [clearedAt, clearNotifications] = useClearedAt(CLEARED_KEY);
-  const visible = newerThan(notifications, clearedAt, (n) => n.created_at);
+  // A single notice swiped away stays hidden on this device too.
+  const [dismissed, dismissNotification] = useDismissed(DISMISSED_KEY);
+  const visible = newerThan(notifications, clearedAt, (n) => n.created_at).filter((n) => !dismissed.has(String(n.id)));
   const unread = newerThan(visible, seenAt, (n) => n.created_at).length;
 
   const toggleNotifications = () => {
@@ -214,13 +218,15 @@ const Header = () => {
                 {visible.length === 0 ? (
                   <p className="text-xs text-slate-500 text-center py-6">You're all caught up</p>
                 ) : visible.slice(0, 10).map((n) => (
-                  <div key={n.id} className="p-3 rounded-xl bg-white/5 border border-white/5">
-                    <p className="text-xs text-white font-medium break-words">{n.title}</p>
-                    {(n.body || n.error) && (
-                      <p className="text-[11px] text-slate-400 mt-1 break-words line-clamp-2">{n.body || n.error}</p>
-                    )}
-                    <p className="text-[10px] text-slate-500 mt-1.5">{relativeTime(n.created_at)}</p>
-                  </div>
+                  <SwipeToDismiss key={n.id} label={n.title} onDismiss={() => dismissNotification(String(n.id))}>
+                    <div className="p-3 pr-10 rounded-xl bg-white/5 border border-white/5">
+                      <p className="text-xs text-white font-medium break-words">{n.title}</p>
+                      {(n.body || n.error) && (
+                        <p className="text-[11px] text-slate-400 mt-1 break-words line-clamp-2">{n.body || n.error}</p>
+                      )}
+                      <p className="text-[10px] text-slate-500 mt-1.5">{relativeTime(n.created_at)}</p>
+                    </div>
+                  </SwipeToDismiss>
                 ))}
               </div>
             </div>

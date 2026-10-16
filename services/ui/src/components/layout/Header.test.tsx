@@ -135,6 +135,20 @@ describe('Header notifications bell', () => {
     expect(screen.getByText("You're all caught up")).toBeTruthy();
   });
 
+  it('clears one notice with its button and keeps it cleared', async () => {
+    const first = renderHeader();
+    fireEvent.click(await screen.findByRole('button', { name: /notifications, 2 new/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Michele left Home' }));
+    await waitFor(() => expect(screen.queryByText('Michele left Home')).toBeNull());
+    expect(screen.getByText('Michele arrived at Home')).toBeTruthy();
+
+    first.unmount();
+    renderHeader();
+    fireEvent.click(await screen.findByRole('button', { name: /notifications/i }));
+    expect(screen.queryByText('Michele left Home')).toBeNull();
+    expect(screen.getByText('Michele arrived at Home')).toBeTruthy();
+  });
+
   it('closes when tapping outside or pressing Escape', async () => {
     renderHeader();
     fireEvent.click(await screen.findByRole('button', { name: /notifications, 2 new/i }));
