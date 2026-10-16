@@ -37,7 +37,8 @@ def test_only_the_gateway_and_telemetry_are_exempt():
 def test_outside_senders_are_capped():
     conf = _ntfy()
     assert conf["behind-proxy"] is True
-    assert conf["message-size-limit"] == 4096
+    # ntfy reads sizes as strings ("4k"); an integer makes it refuse to start.
+    assert conf["message-size-limit"] == "4k"
     assert 0 < conf["visitor-message-daily-limit"] <= 5000
     assert conf["cache-duration"] == "12h"
     assert "everyone:up*:wo" in conf["auth-access"]
