@@ -132,11 +132,7 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
 
         elif action == "list":
             user_id = req.user_context.user
-            keys = await r.keys(f"timer:{user_id}:*")
-            timers = []
-            for k in keys:
-                data = await r.get(k)
-                if data: timers.append(json.loads(data))
+            timers = [t for _, t in await _load_timers(r, user_id)]
 
             if not timers:
                 return ExecutionResult(status="SUCCESS", message="No active timers.", service="timer_list")
@@ -147,19 +143,15 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
         elif action == "delete":
             # Prefer exact id match; fall back to title substring match.
             user_id = req.user_context.user
-            keys = await r.keys(f"timer:{user_id}:*")
             deleted_count = 0
-            for k in keys:
-                data = await r.get(k)
-                if data:
-                    t = json.loads(data)
-                    if req.id:
-                        if t.get("id") == req.id:
-                            await r.delete(k)
-                            deleted_count += 1
-                    elif req.title and req.title.lower() in t['title'].lower():
+            for k, t in await _load_timers(r, user_id):
+                if req.id:
+                    if t.get("id") == req.id:
                         await r.delete(k)
                         deleted_count += 1
+                elif req.title and req.title.lower() in t['title'].lower():
+                    await r.delete(k)
+                    deleted_count += 1
 
             if deleted_count > 0:
                 return ExecutionResult(status="SUCCESS", message=f"Deleted {deleted_count} timer(s).", service="timer_delete")
@@ -167,47 +159,39 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
 
         elif action == "pause":
             user_id = req.user_context.user
-            keys = await r.keys(f"timer:{user_id}:*")
-            for k in keys:
-                data = await r.get(k)
-                if data:
-                    t = json.loads(data)
-                    if t.get("active") and _targets(t, req):
-                        t["active"] = False
-                        t["paused_at"] = datetime.now(UTC).isoformat()
-                        await r.set(k, json.dumps(t))
-                        return ExecutionResult(status="SUCCESS", message=f"Paused timer '{t['title']}'.", service="timer_pause", detail={"timer_id": t["id"]})
+            for k, t in await _load_timers(r, user_id):
+                if t.get("active") and _targets(t, req):
+                    t["active"] = False
+                    t["paused_at"] = datetime.now(UTC).isoformat()
+                    await r.set(k, json.dumps(t))
+                    return ExecutionResult(status="SUCCESS", message=f"Paused timer '{t['title']}'.", service="timer_pause", detail={"timer_id": t["id"]})
             return ExecutionResult(status="FAILURE", message="No active matching timer found to pause.", service="timer_pause")
 
         elif action == "resume":
             user_id = req.user_context.user
-            keys = await r.keys(f"timer:{user_id}:*")
-            for k in keys:
-                data = await r.get(k)
-                if data:
-                    t = json.loads(data)
-                    if not t.get("active") and t.get("paused_at") and _targets(t, req):
-                        try:
-                            paused_at = datetime.fromisoformat(t["paused_at"])
-                            expires_at = datetime.fromisoformat(t["expires_at"])
-                            now = datetime.now(UTC)
-                            if not paused_at.tzinfo:
-                                paused_at = paused_at.replace(tzinfo=UTC)
-                            if not expires_at.tzinfo:
-                                expires_at = expires_at.replace(tzinfo=UTC)
-                            if not now.tzinfo:
-                                now = now.replace(tzinfo=UTC)
+            for k, t in await _load_timers(r, user_id):
+                if not t.get("active") and t.get("paused_at") and _targets(t, req):
+                    try:
+                        paused_at = datetime.fromisoformat(t["paused_at"])
+                        expires_at = datetime.fromisoformat(t["expires_at"])
+                        now = datetime.now(UTC)
+                        if not paused_at.tzinfo:
+                            paused_at = paused_at.replace(tzinfo=UTC)
+                        if not expires_at.tzinfo:
+                            expires_at = expires_at.replace(tzinfo=UTC)
+                        if not now.tzinfo:
+                            now = now.replace(tzinfo=UTC)
 
-                            elapsed_paused = now - paused_at
-                            new_expires = expires_at + elapsed_paused
-                            t["expires_at"] = new_expires.isoformat()
-                        except Exception as err:
-                            log.error(f"Error recalculating timer expiry on resume: {err}")
+                        elapsed_paused = now - paused_at
+                        new_expires = expires_at + elapsed_paused
+                        t["expires_at"] = new_expires.isoformat()
+                    except Exception as err:
+                        log.error(f"Error recalculating timer expiry on resume: {err}")
 
-                        t["active"] = True
-                        t.pop("paused_at", None)
-                        await r.set(k, json.dumps(t))
-                        return ExecutionResult(status="SUCCESS", message=f"Resumed timer '{t['title']}'.", service="timer_resume", detail={"timer_id": t["id"]})
+                    t["active"] = True
+                    t.pop("paused_at", None)
+                    await r.set(k, json.dumps(t))
+                    return ExecutionResult(status="SUCCESS", message=f"Resumed timer '{t['title']}'.", service="timer_resume", detail={"timer_id": t["id"]})
             return ExecutionResult(status="FAILURE", message="No paused matching timer found to resume.", service="timer_resume")
 
         return ExecutionResult(status="FAILURE", message=f"Unknown timer action: {action}", service="timer")
@@ -229,13 +213,31 @@ def _targets(timer: dict, req) -> bool:
     return not req.title or req.title.lower() in str(timer.get("title", "")).lower()
 
 
+async def _load_timers(r, user_id: str | None) -> list[tuple[str, dict]]:
+    """Every stored timer as (key, timer), for one user or everyone.
+
+    Timers live at ``timer:<user>:<id>``. The automation service keeps each
+    timer's run history beside it as a Redis list at ``timer:<user>:<id>:history``,
+    which the same ``timer:<user>:*`` pattern also matches; reading that as a
+    string raised WRONGTYPE and failed every list, pause and delete once a timer
+    had fired. Only three-part keys are timers.
+    """
+    pattern = f"timer:{user_id}:*" if user_id else "timer:*:*"
+    out: list[tuple[str, dict]] = []
+    for k in await r.keys(pattern):
+        key = k.decode() if isinstance(k, bytes) else k
+        if key.count(":") != 2:
+            continue
+        data = await r.get(key)
+        if not data:
+            continue
+        try:
+            out.append((key, json.loads(data)))
+        except ValueError:
+            log.warning(f"[timer] skipping unreadable timer {key}")
+    return out
+
+
 async def get_active_timers(user_id: str | None = None):
     r = await get_redis()
-    pattern = f"timer:{user_id}:*" if user_id else "timer:*:*"
-    keys = await r.keys(pattern)
-    timers = []
-    for k in keys:
-        data = await r.get(k)
-        if data:
-            timers.append(json.loads(data))
-    return timers
+    return [t for _, t in await _load_timers(r, user_id)]

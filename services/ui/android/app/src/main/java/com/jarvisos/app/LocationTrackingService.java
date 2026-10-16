@@ -3,8 +3,6 @@ package com.jarvisos.app;
 import android.Manifest;
 import android.app.AlarmManager;
 import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
@@ -27,7 +25,6 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.Log;
-import androidx.core.app.NotificationCompat;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -50,7 +47,6 @@ import org.json.JSONObject;
  */
 public class LocationTrackingService extends Service {
     private static final String TAG = "LocationTracking";
-    private static final String CHANNEL_ID = "location_tracking";
     private static final int NOTIFICATION_ID = 0x10A1;
     private static final long MIN_TIME_MS = 30_000L;
     private static final float MIN_DISTANCE_M = 5f;
@@ -169,7 +165,6 @@ public class LocationTrackingService extends Service {
     public void onCreate() {
         super.onCreate();
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-        createChannel();
         // Mirrored natively at login, so the service authenticates with no WebView.
         android.content.SharedPreferences p = TokenBridgePlugin.prefs(this);
         username = p.getString(TokenBridgePlugin.KEY_USERNAME, null);
@@ -211,26 +206,9 @@ public class LocationTrackingService extends Service {
                 .apply();
     }
 
-    private void createChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        if (nm.getNotificationChannel(CHANNEL_ID) != null) return;
-        NotificationChannel ch = new NotificationChannel(
-                CHANNEL_ID, "Location sharing", NotificationManager.IMPORTANCE_LOW);
-        ch.setDescription("Keeps sharing your location with your family while the app is closed.");
-        ch.setShowBadge(false);
-        nm.createNotificationChannel(ch);
-    }
-
     private void startForegroundCompat() {
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Sharing your location")
-                .setContentText("Jarvis keeps your family map up to date while the app is closed.")
-                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-                .setOngoing(true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setCategory(NotificationCompat.CATEGORY_SERVICE)
-                .build();
+        Notification notification = BackgroundNotice.build(
+                this, android.R.drawable.ic_menu_mylocation, "Location sharing is on", null);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
         } else {

@@ -249,3 +249,38 @@ async def test_a_notice_failure_does_not_raise(monkeypatch):
     _FakeSession.fail = True
     monkeypatch.setattr(aiohttp, "ClientSession", _FakeSession)
     assert await notify_timer_done("michele", {"title": "Pasta"}) is False
+
+
+class HistoryList(list):
+    """A Redis list value: reading it with GET is a WRONGTYPE error."""
+
+
+class RedisWithHistory(MockRedis):
+    async def get(self, key):
+        val = self.store.get(key)
+        if isinstance(val, HistoryList):
+            raise RuntimeError("WRONGTYPE Operation against a key holding the wrong kind of value")
+        return val
+
+
+@pytest.mark.asyncio
+async def test_run_history_beside_a_timer_is_not_read_as_a_timer(mocker):
+    """Automation keeps timer:<user>:<id>:history lists next to the timers."""
+    from services.execution.handlers.timer import get_active_timers
+
+    r = RedisWithHistory()
+    mocker.patch("services.execution.handlers.timer.get_redis", return_value=r)
+    await handle_timer(TimerRequest(user_context=mock_context, action="add", type="timer", duration_str="10m", title="Pasta"))
+    timer_key = next(iter(r.store))
+    r.store[f"{timer_key}:history"] = HistoryList(["fired"])
+
+    assert [t["title"] for t in await get_active_timers("test_user")] == ["Pasta"]
+    listed = await handle_timer(TimerRequest(user_context=mock_context, action="list"))
+    assert "Pasta" in listed.message
+    paused = await handle_timer(TimerRequest(user_context=mock_context, action="pause", title="Pasta"))
+    assert paused.status == "SUCCESS"
+    resumed = await handle_timer(TimerRequest(user_context=mock_context, action="resume", title="Pasta"))
+    assert resumed.status == "SUCCESS"
+    deleted = await handle_timer(TimerRequest(user_context=mock_context, action="delete", title="Pasta"))
+    assert deleted.status == "SUCCESS"
+    assert list(r.store) == [f"{timer_key}:history"]
