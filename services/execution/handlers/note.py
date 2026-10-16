@@ -309,10 +309,10 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
         elif action == "list":
             directories = req.directories or DEFAULT_NOTES_DIRS
             all_notes = []
+            # Listing never creates the folder: a missing one has no notes, and
+            # the existence check cost Nextcloud another seconds-long request.
             for base_dir in directories:
-                await provider.ensure_directory(base_dir)
-                notes = await _walk_webdav_dir(provider, base_dir)
-                all_notes.extend(notes)
+                all_notes.extend(await _walk_webdav_dir(provider, base_dir))
             # Newest first by time, not by the text of an HTTP date.
             all_notes.sort(key=_modified_ts, reverse=True)
             if req.previews:
@@ -365,59 +365,91 @@ def _modified_ts(note: dict) -> float:
     except (TypeError, ValueError):
         return 0.0
 
-async def _walk_webdav_dir(provider, base_dir: str, current_path: str = "") -> list[dict]:
-    """Recursively walk a WebDAV directory and return all .md files."""
+#: Folder listings run at most this many at once when Nextcloud refuses a
+#: whole-tree listing (each one costs Nextcloud a second or more).
+WALK_CONCURRENCY = 4
+
+
+async def _propfind(provider, dir_path: str, depth: str) -> tuple[int, str]:
     from .. import http_client
 
-    dir_path = f"{base_dir}/{current_path}".rstrip("/")
-    dir_url = provider.file_url(dir_path)
+    resp = await http_client.request(
+        "PROPFIND",
+        provider.file_url(dir_path),
+        auth=(provider.username, provider.password),
+        headers={"Depth": depth, "Content-Type": "application/xml; charset=utf-8"},
+        data=_LIST_PROPS,
+        verify=False,
+        timeout=60,
+    )
+    return resp["status_code"], resp.get("text") or ""
 
+
+def _md_entries(xml_text: str, base_dir: str) -> tuple[list[dict], list[str]]:
+    """Notes (.md files) and sub-folder paths in a PROPFIND reply, with paths
+    relative to the user's files and starting at ``base_dir``."""
+    root = ET.fromstring(xml_text)
+    ns = {"DAV": "DAV:"}
+    anchor = f"/{base_dir.strip('/')}/"
+    notes: list[dict] = []
+    folders: list[str] = []
+    for response in root.findall(".//DAV:response", ns):
+        href = response.findtext("DAV:href", "", ns)
+        decoded = _decode_webdav_href(href)
+        if anchor not in decoded + "/":
+            continue
+        inside = (decoded + "/").split(anchor, 1)[-1].strip("/")
+        if not inside:
+            continue  # the folder itself
+        full_path = f"{base_dir.strip('/')}/{inside}"
+        is_collection = href.endswith("/") or response.find(".//DAV:resourcetype/DAV:collection", ns) is not None
+        if is_collection:
+            folders.append(full_path)
+        elif inside.lower().endswith(".md"):
+            size_elem = response.find(".//DAV:getcontentlength", ns)
+            modified_elem = response.find(".//DAV:getlastmodified", ns)
+            notes.append({
+                "title": inside.rsplit("/", 1)[-1][:-3],
+                "path": full_path,
+                "size": int(size_elem.text) if size_elem is not None and size_elem.text else 0,
+                "modified": modified_elem.text if modified_elem is not None else "",
+            })
+    return notes, folders
+
+
+async def _walk_webdav_dir(provider, base_dir: str) -> list[dict]:
+    """Every .md file under ``base_dir``, at any depth.
+
+    One whole-tree listing (Depth: infinity) is a single request; Nextcloud
+    spends a second or more on each listing, so walking folder by folder
+    (nine sequential requests for a typical Notes tree) took over 20 s. If the
+    server refuses infinite depth, folders are listed a few at a time. A
+    missing folder simply has no notes.
+    """
     try:
-        resp = await http_client.request(
-            "PROPFIND",
-            dir_url,
-            auth=(provider.username, provider.password),
-            headers={"Depth": "1", "Content-Type": "application/xml; charset=utf-8"},
-            data=_LIST_PROPS,
-            verify=False,
-            timeout=30,
-        )
-
-        if resp["status_code"] != 207:
+        status, text = await _propfind(provider, base_dir, "infinity")
+        if status == 207:
+            return _md_entries(text, base_dir)[0]
+        if status == 404:
             return []
+        log.info("Whole-tree listing of %s refused (HTTP %s); listing folders instead", base_dir, status)
 
-        notes = []
-        root = ET.fromstring(resp["text"])
-        ns = {"DAV": "DAV:"}
+        gate = asyncio.Semaphore(WALK_CONCURRENCY)
+        notes: list[dict] = []
 
-        for response in root.findall(".//DAV:response", ns):
-            href = response.findtext("DAV:href", "", ns)
-            decoded_href = _decode_webdav_href(href)
-            relative = decoded_href.split(dir_path, 1)[-1].lstrip("/") if dir_path in decoded_href else decoded_href
+        async def walk(dir_path: str) -> None:
+            async with gate:
+                status, text = await _propfind(provider, dir_path, "1")
+            if status != 207:
+                return
+            found, folders = _md_entries(text, base_dir)
+            notes.extend(n for n in found if n["path"].rsplit("/", 1)[0] == dir_path.strip("/"))
+            await asyncio.gather(*(walk(f) for f in folders if f.strip("/") != dir_path.strip("/")))
 
-            is_collection = href.endswith("/") or response.find(".//DAV:resourcetype/DAV:collection", ns) is not None
-
-            if is_collection:
-                if relative and relative != base_dir.split("/")[-1]:
-                    subdir = f"{current_path}/{relative}".lstrip("/") if current_path else relative
-                    sub_notes = await _walk_webdav_dir(provider, base_dir, subdir)
-                    notes.extend(sub_notes)
-            elif relative.lower().endswith(".md"):
-                size_elem = response.find(".//DAV:getcontentlength", ns)
-                modified_elem = response.find(".//DAV:getlastmodified", ns)
-                full_path = f"{base_dir}/{current_path}/{relative}".replace("//", "/")
-
-                notes.append({
-                    "title": relative.replace(".md", ""),
-                    "path": full_path,
-                    "size": int(size_elem.text) if size_elem is not None and size_elem.text else 0,
-                    "modified": modified_elem.text if modified_elem is not None else "",
-                })
-
+        await walk(base_dir)
         return notes
-
-    except Exception as e:
-        log.error(f"WebDAV walk error at {dir_path}: {e}")
+    except Exception as e:  # noqa: BLE001 - a broken listing shows as no notes, with the reason logged
+        log.error("WebDAV listing error at %s: %s", base_dir, str(e) or type(e).__name__)
         return []
 
 def _decode_webdav_href(href: str) -> str:
