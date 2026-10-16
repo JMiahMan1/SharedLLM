@@ -36,7 +36,8 @@ import Modal from '../components/ui/Modal';
 import BentoBoxDashboard from '../components/dashboard/BentoBoxDashboard';
 import DashboardSettingsPanel from '../components/dashboard/DashboardSettingsPanel';
 import { useWidgetStore } from '../stores/widgetStore';
-import { useClearedAt, newerThan } from '../lib/clearedAt';
+import { useClearedAt, useDismissed, newerThan } from '../lib/clearedAt';
+import SwipeToDismiss from '../components/ui/SwipeToDismiss';
 import { relativeTime } from '../lib/wanderTrips';
 
 // Per-section Error Boundary
@@ -146,6 +147,9 @@ const LOG_LEVEL_COLORS: Record<string, string> = {
 };
 
 const PROBLEMS_CLEARED_KEY = 'jarvis_problems_cleared_at';
+const PROBLEMS_DISMISSED_KEY = 'jarvis_problems_dismissed';
+/** Log entries have no stable id; this names one well enough to hide it. */
+const problemKey = (log: LogEntry) => `${log.timestamp}|${log.service}|${log.message}`;
 
 /** The newest timestamp in a list, so a clear hides exactly what was shown
  *  even when this device's clock and the server's disagree. */
@@ -165,7 +169,7 @@ const LogEntryCard = ({ log }: { log: LogEntry }) => {
   // The logging service stores levels upper-case ("ERROR"); compare folded.
   const level = (log.level || '').toLowerCase();
   return (
-  <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-black/20 border border-white/5 hover:bg-black/30 transition-colors">
+  <div className="flex items-start gap-3 pl-4 pr-10 py-3 rounded-xl bg-black/20 border border-white/5 hover:bg-black/30 transition-colors">
     <div
       className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
         level === 'error' ? 'bg-red-500' :
@@ -331,7 +335,9 @@ const Dashboard = () => {
   });
   // Clearing hides what is listed now; the system log itself is untouched.
   const [problemsClearedAt, clearProblems] = useClearedAt(PROBLEMS_CLEARED_KEY);
-  const problems = newerThan(allProblems, problemsClearedAt, (log) => log.timestamp);
+  const [dismissedProblems, dismissProblem] = useDismissed(PROBLEMS_DISMISSED_KEY);
+  const problems = newerThan(allProblems, problemsClearedAt, (log) => log.timestamp)
+    .filter((log) => !dismissedProblems.has(problemKey(log)));
 
   const { data: workspaces = [] } = useQuery<Workspace[]>({
     queryKey: ['workspaces'],
@@ -581,7 +587,9 @@ const Dashboard = () => {
             <div className="space-y-2">
               {problems.length > 0 ? (
                 problems.slice(0, 8).map((log, index) => (
-                  <LogEntryCard key={`${log.timestamp}-${index}`} log={log} />
+                  <SwipeToDismiss key={`${log.timestamp}-${index}`} label={`${log.service} ${log.level}`} onDismiss={() => dismissProblem(problemKey(log))}>
+                    <LogEntryCard log={log} />
+                  </SwipeToDismiss>
                 ))
               ) : (
                 <div className="flex flex-col items-center justify-center py-10 text-center">
