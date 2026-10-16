@@ -246,3 +246,14 @@ def test_an_expired_session_logs_in_again(monkeypatch):
     assert client.call("system", "info") == {"uptime": 5}
     # The stale session is refused, a new login follows, then the call is retried.
     assert sessions == ["stale", "0" * 32, "fresh"]
+
+
+def test_router_log_times_in_milliseconds_are_counted_in_seconds():
+    """logd reports milliseconds; read as seconds, five hours of log looked like 30 minutes."""
+    now = 1_792_163_136.0
+    # One reconnect every 6 minutes for 5 hours: never 6 within 30 minutes.
+    lines = [{"id": i, "time": int((now - 5 * 3600 + i * 360) * 1000), "priority": 5,
+              "msg": f"AP-STA-CONNECTED {TV} auth_alg=open"} for i in range(50)]
+    lines = [{**ln, "time": rm._seconds(ln["time"])} for ln in lines]
+    assert rm.flap_notices({}, snap(0, log=lines), now) == []
+    assert rm.log_entries([{"id": 1, "time": 1_792_163_136_273, "priority": 3, "msg": "x"}])[0]["time"] == 1_792_163_136
