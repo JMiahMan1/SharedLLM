@@ -432,7 +432,7 @@ async def _discover_via_arp(
                     if mac_part != "00:00:00:00:00:00" and mac_part != "incomplete":
                         arp_ips.append((ip_part, mac_part))
         except FileNotFoundError:
-            result = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=5)
+            result = await asyncio.to_thread(subprocess.run, ["arp", "-a"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 for line in result.stdout.splitlines():
                     parts = line.split()
@@ -506,7 +506,7 @@ async def _discover_via_arp_scan(
 
         for subnet in subnets:
             try:
-                result = subprocess.run(
+                result = await asyncio.to_thread(subprocess.run,
                     ["arp-scan", "--localnet", "--interface=wlo1", f"--net={subnet}"],
                     capture_output=True, text=True, timeout=30
                 )
@@ -588,7 +588,7 @@ async def _discover_via_snmp(
 
         # SNMP OID: ipNetToMediaPhysAddress (1.3.6.1.2.1.4.22.1.2)
         # Returns: ifIndex.IP.OCTET = MAC address
-        result = subprocess.run(
+        result = await asyncio.to_thread(subprocess.run,
             ["snmpwalk", "-v2c", "-c", community, router_ip, "1.3.6.1.2.1.4.22.1.2"],
             capture_output=True, text=True, timeout=15
         )
