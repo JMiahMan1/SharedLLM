@@ -42,11 +42,9 @@ Redis-backed log ingestion, storage, and real-time streaming for the SharedLLM S
 | `log_max_entries` (Identity setting → `LOG_MAX_ENTRIES`) | `10000` | Hard cap; oldest entries are trimmed on write |
 | `INTERNAL_SECRET` (env) | *(required)* | Service-to-service authentication |
 
-Defaults are in `services/config.py`. Note: `services/logging/main.py` imports
-`LOG_RETENTION_DAYS` / `LOG_MAX_ENTRIES` by value at import time, before
-`resolve_runtime_config()` runs in its lifespan, so changing the Identity
-settings currently has no effect — the defaults (30 days, 10000 entries)
-always apply.
+Defaults are in `services/config.py`. The service reads the Identity settings
+once at startup (`resolve_runtime_config()` in its lifespan), so a change takes
+effect when the logging container restarts.
 
 ## API Endpoints
 
@@ -91,6 +89,15 @@ unauthenticated `GET`/`DELETE /api/logs` were removed on 2026-10-15
 - `limit` (int, default 100, max 5000): Number of entries to return
 - `service` (string, optional): Filter by service name
 - `user_id` (string, optional): Filter by user ID (admins see all)
+- `level` (string, optional, `/api/admin/logs`): comma-separated levels, e.g.
+  `warning,error` (`warning` also matches `WARN`). Scans the whole buffer
+  rather than the newest `limit × 10` lines.
+
+What is in the log: almost entirely the gateway's request lines
+(`GET /path` and `RESPONSE GET /path -> 200`). A response line is `ERROR` for a
+5xx, `WARNING` for a 4xx and `INFO` otherwise, so failed requests can be
+found with `level=warning,error`. With the default `LOG_MAX_ENTRIES` the buffer
+covers roughly the last one to two hours.
 
 **Response:**
 
@@ -123,11 +130,19 @@ WS /api/logs/stream
 WS /logs/stream
 ```
 
-Connects to Redis PubSub and streams log entries in real time. Each message is
-a JSON object matching the log entry format, with a `{"ping": true}` keepalive.
-Authenticated by `?token=` — the internal secret or a valid user API key
-(checked against Identity); otherwise the socket is closed with code 4401.
-Caddy routes `/api/logs/stream*` straight to this service.
+Streams each new log entry (a JSON object in the log entry format) from Redis
+PubSub. The client's heartbeat `{"type": "ping"}` is answered with
+`{"ping": true}` (the UI's `lib/wsManager.ts` reconnects when a ping goes
+unanswered), and the subscription ends as soon as the client leaves.
+Authenticated by `?token=`: the internal secret or an **admin's** API key
+(Identity's `validate-api-key`); anything else is refused before the socket is
+accepted. Caddy routes `/api/logs/stream*` straight to this service.
+
+Used by Jarvis Lab → Admin view → Live Telemetry. Admin → Database & Audit →
+Audit Trail reads `GET /api/admin/logs`; the dashboard's admin-only **Recent
+Problems** panel reads `GET /api/admin/logs?level=warning,error` (its Clear
+button, after a confirm, empties the whole log). The header bell does **not**
+read logs: it shows the user's own notices from the telemetry outbox.
 
 ## Retention Cleanup
 
@@ -138,7 +153,7 @@ Logs are automatically purged — no manual intervention required.
 
 ## Security
 
-- All ingestion endpoints require `X-Internal-Secret` header
+- Every HTTP endpoint requires the `X-Internal-Secret` header (compared in constant time)
 - Sensitive fields are automatically redacted: `api_key`, `authorization`, `cookie`, `password`, `token`, etc.
 - Bearer tokens, GitHub PATs, and GitLab tokens are pattern-matched and redacted
 - Log messages and context fields are truncated to 4000 characters

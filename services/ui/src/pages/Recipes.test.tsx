@@ -112,11 +112,47 @@ describe('Recipes', () => {
     expect(screen.getByTestId('send-as-badge')).toBeTruthy();
   });
 
-  it('deletes a recipe', async () => {
+  it('deletes a recipe after asking', async () => {
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirm);
     renderRecipes();
     await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
 
     fireEvent.click(screen.getByLabelText('Delete Pancakes'));
     await waitFor(() => expect(deleteNote).toHaveBeenCalled());
+    expect(confirm).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('edits an open recipe in place, without stacking the stored header', async () => {
+    readNote.mockResolvedValue({ status: 'SUCCESS', message: '# Pancakes\nCategory: Recipes\n\nflour, milk', service: 'note_read' });
+    renderRecipes();
+    await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Pancakes'));
+    await waitFor(() => expect((screen.getByLabelText('Recipe body') as HTMLTextAreaElement).value).toBe('flour, milk'));
+    fireEvent.change(screen.getByLabelText('Recipe body'), { target: { value: 'flour, milk, eggs' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() =>
+      expect(writeNote).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Pancakes', content: 'flour, milk, eggs', path: `${RECIPES_DIR}/Pancakes.md` }),
+      ),
+    );
+    expect(deleteNote).not.toHaveBeenCalled();
+  });
+
+  it('renaming a recipe writes the new one, then removes the old file', async () => {
+    writeNote.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'note_write', detail: { path: `${RECIPES_DIR}/Crepes.md` } });
+    renderRecipes();
+    await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Pancakes'));
+    await waitFor(() => expect(readNote).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText('Recipe name'), { target: { value: 'Crepes' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(deleteNote).toHaveBeenCalledWith('Pancakes', 'nextcloud', `${RECIPES_DIR}/Pancakes.md`, undefined));
+    expect(writeNote).toHaveBeenCalledWith(expect.objectContaining({ title: 'Crepes', path: undefined }));
   });
 });

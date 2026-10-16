@@ -61,8 +61,10 @@ export default function ReferenceBar({
 
   const book = books.find((b) => b.osis === position.book) ?? books[0];
   const selectedVersion = versions.find((v) => v.code === preferences.default_version);
-  const isFavorite = Boolean(preferences.favorite_version);
-  const favoriteName = versions.find((v) => v.code === preferences.favorite_version)?.name ?? '';
+  // The favourite is the translation the reader comes back to: the star shows
+  // whether the one in hand is it, and when it is not, one tap goes back to it.
+  const favorite = versions.find((v) => v.code === preferences.favorite_version);
+  const isFavorite = Boolean(favorite) && favorite?.code === preferences.default_version;
   const installedEditions = editions.filter((entry) => entry.installed);
   const selectedEdition = installedEditions.some(
     (entry) => entry.code === preferences.default_edition,
@@ -256,10 +258,21 @@ export default function ReferenceBar({
             <Star size={14} className={isFavorite ? 'fill-amber-300 text-amber-300' : 'text-slate-400'} />
             {isFavorite ? 'Favourite' : 'Make favourite'}
           </button>
-          {favoriteName && (
+          {favorite && isFavorite && (
             <p data-testid="bible-favorite-note" className="text-[11px] leading-snug text-slate-400">
-              You can jump to {favoriteName} from the Home tab.
+              {favorite.name} is your favourite.
             </p>
+          )}
+          {favorite && !isFavorite && favorite.installed && (
+            <button
+              type="button"
+              onClick={() => onPreferences({ default_version: favorite.code })}
+              data-testid="bible-favorite-switch"
+              className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-amber-400/30 bg-black/25 px-2 py-1 text-[11px] text-amber-200"
+            >
+              <Star size={14} className="fill-amber-300 text-amber-300" />
+              Back to {favorite.name}
+            </button>
           )}
           {selectedVersion?.installed && selectedVersion.license_class === 'licensed' && (
             <p

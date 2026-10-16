@@ -3,6 +3,7 @@
 Asynchronous Home Assistant REST client using aiohttp.
 """
 import logging
+import time
 from contextlib import asynccontextmanager
 
 import aiohttp
@@ -301,6 +302,80 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
             log.error(f"[ha_client] get_areas failed: {e}")
             return {}
     return {}  # Fallback
+
+_ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+# media_player -> remote lookups barely change; one HA round-trip per key press
+# would make the Remote page's d-pad feel sluggish.
+_REMOTE_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
+_REMOTE_CACHE_TTL = 600.0
+
+
+async def _render_template(ha_url: str, ha_token: str, template: str) -> str | None:
+    headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
+    url = f"{ha_url.rstrip('/')}/api/template"
+    async with _ha_session(ha_url) as client:
+        try:
+            async with client.post(url, headers=headers, json={"template": template}, timeout=_TIMEOUT) as resp:
+                resp.raise_for_status()
+                return (await resp.text()).strip()
+        except Exception as e:
+            log.warning(f"[ha_client] template render failed: {type(e).__name__}: {e}")
+            return None
+
+
+def _remote_by_name(all_states: list, media_entity_id: str) -> str | None:
+    """A remote.* entity whose name matches the media player's (heuristic)."""
+    media_friendly = ""
+    for state in all_states:
+        if state.get("entity_id") == media_entity_id:
+            media_friendly = (state.get("attributes", {}).get("friendly_name") or "").lower()
+            break
+    media_short = media_entity_id.split(".")[-1].replace("_", " ")
+    for state in all_states:
+        eid = state.get("entity_id", "")
+        if not eid.startswith("remote."):
+            continue
+        friendly = (state.get("attributes", {}).get("friendly_name") or "").lower()
+        if (media_friendly and media_friendly in friendly) or (media_short and media_short in friendly):
+            return eid
+    base = media_entity_id.replace("media_player.", "remote.", 1)
+    if any(state.get("entity_id") == base for state in all_states):
+        return base
+    return None
+
+
+async def find_companion_remote(ha_url: str, ha_token: str, media_entity_id: str) -> str:
+    """The ``remote.*`` entity that sends keys to the same device as a media player.
+
+    The two are rarely named alike (live: ``media_player.office_tv`` is driven by
+    ``remote.office_tv_remote``, ``media_player.gracies_tv`` by
+    ``remote.28_tcl_roku_tv``), and Home Assistant answers a service call to a
+    non-existent entity with success -- so guessing the name made remote keys
+    vanish silently. Ask HA's device registry first, then match by name, and only
+    then fall back to the same-named entity.
+    """
+    key = (ha_url, media_entity_id)
+    hit = _REMOTE_CACHE.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < _REMOTE_CACHE_TTL:
+        return hit[1]
+
+    remote: str | None = None
+    if _ENTITY_ID_RE.match(media_entity_id):
+        rendered = await _render_template(
+            ha_url,
+            ha_token,
+            "{% set d = device_id('" + media_entity_id + "') %}"
+            "{% if d %}{{ device_entities(d) | select('match', 'remote\\.') | first | default('', true) }}{% endif %}",
+        )
+        if rendered and _ENTITY_ID_RE.match(rendered) and rendered.startswith("remote."):
+            remote = rendered
+    if not remote:
+        remote = _remote_by_name(await get_states(ha_url, ha_token), media_entity_id)
+    remote = remote or media_entity_id.replace("media_player.", "remote.", 1)
+    _REMOTE_CACHE[key] = (now, remote)
+    return remote
+
 
 async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, domain: str = "media_player", media_type: str | None = None) -> str | None:
     """

@@ -20,9 +20,10 @@ This page reuses existing systems and must not grow parallel copies:
 | Points, badges, cheers | Achievements engine + points ledger (`docs/ACHIEVEMENTS.md`) |
 | Chores & rewards | Skylight integration (`/api/integrations/skylight/*`) |
 
-`Communication` no longer hosts chat: it renders a card linking here, and its
-tests assert the Talk composer is *not* present there — so a second chat UI
-cannot reappear.
+`Communication` (timers and spoken announcements) hosts no chat, calendar or
+notes of its own: it links to Family, `/calendar` and `/notes`, and its tests
+assert the old copies are gone (its notes editor appended the whole note to
+itself on every save; its calendar only printed "Loaded N events").
 
 ## What is there now
 
@@ -34,7 +35,13 @@ cannot reappear.
   delete), read markers, reactions and polls through Talk's own APIs, voice
   notes with preview, attachments, a verse banner and quick-action chips, and
   `@Jarvis` questions (answered as a Jarvis bubble via the `assistant`
-  envelope, posted with the asker's login).
+  envelope, posted with the asker's login). A thread opens on the latest 50
+  messages; "Show earlier messages" loads 50 more at a time (Talk's cap: 200).
+- **@Jarvis, one answer**: a message *starting* with `@Jarvis` sent from the
+  app is answered by execution's Talk `send` and claimed in Redis
+  (`jarvis:talk:answered:<token>:<id>`); the gateway's Talk monitor answers
+  `@jarvis` typed in other Talk apps (rooms the system account is in) and
+  skips claimed messages.
 - **Phone notifications** for new family messages (no outside push service):
   a gateway worker (`services/gateway/chat_notify.py`) reads each member's own
   Talk list and queues one notice per new, unread message from someone else;
@@ -42,7 +49,8 @@ cannot reappear.
   `GET /api/telemetry/notifications/wait` (`ChatNotifyService`) and posts
   grouped system notifications; tapping opens `/family?chat=<token>`. A
   person's first pass only records where conversations stand; after that a
-  brand-new conversation's first message is announced.
+  brand-new conversation's first message is announced. A Jarvis answer is
+  announced as "Jarvis" to the whole room, including the person who asked.
 - **Background media**: one app-wide player (`MediaPlayerContext`, above the
   router) so switching tabs never stops playback, and an Android media
   foreground service (`MediaPlaybackService`) with lock-screen controls.
@@ -55,6 +63,9 @@ cannot reappear.
   **Voice signatures** and **Calls** — sections below. Bible games and
   memorisation are linked from the Games tab (`/bible?tab=play`,
   `/bible?tab=memorize`).
+- **Send to chat** (`components/chat/SendToChat.tsx`): a drawing, Jarvis's
+  improved picture or a finished song goes into a conversation the person
+  picks, as a Talk attachment (25 MB cap, like the composer).
 
 ## Explicitly not doing
 
@@ -98,9 +109,13 @@ earned, only when `FAMILY_CHAT_TOKEN` names a room.
 ## Tests
 
 - `src/test/Family.test.tsx` — opens on chat, tab switching, DM open, message
-  send, voice preview → caption → send.
-- `src/pages/Communication.test.tsx` — sections render and chat is *not*
-  duplicated there.
+  send, voice preview → caption → send, a drawing sent to a picked chat.
+- `src/test/ChatFeatures.test.tsx` — envelopes, replies, edits, attachments,
+  "Show earlier messages".
+- `src/pages/Communication.test.tsx` — timers and announcements; chat,
+  calendar and notes are links, not copies.
+- `services/gateway/tests/test_talk_monitor.py` — the monitor answers other
+  Talk apps and skips questions the app already claimed.
 - `services/execution/tests/test_family_games.py` and friends for games;
   `src/components/family/*.test.*` for drawing and music;
   `services/gateway/tests/test_chat_notify.py` for notifications.
@@ -127,9 +142,10 @@ outlive the round; a geo outage is logged and never breaks a game in progress.
 ## Draw together (shipped, single-device first)
 
 `components/family/DrawCanvas.tsx` lives on Family → Create: colour and brush
-pickers, undo, clear, download, and a **Make it way better** pass that sends the
-PNG to the existing image-edit backend and shows the result side by side. A
-refusal is reported in place — nothing pretends to have worked.
+pickers, undo, clear, download, **Send to chat**, and a **Make it way better**
+pass that sends the PNG to the existing image-edit backend and shows the result
+(which can be sent too). A refusal is reported in place — nothing pretends to
+have worked. A blank canvas is not sent.
 
 Deliberately dependency-free (pointer events, `toDataURL`, the `/api/images/edit`
 proxy we already had). On a family device that has to download an APK to get a
@@ -145,11 +161,13 @@ reading pixels back.
 
 `/recipes` (also on Family → Create) keeps a shared cookbook as markdown in
 Nextcloud under `Recipes/`. It reuses the notes storage the house already has,
-so there is one backup, one sync and one mobile app — no new service.
+so there is one backup, one sync and one mobile app — no new service. Opening a
+recipe and saving edits it in place; changing its name renames the file
+(`lib/noteSave.ts`, shared with Notes); delete asks first.
 
 Because notes resolve to the caller's own account, an admin can flip the same
 "Send as" control to the Admin identity to keep one house cookbook, and every
-other member keeps their own. Non-admins never see the control. 8 tests.
+other member keeps their own. Non-admins never see the control.
 
 ## Voice signatures (shipped)
 
@@ -177,7 +195,9 @@ section (intro, verse, chorus, bridge, outro); each section continues the last
 4 s of the one before, choruses after the first are reused, and seams are
 crossfaded (alpaca `music_song.py`). `GET /api/music/songs/{id}` reports the
 place in line or the section being written, and the finished song as a data
-URL; the page remembers the job, so leaving it does not lose the song.
+URL; the page remembers the job, so leaving it does not lose the song. The
+audio server keeps a finished song for 30 minutes, so the way to keep one is
+**Send the song to chat**.
 
 Music jobs run one at a time on one queue because the 8 GB card is shared
 with the resident LLM: a job uses the GPU only when there is room, otherwise

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import EnergyInsightsWidget from './EnergyInsightsWidget';
+import { householdSeries } from '../../lib/energySeries';
 import type { UserWidgetSettings } from '../../types/widget';
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -94,5 +95,43 @@ describe('EnergyInsightsWidget', () => {
     const rows = await screen.findAllByText(/^7W/);
     expect(rows.length).toBeGreaterThan(0);
     expect(screen.queryByText(/7\.4999/)).toBeNull();
+  });
+
+  it('reports the household average as the sum of device averages', async () => {
+    renderWidget();
+    // Two devices averaging 1.23 W each: 2 W in total, not the 1 W mean.
+    const label = await screen.findByText('Average');
+    expect(label.parentElement!.textContent).toContain('2W');
+  });
+
+  it('does not print a stray 0 when the peak has no duration', async () => {
+    renderWidget();
+    const label = await screen.findByText('Peak');
+    expect(label.parentElement!.textContent).toBe('Peak10W');
+  });
+});
+
+describe('householdSeries', () => {
+  const s = (points: Array<[number, number]>) => ({
+    current_power_w: null,
+    peak_power_w: null,
+    peak_at: null,
+    peak_duration_seconds: null,
+    avg_power_w: null,
+    availability_pct: 100,
+    total_activations: 0,
+    last_outage_at: null,
+    data_points: points.map(([recorded_at, power_w]) => ({ recorded_at, power_w })),
+  });
+
+  it('sums devices within a bucket and keeps different days apart', () => {
+    const day = 86_400;
+    const t = 1_700_000_100;
+    const series = householdSeries({
+      a: s([[t, 10], [t + 60, 20], [t + day, 100]]),
+      b: s([[t, 5]]),
+    });
+    // Same clock hour a day apart must be two points, oldest first.
+    expect(series.map((p) => p.power)).toEqual([20, 100]);
   });
 });

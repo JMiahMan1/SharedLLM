@@ -1,4 +1,5 @@
 """Tests for Trip recording, shared trip grouping, and trip editing in the geo service."""
+import fnmatch
 import json
 import time
 from unittest.mock import AsyncMock, patch
@@ -77,7 +78,7 @@ class FakeRedis:
         return dict(self.hashes.get(hname, {}))
 
     async def keys(self, pattern):
-        return [k for k in self.data.keys() if "active_trip" in k]
+        return [k for k in [*self.data, *self.zsets] if fnmatch.fnmatchcase(k, pattern)]
 
 
 @pytest.fixture
@@ -931,3 +932,59 @@ async def test_a_trip_is_found_by_its_whole_id_and_for_those_it_is_shared_with(c
     assert client.get("/trips/trip-abc123", params={"viewer": "jeremiah"}).json()["id"] == "trip-abc123"
     assert client.get("/trips/trip-abc123", params={"viewer": "kate"}).status_code == 404
     assert client.get("/trips/trip-abc123/locations", params={"viewer": "kate"}).status_code == 404
+
+
+def test_family_scope_lists_everyone_sharing_with_the_viewer(client, fake_redis, monkeypatch):
+    """Wander lists the family's trips: your own plus those shared with you.
+
+    Only the caller's own trips used to come back, so "All Wander Trips" and
+    "My Trips" showed the same list and shared rides were never paired (the
+    grouping only sees trips that are in the same list)."""
+    now = time.time()
+    _insert_trip(fake_redis, _sample_trip("t_j1", "jeremiah", "Jeremiah", now - 3600))
+    _insert_trip(fake_redis, _sample_trip("t_m1", "michele", "Michele", now - 3500))
+    _insert_trip(fake_redis, _sample_trip("t_s1", "sam", "Sam", now - 1800))
+    monkeypatch.setattr(
+        geo, "_fetch_activity_sharing",
+        _sharing({"michele": {"enabled": True, "audience": "circle"}, "sam": {"enabled": False}}),
+    )
+    r = client.get("/trips", params={"scope": "family", "user_id": "jeremiah", "viewer": "jeremiah"})
+    assert r.status_code == 200
+    trips = r.json()["trips"]
+    assert {t["user_id"] for t in trips} == {"jeremiah", "michele"}
+    # newest first across people
+    assert [t["id"] for t in trips] == ["t_m1", "t_j1"]
+    # the same drive at the same time and place is a shared ride
+    assert all(t["is_shared"] for t in trips)
+
+    # Sam has not opted in: he sees only his own
+    sam = client.get("/trips", params={"scope": "family", "user_id": "sam", "viewer": "sam"})
+    assert {t["user_id"] for t in sam.json()["trips"]} == {"sam", "michele"}
+
+    # a family listing still needs someone to ask for it
+    assert client.get("/trips", params={"scope": "family"}).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_a_parked_phone_that_goes_quiet_still_ends_its_trip(fake_redis, monkeypatch):
+    """The server finishes an idle drive on its own clock; it used to wait for
+    the phone's next fix, and a phone that went quiet lost the drive when the
+    active record expired."""
+    monkeypatch.setattr(geo.map_match, "match", AsyncMock(return_value=None))
+    now = time.time()
+    active = {
+        "id": "trip_michele_1", "user_id": "michele", "start_time": now - 1500,
+        "last_moving_time": now - 400, "last_point_time": now - 400,
+        "distance_miles": 4.2, "start_location": {"name": "Home"}, "end_location": {"name": "Store"},
+        "status": "in_progress",
+    }
+    await fake_redis.set("geo:active_trip:michele", json.dumps(active))
+    fresh = {**active, "id": "trip_jeremiah_1", "user_id": "jeremiah", "last_moving_time": now - 30}
+    await fake_redis.set("geo:active_trip:jeremiah", json.dumps(fresh))
+
+    assert await geo._sweep_idle_trips(fake_redis, now) == 1
+    assert await fake_redis.get("geo:active_trip:michele") is None
+    assert json.loads(await fake_redis.get("geo:trip:trip_michele_1"))["status"] == "completed"
+    assert await fake_redis.zcard("geo:trips:user:michele") == 1
+    # a drive still moving is left alone
+    assert await fake_redis.get("geo:active_trip:jeremiah") is not None

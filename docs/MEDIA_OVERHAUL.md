@@ -7,8 +7,17 @@
 > design is documented in `docs/MEDIA_PLAYER.md`. **BUG-40** (playback stops
 > when leaving the page) is fixed by the app-wide `MediaPlayerContext` and,
 > on Android, `MediaPlaybackService` + `JarvisMediaPlugin` (lock-screen
-> controls) rather than the §6 design. What follows is the plan for the
-> remaining phases 3-9.
+> controls) rather than the §6 design.
+>
+> **Audit 2026-10-15** (Media + Remote, without the §6 rewrite): the Media page
+> was split into `components/media/*` with one play path (Audiobookshelf items
+> always resolved to an MA URI — the web player used to guess an unplayable
+> one), a deduped device picker, real error states, and a web player that
+> reconnects by itself; the app-wide provider now reports web-player state
+> (heartbeat) so the dashboard no longer shows a closed app as playing; the
+> Remote page sends real d-pad/power/mute commands to the TV's actual
+> companion `remote.*` entity. Ledger rows below are marked. What follows is
+> the plan for the remaining phases 3-9.
 
 ---
 
@@ -104,37 +113,37 @@ Paths are relative to `services/ui/src/`.
 |---|---|---|---|---|
 | BUG-40 | P1 | — | **Fixed 2026-10-15** (`dd9e8df2`): the MA web player lives in `context/MediaPlayerContext.tsx` above the router; Media replays its state on return | Remaining: the E2E (play → navigate → still playing, mini-player visible) once the mini-player exists |
 | BUG-41 | P1 | `Media.tsx:288-293` `formatTime` | No hours: a 10h audiobook shows `605:12` | Shared `formatDuration()` → `H:MM:SS` when ≥1h. Unit test: 0, 59, 3600, 36012, NaN |
-| BUG-42 | P1 | `Media.tsx:705-738,814,852,877,949` | Explorer spinner can never show: async calls are not awaited (the `finally` clears immediately) and the keys never match (`ma-${uri}` vs `uri`) | Await the promise; one `itemKey()` helper. Component test: click → spinner visible until the promise resolves |
-| BUG-43 | P1 | `Media.tsx:992-993` | ABS **podcast** passed as `'playlist'` → plays a raw podcast id via MA (broken) | Podcasts open the Podcast detail view (episode list); play an episode. Component test |
-| BUG-44 | P1 | `Media.tsx:1428` | `availablePlayers.find(...)?.name`, but `MediaStatus` has `friendly_name`, not `name` | Use `friendly_name`. Unit test on the label selector |
-| BUG-45 | P1 | `Media.tsx:1329-1334` | Remote position ignores `pos===0` while playing, so a new track keeps counting from the old position | Reset when `media_content_id` or title changes. Extrapolate with `media_position_updated_at` (backend adds this field, §7.1). Unit test |
-| BUG-46 | P1 | `maWebPlayer.ts:402,492,568-590` | connect/play race → "JSON-RPC WebSocket not connected" | `connect()` returns a single shared promise; `play()` awaits it. Unit test with fake sockets |
-| BUG-47 | P1 | `maWebPlayer.ts:509-513,613` | Stale closure resets volume to 70 on reconnect | Read from a ref/store. Unit test |
-| BUG-48 | P1 | `maWebPlayer.ts:372-374` | JSON-RPC timeout leaks listeners; pending calls are never rejected on close | Pending map keyed by `message_id`; reject all on close. Unit test |
-| BUG-49 | P1 | `maWebPlayer.ts:437-440,498-504,602-612,1019-1027` | `<audio>` element leaked on every retry/disconnect; Sendspin WS left open on failure | Exactly one audio element, owned by the engine. Unit test: 3 connect/disconnect cycles → 1 `<audio>` in the DOM |
-| BUG-50 | P1 | `maWebPlayer.ts:521-561` | No auto-reconnect; `connectionState` only ever becomes CONNECTED | Exponential backoff reconnect (1s, 2s, 4s … max 30s, with jitter) that drives `CONNECTING/CONNECTED/RECONNECTING/FAILED`. Unit test with fake timers |
+| BUG-42 | P1 | `Media.tsx:705-738,814,852,877,949` | **Fixed 2026-10-15**: explorer rows await the play and show their own spinner. Explorer spinner can never show: async calls are not awaited (the `finally` clears immediately) and the keys never match (`ma-${uri}` vs `uri`) | Await the promise; one `itemKey()` helper. Component test: click → spinner visible until the promise resolves |
+| BUG-43 | P1 | `Media.tsx:992-993` | **Fixed 2026-10-15** (play): a podcast resolves to its MA `library://podcast/<n>` like a book; an episode list is still to do. ABS **podcast** passed as `'playlist'` → plays a raw podcast id via MA (broken) | Podcasts open the Podcast detail view (episode list); play an episode. Component test |
+| BUG-44 | P1 | `Media.tsx:1428` | **Fixed 2026-10-15**: labels come from `friendly_name` via `formatDeviceLabel`. `availablePlayers.find(...)?.name`, but `MediaStatus` has `friendly_name`, not `name` | Use `friendly_name`. Unit test on the label selector |
+| BUG-45 | P1 | `Media.tsx:1329-1334` | **Fixed 2026-10-15**: a new track (position jump ≥ 3 s, or a new `media_content_id`) resets the clock. Remote position ignores `pos===0` while playing, so a new track keeps counting from the old position | Reset when `media_content_id` or title changes. Extrapolate with `media_position_updated_at` (backend adds this field, §7.1). Unit test |
+| BUG-46 | P1 | `maWebPlayer.ts:402,492,568-590` | **Fixed 2026-10-15**: one shared connection promise; `play()` awaits it. connect/play race → "JSON-RPC WebSocket not connected" | `connect()` returns a single shared promise; `play()` awaits it. Unit test with fake sockets |
+| BUG-47 | P1 | `maWebPlayer.ts:509-513,613` | **Fixed 2026-10-15**: volume read from a ref on (re)connect. Stale closure resets volume to 70 on reconnect | Read from a ref/store. Unit test |
+| BUG-48 | P1 | `maWebPlayer.ts:372-374` | **Partly fixed 2026-10-15**: a timed-out call removes its listener; calls pending at a close still wait for their 10 s timeout. JSON-RPC timeout leaks listeners; pending calls are never rejected on close | Pending map keyed by `message_id`; reject all on close. Unit test |
+| BUG-49 | P1 | `maWebPlayer.ts:437-440,498-504,602-612,1019-1027` | **Fixed 2026-10-15**: one teardown closes both sockets and removes the `<audio>` element. `<audio>` element leaked on every retry/disconnect; Sendspin WS left open on failure | Exactly one audio element, owned by the engine. Unit test: 3 connect/disconnect cycles → 1 `<audio>` in the DOM |
+| BUG-50 | P1 | `maWebPlayer.ts:521-561` | **Fixed 2026-10-15**: backoff reconnect drives `CONNECTING/CONNECTED/RECONNECTING/FAILED` (`test/maWebPlayer.test.ts`). No auto-reconnect; `connectionState` only ever becomes CONNECTED | Exponential backoff reconnect (1s, 2s, 4s … max 30s, with jitter) that drives `CONNECTING/CONNECTED/RECONNECTING/FAILED`. Unit test with fake timers |
 | BUG-51 | P1 | `maWebPlayer.ts:285-288,313-314,291` | Previous track's art/title sticks; favorite never applied (`null` vs `undefined`) | Replace metadata wholesale on a track change. Unit tests on the event reducer |
 | BUG-52 | P1 | `maWebPlayer.ts:262,268` | Player-id filter uses `includes` both ways | Strict equality. Unit test |
 | BUG-53 | P1 | `maWebPlayer.ts:726,744,762,787,804` | Transport sends with `expectResult=false` → MA errors are swallowed | Await results; surface a toast. Unit test |
 | BUG-54 | P1 | `ActiveMediaWidget.tsx:129-145,246-252,55-58` | Seek fires a request on every pointermove; volume on every step; position never resets | Widget uses the shared store and `<Scrubber>`/`<VolumeSlider>` (commit on release, debounce 150ms) |
-| BUG-55 | P1 | `android/.../widgets/MediaWidget.java:39-61` | Parses `detail.player`, but the API returns `detail.active` | Parse `detail.active`. Manual device check + a JUnit test if the Android test harness exists (it probably doesn't, so use the manual checklist) |
+| BUG-55 | P1 | `android/.../widgets/MediaWidget.java:39-61` | **Already fixed**: `MediaStatus.java` parses `detail.active`. Parses `detail.player`, but the API returns `detail.active` | Parse `detail.active`. Manual device check + a JUnit test if the Android test harness exists (it probably doesn't, so use the manual checklist) |
 | BUG-56 | P1 | `maWebPlayer.ts:116-127,1062-1098` | Lock-screen artwork uses the raw MA path (broken); no `setPositionState`/seek/stop handlers; stale session after unmount | Full MediaSession (§6.7). Unit test with a mocked `navigator.mediaSession` |
-| BUG-57 | P2 | `Media.tsx:1151-1163` | Web player auto-connects on every page visit (it registers an MA player speculatively) | Connect lazily: first time the Web Player is chosen as output, or when restoring a session that was playing |
-| BUG-58 | P2 | `Media.tsx:1839` | Side effect inside a state updater (`setLocalVolume(prev => { setLocalIsPlaying(true) … })`) | Removed by the store rewrite |
-| BUG-59 | P2 | `Media.tsx:2237-2239,2278` | Every card shows a spinner whenever *anything* loads; `isDisabled` always false | Per-item pending state from the store's `pendingAction` |
-| BUG-60 | P2 | `Media.tsx:2250-2255` | Playlists "Refresh" shows a spinning icon when *not* loading | Proper error state with a Retry button |
-| BUG-61 | P2 | `Media.tsx:749-751` modal; `components/ui/Modal.tsx` | No `role=dialog`, no Esc, no focus trap, no scroll lock; `92vh` breaks under the mobile URL bar | New `<Sheet>` primitive (§6.4) using `dvh` |
+| BUG-57 | P2 | `Media.tsx:1151-1163` | **Fixed**: the web player connects on first play only. Web player auto-connects on every page visit (it registers an MA player speculatively) | Connect lazily: first time the Web Player is chosen as output, or when restoring a session that was playing |
+| BUG-58 | P2 | `Media.tsx:1839` | **Fixed 2026-10-15**: the local mirror state was removed; the page reads the shared player. Side effect inside a state updater (`setLocalVolume(prev => { setLocalIsPlaying(true) … })`) | Removed by the store rewrite |
+| BUG-59 | P2 | `Media.tsx:2237-2239,2278` | **Fixed 2026-10-15**: per-row pending key. Every card shows a spinner whenever *anything* loads; `isDisabled` always false | Per-item pending state from the store's `pendingAction` |
+| BUG-60 | P2 | `Media.tsx:2250-2255` | **Fixed 2026-10-15**: error state with Try again. Playlists "Refresh" shows a spinning icon when *not* loading | Proper error state with a Retry button |
+| BUG-61 | P2 | `Media.tsx:749-751` modal; `components/ui/Modal.tsx` | **Partly fixed 2026-10-15**: `role=dialog`, Esc, `dvh`, safe-area; no focus trap or scroll lock yet. No `role=dialog`, no Esc, no focus trap, no scroll lock; `92vh` breaks under the mobile URL bar | New `<Sheet>` primitive (§6.4) using `dvh` |
 | BUG-62 | P2 | `Media.tsx:681-687` | Search fires per keystroke with `retry: 2` | Use the existing `hooks/useDebounce.ts` (250ms), `retry: 1`, `placeholderData: keepPreviousData` |
 | BUG-63 | P2 | `Media.tsx:689,1393` | The same query key `['ma-playlists']` with different options | Central query-key factory + options (§6.3) |
 | BUG-64 | P2 | `Media.tsx:300`, `maWebPlayer.ts:99,111` | API token in `<img>` and WS URLs | Signed short-lived media token (§7.4) for img/stream; WS auth via the first message or `Sec-WebSocket-Protocol` (§7.4) |
-| BUG-65 | P2 | device list | The same speaker appears twice (HA entity from the MA integration + `ma:` player) | Dedupe by the MA player id ↔ HA entity mapping (`services/shared/ma_player.py`). Unit test |
-| BUG-66 | P2 | `lib/webPlayer.ts` | Multi-tab coordination is dead code; `destroy()` permanently nulls the BroadcastChannel handler | Rewrite as `features/media/engine/tabLock.ts` (§6.6) |
+| BUG-65 | P2 | device list | **Fixed 2026-10-15**: MA players with an HA entity (`ma_player_id`) and our own web player are listed once. The same speaker appears twice (HA entity from the MA integration + `ma:` player) | Dedupe by the MA player id ↔ HA entity mapping (`services/shared/ma_player.py`). Unit test |
+| BUG-66 | P2 | `lib/webPlayer.ts` | **Fixed 2026-10-15**: `lib/webPlayer.ts` deleted (multi-tab lock not reimplemented: last tab to connect wins). Multi-tab coordination is dead code; `destroy()` permanently nulls the BroadcastChannel handler | Rewrite as `features/media/engine/tabLock.ts` (§6.6) |
 | BUG-67 | P2 | `main.tsx:43` | `CapacitorApp.removeAllListeners()` removes everyone's listeners | Keep handles; remove only its own |
-| BUG-68 | P2 | `ActiveMediaWidget.tsx`, `LocalAudioPlayer.tsx`, `Modal.tsx` | Missing aria-labels, keyboard support, and touch targets under 44px | Covered by the new components + axe tests |
+| BUG-68 | P2 | `ActiveMediaWidget.tsx`, `LocalAudioPlayer.tsx`, `Modal.tsx` | **Partly fixed 2026-10-15**: `LocalAudioPlayer.tsx` (unused) deleted; Media and Remote meet 44 px; `ActiveMediaWidget` not reviewed here. Missing aria-labels, keyboard support, and touch targets under 44px | Covered by the new components + axe tests |
 | BUG-69 | P2 | Hard-coded `cyan/purple/pink/amber` classes | Media ignores the active theme | Use `var(--site-*)` tokens + dynamic artwork accent (§6.5) |
-| BUG-70 | P2 | `maWebPlayer.ts` (256, 471, …) and `Media.tsx` | Dozens of `console.log` calls on hot paths | A `mediaLog` helper gated by `localStorage['jarvis_debug_media']==='1'` |
+| BUG-70 | P2 | `maWebPlayer.ts` (256, 471, …) and `Media.tsx` | **Mostly fixed 2026-10-15**: hot-path `console.log`s removed from `maWebPlayer.ts` and `Media.tsx`. Dozens of `console.log` calls on hot paths | A `mediaLog` helper gated by `localStorage['jarvis_debug_media']==='1'` |
 | BUG-71 | P2 | `vite.config.ts:40-46` | The `ma-stream-test` debug harness ships in the production build | Remove it from `rollupOptions.input`; delete `src/ma-stream-test.ts` and `e2e/ma-stream.spec.ts` once the new tests cover streaming |
-| BUG-72 | P2 | `services/ui/debug-media*.mjs` | Hard-coded LAN IP + credentials; write to `/tmp` | Delete them |
+| BUG-72 | P2 | `services/ui/debug-media*.mjs` | **Fixed 2026-10-15**: deleted. Hard-coded LAN IP + credentials; write to `/tmp` | Delete them |
 | BUG-73 | P1 | `e2e/web-player-sendspin.spec.ts:15-36` | Throws at module load when env vars are missing, which breaks collection of the **whole** Playwright suite | Replace with `test.skip(!process.env.X, …)` inside `describe`; move it to the `@live` project (§9.3) |
 
 ### 3.4 UI/UX issue ledger (every item must be resolved; none is optional)

@@ -1,18 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import MiniRouteMap from './MiniRouteMap';
+import { routeQueryKey } from '../../lib/wanderQueries';
 import type { RoutePoint } from '../../types/api';
 
 interface RoutePreviewProps {
   id: string;
   completed: boolean;
-  /**
-   * Optional. Omit `loadRoute` and the component fetches and caches the route
-   * itself, which is what every call site actually wanted -- the parent was
-   * maintaining a `routePoints` map and a `routeCache` ref purely to satisfy
-   * this prop. Passing them keeps working for any caller that still does.
-   */
-  points?: RoutePoint[] | undefined;
-  loadRoute?: (key: string, loader: () => Promise<RoutePoint[]>) => void;
   fetcher: () => Promise<RoutePoint[]>;
   /** Opens the full Route Map modal when the thumbnail is clicked. */
   onOpenMap?: () => void;
@@ -23,45 +16,30 @@ interface RoutePreviewProps {
   hidden?: boolean;
 }
 
-/** Lazily loads and renders an OSM mini-map for a trip or workout. */
-const RoutePreview = ({ id, completed, points, loadRoute, fetcher, onOpenMap, hidden }: RoutePreviewProps) => {
-  const [owned, setOwned] = useState<RoutePoint[] | undefined>(undefined);
-  const cache = useRef<Record<string, RoutePoint[]>>({});
-
-  useEffect(() => {
-    if (!completed) return;
-    // Parent-managed: hand off to their loader and let their `points` drive.
-    if (loadRoute) {
-      if (!points) loadRoute(id, fetcher);
-      return;
-    }
-    // Self-managed: serve from cache, otherwise fetch once.
-    if (owned || cache.current[id]) {
-      const cached = cache.current[id];
-      if (cached) setOwned(cached);
-      return;
-    }
-    let cancelled = false;
-    void fetcher()
-      .then((pts) => {
-        cache.current[id] = pts;
-        if (!cancelled) setOwned(pts);
-      })
-      .catch(() => {
-        // Route unavailable (e.g. no breadcrumbs) — card renders without a map.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, completed, points, loadRoute, fetcher, owned]);
-
-  const resolved = loadRoute ? points : owned;
+/**
+ * Lazily loads and renders an OSM mini-map for a trip or workout.
+ *
+ * The route is a query keyed by the trip/workout id: fetched once, shared with
+ * the Route Map modal, and not asked for again. It used to be fetched from an
+ * effect that depended on a fetcher recreated every render, so each refresh of
+ * the page (live positions every 30 s) asked for every route again, and a
+ * route with no breadcrumbs was asked for forever.
+ */
+const RoutePreview = ({ id, completed, fetcher, onOpenMap, hidden }: RoutePreviewProps) => {
+  const { data: points } = useQuery({
+    queryKey: routeQueryKey(id),
+    // A route the server has no points for is an empty route, not undefined.
+    queryFn: async () => (await fetcher()) ?? [],
+    enabled: completed,
+    staleTime: Infinity,
+    retry: false,
+  });
 
   if (hidden) return null;
-  if (!resolved || resolved.length === 0) return null;
+  if (!points || points.length === 0) return null;
   return (
     <MiniRouteMap
-      points={resolved}
+      points={points}
       height={120}
       className="rounded-xl border border-white/10 overflow-hidden mt-3"
       onClick={onOpenMap}

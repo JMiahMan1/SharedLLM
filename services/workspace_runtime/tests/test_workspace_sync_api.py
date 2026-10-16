@@ -260,3 +260,34 @@ def test_upload_into_a_nextcloud_workspace_schedules_a_sync(client, scheduled):
     assert _create(client, sync_mode="nextcloud", nextcloud_path="/Work/NC").status_code == 200
     assert _upload(client, [("a.txt", b"x")]).status_code == 200
     assert scheduled == ["nc_ws"]
+
+
+def test_the_periodic_sync_loop_survives_a_failed_pass(monkeypatch, caplog):
+    """A failed workspace listing (e.g. a locked DB) used to end the timer task."""
+    import asyncio
+    import logging
+
+    import services.config as config
+    import services.workspace_runtime.sync_ops as sync_ops
+
+    class _Stop(Exception):
+        pass
+
+    sleeps = {"n": 0}
+
+    async def fake_sleep(_s):
+        sleeps["n"] += 1
+        if sleeps["n"] > 2:
+            raise _Stop
+
+    class _BrokenSession:
+        def __init__(self, *_a, **_k):
+            raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(config, "WORKSPACE_NEXTCLOUD_SYNC_INTERVAL_SECONDS", 300)
+    monkeypatch.setattr(sync_ops.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(sync_ops, "Session", _BrokenSession)
+    with caplog.at_level(logging.WARNING), pytest.raises(_Stop):
+        asyncio.run(sync_ops.periodic_sync_loop())
+    assert sleeps["n"] == 3  # kept going after two failed passes
+    assert sum("database is locked" in r.getMessage() for r in caplog.records) == 2

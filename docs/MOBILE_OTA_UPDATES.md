@@ -29,6 +29,11 @@ This happened in production: the deploy script wrote `version.json` from the
 earlier commit. The endpoint advertised `c2946120`; the bundle contained
 `2c8dc477`.
 
+So the gateway always advertises the bundle's own SHA. When the published
+`version.json` names a different commit it logs `[AppUpdates] Published
+metadata git_sha=… disagrees with bundle git_sha=…`; a full and a short SHA of
+the same commit are not counted as a disagreement.
+
 ### How the invariant is now enforced
 
 1. **Build** — `build.js` refuses to package a bundle without a real git SHA,

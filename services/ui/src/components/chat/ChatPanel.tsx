@@ -14,6 +14,7 @@ import ConversationInfo from './ConversationInfo';
 import NewChatSheet from './NewChatSheet';
 import ConversationAvatar from './ConversationAvatar';
 import VerseBanner from './VerseBanner';
+import { verseShareText } from '../../lib/verseShare';
 import { useFamilyDirectory } from './familyDirectory';
 import MessageThread from './MessageThread';
 import Composer from './Composer';
@@ -33,6 +34,9 @@ const EMPTY_ARRAY: never[] = [];
 
 /** How long to show "Jarvis is thinking" before giving up on an answer. */
 const JARVIS_WAIT_MS = 3 * 60 * 1000;
+/** Messages loaded per conversation, and each "Show earlier" step (Talk's cap is 200). */
+const PAGE = 50;
+const MAX_HISTORY = 200;
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -81,6 +85,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
   const [inCall, setInCall] = useState(false);
+  const [historyLimit, setHistoryLimit] = useState<Record<string, number>>({});
   const [callError, setCallError] = useState<string | null>(null);
 
   const threadRef = useRef<HTMLElement | null>(null);
@@ -128,16 +133,22 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     select: (response) => detailList<TalkPoll>(response, 'polls'),
   });
 
-  const { data: fetched = EMPTY_ARRAY } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
-    queryKey: ['talk-messages', activeToken],
-    queryFn: () => api.getTalkMessages(activeToken),
+  const limit = historyLimit[activeToken] ?? PAGE;
+  const { data: fetched = EMPTY_ARRAY, isFetching: fetchingMessages } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
+    queryKey: ['talk-messages', activeToken, limit],
+    queryFn: () => api.getTalkMessages(activeToken, limit),
     enabled: Boolean(activeToken),
+    // While "Show earlier" loads, keep this conversation's messages on screen
+    // (never another conversation's).
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === activeToken ? previous : undefined),
     // Poll briskly while Jarvis is working so the answer lands promptly.
     refetchInterval: waitingForJarvis ? 2500 : 10000,
     select: (response) => sortMessages(detailList<TalkMessage>(response, 'messages')),
   });
 
   const messages = useMemo(() => [...fetched, ...(pending[activeToken] || [])], [fetched, pending, activeToken]);
+  // "Show earlier" asked for more than is on screen and the fetch is out.
+  const loadingEarlier = fetchingMessages && fetched.length > 0 && fetched.length < limit;
 
   // Jarvis has answered once an assistant message newer than the question shows up.
   const jarvisAnswered =
@@ -521,7 +532,10 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
         <PollStrip polls={polls} onVote={(pollId, optionId) => void vote(pollId, optionId)} />
 
         <MessageThread
-          key={activeToken}
+          // Remount when the thread comes on screen: on a phone it is laid out
+          // hidden behind the list, where "open at the latest message" measured
+          // nothing and left the first conversation opened at its oldest.
+          key={onScreenToken ? activeToken : `${activeToken}:hidden`}
           messages={messages}
           myActorIds={myActorIds}
           isGroup={isGroup}
@@ -544,6 +558,12 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           onDelete={(message) => void remove(message)}
           onRetry={(message) => void deliver(activeToken, message)}
           onDiscard={(message) => updatePending(activeToken, (list) => list.filter((m) => m.id !== message.id))}
+          onLoadEarlier={
+            loadingEarlier || (fetched.length >= limit && limit < MAX_HISTORY)
+              ? () => setHistoryLimit((current) => ({ ...current, [activeToken]: Math.min(limit + PAGE, MAX_HISTORY) }))
+              : undefined
+          }
+          loadingEarlier={loadingEarlier}
           emptyText={activeToken ? 'No messages yet. Say hello, or ask @Jarvis something.' : 'Pick a conversation to see messages.'}
         />
 
@@ -614,7 +634,10 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
               onSelect: () =>
                 void queryClient
                   .fetchQuery({ queryKey: ['bible-verse-of-day'], queryFn: () => api.getBibleVerseOfDay(), staleTime: 60 * 60 * 1000 })
-                  .then((v) => (v && 'reference' in v && v.reference ? send(`📖 ${v.reference} — "${v.text}"`) : undefined))
+                  .then((v) => {
+                    if (v && 'reference' in v && v.reference) send(verseShareText(v.reference, v.text, v.version));
+                    else toast.error("Today's verse is not available");
+                  })
                   .catch(() => toast.error("Today's verse is not available")),
             },
             ...(onOpenTab

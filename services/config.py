@@ -94,6 +94,11 @@ GIT_URL = os.getenv("GIT_URL")
 GIT_USER = os.getenv("GIT_USER")
 GIT_TOKEN = os.getenv("GIT_TOKEN")
 REDIS_URL = os.getenv(f"{NETWORK_MODE.upper()}_REDIS_URL") or os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+#: Redis key an @Jarvis question is claimed under by execution's Talk send
+#: (which answers it). The gateway's Talk monitor, which answers questions
+#: typed in other Talk apps, skips claimed messages so nobody gets two answers.
+JARVIS_TALK_CLAIM_KEY = "jarvis:talk:answered:{token}:{message_id}"
 LOG_RETENTION_DAYS = 30
 # Per-collection retention for time-bound RAG collections, as JSON days
 # ({"telemetry_alerts": 30}). Deliberately no code default: a retention

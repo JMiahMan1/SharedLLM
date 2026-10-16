@@ -31,6 +31,9 @@ PRIMED_KEY = "chat:notify:primed:{user}"
 POLL_SECONDS = 5
 _FENCE = re.compile(r"```.*?(```|$)", re.S)
 _PLACEHOLDER = re.compile(r"\{(file|mention-[a-z]+\d*|[a-z-]+\d*)\}")
+#: Jarvis's answers are posted with the asker's login and marked by an
+#: ``assistant`` envelope (execution ``_assistant_post``).
+_ASSISTANT = re.compile(r"```jarvis-envelope\s*\{[^`]*\"kind\"\s*:\s*\"assistant\"", re.S)
 
 
 def preview(message: str | None) -> str:
@@ -53,9 +56,12 @@ def notice_for(conv: dict[str, Any], me: str) -> dict[str, Any] | None:
     actor = (conv.get("last_message_actor_id") or "").lower()
     if not conv.get("last_message_id") or conv.get("last_message_system"):
         return None
-    if actor == me.lower() or not int(conv.get("unread_messages") or 0):
+    # Jarvis answering is news for everyone -- including the person who asked,
+    # whose login it is posted under (so Talk counts it as already read).
+    jarvis = bool(_ASSISTANT.search(conv.get("last_message") or ""))
+    if not jarvis and (actor == me.lower() or not int(conv.get("unread_messages") or 0)):
         return None
-    sender = conv.get("last_message_actor") or actor or "Someone"
+    sender = "Jarvis" if jarvis else conv.get("last_message_actor") or actor or "Someone"
     room = conv.get("display_name") or sender
     one_to_one = conv.get("type") == 1
     body = preview(conv.get("last_message"))
@@ -129,19 +135,21 @@ async def _check_user(r, client, username: str, *, identity, execution, telemetr
         before = seen.get(token)
         if before is not None and int(before) >= int(msg_id):
             continue
-        await r.hset(key, token, str(msg_id))
-        if before is None and not primed:
-            continue  # the user's first pass: remember, do not replay history
-        notice = notice_for(conv, me)
-        if notice is None:
-            continue
-        payload = {"user": username, **notice, "once": f"chat:{token}:{msg_id}"}
-        async with client.post(f"{telemetry}/api/telemetry/notify", json=payload,
-                               headers=headers, timeout=timeout) as resp:
-            if resp.status == 200:
+        notice = None if (before is None and not primed) else notice_for(conv, me)
+        if notice is not None:
+            payload = {"user": username, **notice, "once": f"chat:{token}:{msg_id}"}
+            async with client.post(f"{telemetry}/api/telemetry/notify", json=payload,
+                                   headers=headers, timeout=timeout) as resp:
+                if resp.status != 200:
+                    # Not marked handled: the next pass retries, and the
+                    # "once" key keeps a retry from showing it twice. Marking
+                    # it first lost every message that arrived while
+                    # telemetry was restarting.
+                    log.warning(f"[chat-notify] notify {username} failed: HTTP {resp.status}")
+                    continue
                 sent += 1
-            else:
-                log.warning(f"[chat-notify] notify {username} failed: HTTP {resp.status}")
+        # A user's first pass only records where each conversation stands.
+        await r.hset(key, token, str(msg_id))
     if not primed:
         await r.set(PRIMED_KEY.format(user=username), "1")
     return sent

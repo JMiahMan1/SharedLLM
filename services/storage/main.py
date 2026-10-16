@@ -172,12 +172,17 @@ async def _run_full_index_task(req: IndexScanRequest):
         collection_name = f"{req.provider.kind}_files"
         BATCH_SIZE = 25
         total_synced = 0
-        scanned_paths = {c["metadata"]["path"] for c in chunks if c["metadata"].get("path")}
+        # Every listed path counts as present, including files the checkpoint
+        # skipped because they are unchanged and so produced no chunks.
+        scanned_paths = {item.path for item in items}
 
         failure: str | None = None
         async with get_client() as client:
             try:
-                await _purge_stale_paths(client, collection_name, user_id, scanned_paths)
+                await _purge_stale_paths(
+                    client, collection_name, user_id, scanned_paths,
+                    scope=req.path, recursive=req.recursive,
+                )
 
                 # 3.6. Sync to RAG in batches to avoid timeout on large payloads
                 for i in range(0, len(chunks), BATCH_SIZE):
@@ -225,11 +230,33 @@ async def _run_full_index_task(req: IndexScanRequest):
         log.error(traceback.format_exc())
         crawl_end(error=f"{type(e).__name__}: {e}")
 
+def _within_scope(path: str, scope: str, recursive: bool) -> bool:
+    """Whether ``path`` is one a scan of ``scope`` would have listed.
+
+    A scan of a sub-folder only says what is (or is not) inside that folder;
+    paths elsewhere in the index were never looked at and must not be treated
+    as gone.
+    """
+    root = "/" + scope.strip("/")
+    target = "/" + path.strip("/")
+    if root == "/":
+        inside = target != "/"
+        rest = target[1:]
+    else:
+        inside = target.startswith(root + "/")
+        rest = target[len(root) + 1:]
+    if not inside:
+        return False
+    return recursive or "/" not in rest
+
+
 async def _purge_stale_paths(
     client,
     collection_name: str,
     user_id: str,
     scanned_paths: set[str],
+    scope: str = "/",
+    recursive: bool = True,
 ) -> None:
     """Drop only chunks whose source path disappeared upstream.
 
@@ -259,7 +286,7 @@ async def _purge_stale_paths(
         log.warning("Stale-path lookup failed (%s); leaving %s untouched for %s", e, collection_name, user_id)
         return
 
-    stale = sorted(known - scanned_paths)
+    stale = sorted(p for p in known - scanned_paths if _within_scope(p, scope, recursive))
     if not stale:
         return
 

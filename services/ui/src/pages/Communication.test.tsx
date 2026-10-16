@@ -9,10 +9,18 @@ describe('Communication page', () => {
 
     expect(await screen.findByText('Active Timers')).toBeInTheDocument();
     expect(screen.getByText('Announcements')).toBeInTheDocument();
-    expect(screen.getByText('Calendar')).toBeInTheDocument();
-    expect(screen.getAllByText('Notes').length).toBeGreaterThan(0);
     expect(await screen.findByText('Kitchen Timer')).toBeInTheDocument();
-    expect(await screen.findByText('Chat moved to Family')).toBeInTheDocument();
+  });
+
+  it('links to the one calendar, notes and chat instead of hosting second copies', async () => {
+    renderWithProviders(<Communication />);
+
+    expect(await screen.findByRole('link', { name: /open calendar/i })).toHaveAttribute('href', '/calendar');
+    expect(screen.getByRole('link', { name: /open notes/i })).toHaveAttribute('href', '/notes');
+    // The old notes editor (Save appended the note to itself) and the calendar
+    // panel that only printed "Loaded N events" are gone.
+    expect(screen.queryByPlaceholderText('Note title')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Calendar selection')).not.toBeInTheDocument();
   });
 
   it('creates and deletes a timer', async () => {
@@ -21,7 +29,7 @@ describe('Communication page', () => {
     fireEvent.change(await screen.findByPlaceholderText('Timer name'), {
       target: { value: 'Laundry Timer' },
     });
-    fireEvent.change(screen.getByPlaceholderText('Duration or time expression'), {
+    fireEvent.change(screen.getByLabelText('Duration or time'), {
       target: { value: '15m' },
     });
     fireEvent.click(screen.getByText('Add Timer'));
@@ -39,8 +47,7 @@ describe('Communication page', () => {
 
     // Chat has one home now (Family). Communication must not grow its own copy
     // again — the Talk composer and conversation controls are gone from here.
-    expect(await screen.findByText('Chat moved to Family')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /open family/i })).toHaveAttribute('href', '/family');
+    expect(await screen.findByRole('link', { name: /open family/i })).toHaveAttribute('href', '/family');
     expect(screen.queryByPlaceholderText('Send a live Nextcloud Talk message')).not.toBeInTheDocument();
   });
 });

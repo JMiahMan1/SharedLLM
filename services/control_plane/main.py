@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 
 import docker
 from services.config import GEO_SVC_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
-from services.control_plane import osrm_map
+from services.control_plane import osrm_map, registry
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
@@ -495,31 +495,6 @@ def _verify_sharedllm_container(container) -> bool:
     )
 
 
-def _infer_ghcr_image_ref(service_name: str) -> str | None:
-    """
-    Construct the GHCR image reference for a sharedllm service.
-
-    Images are published as ghcr.io/{GHCR_NAMESPACE}/sharedllm-{service}:latest
-    where GHCR_NAMESPACE defaults to 'jmiahman1' (matching the CI workflow).
-    Returns None if the service name doesn't look like a sharedllm service.
-    """
-    # Strip common prefixes/suffixes from the service name
-    clean_name = service_name
-    if clean_name.startswith("sharedllm_"):
-        clean_name = clean_name[len("sharedllm_"):]
-    if clean_name.endswith("_1"):
-        clean_name = clean_name[:-2]
-
-    # Only infer for known sharedllm services
-    known_services = {"gateway", "identity", "rag", "storage", "logging",
-                      "workspace_runtime", "control_plane", "geo", "ui", "caddy"}
-    if clean_name not in known_services:
-        return None
-
-    namespace = os.getenv("GHCR_NAMESPACE", "jmiahman1")
-    return f"ghcr.io/{namespace}/sharedllm-{clean_name}:latest"
-
-
 def _snapshot_container_config(container) -> dict:
     """Capture Config/HostConfig/network membership while the container is still up.
 
@@ -707,8 +682,7 @@ def restart_service(service_name: str, recreate: bool = False):
 
     try:
         # Determine if recreation is needed
-        image_tags = container.image.tags if container.image else []
-        image_tag = image_tags[0] if image_tags else None
+        image_tag = registry.container_image_ref(container, service_name)
 
         should_recreate = recreate
         local_latest_image_id = None
@@ -789,245 +763,66 @@ def _github_token() -> str:
 
 @app.get("/api/admin/services/updates", dependencies=[Depends(verify_internal_secret)])
 def check_all_updates():
+    """Whether each sharedllm container's registry has a newer image.
+
+    Compares the digests the running image was pulled as against the
+    registry's current digest for the tag the container was created from.
+    Never pulls. Public images need no token; for private ones the GitHub
+    token (user 1's in Identity, else GHCR_TOKEN / GITHUB_TOKEN) is used.
     """
-    Check all sharedllm services for available image updates.
-
-    Strategy: compare the locally running image's RepoDigest (sha256) against the
-    remote registry manifest digest fetched via the OCI Distribution HTTP API.
-    This never pulls an image — it only does a HEAD/GET request to the registry.
-
-    For GHCR images, authentication uses (in order):
-    1. github_token for user ID 1 from the Identity service
-    2. GHCR_TOKEN environment variable
-    3. GITHUB_TOKEN environment variable
-    """
-    import urllib.request
-
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
 
-    # GHCR auth token (GitHub PAT with read:packages scope)
-    ghcr_token = _github_token()
-
-    # Decide whether remote digest checks are viable BEFORE looping over every
-    # container. Without a usable GHCR token (or with GHCR unreachable), each
-    # _get_remote_digest call would block on a failing 401/TLS round-trip
-    # (~15s each) and this endpoint would hang ~60s, triggering the browser's
-    # ECONNABORTED. We still report the locally-running services (fast, no
-    # network) so the Admin Updates page stays populated — we just can't detect
-    # whether a newer image exists upstream.
+    token = _github_token() or None
     remote_error = None
-    remote_available = False
-    if not ghcr_token:
-        log.warning(
-                 "[updates] No GHCR/GitHub token available — skipping remote digest "
-                 "checks (set GHCR_TOKEN or GITHUB_TOKEN in .env to enable update detection)."
-        )
-        remote_error = "ghcr_auth_unavailable"
-    else:
-        def _ghcr_auth_ok(token: str) -> bool:
-            import base64
-
-            url = "https://ghcr.io/v2/"
-            req = urllib.request.Request(url, method="GET")
-            token_b64 = base64.b64encode(f":{token}".encode()).decode()
-            req.add_header("Authorization", f"Basic {token_b64}")
-            try:
-                with urllib.request.urlopen(req, timeout=8) as resp:
-                    # 200 = authenticated and usable; 401/403 = unusable token.
-                    return resp.status == 200
-            except urllib.error.HTTPError:
-                # 401/403 = token rejected -> skip. Any other HTTP error is
-                # inconclusive but treated as unusable to avoid slow timeouts.
-                return False
-            except Exception:
-                # Registry unreachable (timeout/DNS/TLS): cannot verify digests.
-                return False
-
-        if _ghcr_auth_ok(ghcr_token):
-            remote_available = True
-        else:
-            log.warning(
-                "[updates] GHCR token present but authentication failed/unreachable "
-                "(401/403 or registry down) — skipping remote digest checks."
-            )
-            remote_error = "ghcr_auth_unavailable"
-
-    def _get_remote_digest(image_ref: str) -> str | None:
-        """
-        Fetch the manifest digest for an image reference from its registry
-        without pulling. Returns the digest string (e.g. sha256:abc...) or None.
-        """
-        # Parse registry / repository / tag from image ref
-        # Expected format: ghcr.io/owner/repo:tag  OR  owner/repo:tag  OR  image:tag
-        tag = "latest"
-        if ":" in image_ref:
-            image_ref, tag = image_ref.rsplit(":", 1)
-
-        if image_ref.startswith("ghcr.io/"):
-            registry = "ghcr.io"
-            repo = image_ref[len("ghcr.io/"):]
-        elif "/" in image_ref and image_ref.split("/")[0].count(".") > 0:
-            # other registry host e.g. registry.example.com/repo
-            parts = image_ref.split("/", 1)
-            registry = parts[0]
-            repo = parts[1]
-        else:
-            # Docker Hub or plain image name
-            registry = "registry-1.docker.io"
-            repo = f"library/{image_ref}" if "/" not in image_ref else image_ref
-
-        # OCI-compliant manifest accept types (prefer multi-arch index)
-        accept_types = (
-            "application/vnd.oci.image.index.v1+json,"
-            "application/vnd.docker.distribution.manifest.list.v2+json,"
-            "application/vnd.oci.image.manifest.v1+json,"
-            "application/vnd.docker.distribution.manifest.v2+json"
-        )
-
-        url = f"https://{registry}/v2/{repo}/manifests/{tag}"
-
-        # Build auth header
-        auth_header = None
-        if registry == "ghcr.io" and ghcr_token:
-            import base64
-            token_b64 = base64.b64encode(f":{ghcr_token}".encode()).decode()
-            auth_header = f"Basic {token_b64}"
-
-        req = urllib.request.Request(url, method="HEAD")
-        req.add_header("Accept", accept_types)
-        if auth_header:
-            req.add_header("Authorization", auth_header)
-
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                # The Docker-Content-Digest header is the canonical digest
-                digest = resp.headers.get("Docker-Content-Digest")
-                return digest
-        except urllib.error.HTTPError as e:
-            if e.code in (401, 403):
-                log.warning(f"[updates] Auth error for {url}: {e.code}. Set GHCR_TOKEN env var.")
-            else:
-                log.warning(f"[updates] HTTP {e.code} fetching manifest for {image_ref}:{tag}")
-            return None
-        except Exception as e:
-            log.warning(f"[updates] Failed to fetch manifest for {image_ref}:{tag}: {e}")
-            return None
-
-    def _get_local_digest(image) -> str | None:
-        """Extract the repo digest from a locally cached image object."""
-        try:
-            attrs = image.attrs or {}
-            repo_digests = attrs.get("RepoDigests", [])
-            if repo_digests:
-                # Format: ghcr.io/owner/repo@sha256:abc...
-                digest_part = repo_digests[0].split("@")[-1]
-                return digest_part
-        except Exception:
-            pass
-        return None
-
+    updates = []
     try:
         containers = client.containers.list(all=True)
-        updates = []
-
-        for container in containers:
-            if not container.name or not container.name.startswith("sharedllm_"):
-                continue
-
-            # Determine base service name
-            compose_service = container.labels.get("com.docker.compose.service")
-            if compose_service:
-                svc_name = compose_service
-            else:
-                svc_name = container.name
-                if svc_name.startswith("sharedllm_"):
-                    svc_name = svc_name[len("sharedllm_"):]
-                if svc_name.endswith("_1"):
-                    svc_name = svc_name[:-2]
-
-            try:
-                image_tags = container.image.tags if container.image else []
-                image_tag = image_tags[0] if image_tags else None
-                if not image_tag:
-                    # Try to infer from compose image label
-                    compose_image = container.labels.get("com.docker.compose.image")
-                    if compose_image:
-                        image_tag = compose_image
-                    else:
-                        # Try to construct from service name (GHCR pattern)
-                        inferred = _infer_ghcr_image_ref(svc_name)
-                        if inferred:
-                            image_tag = inferred
-                        else:
-                            log.warning(f"[updates] {container.name} has no image tag, skipping")
-                            updates.append({
-                                "service": svc_name,
-                                "image": "unknown",
-                                "current_digest": None,
-                                "remote_digest": None,
-                                "has_update": False,
-                                "check_error": "no_image_tag",
-                                "status": container.status,
-                            })
-                            continue
-
-                # Local digest (from what was pulled when the container was last started)
-                current_digest = _get_local_digest(container.image)
-
-                # Remote digest (via OCI registry API — no pull). Only attempted
-                # when GHCR is reachable + authenticated; otherwise skip the
-                # network call entirely so this endpoint stays fast.
-                remote_digest = _get_remote_digest(image_tag) if remote_available else None
-
-                if not remote_available:
-                    has_update = False
-                    check_error = remote_error or "ghcr_unavailable"
-                elif current_digest is None or remote_digest is None:
-                    has_update = False
-                    check_error = "digest_unavailable"
-                else:
-                    # Compare only the sha256 hex, strip any prefix differences
-                    def _norm(d: str) -> str:
-                        return d.split(":")[-1].lower() if d else ""
-                    has_update = _norm(current_digest) != _norm(remote_digest)
-                    check_error = None
-
-                updates.append({
-                    "service": svc_name,
-                    "image": image_tag,
-                    "current_digest": current_digest,
-                    "remote_digest": remote_digest,
-                    "has_update": has_update,
-                    "check_error": check_error,
-                    "status": container.status,
-                })
-
-                log.info(
-                    f"[updates] {svc_name} ({container.name}): local={current_digest} remote={remote_digest} "
-                    f"has_update={has_update}"
-                )
-            except Exception as e:
-                log.warning(f"[updates] Failed to check {container.name}: {e}")
-                updates.append({
-                    "service": svc_name,
-                    "image": getattr(container, "image_tag", "unknown"),
-                    "has_update": False,
-                    "check_error": str(e),
-                    "status": container.status,
-                })
-                continue
-
-        return {
-            "checked": len(updates),
-            "updates_available": sum(1 for u in updates if u["has_update"]),
-            "services": updates,
-            "check_error": remote_error,
-        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
+    for container in containers:
+        if not container.name or not container.name.startswith("sharedllm_"):
+            continue
+        svc_name = container.labels.get("com.docker.compose.service") or container.name
+        svc_name = svc_name.removeprefix("sharedllm_").removesuffix("_1")
+        entry = {"service": svc_name, "image": "unknown", "current_digest": None,
+                 "remote_digest": None, "has_update": False, "check_error": None,
+                 "status": container.status}
+        updates.append(entry)
+        try:
+            ref = registry.container_image_ref(container, svc_name)
+            if not ref:
+                entry["check_error"] = "no_image_tag"
+                continue
+            entry["image"] = ref
+            local = registry.local_digests(container.image)
+            entry["current_digest"] = next(iter(sorted(local)), None)
+            if remote_error:
+                # The registry was unreachable for an earlier container; do not
+                # wait out the same timeout for every one of them.
+                entry["check_error"] = remote_error
+                continue
+            remote = registry.remote_digest(ref, token)
+            entry["remote_digest"] = remote
+            if not local or not remote:
+                entry["check_error"] = "digest_unavailable"
+            else:
+                entry["has_update"] = remote not in local
+        except registry.RegistryUnreachable as e:
+            log.warning(f"[updates] registry unreachable: {e}")
+            remote_error = "registry_unreachable"
+            entry["check_error"] = remote_error
+        except Exception as e:
+            log.warning(f"[updates] Failed to check {container.name}: {e}")
+            entry["check_error"] = str(e)
 
+    return {
+        "checked": len(updates),
+        "updates_available": sum(1 for u in updates if u["has_update"]),
+        "services": updates,
+        "check_error": remote_error,
+    }
 
 
 @app.post("/api/containers/{service_name}/pull", dependencies=[Depends(verify_internal_secret)])
@@ -1052,25 +847,14 @@ def pull_image_update(service_name: str):
         if not current_image_id:
             raise HTTPException(status_code=500, detail="Cannot determine current image ID")
 
-        image_tags = container.image.tags if container.image else []
-        image_tag = image_tags[0] if image_tags else None
+        image_tag = registry.container_image_ref(container, service_name)
         if not image_tag:
-            # Try to infer from container labels (compose image label)
-            compose_image = container.labels.get("com.docker.compose.image")
-            if compose_image:
-                image_tag = compose_image
-            else:
-                # Try to construct from service name (GHCR pattern)
-                inferred = _infer_ghcr_image_ref(service_name)
-                if inferred:
-                    image_tag = inferred
-                else:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Container has no image tag to pull. "
-                               "Rebuild the image with a tag (e.g. ghcr.io/owner/repo:latest) "
-                               "and recreate the container."
-                    )
+            raise HTTPException(
+                status_code=400,
+                detail="Container has no image tag to pull. "
+                       "Rebuild the image with a tag (e.g. ghcr.io/owner/repo:latest) "
+                       "and recreate the container."
+            )
 
         # If a pull is already running, return its current status
         with _pull_lock:
@@ -1141,25 +925,14 @@ def pull_and_restart(service_name: str):
         if not current_image_id:
             raise HTTPException(status_code=500, detail="Cannot determine current image ID")
 
-        image_tags = container.image.tags if container.image else []
-        image_tag = image_tags[0] if image_tags else None
+        image_tag = registry.container_image_ref(container, service_name)
         if not image_tag:
-            # Try to infer from container labels (compose image label)
-            compose_image = container.labels.get("com.docker.compose.image")
-            if compose_image:
-                image_tag = compose_image
-            else:
-                # Try to construct from service name (GHCR pattern)
-                inferred = _infer_ghcr_image_ref(service_name)
-                if inferred:
-                    image_tag = inferred
-                else:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Container has no image tag to pull. "
-                               "Rebuild the image with a tag (e.g. ghcr.io/owner/repo:latest) "
-                               "and recreate the container."
-                    )
+            raise HTTPException(
+                status_code=400,
+                detail="Container has no image tag to pull. "
+                       "Rebuild the image with a tag (e.g. ghcr.io/owner/repo:latest) "
+                       "and recreate the container."
+            )
 
         log.info(f"[pull-and-restart] Pulling latest image for {container.name}: {image_tag}")
         client.images.pull(image_tag)
@@ -1274,19 +1047,6 @@ def exec_in_container(service_name: str, body: dict):
 
 
 # ─── Integration: DNS Sync Webhook ───────────────────────────────────────────
-
-@app.post("/api/webhooks/dns-sync")
-async def dns_sync_webhook(request: dict):
-    """Handle webhook notifications from DNS sync service."""
-    event = request.get("event")
-    data = request.get("data", {})
-    log.info(f"[dns-sync webhook] Event: {event}, Data: {data}")
-
-    if event == "network_change":
-        log.info(f"[dns-sync] Network change: added={data.get('added')}, removed={data.get('removed')}")
-
-    return {"status": "ok", "event": event}
-
 
 if __name__ == "__main__":
     import uvicorn

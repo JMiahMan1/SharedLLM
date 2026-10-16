@@ -1,22 +1,10 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { BookOpen, Brain, Calendar, Compass, HeartPulse, Home, Music, Settings, Shield, StickyNote, Users, X } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useAuth } from '../../context/AuthContext';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
-const pinnedItems = [
-  { icon: Home, label: 'Home', path: '/' },
-  { icon: Compass, label: 'Wander', path: '/wander' },
-  { icon: Users, label: 'Family', path: '/family' },
-  { icon: Music, label: 'Media', path: '/media' },
-  { icon: HeartPulse, label: 'Health', path: '/fitness' },
-];
+import { cn } from '../../lib/utils';
+import { navPagesFor } from './navItems';
 
 const BottomNav = () => {
   const { trigger } = useHaptics();
@@ -26,17 +14,14 @@ const BottomNav = () => {
 
   const isAdmin = user?.is_admin ?? false;
 
-  const moreItems = [
-    { icon: Calendar, label: 'Calendar', path: '/calendar', adminOnly: false },
-    { icon: BookOpen, label: 'Bible', path: '/bible', adminOnly: false },
-    { icon: StickyNote, label: 'Notes', path: '/notes', adminOnly: false },
-    { icon: Brain, label: 'Lab', path: '/lab', adminOnly: true },
-    // Admin-only. Without this, an admin on a phone can reach the control
-    // panel only by digging through the profile menu, which is not
-    // discoverable — the panel is where user management lives.
-    { icon: Shield, label: 'Admin', path: '/admin', adminOnly: true },
-    { icon: Settings, label: 'Settings', path: '/settings', adminOnly: false },
-  ].filter((item) => !item.adminOnly || isAdmin);
+  // Five pinned tabs; every other page the user may open goes in "More", so
+  // nothing reachable on desktop is missing on a phone (Admin included: the
+  // control panel is where user management lives).
+  const pages = navPagesFor(isAdmin);
+  const pinnedItems = pages
+    .filter((item) => item.pinnedOnMobile)
+    .sort((a, b) => (a.pinnedOnMobile ?? 0) - (b.pinnedOnMobile ?? 0));
+  const moreItems = pages.filter((item) => !item.pinnedOnMobile);
 
   const moreActive = moreItems.some((item) => location.pathname.startsWith(item.path));
 
@@ -129,7 +114,7 @@ const BottomNav = () => {
             >
               <item.icon size={19} className="shrink-0" />
               <span className="text-[10px] font-medium truncate w-full text-center tracking-tight leading-none">
-                {item.label}
+                {item.mobileLabel ?? item.label}
               </span>
             </NavLink>
           ))}

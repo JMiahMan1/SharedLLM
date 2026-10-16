@@ -26,7 +26,7 @@ export default function SendAsSelector({
           role="radio"
           aria-checked={value === id}
           onClick={() => onChange(id)}
-          className={`min-h-8 px-2.5 rounded-full text-[11px] inline-flex items-center gap-1 ${
+          className={`relative min-h-8 px-2.5 rounded-full text-[11px] inline-flex items-center gap-1 before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] ${
             value === id
               ? id === 'admin'
                 ? 'bg-amber-400/20 text-amber-100'

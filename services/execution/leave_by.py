@@ -10,7 +10,6 @@ keeps each event to a single reminder across rounds and restarts.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import time
 from datetime import datetime
@@ -179,5 +178,7 @@ async def remind_once() -> int:
 async def leave_by_loop() -> None:
     while True:
         await asyncio.sleep(INTERVAL_S)
-        with contextlib.suppress(Exception):
+        try:
             await remind_once()
+        except Exception as e:  # keep looping, but never fail silently
+            log.warning(f"[leave_by] pass failed: {type(e).__name__}: {e}")

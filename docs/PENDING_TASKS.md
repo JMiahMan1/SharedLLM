@@ -36,9 +36,6 @@ that review were not re-checked one by one; the full list is in git history
 - **Tracebacks to clients**: the gateway's global exception handler returns
   `detail` and the full `traceback` in the 500 body
   (`services/gateway/main.py`, `global_exception_handler`).
-- **Unauthenticated `POST /api/webhooks/dns-sync`** on the control plane
-  (`services/control_plane/main.py`). Nothing posts to it any more (the
-  dns-sync sidecar is gone); remove the route.
 - **Saved password in plain storage**: biometric sign-in replays
   `jarvis_saved_password` from Capacitor Preferences
   (`services/ui/src/pages/Login.tsx`). Store a refreshable token instead.

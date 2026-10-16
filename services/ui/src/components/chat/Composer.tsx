@@ -364,7 +364,8 @@ export default function Composer({
       )}
 
       {!editing && (
-        <div className="-mx-1 mb-2 flex items-center gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none]" data-testid="quick-actions">
+        // py-1 leaves room for the chips' invisible 44px touch area (overflow clips it).
+        <div className="-mx-1 mb-1 flex items-center gap-1.5 overflow-x-auto px-1 py-1 [scrollbar-width:none]" data-testid="quick-actions">
           <QuickChip icon={<Sparkles size={14} className="text-fuchsia-300" />} label="@Jarvis" onSelect={askJarvis} />
           {quickActions.map((action) => (
             <QuickChip key={action.key} icon={action.icon} label={action.label} onSelect={action.onSelect} />
@@ -521,7 +522,7 @@ function QuickChip({ icon, label, onSelect }: { icon: ReactNode; label: string; 
     <button
       type="button"
       onClick={onSelect}
-      className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-slate-800/80 px-3 text-[12px] font-medium text-slate-100 hover:border-purple-400/40 hover:bg-slate-800"
+      className="relative inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full before:absolute before:inset-x-0 before:-inset-y-1 before:content-[''] border border-white/10 bg-slate-800/80 px-3 text-[12px] font-medium text-slate-100 hover:border-purple-400/40 hover:bg-slate-800"
     >
       {icon}
       {label}

@@ -12,7 +12,7 @@ from typing import Any
 
 import aiohttp
 import redis.asyncio as redis
-from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -37,9 +37,14 @@ async def retention_cleanup_task():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Resolve runtime config from Identity service
-    from services.config import resolve_runtime_config
-    await resolve_runtime_config()
+    # Resolve runtime config from Identity service. The limits were imported
+    # by value before this ran, so take the resolved ones (log_retention_days /
+    # log_max_entries settings) or the Identity settings would never apply.
+    global LOG_RETENTION_DAYS, LOG_MAX_ENTRIES
+    from services import config as runtime_config
+    await runtime_config.resolve_runtime_config()
+    LOG_RETENTION_DAYS = runtime_config.LOG_RETENTION_DAYS
+    LOG_MAX_ENTRIES = runtime_config.LOG_MAX_ENTRIES
 
     py_logging.info(f"[Logging] Redis backend initialized (retention={LOG_RETENTION_DAYS}d, max_entries={LOG_MAX_ENTRIES})")
     task = asyncio.create_task(retention_cleanup_task())
@@ -70,9 +75,6 @@ SECRET_PATTERNS = [
     re.compile(r"\bghp_[A-Za-z0-9]+\b"),
     re.compile(r"\bglpat-[A-Za-z0-9\-_]+\b"),
 ]
-
-# Redis client (initialized in lifespan)
-_redis_client: redis.Redis | None = None
 
 async def get_redis() -> redis.Redis:
     global _redis_client
@@ -106,9 +108,6 @@ def sanitize_log_payload(value: Any, parent_key: str | None = None) -> Any:
         return [sanitize_log_payload(item, parent_key=parent_key) for item in value]
     return _sanitize_scalar(value)
 
-def _require_internal_secret(x_internal_secret: str | None) -> None:
-    if x_internal_secret != INTERNAL_SECRET:
-        raise HTTPException(status_code=403, detail="Forbidden")
 
 def _resolve_limit(limit: int | None, lines: int | None, default: int = 100) -> int:
     value = lines if lines is not None else limit
@@ -123,16 +122,29 @@ class LogEntry(BaseModel):
     message: str
     context: dict | None = None
 
+def _parse_levels(levels: str | None) -> set[str]:
+    """``"warning,error"`` -> ``{"WARNING", "WARN", "ERROR"}``; empty means any."""
+    wanted = {part.strip().upper() for part in (levels or "").split(",") if part.strip()}
+    if "WARNING" in wanted or "WARN" in wanted:
+        wanted |= {"WARNING", "WARN"}
+    return wanted
+
+
 async def _fetch_logs(
     service: str | None = None,
     user_id: str | None = None,
     limit: int = 100,
+    levels: str | None = None,
 ):
     r = await get_redis()
     cutoff = time.time() - (LOG_RETENTION_DAYS * 86400)
+    wanted_levels = _parse_levels(levels)
 
-    # Fetch all entries within retention window (sorted by timestamp desc)
-    entries = await r.zrevrangebyscore("logs:entries", "+inf", cutoff, start=0, num=limit * 10)
+    # Fetch entries within the retention window, newest first. A level filter
+    # scans the whole buffer: warnings are rare among the request lines, and a
+    # 10x window would only ever see the last few minutes.
+    scan = LOG_MAX_ENTRIES if wanted_levels else limit * 10
+    entries = await r.zrevrangebyscore("logs:entries", "+inf", cutoff, start=0, num=scan)
 
     results = []
     for entry_json in entries:
@@ -142,6 +154,8 @@ async def _fetch_logs(
             if service and entry.get("service") != service:
                 continue
             if user_id and user_id != "admin" and entry.get("user_id") != user_id:
+                continue
+            if wanted_levels and str(entry.get("level", "")).upper() not in wanted_levels:
                 continue
             results.append(entry)
             if len(results) >= limit:
@@ -164,8 +178,8 @@ async def _token_is_admin_api_key(token: str) -> bool:
         async with aiohttp.ClientSession() as client:
             resp = await client.get(
                 f"{IDENTITY_SVC_URL}/api/internal/validate-api-key",
-                params={"api_key": token},
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                # A header, not a query parameter: URLs land in access logs.
+                headers={"X-Internal-Secret": INTERNAL_SECRET, "X-Api-Key": token},
                 timeout=aiohttp.ClientTimeout(total=5.0),
             )
             if resp.status == 200:
@@ -174,21 +188,21 @@ async def _token_is_admin_api_key(token: str) -> bool:
         py_logging.warning(f"[logs] API key validation failed: {e}")
     return False
 
-def _require_read_secret(x_internal_secret: str | None):
-    """Log reads expose every user's entries; gate them like deletes."""
+def _require_internal_secret(x_internal_secret: str | None) -> None:
+    """Every HTTP route is service-to-service: reads expose every user's entries."""
     if not x_internal_secret or not secret_matches(x_internal_secret, INTERNAL_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 @app.get("/logs")
 @app.get("/api/logs")
 async def get_logs(user_id: str | None = None, service: str | None = None, limit: int | None = None, lines: int | None = None, x_internal_secret: str | None = Header(default=None)):
-    _require_read_secret(x_internal_secret)
+    _require_internal_secret(x_internal_secret)
     return await _fetch_logs(service=service, user_id=user_id, limit=_resolve_limit(limit, lines))
 
 @app.get("/api/admin/logs")
-async def get_logs_admin_api(service: str | None = None, limit: int | None = None, lines: int | None = None, x_internal_secret: str | None = Header(default=None)):
-    _require_read_secret(x_internal_secret)
-    return await _fetch_logs(service=service, user_id="admin", limit=_resolve_limit(limit, lines))
+async def get_logs_admin_api(service: str | None = None, limit: int | None = None, lines: int | None = None, level: str | None = None, x_internal_secret: str | None = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    return await _fetch_logs(service=service, user_id="admin", limit=_resolve_limit(limit, lines), levels=level)
 
 @app.delete("/api/logs")
 @app.delete("/api/admin/logs")
@@ -232,8 +246,6 @@ async def log_event(entry: LogEntry, x_internal_secret: str | None = Header(defa
     return {"status": "success"}
 
 # --- WebSocket Streaming via Redis PubSub ---
-active_ws: list[WebSocket] = []
-
 async def _ws_authorized(websocket: WebSocket) -> bool:
     """Accept the shared internal secret or an admin's API key (?token=...).
 
@@ -247,35 +259,50 @@ async def _ws_authorized(websocket: WebSocket) -> bool:
         return True
     return await _token_is_admin_api_key(token)
 
+async def _forward_logs(websocket: WebSocket, pubsub, send_lock: asyncio.Lock):
+    async for message in pubsub.listen():
+        if message["type"] == "message":
+            async with send_lock:
+                await websocket.send_text(message["data"])
+
+
+async def _answer_pings(websocket: WebSocket, send_lock: asyncio.Lock):
+    """Reply to the client's heartbeat (lib/wsManager.ts sends {"type":"ping"}
+    and reconnects when nothing comes back), and notice the client leaving
+    even when no log line is being sent."""
+    while True:
+        text = await websocket.receive_text()
+        try:
+            is_ping = json.loads(text).get("type") == "ping"
+        except (ValueError, AttributeError):
+            is_ping = False
+        if is_ping:
+            async with send_lock:
+                await websocket.send_text(json.dumps({"ping": True}))
+
+
 async def _ws_handler(websocket: WebSocket):
     if not await _ws_authorized(websocket):
         await websocket.close(code=4401)
         return
     await websocket.accept()
-    active_ws.append(websocket)
     r = await get_redis()
     pubsub = r.pubsub()
     await pubsub.subscribe("logs:stream")
-
+    send_lock = asyncio.Lock()
+    tasks = [
+        asyncio.create_task(_forward_logs(websocket, pubsub, send_lock)),
+        asyncio.create_task(_answer_pings(websocket, send_lock)),
+    ]
     try:
-        async for message in pubsub.listen():
-            if message["type"] == "message":
-                try:
-                    await websocket.send_text(message["data"])
-                except Exception:
-                    break
-            elif message["type"] == "ping":
-                try:
-                    await websocket.send_text(json.dumps({"ping": True}))
-                except Exception:
-                    break
-    except WebSocketDisconnect:
-        pass
+        # Whichever ends first (client gone, send failed) ends the stream.
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         await pubsub.unsubscribe("logs:stream")
         await pubsub.close()
-        if websocket in active_ws:
-            active_ws.remove(websocket)
 
 @app.websocket("/api/logs/stream")
 @app.websocket("/logs/stream")

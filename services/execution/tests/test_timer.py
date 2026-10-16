@@ -157,3 +157,95 @@ async def test_timer_pause_and_resume(mock_redis_conn, mocker):
     if expected_expiry.tzinfo:
         expected_expiry = expected_expiry.replace(tzinfo=None)
     assert abs((new_expiry - expected_expiry).total_seconds()) < 1.0
+
+
+@pytest.mark.asyncio
+async def test_pause_and_resume_target_the_timer_by_id(mock_redis_conn):
+    """Pausing "Timer 1" must not pause "Timer 10", and resume must wake the
+    timer it was asked about rather than whichever paused one comes first."""
+    for title in ("Timer 10", "Timer 1"):
+        await handle_timer(TimerRequest(user_context=mock_context, action="add", duration_str="10m", title=title))
+    timers = {json.loads(v)["title"]: json.loads(v) for v in mock_redis_conn.store.values()}
+    one, ten = timers["Timer 1"], timers["Timer 10"]
+
+    for timer in (ten, one):
+        res = await handle_timer(TimerRequest(user_context=mock_context, action="pause", title=timer["title"], id=timer["id"]))
+        assert res.detail["timer_id"] == timer["id"]
+
+    res = await handle_timer(TimerRequest(user_context=mock_context, action="resume", title="Timer 1", id=one["id"]))
+    assert res.status == "SUCCESS"
+    assert res.detail["timer_id"] == one["id"]
+    after = {json.loads(v)["id"]: json.loads(v) for v in mock_redis_conn.store.values()}
+    assert after[one["id"]]["active"] is True
+    assert after[ten["id"]]["active"] is False
+
+
+def test_duration_parsing_counts_every_part_and_leaves_clock_times_alone():
+    from datetime import timedelta
+
+    from services.execution.handlers.timer import _parse_duration
+
+    assert _parse_duration("10m") == timedelta(minutes=10)
+    assert _parse_duration("1h30m") == timedelta(minutes=90)
+    assert _parse_duration("1 hour 20 minutes") == timedelta(minutes=80)
+    assert _parse_duration("90 sec") == timedelta(seconds=90)
+    assert _parse_duration("15") == timedelta(minutes=15)
+    # A clock time is not a duration: the handler parses it as one instead.
+    assert _parse_duration("3pm") is None
+    assert _parse_duration("7:30") is None
+    assert _parse_duration("tomorrow at 9") is None
+
+
+class _FakeSession:
+    calls: list = []  # noqa: RUF012 - reset by each test
+    fail = False
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def post(self, url, json=None, **kwargs):
+        if _FakeSession.fail:
+            raise OSError("telemetry down")
+        _FakeSession.calls.append((url, json))
+        return _FakeResp()
+
+
+class _FakeResp:
+    status = 200
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+async def test_a_fired_timer_puts_a_notice_on_the_phone(monkeypatch):
+    import aiohttp
+
+    from services.execution.handlers.timer import notify_timer_done
+
+    _FakeSession.calls, _FakeSession.fail = [], False
+    monkeypatch.setattr(aiohttp, "ClientSession", _FakeSession)
+    assert await notify_timer_done("michele", {"id": "t1", "title": "Pasta", "expires_at": "2026-10-15T18:00:00+00:00"})
+    (url, body), = _FakeSession.calls
+    assert url.endswith("/api/telemetry/notify")
+    assert body["user"] == "michele"
+    assert body["title"] == "Timer: Pasta" and body["body"] == "Pasta is done"
+    assert body["once"] == "timer:t1:2026-10-15T18:00:00+00:00"
+
+
+async def test_a_notice_failure_does_not_raise(monkeypatch):
+    import aiohttp
+
+    from services.execution.handlers.timer import notify_timer_done
+
+    _FakeSession.fail = True
+    monkeypatch.setattr(aiohttp, "ClientSession", _FakeSession)
+    assert await notify_timer_done("michele", {"title": "Pasta"}) is False

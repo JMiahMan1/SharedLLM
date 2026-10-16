@@ -55,3 +55,35 @@ export function isUnreachable(error: unknown): boolean {
   if (e?.response) return false;
   return true;
 }
+
+const LAST = 'bible:last:';
+
+/**
+ * Fetch something the reader needs before any chapter can open (their saved
+ * place, the translation list, the book list), keeping the last answer on the
+ * device. Without these a cold start with no connection never reaches the
+ * saved chapters above; with them it opens on the reader's own page. Only an
+ * unreachable server falls back -- an answer from the server, even an error,
+ * is always the server's.
+ */
+export async function withOfflineCopy<T>(name: string, fetch: () => Promise<T>): Promise<T> {
+  try {
+    const data = await fetch();
+    try {
+      localStorage.setItem(LAST + name, JSON.stringify(data));
+    } catch {
+      // A full or blocked store only costs the offline copy.
+    }
+    return data;
+  } catch (error) {
+    if (isUnreachable(error)) {
+      try {
+        const raw = localStorage.getItem(LAST + name);
+        if (raw) return JSON.parse(raw) as T;
+      } catch {
+        // Fall through to the original failure.
+      }
+    }
+    throw error;
+  }
+}

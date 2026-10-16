@@ -186,7 +186,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
       <div
         ref={menuRef}
         style={{ top: displayPos.y, left: displayPos.x }}
-        className="fixed z-50 glass-card min-w-[180px] p-2 animate-in fade-in"
+        className="fixed z-50 glass-card min-w-[180px] max-h-[calc(100dvh-16px)] overflow-y-auto overscroll-contain p-2 animate-in fade-in"
         role="menu"
         aria-label={`${props.def.label} options`}
       >
@@ -231,19 +231,17 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
 
           <div className="border-t border-slate-700/50 my-1" />
 
-          {props.widgetKey !== 'active_media' && (
-            <button
-              role="menuitem"
-              onClick={() => {
-                props.onToggleVisibility(props.widgetKey, props.userSettings.visibility !== 'visible');
-                setMenuOpen(false);
-              }}
-              className="w-full text-left text-xs px-2 py-1.5 rounded-md pointer-coarse:min-h-11 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors flex items-center gap-2"
-            >
-              {props.userSettings.visibility === 'hidden' ? <Eye size={13} /> : <EyeOff size={13} />}
-              {props.userSettings.visibility === 'hidden' ? 'Show' : 'Hide'}
-            </button>
-          )}
+          <button
+            role="menuitem"
+            onClick={() => {
+              props.onToggleVisibility(props.widgetKey, props.userSettings.visibility !== 'visible');
+              setMenuOpen(false);
+            }}
+            className="w-full text-left text-xs px-2 py-1.5 rounded-md pointer-coarse:min-h-11 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors flex items-center gap-2"
+          >
+            {props.userSettings.visibility === 'hidden' ? <Eye size={13} /> : <EyeOff size={13} />}
+            {props.userSettings.visibility === 'hidden' ? 'Show' : 'Hide'}
+          </button>
 
           <button
             role="menuitem"

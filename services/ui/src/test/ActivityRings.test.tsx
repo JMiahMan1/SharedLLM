@@ -57,7 +57,8 @@ describe('ActivityRings', () => {
 
   it('hides the zone verdict while thin, since it would be a guess', () => {
     render(<ActivityRings rings={[stepsRing()]} baseline={null} thin baselineMinDays={7} />);
-    expect(screen.getByTestId('ring-zone-steps')).toHaveTextContent('On your usual pace');
+    expect(screen.queryByTestId('ring-zone-steps')).not.toBeInTheDocument();
+    expect(screen.queryByText('On your usual pace')).not.toBeInTheDocument();
   });
 
   it('falls back to the default goal when the server sent none', () => {

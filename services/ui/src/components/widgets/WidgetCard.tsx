@@ -1,4 +1,5 @@
 import React, { Component, useState, useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Maximize2, Minimize2, AlertTriangle, RefreshCw } from 'lucide-react';
 
 // ── Error Boundary ──────────────────────────────────────────────────────────
@@ -133,7 +134,7 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
               e.stopPropagation();
               setIsExpanded(!isExpanded);
             }}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/5 transition-colors pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
             title={isExpanded ? 'Collapse' : 'Expand to full screen'}
             aria-label={isExpanded ? 'Collapse widget' : 'Expand widget'}
           >
@@ -185,7 +186,10 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
   // ── Expanded (full-screen overlay) ──────────────────────────────────────
 
   if (isExpanded) {
-    return (
+    // Portalled so `fixed` means the viewport: the dashboard's entry
+    // animation leaves a transform on an ancestor, which otherwise pins the
+    // overlay to the page instead of the screen.
+    return createPortal(
       <div className={`fixed inset-0 z-50 flex flex-col p-4 md:p-8 animate-fade-up ${expandedClassName ?? 'bg-slate-950/98 backdrop-blur-xl'}`}>
         {/* Close strip */}
         <div className="flex items-center justify-between mb-6 max-w-7xl mx-auto w-full shrink-0">
@@ -240,7 +244,8 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
             )}
           </WidgetErrorBoundary>
         </div>
-      </div>
+      </div>,
+      document.body,
     );
   }
 

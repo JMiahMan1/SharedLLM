@@ -1871,7 +1871,7 @@ def internal_user_device_assignments(
 
 @app.get("/api/internal/validate-api-key")
 def internal_validate_api_key(
-    api_key: str,
+    api_key: str | None = Header(None, alias="X-Api-Key"),
     session: Session = Depends(get_session),
     _: None = Depends(require_internal),
 ):
@@ -1885,6 +1885,9 @@ def internal_validate_api_key(
     only "did this exact key authenticate", and 401s otherwise.
 
     Do not add a fallback here; that is the whole point of the endpoint.
+
+    The key arrives in the ``X-Api-Key`` header, never the query string:
+    a URL goes into the access log, and this is called ~1,000 times an hour.
     """
     if not api_key or not api_key.strip():
         raise HTTPException(status_code=400, detail="api_key is required")
@@ -1998,7 +2001,13 @@ def change_password(body: ChangePasswordRequest, session: Session = Depends(get_
 async def test_connection(req: dict, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     """Test a connection before saving."""
     service = req.get("service")
-    config = req.get("config", {})
+    config = dict(req.get("config") or {})
+    # Saved secrets are never sent to the browser, so "Test" on an already
+    # connected integration arrives with the token/password blank. Test with
+    # the caller's own saved value instead of failing "Token is required".
+    for key in list(config):
+        if not config.get(key) and isinstance(getattr(admin, f"{key}_enc", None), str):
+            config[key] = _decrypt_field(getattr(admin, f"{key}_enc"))
     log.info(f"[test_connection] Testing {service} with config: { {k: '***' if 'token' in k.lower() or 'pass' in k.lower() else v for k, v in config.items()} }")
 
     try:
@@ -2962,6 +2971,29 @@ def delete_dns_record(record_id: int, session: Session = Depends(get_session), a
     session.commit()
     return {"status": "SUCCESS", "message": f"DNS record for '{record.domain_name}' deleted"}
 
+# Every dashboard widget in display order with its default size. Mirrors
+# `defaultWidgetDefs` in the UI's widgetStore: a key missing here is saved by
+# the PUT but never read back, so the user's change reverts on the next load.
+WIDGET_DEFAULT_SIZES: dict[str, str] = {
+    'energy_insights': 'medium',
+    'ambient_timer': 'medium',
+    'quick_notes': 'medium',
+    'active_media': 'wide',
+    'chores_progress': 'tall',
+    'upcoming_events': 'wide',
+    'quick_assistant': 'medium',
+    'device_control': 'tall',
+    'workspaces': 'medium',
+    'health_activity': 'medium',
+    'climate': 'medium',
+    'presence': 'medium',
+    'bible_daily': 'medium',
+}
+_WIDGET_ORDER = {key: index for index, key in enumerate(WIDGET_DEFAULT_SIZES)}
+WIDGET_SIZES = frozenset({'small', 'medium', 'wide', 'tall'})
+WIDGET_VISIBILITIES = frozenset({'visible', 'hidden', 'removed'})
+
+
 @app.get("/api/widgets/settings", response_model=WidgetSettingsRead)
 def get_widget_settings(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     """Get all widget settings for the current user."""
@@ -3001,35 +3033,16 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
         )
 
     # Return as list, ensure every known widget key has an entry
-    known_keys = [
-        'energy_insights', 'ambient_timer', 'quick_notes', 'active_media',
-        'chores_progress', 'upcoming_events', 'quick_assistant', 'device_control',
-        'workspaces', 'health_activity', 'climate', 'presence'
-    ]
-    default_sizes = {
-        'energy_insights': 'medium',
-        'ambient_timer': 'small',
-        'quick_notes': 'medium',
-        'active_media': 'wide',
-        'chores_progress': 'tall',
-        'upcoming_events': 'wide',
-        'quick_assistant': 'medium',
-        'device_control': 'tall',
-        'workspaces': 'medium',
-        'health_activity': 'medium',
-        'climate': 'medium',
-        'presence': 'medium',
-    }
     result = []
-    for key in known_keys:
+    for index, key in enumerate(WIDGET_DEFAULT_SIZES):
         if key in settings_map:
             result.append(settings_map[key])
         else:
             result.append(UserWidgetRead(
                 widget_key=key,
                 visibility='visible' if key != 'quick_assistant' else 'hidden',
-                order_index=known_keys.index(key),
-                size=default_sizes[key],
+                order_index=index,
+                size=WIDGET_DEFAULT_SIZES[key],
                 is_pinned=False,
                 sort_mode=None,
                 pinned_devices=[],
@@ -3052,6 +3065,12 @@ def update_widget_settings(
     user: User = Depends(require_api_key)
 ):
     """Update widget settings for the current user."""
+    if widget_key not in WIDGET_DEFAULT_SIZES:
+        raise HTTPException(status_code=404, detail=f"Unknown widget '{widget_key}'")
+    if body.size is not None and body.size not in WIDGET_SIZES:
+        raise HTTPException(status_code=400, detail=f"Invalid widget size '{body.size}'")
+    if body.visibility is not None and body.visibility not in WIDGET_VISIBILITIES:
+        raise HTTPException(status_code=400, detail=f"Invalid widget visibility '{body.visibility}'")
     if body.quick_assistant_enabled is not None:
         setting = session.exec(
             select(UserWidget).where(
@@ -3067,8 +3086,8 @@ def update_widget_settings(
                 username=user.username,
                 widget_key='quick_assistant',
                 visibility=visibility,
-                order_index=6,
-                size='medium',
+                order_index=_WIDGET_ORDER['quick_assistant'],
+                size=WIDGET_DEFAULT_SIZES['quick_assistant'],
                 is_pinned=False,
                 sort_mode=None,
                 pinned_devices='[]',
@@ -3086,7 +3105,9 @@ def update_widget_settings(
         )
     ).first()
 
-    update_data = body.model_dump(exclude_unset=True)
+    # Not columns: `quick_assistant_enabled` is handled above, `user_id` is
+    # never trusted (the row always belongs to the caller).
+    update_data = body.model_dump(exclude_unset=True, exclude={'quick_assistant_enabled', 'user_id'})
 
     if not update_data:
         return {"status": "SUCCESS"}
@@ -3098,8 +3119,9 @@ def update_widget_settings(
         update_data['config'] = json.dumps(update_data['config'])
 
     # Creating a quick_assistant row without an explicit visibility must not
-    # reveal the widget (model default is 'visible').
-    if widget_key == 'quick_assistant' and 'visibility' not in update_data:
+    # reveal the widget (model default is 'visible'). An existing row keeps its
+    # visibility: resizing an enabled assistant must not switch it off.
+    if widget_key == 'quick_assistant' and 'visibility' not in update_data and not existing:
         update_data['visibility'] = 'hidden'
 
     if existing:
@@ -3108,6 +3130,12 @@ def update_widget_settings(
         existing.updated_at = int(datetime.now().timestamp() * 1000)
         session.add(existing)
     else:
+        # The first change to a widget creates its row. Fields the change does
+        # not name keep the widget's defaults: the model's own defaults (size
+        # 'medium', order 0) silently resized and reordered every widget the
+        # first time anything about it was saved.
+        update_data.setdefault('size', WIDGET_DEFAULT_SIZES.get(widget_key, 'medium'))
+        update_data.setdefault('order_index', _WIDGET_ORDER.get(widget_key, len(_WIDGET_ORDER)))
         new_widget = UserWidget(
             username=user.username,
             widget_key=widget_key,
@@ -4846,7 +4874,8 @@ async def update_user_location(
             )
             session.add(new_location)
         session.commit()
-    log.info(f"[location] Updated location for {user_id}: ({location.latitude}, {location.longitude})")
+    # No coordinates in the log: it is kept and read far more widely than the map.
+    log.info(f"[location] Updated location for {user_id} (±{int(location.accuracy or 0)} m)")
 
     try:
         await _forward_location_to_ha(user_id, location)

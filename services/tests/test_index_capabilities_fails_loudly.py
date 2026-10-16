@@ -41,9 +41,13 @@ def test_a_rejected_sync_raises_instead_of_just_logging():
 
 
 def test_the_post_timeout_survives_a_slow_embed():
-    assert "timeout=300" in SCRIPT, (
-        "embedding ~35 capability schemas can exceed the old 30s client "
-        "timeout, which reports failure while the server is still working"
+    import re
+
+    timeouts = [int(t) for t in re.findall(r"timeout=(\d+)\s*\n\s*\)", SCRIPT)]
+    assert timeouts and min(timeouts) >= 1800, (
+        "RAG finishes the capability sync even after the client gives up; right "
+        "after a deploy it took 11 minutes, so a 300s timeout reported a "
+        "successful sync as failed"
     )
 
 

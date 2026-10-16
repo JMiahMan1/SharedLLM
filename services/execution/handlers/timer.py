@@ -13,6 +13,65 @@ from services.execution.schemas import ExecutionResult, TimerRequest
 
 log = logging.getLogger("execution.timer")
 
+_DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)\s*(h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?)(?![a-z])", re.I)
+
+
+def _parse_duration(text: str | None) -> timedelta | None:
+    """"10m", "1h30m", "1 hour 20 minutes", "90 sec" -> a timedelta; else None.
+
+    Every part counts: reading only the first turned "1h30m" into one hour.
+    A bare number is minutes, which is what people mean by "timer 10".
+    """
+    if not text or not text.strip():
+        return None
+    stripped = text.strip()
+    if re.fullmatch(r"\d+(?:\.\d+)?", stripped):
+        return timedelta(minutes=float(stripped))
+    parts = _DURATION_PART.findall(stripped)
+    if not parts or re.search(r"\d\s*(am|pm)\b|:\d", stripped, re.I):
+        return None
+    total = timedelta()
+    for value, unit in parts:
+        n = float(value)
+        u = unit[0].lower()
+        total += timedelta(hours=n) if u == "h" else timedelta(minutes=n) if u == "m" else timedelta(seconds=n)
+    return total if total > timedelta() else None
+
+
+async def notify_timer_done(user: str, timer_data: dict) -> bool:
+    """Put "<title> is done" on the person's phone (telemetry outbox).
+
+    A timer set from the app has no speaker, and firing one used to do
+    nothing at all: this notice is what makes it ring somewhere.
+    """
+    import aiohttp
+
+    from services.config import INTERNAL_SECRET, TELEMETRY_SVC_URL
+
+    title = str(timer_data.get("title") or "Timer").strip() or "Timer"
+    is_alarm = timer_data.get("type") == "alarm"
+    payload = {
+        "user": user,
+        "kind": "alarm" if is_alarm else "timer",
+        "title": f"{'Alarm' if is_alarm else 'Timer'}: {title}",
+        "body": f"{title} is done" if not is_alarm else f"{title}",
+        "data": {"url": "/communication"},
+        # One notice per firing, however often the scheduler retries it.
+        "once": f"timer:{timer_data.get('id')}:{timer_data.get('expires_at')}",
+    }
+    try:
+        async with aiohttp.ClientSession() as session, session.post(
+            f"{TELEMETRY_SVC_URL.rstrip('/')}/api/telemetry/notify",
+            json=payload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            return resp.status == 200
+    except Exception as e:  # the speaker alert still runs
+        log.warning(f"[timer] phone notice for {user} failed: {e}")
+        return False
+
+
 async def get_redis():
     return redis.from_url(REDIS_URL, decode_responses=True)
 
@@ -30,18 +89,14 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
             now = datetime.now(UTC)
             expires_at = now
 
-            if req.duration_str:
-                # Basic duration parsing (e.g. "10m", "5s")
-                # This should ideally be handled by Gateway extraction
-                # but we'll add a safety fallback here.
-                m = re.search(r"(\d+)\s*(m|s|h)", req.duration_str)
-                if m:
-                    val, unit = int(m.group(1)), m.group(2)
-                    if unit == "m": expires_at += timedelta(minutes=val)
-                    elif unit == "s": expires_at += timedelta(seconds=val)
-                    elif unit == "h": expires_at += timedelta(hours=val)
-            elif req.time_str:
-                dt = dateparser.parse(req.time_str, settings={"PREFER_DATES_FROM": "future"})
+            duration = _parse_duration(req.duration_str)
+            # The Communication page has one box for "10m" *or* "3pm": a value
+            # that is not a duration is a clock time.
+            time_str = req.time_str or (req.duration_str if req.duration_str and duration is None else None)
+            if duration is not None:
+                expires_at += duration
+            elif time_str:
+                dt = dateparser.parse(time_str, settings={"PREFER_DATES_FROM": "future"})
                 if dt:
                     # Naive wall-clock input ("3pm") means the container's
                     # local zone; normalize everything to UTC for storage.
@@ -117,7 +172,7 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 data = await r.get(k)
                 if data:
                     t = json.loads(data)
-                    if t.get("active") and (not req.title or req.title.lower() in t["title"].lower()):
+                    if t.get("active") and _targets(t, req):
                         t["active"] = False
                         t["paused_at"] = datetime.now(UTC).isoformat()
                         await r.set(k, json.dumps(t))
@@ -131,7 +186,7 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 data = await r.get(k)
                 if data:
                     t = json.loads(data)
-                    if not t.get("active") and t.get("paused_at"):
+                    if not t.get("active") and t.get("paused_at") and _targets(t, req):
                         try:
                             paused_at = datetime.fromisoformat(t["paused_at"])
                             expires_at = datetime.fromisoformat(t["expires_at"])
@@ -160,6 +215,19 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
     except Exception as e:
         log.error(f"Timer error: {e}")
         return ExecutionResult(status="FAILURE", message=f"Timer error: {e!s}", service="timer")
+
+def _targets(timer: dict, req) -> bool:
+    """Whether a pause/resume request names this timer.
+
+    An id is exact (the dashboard always sends one); otherwise the title is a
+    case-insensitive substring, and no title at all means "any". Pause used to
+    ignore the id, so pausing "Timer 1" could pause "Timer 10", and resume
+    ignored the title too and woke whichever paused timer came first.
+    """
+    if req.id:
+        return timer.get("id") == req.id
+    return not req.title or req.title.lower() in str(timer.get("title", "")).lower()
+
 
 async def get_active_timers(user_id: str | None = None):
     r = await get_redis()

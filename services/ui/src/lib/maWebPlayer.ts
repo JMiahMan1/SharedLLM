@@ -1,23 +1,24 @@
 /* ── MA Web Player hook ─────────────────────────────────────────────────────
  *
- * Mirrors the Music Assistant frontend web player architecture:
- * 1. Sendspin protocol for audio transport (via /api/sendspin proxy)
- * 2. JSON-RPC control API for play/pause/seek commands (via /api/ma-jsonrpc proxy)
+ * The app's own Music Assistant player, mirroring the MA frontend's web player:
+ * 1. Sendspin protocol for the audio (via the gateway's /api/sendspin proxy)
+ * 2. JSON-RPC control API for play/pause/seek (via /api/ma-jsonrpc)
  *
- * Uses native WebSocket for Sendspin (required by SendspinPlayer library)
- * and WebSocketManager for JSON-RPC (auto-reconnect with backoff).
- * Audio plays directly through the browser's <audio> element via sendspin-js.
+ * Both are plain WebSockets (SendspinPlayer needs a real one). Audio plays
+ * through an <audio> element driven by sendspin-js.
+ *
+ * Mounted once for the whole app by context/MediaPlayerContext.tsx. When either
+ * socket drops unexpectedly (Wi-Fi hand-off, the phone sleeping, a gateway
+ * restart) the player tears itself down and reconnects with backoff, so a
+ * network blip does not leave a dead player behind until the app is reloaded.
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { getPlayerId, savePlayerId, setState } from './webPlayer';
 import { SendspinPlayer } from '@sendspin/sendspin-js';
 import type { ConnectionState } from './wsManager';
 import { getServerOrigin, getWsProtocolFor } from './serverUrl';
 import { storageGetSync } from './storage';
 import { parseMaPlayerList, type MaPlayerListEntry } from './deviceLabels';
-
-const STORAGE_KEY = 'sendspin_webplayer_id';
 
 /**
  * UI-level playback state. Deliberately distinct from Sendspin's own
@@ -45,7 +46,39 @@ export interface MAWebPlayerState {
 }
 
 const API_KEY_STORAGE = 'jarvis_api_key' as const;
+/** The web player's Sendspin client id, kept so MA sees the same player across reloads. */
+const PLAYER_ID_STORAGE = 'sendspin_webplayer_id';
 const MAX_RECONNECT_ATTEMPTS = 10;
+const CONNECT_TIMEOUT_MS = 15_000;
+const RPC_TIMEOUT_MS = 10_000;
+
+function storedPlayerId(): string {
+  try {
+    return localStorage.getItem(PLAYER_ID_STORAGE) || '';
+  } catch {
+    return '';
+  }
+}
+
+function ensurePlayerId(): string {
+  let id = storedPlayerId();
+  if (!id) {
+    const arr = new Uint32Array(10);
+    crypto.getRandomValues(arr);
+    id = arr.join('');
+    try {
+      localStorage.setItem(PLAYER_ID_STORAGE, id);
+    } catch {
+      /* private mode: a fresh id per session still works */
+    }
+  }
+  return id;
+}
+
+/** Backoff before reconnect attempt `n` (1-based): 1 s, 2 s, 4 s … capped at 30 s. */
+export function reconnectDelayMs(attempt: number): number {
+  return Math.min(30_000, 1000 * 2 ** Math.max(0, attempt - 1));
+}
 
 // Extract a usable image reference from a Music Assistant image payload.
 // MA sends several shapes and we must handle ALL of them, otherwise the
@@ -69,47 +102,24 @@ function extractMaImage(img: unknown): string | null {
   }
   if (typeof img === 'object') {
     const i = img as Record<string, unknown>;
-    // String-bearing fields, in priority order. `remote_url` carries the
-    // absolute upstream URL; `path`/`uri` are relative and resolved by the
-    // gateway imageproxy against the configured MA host.
+    // `remote_url` carries the absolute upstream URL; `path`/`uri` are
+    // relative and resolved by the gateway imageproxy against the MA host.
     for (const key of ['image_url', 'remote_url', 'uri', 'path', 'url']) {
       const v = i[key];
       if (typeof v === 'string' && v.trim()) return v.trim();
     }
-    // Nested image (e.g. { image: { remote_url: ... } }).
-    if (i.image) {
-      const r = extractMaImage(i.image);
-      if (r) return r;
-    }
+    if (i.image) return extractMaImage(i.image);
   }
   return null;
 }
 
-/* ── Sendspin URL builder ──────────────────────────────────────────────────
- *
- * Returns a native WebSocket URL for the sendspin proxy.
- * SendspinPlayer requires a real WebSocket (not a wrapper class). On the
- * Capacitor app the bundled page is served from localhost, so we resolve the
- * host from the configured server URL (see serverUrl.ts) instead of
- * window.location.
- */
-function getSendspinUrl(apiToken: string): string {
+/* The gateway WebSocket for `path`. On the Capacitor app the bundled page is
+   served from localhost, so the host comes from the configured server URL
+   (serverUrl.ts), never window.location. */
+function gatewaySocketUrl(path: string, apiToken: string): string {
   const origin = getServerOrigin();
-  const wsProtocol = getWsProtocolFor(origin);
   const host = new URL(origin).host;
-  return `${wsProtocol}://${host}/api/sendspin?token=${encodeURIComponent(apiToken)}`;
-}
-
-/* ── JSON-RPC URL builder ─────────────────────────────────────────────────
- *
- * Returns a native WebSocket URL for the JSON-RPC proxy.
- * Matches ma-stream-test.ts: plain WebSocket, not WebSocketManager.
- */
-function getJsonRpcUrl(apiToken: string): string {
-  const origin = getServerOrigin();
-  const wsProtocol = getWsProtocolFor(origin);
-  const host = new URL(origin).host;
-  return `${wsProtocol}://${host}/api/ma-jsonrpc?token=${encodeURIComponent(apiToken)}`;
+  return `${getWsProtocolFor(origin)}://${host}${path}?token=${encodeURIComponent(apiToken)}`;
 }
 
 /* Resolve a (possibly relative) MA image reference to an absolute URL so the
@@ -127,17 +137,40 @@ function buildMediaArtwork(img?: string | null): MediaImage[] {
   return [{ src: url, sizes: '512x512', type: 'image/png' }];
 }
 
+function clientName(): string {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  let userName = '';
+  try {
+    const rawUser = storageGetSync('jarvis_user');
+    if (rawUser) {
+      const parsed = typeof rawUser === 'string' ? JSON.parse(rawUser) : rawUser;
+      userName = parsed.display_name || parsed.username || '';
+    }
+  } catch {
+    // Not JSON
+  }
+  if (!userName) userName = storageGetSync('username') || '';
+  return `${userName ? userName + "'s " : ''}Web Player (${isMobile ? 'Mobile' : 'Desktop'})`;
+}
+
+const sameId = (a: string, b: string) => a === b || a.includes(b) || b.includes(a);
+
 /* ── Hook ────────────────────────────────────────────────────────────────── */
 
-export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void) {
+export function useMAWebPlayer() {
   const playerRef = useRef<SendspinPlayer | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const jsonrpcWsRef = useRef<WebSocket | null>(null);
   const sendspinWsRef = useRef<WebSocket | null>(null);
-  const playerIdRef = useRef<string>(getPlayerId() || '');
-  const [playerId, setPlayerId] = useState<string>(() => getPlayerId() || '');
-  const reconnectAttemptsRef = useRef(0);
+  const playerIdRef = useRef<string>(storedPlayerId());
+  const [playerId, setPlayerId] = useState<string>(() => storedPlayerId());
   const msgIdRef = useRef(0);
+  /** The in-flight connection attempt, shared by concurrent callers. */
+  const initPromiseRef = useRef<Promise<boolean> | null>(null);
+  /** True once someone asked for the player; false after an explicit disconnect. */
+  const wantConnectedRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<number | null>(null);
   const [state, setStateLocal] = useState<MAWebPlayerState>({
     isConnected: false,
     isPlaying: false,
@@ -156,52 +189,45 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     reconnectAttempts: 0,
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
   });
-
-  const onStateChangeRef = useRef(onStateChange);
+  const volumeRef = useRef({ volume: state.volume, muted: state.muted });
   useEffect(() => {
-    onStateChangeRef.current = onStateChange;
-  }, [onStateChange]);
+    volumeRef.current = { volume: state.volume, muted: state.muted };
+  }, [state.volume, state.muted]);
 
-  // Eagerly unlock Web Audio Context & audio element on first user interaction (touch/click)
+  /** Browsers only start audio from a user gesture: resume the element and
+   *  Sendspin's AudioContext while we are inside one. */
+  const unlockAudio = useCallback(() => {
+    try {
+      if (audioRef.current?.paused) void audioRef.current.play().catch(() => {});
+      const sched = (playerRef.current as unknown as {
+        scheduler?: { resumeAudioContext?: () => Promise<void>; audioContext?: AudioContext };
+      } | null)?.scheduler;
+      if (sched?.resumeAudioContext) void sched.resumeAudioContext();
+      else if (sched?.audioContext?.state === 'suspended') void sched.audioContext.resume();
+    } catch {
+      /* nothing to unlock yet */
+    }
+  }, []);
+
   useEffect(() => {
-    const unlockAudio = () => {
-      try {
-        if (audioRef.current && audioRef.current.paused) {
-          void audioRef.current.play().catch(() => {});
-        }
-        const sched = (playerRef.current as unknown as { scheduler?: { resumeAudioContext?: () => Promise<void>; audioContext?: AudioContext } })?.scheduler;
-        if (sched?.resumeAudioContext) {
-          void sched.resumeAudioContext();
-        } else if (sched?.audioContext && sched.audioContext.state === 'suspended') {
-          void sched.audioContext.resume();
-        }
-      } catch {
-        // AudioContext unlock error ignored
-      }
-    };
-
     window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
     window.addEventListener('click', unlockAudio, { once: true, passive: true });
     return () => {
       window.removeEventListener('touchstart', unlockAudio);
       window.removeEventListener('click', unlockAudio);
     };
-  }, []);
+  }, [unlockAudio]);
 
-  // Smoothly advance the playback position while playing, so the seek bar /
-  // elapsed-time readout doesn't jump in coarse steps between MA's
-  // player_updated / queue_time_updated events. MA only pushes position on
-  // those events (a few times per second at best), which feels "clumsy".
+  // Advance the position once a second while playing: MA only pushes it on
+  // player_updated / queue_time_updated, which made the scrubber jump.
   useEffect(() => {
     if (!state.isPlaying || !state.duration) return;
     const id = setInterval(() => {
       setStateLocal(s => {
         if (!s.isPlaying || !s.duration) return s;
-        // If Sendspin player has synchronized trackProgress, use it for exact sync
         const tp = playerRef.current?.trackProgress;
         if (tp && typeof tp.positionMs === 'number' && tp.positionMs > 0) {
-          const sec = Math.min(s.duration, Math.round(tp.positionMs / 1000));
-          return { ...s, position: sec };
+          return { ...s, position: Math.min(s.duration, Math.round(tp.positionMs / 1000)) };
         }
         const nextPos = s.position + 1;
         return nextPos >= s.duration ? s : { ...s, position: nextPos };
@@ -210,100 +236,51 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     return () => clearInterval(id);
   }, [state.isPlaying, state.duration]);
 
-  useEffect(() => {
-    onStateChangeRef.current?.(state);
-  }, [state]);
-
   const setError = useCallback((msg: string, err?: unknown) => {
-    console.error('[MAWebPlayer] ERROR:', msg, err);
+    console.error('[MAWebPlayer]', msg, err ?? '');
     setStateLocal(s => ({ ...s, error: msg }));
   }, []);
 
-  const getPlayerIdRef = useCallback(() => {
-    let id = getPlayerId();
-    if (!id) {
-      const arr = new Uint32Array(10);
-      crypto.getRandomValues(arr);
-      id = arr.join('');
-      savePlayerId(id);
-      setState({ player_id: id });
-    }
-    playerIdRef.current = id;
-    setPlayerId(id);
-    return id;
-  }, []);
-
-  // Track connection state changes
-  const updateConnectionState = useCallback((connState: ConnectionState, reconnectAttempts: number) => {
-    const isConnected = connState === 'CONNECTED';
-    const isFailed = connState === 'FAILED';
-
-    console.log('[MAWebPlayer] Connection state:', connState, 'attempts:', reconnectAttempts);
-
-    setStateLocal(s => {
-      const next = {
-        ...s,
-        isConnected,
-        connectionState: connState,
-        reconnectAttempts,
-        error: isFailed ? `Connection failed after ${MAX_RECONNECT_ATTEMPTS} attempts. Please refresh.` : null,
-      };
-      return next;
-    });
-  }, []);
-
-  // Handle MA JSON-RPC events (queue_updated, player_updated)
+  // MA JSON-RPC events for this player (queue_updated, player_updated).
   const handleMaEvent = useCallback((eventType: string, data: Record<string, unknown>) => {
-    console.log('[MAWebPlayer] MA event:', eventType, data);
-
     const myPid = playerIdRef.current;
     if (myPid) {
-      if (eventType === 'player_updated') {
-        const eventPlayerId = String(data?.player_id ?? data?.id ?? '');
-        if (eventPlayerId && eventPlayerId !== myPid && !eventPlayerId.includes(myPid) && !myPid.includes(eventPlayerId)) {
-          return;
-        }
-      }
-      if (eventType === 'queue_updated') {
-        const eventQueueId = String(data?.queue_id ?? data?.player_id ?? '');
-        if (eventQueueId && eventQueueId !== myPid && !eventQueueId.includes(myPid) && !myPid.includes(eventQueueId)) {
-          return;
-        }
-      }
+      const eventId =
+        eventType === 'player_updated'
+          ? String(data?.player_id ?? data?.id ?? '')
+          : eventType === 'queue_updated'
+            ? String(data?.queue_id ?? data?.player_id ?? '')
+            : '';
+      if (eventId && !sameId(eventId, myPid)) return;
     }
 
     setStateLocal(prev => {
       const next = { ...prev };
 
       if (eventType === 'queue_updated') {
-        // current_item holds the active queue item. Use it only as a fallback
-        // for title/artist/cover — if the authoritative player_updated
-        // current_media has already populated them, don't let a playlist/source
-        // name in current_item override the real track.
+        // current_item is only a fallback for title/artist/cover: once the
+        // authoritative player_updated current_media has filled them, a
+        // playlist/source name here must not override the real track.
         const current = data?.current_item as Record<string, unknown> | undefined;
         if (current) {
-          const qUri = (current.uri || (current.media_item as Record<string, unknown> | undefined)?.uri || (current.streamdetails as Record<string, unknown> | undefined)?.uri) as string | undefined;
+          const mediaItem = current.media_item as Record<string, unknown> | undefined;
+          const qUri = (current.uri || mediaItem?.uri || (current.streamdetails as Record<string, unknown> | undefined)?.uri) as string | undefined;
           if (qUri && !next.mediaUri) next.mediaUri = qUri;
           if (!next.mediaTitle) next.mediaTitle = (current.name as string) || null;
           if (!next.mediaArtist) next.mediaArtist = (current.artist as string) || null;
           if (!next.mediaImage) next.mediaImage = extractMaImage(current.image) || next.mediaImage;
           if (current.duration) next.duration = current.duration as number;
-          const qFav = (current.favorite ?? (current.media_item as Record<string, unknown> | undefined)?.favorite) as boolean | undefined;
+          const qFav = (current.favorite ?? mediaItem?.favorite) as boolean | undefined;
           if (qFav !== undefined && next.mediaFavorite === undefined) next.mediaFavorite = qFav;
         }
-
-        // Update play state from queue state
         const queueState = data?.state;
-        if (queueState === 'playing') {
-          next.isPlaying = true;
-        } else if (queueState === 'paused' || queueState === 'idle') {
-          next.isPlaying = false;
-        }
+        if (queueState === 'playing') next.isPlaying = true;
+        else if (queueState === 'paused' || queueState === 'idle') next.isPlaying = false;
       }
 
       if (eventType === 'player_updated') {
-        // current_media is MA's authoritative "now playing" track and updates on
-        // every track change — this is what drives the title/artist/cover.
+        // current_media is MA's authoritative "now playing" and changes on
+        // every track change -- it drives the title/artist/cover.
         const media = data?.current_media as Record<string, unknown> | undefined;
         if (media) {
           const mUri = (media.uri || (media.media_item as Record<string, unknown> | undefined)?.uri) as string | undefined;
@@ -315,18 +292,15 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
           if (img) next.mediaImage = img;
           if (media.duration) next.duration = media.duration as number;
           if (isTrackChange) {
-            next.position = typeof media.elapsed_time === 'number' ? (media.elapsed_time as number) : 0;
+            next.position = typeof media.elapsed_time === 'number' ? media.elapsed_time : 0;
           } else if (typeof media.elapsed_time === 'number' && media.elapsed_time > 0 && !next.isPlaying) {
-            next.position = media.elapsed_time as number;
+            next.position = media.elapsed_time;
           }
           const mFav = (media.favorite ?? (media.media_item as Record<string, unknown> | undefined)?.favorite) as boolean | undefined;
           if (mFav !== undefined) next.mediaFavorite = mFav;
         }
-        // Player-level state (volume, muted, position)
         if (data?.volume_level !== undefined && data?.volume_level !== null) {
-          // MA reports volume_level on a 0..1 scale, but some providers/players
-          // emit 0..100. Normalize both to a 0..100 UI percentage so the slider
-          // doesn't jump to absurd values like 6800.
+          // MA reports 0..1, some providers 0..100: normalize to a 0..100 UI scale.
           const vl = data.volume_level as number;
           next.volume = vl <= 1 ? Math.round(vl * 100) : Math.round(vl);
         }
@@ -345,23 +319,17 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     });
   }, []);
 
-  // JSON-RPC helper: send command and optionally wait for response
+  // Send a JSON-RPC command; with expectResult, wait for MA's answer.
   const sendJsonRpc = useCallback((command: string, args: Record<string, unknown>, expectResult: boolean = true): Promise<unknown> => {
     return new Promise((resolve, reject) => {
       const ws = jsonrpcWsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('JSON-RPC WebSocket not connected'));
+        reject(new Error('Music Assistant is not connected'));
         return;
       }
-
-      const id = `counter${msgIdRef.current + 1}`;
       msgIdRef.current += 1;
-
-      const payload = JSON.stringify({
-        message_id: id,
-        command,
-        args,
-      });
+      const id = `counter${msgIdRef.current}`;
+      const payload = JSON.stringify({ message_id: id, command, args });
 
       if (!expectResult) {
         ws.send(payload);
@@ -369,571 +337,348 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         return;
       }
 
-      // Wait for response with timeout
       const timeout = setTimeout(() => {
-        reject(new Error(`JSON-RPC command ${command} timed out`));
-      }, 10000);
+        ws.removeEventListener('message', onMessage);
+        reject(new Error(`Music Assistant did not answer ${command}`));
+      }, RPC_TIMEOUT_MS);
 
-      const onMessage = (event: MessageEvent) => {
+      function onMessage(event: MessageEvent) {
+        let data: Record<string, unknown>;
         try {
-          const data = JSON.parse(event.data as string);
-          if (data?.message_id === id && data?.result !== undefined) {
-            clearTimeout(timeout);
-            ws.removeEventListener('message', onMessage);
-            resolve(data.result);
-          }
-          if (data?.message_id === id && (data?.error !== undefined || data?.error_code !== undefined)) {
-            clearTimeout(timeout);
-            ws.removeEventListener('message', onMessage);
-            const errStr = data.details || (typeof data.error === 'string' ? data.error : JSON.stringify(data.error || `Error code ${data.error_code}`));
-            reject(new Error(`JSON-RPC error: ${errStr}`));
-          }
+          data = JSON.parse(event.data as string);
         } catch {
-          // Not our response
+          return;
         }
-      };
+        if (data?.message_id !== id) return;
+        if (data.result !== undefined) {
+          clearTimeout(timeout);
+          ws!.removeEventListener('message', onMessage);
+          resolve(data.result);
+        } else if (data.error !== undefined || data.error_code !== undefined) {
+          clearTimeout(timeout);
+          ws!.removeEventListener('message', onMessage);
+          const detail = data.details || (typeof data.error === 'string' ? data.error : JSON.stringify(data.error || `Error code ${data.error_code}`));
+          reject(new Error(`Music Assistant: ${detail}`));
+        }
+      }
 
       ws.addEventListener('message', onMessage);
       ws.send(payload);
     });
   }, []);
 
-  const initPlayer = useCallback(async () => {
-    console.log('[MAWebPlayer] initPlayer called, playerRef.current:', !!playerRef.current);
-    if (playerRef.current) return;
+  /** Close both sockets and the audio element; safe to call repeatedly. */
+  const teardown = useCallback((reason: string) => {
+    const player = playerRef.current;
+    const sendspinWs = sendspinWsRef.current;
+    const jsonrpcWs = jsonrpcWsRef.current;
+    playerRef.current = null;
+    sendspinWsRef.current = null;
+    jsonrpcWsRef.current = null;
+    try { player?.disconnect('shutdown'); } catch { /* already gone */ }
+    try { sendspinWs?.close(1000, reason); } catch { /* already gone */ }
+    try { jsonrpcWs?.close(1000, reason); } catch { /* already gone */ }
+    try { audioRef.current?.remove(); } catch { /* already gone */ }
+    audioRef.current = null;
+  }, []);
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlToken = urlParams.get('token')?.trim();
-    const storedToken = storageGetSync(API_KEY_STORAGE);
-    const apiToken = urlToken || storedToken || '';
-    console.log('[MAWebPlayer] initPlayer token check: urlToken=', !!urlToken, 'storedToken=', !!storedToken, 'apiToken=', !!apiToken);
-    const playerId = getPlayerIdRef();
+  // `initPlayer` and the reconnect scheduler refer to each other.
+  const scheduleReconnectRef = useRef<() => void>(() => {});
+
+  /** A socket that belongs to the live connection closed without being asked to. */
+  const handleConnectionLost = useCallback((which: string, ws: WebSocket, event?: CloseEvent) => {
+    if (sendspinWsRef.current !== ws && jsonrpcWsRef.current !== ws) return; // an old socket
+    console.warn(`[MAWebPlayer] ${which} connection lost`, event?.code ?? '', event?.reason ?? '');
+    teardown('connection-lost');
+    setStateLocal(s => ({ ...s, isConnected: false, isPlaying: false, connectionState: 'RECONNECTING' }));
+    scheduleReconnectRef.current();
+  }, [teardown]);
+
+  /** Open both sockets. Resolves true once the player is usable. */
+  const openConnection = useCallback(async (): Promise<boolean> => {
+    if (playerRef.current && jsonrpcWsRef.current?.readyState === WebSocket.OPEN) return true;
+    teardown('reinit');
+
+    const urlToken = new URLSearchParams(window.location.search).get('token')?.trim();
+    const apiToken = urlToken || storageGetSync(API_KEY_STORAGE) || '';
     if (!apiToken) {
-      console.error('[MAWebPlayer] initPlayer FAILED: no API token available');
-      setStateLocal(s => ({ ...s, error: 'No API token available — use ?token=xxx in URL or login to UI' }));
-      return;
+      setStateLocal(s => ({ ...s, connectionState: 'FAILED', error: 'Sign in to use the web player.' }));
+      return false;
     }
 
-    let sendspinWs: WebSocket | undefined;
-    let jsonrpcWs: WebSocket | undefined;
-    let player: SendspinPlayer;
+    const pid = ensurePlayerId();
+    playerIdRef.current = pid;
+    setPlayerId(pid);
+    setStateLocal(s => ({ ...s, connectionState: reconnectAttemptsRef.current > 0 ? 'RECONNECTING' : 'CONNECTING' }));
+
+    let sendspinWs: WebSocket = new WebSocket(gatewaySocketUrl('/api/sendspin', apiToken));
+    const audio = new Audio();
+    audio.crossOrigin = 'anonymous';
+    document.body.appendChild(audio);
+    audioRef.current = audio;
+    audio.onerror = () => setError('Audio element error — check browser audio permissions');
 
     try {
-      console.log('[MAWebPlayer] [1/6] Starting initialization...');
-
-      // 1. Create native WebSocket for Sendspin
-      console.log('[MAWebPlayer] [1/6] Creating Sendspin WebSocket...');
-      const sendspinWsUrl = getSendspinUrl(apiToken);
-      sendspinWs = new WebSocket(sendspinWsUrl);
-
-      sendspinWs.onerror = (event) => {
-        console.error('[MAWebPlayer] Sendspin WebSocket error event:', event);
-        setError('Sendspin WebSocket error', event);
-      };
-
-      let sendspinCloseHandler: ((event: CloseEvent) => void) | null = null;
-
-      // 2. Create audio element
-      console.log('[MAWebPlayer] [2/6] Creating audio element...');
-      const audio = new Audio();
-      audio.crossOrigin = 'anonymous';
-      document.body.appendChild(audio);
-      audioRef.current = audio;
-
-      audio.onerror = () => {
-        console.error('[MAWebPlayer] Audio element error');
-        setError('Audio element error — check browser audio permissions');
-      };
-
-      // 3. Create SendspinPlayer
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      let userName = '';
-      try {
-        const rawUser = storageGetSync('jarvis_user');
-        if (rawUser) {
-          const parsed = typeof rawUser === 'string' ? JSON.parse(rawUser) : rawUser;
-          userName = parsed.display_name || parsed.username || '';
-        }
-      } catch {
-        // Not JSON
-      }
-      if (!userName) {
-        userName = storageGetSync('username') || '';
-      }
-      const clientName = `${userName ? userName + "'s " : ''}Web Player (${isMobile ? 'Mobile' : 'Desktop'})`;
-      console.log('[MAWebPlayer] [3/6] Creating SendspinPlayer with playerId:', playerId, 'clientName:', clientName);
-      player = new SendspinPlayer({
+      const player = new SendspinPlayer({
         audioElement: audio,
-        playerId,
-        clientName,
+        playerId: pid,
+        clientName: clientName(),
         webSocket: sendspinWs,
         onStateChange: (newState) => {
-          try {
-            console.log('[MAWebPlayer] onStateChange:', newState);
-            setStateLocal(s => ({
-              ...s,
-              isPlaying: newState.isPlaying,
-              volume: Math.round(newState.volume),
-              muted: newState.muted,
-              playerState: newState.isPlaying ? 'playing' : (newState.playerState === 'synchronized' ? 'idle' : null),
-              mediaTitle: (newState as unknown as { serverState?: { metadata?: { title?: string } } }).serverState?.metadata?.title ?? s.mediaTitle,
-              mediaArtist: (newState as unknown as { serverState?: { metadata?: { artist?: string } } }).serverState?.metadata?.artist ?? s.mediaArtist,
-              mediaImage: extractMaImage((newState as unknown as { serverState?: { metadata?: { image?: unknown } } }).serverState?.metadata?.image) ?? s.mediaImage,
-              duration: (newState as unknown as { serverState?: { metadata?: { duration?: number } } }).serverState?.metadata?.duration ?? s.duration,
-              position: (newState as unknown as { serverState?: { position?: number } }).serverState?.position ?? s.position,
-              error: newState.playerState === 'error' ? 'Playback error - attempting recovery' : s.error,
-            }));
-          } catch (callbackErr) {
-            const msg = callbackErr instanceof Error ? callbackErr.message : String(callbackErr);
-            console.error('[MAWebPlayer] onStateChange callback error:', msg, callbackErr);
-          }
+          const server = (newState as unknown as {
+            serverState?: { metadata?: { title?: string; artist?: string; image?: unknown; duration?: number }; position?: number };
+          }).serverState;
+          setStateLocal(s => ({
+            ...s,
+            isPlaying: newState.isPlaying,
+            volume: Math.round(newState.volume),
+            muted: newState.muted,
+            playerState: newState.isPlaying ? 'playing' : (newState.playerState === 'synchronized' ? 'idle' : null),
+            mediaTitle: server?.metadata?.title ?? s.mediaTitle,
+            mediaArtist: server?.metadata?.artist ?? s.mediaArtist,
+            mediaImage: extractMaImage(server?.metadata?.image) ?? s.mediaImage,
+            duration: server?.metadata?.duration ?? s.duration,
+            position: server?.position ?? s.position,
+            error: newState.playerState === 'error' ? 'Playback error - attempting recovery' : s.error,
+          }));
         },
       });
-
       playerRef.current = player;
-
-      // 4. Connect SendspinPlayer
-      console.log('[MAWebPlayer] [4/6] Calling player.connect()...');
-      try {
-        await player.connect();
-      } catch (connectErr) {
-        const msg = connectErr instanceof Error ? connectErr.message : String(connectErr);
-        console.error('[MAWebPlayer] player.connect() failed:', msg);
-        setError(`Player connection failed: ${msg}`);
-        player.disconnect();
-        playerRef.current = null;
-        return;
-      }
+      await player.connect();
+      // sendspin-js adopts the socket and may have replaced it.
       sendspinWs = (player as unknown as { core: { wsManager: { ws: WebSocket } } }).core.wsManager.ws;
       sendspinWsRef.current = sendspinWs;
+      const { volume, muted } = volumeRef.current;
       try {
-        player.setVolume(state.volume);
-        player.setMuted(state.muted);
-        if (audioRef.current) {
-          audioRef.current.volume = Math.max(0, Math.min(1, state.volume / 100));
-          audioRef.current.muted = state.muted;
-        }
-      } catch (volErr) {
-        console.warn('[MAWebPlayer] Initial volume sync failed:', volErr);
+        player.setVolume(volume);
+        player.setMuted(muted);
+        audio.volume = Math.max(0, Math.min(1, volume / 100));
+        audio.muted = muted;
+      } catch {
+        /* volume sync is best-effort */
       }
-      console.log('[MAWebPlayer] player.connect() completed, volume:', player.volume, 'muted:', player.muted);
+      const ss = sendspinWs;
+      ss.onclose = (event) => handleConnectionLost('Sendspin', ss, event);
 
-      // Set up onclose handler AFTER adopt() to avoid being overwritten
-      sendspinCloseHandler = (event) => {
-        console.error('[MAWebPlayer] Sendspin WebSocket closed:', event.code, event.reason);
-        if (sendspinWsRef.current === sendspinWs) {
-          setError(`Sendspin WebSocket closed (code: ${event.code}, reason: ${event.reason})`);
-        }
-      };
-      sendspinWs.onclose = sendspinCloseHandler;
-
-      // 5. Create plain JSON-RPC WebSocket
-      console.log('[MAWebPlayer] [5/6] Creating JSON-RPC WebSocket...');
-      const jsonrpcUrl = getJsonRpcUrl(apiToken);
-      jsonrpcWs = new WebSocket(jsonrpcUrl);
+      const jsonrpcWs = new WebSocket(gatewaySocketUrl('/api/ma-jsonrpc', apiToken));
       jsonrpcWsRef.current = jsonrpcWs;
-
-      jsonrpcWs.onopen = () => {
-        console.log('[MAWebPlayer] JSON-RPC WebSocket connected');
-        // Sendspin was awaited before jsonrpcWs was created, so when the
-        // jsonrpc socket opens BOTH connections are ready — only then flip
-        // isConnected so consumers (e.g. the players list) don't race an
-        // unopened socket.
-        reconnectAttemptsRef.current = 0;
-        updateConnectionState('CONNECTED', 0);
-      };
-
       jsonrpcWs.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data as string);
           if (data && typeof data === 'object' && 'event' in data) {
             handleMaEvent(data.event as string, data.data as Record<string, unknown>);
           }
-        } catch (parseErr) {
-          console.warn('[MAWebPlayer] Failed to parse JSON-RPC message:', event.data, parseErr);
+        } catch {
+          /* not JSON: ignore */
         }
       };
+      jsonrpcWs.onclose = (event) => handleConnectionLost('Control', jsonrpcWs, event);
 
-      jsonrpcWs.onclose = (event) => {
-        console.log('[MAWebPlayer] JSON-RPC WebSocket closed:', event.code, event.reason);
-        if (jsonrpcWsRef.current === jsonrpcWs && event.code !== 1000) {
-          setError(`JSON-RPC WebSocket closed (code: ${event.code}, reason: ${event.reason})`);
-        }
-      };
+      await new Promise<void>((resolve, reject) => {
+        if (jsonrpcWs.readyState === WebSocket.OPEN) { resolve(); return; }
+        const timer = setTimeout(() => reject(new Error('Music Assistant did not answer in time')), CONNECT_TIMEOUT_MS);
+        jsonrpcWs.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+        const fail = () => { clearTimeout(timer); reject(new Error('Could not reach Music Assistant')); };
+        jsonrpcWs.addEventListener('error', fail, { once: true });
+        jsonrpcWs.addEventListener('close', fail, { once: true });
+      });
+      if (sendspinWs.readyState !== WebSocket.OPEN) throw new Error('The audio stream closed while connecting');
 
-      jsonrpcWs.onerror = () => {
-        console.error('[MAWebPlayer] JSON-RPC WebSocket error event');
-        setError('JSON-RPC WebSocket error');
-      };
-
-      // 6. Wait for both connections
-      console.log('[MAWebPlayer] [6/6] Waiting for both connections...');
-      const connTimeout = 15000;
-      const start = Date.now();
-      while (Date.now() - start < connTimeout) {
-        const sReady = sendspinWs && sendspinWs.readyState === WebSocket.OPEN;
-        const jReady = jsonrpcWs && jsonrpcWs.readyState === WebSocket.OPEN;
-        if (sReady && jReady) {
-          console.log('[MAWebPlayer] Both WebSocket connections established');
-          break;
-        }
-        await new Promise(r => setTimeout(r, 500));
-      }
-
-      // Verify both connections are still open after timeout window
-      const sFinal = sendspinWs.readyState === WebSocket.OPEN;
-      const jFinal = jsonrpcWs.readyState === WebSocket.OPEN;
-      if (!sFinal || !jFinal) {
-        const missing: string[] = [];
-        if (!sFinal) missing.push('sendspin');
-        if (!jFinal) missing.push('jsonrpc');
-        throw new Error(`Connection timeout: ${missing.join(' and ')} WebSocket(s) failed to connect within ${connTimeout}ms`);
-      }
-
+      reconnectAttemptsRef.current = 0;
       setStateLocal(s => ({
         ...s,
         isConnected: true,
+        connectionState: 'CONNECTED',
+        reconnectAttempts: 0,
         volume: player.volume,
         muted: player.muted,
         error: null,
       }));
-
-      console.log('[MAWebPlayer] Player initialized and connected successfully');
-
+      return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError('Init failed: ' + msg, err);
-      // Cleanup failed connections
-      try { playerRef.current?.disconnect(); } catch { /* ignore cleanup errors */ }
-      try { sendspinWs?.close(1000, 'init-error'); } catch { /* ignore cleanup errors */ }
-      try { jsonrpcWs?.close(1000, 'init-error'); } catch { /* ignore cleanup errors */ }
-      playerRef.current = null;
-      sendspinWsRef.current = null;
-      jsonrpcWsRef.current = null;
+      teardown('init-error');
+      setStateLocal(s => ({ ...s, isConnected: false }));
+      console.warn('[MAWebPlayer] connect failed:', msg);
+      throw new Error(msg, { cause: err });
     }
-  }, [getPlayerIdRef, handleMaEvent, updateConnectionState, setError]);
+  }, [teardown, setError, handleMaEvent, handleConnectionLost]);
+
+  /** Connect once, sharing the attempt with anyone who asks meanwhile. */
+  const initPlayer = useCallback((): Promise<boolean> => {
+    wantConnectedRef.current = true;
+    if (!initPromiseRef.current) {
+      initPromiseRef.current = openConnection()
+        .catch((err: unknown) => {
+          scheduleReconnectRef.current();
+          throw err;
+        })
+        .finally(() => {
+          initPromiseRef.current = null;
+        });
+    }
+    return initPromiseRef.current;
+  }, [openConnection]);
+
+  useEffect(() => {
+    scheduleReconnectRef.current = () => {
+      if (!wantConnectedRef.current || reconnectTimerRef.current !== null) return;
+      const attempt = reconnectAttemptsRef.current + 1;
+      if (attempt > MAX_RECONNECT_ATTEMPTS) {
+        setStateLocal(s => ({
+          ...s,
+          connectionState: 'FAILED',
+          error: 'Lost the connection to Music Assistant. Tap Reconnect to try again.',
+        }));
+        return;
+      }
+      reconnectAttemptsRef.current = attempt;
+      setStateLocal(s => ({ ...s, connectionState: 'RECONNECTING', reconnectAttempts: attempt }));
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null;
+        void initPlayer().catch(() => { /* scheduled again by initPlayer */ });
+      }, reconnectDelayMs(attempt));
+    };
+  }, [initPlayer]);
+
+  // Coming back to the app (or back online) is the moment to retry at once
+  // rather than waiting out a long backoff.
+  useEffect(() => {
+    const retryNow = () => {
+      if (document.hidden || !wantConnectedRef.current || playerRef.current || initPromiseRef.current) return;
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      reconnectAttemptsRef.current = 0;
+      void initPlayer().catch(() => {});
+    };
+    document.addEventListener('visibilitychange', retryNow);
+    window.addEventListener('online', retryNow);
+    return () => {
+      document.removeEventListener('visibilitychange', retryNow);
+      window.removeEventListener('online', retryNow);
+    };
+  }, [initPlayer]);
 
   // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      try {
-        console.log('[MAWebPlayer] Cleanup: disconnecting player...');
-        playerRef.current?.disconnect('shutdown');
-        playerRef.current = null;
-      } catch (err) {
-        console.error('[MAWebPlayer] Cleanup error (disconnect):', err);
-      }
-      try {
-        sendspinWsRef.current?.close(1000, 'shutdown');
-        sendspinWsRef.current = null;
-      } catch (err) {
-        console.error('[MAWebPlayer] Cleanup error (sendspinWs):', err);
-      }
-      try {
-        jsonrpcWsRef.current?.close(1000, 'shutdown');
-        jsonrpcWsRef.current = null;
-      } catch (err) {
-        console.error('[MAWebPlayer] Cleanup error (jsonrpcWs):', err);
-      }
-      try {
-        audioRef.current?.remove();
-        audioRef.current = null;
-      } catch (err) {
-        console.error('[MAWebPlayer] Cleanup error (audio):', err);
-      }
-    };
-  }, []);
+  useEffect(() => () => {
+    wantConnectedRef.current = false;
+    if (reconnectTimerRef.current !== null) clearTimeout(reconnectTimerRef.current);
+    teardown('shutdown');
+  }, [teardown]);
 
-  /* ── JSON-RPC Control Methods ──────────────────────────────────────── */
+  /* ── Commands ───────────────────────────────────────────────────────── */
 
-  // Queue a URI in MA using the same signature as the MA frontend, then start playback.
-  // Converts raw ABS book UUIDs to MA-compatible library:// URIs.
-  const playMedia = useCallback(async (mediaUri: string, player_id?: string) => {
-    const pid = player_id || playerIdRef.current;
-    if (!pid) {
-      console.error('[MAWebPlayer] No player_id available for play_media');
-      return;
-    }
+  /** Connects if needed; throws a readable error when MA cannot be reached. */
+  const ensureConnected = useCallback(async () => {
+    if (playerRef.current && jsonrpcWsRef.current?.readyState === WebSocket.OPEN) return;
+    await initPlayer();
+  }, [initPlayer]);
 
-    // Eagerly unlock audio during direct user tap
+  /** Run a queue/player command on this web player, surfacing failures. */
+  const runOwn = useCallback(async (label: string, command: string, args: Record<string, unknown>) => {
+    const pid = playerIdRef.current;
+    if (!pid) return;
     try {
-      if (audioRef.current && audioRef.current.paused) {
-        void audioRef.current.play().catch(() => {});
-      }
-      const sched = (playerRef.current as unknown as { scheduler?: { resumeAudioContext?: () => Promise<void>; audioContext?: AudioContext } })?.scheduler;
-      if (sched?.resumeAudioContext) {
-        void sched.resumeAudioContext();
-      } else if (sched?.audioContext && sched.audioContext.state === 'suspended') {
-        void sched.audioContext.resume();
-      }
-    } catch {
-      // Audio unlock error ignored
-    }
-
-    let resolvedUri = mediaUri;
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-    if (mediaUri.startsWith('audiobookshelf://')) {
-      const idClean = mediaUri.replace('audiobookshelf://', '').replace('abs-', '').replace('ma-', '');
-      resolvedUri = `library://audiobookshelf/book/${idClean}`;
-    } else if (uuidRegex.test(mediaUri)) {
-      resolvedUri = `library://audiobookshelf/book/${mediaUri}`;
-    } else if (mediaUri.startsWith('abs-') || mediaUri.startsWith('ma-')) {
-      const idClean = mediaUri.replace('abs-', '').replace('ma-', '');
-      if (uuidRegex.test(idClean)) {
-        resolvedUri = `library://audiobookshelf/book/${idClean}`;
-      }
-    }
-
-    try {
-      console.log('[MAWebPlayer] play_media:', resolvedUri, 'player/queue:', pid);
-      await sendJsonRpc('player_queues/play_media', {
-        queue_id: pid,
-        media: resolvedUri,
-        option: 'replace',
-        radio_mode: false,
-      }, true);
-      setStateLocal(s => ({ ...s, mediaUri: resolvedUri, mediaFavorite: null }));
+      await sendJsonRpc(command, args, false);
     } catch (err) {
-      const rawMsg = err instanceof Error ? err.message : String(err);
-      const userMsg = (rawMsg.includes('Cannot connect to host') || rawMsg.includes('Connect call failed'))
-        ? `Upstream media provider unreachable: ${rawMsg}`
-        : rawMsg;
-      console.error('[MAWebPlayer] play_media failed:', userMsg, err);
-      setError(userMsg);
-      throw new Error(userMsg, { cause: err });
+      setError(`${label} failed: ${err instanceof Error ? err.message : String(err)}`, err);
     }
   }, [sendJsonRpc, setError]);
 
-  // Resume local browser playback.
-  const cmdPlay = useCallback(async (player_id?: string) => {
-    const pid = player_id || playerIdRef.current;
-    if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmdPlay');
-      return;
-    }
-    try {
-      if (audioRef.current && audioRef.current.paused) {
-        void audioRef.current.play().catch(() => {});
-      }
-      const sched = (playerRef.current as unknown as { scheduler?: { resumeAudioContext?: () => Promise<void>; audioContext?: AudioContext } })?.scheduler;
-      if (sched?.resumeAudioContext) {
-        void sched.resumeAudioContext();
-      } else if (sched?.audioContext && sched.audioContext.state === 'suspended') {
-        void sched.audioContext.resume();
-      }
-      console.log('[MAWebPlayer] cmd/play:', pid);
-      playerRef.current?.sendCommand('play', undefined);
-      await sendJsonRpc('players/cmd/play', { player_id: pid }, false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] cmdPlay failed:', msg);
-      setError('cmdPlay failed: ' + msg);
-    }
-  }, [sendJsonRpc, setError]);
-
-  // Pause local browser playback.
-  const cmdPause = useCallback(async (player_id?: string) => {
-    const pid = player_id || playerIdRef.current;
-    if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmdPause');
-      return;
-    }
-    try {
-      console.log('[MAWebPlayer] cmd/pause:', pid);
-      playerRef.current?.sendCommand('pause', undefined);
-      await sendJsonRpc('players/cmd/pause', { player_id: pid }, false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] cmdPause failed:', msg);
-      setError('cmdPause failed: ' + msg);
-    }
-  }, [sendJsonRpc, setError]);
-
-  // Send player_queues/seek to seek to a position in the track
-  const cmdSeek = useCallback(async (position: number, player_id?: string) => {
-    const pid = player_id || playerIdRef.current;
-    if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmdSeek');
-      return;
-    }
-    const pos = Math.max(0, Math.round(position));
-    try {
-      console.log('[MAWebPlayer] player_queues/seek:', pos, 'queue/player:', pid);
-      await sendJsonRpc('player_queues/seek', { queue_id: pid, player_id: pid, position: pos }, false);
-      if (audioRef.current && Number.isFinite(pos)) {
-        try {
-          audioRef.current.currentTime = pos;
-        } catch {
-          // ignore
-        }
-      }
-      setStateLocal(s => ({ ...s, position: pos }));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] cmdSeek failed:', msg);
-      setError('cmdSeek failed: ' + msg);
-    }
-  }, [sendJsonRpc, setError]);
-
-  // Skip to the next track via MA player_queues/next
-  const cmdNext = useCallback(async (_player_id?: string) => {
-    const pid = _player_id || playerIdRef.current;
-    if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmdNext');
-      return;
-    }
-    try {
-      console.log('[MAWebPlayer] player_queues/next:', pid);
-      await sendJsonRpc('player_queues/next', { queue_id: pid, player_id: pid }, false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] cmdNext failed:', msg);
-      setError('cmdNext failed: ' + msg);
-    }
-  }, [sendJsonRpc, setError]);
-
-  // Skip to the previous track via MA player_queues/previous
-  const cmdPrevious = useCallback(async (_player_id?: string) => {
-    const pid = _player_id || playerIdRef.current;
-    if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmdPrevious');
-      return;
-    }
-    try {
-      console.log('[MAWebPlayer] player_queues/previous:', pid);
-      await sendJsonRpc('player_queues/previous', { queue_id: pid, player_id: pid }, false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] cmdPrevious failed:', msg);
-      setError('cmdPrevious failed: ' + msg);
-    }
-  }, [sendJsonRpc, setError]);
-
-  /* ── Convenience Methods ───────────────────────────────────────────── */
-
-  // Play: ensure connected, queue media if provided, then resume local playback.
+  /** Play `mediaUri` (an MA URI -- resolve Audiobookshelf ids with
+   *  api.resolveMALibraryUri first), or resume when no URI is given. */
   const play = useCallback(async (mediaUri?: string) => {
-    console.log('[MAWebPlayer] play called, player exists:', !!playerRef.current);
+    unlockAudio();
     try {
-      // Eagerly unlock audio during direct user tap
-      if (audioRef.current && audioRef.current.paused) {
-        void audioRef.current.play().catch(() => {});
-      }
-      const sched = (playerRef.current as unknown as { scheduler?: { resumeAudioContext?: () => Promise<void>; audioContext?: AudioContext } })?.scheduler;
-      if (sched?.resumeAudioContext) {
-        void sched.resumeAudioContext();
-      } else if (sched?.audioContext && sched.audioContext.state === 'suspended') {
-        void sched.audioContext.resume();
-      }
-
-      if (!playerRef.current) {
-        console.log('[MAWebPlayer] Initializing player before play...');
-        await initPlayer();
-      }
-      if (mediaUri) {
-        console.log('[MAWebPlayer] Sending play_media with URI:', mediaUri);
-        await playMedia(mediaUri);
-      } else {
-        console.log('[MAWebPlayer] Resuming local playback...');
-        await cmdPlay();
-      }
+      await ensureConnected();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] play failed:', msg);
-      setError(msg);
+      setError(msg, err);
       throw err;
     }
-  }, [initPlayer, playMedia, cmdPlay, setError]);
+    unlockAudio();
+    const pid = playerIdRef.current;
+    if (!mediaUri) {
+      playerRef.current?.sendCommand('play', undefined);
+      await runOwn('Play', 'players/cmd/play', { player_id: pid });
+      return;
+    }
+    try {
+      await sendJsonRpc('player_queues/play_media', { queue_id: pid, media: mediaUri, option: 'replace', radio_mode: false }, true);
+      setStateLocal(s => ({ ...s, mediaUri, mediaFavorite: null, error: null }));
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      const msg = /Cannot connect to host|Connect call failed/.test(raw)
+        ? `Upstream media provider unreachable: ${raw}`
+        : raw;
+      setError(msg, err);
+      throw new Error(msg, { cause: err });
+    }
+  }, [unlockAudio, ensureConnected, runOwn, sendJsonRpc, setError]);
 
-  // Pause: send cmd_pause
   const pause = useCallback(async () => {
-    console.log('[MAWebPlayer] pause called');
-    try {
-      await cmdPause();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] pause failed:', msg);
-      setError('pause failed: ' + msg);
-    }
-  }, [cmdPause, setError]);
+    playerRef.current?.sendCommand('pause', undefined);
+    await runOwn('Pause', 'players/cmd/pause', { player_id: playerIdRef.current });
+  }, [runOwn]);
 
-  // Seek: send cmd_seek via JSON-RPC
+  /** Stop and forget the current item, so nothing reads as "now playing". */
+  const stop = useCallback(async () => {
+    await runOwn('Stop', 'players/cmd/stop', { player_id: playerIdRef.current });
+    setStateLocal(s => ({
+      ...s, isPlaying: false, mediaUri: null, mediaTitle: null, mediaArtist: null,
+      mediaImage: null, mediaFavorite: null, position: 0, duration: 0,
+    }));
+  }, [runOwn]);
+
   const seek = useCallback(async (position: number) => {
-    console.log('[MAWebPlayer] seek called:', position);
-    try {
-      await cmdSeek(position);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] seek failed:', msg);
-      setError('seek failed: ' + msg);
-    }
-  }, [cmdSeek, setError]);
+    const pos = Math.max(0, Math.round(position));
+    const pid = playerIdRef.current;
+    await runOwn('Seek', 'player_queues/seek', { queue_id: pid, player_id: pid, position: pos });
+    setStateLocal(s => ({ ...s, position: pos }));
+  }, [runOwn]);
 
-  // Next track: send players/cmd_next
   const next = useCallback(async () => {
-    console.log('[MAWebPlayer] next called');
-    try {
-      await cmdNext();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] next failed:', msg);
-      setError('next failed: ' + msg);
-    }
-  }, [cmdNext, setError]);
+    const pid = playerIdRef.current;
+    await runOwn('Next track', 'player_queues/next', { queue_id: pid, player_id: pid });
+  }, [runOwn]);
 
-  // Previous track: send players/cmd_previous
   const previous = useCallback(async () => {
-    console.log('[MAWebPlayer] previous called');
-    try {
-      await cmdPrevious();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] previous failed:', msg);
-      setError('previous failed: ' + msg);
-    }
-  }, [cmdPrevious, setError]);
+    const pid = playerIdRef.current;
+    await runOwn('Previous track', 'player_queues/previous', { queue_id: pid, player_id: pid });
+  }, [runOwn]);
 
-  // Send an arbitrary MA JSON-RPC command. Used to control a *physical* MA
-  // player selected from the device picker (e.g. players/play_media with a
-  // player_id). Reuses the browser's ma-jsonrpc WebSocket, which reaches MA
-  // directly and sidesteps the gateway's server-side hostname loop.
+  // Send an MA JSON-RPC command for a *physical* MA player picked in the
+  // device picker. Legacy command spellings are normalized to the ones the
+  // gateway's allowlist accepts.
   const maCommand = useCallback(
     (command: string, args: Record<string, unknown> = {}): Promise<unknown> => {
-      let normalizedCmd = command;
-      const normalizedArgs = { ...args };
-      if (normalizedCmd === 'players/cmd/next' || normalizedCmd === 'players/cmd_next' || normalizedCmd === 'player_queues/cmd_next') {
-        normalizedCmd = 'player_queues/next';
-        if (!normalizedArgs.queue_id && normalizedArgs.player_id) {
-          normalizedArgs.queue_id = normalizedArgs.player_id;
-        }
-      } else if (normalizedCmd === 'players/cmd/previous' || normalizedCmd === 'players/cmd_previous' || normalizedCmd === 'player_queues/cmd_previous') {
-        normalizedCmd = 'player_queues/previous';
-        if (!normalizedArgs.queue_id && normalizedArgs.player_id) {
-          normalizedArgs.queue_id = normalizedArgs.player_id;
-        }
-      } else if (normalizedCmd === 'players/cmd/seek' || normalizedCmd === 'players/cmd_seek' || normalizedCmd === 'player_queues/cmd_seek') {
-        normalizedCmd = 'player_queues/seek';
-        if (!normalizedArgs.queue_id && normalizedArgs.player_id) {
-          normalizedArgs.queue_id = normalizedArgs.player_id;
-        }
-        if (typeof normalizedArgs.position === 'number') {
-          normalizedArgs.position = Math.round(normalizedArgs.position);
-        }
-      } else if (normalizedCmd.startsWith('players/cmd_')) {
-        normalizedCmd = 'players/cmd/' + normalizedCmd.slice(12);
-      } else if (normalizedCmd === 'players/play_media') {
-        normalizedCmd = 'player_queues/play_media';
-        if (!normalizedArgs.queue_id && normalizedArgs.player_id) {
-          normalizedArgs.queue_id = normalizedArgs.player_id;
-        }
-        if (!normalizedArgs.option) {
-          normalizedArgs.option = 'replace';
-        }
-      } else if (normalizedCmd.startsWith('player_queues/cmd_')) {
-        normalizedCmd = 'player_queues/' + normalizedCmd.slice(18);
+      let cmd = command;
+      const a = { ...args };
+      const toQueue = () => {
+        if (!a.queue_id && a.player_id) a.queue_id = a.player_id;
+      };
+      if (['players/cmd/next', 'players/cmd_next', 'player_queues/cmd_next'].includes(cmd)) {
+        cmd = 'player_queues/next';
+        toQueue();
+      } else if (['players/cmd/previous', 'players/cmd_previous', 'player_queues/cmd_previous'].includes(cmd)) {
+        cmd = 'player_queues/previous';
+        toQueue();
+      } else if (['players/cmd/seek', 'players/cmd_seek', 'player_queues/cmd_seek'].includes(cmd)) {
+        cmd = 'player_queues/seek';
+        toQueue();
+        if (typeof a.position === 'number') a.position = Math.round(a.position);
+      } else if (cmd.startsWith('players/cmd_')) {
+        cmd = 'players/cmd/' + cmd.slice('players/cmd_'.length);
+      } else if (cmd === 'players/play_media') {
+        cmd = 'player_queues/play_media';
+        toQueue();
+        if (!a.option) a.option = 'replace';
+      } else if (cmd.startsWith('player_queues/cmd_')) {
+        cmd = 'player_queues/' + cmd.slice('player_queues/cmd_'.length);
       }
-      return sendJsonRpc(normalizedCmd, normalizedArgs);
+      return sendJsonRpc(cmd, a);
     },
     [sendJsonRpc],
   );
@@ -941,117 +686,79 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   // List Music Assistant players so the UI device picker can offer them.
   const listMaPlayers = useCallback(async (): Promise<MaPlayerListEntry[]> => {
     try {
-      const raw = (await sendJsonRpc('players/all', {})) as { result?: unknown } | unknown;
-      return parseMaPlayerList(raw);
+      return parseMaPlayerList(await sendJsonRpc('players/all', {}));
     } catch (err) {
-      console.error('[MAWebPlayer] listMaPlayers failed:', err);
+      console.warn('[MAWebPlayer] listMaPlayers failed:', err);
       return [];
     }
   }, [sendJsonRpc]);
 
   const setVolume = useCallback((volume: number) => {
     try {
-      if (playerRef.current && (playerRef.current as unknown as { core?: { isConnected?: boolean } })?.core?.isConnected) {
-        playerRef.current.setVolume(volume);
+      if ((playerRef.current as unknown as { core?: { isConnected?: boolean } } | null)?.core?.isConnected) {
+        playerRef.current!.setVolume(volume);
       }
-      if (audioRef.current) {
-        audioRef.current.volume = Math.max(0, Math.min(1, volume / 100));
-      }
+      if (audioRef.current) audioRef.current.volume = Math.max(0, Math.min(1, volume / 100));
       setStateLocal(s => (s.volume === volume ? s : { ...s, volume }));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] setVolume failed:', msg);
-      setError('setVolume failed: ' + msg);
+      setError('setVolume failed: ' + (err instanceof Error ? err.message : String(err)), err);
     }
   }, [setError]);
 
   const setMuted = useCallback((muted: boolean) => {
     try {
-      if (playerRef.current && (playerRef.current as unknown as { core?: { isConnected?: boolean } })?.core?.isConnected) {
-        playerRef.current.setMuted(muted);
+      if ((playerRef.current as unknown as { core?: { isConnected?: boolean } } | null)?.core?.isConnected) {
+        playerRef.current!.setMuted(muted);
       }
-      if (audioRef.current) {
-        audioRef.current.muted = muted;
-      }
+      if (audioRef.current) audioRef.current.muted = muted;
       setStateLocal(s => (s.muted === muted ? s : { ...s, muted }));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] setMuted failed:', msg);
-      setError('setMuted failed: ' + msg);
+      setError('setMuted failed: ' + (err instanceof Error ? err.message : String(err)), err);
     }
   }, [setError]);
 
+  /** Connect now (no-op when connected). Never throws; failures land in `error`. */
   const connect = useCallback(async () => {
-    console.log('[MAWebPlayer] connect called, playerRef.current:', !!playerRef.current, 'isConnected:', state.isConnected);
     try {
-      if (!playerRef.current) {
-        console.log('[MAWebPlayer] connect: player not initialized, calling initPlayer...');
-        await initPlayer();
-        console.log('[MAWebPlayer] connect: initPlayer completed, playerRef.current:', !!playerRef.current);
-      } else {
-        console.log('[MAWebPlayer] connect: player already initialized');
-      }
+      await ensureConnected();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] connect failed:', msg);
-      setError('connect failed: ' + msg);
+      setError(err instanceof Error ? err.message : String(err), err);
     }
-  }, [initPlayer, setError, state.isConnected]);
+  }, [ensureConnected, setError]);
 
   const disconnect = useCallback(() => {
-    playerRef.current?.disconnect('shutdown');
-    playerRef.current = null;
-    sendspinWsRef.current?.close();
-    sendspinWsRef.current = null;
-    jsonrpcWsRef.current?.close();
-    jsonrpcWsRef.current = null;
-    setStateLocal(s => ({ ...s, isConnected: false, isPlaying: false }));
-  }, []);
-
-  // Reconnect: reinitialize the player when connection fails or drops
-  const reconnect = useCallback(async () => {
-    console.log('[MAWebPlayer] Reconnecting...');
-    try {
-      // Clean up existing connections
-      playerRef.current?.disconnect('shutdown');
-      playerRef.current = null;
-      sendspinWsRef.current?.close(1000, 'reconnect');
-      sendspinWsRef.current = null;
-      jsonrpcWsRef.current?.close(1000, 'reconnect');
-      jsonrpcWsRef.current = null;
-      audioRef.current?.remove();
-      audioRef.current = null;
-    } catch (cleanupErr) {
-      const msg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
-      console.error('[MAWebPlayer] Reconnect cleanup failed:', msg);
+    wantConnectedRef.current = false;
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
+    teardown('shutdown');
+    setStateLocal(s => ({ ...s, isConnected: false, isPlaying: false, connectionState: 'DISCONNECTED' }));
+  }, [teardown]);
 
-    setStateLocal(s => ({
-      ...s,
-      isConnected: false,
-      isPlaying: false,
-      error: null,
-      reconnectAttempts: 0,
-    }));
+  /** Start over after the automatic retries gave up. */
+  const reconnect = useCallback(async () => {
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    reconnectAttemptsRef.current = 0;
+    teardown('reconnect');
+    setStateLocal(s => ({ ...s, isConnected: false, isPlaying: false, error: null, reconnectAttempts: 0 }));
+    await connect();
+  }, [teardown, connect]);
 
-    // Wait a moment before reconnecting
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    await initPlayer();
-  }, [initPlayer]);
-
-  // Keep the OS MediaSession (lock-screen / background controls) in sync so
-  // playback keeps working when the app is backgrounded and media keys work.
+  // Keep the OS MediaSession (lock screen / media keys) in sync.
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
-    const ms = navigator.mediaSession;
     try {
-      ms.metadata = new MediaMetadata({
+      navigator.mediaSession.metadata = new MediaMetadata({
         title: state.mediaTitle || 'Jarvis OS',
         artist: state.mediaArtist || 'Music Assistant',
         album: 'Jarvis OS',
         artwork: buildMediaArtwork(state.mediaImage),
       });
-      ms.playbackState = state.isPlaying ? 'playing' : 'paused';
+      navigator.mediaSession.playbackState = state.isPlaying ? 'playing' : 'paused';
     } catch {
       /* MediaSession unsupported in this WebView */
     }
@@ -1059,23 +766,19 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
-    const ms = navigator.mediaSession;
     const setHandler = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
       try {
-        ms.setActionHandler(action, handler);
+        navigator.mediaSession.setActionHandler(action, handler);
       } catch {
         /* action not supported */
       }
     };
-    setHandler('play', () => { void play(); });
+    setHandler('play', () => { void play().catch(() => {}); });
     setHandler('pause', () => { void pause(); });
     setHandler('nexttrack', () => { void next(); });
     setHandler('previoustrack', () => { void previous(); });
     return () => {
-      setHandler('play', null);
-      setHandler('pause', null);
-      setHandler('nexttrack', null);
-      setHandler('previoustrack', null);
+      for (const action of ['play', 'pause', 'nexttrack', 'previoustrack'] as const) setHandler(action, null);
     };
   }, [play, pause, next, previous]);
 
@@ -1083,27 +786,17 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     ...state,
     playerId,
     connect,
+    reconnect,
+    disconnect,
     play,
     pause,
+    stop,
     seek,
-    setVolume,
-    setMuted,
-    disconnect,
-    reconnect,
-    playMedia,
-    cmdPlay,
-    cmdPause,
-    cmdSeek,
-    cmdNext,
-    cmdPrevious,
     next,
     previous,
+    setVolume,
+    setMuted,
     maCommand,
     listMaPlayers,
-    audioRef,
-    jsonrpcWs: jsonrpcWsRef,
-    sendspinWs: sendspinWsRef,
   };
 }
-
-export { STORAGE_KEY };

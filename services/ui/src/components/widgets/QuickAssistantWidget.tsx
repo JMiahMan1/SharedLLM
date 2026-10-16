@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import type { IWidgetProps } from '../../types/widget';
+import { chatReplyText } from '../../lib/chatReply';
 import toast from 'react-hot-toast';
 
 
@@ -17,28 +18,23 @@ const QuickAssistantWidget = ({ settingsButton }: IWidgetProps) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Scroll the message list only. scrollIntoView would also scroll the whole
+  // dashboard to this card on every reply.
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, sending]);
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || sending) return;
+    const text = input.trim();
+    if (!text || sending) return;
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
-      content: input.trim(),
+      content: text,
       timestamp: Date.now(),
     };
 
@@ -47,132 +43,84 @@ const QuickAssistantWidget = ({ settingsButton }: IWidgetProps) => {
     setSending(true);
 
     try {
-      const resp = await api.chat(input.trim(), undefined, user?.username) as {
-        status: string;
-        message?: string;
-        response?: string;
-        choices?: Array<{ message?: { content?: string } }>;
-      };
+      const resp = await api.chat(text, undefined, user?.username);
+      const failed = (resp as { status?: string } | null)?.status === 'ERROR';
+      const content = chatReplyText(resp) ?? (failed
+        ? 'The assistant could not process that request.'
+        : 'No response received');
 
-      let content = resp.response || resp.message || resp.choices?.[0]?.message?.content || 'No response received';
-      if (resp.status === 'ERROR') {
-        content = resp.message || 'The assistant could not process that request.';
-      }
-
-      const assistantMessage: ChatMessage = {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content,
-        timestamp: Date.now(),
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
+      setMessages((prev) => [
+        ...prev,
+        { id: `assistant-${Date.now()}`, role: 'assistant', content, timestamp: Date.now() },
+      ]);
     } catch {
       toast.error('Failed to send message');
       setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+      setInput(text);
     } finally {
       setSending(false);
     }
   }, [input, sending, user]);
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  }, [handleSend]);
-
-  if (messages.length === 0) {
-    return (
-      <div className="glass-card h-full p-5 relative flex flex-col">
-        <div className="absolute top-3 right-3 z-10">{settingsButton}</div>
-        <h3 className="font-bold text-white text-lg mb-4 pr-8">Quick Assistant</h3>
-
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-sm text-slate-400 mb-2">Ask me anything</p>
-            <p className="text-xs text-slate-500 mb-4">Type a message to start chatting</p>
-          </div>
-        </div>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSend();
-          }}
-          className="flex gap-2 mt-auto"
-        >
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a message..."
-            disabled={sending}
-            className="flex-1 bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-slate-600/50 disabled:opacity-50"
-          />
-          <button
-            type="submit"
-            disabled={sending || !input.trim()}
-            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-          >
-            {sending ? '...' : 'Send'}
-          </button>
-        </form>
-      </div>
-    );
-  }
 
   return (
     <div className="glass-card h-full p-5 relative flex flex-col">
       <div className="absolute top-3 right-3 z-10">{settingsButton}</div>
       <h3 className="font-bold text-white text-lg mb-4 pr-8">Quick Assistant</h3>
 
-      <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-1">
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[85%] rounded-lg px-3 py-2 ${
-                msg.role === 'user'
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-800/50 border border-slate-700/50 text-white'
-              }`}
-            >
-              <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
-              <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-indigo-200' : 'text-slate-500'}`}>
-                {new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-              </p>
-            </div>
+      {messages.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-center">
+          <div>
+            <p className="text-sm text-slate-400 mb-2">Ask me anything</p>
+            <p className="text-xs text-slate-500">Type a message to start chatting</p>
           </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
+        </div>
+      ) : (
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto space-y-3 mb-4 pr-1">
+          {messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[85%] rounded-lg px-3 py-2 ${
+                  msg.role === 'user'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-800/50 border border-slate-700/50 text-white'
+                }`}
+              >
+                <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
+                <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-indigo-200' : 'text-slate-500'}`}>
+                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                </p>
+              </div>
+            </div>
+          ))}
+          {sending && <p className="text-xs text-slate-500 animate-pulse">Thinking…</p>}
+        </div>
+      )}
 
+      {/* Enter submits the form. No autofocus: on a phone that popped the
+          keyboard over the dashboard every time it opened. */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          handleSend();
+          void handleSend();
         }}
         className="flex gap-2 mt-auto"
       >
         <input
-          ref={inputRef}
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
           placeholder="Type a message..."
+          aria-label="Message the assistant"
           disabled={sending}
-          className="flex-1 bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-slate-600/50 disabled:opacity-50"
+          className="flex-1 min-w-0 min-h-11 bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-slate-600/50 disabled:opacity-50"
         />
         <button
           type="submit"
           disabled={sending || !input.trim()}
-          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          className="min-h-11 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
         >
           {sending ? '...' : 'Send'}
         </button>

@@ -21,12 +21,13 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
-import type { HealthStatus, LogEntry, Workspace, SearchResult } from '../services/api';
+import type { LogEntry, Workspace, SearchResult } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { Capacitor } from '@capacitor/core';
 import { useRavenMissions } from '../hooks/useRavenMissions';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDebounce } from '../hooks/useDebounce';
+import { useServiceInfo, useSystemHealth } from '../hooks/useSystemHealth';
 import HaloBanner from '../components/presence/HaloBanner';
 import LocationBackgroundNotice from '../components/location/LocationBackgroundNotice';
 import { useLocation } from '../context/LocationContext';
@@ -126,7 +127,7 @@ const ServiceCard = ({ service, onClick }: { service: ServiceSummary; onClick: (
         {service.label}
       </p>
       <p className="mt-0.5 text-[10px] text-slate-500 leading-relaxed">
-        Health · Logs · Metrics
+        Revision · last restart
       </p>
     </button>
   );
@@ -142,19 +143,22 @@ const LOG_LEVEL_COLORS: Record<string, string> = {
   debug: 'text-slate-500',
 };
 
-const LogEntryCard = ({ log }: { log: LogEntry }) => (
+const LogEntryCard = ({ log }: { log: LogEntry }) => {
+  // The logging service stores levels upper-case ("ERROR"); compare folded.
+  const level = (log.level || '').toLowerCase();
+  return (
   <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-black/20 border border-white/5 hover:bg-black/30 transition-colors">
     <div
       className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
-        log.level === 'error' ? 'bg-red-500' :
-        (log.level === 'warning' || log.level === 'warn') ? 'bg-amber-500' :
+        level === 'error' ? 'bg-red-500' :
+        (level === 'warning' || level === 'warn') ? 'bg-amber-500' :
         'bg-blue-500/50'
       }`}
     />
     <div className="min-w-0 flex-1">
       <div className="flex items-center justify-between gap-2 mb-0.5">
         <p className="text-xs font-semibold text-slate-300 capitalize truncate min-w-0">{log.service}</p>
-        <span className={`text-[9px] font-bold uppercase tracking-widest shrink-0 ${LOG_LEVEL_COLORS[log.level?.toLowerCase()] ?? 'text-slate-500'}`}>
+        <span className={`text-[9px] font-bold uppercase tracking-widest shrink-0 ${LOG_LEVEL_COLORS[level] ?? 'text-slate-500'}`}>
           {log.level}
         </span>
       </div>
@@ -162,7 +166,8 @@ const LogEntryCard = ({ log }: { log: LogEntry }) => (
       <p className="text-[9px] text-slate-600 mt-1">{new Date(log.timestamp).toLocaleString()}</p>
     </div>
   </div>
-);
+  );
+};
 
 // ── Workspace Card ────────────────────────────────────────────────────────────
 
@@ -223,7 +228,9 @@ function useSearch(query: string) {
       try {
         const data = await api.globalSearch(trimmed, controller.signal);
         if (!active) return;
-        const empty = !data.answer && (!data.files || data.files.length === 0);
+        // The gateway answers a miss with a placeholder sentence and no
+        // files, so "no files" is the empty signal, not an empty answer.
+        const empty = !data.files || data.files.length === 0;
         setResponse({
           query: trimmed,
           results: empty ? null : data,
@@ -292,64 +299,20 @@ const Dashboard = () => {
   const debouncedSearch = useDebounce(searchQuery, 300);
   const { results: searchResults, error: searchError, isSearching, clear: clearSearch } = useSearch(debouncedSearch);
 
-  const { data: health } = useQuery<HealthStatus>({
-    queryKey: ['health'],
-    queryFn: () => api.getHealth(),
-    refetchInterval: 5000,
-    // Don't crash on failure — just return stale data
-    retry: 2,
-  });
+  const { data: health } = useSystemHealth();
+  const { data: serviceInfo } = useServiceInfo();
 
-  const { data: serviceInfo } = useQuery<{ service: string; version: string; git_sha: string; git_branch: string } | null>({
-    queryKey: ['service-info'],
-    queryFn: () => api.getInfo(),
-    refetchOnWindowFocus: false,
-    retry: false,
-  });
-
-  const { data: logs = [] } = useQuery<LogEntry[]>({
-    queryKey: ['recent-logs'],
-    queryFn: () => api.getLogs(50),
-    refetchInterval: 10000,
+  // Admin only (the log is the whole system's). The central log is mostly the
+  // gateway's request lines, so the panel asks for warnings and errors only —
+  // failed requests — instead of keyword-filtering lines that never matched.
+  const { data: problems = [] } = useQuery<LogEntry[]>({
+    queryKey: ['recent-logs', 'problems'],
+    queryFn: () => api.getLogs(20, ['warning', 'error']),
+    refetchInterval: 30000,
     retry: 1,
     enabled: !!isAdmin,
   });
-
-  const filteredLogs = useMemo(() => {
-    return logs.filter(n => {
-      const msg = (n.message || '').toLowerCase();
-      const service = (n.service || '').toLowerCase();
-
-      // 1. Check if it's an update notification (admin only)
-      const isUpdate = msg.includes('update available') || msg.includes('updates available') || msg.includes('image update');
-      if (isUpdate) {
-        return !!user?.is_admin;
-      }
-
-      // 2. Check if it's an ingestion / upload / import event (all users can see)
-      const isIngest = ['ingest', 'upload', 'import', 'document', 'document_upload', 'file_upload', 'rag', 'ingestion', 'rag_sync', 'rag_index'].some(
-        kw => msg.includes(kw) || service.includes(kw)
-      );
-      if (isIngest) {
-        return true;
-      }
-
-      // 3. Check if it's a communication (Nextcloud Talk, messages, mentions, chats)
-      const isComm = ['nextcloud_talk', 'nextcloud', 'talk_message', 'chat_message', 'mention', 'communication', 'notification'].some(
-        kw => msg.includes(kw) || service.includes(kw)
-      );
-
-      const relatesToUser = user?.username && msg.includes(user.username.toLowerCase());
-
-      if (isComm) {
-        if (relatesToUser || service.includes('talk') || service.includes('nextcloud') || msg.includes('talk') || msg.includes('nextcloud')) {
-          return true;
-        }
-      }
-
-      return false;
-    });
-  }, [logs, user]);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const { data: workspaces = [] } = useQuery<Workspace[]>({
     queryKey: ['workspaces'],
@@ -364,7 +327,6 @@ const Dashboard = () => {
     const detailsMap = health?.service_details || {};
     return Object.entries(services).map(([key, status]) => {
       const Icon = SERVICE_ICON_MAP[key as keyof typeof SERVICE_ICON_MAP] ?? Activity;
-      const relatedLogs = logs.filter((log) => log.service === key).slice(0, 2);
       const meta = detailsMap[key];
       const gitSha = meta?.git_sha || 'unknown';
       const lastRestart = meta?.start_time
@@ -380,16 +342,15 @@ const Dashboard = () => {
           { label: 'Status', value: status },
           { label: 'Git Revision', value: gitSha },
           { label: 'Last Restart', value: lastRestart },
-          { label: 'Recent Logs', value: String(relatedLogs.length) },
-          { label: 'Updated', value: new Date().toLocaleTimeString() },
         ],
       };
     });
-  }, [health, logs]);
+  }, [health]);
 
-  const handleSearch = async (event: React.FormEvent) => {
+  // Search runs as you type; Enter only dismisses the phone keyboard.
+  const handleSearch = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!searchQuery.trim()) return;
+    (document.activeElement as HTMLElement | null)?.blur();
   };
 
   const handleClearSearch = useCallback(() => {
@@ -421,7 +382,8 @@ const Dashboard = () => {
           </p>
           {serviceInfo && serviceInfo.git_sha !== 'unknown' && (
             <p className="mt-0.5 text-[10px] font-mono text-slate-700">
-              {serviceInfo.service} · {serviceInfo.git_sha} · {serviceInfo.git_branch}
+              {serviceInfo.service} · {serviceInfo.git_sha}
+              {serviceInfo.git_branch && serviceInfo.git_branch !== 'unknown' ? ` · ${serviceInfo.git_branch}` : ''}
             </p>
           )}
         </div>
@@ -436,8 +398,9 @@ const Dashboard = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search RAG context and indexed files…"
+              placeholder="Search knowledge & files…"
               className="glass-input w-full py-2.5 pl-10 pr-14 text-sm"
+              enterKeyHint="search"
               aria-label="Global search"
             />
             <button
@@ -452,7 +415,7 @@ const Dashboard = () => {
 
           <button
             onClick={() => { trigger('medium'); setVoiceOpen(true); }}
-            className="flex items-center justify-center w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/25 text-purple-400 hover:bg-purple-500/25 transition-colors shrink-0"
+            className="flex items-center justify-center w-11 h-11 rounded-xl bg-purple-500/15 border border-purple-500/25 text-purple-400 hover:bg-purple-500/25 transition-colors shrink-0"
             aria-label="Open voice assistant"
           >
             <Mic size={18} />
@@ -460,7 +423,7 @@ const Dashboard = () => {
 
           <button
             onClick={() => setSettingsOpen(true)}
-            className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+            className="flex items-center justify-center w-11 h-11 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
             aria-label="Dashboard settings"
             title="Dashboard settings"
           >
@@ -494,13 +457,13 @@ const Dashboard = () => {
             ) : searchResults ? (
               <>
                 {searchResults.answer && (
-                  <div className="rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-relaxed text-slate-300 mb-4">
+                  <div className="rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-relaxed text-slate-300 mb-4 max-h-60 overflow-y-auto whitespace-pre-wrap break-words">
                     {searchResults.answer}
                   </div>
                 )}
                 <div className="grid gap-3 md:grid-cols-2">
-                  {(searchResults.files || []).map((file) => (
-                    <div key={file.path} className="glass-card flex items-center gap-3 p-4">
+                  {(searchResults.files || []).map((file, index) => (
+                    <div key={`${file.path}-${index}`} className="glass-card flex items-center gap-3 p-4">
                       <FileText size={15} className="text-blue-400 shrink-0" />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-white">{file.name}</p>
@@ -551,13 +514,13 @@ const Dashboard = () => {
           </div>
 
           {serviceSummaries.length === 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 md:gap-4 xl:grid-cols-4">
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="skeleton h-24 rounded-xl" />
               ))}
             </div>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 md:gap-4 xl:grid-cols-4">
               {serviceSummaries.map((service) => (
                 <ServiceCard
                   key={service.key}
@@ -573,42 +536,60 @@ const Dashboard = () => {
 
       {/* ── Logs + Workspaces + Settings + Raven ── */}
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        {showFullSections && (
-        <SectionErrorBoundary label="Recent Activity">
+        {isAdmin && (
+        <SectionErrorBoundary label="Recent Problems">
           <section className="glass-panel p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-500/10">
-                  <FileText size={16} className="text-blue-300" />
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-amber-500/10 shrink-0">
+                  <AlertTriangle size={16} className="text-amber-300" />
                 </div>
-                <div>
-                  <h2 className="text-base font-bold text-white">Recent Activity</h2>
-                  <p className="text-xs text-slate-500">Live log stream</p>
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold text-white">Recent Problems</h2>
+                  <p className="text-xs text-slate-500">Failed requests from the system log</p>
                 </div>
               </div>
-              <button
-                onClick={() =>
-                  api.clearLogs().then(() => {
-                    queryClient.invalidateQueries({ queryKey: ['recent-logs'] });
-                    queryClient.invalidateQueries({ queryKey: ['header-notifications'] });
-                    toast.success('Logs cleared');
-                  }).catch(() => toast.error('Failed to clear logs'))
-                }
-                className="text-[10px] font-bold uppercase tracking-widest text-red-400 hover:text-red-300 px-3 py-1.5 rounded-lg border border-red-500/20 hover:bg-red-500/10 transition-colors"
-              >
-                Clear
-              </button>
+              {problems.length > 0 && (
+                confirmClear ? (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() =>
+                        api.clearLogs().then(() => {
+                          queryClient.invalidateQueries({ queryKey: ['recent-logs'] });
+                          toast.success('System log cleared');
+                        }).catch(() => toast.error('Failed to clear logs')).finally(() => setConfirmClear(false))
+                      }
+                      className="min-h-11 text-[10px] font-bold uppercase tracking-widest text-red-300 px-3 rounded-lg border border-red-500/30 bg-red-500/10"
+                    >
+                      Clear whole log
+                    </button>
+                    <button
+                      onClick={() => setConfirmClear(false)}
+                      className="min-h-11 text-[10px] font-bold uppercase tracking-widest text-slate-400 px-3 rounded-lg"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmClear(true)}
+                    className="min-h-11 shrink-0 text-[10px] font-bold uppercase tracking-widest text-red-400 hover:text-red-300 px-3 rounded-lg border border-red-500/20 hover:bg-red-500/10 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )
+              )}
             </div>
 
             <div className="space-y-2">
-              {filteredLogs.length > 0 ? (
-                filteredLogs.slice(0, 8).map((log, index) => (
+              {problems.length > 0 ? (
+                problems.slice(0, 8).map((log, index) => (
                   <LogEntryCard key={`${log.timestamp}-${index}`} log={log} />
                 ))
               ) : (
                 <div className="flex flex-col items-center justify-center py-10 text-center">
-                  <FileText size={28} className="text-slate-700 mb-2" />
-                  <p className="text-sm text-slate-500">No recent activity</p>
+                  <CheckCircle2 size={28} className="text-emerald-700 mb-2" />
+                  <p className="text-sm text-slate-500">No failed requests recently</p>
                 </div>
               )}
             </div>

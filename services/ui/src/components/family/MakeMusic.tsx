@@ -3,6 +3,7 @@ import { Music, Loader2, X } from 'lucide-react';
 import { api } from '../../services/api';
 import type { SongJob } from '../../services/api';
 import { errorText } from '../../lib/errorText';
+import SendToChat from '../chat/SendToChat';
 import { STRUCTURES, minutes, songStatus, type StructureId } from './songShapes';
 
 const PRESETS = [
@@ -141,7 +142,7 @@ export default function MakeMusic() {
 
       <div className="flex flex-wrap gap-2">
         {PRESETS.map((preset) => (
-          <button key={preset.label} type="button" onClick={() => setPrompt(preset.prompt)} className="glass-button min-h-9 px-2.5 py-1.5 text-[11px]">
+          <button key={preset.label} type="button" onClick={() => setPrompt(preset.prompt)} className="glass-button min-h-11 px-3 py-1.5 text-xs">
             {preset.label}
           </button>
         ))}
@@ -152,7 +153,7 @@ export default function MakeMusic() {
         onChange={(event) => setPrompt(event.target.value)}
         placeholder="Describe the song — 'a bouncy tune about a very slow turtle'"
         aria-label="Song prompt"
-        className="glass-input w-full px-3 py-2 text-sm"
+        className="glass-input min-h-11 w-full px-3 py-2 text-base sm:text-sm"
       />
 
       <div role="radiogroup" aria-label="Song shape" className="flex flex-wrap gap-1.5">
@@ -164,7 +165,7 @@ export default function MakeMusic() {
             aria-checked={structure === s.id}
             onClick={() => chooseStructure(s.id)}
             disabled={working}
-            className={`min-h-9 rounded-full px-3 text-xs border transition disabled:opacity-60 ${
+            className={`min-h-11 rounded-full px-3 text-xs border transition disabled:opacity-60 ${
               structure === s.id ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-100' : 'border-white/10 text-slate-300'
             }`}
           >
@@ -187,7 +188,7 @@ export default function MakeMusic() {
           onChange={(event) => setDuration(Number(event.target.value))}
           aria-label="Song length"
           disabled={working}
-          className="flex-1"
+          className="min-h-11 flex-1"
         />
         <span className="w-12 text-right">{minutes(duration)}</span>
       </label>
@@ -222,7 +223,12 @@ export default function MakeMusic() {
       )}
 
       {job?.status === 'done' && job.audio_url && (
-        <audio src={job.audio_url} controls data-testid="music-audio" className="w-full" />
+        <>
+          <audio src={job.audio_url} controls data-testid="music-audio" className="w-full" />
+          {/* The audio server keeps a finished song for 30 minutes: sending it
+              to a chat is how it is kept. */}
+          <SendToChat getDataUrl={() => job.audio_url ?? ''} fileName="song.wav" label="Send the song to chat" />
+        </>
       )}
     </div>
   );

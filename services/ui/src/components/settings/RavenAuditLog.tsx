@@ -1,229 +1,148 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { History, FileText, CheckCircle, XCircle, Download } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Download, History, XCircle } from 'lucide-react';
 import { api, type RavenMission } from '../../services/api';
+import { downloadMissionLog, parseMissionLog } from '../../lib/missionLog';
 import Modal from '../ui/Modal';
+import { MissionTimeline } from './MissionTimeline';
 
 interface RavenAuditLogProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+const AUDITED = ['completed', 'failed', 'running', 'executing'];
+
+const formatTs = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
+const formatDuration = (seconds?: number | null) => {
+  if (seconds == null) return '—';
+  const m = Math.floor(seconds / 60);
+  return m > 0 ? `${m}m ${seconds % 60}s` : `${seconds % 60}s`;
+};
+
+/** Every mission Raven has run, with its full execution log. */
 export default function RavenAuditLog({ isOpen, onClose }: RavenAuditLogProps) {
-  const [selectedMission, setSelectedMission] = useState<RavenMission | null>(null);
- 
-   const { data: missions = [], isLoading } = useQuery<RavenMission[]>({
-     queryKey: ['raven-missions-audit'],
-     queryFn: () => api.getAdminRavenQueue(),
-     enabled: isOpen,
-     refetchInterval: 3000,
-   });
- 
-   const auditMissions = missions.filter(
-     (m) => m.status === 'completed' || m.status === 'failed' || m.status === 'running' || m.status === 'executing'
-   ).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
- 
-   const currentSelectedMission = selectedMission
-     ? (missions.find((m) => m.id === selectedMission.id) || selectedMission)
-     : null;
- 
-   const renderLog = (logData: string | null | undefined) => {
-     if (!logData) return <div className="text-slate-500 italic">No execution log available.</div>;
-     try {
-       const parsed = JSON.parse(logData);
-       if (Array.isArray(parsed)) {
-         const displayedLogs = parsed.slice(-500);
-         return (
-           <div className="space-y-2">
-             {displayedLogs.map((entry, idx) => {
-               const timeStr = entry.timestamp ? new Date(entry.timestamp * 1000).toISOString().split('T')[1].slice(0,-1) : '';
-               const entryType = entry.raw_type || entry.type;
-               let textColor = 'text-slate-400';
-               if (entryType === 'action') textColor = 'text-yellow-400 font-bold';
-               else if (entryType === 'action_payload') textColor = 'text-yellow-300/80';
-               else if (entryType === 'result_success') textColor = 'text-emerald-400 font-bold';
-               else if (entryType === 'result_error') textColor = 'text-red-400 font-bold';
-               else if (entryType === 'reasoning') textColor = 'text-blue-400';
-               
-               return (
-                 <div key={idx} className={textColor}>
-                   <span className="opacity-50 select-none mr-2">[{timeStr}]</span>
-                   {entry.type === 'action_payload' ? (
-                     <div className="pl-6 mt-1 mb-2">
-                       <div className="bg-white/5 border-l-2 border-yellow-500/50 p-2 rounded-r text-xs">
-                         {entry.data}
-                       </div>
-                     </div>
-                   ) : (
-                     <span>{entry.data}</span>
-                   )}
-                 </div>
-               );
-             })}
-           </div>
-         );
-       }
-     } catch {
-       // Not JSON, just return raw string
-     }
-     return <div>{logData}</div>;
-   };
- 
-    const formatTs = (iso?: string | null) =>
-      iso ? new Date(iso).toLocaleString() : '—';
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
-    const formatDuration = (seconds?: number | null) => {
-      if (seconds == null) return '—';
-      const m = Math.floor(seconds / 60);
-      const s = seconds % 60;
-      return m > 0 ? `${m}m ${s}s` : `${s}s`;
-    };
+  const { data: missions = [], isLoading } = useQuery<RavenMission[]>({
+    queryKey: ['raven-missions-audit'],
+    queryFn: () => api.getAdminRavenQueue(),
+    enabled: isOpen,
+    refetchInterval: 5000,
+  });
 
-    const downloadLogs = (mission: RavenMission) => {
-      let content = '';
-      const raw = mission.output_log;
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            content = parsed
-              .map((e: { type?: string; data?: string; timestamp?: number }) => {
-                const t = e.timestamp
-                  ? new Date(e.timestamp * 1000).toISOString().split('T')[1].slice(0, -1)
-                  : '';
-                return `[${t}] [${e.type ?? 'system'}] ${e.data ?? ''}`;
-              })
-              .join('\n');
-          } else {
-            content = raw;
-          }
-        } catch {
-          content = raw;
-        }
-      }
-      if (mission.result) {
-        content += `\n\n--- MISSION RESULT ---\n${mission.result}`;
-      }
-      const blob = new Blob([content || 'No logs available.'], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `mission-${mission.id}-logs.txt`;
-      a.click();
-      URL.revokeObjectURL(url);
-    };
+  // The log and result come from the mission itself, not the list row.
+  const { data: selected } = useQuery({
+    queryKey: ['raven-mission', selectedId],
+    queryFn: () => api.getRavenMission(selectedId as number),
+    enabled: isOpen && selectedId != null,
+    refetchInterval: (q) => (['running', 'executing'].includes(q.state.data?.status ?? '') ? 4000 : false),
+  });
 
-    return (
-      <Modal isOpen={isOpen} onClose={onClose} title="Raven Audit Log" size="4xl">
-       <div className="flex h-[600px] gap-4">
-         {/* Left Side: Mission List */}
-         <div className="w-1/3 flex flex-col border-r border-white/10 pr-4">
-           {isLoading && missions.length === 0 ? (
-             <div className="text-slate-500 text-sm italic p-4">Loading audit log...</div>
-           ) : auditMissions.length === 0 ? (
-             <div className="text-slate-500 text-sm p-4 text-center">No historical missions found.</div>
-           ) : (
-             <div className="overflow-y-auto space-y-2 pr-2 custom-scrollbar flex-1">
-               {auditMissions.map((mission) => (
-                 <button
-                   key={mission.id}
-                   onClick={() => setSelectedMission(mission)}
-                   className={`w-full text-left p-3 rounded-lg border transition ${
-                     currentSelectedMission?.id === mission.id
-                       ? 'bg-white/10 border-white/20'
-                       : 'bg-black/20 border-white/5 hover:bg-white/5'
-                   }`}
-                 >
-                   <div className="flex items-center justify-between mb-1">
-                     <span className="text-xs font-bold text-white truncate max-w-[120px]">
-                       {mission.target_container || 'System'}
-                     </span>
-                     {mission.status === 'completed' ? (
-                       <CheckCircle size={14} className="text-emerald-400" />
-                     ) : mission.status === 'failed' ? (
-                       <XCircle size={14} className="text-red-400" />
-                     ) : (
-                       <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                     )}
-                   </div>
-                   <div className="text-[10px] text-slate-400 truncate mb-1">
-                     {mission.error_summary || mission.proposed_mission}
-                   </div>
-                   <div className="text-[9px] text-slate-500 uppercase tracking-widest">
-                     {new Date(mission.created_at).toLocaleString()}
-                   </div>
-                 </button>
-               ))}
-             </div>
-           )}
-         </div>
- 
-         {/* Right Side: Mission Details */}
-         <div className="w-2/3 flex flex-col pl-2 min-w-0">
-           {currentSelectedMission ? (
-             <div className="flex flex-col h-full">
-               <div className="mb-4">
-                 <div className="flex items-center gap-3 mb-2">
-                   <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${
-                     currentSelectedMission.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
-                     currentSelectedMission.status === 'failed' ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'
-                   }`}>
-                     {currentSelectedMission.status}
-                   </span>
-                   <h3 className="text-lg font-bold text-white">Mission #{currentSelectedMission.id}</h3>
-                 </div>
-                  <p className="text-sm text-slate-300">{currentSelectedMission.proposed_mission}</p>
-                  <button
-                    onClick={() => downloadLogs(currentSelectedMission)}
-                    className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-bold uppercase tracking-widest bg-white/10 hover:bg-white/20 border border-white/10 text-slate-200 transition"
-                  >
-                    <Download size={12} /> Download Logs
-                  </button>
-                  <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-400">
-                    <div><span className="text-slate-500">Queued:</span> {formatTs(currentSelectedMission.queued_at ?? currentSelectedMission.created_at)}</div>
-                    <div><span className="text-slate-500">Started:</span> {formatTs(currentSelectedMission.started_at)}</div>
-                    <div><span className="text-slate-500">Finished:</span> {formatTs(currentSelectedMission.completed_at)}</div>
-                    <div><span className="text-slate-500">Run time:</span> {formatDuration(currentSelectedMission.duration)}</div>
+  const auditMissions = missions
+    .filter((m) => AUDITED.includes(m.status))
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  const events = parseMissionLog(selected?.output_log);
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Raven Audit Log" size="5xl">
+      {/* Phones show the list or one mission; wider screens show both side by side. */}
+      <div className="flex flex-col md:flex-row h-[75vh] md:h-[600px] gap-4 p-4 sm:p-6 min-h-0">
+        <div className={`${selectedId != null ? 'hidden md:flex' : 'flex'} md:w-1/3 flex-col md:border-r border-white/10 md:pr-4 min-h-0`}>
+          {isLoading && missions.length === 0 ? (
+            <div className="text-slate-500 text-sm italic p-4">Loading audit log…</div>
+          ) : auditMissions.length === 0 ? (
+            <div className="text-slate-500 text-sm p-4 text-center">No missions have run yet.</div>
+          ) : (
+            <div className="overflow-y-auto space-y-2 pr-1 custom-scrollbar flex-1">
+              {auditMissions.map((mission) => (
+                <button
+                  key={mission.id}
+                  onClick={() => setSelectedId(mission.id)}
+                  className={`w-full text-left p-3 min-h-11 rounded-lg border transition ${
+                    selectedId === mission.id ? 'bg-white/10 border-white/20' : 'bg-black/20 border-white/5 hover:bg-white/5'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-xs font-bold text-white truncate">
+                      #{mission.id} · {mission.target_container || mission.mission_type}
+                    </span>
+                    {mission.status === 'completed' ? (
+                      <CheckCircle size={14} className="text-emerald-400 shrink-0" aria-label="completed" />
+                    ) : mission.status === 'failed' ? (
+                      <XCircle size={14} className="text-red-400 shrink-0" aria-label="failed" />
+                    ) : (
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" aria-label="running" />
+                    )}
                   </div>
-                  {currentSelectedMission.error_summary && (
-                    <div className="mt-2 text-xs text-slate-400 p-2 bg-black/30 rounded border border-white/5">
-                      <strong>Trigger:</strong> {currentSelectedMission.error_summary}
-                    </div>
-                  )}
-               </div>
- 
-               <div className="flex-1 flex flex-col min-h-0 space-y-4">
-                 <div className="flex-1 flex flex-col min-h-0 bg-black/40 border border-white/10 rounded-lg overflow-hidden">
-                   <div className="bg-white/5 px-3 py-1.5 border-b border-white/10 flex items-center gap-2">
-                     <FileText size={12} className="text-slate-400" />
-                     <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Execution Log</span>
-                   </div>
-                   <div className="flex-1 overflow-y-auto p-3 custom-scrollbar text-xs font-mono text-slate-300 whitespace-pre-wrap">
-                     {renderLog(currentSelectedMission.output_log)}
-                   </div>
-                 </div>
- 
-                 {currentSelectedMission.result && (
-                   <div className="h-1/3 flex flex-col min-h-0 bg-black/40 border border-white/10 rounded-lg overflow-hidden">
-                     <div className="bg-white/5 px-3 py-1.5 border-b border-white/10 flex items-center gap-2">
-                       <FileText size={12} className="text-slate-400" />
-                       <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Final Result</span>
-                     </div>
-                     <div className="flex-1 overflow-y-auto p-3 custom-scrollbar text-xs font-mono text-emerald-300/80 whitespace-pre-wrap">
-                       {currentSelectedMission.result}
-                     </div>
-                   </div>
-                 )}
-               </div>
-             </div>
-           ) : (
-             <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
-               <History size={48} className="mb-4 opacity-20" />
-               <p className="text-sm">Select a mission from the audit log to view details.</p>
-             </div>
-           )}
-         </div>
-       </div>
-     </Modal>
+                  <div className="text-[11px] text-slate-400 truncate mb-1">{mission.error_summary || mission.proposed_mission}</div>
+                  <div className="text-[10px] text-slate-500">{formatTs(mission.created_at)}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className={`${selectedId == null ? 'hidden md:flex' : 'flex'} md:w-2/3 flex-col min-w-0 min-h-0`}>
+          {selectedId == null ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
+              <History size={48} className="mb-4 opacity-20" />
+              <p className="text-sm">Choose a mission to see its log.</p>
+            </div>
+          ) : !selected ? (
+            <p className="text-sm text-slate-500 p-4">Loading mission #{selectedId}…</p>
+          ) : (
+            <div className="flex flex-col h-full min-h-0 gap-3">
+              <div>
+                <button
+                  onClick={() => setSelectedId(null)}
+                  className="md:hidden mb-2 min-h-11 inline-flex items-center gap-1 text-xs text-slate-300"
+                >
+                  <ArrowLeft size={14} /> All missions
+                </button>
+                <div className="flex flex-wrap items-center gap-3 mb-2">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${
+                    selected.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
+                    selected.status === 'failed' ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'
+                  }`}>
+                    {selected.status}
+                  </span>
+                  <h3 className="text-lg font-bold text-white">Mission #{selected.id}</h3>
+                  <button
+                    onClick={() => downloadMissionLog(selected.id, events, selected.result)}
+                    className="ml-auto inline-flex items-center gap-1.5 min-h-11 px-3 rounded text-[11px] font-bold uppercase tracking-widest bg-white/10 hover:bg-white/20 border border-white/10 text-slate-200"
+                  >
+                    <Download size={12} /> Download
+                  </button>
+                </div>
+                <p className="text-sm text-slate-300 line-clamp-3 break-words">{selected.proposed_mission}</p>
+                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-400">
+                  <div><span className="text-slate-500">Queued:</span> {formatTs(selected.queued_at ?? selected.created_at)}</div>
+                  <div><span className="text-slate-500">Started:</span> {formatTs(selected.started_at)}</div>
+                  <div><span className="text-slate-500">Finished:</span> {formatTs(selected.completed_at)}</div>
+                  <div><span className="text-slate-500">Run time:</span> {formatDuration(selected.duration)}</div>
+                </div>
+                {selected.error_summary && (
+                  <div className="mt-2 text-xs text-slate-400 p-2 bg-black/30 rounded border border-white/5">
+                    <strong>Trigger:</strong> {selected.error_summary}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto p-3 custom-scrollbar bg-black/40 border border-white/10 rounded-lg">
+                <MissionTimeline events={events} showPayloads emptyText="No execution log was recorded." />
+              </div>
+
+              {selected.result && (
+                <div className="max-h-[30%] overflow-y-auto p-3 custom-scrollbar text-xs font-mono text-emerald-300/80 whitespace-pre-wrap break-words bg-black/40 border border-white/10 rounded-lg">
+                  {selected.result}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }

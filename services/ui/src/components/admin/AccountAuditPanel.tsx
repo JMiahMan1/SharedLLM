@@ -16,7 +16,7 @@ export default function AccountAuditPanel({ users }: { users: string[] }) {
   });
 
   return (
-    <div className="glass-panel p-6" data-testid="account-audit">
+    <div className="glass-panel p-4 sm:p-6" data-testid="account-audit">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="flex items-center gap-3 text-xl font-bold text-white">
@@ -32,7 +32,7 @@ export default function AccountAuditPanel({ users }: { users: string[] }) {
             value={target}
             onChange={(event) => setTarget(event.target.value)}
             aria-label="Filter by account"
-            className="glass-input text-sm"
+            className="glass-input min-h-11 text-sm"
           >
             <option value="">All accounts</option>
             {users.map((u) => (
@@ -41,7 +41,7 @@ export default function AccountAuditPanel({ users }: { users: string[] }) {
               </option>
             ))}
           </select>
-          <button type="button" className="glass-button p-2.5" aria-label="Refresh activity" onClick={() => void refetch()}>
+          <button type="button" className="glass-button min-h-11 min-w-11 p-2.5" aria-label="Refresh activity" onClick={() => void refetch()}>
             <RefreshCcw size={14} className={isFetching ? 'animate-spin' : ''} />
           </button>
         </div>

@@ -2,34 +2,12 @@ import React, { useMemo } from 'react';
 import { Zap, TrendingUp, Calendar, Clock } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import type { IWidgetProps } from '../../types/widget';
+import { householdSeries, type EnergySummary as Summary } from '../../lib/energySeries';
 import { api } from '../../services/api';
 import { WidgetCard } from './WidgetCard';
 
-interface EnergyDataPoint {
-  time: string;
-  power: number;
-  battery?: number;
-}
-
-interface TelemetrySummary {
-  current_power_w: number | null;
-  peak_power_w: number | null;
-  peak_at: number | null;
-  peak_duration_seconds: number | null;
-  avg_power_w: number | null;
-  availability_pct: number;
-  total_activations: number;
-  data_points: Array<{
-    recorded_at: number;
-    power_w?: number;
-    is_available?: boolean;
-    state?: string;
-    source?: string;
-  }>;
-}
-
 const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
-  const [summaries, setSummaries] = React.useState<Record<string, TelemetrySummary>>({});
+  const [summaries, setSummaries] = React.useState<Record<string, Summary>>({});
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -47,7 +25,7 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
           )
         );
 
-        const summaryMap: Record<string, TelemetrySummary> = {};
+        const summaryMap: Record<string, Summary> = {};
         results.forEach((result, idx) => {
           if (result.status === 'fulfilled' && result.value.summary) {
             summaryMap[powerEnrollments[idx].entity_id] = result.value.summary;
@@ -57,10 +35,8 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
         setSummaries(summaryMap);
       } catch (err) {
         const msg = (err as Error).message?.toLowerCase() ?? '';
-        if (msg.includes('not found') || msg.includes('404')) {
-          setError('Telemetry service is not running. Please check the service status in the Dashboard.');
-        } else if (msg.includes('connect') || msg.includes('refused') || msg.includes('econnrefused')) {
-          setError('Cannot reach telemetry service. Ensure the logging service is running and network discovery is active.');
+        if (msg.includes('not found') || msg.includes('404') || msg.includes('connect') || msg.includes('refused')) {
+          setError('Energy data is unavailable right now. Try again in a minute.');
         } else {
           setError((err as Error).message || 'Failed to load energy data');
         }
@@ -73,39 +49,7 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
     return () => clearInterval(interval);
   }, []);
 
-  const data = useMemo(() => {
-    const allDataPoints: Array<{ recorded_at: number; power_w?: number; entity_id: string }> = [];
-
-    for (const [entityId, summary] of Object.entries(summaries)) {
-      if (summary.data_points) {
-        for (const dp of summary.data_points) {
-          if (dp.power_w != null) {
-            allDataPoints.push({ recorded_at: dp.recorded_at, power_w: dp.power_w, entity_id: entityId });
-          }
-        }
-      }
-    }
-
-    if (allDataPoints.length === 0) return [];
-
-    allDataPoints.sort((a, b) => a.recorded_at - b.recorded_at);
-
-    const hourlyBuckets: Record<string, number[]> = {};
-    for (const dp of allDataPoints) {
-      const date = new Date(dp.recorded_at * 1000);
-      const key = `${date.getHours().toString().padStart(2, '0')}:00`;
-      if (!hourlyBuckets[key]) hourlyBuckets[key] = [];
-      hourlyBuckets[key].push(dp.power_w!);
-    }
-
-    const result: EnergyDataPoint[] = [];
-    for (const [time, values] of Object.entries(hourlyBuckets).sort()) {
-      const avg = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
-      result.push({ time, power: avg });
-    }
-
-    return result;
-  }, [summaries]);
+  const data = useMemo(() => householdSeries(summaries), [summaries]);
 
   const metrics = useMemo(() => {
     let currentPower = 0;
@@ -113,7 +57,6 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
     let peakAt: number | null = null;
     let peakDuration = 0;
     let totalPower = 0;
-    let powerCount = 0;
 
     for (const summary of Object.values(summaries)) {
       if (summary.current_power_w != null) currentPower += summary.current_power_w;
@@ -124,15 +67,14 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
           peakDuration = summary.peak_duration_seconds ?? 0;
         }
       }
-      if (summary.avg_power_w != null) {
-        totalPower += summary.avg_power_w;
-        powerCount++;
-      }
+      // Current is the household total, so the average must be one too: the
+      // sum of each device's average, not the mean of them.
+      if (summary.avg_power_w != null) totalPower += summary.avg_power_w;
     }
 
     return {
       current: Math.round(currentPower),
-      avg: powerCount > 0 ? Math.round(totalPower / powerCount) : 0,
+      avg: Math.round(totalPower),
       peak: Math.round(peakPower),
       peakAt,
       peakDuration,
@@ -141,7 +83,8 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
 
   const formatPeakTime = (timestamp: number | null) => {
     if (!timestamp) return '--';
-    return new Date(timestamp * 1000).toLocaleString();
+    // A full date-time wraps to four lines in a third of a phone-width card.
+    return new Date(timestamp * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   };
 
   const formatPeakDuration = (seconds: number | null) => {
@@ -197,7 +140,7 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
               <p className="text-base font-bold text-blue-400">{metrics.avg}<span className="text-[10px] ml-0.5 text-slate-500">W</span></p>
             </div>
             <div className="glass-card p-2.5 text-center">
-              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Peak</p>
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500" title="Highest single-device reading">Peak</p>
               <p className="text-base font-bold text-red-400">{metrics.peak}<span className="text-[10px] ml-0.5 text-slate-500">W</span></p>
               {metrics.peakAt && (
                 <div className="flex items-center justify-center gap-1 mt-1">
@@ -205,7 +148,7 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
                   <span className="text-[9px] text-slate-400">{formatPeakTime(metrics.peakAt)}</span>
                 </div>
               )}
-              {metrics.peakDuration && metrics.peakDuration > 0 && (
+              {metrics.peakDuration > 0 && (
                 <div className="flex items-center justify-center gap-1 mt-0.5">
                   <Clock size={10} className="text-slate-400" />
                   <span className="text-[9px] text-slate-500">Duration: {formatPeakDuration(metrics.peakDuration)}</span>
@@ -267,7 +210,7 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
           <Zap size={28} className="text-slate-700 mb-2" />
           <p className="text-sm text-slate-500">No energy data available</p>
           <p className="text-xs text-slate-600 mt-1">
-            Enroll power-tracking entities via Admin → Telemetry, or ensure devices are reporting.
+            Power-tracked devices appear here once an admin enrolls them under Telemetry.
           </p>
         </div>
       )}

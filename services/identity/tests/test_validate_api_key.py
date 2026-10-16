@@ -41,7 +41,7 @@ def client_fixture(session: Session):
 
 
 def test_a_real_key_is_accepted_and_names_its_owner(client: TestClient):
-    resp = client.get("/api/internal/validate-api-key", params={"api_key": "key-alice"})
+    resp = client.get("/api/internal/validate-api-key", headers={"X-Api-Key": "key-alice"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["user"] == "alice"
@@ -50,7 +50,7 @@ def test_a_real_key_is_accepted_and_names_its_owner(client: TestClient):
 
 
 def test_the_default_users_key_is_accepted(client: TestClient):
-    body = client.get("/api/internal/validate-api-key", params={"api_key": "key-default"}).json()
+    body = client.get("/api/internal/validate-api-key", headers={"X-Api-Key": "key-default"}).json()
     assert body["user"] == "default"
     assert body["is_admin"] is True
     assert body["is_system_default"] is True
@@ -58,21 +58,21 @@ def test_the_default_users_key_is_accepted(client: TestClient):
 
 def test_a_junk_key_is_rejected_rather_than_resolved_to_the_default_admin(client: TestClient):
     """The whole point of the endpoint: no fallback, ever."""
-    resp = client.get("/api/internal/validate-api-key", params={"api_key": "totally-bogus-key"})
+    resp = client.get("/api/internal/validate-api-key", headers={"X-Api-Key": "totally-bogus-key"})
     assert resp.status_code == 401
     # Critically: the body must not leak the default user's identity.
     assert "default" not in resp.text
 
 
 def test_a_blank_key_is_a_bad_request_not_a_default_user(client: TestClient):
-    resp = client.get("/api/internal/validate-api-key", params={"api_key": "   "})
+    resp = client.get("/api/internal/validate-api-key", headers={"X-Api-Key": "   "})
     assert resp.status_code == 400
     assert "default" not in resp.text
 
 
 def test_another_users_key_does_not_resolve_to_the_caller(client: TestClient):
     """alice must not be able to present bob's key and have it accepted as hers."""
-    resp = client.get("/api/internal/validate-api-key", params={"api_key": "key-default"})
+    resp = client.get("/api/internal/validate-api-key", headers={"X-Api-Key": "key-default"})
     assert resp.status_code == 200
     assert resp.json()["user"] == "default"
 
@@ -81,7 +81,7 @@ def test_the_endpoint_is_internal_only(client: TestClient):
     """Without the internal secret the endpoint must not be reachable."""
     app.dependency_overrides.pop(require_internal, None)
     try:
-        resp = client.get("/api/internal/validate-api-key", params={"api_key": "key-alice"})
+        resp = client.get("/api/internal/validate-api-key", headers={"X-Api-Key": "key-alice"})
         assert resp.status_code in (401, 403)
     finally:
         app.dependency_overrides[require_internal] = lambda: True

@@ -1,45 +1,31 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Bell, LogOut, Trash2, Satellite, User as UserIcon, Settings, Shield, ChevronUp } from 'lucide-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Search, Bell, LogOut, Satellite, User as UserIcon, Settings, Shield, ChevronUp } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../../services/api';
-import type { LogEntry } from '../../services/api';
+import type { TelemetryNotification } from '../../types/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLocation } from '../../context/LocationContext';
+import { useSystemHealth } from '../../hooks/useSystemHealth';
+import { storageGetSync, storageSet } from '../../lib/storage';
+import { relativeTime } from '../../lib/wanderTrips';
+import { navPagesFor } from './navItems';
 
 // Navigation search index — the header box is a *command-palette* style finder
 // for pages/tabs/settings, distinct from the RAG/semantic search on Knowledge.
+// Pages come from the shared nav list; these are the extra destinations.
 type NavItem = { label: string; path: string; section: string; keywords: string };
-const NAV_ITEMS: NavItem[] = [
-  { label: 'Dashboard', path: '/', section: 'Pages', keywords: 'home overview jarvis' },
-  { label: 'Knowledge', path: '/knowledge', section: 'Pages', keywords: 'rag semantic memory storage indexed files ha entities' },
-  { label: 'Identity', path: '/identity', section: 'Pages', keywords: 'users accounts login credentials' },
+const EXTRA_ITEMS: NavItem[] = [
+  { label: 'Accounts & Integrations', path: '/identity', section: 'Pages', keywords: 'identity users accounts credentials api keys home assistant nextcloud github voice devices' },
   { label: 'Communication', path: '/communication', section: 'Pages', keywords: 'talk nextcloud messages chat' },
-  { label: 'Calendar', path: '/calendar', section: 'Pages', keywords: 'schedule events' },
-  { label: 'Wander', path: '/wander', section: 'Pages', keywords: 'trips family circle presence travel drives vehicles fuel mileage locations map' },
-  { label: 'Health', path: '/fitness', section: 'Pages', keywords: 'steps workouts pedometer fitness goals achievements' },
-  { label: 'Family', path: '/family', section: 'Pages', keywords: 'games talk chores rewards together' },
-  { label: 'Bible', path: '/bible', section: 'Pages', keywords: 'scripture read verse devotional plan memorise quiz study blb' },
-  { label: 'Media', path: '/media', section: 'Pages', keywords: 'music assistant audiobookshelf player' },
   { label: 'Remote', path: '/remote', section: 'Pages', keywords: 'home assistant control devices' },
-  { label: 'Settings', path: '/settings', section: 'Pages', keywords: 'preferences configuration profile' },
-  { label: 'Workspaces', path: '/workspaces', section: 'Pages', keywords: 'files folders registry' },
-  { label: 'Docs', path: '/docs', section: 'Pages', keywords: 'documentation help' },
-  { label: 'Lab', path: '/lab', section: 'Pages', keywords: 'raven missions autonomous agent' },
-  { label: 'Admin', path: '/admin', section: 'Pages', keywords: 'manage control panel users services' },
   { label: 'Profile Settings', path: '/settings', section: 'Settings', keywords: 'account name password' },
   { label: 'RAG / Storage Settings', path: '/knowledge', section: 'Settings', keywords: 'embeddings collections purge index' },
   { label: 'Voice Assistant', path: '/settings', section: 'Settings', keywords: 'microphone speech tts' },
-  { label: 'Notifications', path: '/', section: 'Tabs', keywords: 'alerts bell logs' },
 ];
 
-const LEVEL_COLOR: Record<string, string> = {
-  ERROR: 'text-red-400',
-  WARNING: 'text-yellow-400',
-  WARN: 'text-yellow-400',
-  INFO: 'text-emerald-400',
-  DEBUG: 'text-slate-400',
-};
+/** When the bell was last opened; notices newer than this light the dot. */
+const SEEN_KEY = 'jarvis_notifications_seen_at';
 
 const Header = () => {
   const { user, logout } = useAuth();
@@ -51,13 +37,18 @@ const Header = () => {
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
+  const navItems = useMemo<NavItem[]>(() => [
+    ...navPagesFor(!!user?.is_admin).map(({ label, path, keywords }) => ({ label, path, keywords, section: 'Pages' })),
+    ...EXTRA_ITEMS,
+  ], [user?.is_admin]);
+
   const matches = useMemo(() => {
     const q = navQuery.trim().toLowerCase();
     if (!q) return [];
-    return NAV_ITEMS.filter((it) =>
+    return navItems.filter((it) =>
       (it.label + ' ' + it.keywords + ' ' + it.section).toLowerCase().includes(q)
     ).slice(0, 12);
-  }, [navQuery]);
+  }, [navQuery, navItems]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -82,18 +73,21 @@ const Header = () => {
     };
   }, []);
   
-  const { data: health, isLoading, error } = useQuery({
-    queryKey: ['health'],
-    queryFn: () => api.getHealth(),
-    refetchInterval: 10000,
-  });
+  const { data: health, isLoading, error } = useSystemHealth();
 
-  const { data: notifications = [] } = useQuery<LogEntry[]>({
+  // The bell shows this user's own notices from the telemetry outbox: family
+  // arrivals/departures, leave-by reminders, finished reports — the same
+  // notices the Android app raises as system notifications. It used to show
+  // filtered system *logs* (admin only), which never matched anything, and
+  // its "Clear All" wiped the whole system log.
+  const { data: notifications = [] } = useQuery<TelemetryNotification[]>({
     queryKey: ['header-notifications'],
-    queryFn: () => api.getLogs(50),
-    refetchInterval: 15000,
-    // System logs are admin-only; for everyone else this would be a 403 a minute.
-    enabled: !!user?.is_admin,
+    queryFn: async () => {
+      const { notifications: items } = await api.getTelemetryNotifications(20);
+      return [...(items ?? [])].sort((x, y) => (y.created_at ?? '').localeCompare(x.created_at ?? ''));
+    },
+    refetchInterval: 60_000,
+    enabled: !!user,
   });
 
   // Periodic background check for service updates (admin accounts only).
@@ -107,57 +101,22 @@ const Header = () => {
     staleTime: 60000,
   });
 
-  const queryClient = useQueryClient();
-  const clearMutation = useMutation({
-    mutationFn: () => api.clearLogs(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['header-notifications'] });
-      queryClient.invalidateQueries({ queryKey: ['recent-logs'] });
-    },
-  });
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [seenAt, setSeenAt] = useState(() => storageGetSync(SEEN_KEY) ?? '');
+  const unread = notifications.filter((n) => (n.created_at ?? '') > seenAt).length;
 
-  const handleClearLogs = async () => {
-    try {
-      await clearMutation.mutateAsync();
-    } catch {
-      // Error handled by query client or toast if needed
+  const toggleNotifications = () => {
+    const opening = !showNotifications;
+    setShowNotifications(opening);
+    if (opening && notifications[0]?.created_at) {
+      setSeenAt(notifications[0].created_at);
+      void storageSet(SEEN_KEY, notifications[0].created_at);
     }
   };
 
-  const [showNotifications, setShowNotifications] = useState(false);
   const isReady = health?.status === 'READY';
   const statusColor = error ? 'bg-red-500' : (isLoading ? 'bg-yellow-500' : (isReady ? 'bg-green-500' : 'bg-red-400'));
   const statusText = error ? 'Offline' : (isLoading ? 'Polling...' : (health?.status || 'Unknown'));
-
-  // Filter notifications: show communications for the logged-in user or updates for admins
-  const filteredNotifications = notifications.filter(n => {
-    const msg = n.message.toLowerCase();
-    const service = n.service.toLowerCase();
-    
-    // 1. Check if it's an update notification (admin only)
-    const isUpdate = msg.includes('update available') || msg.includes('updates available') || msg.includes('image update');
-    if (isUpdate) {
-      return !!user?.is_admin;
-    }
-    
-    // 2. Check if it's a communication (Nextcloud Talk, messages, mentions, chats)
-    const isComm = ['talk', 'nextcloud', 'message', 'chat', 'mention', 'communication', 'notification'].some(
-      kw => msg.includes(kw) || service.includes(kw)
-    );
-    
-    const relatesToUser = user?.username && msg.includes(user.username.toLowerCase());
-    
-    if (isComm) {
-      // Include if it explicitly mentions/targets the current user or is from talk/nextcloud services
-      if (relatesToUser || service.includes('talk') || service.includes('nextcloud') || msg.includes('talk') || msg.includes('nextcloud')) {
-        return true;
-      }
-    }
-    
-    return false;
-  });
-
-  const hasErrors = filteredNotifications.some(n => n.level === 'ERROR' || n.level === 'WARNING' || n.level === 'WARN');
 
   return (
     <header className="h-14 md:h-20 flex items-center justify-between px-4 md:px-8 bg-transparent">
@@ -218,51 +177,39 @@ const Header = () => {
         </div>
 
         <div className="relative">
-          <button 
-            onClick={() => setShowNotifications(!showNotifications)}
+          <button
+            onClick={toggleNotifications}
+            aria-label={unread ? `Notifications, ${unread} new` : 'Notifications'}
+            aria-expanded={showNotifications}
             className="glass-card p-3 relative hover:bg-white/5 transition-colors"
           >
             <Bell size={20} className="text-slate-300" />
-            {/* Show dot only if there are active notifications */}
-            {filteredNotifications.length > 0 && (
-              <span className={`absolute top-2 right-2 w-2 h-2 rounded-full ${hasErrors ? 'bg-red-500' : 'bg-emerald-500'}`} />
+            {unread > 0 && (
+              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-500" />
             )}
           </button>
-          
+
           {showNotifications && (
-            <div className="absolute right-0 mt-4 w-80 max-w-[calc(100vw-2rem)] glass-menu p-4 z-50 animate-in slide-in-from-top-2 duration-200">
-              <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
+            <div className="fixed left-4 right-4 top-16 sm:absolute sm:left-auto sm:top-auto sm:right-0 sm:mt-4 sm:w-80 glass-menu p-4 z-50 animate-in slide-in-from-top-2 duration-200">
+              <div className="mb-4 border-b border-white/5 pb-3">
                 <h4 className="text-sm font-bold text-white uppercase tracking-widest">Notifications</h4>
-                <button 
-                  onClick={handleClearLogs}
-                  disabled={filteredNotifications.length === 0 || clearMutation.isPending}
-                  className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-red-400 hover:text-red-300 transition-colors disabled:opacity-30 p-2 -m-2"
-                >
-                  <Trash2 size={12} />
-                  {clearMutation.isPending ? '...' : 'Clear All'}
-                </button>
               </div>
               <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                {filteredNotifications.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-4">No notifications</p>
-                ) : filteredNotifications.slice(0, 5).map((log, i) => (
-                  <div key={`${log.timestamp}-${i}`} className="p-3 rounded-xl bg-white/5 border border-white/5">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs text-white font-medium truncate">{log.service}</p>
-                      <span className={`text-[9px] font-black uppercase tracking-widest shrink-0 ${LEVEL_COLOR[log.level] ?? 'text-slate-400'}`}>
-                        {log.level}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-1 break-words line-clamp-2">{log.message}</p>
-                    <p className="text-[9px] text-slate-600 mt-1.5">
-                      {new Date(log.timestamp).toLocaleTimeString()}
-                    </p>
+                {notifications.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-4">No notifications yet</p>
+                ) : notifications.slice(0, 10).map((n) => (
+                  <div key={n.id} className="p-3 rounded-xl bg-white/5 border border-white/5">
+                    <p className="text-xs text-white font-medium break-words">{n.title}</p>
+                    {(n.body || n.error) && (
+                      <p className="text-[11px] text-slate-400 mt-1 break-words line-clamp-2">{n.body || n.error}</p>
+                    )}
+                    <p className="text-[10px] text-slate-500 mt-1.5">{relativeTime(n.created_at)}</p>
                   </div>
                 ))}
               </div>
-              <button 
+              <button
                 onClick={() => setShowNotifications(false)}
-                className="w-full mt-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-colors border-t border-white/5 pt-3"
+                className="w-full mt-3 min-h-11 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-colors border-t border-white/5 pt-3"
               >
                 Dismiss
               </button>
@@ -322,7 +269,7 @@ const Header = () => {
                   }}
                   className="w-full flex items-center gap-2.5 px-3 min-h-11 rounded-xl text-sm text-[var(--site-text)] hover:bg-slate-500/20 transition-colors"
                 >
-                  <UserIcon size={15} className="text-slate-400" /> Family Members
+                  <UserIcon size={15} className="text-slate-400" /> Accounts & Integrations
                 </button>
 
                 {user?.is_admin && (

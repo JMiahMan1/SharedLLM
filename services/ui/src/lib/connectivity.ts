@@ -1,3 +1,10 @@
+/** Bare host -> https (the public server is https-only); no trailing slash. */
+export function normalizeServerUrl(raw: string): string {
+  let url = raw.trim();
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  return url.replace(/\/+$/, '');
+}
+
 export async function checkConnectivity(url: string): Promise<{ ok: boolean; latency?: number; error?: string }> {
   if (!url) return { ok: false, error: 'No server URL configured' };
 
@@ -6,7 +13,10 @@ export async function checkConnectivity(url: string): Promise<{ ok: boolean; lat
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
 
-    const response = await fetch(`${url}/health/ready`, {
+    // The gateway's own liveness: answers fast, and does not fan out to
+    // every backing service like /health/ready (this runs every 30 s on
+    // each phone).
+    const response = await fetch(`${url}/health`, {
       method: 'GET',
       signal: controller.signal,
       cache: 'no-store',

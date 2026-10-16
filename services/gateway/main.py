@@ -866,51 +866,57 @@ async def readiness():
       "logging": f"{LOGGING_SVC}/health",
       "workspace_runtime": f"{WORKSPACE_RUNTIME_SVC}/health",
       "control_plane": f"{CONTROL_PLANE_URL}/health",
+      # Family-facing services the dashboard depends on (maps/location, the
+      # Bible reader, health/telemetry). Leaving them out showed a green
+      # board while their pages were broken.
+      "geo": f"{GEO_SVC}/health",
+      "bible": f"{BIBLE_SVC}/health",
+      "telemetry": f"{TELEMETRY_SVC}/health",
     }
 
     services_status: dict[str, str] = {}
     service_details: dict[str, dict] = {}
     results: dict[str, Any] = {"status": "READY", "services": services_status, "service_details": service_details}
-    all_ok = True
 
-    async with shared_http_client() as client:
-      for name, url in services.items():
-          # Retry with a generous per-probe timeout. RAG/Execution are the two
-          # services the Raven worker hammers; under worker load their /health
-          # can briefly exceed a tight timeout. A short retry here prevents a
-          # transient blip from marking a healthy service UNREACHABLE (which in
-          # turn made the whole gateway report DEGRADED for no real reason).
-          ok = False
-          status_val = "UNREACHABLE"
-          for _attempt in range(3):
-              try:
-                log.info(f"[health] Checking {name} at {redact_url(url)} (attempt {_attempt + 1})")
+    async def _probe(client, name: str, url: str) -> tuple[str, str, dict | None]:
+        # Retry with a generous per-probe timeout. RAG/Execution are the two
+        # services the Raven worker hammers; under worker load their /health
+        # can briefly exceed a tight timeout. A short retry here prevents a
+        # transient blip from marking a healthy service UNREACHABLE (which in
+        # turn made the whole gateway report DEGRADED for no real reason).
+        status_val = "UNREACHABLE"
+        for attempt in range(3):
+            try:
                 resp = await client.get(url, timeout=aiohttp.ClientTimeout(total=5.0))
-                log.info(f"[health] {name} response: {resp.status}")
                 if resp.status == 200:
-                    ok = True
+                    details = None
                     try:
                         data = await resp.json()
                         if isinstance(data, dict):
-                            service_details[name] = {
+                            details = {
                                 "git_sha": data.get("git_sha", "unknown"),
-                                "start_time": data.get("start_time", None)
+                                "start_time": data.get("start_time", None),
                             }
                     except Exception:
                         pass
-                    break
-                else:
-                    status_val = f"ERROR ({resp.status})"
-              except Exception as e:
+                    return name, "OK", details
+                status_val = f"ERROR ({resp.status})"
+            except Exception as e:
                 status_val = "UNREACHABLE"
-                log.warning(f"[health] {name} failed (attempt {_attempt + 1}): {e}")
-              if not ok:
-                await asyncio.sleep(0.3)
-          if ok:
-              services_status[name] = "OK"
-          else:
-              services_status[name] = status_val
-              all_ok = False
+                log.warning(f"[health] {name} at {redact_url(url)} failed (attempt {attempt + 1}): {e}")
+            await asyncio.sleep(0.3)
+        return name, status_val, None
+
+    # Probed concurrently: the dashboard polls this, and one slow service used
+    # to delay every other check behind it. Successful probes are not logged:
+    # at one poll per open dashboard they were ~40% of the gateway's log.
+    async with shared_http_client() as client:
+      probes = await asyncio.gather(*(_probe(client, n, u) for n, u in services.items()))
+    for name, status_val, details in probes:
+        services_status[name] = status_val
+        if details is not None:
+            service_details[name] = details
+    all_ok = all(v == "OK" for v in services_status.values())
 
     # The Gateway itself is running if we are responding to this request
     services_status["gateway"] = "OK"
@@ -947,6 +953,53 @@ async def readiness():
     return results
 
 # --- Documentation Endpoint ---
+_DOCS_BASE_DIR = Path(__file__).parent.parent.parent
+_DOCS_DIR = _DOCS_BASE_DIR / "docs"
+#: Root-level markdown the Docs page may show besides docs/*.md.
+_DOCS_ROOT_FILES = ["README.md"]
+
+
+async def _require_docs_reader(request: Request) -> None:
+    """A signed-in user or an internal service.
+
+    This used to accept *any* non-empty key ("Bearer x" read every doc)."""
+    if request.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
+        return
+    if not await _user_id_from_request(request):
+        raise HTTPException(status_code=401, detail="Authentication required to view system docs")
+
+
+def _doc_title(path: Path) -> str:
+    """The first markdown heading, else the file name."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for _ in range(40):
+                line = fh.readline()
+                if not line:
+                    break
+                if line.startswith("# "):
+                    return line[2:].strip()
+    except OSError:
+        pass
+    return path.stem.replace("_", " ")
+
+
+@app.get("/api/docs")
+async def list_documentation(request: Request):
+    """Every document the Docs page can open: ``{docs: [{name, title}]}``,
+    README first, then docs/ alphabetically by title."""
+    await _require_docs_reader(request)
+    docs = [
+        {"name": name, "title": _doc_title(_DOCS_BASE_DIR / name)}
+        for name in _DOCS_ROOT_FILES
+        if (_DOCS_BASE_DIR / name).is_file()
+    ]
+    if _DOCS_DIR.is_dir():
+        found = [{"name": p.name, "title": _doc_title(p)} for p in _DOCS_DIR.glob("*.md") if p.is_file()]
+        docs += sorted(found, key=lambda d: d["title"].lower())
+    return {"docs": docs}
+
+
 @app.get("/api/docs/{doc_name}")
 async def get_documentation(
     doc_name: str,
@@ -955,31 +1008,13 @@ async def get_documentation(
     """
     Serves system documentation securely from the /docs folder or root markdown files.
     """
-    # 1. Authentication Check (Basic)
-    # For docs, we'll check for a valid API Key or internal secret
-    api_key = request.headers.get("X-API-Key")
-    internal_secret = request.headers.get("X-Internal-Secret")
-    auth_header = request.headers.get("Authorization")
-
-    if not api_key and auth_header and auth_header.startswith("Bearer "):
-        api_key = auth_header.split(" ")[1]
-
-    if internal_secret != INTERNAL_SECRET and not api_key:
-        # Fallback: check query params if needed, but header is preferred
-        api_key = request.query_params.get("api_key")
-
-    if not internal_secret == INTERNAL_SECRET and not api_key:
-        raise HTTPException(status_code=401, detail="Authentication required to view system docs")
+    await _require_docs_reader(request)
 
     # 2. Path Security & Resolution
     # We allow files from the 'docs' directory or specific root files
-    base_dir = Path(__file__).parent.parent.parent
-    docs_dir = base_dir / "docs"
-
-    # Whitelist of allowed root-level files (everything else resolved from docs/)
-    allowed_root_files = [
-        "README.md",
-    ]
+    base_dir = _DOCS_BASE_DIR
+    docs_dir = _DOCS_DIR
+    allowed_root_files = _DOCS_ROOT_FILES
 
     # Normalize doc_name
     if not doc_name.endswith(".md"):
@@ -1026,7 +1061,7 @@ async def emit_log(level: str, message: str, context: dict | None = None):
       pass
 
 @app.get("/api/admin/logs")
-async def get_api_admin_logs(request: Request, limit: int = 50, service: str | None = None):
+async def get_api_admin_logs(request: Request, limit: int = 50, service: str | None = None, level: str | None = None):
     # This route had no authentication at all -- it took no request, so it could
     # not even look at a caller -- and forwarded straight to the logging service
     # with the internal secret. Anyone who could reach the gateway could read the
@@ -1036,6 +1071,8 @@ async def get_api_admin_logs(request: Request, limit: int = 50, service: str | N
       params: dict[str, object] = {"limit": limit}
       if service:
         params["service"] = service
+      if level:
+        params["level"] = level
       resp = await client.get(
         f"{LOGGING_SVC}/api/admin/logs",
         params=params,
@@ -2146,8 +2183,8 @@ async def _resolve_strict_identity(api_key: str) -> dict | None:
     try:
         resp = await get_http_client().get(
             f"{IDENTITY_SVC}/api/internal/validate-api-key",
-            params={"api_key": key},
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            # A header, not a query parameter: URLs land in access logs.
+            headers={"X-Internal-Secret": INTERNAL_SECRET, "X-Api-Key": key},
             timeout=aiohttp.ClientTimeout(total=10.0),
         )
     except Exception as exc:
@@ -2521,6 +2558,37 @@ async def get_entities(request: Request):
 
 
 # --- Middleware & Security ---
+def _response_log_level(status_code: object) -> str:
+    """ERROR for a 5xx, WARNING for a 4xx, INFO otherwise."""
+    code = status_code if isinstance(status_code, int) else 0
+    if code >= 500:
+        return "ERROR"
+    if code >= 400:
+        return "WARNING"
+    return "INFO"
+
+
+#: Endpoints phones and pages call every few seconds. Their successes stay in
+#: the container log but are not sent to the logging service, whose 10,000
+#: entries they filled in about seven hours (one request + one response line
+#: each), pushing real warnings out. Failures are always sent.
+_ROUTINE_POLL_PREFIXES = (
+    "/health",
+    "/api/telemetry/notifications/wait",
+    "/api/users/location",
+    "/api/admin/logs",
+    "/api/music/songs/",
+    "/api/app-updates/version",
+)
+
+
+def _is_routine_poll(path: str) -> bool:
+    if path.startswith(_ROUTINE_POLL_PREFIXES):
+        return True
+    # /api/users/<user>/location: the phones' location uploads.
+    return path.startswith("/api/users/") and path.endswith("/location")
+
+
 @app.middleware("http")
 async def secure_logging_middleware(request: Request, call_next):
     """Logs incoming requests while redacting sensitive security headers."""
@@ -2532,7 +2600,6 @@ async def secure_logging_middleware(request: Request, call_next):
             safe_headers[key] = "[REDACTED]"
 
     log.info(f"REQUEST: {request.method} {redact_url(str(request.url))} | Headers: {safe_headers}")
-    _ =     _ = asyncio.create_task(emit_log("INFO", f"{request.method} {request.url.path}", {"headers": safe_headers}))
 
     try:
         response = await call_next(request)
@@ -2543,6 +2610,7 @@ async def secure_logging_middleware(request: Request, call_next):
         )
     except Exception as e:
         log.error(f"Middleware error: {type(e).__name__}: {e}", exc_info=True)
+        _ = asyncio.create_task(emit_log("ERROR", f"RESPONSE {request.method} {request.url.path} -> 500 ({type(e).__name__})", {}))
         return JSONResponse(
             status_code=500,
             content={"status": "ERROR", "message": "Internal Gateway Error"}
@@ -2550,7 +2618,12 @@ async def secure_logging_middleware(request: Request, call_next):
 
     status_code = getattr(response, 'status_code', None) or getattr(response, 'status', 'N/A')
     log.info(f"RESPONSE: {request.method} {redact_url(str(request.url))} | Status: {status_code}")
-    _ =     _ = asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
+    # Failures carry their level so the dashboard's "Recent problems" panel
+    # (``/api/admin/logs?level=warning,error``) can find them among the
+    # request lines; everything used to be INFO.
+    level = _response_log_level(status_code)
+    if level != "INFO" or not _is_routine_poll(request.url.path):
+        _ = asyncio.create_task(emit_log(level, f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
     return response
 
 # --- Core Handlers ---
@@ -4317,9 +4390,9 @@ async def proxy_delete_device(device_id: str, request: Request):
     auth_header = request.headers.get("Authorization")
     async with shared_http_client() as client:
         resp = await client.delete(
-            f"{IDENTITY_SVC}/api/devices/{device_id}",
-            headers={"Authorization": auth_header} if auth_header else {}
-            , timeout=aiohttp.ClientTimeout(total=10.0),
+            f"{IDENTITY_SVC}/api/devices/{quote(device_id, safe='')}",
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
         )
     return await _proxy_json_response(resp)
 
@@ -4367,12 +4440,22 @@ async def proxy_list_calendars(request: Request):
 
 
 @app.get("/api/communication/calendar/events")
-async def proxy_read_calendar(request: Request, calendar_name: str | None = None, integration: str | None = None):
+async def proxy_read_calendar(
+    request: Request,
+    calendar_name: str | None = None,
+    integration: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+):
     payload = {"action": "read"}
     if calendar_name:
         payload["calendar_name"] = calendar_name
     if integration:
         payload["integration"] = integration
+    # The window on screen (month grid, agenda); unset = the next week.
+    if start and end:
+        payload["range_start"] = start
+        payload["range_end"] = end
     return await _proxy_execution_with_identity(request, "/execute/calendar", payload)
 
 
@@ -4510,15 +4593,91 @@ async def proxy_list_notes(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
 
+#: RAG collection chat searches for the family's files; notes join it.
+NOTES_RAG_COLLECTION = "nextcloud_files"
+
+
 @app.post("/api/communication/notes/sync_rag")
 async def proxy_sync_notes_rag(request: Request):
+    """Index the caller's notes into Jarvis's memory (RAG).
+
+    Execution reads every note; the text is chunked the way the storage
+    indexer chunks files and written to the collection chat searches, under
+    the caller, with that indexer's per-path chunk ids -- so syncing again
+    replaces a note's passages instead of piling up copies. (Execution alone
+    only *read* the notes: the old "Sync to RAG" button indexed nothing.)
+    """
+    from services.storage.indexer import chunk_text
+
     body = await request.json()
     payload = {
         "action": "sync_rag",
         "storage": body.get("storage", "nextcloud"),
         "directories": body.get("directories"),
     }
-    return await _proxy_execution_with_identity(request, "/execute/note", payload)
+    read = await _proxy_execution_with_identity(request, "/execute/note", payload)
+    result = json.loads(read.body or b"{}")
+    if read.status_code != 200 or not isinstance(result, dict) or result.get("status") != "SUCCESS":
+        return read
+    creds = await _resolve_identity_from_request(request)
+    user_id = str(creds.get("user") or "").lower()
+    notes = (result.get("detail") or {}).get("synced") or []
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    indexed = passages = 0
+    async with shared_http_client() as client:
+        for note in notes:
+            path = "/" + str(note.get("path") or "").lstrip("/")
+            chunks = [
+                {
+                    "content": text,
+                    "metadata": {
+                        "path": path,
+                        "name": path.rsplit("/", 1)[-1],
+                        "chunk_index": i,
+                        "item_type": "document",
+                        "subtype": "note",
+                        "is_chunk": True,
+                    },
+                }
+                for i, text in enumerate(chunk_text(note.get("content") or ""))
+            ]
+            if not chunks:
+                continue
+            # Drop the note's old passages first, so a shortened note leaves none behind.
+            async with client.post(
+                f"{RAG_SVC}/rag/purge/{NOTES_RAG_COLLECTION}",
+                json={"user_id": user_id, "filter": {"path": path}},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=30.0),
+            ):
+                pass
+            async with client.post(
+                f"{RAG_SVC}/rag/sync/files",
+                json={"chunks": chunks, "user_id": user_id, "collection_name": NOTES_RAG_COLLECTION},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=120.0),
+            ) as resp:
+                status = resp.status
+            if status != 200:
+                return JSONResponse(
+                    status_code=502,
+                    content={
+                        "status": "FAILURE",
+                        "message": f"Indexed {indexed} of {len(notes)} notes; memory refused the rest (HTTP {status}).",
+                        "service": "note_sync_rag",
+                    },
+                )
+            indexed += 1
+            passages += len(chunks)
+    return JSONResponse(
+        content={
+            "status": "SUCCESS",
+            "message": f"Indexed {indexed} note{'s' if indexed != 1 else ''} into Jarvis memory.",
+            "service": "note_sync_rag",
+            # Counts only: the notes' text stays out of the browser response.
+            "detail": {"notes": indexed, "passages": passages},
+        }
+    )
 
 
 @app.get("/api/integrations/skylight/chores")
@@ -4928,6 +5087,7 @@ async def proxy_version():
 
 @app.post("/api/show")
 async def proxy_show(request: Request):
+    await _require_identity_from_request(request)
     try:
         body = await request.json()
         settings = await get_all_settings()
@@ -4943,6 +5103,7 @@ async def proxy_show(request: Request):
 
 @app.post("/api/embeddings")
 async def proxy_embeddings(request: Request):
+    await _require_identity_from_request(request)
     try:
         body = await request.json()
         settings = await get_all_settings()
@@ -4958,6 +5119,9 @@ async def proxy_embeddings(request: Request):
 
 @app.post("/api/embed")
 async def proxy_embed(request: Request):
+    # These Ollama-compatible routes ran the desktop's models for anyone who
+    # could reach the gateway; callers must be signed in (or another service).
+    await _require_identity_from_request(request)
     try:
         body = await request.json()
         settings = await get_all_settings()
@@ -5029,7 +5193,14 @@ async def global_search(q: str, request: Request):
             or "Result"
         )
         path = meta.get("path") or meta.get("entity_id") or meta.get("source") or ""
-        files.append({"name": str(name), "path": str(path)})
+        # Each hit carries its own text: with only names, every result past
+        # the first was a title the user could not read.
+        files.append({
+            "name": str(name),
+            "path": str(path),
+            "collection": str(meta.get("collection_name") or ""),
+            "snippet": str(r.get("content", ""))[:280],
+        })
 
     return {
         "status": "SUCCESS",
@@ -5098,8 +5269,23 @@ async def _proxy_workspace_runtime_json(method: str, path: str, request = None):
     )
     return await _proxy_json_response(resp)
 
+async def _require_workspace_admin(request: Request) -> None:
+    """Registering, reconfiguring and deleting workspaces is an administrator's job.
+
+    The Workspaces page offers it to no one else, and the runtime does not check
+    a caller on these routes, so without this gate anyone -- signed in or not --
+    could delete a workspace or point one at another owner or path. Services
+    holding the internal secret (the live E2E suites' cleanup) stay inside the
+    trust boundary, as in ``_require_identity_from_request``.
+    """
+    if secret_matches(request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET):
+        return
+    await _require_admin(request)
+
+
 @app.post("/api/workspaces")
 async def create_workspace_proxy(request: Request):
+    await _require_workspace_admin(request)
     return await _proxy_workspace_runtime_json("POST", "/workspaces", request)
 
 @app.post("/api/workspaces/bootstrap")
@@ -5142,10 +5328,12 @@ async def put_workspace_session_proxy(workspace_id: str, request: Request):
 
 @app.patch("/api/workspaces/{workspace_id}")
 async def update_workspace_proxy(workspace_id: str, request: Request):
+    await _require_workspace_admin(request)
     return await _proxy_workspace_runtime_json("PATCH", f"/workspaces/{workspace_id}", request)
 
 @app.delete("/api/workspaces/{workspace_id}")
-async def delete_workspace_proxy(workspace_id: str):
+async def delete_workspace_proxy(workspace_id: str, request: Request):
+    await _require_workspace_admin(request)
     return await _proxy_workspace_runtime_json("DELETE", f"/workspaces/{workspace_id}")
 
 @app.post("/api/workspaces/files/read")
@@ -5648,8 +5836,16 @@ async def git_branch_create_workspace_proxy(request: Request):
 
 @app.get("/api/workspaces/{workspace_id}/raven/missions")
 async def get_workspace_raven_missions_proxy(workspace_id: str, request: Request, limit: int = 50):
+    # Identity is asked with the internal secret and does not filter by user,
+    # so the caller must be able to see the workspace itself.
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        listing = await workspace_runtime_request("GET", "/workspaces", params={"rag_user": creds["user"]})
+        if not any(w.get("id") == workspace_id for w in listing.get("workspaces") or []):
+            raise HTTPException(status_code=404, detail="Workspace not found")
     resp = await get_http_client().get(
-        f"{IDENTITY_SVC}/api/raven/missions?workspace_id={workspace_id}&limit={limit}",
+        f"{IDENTITY_SVC}/api/raven/missions",
+        params={"workspace_id": workspace_id, "limit": limit},
         headers={"X-Internal-Secret": INTERNAL_SECRET},
     )
     return await _proxy_json_response(resp)
@@ -6184,11 +6380,14 @@ async def get_storage_stats(request: Request):
         if base.get("status") != "SUCCESS":
             return extra
 
-        base["total_chunks"] = base.get("total_chunks", 0) + extra.get("total_chunks", 0)
-        base["total_documents"] = base.get("total_documents", 0) + extra.get("total_documents", 0)
-
         breakdown = base.get("breakdown", {})
         for k, v in extra.get("breakdown", {}).items():
+            if k.startswith("system_"):
+                # System-wide collections (stored under "default"): both
+                # answers already carry the same rows; adding them doubled them.
+                continue
+            base["total_chunks"] = base.get("total_chunks", 0) + v.get("chunks", 0)
+            base["total_documents"] = base.get("total_documents", 0) + v.get("documents", 0)
             if k in breakdown:
                 # Merge individual collection counts
                 breakdown[k]["chunks"] = breakdown[k].get("chunks", 0) + v.get("chunks", 0)
@@ -6241,12 +6440,16 @@ async def get_storage_status(request: Request):
 
 @app.get("/api/storage/collection/{collection_name}")
 async def get_collection_docs(collection_name: str, request: Request, limit: int = 100):
-    try:
-        creds_data = await _resolve_identity_from_request(request)
-        user_id = request.query_params.get("user_id") or creds_data.get("nextcloud_user") or creds_data.get("user") or ""
-    except Exception:
-        first_user = await resolve_first_user()
-        user_id = first_user.get("user") or ""
+    """Raw rows of one RAG collection: the Admin page's collection inspector.
+
+    Admin only. It used to fall back to the first (admin) user when the caller
+    could not be identified, so anyone on the internet could read any
+    collection -- file chunks, missions, lessons -- with no key at all, and a
+    signed-in user could read anyone else's with ``?user_id=``.
+    """
+    await _require_admin(request)
+    creds_data = await _resolve_identity_from_request(request)
+    user_id = request.query_params.get("user_id") or creds_data.get("nextcloud_user") or creds_data.get("user") or ""
 
     resp = await get_http_client().get(
         f"{RAG_SVC}/rag/collection/{collection_name}?user_id={user_id}&limit={limit}",
@@ -6279,14 +6482,27 @@ async def purge_storage_collection(collection_name: str, request: Request):
         raise HTTPException(status_code=401, detail="Missing user identity")
 
     body = await request.json()
+    # The same owners /api/storage/stats counts: storage indexes files under the
+    # *Nextcloud* username, so purging only the Jarvis username removed nothing
+    # from nextcloud_files and still answered "purged successfully".
+    owners = list(dict.fromkeys(u for u in (user_id, creds_data.get("nextcloud_user")) if u))
 
+    removed = 0
     async with borrow_http_client() as client:
-        resp = await client.post(
-            f"{RAG_SVC}/rag/purge/{collection_name}",
-            json={"user_id": user_id, "filter": body.get("filter") or {}},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        return await _proxy_json_response(resp)
+        for owner in owners:
+            resp = await client.post(
+                f"{RAG_SVC}/rag/purge/{collection_name}",
+                json={"user_id": owner, "filter": body.get("filter") or {}},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status != 200:
+                return await _proxy_json_response(resp)
+            removed += int((await resp.json()).get("removed") or 0)
+    return {
+        "status": "SUCCESS",
+        "message": f"Removed {removed} entries from {collection_name}",
+        "removed": removed,
+    }
 
 
 @app.post("/api/storage/maintenance")
@@ -6318,13 +6534,13 @@ async def rag_maintenance(request: Request):
 
 @app.get("/api/storage/learning")
 async def get_raven_learnings(request: Request, limit: int = 200, sort: str = "recent"):
-    """List Raven lessons (system_learnings) with reuse stats for the UI."""
-    try:
-        creds_data = await _resolve_identity_from_request(request)
-        user_id = creds_data.get("user") or "default"
-    except Exception:
-        first_user = await resolve_first_user()
-        user_id = first_user.get("user") or "default"
+    """List Raven lessons (system_learnings) with reuse stats for the UI.
+
+    Signed-in callers only: this used to fall back to the first user when the
+    caller could not be identified, which served every lesson to anyone.
+    """
+    creds_data = await _resolve_identity_from_request(request)
+    user_id = creds_data.get("user") or "default"
 
     resp = await get_http_client().get(
         f"{RAG_SVC}/rag/learning?user_id={user_id}&limit={limit}&sort={sort}",
@@ -6335,6 +6551,9 @@ async def get_raven_learnings(request: Request, limit: int = 200, sort: str = "r
 
 @app.patch("/api/storage/learning/{doc_id}")
 async def edit_raven_learning(doc_id: str, request: Request):
+    # Lessons steer every Raven mission for the whole family: admins only.
+    # (This and the delete below were open to anonymous callers.)
+    await _require_admin(request)
     try:
         body = await request.json()
     except Exception:
@@ -6348,19 +6567,10 @@ async def edit_raven_learning(doc_id: str, request: Request):
 
 
 @app.delete("/api/storage/learning/{doc_id}")
-async def delete_raven_learning(doc_id: str):
+async def delete_raven_learning(doc_id: str, request: Request):
+    await _require_admin(request)
     resp = await get_http_client().delete(
         f"{RAG_SVC}/rag/learning/{doc_id}",
-        headers={"X-Internal-Secret": INTERNAL_SECRET},
-    )
-    return await _proxy_json_response(resp)
-
-
-@app.patch("/api/storage/learning/{doc_id}/applied")
-async def mark_raven_learning_applied(doc_id: str):
-    """Record that a mission actually APPLIED this lesson (honest reuse signal)."""
-    resp = await get_http_client().patch(
-        f"{RAG_SVC}/rag/learning/{doc_id}/applied",
         headers={"X-Internal-Secret": INTERNAL_SECRET},
     )
     return await _proxy_json_response(resp)
@@ -6414,6 +6624,9 @@ async def get_raven_config(request: Request):
         "raven_suspended": settings.get("raven_suspended", "false").lower() == "true",
         "raven_scan_interval": int(settings.get("raven_scan_interval", "300")),
         "raven_error_threshold": int(settings.get("raven_error_threshold", "5")),
+        # Saved by the PATCH below; without it here the admin field always
+        # showed the 1800 default whatever had been set.
+        "raven_max_total_seconds": int(settings.get("raven_max_total_seconds", "1800") or 0),
         "active_coding_model": settings.get("coding_model") or settings.get("ollama_coding_model"),
         "system_default_tts_voice": settings.get("system_default_tts_voice", "af_heart"),
         "system_default_tts_engine": settings.get("system_default_tts_engine", "kokoro")
@@ -6882,6 +7095,7 @@ async def list_openai_models(request: Request):
 @app.post("/v1/embeddings")
 async def openai_embeddings(request: Request):
     """OpenAI-compatible embeddings endpoint."""
+    await _require_identity_from_request(request)
     try:
         body = await request.json()
         model = body.get("model", "default")
@@ -8305,23 +8519,10 @@ async def list_sharedllm_tools():
 
 # --- Presence & Location Endpoints ---
 
-@app.get("/api/presence/{user_id}")
-async def get_user_presence(user_id: str):
-    """Get presence data for a user."""
-    async with shared_http_client() as client:
-        resp = await client.get(
-            f"{EXECUTION_SVC}/execute/presence/{user_id}",
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-            , timeout=aiohttp.ClientTimeout(total=5.0),
-        )
-        if resp.status == 200:
-            return await resp.json()
-    raise HTTPException(status_code=502, detail="Presence service unavailable")
-
-
 @app.get("/api/presence/all")
-async def get_all_presence():
-    """Get presence data for all users."""
+async def get_all_presence(request: Request):
+    """Get presence data for all users (who is in which room: signed-in only)."""
+    await _require_identity_from_request(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/presence/all",
@@ -8334,11 +8535,31 @@ async def get_all_presence():
 
 
 @app.get("/api/presence/rooms")
-async def get_presence_rooms():
+async def get_presence_rooms(request: Request):
     """Get list of all known rooms."""
+    await _require_identity_from_request(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/presence/rooms",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Presence service unavailable")
+
+
+@app.get("/api/presence/{user_id}")
+async def get_user_presence(user_id: str, request: Request):
+    """Get presence data for a user.
+
+    Declared after /all and /rooms: as the first route it caught both of them
+    as a user named "all" or "rooms".
+    """
+    await _require_identity_from_request(request)
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/presence/{user_id}",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
             , timeout=aiohttp.ClientTimeout(total=5.0),
         )
@@ -8421,8 +8642,13 @@ async def update_current_user_location(request: Request):
 
 
 @app.get("/api/users/{user_id}/location")
-async def get_user_location(user_id: str):
-    """Get user GPS location."""
+async def get_user_location(user_id: str, request: Request):
+    """A user's last GPS fix, for signed-in members (as /location/all).
+
+    This answered anyone at all, so a family member's position was readable
+    from the internet with no sign-in."""
+    if not await _user_id_from_request(request):
+        raise HTTPException(status_code=401, detail="Authentication required")
     async with shared_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/users/{user_id}/location",
@@ -8718,8 +8944,9 @@ async def _upstream_detail(resp) -> Any:
 
 
 @app.get("/api/geo/trips")
-async def get_geo_trips(request: Request, user_id: str | None = None, limit: int = 50):
-    """List trips.
+async def get_geo_trips(request: Request, user_id: str | None = None, limit: int = 50, scope: str | None = None):
+    """List trips: one user's, or with ``scope=family`` the caller's plus those
+    of everyone sharing with them.
 
     This used to forward no identity at all, so geo served its ``geo:trips:all``
     index -- every user's trips to any authenticated caller (verified live:
@@ -8728,6 +8955,8 @@ async def get_geo_trips(request: Request, user_id: str | None = None, limit: int
     """
     target, viewer, is_admin = await _read_target(request, user_id)
     params = {"limit": limit, "user_id": target, "viewer": viewer, "is_admin": is_admin}
+    if scope == "family":
+        params["scope"] = "family"
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/trips",
@@ -10674,8 +10903,10 @@ async def get_app_update_version(request: Request):
         log.warning("[AppUpdates] Bundle present but its version.json is unreadable; not offering OTA.")
         bundle_available = False
 
-    metadata_sha = version_data.get("git_sha", "unknown")
-    if bundle_available and metadata_sha not in ("unknown", effective_sha):
+    metadata_sha = str(version_data.get("git_sha") or "unknown")
+    # One side may carry the short SHA and the other the full one.
+    same_commit = metadata_sha.startswith(effective_sha) or effective_sha.startswith(metadata_sha)
+    if bundle_available and metadata_sha != "unknown" and not same_commit:
         log.warning(
             f"[AppUpdates] Published metadata git_sha={metadata_sha} disagrees with "
             f"bundle git_sha={effective_sha}; advertising the bundle's SHA."

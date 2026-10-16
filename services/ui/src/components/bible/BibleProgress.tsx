@@ -101,11 +101,6 @@ export default function BibleProgress({ marks, onDeleteMark, onOpenRef }: BibleP
                 </div>
               </div>
             ))}
-            {achievements.pending_rules.length > 0 && (
-              <p className="text-[11px] text-slate-500 pt-1">
-                Plans, memorisation and quiz badges arrive with those features.
-              </p>
-            )}
           </div>
         ) : (
           <p className="text-xs text-slate-500">Read a chapter to earn the first badge.</p>

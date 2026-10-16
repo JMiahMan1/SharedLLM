@@ -5,6 +5,7 @@ import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
 import { calendarColor, calendarLabel } from '../calendar/calendarMeta';
 import type { CalendarEvent, CalendarPerson, IWidgetProps } from '../../types/widget';
+import { formatRelativeTime, isUpcoming } from '../../lib/eventTiming';
 
 interface ParsedEvent {
   summary: string;
@@ -81,21 +82,6 @@ const formatTime = (hour: number, minute: number): string => {
   return `${displayHour}:${displayMinute} ${period}`;
 };
 
-const formatRelativeTime = (date: Date): string => {
-  const now = new Date();
-  const diffMs = date.getTime() - now.getTime();
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffHours < 0) return 'Past';
-  if (diffHours < 1) return 'In minutes';
-  if (diffHours === 1) return 'In 1 hour';
-  if (diffDays === 0) return `In ${diffHours} hours`;
-  if (diffDays === 1) return 'Tomorrow';
-  if (diffDays < 7) return `In ${diffDays} days`;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
-
   const UpcomingEventsWidget = ({ settingsButton }: IWidgetProps) => {
     const navigate = useNavigate();
     const openCalendar = () => navigate('/calendar');
@@ -121,7 +107,7 @@ const formatRelativeTime = (date: Date): string => {
     }
 
     return parsed
-      .filter((e) => new Date(e.start_time).getTime() > Date.now() - 3600000)
+      .filter((e) => isUpcoming(e))
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
       .slice(0, 8);
   };
@@ -133,9 +119,12 @@ const formatRelativeTime = (date: Date): string => {
   );
 
   const eventList = (isExpanded: boolean) => (
-    <div className={isExpanded ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" : "space-y-3 max-h-64 overflow-y-auto pr-1"}>
+    <div className={isExpanded ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" : "space-y-3 pr-1"}>
       {events.map((event, index) => {
-        const relativeTime = formatRelativeTime(new Date(event.start_time));
+        const relativeTime = formatRelativeTime(
+          new Date(event.start_time),
+          event.end_time ? new Date(event.end_time) : undefined,
+        );
         const startMs = new Date(event.start_time).getTime();
         const isVerySoon =
           event.isToday && startMs > Date.now() && startMs - Date.now() < 3600000;
@@ -147,14 +136,14 @@ const formatRelativeTime = (date: Date): string => {
             tabIndex={0}
             onClick={openCalendar}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openCalendar(); } }}
-            className={`p-4 rounded-xl border cursor-pointer transition-all ${
+            className={`${isExpanded ? 'p-4' : 'p-3'} rounded-xl border cursor-pointer transition-all ${
               isVerySoon
                 ? 'bg-amber-500/10 border-amber-500/30 shadow-lg shadow-amber-500/5'
                 : 'bg-slate-900/50 border-slate-800 hover:border-slate-700/50'
             }`}
           >
-            <div className="flex items-start gap-4">
-              <div className="flex flex-col items-center min-w-[3.5rem] bg-slate-950/40 p-2 rounded-lg border border-white/5">
+            <div className="flex items-start gap-3">
+              <div className="flex flex-col items-center min-w-[4.25rem] shrink-0 bg-slate-950/40 p-2 rounded-lg border border-white/5">
                 <span className={`text-sm font-bold ${isVerySoon ? 'text-amber-400' : 'text-purple-400'}`}>
                   {formatTime(event.startHour, event.startMinute)}
                 </span>
@@ -164,18 +153,20 @@ const formatRelativeTime = (date: Date): string => {
               </div>
 
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                {/* Title gets its own line: sharing one with the calendar
+                    label left a phone-width card a few characters of it. */}
+                <p className={`text-sm font-semibold truncate ${isVerySoon ? 'text-amber-300' : 'text-white'}`}>
+                  {event.summary}
+                </p>
+                <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
                   <span
                     className="inline-block h-2 w-2 shrink-0 rounded-full"
                     style={{ backgroundColor: calendarColor(event.calendar, people) }}
-                    title={calendarLabel(event.calendar, people)}
+                    aria-hidden
                   />
                   <span className="text-[10px] font-semibold truncate" style={{ color: calendarColor(event.calendar, people) }}>
                     {calendarLabel(event.calendar, people)}
                   </span>
-                  <p className={`text-sm font-semibold truncate ${isVerySoon ? 'text-amber-300' : 'text-white'}`}>
-                    {event.summary}
-                  </p>
                 </div>
                 {event.location && (
                   <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
@@ -189,7 +180,9 @@ const formatRelativeTime = (date: Date): string => {
                 )}
               </div>
 
-              {isVerySoon && (
+              {/* "Soon" only where there is room: in a phone-width card the
+                  amber styling says it and the badge ate the title. */}
+              {isVerySoon && isExpanded && (
                 <span className="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full shrink-0 font-bold">
                   Soon
                 </span>
@@ -210,13 +203,13 @@ const formatRelativeTime = (date: Date): string => {
       settingsButton={settingsButton}
       isExpandable={true}
       icon="📅"
-      actions={<span className="text-xs text-slate-400">{events.length} events</span>}
+      actions={events.length > 0 ? <span className="text-xs text-slate-400">Next {events.length}</span> : undefined}
       expandedChildren={
         <div className="space-y-6 py-2">
           <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <p className="text-sm font-semibold text-white">Calendar Details</p>
-              <p className="text-xs text-slate-500">View and manage your upcoming schedule. Connected via local system services.</p>
+              <p className="text-xs text-slate-500">Your next events across every connected calendar. Tap one to open the calendar.</p>
             </div>
             <button onClick={() => refetch()} className="glass-button px-4 py-2 text-xs font-bold text-indigo-400 self-start md:self-auto">
               Sync Calendar

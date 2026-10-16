@@ -51,7 +51,7 @@ All management endpoints require the `X-Internal-Secret` header. The secret is r
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/api/restart/{service_name}?recreate=false` | Internal Secret | Restart a container. With `recreate=true` (or if a newer local image is detected), the container is recreated with preserved network config, volumes, and environment |
+| `POST` | `/api/restart/{service_name}?recreate=false` | Internal Secret | Restart a container. With `recreate=true`, or when a pull has left a newer local image for the container's tag, the container is recreated with its network config, volumes and environment. So *Pull* then *Restart* applies an update, as *Pull & Restart* does in one step |
 
 Recreate flow:
 1. Stop old container
@@ -75,14 +75,22 @@ On failure: new container is torn down, backup is restored and started.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/admin/services/updates` | Internal Secret | Check all services for available image updates without pulling. Compares local `RepoDigest` (sha256) against remote registry digest via OCI Distribution API |
+| `GET` | `/api/admin/services/updates` | Internal Secret | For every `sharedllm_` container, whether its registry has a newer image. Never pulls |
 
-Token resolution order:
-1. Fetches `github_token` for user ID 1 from Identity service (`POST /api/resolve`)
-2. Falls back to `GHCR_TOKEN` environment variable
-3. Falls back to `GITHUB_TOKEN` environment variable
-
-Uses `Docker-Content-Digest` header from registry HEAD response.
+How (`services/control_plane/registry.py`):
+- The image checked is the one the container was created from
+  (`Config.Image`, e.g. `ghcr.io/jmiahman1/sharedllm-ui:latest`), not
+  `image.tags[0]`, which can be a commit tag that never moves. Pull, restart
+  and pull-and-restart use the same reference.
+- The registry's digest comes from a manifest `HEAD` using the standard
+  Bearer-token exchange. The images are public, so no token is needed; for a
+  private image the GitHub token is used (user ID 1's `github_token` from
+  Identity, else `GHCR_TOKEN`, else `GITHUB_TOKEN`), falling back to an
+  anonymous pull token if it is rejected.
+- `has_update` is true when that digest is not among the image's local
+  `RepoDigests`. Per-service `check_error` is `no_image_tag`,
+  `digest_unavailable` or `registry_unreachable` (after the first network
+  failure the rest are skipped so the call stays fast).
 
 ### Image Pull
 
@@ -108,12 +116,6 @@ Request body: `{ "command": "ping -c 1 sharedllm_gateway" }`
 
 Returns: exit code and combined stdout/stderr output.
 
-### Webhook (legacy)
-
-`POST /api/webhooks/dns-sync` only logs the event. Nothing posts to it since
-the dns-sync sidecar was retired, and it is unauthenticated — slated for
-removal (`docs/PENDING_TASKS.md`).
-
 ## Container Name Resolution
 
 The `_resolve_container()` helper tries three strategies in order:
@@ -131,8 +133,9 @@ Environment variables (from `docker-compose.yml`):
 | `INTERNAL_SECRET` | Auth token for all management endpoints |
 | `FERNET_KEY` | Shared encryption key |
 | `DOCKER_HOST` | Docker socket path (default: `unix:///var/run/docker.sock`) |
-| `GHCR_TOKEN` | GitHub PAT with `packages:read` scope (for update checks) |
-| `GITHUB_TOKEN` | Fallback GitHub PAT (same as GHCR_TOKEN if GHCR_TOKEN unset) |
+| `GHCR_TOKEN` | Optional GitHub PAT with `packages:read`, only needed if the images are private |
+| `GITHUB_TOKEN` | Fallback for `GHCR_TOKEN` |
+| `GHCR_NAMESPACE` | Owner used to infer an image for a container with no tag (default `jmiahman1`) |
 | `IDENTITY_SVC_URL` | Identity service URL (`${BRIDGE_IDENTITY_SVC_URL}`; GHCR token resolution) |
 | `SANDBOX_REAP_INTERVAL`, `OSRM_MAP_CHECK_INTERVAL` | Background job intervals (seconds) |
 | `GIT_SHA`, `BUILD_DATE`, `SERVICE_NAME` | Build metadata (set via Docker build args) |

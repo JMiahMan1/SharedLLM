@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { HelpCircle, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
-import { useAuth } from '../../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import { api } from '../../services/api';
 import MarkdownViewer from '../MarkdownViewer';
 
 interface HelpTooltipProps {
@@ -13,16 +13,13 @@ interface HelpTooltipProps {
 
 const HelpTooltip: React.FC<HelpTooltipProps> = ({ docName, sectionTitle, label }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const { token } = useAuth();
+  const navigate = useNavigate();
 
-  const { data: docContent, isLoading } = useQuery({
+  // Same query (and cache) as the Docs page; through apiClient so it also
+  // works in the phone app.
+  const { data: docContent, isLoading, isError } = useQuery({
     queryKey: ['docs', docName],
-    queryFn: async () => {
-      const response = await axios.get(`/api/docs/${docName}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      return response.data.content;
-    },
+    queryFn: () => api.getDoc(docName),
     enabled: isOpen,
     staleTime: 1000 * 60 * 60 * 24,
   });
@@ -51,8 +48,9 @@ const HelpTooltip: React.FC<HelpTooltipProps> = ({ docName, sectionTitle, label 
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 transition-colors ml-2"
+        className="inline-flex items-center justify-center gap-1 text-indigo-400 hover:text-indigo-300 transition-colors ml-1 p-1.5 -m-0.5 pointer-coarse:p-3 pointer-coarse:-m-2"
         title={`Help with ${label || 'this field'}`}
+        aria-label={`Help with ${label || 'this field'}`}
       >
         <HelpCircle className="w-3.5 h-3.5" />
       </button>
@@ -79,6 +77,7 @@ const HelpTooltip: React.FC<HelpTooltipProps> = ({ docName, sectionTitle, label 
               </div>
               <button
                 onClick={() => setIsOpen(false)}
+                aria-label="Close help"
                 className="p-2 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition-all"
               >
                 <X className="w-5 h-5" />
@@ -91,6 +90,8 @@ const HelpTooltip: React.FC<HelpTooltipProps> = ({ docName, sectionTitle, label 
                   <div className="w-10 h-10 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
                   <p className="text-sm text-slate-500">Searching knowledge base...</p>
                 </div>
+) : isError ? (
+                <p className="text-sm text-slate-400">Help for this section is not available on the server.</p>
               ) : (
                 <MarkdownViewer 
                   markdown={extractSection(docContent || '', sectionTitle)} 
@@ -103,7 +104,7 @@ const HelpTooltip: React.FC<HelpTooltipProps> = ({ docName, sectionTitle, label 
               <button
                 onClick={() => {
                   setIsOpen(false);
-                  window.location.href = '/docs';
+                  navigate('/docs');
                 }}
                 className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
               >

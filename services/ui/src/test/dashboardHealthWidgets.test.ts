@@ -11,7 +11,6 @@ const read = (rel: string) => readFileSync(SRC(rel), 'utf8');
 
 const BENTO = read('components/dashboard/BentoBoxDashboard.tsx');
 const SKELETONS = read('components/widgets/skeletons/WidgetSkeletons.tsx');
-const STORE = read('stores/widgetStore.ts');
 
 /**
  * The dashboard used to carry two health widgets: `health_hero`, whose registry
@@ -34,13 +33,18 @@ describe('dashboard health widgets', () => {
     expect(defaultWidgetDefs.map((d) => d.label)).not.toContain('Today');
   });
 
-  it('has no widget key mentioning health_hero', () => {
-    // `defaultSizes` is module-private, so read it from source rather than
-    // importing a name that does not exist.
-    const sizeBlock = STORE.slice(STORE.indexOf('defaultSizes'));
-    const sized = [...sizeBlock.matchAll(/^\s{2}([a-z_]+):\s*'/gm)].map((m) => m[1]);
-    expect(sized.filter((k) => k.includes('hero'))).toEqual([]);
-    expect(sized.length).toBe(defaultWidgetDefs.length);
+  it('matches the identity service registry, key for key and size for size', () => {
+    // Identity answers GET /api/widgets/settings from its own copy of this
+    // registry. A key missing there is saved but never read back (the verse
+    // widget reverted on every load), and a different size resizes the widget
+    // the first time anything about it is saved.
+    const identity = readFileSync(resolve(process.cwd(), '..', 'identity', 'main.py'), 'utf8');
+    const block = identity.slice(identity.indexOf('WIDGET_DEFAULT_SIZES: dict[str, str] = {'));
+    const server = Object.fromEntries(
+      [...block.slice(0, block.indexOf('}')).matchAll(/'([a-z_]+)':\s*'([a-z]+)'/g)].map((m) => [m[1], m[2]]),
+    );
+    expect(server).toEqual(Object.fromEntries(defaultWidgetDefs.map((d) => [d.key, d.defaultSize])));
+    expect(Object.keys(server).filter((k) => k.includes('hero'))).toEqual([]);
   });
 
   it('leaves no orphaned entries in the lazy map or skeleton map', () => {

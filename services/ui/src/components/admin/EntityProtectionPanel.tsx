@@ -109,7 +109,7 @@ export const EntityProtectionPanel: FC<{ users: UserProfile[] }> = ({ users }) =
             Lock an entity so only admins and the users you permit can see or control it.
           </p>
         </div>
-        <HelpTooltip docName="architecture.md" sectionTitle="Entity Protection" label="Entity Protection" />
+        <HelpTooltip docName="ENTITY_PROTECTION.md" sectionTitle="## The rule" label="Entity Protection" />
       </div>
 
       <p className="mb-4 rounded-lg border border-white/5 bg-black/20 p-3 text-[11px] leading-relaxed text-slate-400">

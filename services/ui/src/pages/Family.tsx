@@ -25,10 +25,10 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof MessageCircle }> = [
 /**
  * Family hub: chat, games and making things together.
  *
- * Chat is live on Nextcloud Talk (the same rooms as the Nextcloud app) with
- * text and voice messages. Games and Create are the next slices — see
- * docs/FAMILY_HUB.md — and are shown here as a roadmap rather than dead
- * buttons, so nobody taps something that does nothing.
+ * Chat is Nextcloud Talk (the same rooms as the Nextcloud app). Games are the
+ * arcade and the Bible games; Create is drawing, songs and the family
+ * cookbook, and a drawing or a song can be sent straight into a conversation.
+ * See docs/FAMILY_HUB.md.
  */
 export default function Family() {
   const [tab, setTab] = useState<Tab>('chat');
@@ -63,7 +63,7 @@ export default function Family() {
               role="tab"
               aria-selected={tab === id}
               onClick={() => setTab(id)}
-              className={`flex min-h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] font-medium transition ${
+              className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] font-medium transition ${
                 tab === id ? 'bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -102,16 +102,12 @@ export default function Family() {
 
       {tab === 'create' && (
         <div className="space-y-4" data-testid="family-create">
+          <p className="px-1 text-xs text-slate-400">
+            Draw, make a song or keep a recipe. Drawings and songs can be sent straight into a conversation.
+          </p>
           <DrawCanvas />
           <MakeMusic />
           <Recipes />
-          <div className="glass-panel p-4 rounded-2xl border border-white/5">
-            <h2 className="text-sm font-semibold text-slate-200">Create</h2>
-            <p className="text-xs text-slate-400 mt-1">
-              Drawings, pictures, songs and recipes live in shared family space, and anything you make can be sent
-              straight into a conversation.
-            </p>
-          </div>
         </div>
       )}
     </div>

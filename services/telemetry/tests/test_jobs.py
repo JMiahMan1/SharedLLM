@@ -218,3 +218,27 @@ async def test_dequeue_respects_defer_time(rc):
     await store.enqueue(rc, "later-job", available_at=time.time() + 600)
     claimed = await store.dequeue_due(rc)
     assert claimed == ["now-job"]
+
+
+async def test_a_daily_health_report_counts_only_todays_workouts(monkeypatch):
+    """Geo hands back the latest workouts of any age; a daily report used to
+    count all of them as today's."""
+    from services.telemetry import reports
+
+    now = time.time()
+    answers = {
+        "/steps": {"daily_steps": {"2026-10-15": 4000}, "today": 4000, "goal": 10000},
+        "/workouts": {"workouts": [
+            {"activity_type": "walking", "start_time": now - 600, "distance_miles": 1.0},
+            {"activity_type": "running", "start_time": now - 5 * 86400, "distance_miles": 3.0},
+        ]},
+    }
+
+    async def fake_get(session, url, params=None):
+        return answers[url[url.rindex("/"):]]
+
+    monkeypatch.setattr(reports, "_get_json", fake_get)
+    stats = await reports.collect_health_stats(None, "jeremiah", "daily", "America/Phoenix")
+    assert stats["workout_count"] == 1
+    assert stats["workout_types"] == ["walking"]
+    assert stats["workout_distance_miles"] == 1.0

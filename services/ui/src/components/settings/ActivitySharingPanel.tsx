@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
+import Toggle from '../ui/Toggle';
 
 interface SharingState {
   enabled: boolean;
@@ -44,8 +45,10 @@ export default function ActivitySharingPanel() {
       ? {
           enabled: server.enabled,
           audience: server.audience === 'users' ? 'users' : 'circle',
-          user_ids: server.user_ids,
-          share: server.share.length ? server.share : ['totals'],
+          // Tolerate a partial body: one malformed reply used to throw here
+          // and take the whole Settings page down with it.
+          user_ids: server.user_ids ?? [],
+          share: server.share?.length ? server.share : ['totals'],
         }
       : { enabled: false, audience: 'circle', user_ids: [], share: ['totals'] });
 
@@ -53,7 +56,7 @@ export default function ActivitySharingPanel() {
   // viewer that can read everyone's activity regardless of consent, so
   // offering it as a grant target would imply a control it does not have.
   const recipients = useMemo(
-    () => users.filter((u) => u.username && u.username !== 'default'),
+    () => (Array.isArray(users) ? users : []).filter((u) => u.username && u.username !== 'default'),
     [users],
   );
 
@@ -111,23 +114,12 @@ export default function ActivitySharingPanel() {
               : 'Private — nothing is visible to anyone else.'}
           </p>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={state.enabled}
-          aria-label="Share my activity"
-          data-testid="sharing-toggle"
-          onClick={() => patch({ enabled: !state.enabled })}
-          className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${
-            state.enabled ? 'bg-emerald-500/70' : 'bg-slate-700'
-          }`}
-        >
-          <span
-            className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-all ${
-              state.enabled ? 'left-6' : 'left-1'
-            }`}
-          />
-        </button>
+        <Toggle
+          checked={state.enabled}
+          onChange={(next) => patch({ enabled: next })}
+          ariaLabel="Share my activity"
+          testId="sharing-toggle"
+        />
       </div>
 
       {state.enabled && (
@@ -196,7 +188,7 @@ export default function ActivitySharingPanel() {
                   data-testid={`scope-${scope.id}`}
                   checked={state.share.includes(scope.id)}
                   onChange={() => toggleScope(scope.id)}
-                  className="w-5 h-5 accent-purple-500"
+                  className="w-5 h-5 shrink-0 accent-purple-500"
                 />
                 <span>
                   <span className="block text-sm text-slate-200">{scope.label}</span>

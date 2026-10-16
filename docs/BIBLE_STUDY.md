@@ -55,7 +55,35 @@ What differs from the plan below:
   back to BLB's interlinear tab. Source files:
   <https://github.com/STEPBible/STEPBible-Data> ("Translators Amalgamated OT+NT").
 - **Share to Family chat** from the verse sheet: pick a conversation, add a
-  note, sent through the Talk send path (`src/lib/verseShare.ts`).
+  note, sent through the Talk send path. `src/lib/verseShare.ts` is the one
+  formatter for a verse as a chat line; the Family chat's **Verse** chip uses
+  it too.
+- **Reading reminder** is a loop inside the bible service
+  (`services/bible/reminders.py`), not an automation job: every 5 minutes it
+  finds readers whose `reminder_time` (server local time, `TZ` on the
+  container) passed within the last **two hours** and who have not read today,
+  and sends one telemetry `notify` with a per-day `once` key (so restarts never
+  double-send). The push opens `/bible?ref=<today's plan reading>` (URL-encoded),
+  `/bible?tab=memorize`, or `/bible`. A failed pass is logged and the loop
+  carries on.
+- **Marks** are fetched for the whole Bible and matched to a verse on book,
+  chapter and verse (`components/bible/verseMarks.ts`), so a Genesis 3:16
+  highlight never shows on (or is deleted from) John 3:16. Only highlights wash
+  a verse; bookmarks and notes show a glyph.
+- **Favourite translation** (`favorite_version`): the star marks the
+  translation in hand; when reading another one, a "Back to …" button returns
+  to the favourite in one tap. `split_view` is stored but no layout reads it
+  yet — the comparison is always the per-verse `compare` layout.
+- **Offline**: besides the last 120 passages, the last answers for `/state`,
+  `/versions` and `/books` are kept on the device (`withOfflineCopy` in
+  `src/lib/bibleOffline.ts`), so a cold start with no connection still opens
+  the saved chapter. If neither a server answer nor a copy exists, the Read tab
+  says why with a retry instead of a never-ending skeleton.
+- **Reader behaviour**: turning the page (buttons, swipe, Focus mode arrows)
+  keeps Focus mode open and updates `?ref=` with a history *replace*.
+  Read-aloud stops when the passage, translation or voice changes and when the
+  reader leaves; closing "Ask about this verse" aborts the streaming answer.
+  Stopping a plan asks first (starting again begins at day 1).
 
 ## Principles
 
@@ -446,7 +474,7 @@ folder as an empty library, which is worse than saying nothing.
 | Read-aloud | **Existing** `POST /execute/tts` (Kokoro + Edge-TTS) — `_expand_scripture_refs()` already narrates "John 3:16" as prose, and SSMD single- and double-pipe pauses give a good reading cadence. Built as the bible service's own `/narration*` routes (proxied as `/api/bible/narration*`), cached per translation+reference+voice | We own no new engine and no audio licenses; the one missing piece is a gateway route. "Play on the kitchen speaker" rides the existing `/execute/ha_service` `tts.piper` path |
 | Note storage | **Nextcloud, via the Notes handler.** The note body is written by the existing `/execute/note` handler into `Notes/{Title}.md` or `{category}/{Title}.md`; the `note` mark stores the path the handler reported (`note_path`) plus a one-line preview. If the server does not report a path, the verse is **not** marked and the reader is told, rather than being pointed at a filename the client guessed | Bible notes are visible in Notes, searchable in RAG, shareable with the family folder, and editable by hand. Two copies of a note is how they drift apart |
 | Sharing controls | Extend `ActivitySharingPanel` with a `bible` scope (4th checkbox next to `totals`/`workouts`/`achievements`) | Private by default; audience `circle`/`users` already enforced server-side |
-| Reminders | **Automation** daily job per user + **telemetry** `send_to_user` for delivery, in-app outbox as the durable record | No new notification infra; the 7pm nudge and the reminder are the same code path as every other notification |
+| Reminders | **Bible-service loop** (`reminders.py`) + **telemetry** `/api/telemetry/notify` for delivery, in-app outbox as the durable record. (Planned as an automation job; automation has no timer-create API and its daily recurrence drifts across DST.) | No new notification infra; the reminder goes through the same notify path as every other notification |
 | Study memory | **RAG** ingest of promoted notes and study threads, with a stable citable `id` per lesson (`handlers/learning.py` pattern) | "Show me where we already talked about this" is the study superpower, and the assistant should not re-teach what the family already covered |
 | Study workspace | **workspace_runtime** opt-in repo for `study/journal`, `memory/sets/*.json`, quiz results | Lets a family diff/version their own study material; skipped with a visible note when no workspace is enabled |
 | Home entry point | `bible_daily` dashboard widget + continue-reading, mirroring how Home opens with Verse of the Day | The reader must be one tap from Home, the way the Bible App opens on the text |
@@ -582,8 +610,9 @@ separate fields because they are three separate decisions — turning a
 comparison off must not move the reader's own text. `compare_version` blank
 means no comparison and is never guessed, and comparing a translation against
 itself is refused, because the same words twice reads as a bug rather than as
-a comparison. `split_view` chooses the *layout* of that second column
-(`compare` = a row per verse, `parallel` = the whole second chapter).
+a comparison. `split_view` is reserved for the *layout* of that second column
+(`compare` = a row per verse, `parallel` = the whole second chapter); only
+`compare` is built, and the UI does not read the field yet.
 `show_notes` is the reader saying they want the chapter's commentary on the
 reading surface rather than behind a tap; it defaults off so the reader opens
 as text, and turning it on fetches nothing extra because the chapter's notes

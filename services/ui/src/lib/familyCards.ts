@@ -1,5 +1,5 @@
 import type { UserLiveLocation } from '../types/api';
-import { distanceMeters, STALE_MAX_AGE_MS } from '../components/geo/liveLocations';
+import { distanceMeters, fixTimeSeconds, STALE_MAX_AGE_MS } from '../components/geo/liveLocations';
 
 /** One Wander member card. */
 export interface FamilyMemberStatus {
@@ -49,10 +49,6 @@ export function placesAt(lat: number, lon: number, places: Place[]): string[] {
     .map(({ p }) => p.name);
 }
 
-function fixTime(loc: UserLiveLocation): number {
-  return loc.timestamp || loc.updated_at || 0;
-}
-
 /**
  * The Wander member cards: the freshest position for each person.
  *
@@ -62,7 +58,7 @@ function fixTime(loc: UserLiveLocation): number {
  * reporting, so the cards sat a day behind while the map (which reads the
  * Jarvis app's own fixes) was live. Now the app's fix wins whenever it is
  * newer, its place is worked out from the HA zones, and HA still supplies
- * anyone who has no app fix (and battery, which the app does not send).
+ * anyone who has no app fix (and battery, when the app's fix lacks one).
  */
 export function buildFamilyCards(
   haFeatures: HaFeature[],
@@ -100,7 +96,7 @@ export function buildFamilyCards(
     const { latitude, longitude } = loc;
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
     if (latitude === 0 && longitude === 0) continue;
-    const stamp = fixTime(loc);
+    const stamp = fixTimeSeconds(loc);
     if (!stamp) continue;
 
     const existing = cards.find((c) => c.source === 'home_assistant' && tokensById.get(c.id)?.has(user));

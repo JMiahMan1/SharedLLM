@@ -26,6 +26,8 @@ import BibleToday from '../components/bible/BibleToday';
 import BibleProgress from '../components/bible/BibleProgress';
 import BibleGames from '../components/bible/BibleGames';
 import BibleMemorize from '../components/bible/BibleMemorize';
+import { marksOnVerse } from '../components/bible/verseMarks';
+import { errorText } from '../lib/errorText';
 
 type Tab = 'read' | 'today' | 'play' | 'memorize' | 'progress';
 
@@ -109,6 +111,16 @@ function BibleReaderPane({
   const [searchTerm, setSearchTerm] = useState<string | null>(null);
   const [activeVerse, setActiveVerse] = useState<BibleVerse | null>(null);
   const [focusing, setFocusing] = useState(false);
+  // A new requested passage (a link, a search hit, a cross-reference, a turned
+  // page) replaces the search and fills the passage box. Adjusted during render
+  // rather than by remounting the pane, so Focus mode and the rest of the
+  // reader's state survive turning the page.
+  const [seenRef, setSeenRef] = useState(requestedRef);
+  if (requestedRef !== seenRef) {
+    setSeenRef(requestedRef);
+    setSearchTerm(null);
+    if (requestedRef) setInput(requestedRef);
+  }
 
   const requestRef = searchTerm ?? requestedRef ?? chapterRef(position);
   const searching = searchTerm !== null;
@@ -168,18 +180,6 @@ function BibleReaderPane({
   const notesAlongside = preferences.show_notes && Boolean(studyScope);
   const noteUnavailable =
     studyData && !studyData.notes.length ? (studyData.note ?? null) : null;
-  // Which verses the reader has written about. The note itself is in Nextcloud;
-  // this only marks that one exists, so the glyph is a pointer to something real
-  // rather than a copy of it.
-  const notedVerses = useMemo(
-    () =>
-      new Set(
-        marks
-          .filter((m) => m.kind === 'note' && m.note_path)
-          .map((m) => `${m.chapter}:${m.verse_start}`),
-      ),
-    [marks],
-  );
   const studiedVerses = useMemo(
     () =>
       new Set(
@@ -255,13 +255,7 @@ function BibleReaderPane({
   const toggleMark = async (kind: 'highlight' | 'bookmark', color: string) => {
     if (!activeVerse) return;
     const ref = activeVerse.reference;
-    const existing = marks.find(
-      (m) =>
-        m.kind === kind &&
-        m.chapter === activeVerse.chapter &&
-        m.verse_start <= activeVerse.verse &&
-        (m.verse_end ?? m.verse_start) >= activeVerse.verse
-    );
+    const existing = marksOnVerse(marks, activeVerse).find((m) => m.kind === kind);
     if (existing && existing.verse_end === existing.verse_start) {
       await api.deleteBibleMark(existing.id);
     } else {
@@ -321,7 +315,11 @@ function BibleReaderPane({
                 <li key={`${hit.osis}-${hit.chapter}-${hit.verse}`}>
                   <button
                     type="button"
-                    onClick={() => onOpenRef(hit.reference)}
+                    onClick={() => {
+                      setSearchTerm(null);
+                      setInput(hit.reference);
+                      onOpenRef(hit.reference);
+                    }}
                     className="w-full text-left rounded-xl px-3 py-2.5 min-h-11 pointer-coarse:min-h-11 hover:bg-white/5 transition-colors"
                   >
                     <span className="block text-xs font-semibold text-amber-300">{hit.reference}</span>
@@ -370,7 +368,6 @@ function BibleReaderPane({
               verses={passage?.verses ?? []}
               marks={marks}
               studiedVerses={studiedVerses}
-              notedVerses={notedVerses}
               compareVerses={compareData?.verses}
               compareName={compareName}
               fontScale={preferences.font_scale}
@@ -428,7 +425,7 @@ function BibleReaderPane({
       {activeVerse && (
         <VerseActionSheet
           verse={activeVerse}
-          marks={marks}
+          marks={marksOnVerse(marks, activeVerse)}
           version={version}
           page={preferences.page}
           edition={preferences.default_edition}
@@ -474,11 +471,24 @@ export default function Bible() {
   });
   const [requestedRef, setRequestedRef] = useState<string | null>(searchParams.get('ref'));
 
-  const { data: stateData, isLoading: stateLoading } = useQuery({
+  const {
+    data: stateData,
+    isLoading: stateLoading,
+    error: stateError,
+    refetch: refetchState,
+  } = useQuery({
     queryKey: ['bible-state'],
     queryFn: () => api.getBibleState(),
   });
-  const { data: versionData } = useQuery({ queryKey: ['bible-versions'], queryFn: () => api.getBibleVersions() });
+  const {
+    data: versionData,
+    error: versionError,
+    refetch: refetchVersions,
+  } = useQuery({ queryKey: ['bible-versions'], queryFn: () => api.getBibleVersions() });
+  // Without the translation list or the saved place nothing can open, so a
+  // failure to fetch either is said (with a retry) rather than left as a
+  // skeleton that never resolves.
+  const loadError = (!versionData && versionError) || (!stateData && stateError) || null;
   const { data: markData } = useQuery({ queryKey: ['bible-marks'], queryFn: () => api.getBibleMarks() });
 
   const versions = useMemo(() => versionData?.versions ?? [], [versionData]);
@@ -539,6 +549,16 @@ export default function Bible() {
     [setSearchParams, trigger]
   );
 
+  // Turning the page keeps the address in step (replacing, not pushing, so Back
+  // still leaves the Bible rather than walking back through every chapter).
+  const requestRef = useCallback(
+    (ref: string) => {
+      setSearchParams({ ref }, { replace: true });
+      setRequestedRef(ref);
+    },
+    [setSearchParams]
+  );
+
   const applyPreferences = (patch: Partial<BiblePreferences>) => {
     setPreferencePatch((current) => ({ ...current, ...patch }));
     void api.putBibleState(patch);
@@ -554,7 +574,9 @@ export default function Bible() {
           Read, mark and remember
           {version ? ` — ${version.toUpperCase()}` : ' — no translation loaded yet'}.
         </p>
-        <div className="mt-3 sm:mt-4 grid grid-cols-5 gap-1.5 sm:flex sm:flex-wrap" role="tablist" aria-label="Bible sections">
+        {/* Five tabs share a phone's width while they fit; with large system text
+            the row scrolls rather than letting labels run into each other. */}
+        <div className="mt-3 sm:mt-4 -mx-1 px-1 flex gap-1.5 overflow-x-auto [scrollbar-width:none] sm:flex-wrap sm:overflow-visible" role="tablist" aria-label="Bible sections">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -565,7 +587,7 @@ export default function Bible() {
                 setTab(id);
               }}
               data-testid={`bible-tab-${id}`}
-              className={`glass-button flex-col sm:flex-row gap-0.5 sm:gap-2 px-1 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm min-h-12 sm:min-h-11 pointer-coarse:min-h-12 justify-center ${tab === id ? 'text-purple-200 border-purple-400/50' : 'text-slate-300'}`}
+              className={`glass-button flex-1 sm:flex-none shrink-0 min-w-[4.5rem] whitespace-nowrap flex-col sm:flex-row gap-0.5 sm:gap-2 px-1.5 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm min-h-12 sm:min-h-11 pointer-coarse:min-h-12 justify-center ${tab === id ? 'text-purple-200 border-purple-400/50' : 'text-slate-300'}`}
             >
               <Icon size={15} /> {label}
             </button>
@@ -574,7 +596,23 @@ export default function Bible() {
       </div>
 
       {tab === 'read' && (
-        versions.length === 0 && !versionData ? (
+        loadError ? (
+          <div className="glass-panel rounded-2xl p-4 space-y-3" data-testid="bible-load-error">
+            <p className="text-sm text-amber-300/90 leading-relaxed">
+              The Bible could not be opened: {errorText(loadError)}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                void refetchVersions();
+                void refetchState();
+              }}
+              className="glass-button px-4 py-2.5 text-sm min-h-11"
+            >
+              Try again
+            </button>
+          </div>
+        ) : versions.length === 0 && !versionData ? (
           <div className="glass-panel rounded-2xl p-4 space-y-2">
             <div className="skeleton h-4 w-1/3 rounded" />
             <div className="skeleton h-4 w-full rounded" />
@@ -605,11 +643,11 @@ export default function Bible() {
               </div>
             )}
             <BibleReaderPane
-              key={`${stateData.username}-${requestedRef ?? 'saved'}`}
+              key={stateData.username}
               state={stateData}
               requestedRef={requestedRef}
               onOpenRef={openRef}
-              onRequestRef={setRequestedRef}
+              onRequestRef={requestRef}
               marks={marks}
               onMarksChanged={refreshMarks}
               preferences={effectivePreferences}

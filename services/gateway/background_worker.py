@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import threading
 import time
 from contextlib import asynccontextmanager, suppress
@@ -16,6 +17,7 @@ from typing import Any
 
 import aiohttp
 
+from services.config import JARVIS_TALK_CLAIM_KEY
 from services.gateway.agent_loop import should_persist_learning
 from services.gateway.config import (
     EXECUTION_SVC,
@@ -80,9 +82,9 @@ async def _capture_mission_artifacts(mission_id: str, workspace_id: str | None) 
         log.warning(f"[Worker] Artifact capture error for mission {mission_id}: {e}")
         return None
 
-CHECK_INTERVAL_SECONDS = RAVEN_CHECK_INTERVAL
-ERROR_THRESHOLD = RAVEN_ERROR_THRESHOLD
 GATEWAY_SVC = "http://localhost:11435"
+# Longest the cleanup loop waits for one user's Home Assistant sync into RAG.
+HA_SYNC_TIMEOUT_SECONDS = int(os.getenv("HA_SYNC_TIMEOUT_SECONDS", "1800"))
 
 class RavenWorker:
     def __init__(self):
@@ -243,9 +245,11 @@ class RavenWorker:
                 from services.gateway.agent_loop import get_dynamic_llm_settings
                 settings = await get_dynamic_llm_settings()
 
-                is_suspended = settings.get("raven_suspended", "false").lower() == "true"
-                scan_interval = int(settings.get("raven_scan_interval", "300"))
-                error_threshold = int(settings.get("raven_error_threshold", "5"))
+                is_suspended = str(settings.get("raven_suspended") or "false").lower() == "true"
+                # The Raven Ops settings first; RAVEN_CHECK_INTERVAL /
+                # RAVEN_ERROR_THRESHOLD from config when they are unset.
+                scan_interval = int(settings.get("raven_scan_interval") or RAVEN_CHECK_INTERVAL)
+                error_threshold = int(settings.get("raven_error_threshold") or RAVEN_ERROR_THRESHOLD)
 
                 if is_suspended:
                     log.info("Raven health checks are suspended. Standing by...")
@@ -495,7 +499,10 @@ class RavenWorker:
                         continue
 
                     if "@jarvis" in content.lower():
-                        query = content.replace("@jarvis", "").strip()
+                        # Asked through the app: execution's send is already answering it.
+                        if await r.exists(JARVIS_TALK_CLAIM_KEY.format(token=token, message_id=msg_id)):
+                            continue
+                        query = re.sub(r"@jarvis\b[,:]?", "", content, flags=re.I).strip()
                         log.info(f"[TalkMonitor] Detected @jarvis mention in room {token}: {query}")
 
                         model = await self._get_model_from_settings()
@@ -1211,8 +1218,8 @@ class RavenWorker:
         )
 
     async def _has_pending_self_repair(self, container: str) -> bool:
-        """True if an admin_fix mission for this container is already queued,
-        executing or paused — in that case pushing another one is redundant."""
+        """True if an admin_fix mission for this container is already pending
+        approval, queued, executing or paused — pushing another is redundant."""
         try:
             async with _shared_http_client() as client:
                 resp = await client.get(
@@ -1229,7 +1236,10 @@ class RavenWorker:
                 if m.get("target_container") != container:
                     continue
                 status = (m.get("status") or "").lower()
-                if status in ("queued", "executing", "paused"):
+                # "pending" is a proposed fix still waiting for an admin in
+                # Raven Ops; filing another for the same container only
+                # stacks duplicates in that queue.
+                if status in ("pending", "queued", "executing", "paused"):
                     log.info(
                         f"[SelfRepair] Skipping {container}: admin_fix mission "
                         f"#{m.get('id')} already {status}"
@@ -1388,10 +1398,15 @@ class RavenWorker:
 
                 # Sync to RAG (triggers orphan cleanup in RAG collection)
                 async with _shared_http_client() as client:
+                    # RAG keeps embedding after a client gives up, so a short
+                    # timeout made the next pass send the same work again while
+                    # the first was still running (seen after deploys, when the
+                    # whole entity list is new). Wait for it instead.
                     sync_resp = await client.post(
                         f"{RAG_SVC}/rag/sync/ha",
                         json={"entities": entities, "user_id": username},
-                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                        timeout=aiohttp.ClientTimeout(total=HA_SYNC_TIMEOUT_SECONDS),
                     )
                     if sync_resp.status == 200:
                         sync_text = await sync_resp.text()
@@ -1409,8 +1424,10 @@ class RavenWorker:
                 cache_all_states(entities)
 
             except Exception as e:
-                msg = str(e)
-                transient = any(
+                # str(TimeoutError()) is empty, which logged "failed for user X: "
+                # with no cause; always name the exception type.
+                msg = f"{type(e).__name__}: {e}"
+                transient = isinstance(e, TimeoutError) or any(
                     s in msg
                     for s in (
                         "Server disconnected",
@@ -1422,10 +1439,10 @@ class RavenWorker:
                 )
                 if transient:
                     # Dependants (rag/execution) may still be starting after a
-                    # deploy — retry next interval instead of alarming.
-                    log.warning(f"Cleanup: deferred for user {username}: {e}")
+                    # deploy, or busy (a slow RAG sync) — retry next interval.
+                    log.warning(f"Cleanup: deferred for user {username}: {msg}")
                 else:
-                    log.error(f"Cleanup: failed for user {username}: {e}")
+                    log.error(f"Cleanup: failed for user {username}: {msg}")
 
         if total_orphaned > 0:
             log.info(f"Cleanup pass complete: removed {total_orphaned} orphaned entity entries across all users")

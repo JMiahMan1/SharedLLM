@@ -101,4 +101,16 @@ describe('reading along', () => {
     renderIt();
     expect(await screen.findByTestId('bible-plan-family-john-21')).toHaveTextContent('mia 43%');
   });
+  it('asks before stopping a plan, since starting again begins at day 1', async () => {
+    const user = userEvent.setup();
+    apiMock.stopBiblePlan.mockResolvedValue({ stopped: 'john-21' });
+    renderIt();
+    await user.click(await screen.findByTestId('bible-plan-stop-john-21'));
+    expect(apiMock.stopBiblePlan).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(screen.queryByTestId('bible-plan-stop-confirm-john-21')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('bible-plan-stop-john-21'));
+    await user.click(screen.getByTestId('bible-plan-stop-confirm-john-21'));
+    expect(apiMock.stopBiblePlan).toHaveBeenCalledWith('john-21');
+  });
 });

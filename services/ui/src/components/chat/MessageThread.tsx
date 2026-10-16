@@ -40,6 +40,9 @@ interface MessageThreadProps {
   onRetry: (message: TalkMessage) => void;
   onDiscard: (message: TalkMessage) => void;
   emptyText: string;
+  /** Fetch older messages; omitted when there are none (or no more) to show. */
+  onLoadEarlier?: () => void;
+  loadingEarlier?: boolean;
 }
 
 export default function MessageThread({
@@ -58,11 +61,12 @@ export default function MessageThread({
   onRetry,
   onDiscard,
   emptyText,
+  onLoadEarlier,
+  loadingEarlier = false,
 }: MessageThreadProps) {
   const feedRef = useRef<HTMLDivElement | null>(null);
   const dividerRef = useRef<HTMLDivElement | null>(null);
   const atBottomRef = useRef(true);
-  const seenCountRef = useRef(0);
   const [unseen, setUnseen] = useState(0);
   const [activeKey, setActiveKey] = useState<string | null>(null);
 
@@ -98,7 +102,6 @@ export default function MessageThread({
   useLayoutEffect(() => {
     if (positionedRef.current || messages.length === 0) return;
     positionedRef.current = true;
-    seenCountRef.current = messages.length;
     const feed = feedRef.current;
     if (!feed) return;
     // Move only the feed. scrollIntoView also scrolls every scrollable
@@ -112,18 +115,37 @@ export default function MessageThread({
     }
   }, [messages.length]);
 
+  // Older messages loaded above: keep the one being read where it was.
+  const firstId = messages[0]?.id;
+  const lastId = messages[messages.length - 1]?.id;
+  const anchorRef = useRef({ firstId, lastId, height: 0 });
+  useLayoutEffect(() => {
+    const feed = feedRef.current;
+    const before = anchorRef.current;
+    if (feed && positionedRef.current && firstId !== before.firstId && lastId === before.lastId) {
+      feed.scrollTop += feed.scrollHeight - before.height;
+    }
+    anchorRef.current = { firstId, lastId, height: feed?.scrollHeight ?? 0 };
+  });
+
   // New messages follow you only if you were already at the bottom or sent
-  // them yourself; otherwise they wait behind a "N new" pill.
+  // them yourself; otherwise they wait behind a "N new" pill. Keyed on the
+  // newest message, not the count: the feed is a window of the latest
+  // messages, so once a conversation is longer than it the count stops
+  // changing while messages keep arriving.
+  const lastSeenRef = useRef(lastId);
   useEffect(() => {
-    if (!positionedRef.current) return;
-    const added = messages.length - seenCountRef.current;
-    seenCountRef.current = messages.length;
+    const previous = lastSeenRef.current;
+    lastSeenRef.current = lastId;
+    if (!positionedRef.current || previous === undefined || lastId === previous) return;
+    const at = messages.findIndex((m) => m.id === previous);
+    const added = at >= 0 ? messages.length - 1 - at : 1;
     if (added <= 0) return;
     const last = messages[messages.length - 1];
     if (atBottomRef.current || last?.pending) scrollToBottom(true);
     else setUnseen((n) => n + added);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on growth
-  }, [messages.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the newest message
+  }, [lastId]);
 
   useEffect(() => {
     if (jarvisThinking && atBottomRef.current) scrollToBottom(true);
@@ -161,6 +183,18 @@ export default function MessageThread({
         aria-live="polite"
         aria-label="Messages"
       >
+        {onLoadEarlier && messages.length > 0 && (
+          <div className="mb-2 flex justify-center">
+            <button
+              type="button"
+              onClick={onLoadEarlier}
+              disabled={loadingEarlier}
+              className="min-h-11 rounded-full bg-white/5 px-4 text-xs font-medium text-slate-300 hover:bg-white/10 disabled:opacity-60"
+            >
+              {loadingEarlier ? 'Loading…' : 'Show earlier messages'}
+            </button>
+          </div>
+        )}
         {runs.map((run, index) => {
           const first = run.messages[0];
           const prevRun = runs[index - 1];

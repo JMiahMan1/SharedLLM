@@ -88,7 +88,7 @@ export default function ServiceAccessSetup({
               type="button"
               onClick={() => activate(service)}
               disabled={pending === service.id || isDone}
-              className="glass-button min-h-9 px-2.5 py-1.5 text-[11px] disabled:opacity-60"
+              className="glass-button min-h-11 px-2.5 py-1.5 text-[11px] disabled:opacity-60"
               title={service.hint}
             >
               {pending === service.id ? (
@@ -123,7 +123,7 @@ export default function ServiceAccessSetup({
             aria-label={`${asking} password`}
             className="glass-input flex-1 px-2.5 py-1.5 text-[11px]"
           />
-          <button type="submit" disabled={pending === asking} className="glass-button min-h-9 px-2.5 py-1.5 text-[11px]">
+          <button type="submit" disabled={pending === asking} className="glass-button min-h-11 px-2.5 py-1.5 text-[11px]">
             {pending === asking ? <Loader2 size={12} className="animate-spin" /> : 'Create token'}
           </button>
           <button
@@ -132,7 +132,7 @@ export default function ServiceAccessSetup({
               setAsking(null);
               setPassword('');
             }}
-            className="glass-button min-h-9 px-2.5 py-1.5 text-[11px]"
+            className="glass-button min-h-11 px-2.5 py-1.5 text-[11px]"
           >
             Cancel
           </button>

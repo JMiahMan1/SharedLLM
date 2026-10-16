@@ -19,28 +19,14 @@ export interface WidgetStateItem {
   config: Record<string, unknown>;
 }
 
-const defaultSizes: Record<WidgetKey, WidgetSize> = {
-  energy_insights: 'medium',
-  ambient_timer: 'small',
-  quick_notes: 'medium',
-  active_media: 'wide',
-  chores_progress: 'tall',
-  upcoming_events: 'wide',
-  quick_assistant: 'medium',
-  device_control: 'tall',
-  workspaces: 'medium',
-  health_activity: 'medium',
-  climate: 'medium',
-  presence: 'medium',
-  bible_daily: 'medium',
-};
-
 function createDefaultSettings(key: WidgetKey, order: number): UserWidgetSettings {
   return {
     widget_key: key,
     visibility: key === 'quick_assistant' ? 'hidden' : 'visible',
     order_index: order,
-    size: defaultSizes[key],
+    // `defaultWidgetDefs` is the one source of default sizes (the identity
+    // service mirrors it in WIDGET_DEFAULT_SIZES).
+    size: defaultWidgetDefs.find((def) => def.key === key)?.defaultSize ?? 'medium',
     is_pinned: false,
     sort_mode: key === 'device_control' ? 'most_used' : null,
     pinned_devices: [],
@@ -57,7 +43,8 @@ export const defaultWidgetDefs: WidgetDef[] = [
   // average, best day and distance. The hero's baseline-relative insight is not
   // lost — the Health page renders the same `heroInsight` and `ActivityRings`.
   { key: 'energy_insights', label: 'Energy Insights', icon: Zap, minSize: 'small', defaultSize: 'medium' },
-  { key: 'ambient_timer', label: 'Ambient Timer', icon: Timer, minSize: 'small', defaultSize: 'small' },
+  // Medium, not small: the add-timer form alone is taller than a 200px cell.
+  { key: 'ambient_timer', label: 'Ambient Timer', icon: Timer, minSize: 'small', defaultSize: 'medium' },
   { key: 'quick_notes', label: 'Quick Notes', icon: StickyNote, minSize: 'small', defaultSize: 'medium' },
   { key: 'active_media', label: 'Active Media', icon: Music, minSize: 'medium', defaultSize: 'wide' },
   { key: 'chores_progress', label: 'Chores Progress', icon: ListChecks, minSize: 'small', defaultSize: 'tall' },
@@ -375,6 +362,9 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   hideWidget: async (widgetKey: WidgetKey) => {
+    // The assistant's visibility is its enabled flag; going through the flag
+    // keeps the two from disagreeing (see showWidget).
+    if (widgetKey === 'quick_assistant') return get().setQuickAssistantEnabled(false);
     const registryIndex = get().widgetRegistry.findIndex((d) => d.key === widgetKey);
     const current = get().userWidgets[widgetKey] ?? createDefaultSettings(widgetKey, Math.max(0, registryIndex));
     const updated = { ...current, visibility: 'hidden' as const, is_pinned: false, updated_at: Date.now() };
@@ -398,6 +388,9 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   showWidget: async (widgetKey: WidgetKey) => {
+    // Showing the assistant only flipped its row to visible while the enabled
+    // flag stayed false, so "Show" did nothing until the next page load.
+    if (widgetKey === 'quick_assistant') return get().setQuickAssistantEnabled(true);
     const registryIndex = get().widgetRegistry.findIndex((d) => d.key === widgetKey);
     const current = get().userWidgets[widgetKey] ?? createDefaultSettings(widgetKey, Math.max(0, registryIndex));
     const updated = { ...current, visibility: 'visible' as const, updated_at: Date.now() };
@@ -456,37 +449,21 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   setQuickAssistantEnabled: async (enabled: boolean) => {
-    const currentQA = get().userWidgets['quick_assistant'];
-    set({
-      quickAssistantEnabled: enabled,
-      userWidgets: currentQA
-        ? {
-            ...get().userWidgets,
-            quick_assistant: {
-              ...currentQA,
-              visibility: enabled ? 'visible' : 'hidden',
-              updated_at: Date.now(),
-            },
-          }
-        : get().userWidgets,
+    const registryIndex = get().widgetRegistry.findIndex((d) => d.key === 'quick_assistant');
+    const previous = get().userWidgets['quick_assistant'];
+    const base = previous ?? createDefaultSettings('quick_assistant', Math.max(0, registryIndex));
+    const apply = (on: boolean) => set({
+      quickAssistantEnabled: on,
+      userWidgets: {
+        ...get().userWidgets,
+        quick_assistant: { ...base, visibility: on ? 'visible' : 'hidden', updated_at: Date.now() },
+      },
     });
+    apply(enabled);
     try {
       await api.updateWidgetSettings('quick_assistant', { quick_assistant_enabled: enabled });
     } catch {
-      const prevQA = get().userWidgets['quick_assistant'];
-      set({
-        quickAssistantEnabled: !enabled,
-        userWidgets: prevQA
-          ? {
-              ...get().userWidgets,
-              quick_assistant: {
-                ...prevQA,
-                visibility: !enabled ? 'visible' : 'hidden',
-                updated_at: Date.now(),
-              },
-            }
-          : get().userWidgets,
-      });
+      apply(!enabled);
     }
   },
 
@@ -528,14 +505,17 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
     });
 
     try {
-      await api.updateWidgetSettings(id as never, { config: updatedConfig });
-    } catch {
+      await api.updateWidgetSettings(id, { config: updatedConfig });
+    } catch (err) {
       set({
         userWidgets: { ...get().userWidgets, [id]: current },
         activeWidgets: get().activeWidgets.map((item) =>
           item.id === id ? { ...item, config: current.config || {} } : item
         ),
       });
+      // Rethrown so a caller that reports success (the climate setup sheet)
+      // can tell the save did not land.
+      throw err;
     }
   },
 

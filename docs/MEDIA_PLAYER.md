@@ -10,7 +10,7 @@ live probes); task-by-task history lives in `docs/MEDIA_OVERHAUL.md`.
 
 ```mermaid
 graph TD
-    UI[React/Capacitor UI<br/>pages/Media.tsx, features/media] -->|REST + SSE + WS| GW[Gateway<br/>services/gateway]
+    UI[React/Capacitor UI<br/>pages/Media.tsx, pages/Remote.tsx,<br/>components/media, context/MediaPlayerContext] -->|REST + WS| GW[Gateway<br/>services/gateway]
     GW -->|JSON-RPC REST + WS| MA[Music Assistant<br/>:8095]
     GW -->|per-user creds| ID[Identity<br/>POST /api/resolve]
     GW -->|REST| EX[Execution<br/>services/execution]
@@ -54,9 +54,27 @@ Caddy redacts `token` and `mt` query values from its access log.
 
 ---
 
-## 3. Unified REST endpoints
+## 3. REST endpoints
 
-One call per screen. Wire shapes are Pydantic models in
+### What the app calls today
+
+| Screen | Calls |
+| --- | --- |
+| Media → device picker / player card | `POST /execute/media/status` (every 3 s while visible), `GET /api/entities`, MA `players/all` over the control socket |
+| Media → Jump back in, Playlists | `GET /api/media/audiobookshelf/last-played`, `GET /api/media/music-assistant/recent`, `GET /api/media/music-assistant/playlists` |
+| Media → Browse | `…/music-assistant/search`, `…/audiobookshelf/libraries`, `…/audiobookshelf/library/{id}`, `…/audiobookshelf/search` |
+| Playing | web player / MA player: `POST /api/media/ma-library-uri` for Audiobookshelf items, then MA `player_queues/play_media`; HA speaker: `POST /execute/media/play` (MA URIs) or `POST /execute/audiobookshelf` `{action:"play"}` (books, ABS session HLS) |
+| Favourite heart | `GET /api/media/detail?uri=`, `POST /api/media/favorite` |
+| Remote | `POST /execute/media/status` (every 5 s while visible), `POST /execute/media/transport` |
+
+The provider endpoints answer `502 {status:"ERROR"}` (MA) or
+`200 {…, notice:"ABS unavailable"}` (ABS) when an upstream is down; the UI
+shows both as an error with a retry, never as an empty library.
+
+### Unified endpoints (built, not yet used by the app)
+
+The endpoints below are live and contract-tested but no screen calls them yet
+(the Media page still uses the provider endpoints above). One call per screen. Wire shapes are Pydantic models in
 `services/gateway/media_models.py`; the generated JSON Schema dump
 (`services/ui/src/features/media/__generated__/schemas.json`) is kept in
 lockstep by a pytest drift guard and validated against UI fixtures with ajv
@@ -125,8 +143,9 @@ Forwarded to the execution service, which calls
 {"item_id": "…", "episode_id": "…", "current_time": 123.4, "duration": 3600, "is_finished": false}
 ```
 
-The UI reports progress every 15 s while an ABS item plays on any output, and
-on pause/stop.
+Nothing in the app calls this yet: books played through Music Assistant keep
+their progress in MA's own Audiobookshelf provider, and HA-speaker playback
+uses an ABS session.
 
 ### Provider endpoints (kept)
 
@@ -173,6 +192,17 @@ with `422` before reaching HA.
 | `repeat_set` | `repeat` (`off`/`one`/`all`) | `media_player.repeat_set` |
 | `join` | `group_members` (list) | `media_player.join` |
 | `unjoin` | — | `media_player.unjoin` |
+| `power_on`, `power_off` | — | `media_player.turn_on` / `turn_off` (bits 128 / 256); else the brand POWER key |
+| `up`, `down`, `left`, `right`, `select`, `menu` | — | remote key press (Remote page d-pad) |
+
+Any other command (e.g. `unmute`) is a `422`.
+
+**Remote keys** go to the TV's companion `remote.*` entity, found through HA's
+device registry (`ha_client.find_companion_remote`: same device → name match →
+same-named entity, cached 10 min). The names rarely match — live,
+`media_player.office_tv` is driven by `remote.office_tv_remote` — and HA does
+not fail a call to a missing entity, so guessing the name lost key presses
+silently.
 
 **Routing rule (BUG-28):** the standard `media_player.*` service is used
 whenever the entity advertises the feature bit for the requested command
@@ -194,8 +224,18 @@ HA states read itself; the hub snapshot remains the source of truth for SSE.
 
 Local (browser/Capacitor) players report their own state
 (the UI sends `entity_id: "web_player"`; `local`, `browser` and `android` are
-accepted aliases) so the rest of the house sees what is playing.
-`MediaStateSyncRequest` carries the same enriched fields as above.
+accepted aliases) so the dashboard widget, the Android home-screen widget and
+voice see what is playing. `MediaStateSyncRequest` carries the same enriched
+fields as above. Rules:
+
+* `MediaPlayerProvider` reports on every play/pause/track change and every
+  15 s while playing, from any page.
+* A local report that is not `playing` never takes the "chosen device" back
+  from a speaker the person picked (it is acknowledged and dropped).
+* `status` treats a stored local `playing` row older than 2 min (paused: 30 min)
+  as gone — the app was closed mid-song — and does not report it as active.
+* Picking an HA speaker on the Media page records it as the chosen device
+  (`state: "idle"`), which `transport` without an `entity_id` then targets.
 
 ### MA control socket (`WS /api/ma-jsonrpc`)
 
@@ -275,34 +315,89 @@ event: heartbeat
 Heartbeats arrive every 15 s when idle; the hub subscribes on the first
 listener and stops 60 s after the last one leaves. Hubs are keyed by user and
 never cross. Clients should reconnect on error, re-take the snapshot, and fall
-back to 10 s status polling when the stream is down.
+back to 10 s status polling when the stream is down. **No screen subscribes
+yet**; the Media and Remote pages poll `status` (3 s / 5 s, paused while the
+page is hidden).
 
 ---
 
-## 7. UI notes
+## 7. UI
 
-* **Player bar & scrubber.** The progress drag is keyed on
-  `media_content_id` so 3 s status polls do not cancel it; pointer moves are
-  coalesced with `requestAnimationFrame`. Touch targets are ≥ 44 px
-  (`py-5`, thumb 20 px); hover reveals are desktop-only. Live streams
-  (`duration <= 0`) show a LIVE bar instead of a scrubber. Seek failures
-  surface a toast on the page and the widget.
-* **Mobile parity.** The media screen and its widgets work at phone widths
-  inside `BentoBoxDashboard` (~280 px columns); use `pointer-coarse:min-h-11`
-  for touch rows, `useHaptics()` for tactile feedback and Capacitor native
-  audio where it fits. Never make hover or drag the only path to an action.
-* **Playback outlives the page.** The MA web player is mounted once, above the
-  router (`context/MediaPlayerContext.tsx`), so switching tabs never stops it;
-  Media subscribes with `useSharedMAWebPlayer` and gets the current state
-  replayed. On Android, `MediaPlaybackService` (a `mediaPlayback` foreground
-  service) with `JarvisMediaPlugin` keeps playing in the background and shows
-  lock-screen controls (play/pause/next/previous) routed back to the web
-  player. Swiping the app away from recents still stops it.
-* **Partial state.** Every screen renders `loading`/`empty`/`error`/`partial`
-  states; a partial response names the unreachable provider
-  (“Music Assistant is unreachable”) and keeps the working shelves.
+Files: `pages/Media.tsx` (controller), `components/media/` (`DeviceSelector`,
+`NowPlayingCard`, `MediaExplorer`, shared types), `pages/Remote.tsx`,
+`lib/maWebPlayer.ts` (the web player engine), `context/MediaPlayerContext.tsx`
+(app-wide mount, state reporting, Android bridge), `plugins/jarvisMedia.ts` +
+Android `MediaPlaybackService` / `JarvisMediaPlugin`.
 
----
+### Media page
+
+* **Play on** — "This device" (the web player) first, then every HA media
+  player, then Music Assistant players that HA does not also expose (matched
+  via `ma_player_id` from `status`; our own Sendspin player is never listed
+  twice). Offline devices sort last and are dimmed. A speaker that is already
+  playing when the page opens is selected automatically, once; after the person
+  picks a device the page never overrides them. Picking a speaker does **not**
+  stop the web player (the chip says "Playing now").
+* **Player card** — title/artist/cover, scrubber (drag keyed on the track, rAF
+  coalesced; LIVE bar when `duration <= 0`), previous / play-pause / next /
+  stop, volume + mute, favourite heart for MA items. Web player: resume uses
+  `players/cmd/play` (it never re-sends the URI, which restarted the track).
+  Remote speaker: `/execute/media/transport` (HA) or MA commands (`ma:` ids).
+* **Jump back in** — Audiobookshelf books in progress (finished books are
+  skipped) merged with MA recently played, newest first, six at most.
+* **Playlists**, **Browse all media** (a dialog: MA search/playlists/recent;
+  ABS libraries → books, ABS search for books, podcasts and authors).
+* **Every play goes through one function** (`playItem`): Audiobookshelf books
+  *and* podcasts are resolved with `POST /api/media/ma-library-uri` for the web
+  player and MA players (MA only plays its own `library://…` URIs); HA speakers
+  get `/execute/audiobookshelf` (books) or `/execute/media/play` (MA URIs).
+  A failed lookup is shown, never replaced by a guessed URI.
+* Loading, empty and error states exist for every shelf; an unreachable
+  provider shows "Couldn’t load …" with **Try again**.
+
+### Web player engine (`lib/maWebPlayer.ts`)
+
+* Connects lazily (first play), over two gateway WebSockets: `/api/sendspin`
+  (audio) and `/api/ma-jsonrpc` (control). Concurrent callers share one
+  connection attempt.
+* `connectionState`: `DISCONNECTED` → `CONNECTING` → `CONNECTED`; on an
+  unexpected close of either socket it tears down (sockets + `<audio>`), goes
+  `RECONNECTING` and retries with backoff 1 s, 2 s, 4 s … 30 s, up to 10 tries,
+  then `FAILED` (the card shows **Reconnect**). Returning to the app or coming
+  back online retries at once. `disconnect()` stops retrying.
+* `stop()` sends `players/cmd/stop` and clears the now-playing fields, which
+  also removes the Android notification and reports `idle`.
+
+### Playback outlives the page
+
+The web player is mounted once above the router (`MediaPlayerProvider` in
+`App.tsx`), so switching tabs never stops it; pages read it with
+`useSharedMAWebPlayer()`. On Android, `MediaPlaybackService` (a
+`mediaPlayback` foreground service while playing) keeps the WebView alive in
+the background and shows a MediaStyle notification / lock-screen controls
+(play, pause, next, previous) that route back to the web player through
+`JarvisMediaPlugin`. Paused: the notification stays but the service leaves the
+foreground. Nothing loaded: the service is stopped (it is not touched at all
+until something has played). Swiping the app away from recents still stops
+playback (the service is `START_NOT_STICKY`; there is no web player to resume).
+
+### Remote page
+
+Lists HA media players from `status` (TVs first; the web player is excluded),
+starts on a TV that is on, and shows the device's own power state, volume and
+mute (polled). Buttons: power (`power_on`/`power_off` by state), d-pad + OK
+(`up/down/left/right/select`), back, home, menu, previous/play-pause/next,
+volume −/+ (±5 %, or `volume_up/down` when the device reports no level),
+slider (debounced `volume_set`), mute (`volume_mute` with an explicit
+`muted`). Offline devices show a message instead of dead buttons.
+
+### Mobile
+
+Touch targets are ≥ 44 px everywhere on both pages (checked with Playwright at
+360 px / 130 % text, 412 px and 1280 px, no horizontal overflow); the device
+strip scrolls sideways on phones and wraps on desktop, keeping the selected
+device in view; the browse dialog is a bottom sheet sized with `dvh` and the
+safe-area inset.
 
 ## 8. Contract tests
 
@@ -327,7 +422,14 @@ back to 10 s status polling when the stream is down.
   same pattern names ABS failures.
 * **Transport does nothing** — check `supported_features`: a feature the
   entity does not advertise falls through to the brand handler, and an
-  unmappable command is rejected loudly.
+  unmappable command is rejected loudly. For remote keys, check which
+  `remote.*` entity the execution log says it sent to (`[android_tv] Sending …
+  to remote.…`); it must be the TV's companion entity.
+* **Dashboard says the web player is playing but nothing is** — the app stopped
+  reporting (closed, offline). It clears itself after 2 min.
+* **Web player keeps "reconnecting"** — the gateway's `/api/sendspin` or
+  `/api/ma-jsonrpc` proxy cannot reach MA; after 10 tries the card offers
+  Reconnect.
 * **Stream 409** — playback has not been started (or has ended); POST the
   stream route first. **504** on an ABS session means ABS never produced the
   HLS playlist.

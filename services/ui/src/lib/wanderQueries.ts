@@ -32,6 +32,11 @@ export function geoPeopleQueryKey() {
   return ['geo-people'] as const;
 }
 
+/** A finished trip's or workout's route (ids never collide: trip_*, workout ids). */
+export function routeQueryKey(id: string) {
+  return ['geo-route', id] as const;
+}
+
 export function geoZonesQueryKey() {
   return ['geo-zones'] as const;
 }

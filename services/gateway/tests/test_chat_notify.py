@@ -193,3 +193,38 @@ def test_the_wait_needs_a_signed_in_user(monkeypatch):
 
     monkeypatch.setattr(gateway_main, "_user_id_from_request", nobody)
     assert TestClient(gateway_main.app).get("/api/telemetry/notifications/wait").status_code == 401
+
+
+def test_a_notice_telemetry_refuses_is_retried_next_pass():
+    """Marking a message handled before telemetry accepted it lost every
+    message that arrived while telemetry was restarting."""
+    r, client = _Redis(), _Client({"jeremiah": [_conv(10)]})
+    _run(r, client)
+    client.conversations["jeremiah"] = [_conv(11)]
+    real_post = client.post
+
+    def down(url, json=None, **kw):
+        if url.endswith("/api/telemetry/notify"):
+            return _Resp(503, {})
+        return real_post(url, json=json, **kw)
+
+    client.post = down
+    assert _run(r, client) == 0
+    client.post = real_post
+    assert _run(r, client) == 1
+    assert client.notified[0]["once"] == "chat:fam:11"
+    assert _run(r, client) == 0
+
+
+def test_jarvis_answer_reaches_the_asker_and_is_signed_jarvis():
+    """Jarvis posts with the asker's login, so it is "theirs" and already read --
+    yet the person who asked is exactly who is waiting for the answer."""
+    answer = 'Tacos tonight.\n\n```jarvis-envelope\n{"kind": "assistant", "title": "Jarvis"}\n```'
+    notice = chat_notify.notice_for(_conv(12, actor="jeremiah", unread=0, text=answer), "jeremiah")
+    assert notice is not None
+    assert notice["body"] == "Jarvis: Tacos tonight."
+    # An ordinary message of your own still never notifies you.
+    assert chat_notify.notice_for(_conv(13, actor="jeremiah", unread=0, text="ok"), "jeremiah") is None
+    # A game card someone else posted is not mistaken for Jarvis.
+    game = 'Leo 9/10\n\n```jarvis-envelope\n{"kind": "game", "title": "Trivia"}\n```'
+    assert chat_notify.notice_for(_conv(14, actor="jeremiah", unread=0, text=game), "jeremiah") is None

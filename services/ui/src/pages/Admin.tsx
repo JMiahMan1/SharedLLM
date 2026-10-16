@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -41,6 +41,7 @@ import SystemValueHint from '../components/ui/SystemValueHint';
 import AccountAuditPanel from '../components/admin/AccountAuditPanel';
 import { INTEGRATIONS, credentialPayload, inUse, missingFields, prefill, validateIntegrations, type Defaults } from '../lib/credentialForm';
 import { api } from '../services/api';
+import { errorText } from '../lib/errorText';
 import type {
   DeviceAssignment,
   DiscoveredUser,
@@ -181,6 +182,11 @@ const Admin = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const activeTab = adminTabFromPathname(location.pathname);
+  // On a phone most tabs sit off-screen in the scrolling strip; bring the open one into view.
+  const activeTabRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+  }, [activeTab]);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [userForm, setUserForm] = useState<UserFormState>(emptyUserForm);
@@ -227,6 +233,7 @@ const Admin = () => {
   const { data: discoveryData, refetch: refetchDiscoveredUsers, isFetching: isDiscovering } = useQuery<{ users: DiscoveredUser[]; warnings: string[]; errors: string[] }>({
     queryKey: ['discovered-users'],
     queryFn: () => api.discoverUsers(),
+    enabled: activeTab === 'users',
   });
   const discoveredUsers = useMemo(() => discoveryData?.users ?? [], [discoveryData]);
   const discoveryWarnings = discoveryData?.warnings ?? [];
@@ -235,22 +242,26 @@ const Admin = () => {
   const { data: devices = [] } = useQuery<DeviceAssignment[]>({
     queryKey: ['devices'],
     queryFn: () => api.getDevices(),
+    enabled: activeTab === 'users',
   });
 
   const { data: settings = [] } = useQuery<GlobalSetting[]>({
     queryKey: ['settings'],
     queryFn: () => api.getSettings(),
+    enabled: activeTab === 'database',
   });
 
   const { data: logs = [] } = useQuery<LogEntry[]>({
     queryKey: ['admin-logs'],
     queryFn: () => api.getLogs(12),
     refetchInterval: 10000,
+    enabled: activeTab === 'database',
   });
   
   const { data: ragStats } = useQuery<RagStats>({
     queryKey: ['rag-stats'],
     queryFn: () => api.getRagStats(),
+    enabled: activeTab === 'database',
   });
 
   const { data: collectionDocs, isFetching: isFetchingDocs } = useQuery({
@@ -263,6 +274,7 @@ const Admin = () => {
     queryKey: ['system-health'],
     queryFn: () => api.getSystemHealth(),
     refetchInterval: 10000,
+    enabled: activeTab === 'services',
   });
 
   const { data: updatesData } = useQuery({
@@ -270,6 +282,7 @@ const Admin = () => {
     queryFn: () => api.checkAllUpdates(),
     refetchInterval: 60000,
     refetchOnWindowFocus: true,
+    enabled: activeTab === 'services',
   });
 
   const { data: pullStatusData } = useQuery<PullStatus>({
@@ -291,7 +304,7 @@ const Admin = () => {
         queryClient.invalidateQueries({ queryKey: ['system-health'] });
         if (pullStatusData.status === 'completed') {
           if (pullStatusData.updated) {
-            toast.success(`${wasActive}: Image updated! Restart to apply.`);
+            toast.success(`${wasActive}: new image downloaded. Restart to run it.`);
           } else {
             toast.success(`${wasActive}: Image is up to date.`);
           }
@@ -314,10 +327,7 @@ const Admin = () => {
         toast.success(data.message || 'Image pull completed');
       }
     },
-    onError: (error: unknown) => {
-      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      toast.error(detail || 'Image pull failed');
-    },
+    onError: (error: unknown) => toast.error(errorText(error, 'Image pull failed')),
   });
 
   const pullAndRestartMutation = useMutation({
@@ -327,10 +337,7 @@ const Admin = () => {
       queryClient.invalidateQueries({ queryKey: ['service-updates'] });
       toast.success(data.message);
     },
-    onError: (error: unknown) => {
-      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      toast.error(detail || 'Pull and restart failed');
-    },
+    onError: (error: unknown) => toast.error(errorText(error, 'Pull and restart failed')),
   });
 
   const restartServiceMutation = useMutation({
@@ -339,10 +346,7 @@ const Admin = () => {
       queryClient.invalidateQueries({ queryKey: ['system-health'] });
       toast.success('Service restart initiated');
     },
-    onError: (error: unknown) => {
-      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      toast.error(detail || 'Restart failed');
-    },
+    onError: (error: unknown) => toast.error(errorText(error, 'Restart failed')),
   });
 
   const saveUserMutation = useMutation({
@@ -483,16 +487,19 @@ const Admin = () => {
   const { data: mediaGroups = [] } = useQuery<GroupItem[]>({
     queryKey: ['media-groups'],
     queryFn: () => api.getMediaGroups(),
+    enabled: activeTab === 'groups',
   });
 
   const { data: lightClusters = [] } = useQuery<GroupItem[]>({
     queryKey: ['light-clusters'],
     queryFn: () => api.getLightClusters(),
+    enabled: activeTab === 'groups',
   });
 
   const { data: lightPatterns = [] } = useQuery<GroupItem[]>({
     queryKey: ['light-patterns'],
     queryFn: () => api.getLightPatterns(),
+    enabled: activeTab === 'groups',
   });
 
   const createMediaGroupMutation = useMutation({
@@ -567,12 +574,14 @@ const Admin = () => {
   const { data: intercomSessions = [] } = useQuery<IntercomSessionItem[]>({
     queryKey: ['intercom-sessions'],
     queryFn: () => api.getIntercomSessions(),
+    enabled: activeTab === 'intercom',
   });
 
   interface IntercomConfig { default_tts_engine?: string; default_voice?: string; default_volume?: number; enable_espresense_routing?: boolean }
   const { data: intercomConfig } = useQuery<IntercomConfig>({
     queryKey: ['intercom-config'],
     queryFn: () => api.getIntercomConfig(),
+    enabled: activeTab === 'intercom',
   });
 
   const startIntercomMutation = useMutation({
@@ -644,21 +653,21 @@ const Admin = () => {
     <div className="space-y-6 pb-12">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <h2 className="text-4xl font-black tracking-tighter text-white uppercase">System Matrix</h2>
+          <h2 className="text-3xl sm:text-4xl font-black tracking-tighter text-white uppercase">System Matrix</h2>
           <p className="mt-2 text-slate-400">Admin-only controls for users, Raven, settings, and database.</p>
         </div>
         <div className="flex flex-wrap gap-3">
           <button
             onClick={() => syncDiscoveryMutation.mutate()}
             disabled={syncDiscoveryMutation.isPending}
-            className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+            className="glass-button min-h-11 px-4 text-[10px] font-black uppercase tracking-widest"
           >
             <RefreshCcw size={14} className={syncDiscoveryMutation.isPending ? 'animate-spin' : ''} />
             Sync Device Discovery
           </button>
           <button
             onClick={openCreateUser}
-            className="glass-button px-4 py-3 bg-indigo-600/30 border-indigo-500/30 text-[10px] font-black uppercase tracking-widest text-indigo-300"
+            className="glass-button min-h-11 px-4 bg-indigo-600/30 border-indigo-500/30 text-[10px] font-black uppercase tracking-widest text-indigo-300"
           >
             <UserPlus size={14} />
             Create User
@@ -667,14 +676,17 @@ const Admin = () => {
       </header>
 
       {/* Tab Navigation */}
-      <div className="flex gap-2 border-b border-white/10 pb-2 overflow-x-auto">
+      <div className="flex gap-2 border-b border-white/10 pb-2 overflow-x-auto" role="tablist" aria-label="Admin sections">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           return (
             <button
               key={tab.id}
+              ref={activeTab === tab.id ? activeTabRef : undefined}
               onClick={() => navigate(tab.path)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition whitespace-nowrap ${
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={`flex min-h-11 items-center gap-2 px-4 rounded-lg text-xs font-black uppercase tracking-widest transition whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'bg-purple-600/30 text-white border border-purple-500/30'
                   : 'text-slate-400 hover:text-white hover:bg-white/5'
@@ -691,7 +703,7 @@ const Admin = () => {
       {activeTab === 'users' && (
         <div className="space-y-8">
           <div className="grid gap-6 xl:gap-8 xl:grid-cols-[1.2fr_0.8fr]">
-            <section className="glass-panel p-6 min-w-0 overflow-hidden">
+            <section className="glass-panel p-4 sm:p-6 min-w-0 overflow-hidden">
               <div className="mb-6 flex items-center justify-between">
                 <div>
                   <h3 className="flex items-center gap-3 text-xl font-bold text-white">
@@ -700,7 +712,7 @@ const Admin = () => {
                   </h3>
                   <p className="mt-1 text-sm text-slate-400">Create, edit, and remove real identities used by the backend.</p>
                 </div>
-                <HelpTooltip docName="api_reference.md" sectionTitle="Identity Resolution" label="Users" />
+                <HelpTooltip docName="api_reference.md" sectionTitle="## Authentication" label="Users" />
               </div>
 
               <div className="space-y-3">
@@ -744,7 +756,11 @@ const Admin = () => {
                       </button>
                       {!user.is_system_default && (
                         <button
-                          onClick={() => deleteUserMutation.mutate(user.username)}
+                          onClick={() => {
+                            if (window.confirm(`Delete ${user.full_name || user.username}? Their account and saved logins are removed.`)) {
+                              deleteUserMutation.mutate(user.username);
+                            }
+                          }}
                           className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
                           aria-label={`Delete ${user.username}`}
                         >
@@ -757,7 +773,7 @@ const Admin = () => {
               </div>
             </section>
 
-            <section className="glass-panel p-6 min-w-0 overflow-hidden">
+            <section className="glass-panel p-4 sm:p-6 min-w-0 overflow-hidden">
               <div className="mb-6 flex items-center justify-between">
                 <div>
                   <h3 className="flex items-center gap-3 text-xl font-bold text-white">
@@ -772,6 +788,7 @@ const Admin = () => {
                     disabled={importNcMutation.isPending}
                     className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-white/5 hover:text-white"
                     title="Sync users from Nextcloud OCS"
+                    aria-label="Import users from Nextcloud"
                   >
                     <Cloud size={16} className={importNcMutation.isPending ? 'animate-pulse' : ''} />
                   </button>
@@ -830,7 +847,8 @@ const Admin = () => {
                     </div>
                     <button
                       onClick={() => importUserMutation.mutate(user)}
-                      className="glass-button px-3 py-2 text-[10px] font-black uppercase tracking-widest shrink-0"
+                      disabled={importUserMutation.isPending}
+                      className="glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest shrink-0 disabled:opacity-50"
                     >
                       Import
                     </button>
@@ -845,7 +863,7 @@ const Admin = () => {
             </section>
           </div>
 
-          <section className="glass-panel p-6 min-w-0 overflow-hidden" data-testid="admin-stars">
+          <section className="glass-panel p-4 sm:p-6 min-w-0 overflow-hidden" data-testid="admin-stars">
             <div className="mb-6 flex items-center justify-between gap-4 flex-wrap">
               <div>
                 <h3 className="flex items-center gap-3 text-xl font-bold text-white">
@@ -882,13 +900,13 @@ const Admin = () => {
             )}
           </section>
 
-          <section className="glass-panel p-6 min-w-0 overflow-hidden">
+          <section className="glass-panel p-4 sm:p-6 min-w-0 overflow-hidden">
             <h3 className="flex items-center gap-3 text-xl font-bold text-white">Companion devices</h3>
             <p className="mt-1 mb-4 text-sm text-slate-400">Phones register themselves when their owner signs in; watches and assistants are linked to whoever adds them (a watch with the code on its screen).</p>
             <CompanionDevicesPanel scope="all" />
           </section>
 
-          <section className="glass-panel p-6 min-w-0 overflow-hidden">
+          <section className="glass-panel p-4 sm:p-6 min-w-0 overflow-hidden">
             <div className="mb-6 flex items-center justify-between">
               <div>
                 <h3 className="flex items-center gap-3 text-xl font-bold text-white">
@@ -897,7 +915,7 @@ const Admin = () => {
                 </h3>
                 <p className="mt-1 text-sm text-slate-400">Every entry here is live identity-to-device data.</p>
               </div>
-              <HelpTooltip docName="architecture.md" sectionTitle="Identity Service" label="Device Assignments" />
+              <HelpTooltip docName="ENTITY_PROTECTION.md" sectionTitle="## The rule" label="Device Assignments" />
             </div>
 
             <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_220px_auto]">
@@ -960,12 +978,12 @@ const Admin = () => {
 
       {activeTab === 'groups' && (
         <div className="space-y-6">
-          <div className="flex gap-2 border-b border-white/10 pb-2">
+          <div className="flex gap-2 border-b border-white/10 pb-2 overflow-x-auto">
             {(['media', 'lights', 'patterns'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setGroupTab(tab)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition ${
+                className={`flex min-h-11 items-center gap-2 px-4 rounded-lg text-xs font-black uppercase tracking-widest transition whitespace-nowrap ${
                   groupTab === tab
                     ? 'bg-emerald-600/30 text-white border border-emerald-500/30'
                     : 'text-slate-400 hover:text-white hover:bg-white/5'
@@ -979,7 +997,7 @@ const Admin = () => {
 
           {groupTab === 'media' && (
             <div className="space-y-6">
-              <section className="glass-panel p-6">
+              <section className="glass-panel p-4 sm:p-6">
                 <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                   <Plus size={20} className="text-emerald-400" />
                   Create Media Group
@@ -1018,7 +1036,7 @@ const Admin = () => {
                 </div>
               </section>
 
-              <section className="glass-panel p-6">
+              <section className="glass-panel p-4 sm:p-6">
                 <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                   <Cpu size={20} className="text-orange-300" />
                   Media Groups
@@ -1053,7 +1071,7 @@ const Admin = () => {
 
           {groupTab === 'lights' && (
             <div className="space-y-6">
-              <section className="glass-panel p-6">
+              <section className="glass-panel p-4 sm:p-6">
                 <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                   <Plus size={20} className="text-yellow-400" />
                   Create Light Cluster
@@ -1092,7 +1110,7 @@ const Admin = () => {
                 </div>
               </section>
 
-              <section className="glass-panel p-6">
+              <section className="glass-panel p-4 sm:p-6">
                 <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                   <Lightbulb size={20} className="text-yellow-300" />
                   Light Clusters
@@ -1127,7 +1145,7 @@ const Admin = () => {
 
           {groupTab === 'patterns' && (
             <div className="space-y-6">
-              <section className="glass-panel p-6">
+              <section className="glass-panel p-4 sm:p-6">
                 <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                   <Plus size={20} className="text-purple-400" />
                   Create Light Pattern
@@ -1175,7 +1193,7 @@ const Admin = () => {
                 </div>
               </section>
 
-              <section className="glass-panel p-6">
+              <section className="glass-panel p-4 sm:p-6">
                 <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                   <Play size={20} className="text-cyan-400" />
                   Execute Pattern
@@ -1221,7 +1239,7 @@ const Admin = () => {
                 </div>
               </section>
 
-              <section className="glass-panel p-6">
+              <section className="glass-panel p-4 sm:p-6">
                 <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                   <Lightbulb size={20} className="text-purple-300" />
                   Light Patterns
@@ -1260,12 +1278,12 @@ const Admin = () => {
 
       {activeTab === 'intercom' && (
         <div className="space-y-6">
-          <div className="flex gap-2 border-b border-white/10 pb-2">
+          <div className="flex gap-2 border-b border-white/10 pb-2 overflow-x-auto">
             {(['sessions', 'broadcast', 'announce', 'config'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setIntercomTab(tab)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition ${
+                className={`flex min-h-11 items-center gap-2 px-4 rounded-lg text-xs font-black uppercase tracking-widest transition whitespace-nowrap ${
                   intercomTab === tab
                     ? 'bg-violet-600/30 text-white border border-violet-500/30'
                     : 'text-slate-400 hover:text-white hover:bg-white/5'
@@ -1279,7 +1297,7 @@ const Admin = () => {
 
           {intercomTab === 'sessions' && (
             <div className="space-y-6">
-              <section className="glass-panel p-6">
+              <section className="glass-panel p-4 sm:p-6">
                 <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                   <Phone size={20} className="text-violet-400" />
                   Start Intercom Session
@@ -1322,7 +1340,7 @@ const Admin = () => {
                 </div>
               </section>
 
-              <section className="glass-panel p-6">
+              <section className="glass-panel p-4 sm:p-6">
                 <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                   <Phone size={20} className="text-violet-400" />
                   Active Intercom Sessions
@@ -1356,7 +1374,7 @@ const Admin = () => {
           )}
 
           {intercomTab === 'broadcast' && (
-            <section className="glass-panel p-6">
+            <section className="glass-panel p-4 sm:p-6">
               <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                 <Radio size={20} className="text-amber-400" />
                 Broadcast Message
@@ -1395,7 +1413,7 @@ const Admin = () => {
           )}
 
           {intercomTab === 'announce' && (
-            <section className="glass-panel p-6">
+            <section className="glass-panel p-4 sm:p-6">
               <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                 <Megaphone size={20} className="text-cyan-400" />
                 TV / Speaker Announcement
@@ -1435,7 +1453,7 @@ const Admin = () => {
           )}
 
           {intercomTab === 'config' && (
-            <section className="glass-panel p-6">
+            <section className="glass-panel p-4 sm:p-6">
               <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                 <Settings2 size={20} className="text-slate-400" />
                 Intercom Configuration
@@ -1444,15 +1462,15 @@ const Admin = () => {
                 <div className="space-y-3">
                   <div className="glass-card p-4">
                     <p className="text-xs text-slate-400">Default TTS Engine</p>
-                    <p className="font-mono text-sm text-white">{intercomConfig.default_tts_engine || 'kokoro'}</p>
+                    <p className="font-mono text-sm text-white">{intercomConfig.default_tts_engine || 'Not set'}</p>
                   </div>
                   <div className="glass-card p-4">
                     <p className="text-xs text-slate-400">Default Voice</p>
-                    <p className="font-mono text-sm text-white">{intercomConfig.default_voice || 'af_heart'}</p>
+                    <p className="font-mono text-sm text-white">{intercomConfig.default_voice || 'Not set'}</p>
                   </div>
                   <div className="glass-card p-4">
                     <p className="text-xs text-slate-400">Default Volume</p>
-                    <p className="font-mono text-sm text-white">{intercomConfig.default_volume ?? 0.8}</p>
+                    <p className="font-mono text-sm text-white">{intercomConfig.default_volume ?? 'Not set'}</p>
                   </div>
                   <div className="glass-card p-4">
                     <p className="text-xs text-slate-400">ESPresense Routing</p>
@@ -1468,13 +1486,13 @@ const Admin = () => {
       )}
 
       {activeTab === 'raven' && (
-        <section className="glass-panel p-8 border-red-500/20">
+        <section className="glass-panel p-4 sm:p-8 border-red-500/20">
           <RavenOpsPanel />
         </section>
       )}
 
       {activeTab === 'hardware' && (
-        <section className="glass-panel p-8 border-emerald-500/20 space-y-6">
+        <section className="glass-panel p-4 sm:p-8 border-emerald-500/20 space-y-6">
           <div className="flex items-center gap-3">
             <Cpu size={24} className="text-emerald-400" />
             <div>
@@ -1497,15 +1515,15 @@ const Admin = () => {
       )}
 
       {activeTab === 'settings' && (
-        <section className="glass-panel p-8 border-purple-500/20 space-y-8">
-          <div className="glass-panel p-6 border border-white/10">
+        <section className="glass-panel p-4 sm:p-8 border-purple-500/20 space-y-8">
+          <div className="glass-panel p-4 sm:p-6 border border-white/10">
             <h3 className="flex items-center gap-3 text-xl font-bold text-white mb-6">
               <Globe size={20} className="text-blue-400" />
               DNS Management
             </h3>
             <DnsManagementPanel />
           </div>
-          <div className="glass-panel p-6 border border-white/10">
+          <div className="glass-panel p-4 sm:p-6 border border-white/10">
             <h3 className="flex items-center gap-3 text-xl font-bold text-white mb-6">
               <Code2 size={20} className="text-purple-400" />
               LLM Configuration
@@ -1519,7 +1537,7 @@ const Admin = () => {
         <div className="space-y-8">
           <AccountAuditPanel users={users.map((u) => u.username)} />
 
-          <div className="glass-panel p-6">
+          <div className="glass-panel p-4 sm:p-6">
             <div className="mb-6 flex items-center justify-between">
               <div>
                 <h3 className="flex items-center gap-3 text-xl font-bold text-white">
@@ -1528,24 +1546,24 @@ const Admin = () => {
                 </h3>
                 <p className="mt-1 text-sm text-slate-400">Seeded system settings with live writeback.</p>
               </div>
-              <HelpTooltip docName="architecture.md" sectionTitle="Global Error Handling" label="Settings" />
+              <HelpTooltip docName="CONFIG.md" sectionTitle="## Runtime settings" label="Settings" />
             </div>
 
             <div className="space-y-3">
               {settings
                 .filter((s) => !['assistant_model', 'coding_model', 'librarian_model'].includes(s.key))
                 .map((setting) => (
-                <div key={setting.key} className="glass-card p-4">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="font-mono text-sm text-white">{setting.key}</p>
+                <div key={setting.key} className="glass-card p-4 min-w-0">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="font-mono text-sm text-white break-all">{setting.key}</p>
                     <button
                       onClick={() => saveSettingMutation.mutate({
                         key: setting.key,
                         value: settingsDrafts[setting.key] ?? setting.value,
                       })}
-                      className="text-[10px] font-black uppercase tracking-widest text-cyan-300"
+                      className="min-h-11 px-2 shrink-0 text-[10px] font-black uppercase tracking-widest text-cyan-300"
                     >
-                      Save Setting
+                      Save
                     </button>
                   </div>
                   <input
@@ -1594,7 +1612,7 @@ const Admin = () => {
             </div>
           </div>
 
-          <div className="glass-panel p-6">
+          <div className="glass-panel p-4 sm:p-6">
             <h3 className="mb-6 text-xl font-bold text-white flex items-center gap-3">
               <Database size={20} className="text-purple-400" />
               Advanced Database Insights
@@ -1639,7 +1657,7 @@ const Admin = () => {
             </div>
           </div>
 
-          <div className="glass-panel p-6">
+          <div className="glass-panel p-4 sm:p-6">
             <h3 className="mb-2 text-xl font-bold text-white flex items-center gap-3">
               <Database size={20} className="text-orange-300" />
               Audit Trail
@@ -1669,8 +1687,8 @@ const Admin = () => {
 
       {activeTab === 'services' && (
         <section className="space-y-6">
-          <div className="glass-panel p-6">
-            <div className="mb-6 flex items-center justify-between">
+          <div className="glass-panel p-4 sm:p-6">
+            <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <h3 className="flex items-center gap-3 text-xl font-bold text-white">
                   <Server size={20} className="text-emerald-400" />
@@ -1679,9 +1697,12 @@ const Admin = () => {
                 <p className="mt-1 text-sm text-slate-400">Docker container status, image updates, and uptime metrics.</p>
               </div>
               <button
-                onClick={() => queryClient.invalidateQueries({ queryKey: ['system-health'] })}
+                onClick={() => {
+                  queryClient.invalidateQueries({ queryKey: ['system-health'] });
+                  queryClient.invalidateQueries({ queryKey: ['service-updates'] });
+                }}
                 disabled={isFetchingHealth}
-                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+                className="glass-button min-h-11 px-4 text-[10px] font-black uppercase tracking-widest self-start"
               >
                 <RefreshCcw size={14} className={isFetchingHealth ? 'animate-spin' : ''} />
                 Refresh
@@ -1723,13 +1744,13 @@ const Admin = () => {
                   </div>
                   <div className="rounded-2xl border border-orange-500/20 bg-orange-500/5 p-4">
                     <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">Updates</p>
-                    <p className="mt-1 text-2xl font-bold text-orange-400">{updatesData?.updates_available || 0}</p>
+                    <p className="mt-1 text-2xl font-bold text-orange-400">{!updatesData || updatesData.check_error ? '—' : updatesData.updates_available}</p>
                   </div>
                 </div>
 
                 <div className="mb-6 rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
                       <p className="text-xs font-black uppercase tracking-widest text-indigo-400">Control Plane</p>
                       <p className="mt-1 text-sm text-white font-mono">{systemHealth.control_plane.git_sha}</p>
                     </div>
@@ -1756,9 +1777,9 @@ const Admin = () => {
                    const pullStatus = isPulling ? pullStatusData : null;
 
                    return (
-                     <div key={service.name} className={`glass-card p-4 ${hasUpdate ? 'border-orange-500/30' : ''}`}>
-                       <div className="flex items-center justify-between gap-4">
-                         <div className="flex items-center gap-3">
+                     <div key={service.name} className={`glass-card p-4 min-w-0 ${hasUpdate ? 'border-orange-500/30' : ''}`}>
+                       <div className="flex items-start justify-between gap-3">
+                         <div className="flex items-center gap-3 min-w-0">
                            <div className={`rounded-full p-2 ${
                              service.status === 'running' ? 'bg-emerald-500/10' :
                              service.health_status === 'unhealthy' ? 'bg-red-500/10' :
@@ -1772,9 +1793,9 @@ const Admin = () => {
                                <PowerOff size={16} className="text-slate-400" />
                              )}
                            </div>
-                           <div>
-                             <div className="flex items-center gap-2">
-                               <p className="font-semibold text-white capitalize">{service.name.replace(/_/g, ' ')}</p>
+                           <div className="min-w-0">
+                             <div className="flex flex-wrap items-center gap-2">
+                               <p className="font-semibold text-white capitalize">{serviceKey.replace(/_/g, ' ')}</p>
                                {hasUpdate && !isPulling && (
                                  <span className="flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-orange-400">
                                    <ArrowUpCircle size={10} /> Update Available
@@ -1788,7 +1809,7 @@ const Admin = () => {
                                {!hasUpdate && !isPulling && checkError && checkError !== 'no_image_tag' && (
                                  <span
                                    className="flex items-center gap-1 rounded-full bg-slate-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-500"
-                                   title={`Update check failed: ${checkError}. Set GHCR_TOKEN or GITHUB_TOKEN in .env to enable registry checks.`}
+                                   title={checkError === 'registry_unreachable' ? 'The image registry could not be reached.' : `Update check failed: ${checkError}`}
                                  >
                                    Check Failed
                                  </span>
@@ -1802,15 +1823,15 @@ const Admin = () => {
                                  </span>
                                )}
                              </div>
-                             <p className="text-[10px] font-mono text-slate-500">{service.image}</p>
+                             <p className="text-[10px] font-mono text-slate-500 break-all">{service.image}</p>
                              {isPulling && pullStatus?.progress && (
-                               <p className="mt-1 max-w-[300px] truncate text-[10px] font-mono text-slate-400">
+                               <p className="mt-1 max-w-full truncate text-[10px] font-mono text-slate-400">
                                  {pullStatus.progress}
                                </p>
                              )}
                            </div>
                          </div>
-                         <div className="flex items-center gap-2">
+                         <div className="flex items-center gap-2 shrink-0">
                            <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${
                              service.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' :
                              service.health_status === 'unhealthy' ? 'bg-red-500/10 text-red-400' :
@@ -1820,8 +1841,8 @@ const Admin = () => {
                            </span>
                          </div>
                        </div>
-                       <div className="mt-3 flex items-center justify-between gap-4 border-t border-white/5 pt-3 text-xs text-slate-500">
-                         <div className="flex gap-4">
+                       <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-white/5 pt-3 text-xs text-slate-500">
+                         <div className="flex flex-wrap gap-x-4 gap-y-1">
                            <span>Uptime: {service.uptime || 'N/A'}</span>
                            {(service.restart_count ?? 0) > 0 && (
                              <span>Restarts: {service.restart_count ?? 0}</span>
@@ -1830,20 +1851,24 @@ const Admin = () => {
                              <span>Started: {new Date(service.started_at).toLocaleString()}</span>
                            )}
                          </div>
-                         <div className="flex gap-1 shrink-0">
+                         <div className="flex flex-wrap gap-2 sm:shrink-0">
                            {service.status === 'running' && (
                              <>
                                <button
-                                 onClick={() => restartServiceMutation.mutate(service.name)}
+                                 onClick={() => {
+                                   if (window.confirm(`Restart ${serviceKey}? It is unavailable for a few seconds${serviceKey === 'gateway' || serviceKey === 'caddy' ? ', and this app with it' : ''}.`)) {
+                                     restartServiceMutation.mutate(service.name);
+                                   }
+                                 }}
                                  disabled={restartServiceMutation.isPending}
-                                 className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest"
+                                 className="glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest"
                                >
                                  <RefreshCw size={12} /> Restart
                                </button>
                                {isPulling ? (
                                  <button
                                    disabled
-                                   className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest text-cyan-400"
+                                   className="glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest text-cyan-400"
                                  >
                                    <RefreshCw size={12} className="animate-spin" /> Pulling...
                                  </button>
@@ -1851,7 +1876,7 @@ const Admin = () => {
                                  <button
                                    onClick={() => pullImageMutation.mutate(service.name)}
                                    disabled={pullImageMutation.isPending || pullImageMutation.isPaused || checkError === 'no_image_tag'}
-                                   className={`glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest ${hasUpdate ? 'border-orange-500/50 text-orange-400' : ''} ${checkError === 'no_image_tag' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                   className={`glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest ${hasUpdate ? 'border-orange-500/50 text-orange-400' : ''} ${checkError === 'no_image_tag' ? 'opacity-50 cursor-not-allowed' : ''}`}
                                    title={checkError === 'no_image_tag' ? 'Cannot pull: container image has no tag. Rebuild with a tag and recreate.' : undefined}
                                  >
                                    <Cloud size={12} /> {hasUpdate ? 'Update' : 'Pull'}
@@ -1859,9 +1884,13 @@ const Admin = () => {
                                )}
                                 {showPullAndRestart && (
                                   <button
-                                    onClick={() => pullAndRestartMutation.mutate(service.name)}
+                                    onClick={() => {
+                                      if (window.confirm(`Download the latest ${serviceKey} image and restart it?`)) {
+                                        pullAndRestartMutation.mutate(service.name);
+                                      }
+                                    }}
                                     disabled={pullAndRestartMutation.isPending}
-                                    className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest border-indigo-500/50 text-indigo-400"
+                                    className="glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest border-indigo-500/50 text-indigo-400"
                                   >
                                     <ArrowUpCircle size={12} /> {pullAndRestartMutation.isPending ? 'Updating…' : 'Pull & Restart'}
                                   </button>

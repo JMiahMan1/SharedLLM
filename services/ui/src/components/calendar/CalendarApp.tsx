@@ -1,5 +1,5 @@
-import { useMemo, useState, useEffect } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useRef, useState, useEffect } from 'react';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import {
   Calendar as CalIcon,
@@ -30,6 +30,7 @@ const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.get
 const startOfWeek = (d: Date) => { const x = startOfDay(d); x.setDate(x.getDate() - x.getDay()); return x; }; // Sunday
 const startOfMonthGrid = (d: Date) => startOfWeek(new Date(d.getFullYear(), d.getMonth(), 1));
 const isAllDay = (e: CalendarEvent) => {
+  if (e.all_day !== undefined) return e.all_day;
   const s = new Date(e.start_time);
   const en = e.end_time ? new Date(e.end_time) : s;
   const sd = startOfDay(s);
@@ -300,7 +301,7 @@ const EventCard = ({ ev, size = 'md', onSelect, people }: { ev: CalendarEvent; s
       <button
         type="button"
         onClick={() => onSelect?.(ev)}
-        className={`relative w-full text-left overflow-hidden shadow-[0_1px_3px_rgba(72,60,38,0.07),0_10px_28px_-10px_rgba(72,60,38,0.16)] ${size === 'lg' ? 'rounded-2xl py-4 pr-4 pl-5' : 'rounded-xl py-2 pr-3 pl-4'}`}
+        className={`relative w-full min-w-0 text-left overflow-hidden shadow-[0_1px_3px_rgba(72,60,38,0.07),0_10px_28px_-10px_rgba(72,60,38,0.16)] ${size === 'lg' ? 'rounded-2xl py-3 pr-3 pl-4 sm:py-4 sm:pr-4 sm:pl-5' : 'rounded-xl py-2 pr-3 pl-4'}`}
         style={{ backgroundColor: 'var(--os-card)' }}
         title={calendarLabel(ev.calendar, people)}
       >
@@ -308,7 +309,7 @@ const EventCard = ({ ev, size = 'md', onSelect, people }: { ev: CalendarEvent; s
       <div className="flex items-center gap-1.5">
         <span className={`font-extrabold ${size === 'lg' ? 'text-base' : 'text-[13px]'}`} style={{ color }}>{formatTime(ev.start_time)}</span>
       </div>
-      <div className={`truncate font-bold ${size === 'lg' ? 'text-xl' : 'text-[15px]'}`} style={{ color: 'var(--os-ink)' }}>{ev.summary}</div>
+      <div className={`font-bold ${size === 'lg' ? 'line-clamp-2 text-base sm:text-xl' : 'truncate text-[15px]'}`} style={{ color: 'var(--os-ink)' }}>{ev.summary}</div>
       <div className="text-[11px] font-semibold" style={{ color }}>{calendarLabel(ev.calendar, people)}</div>
       {size === 'lg' && ev.location && (
         <div className="mt-1 flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--os-ink-soft)' }}>
@@ -320,25 +321,28 @@ const EventCard = ({ ev, size = 'md', onSelect, people }: { ev: CalendarEvent; s
   );
 };
 
-const EditEventModal = ({ event, onClose, people }: { event: CalendarEvent; onClose: () => void; people?: CalendarPerson[] }) => {
+const EditEventModal = ({ event, onClose, people, readOnly }: { event: CalendarEvent; onClose: () => void; people?: CalendarPerson[]; readOnly: boolean }) => {
   const queryClient = useQueryClient();
   const meta = integrationMeta(event.integration);
-  const isSkylight = (event.integration || '').toLowerCase() === 'skylight';
   const pad = (n: number) => String(n).padStart(2, '0');
   const d = new Date(event.start_time);
+  const initialStart = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   const [summary, setSummary] = useState(event.summary);
-  const [startInput, setStartInput] = useState(
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-  );
+  const [startInput, setStartInput] = useState(initialStart);
+  // Edit and delete act on this one event (Skylight id / Nextcloud UID); the
+  // title is only a fallback for an event that has no id.
+  const target = event.id ? { event_id: event.id } : { query: event.summary };
 
   const updateMut = useMutation({
     mutationFn: () =>
       api.updateCalendarEvent({
         action: 'update',
         integration: event.integration,
-        ...(isSkylight && event.id ? { event_id: event.id } : { query: event.summary }),
+        ...target,
         summary: summary.trim(),
-        start_time: startInput.trim(),
+        // An untouched time is not sent: re-saving it would turn an all-day
+        // event into a midnight appointment.
+        ...(startInput.trim() !== initialStart ? { start_time: startInput.trim() } : {}),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['calendar-app'] });
@@ -352,7 +356,7 @@ const EditEventModal = ({ event, onClose, people }: { event: CalendarEvent; onCl
       api.deleteCalendarEvent({
         action: 'delete',
         integration: event.integration,
-        ...(isSkylight && event.id ? { event_id: event.id } : { query: event.summary }),
+        ...target,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['calendar-app'] });
@@ -363,32 +367,46 @@ const EditEventModal = ({ event, onClose, people }: { event: CalendarEvent; onCl
   });
 
   return (
-    <Modal isOpen={true} onClose={onClose} title="Edit Event" size="md">
+    <Modal isOpen={true} onClose={onClose} title={readOnly ? 'Event' : 'Edit Event'} size="md">
       <div className="space-y-4">
         <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--os-ink-soft)' }}>
           <span className="h-3 w-3 rounded-full" style={{ backgroundColor: calendarColor(event.calendar, people) }} />
           {meta.label}
           <span className="font-semibold" style={{ color: calendarColor(event.calendar, people) }}>· {calendarLabel(event.calendar, people)}</span>
         </div>
+        {readOnly && (
+          <p className="rounded-xl px-3 py-2 text-xs" style={{ background: 'var(--os-paper-deep)', color: 'var(--os-ink-soft)' }}>
+            This calendar is a read-only subscription — change the event where it comes from.
+          </p>
+        )}
+        {event.recurring && !readOnly && (
+          <p className="text-xs" style={{ color: 'var(--os-ink-soft)' }}>Repeating event: changes and deletes apply to every repeat.</p>
+        )}
         <div>
-          <label className="mb-1 block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>Title</label>
+          <label htmlFor="event-title" className="mb-1 block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>Title</label>
           <input
+            id="event-title"
             value={summary}
+            readOnly={readOnly}
             onChange={(e) => setSummary(e.target.value)}
-            className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+            className="min-h-11 w-full rounded-xl border px-3 py-2 text-base outline-none sm:text-sm"
             style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }}
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>When</label>
+          <label htmlFor="event-when" className="mb-1 block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>When</label>
           <input
+            id="event-when"
             value={startInput}
+            readOnly={readOnly}
             onChange={(e) => setStartInput(e.target.value)}
             placeholder="YYYY-MM-DD HH:MM"
-            className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+            className="min-h-11 w-full rounded-xl border px-3 py-2 text-base outline-none sm:text-sm"
             style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }}
           />
-          <p className="mt-1 text-[11px]" style={{ color: 'var(--os-ink-faint)' }}>24-hour date/time. Leave as-is to keep the current time.</p>
+          {!readOnly && (
+            <p className="mt-1 text-[11px]" style={{ color: 'var(--os-ink-faint)' }}>24-hour date/time, or e.g. "Friday 3pm". The length stays the same.</p>
+          )}
         </div>
         {event.location && (
           <p className="flex items-center gap-1 text-sm" style={{ color: 'var(--os-ink-soft)' }}>
@@ -396,29 +414,34 @@ const EditEventModal = ({ event, onClose, people }: { event: CalendarEvent; onCl
           </p>
         )}
         <div className="flex items-center justify-between gap-2 pt-2">
-          <button
-            onClick={() => { if (window.confirm('Delete this event?')) deleteMut.mutate(); }}
-            className="rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[#fffdf8]"
-            style={{ background: '#dc2626' }}
-          >
-            Delete
-          </button>
+          {readOnly ? <span /> : (
+            <button
+              disabled={deleteMut.isPending}
+              onClick={() => { if (window.confirm(event.recurring ? 'Delete this event and all its repeats?' : 'Delete this event?')) deleteMut.mutate(); }}
+              className="min-h-11 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[#fffdf8] disabled:opacity-60"
+              style={{ background: '#dc2626' }}
+            >
+              Delete
+            </button>
+          )}
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="rounded-xl border px-4 py-2 text-xs font-bold"
+              className="min-h-11 rounded-xl border px-4 py-2 text-xs font-bold"
               style={{ borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}
             >
-              Cancel
+              {readOnly ? 'Close' : 'Cancel'}
             </button>
-            <button
-              disabled={!summary.trim()}
-              onClick={() => updateMut.mutate()}
-              className="rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[#fffdf8]"
-              style={{ background: 'var(--os-ember)' }}
-            >
-              Save
-            </button>
+            {!readOnly && (
+              <button
+                disabled={!summary.trim() || updateMut.isPending}
+                onClick={() => updateMut.mutate()}
+                className="min-h-11 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[#fffdf8] disabled:opacity-60"
+                style={{ background: 'var(--os-ember)' }}
+              >
+                Save
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -438,9 +461,37 @@ const CalendarApp = () => {
   const [startInput, setStartInput] = useState('');
   const [addIntegration, setAddIntegration] = useState('');
   const [editing, setEditing] = useState<CalendarEvent | null>(null);
-  const { data, isLoading, error, refetch } = useQuery<ExecutionResponse>({
-    queryKey: ['calendar-app'],
-    queryFn: () => api.getCalendarEvents(),
+  const addTitleRef = useRef<HTMLInputElement | null>(null);
+
+  // View range
+  const { rangeStart, rangeEnd, days } = useMemo(() => {
+    const f = focused;
+    if (view === 'day') {
+      const s = startOfDay(f);
+      return { rangeStart: s, rangeEnd: addDays(s, 1), days: [s] };
+    }
+    if (view === 'week') {
+      const s = startOfWeek(f);
+      return { rangeStart: s, rangeEnd: addDays(s, 7), days: Array.from({ length: 7 }, (_, i) => addDays(s, i)) };
+    }
+    if (view === 'month') {
+      const s = startOfMonthGrid(f);
+      const arr = Array.from({ length: 42 }, (_, i) => addDays(s, i));
+      return { rangeStart: s, rangeEnd: addDays(s, 42), days: arr };
+    }
+    // agenda: 60 days from focused
+    const s = startOfDay(f);
+    const arr = Array.from({ length: 60 }, (_, i) => addDays(s, i));
+    return { rangeStart: s, rangeEnd: addDays(s, 60), days: arr };
+  }, [view, focused]);
+
+  // Load exactly the days on screen: the server's default is only the next
+  // week, which left a month grid (or last month) empty.
+  const range = { start: ymd(rangeStart), end: ymd(rangeEnd) };
+  const { data, isLoading, error, refetch, isFetching } = useQuery<ExecutionResponse>({
+    queryKey: ['calendar-app', range.start, range.end],
+    queryFn: () => api.getCalendarEvents(undefined, undefined, range),
+    placeholderData: keepPreviousData,
     refetchInterval: (q) => {
       const integ = (q.state.data?.detail as CalendarDetail | undefined)?.integrations ?? [];
       const down = integ.filter((i) => i.enabled && i.available === false);
@@ -471,28 +522,6 @@ const CalendarApp = () => {
     () => [...new Set(allEvents.map((e) => e.calendar).filter(Boolean) as string[])],
     [allEvents]
   );
-
-  // View range
-  const { rangeStart, rangeEnd, days } = useMemo(() => {
-    const f = focused;
-    if (view === 'day') {
-      const s = startOfDay(f);
-      return { rangeStart: s, rangeEnd: addDays(s, 1), days: [s] };
-    }
-    if (view === 'week') {
-      const s = startOfWeek(f);
-      return { rangeStart: s, rangeEnd: addDays(s, 7), days: Array.from({ length: 7 }, (_, i) => addDays(s, i)) };
-    }
-    if (view === 'month') {
-      const s = startOfMonthGrid(f);
-      const arr = Array.from({ length: 42 }, (_, i) => addDays(s, i));
-      return { rangeStart: s, rangeEnd: addDays(s, 42), days: arr };
-    }
-    // agenda: 60 days from focused
-    const s = startOfDay(f);
-    const arr = Array.from({ length: 60 }, (_, i) => addDays(s, i));
-    return { rangeStart: s, rangeEnd: addDays(s, 60), days: arr };
-  }, [view, focused]);
 
   const byDay = useMemo(
     () => buildByDay(visibleEvents, rangeStart, rangeEnd),
@@ -543,6 +572,20 @@ const CalendarApp = () => {
     onError: (e: Error) => toast.error(e.message || 'Failed to add iCal feed'),
   });
 
+  const removeIcalMutation = useMutation({
+    mutationFn: (url: string) =>
+      api.updateCalendarSettings({ ical_urls: (settingsData?.settings?.ical_urls ?? []).filter((u) => u !== url) }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['calendar-settings'] }); queryClient.invalidateQueries({ queryKey: ['calendar-app'] }); toast.success('iCal feed removed'); },
+    onError: (e: Error) => toast.error(e.message || 'Failed to remove iCal feed'),
+  });
+
+  /** "Add something" on an empty day: start the add form on that day. */
+  const addOnFocusedDay = () => {
+    if (!startInput.trim()) setStartInput(`${ymd(focused)} 9:00`);
+    addTitleRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    addTitleRef.current?.focus();
+  };
+
   const savePeopleMutation = useMutation({
     mutationFn: (next: CalendarPerson[]) => api.updateCalendarSettings({ people: next }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['calendar-settings'] }); queryClient.invalidateQueries({ queryKey: ['calendar-app'] }); toast.success('People saved'); },
@@ -558,7 +601,8 @@ const CalendarApp = () => {
     <button
       key={key}
       onClick={() => setView(key)}
-      className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${view === key ? '' : 'hover:opacity-80'}`}
+      aria-pressed={view === key}
+      className={`min-h-10 min-w-0 flex-1 rounded-full px-1.5 text-xs font-bold transition sm:flex-none sm:px-4 ${view === key ? '' : 'hover:opacity-80'}`}
       style={view === key ? { background: 'var(--os-ember)', color: '#fffdf8' } : { color: 'var(--os-ink-soft)' }}
     >
       {label}
@@ -583,25 +627,27 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
           <CalIcon size={20} style={{ color: 'var(--os-ember)' }} />
           <h3 className="os-display text-2xl font-bold" style={{ color: 'var(--os-ink)' }}>Calendar</h3>
         </div>
-        <div className="flex items-center gap-1 rounded-full p-1" style={{ background: 'var(--os-paper-deep)' }}>
+        <div className="order-3 flex w-full items-center gap-1 rounded-full p-1 sm:order-none sm:w-auto" style={{ background: 'var(--os-paper-deep)' }} role="group" aria-label="Calendar view">
           {viewBtn('agenda', 'Agenda')}
           {viewBtn('day', 'Day')}
           {viewBtn('week', 'Week')}
           {viewBtn('month', 'Month')}
         </div>
-        <button onClick={() => setShowSources(!showSources)} className="rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-widest" style={{ background: 'var(--os-ember-soft)', color: 'var(--os-ember-deep)' }}>
-          <SettingsIcon size={14} className="inline mr-1" />Sources
-        </button>
-        <button onClick={() => refetch()} title="Refresh" className="rounded-full p-2" style={{ background: 'var(--os-paper-deep)', color: 'var(--os-ink-soft)' }}>
-          <RefreshIcon size={14} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowSources(!showSources)} aria-expanded={showSources} className="inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-[10px] font-black uppercase tracking-widest" style={{ background: 'var(--os-ember-soft)', color: 'var(--os-ember-deep)' }}>
+            <SettingsIcon size={14} />Sources
+          </button>
+          <button onClick={() => refetch()} title="Refresh" aria-label="Refresh calendar" className="flex h-11 w-11 items-center justify-center rounded-full" style={{ background: 'var(--os-paper-deep)', color: 'var(--os-ink-soft)' }}>
+            <RefreshIcon size={14} className={isFetching ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
 
       <div className="mb-4 flex items-center gap-2">
-        <button onClick={() => shift(-1)} className="os-card rounded-full p-2 transition hover:opacity-80" style={{ color: 'var(--os-ink-soft)' }}><ChevronLeft size={18} /></button>
-        <button onClick={goToday} className="rounded-full px-3 py-1 text-xs font-bold" style={{ background: 'var(--os-sun-soft)', color: 'var(--os-ember-deep)' }}>Today</button>
-        <button onClick={() => shift(1)} className="os-card rounded-full p-2 transition hover:opacity-80" style={{ color: 'var(--os-ink-soft)' }}><ChevronRight size={18} /></button>
-        <div className="ml-2 os-display text-lg font-semibold" style={{ color: 'var(--os-ink-soft)' }}>
+        <button onClick={() => shift(-1)} aria-label="Previous" className="os-card flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition hover:opacity-80" style={{ color: 'var(--os-ink-soft)' }}><ChevronLeft size={18} /></button>
+        <button onClick={goToday} className="min-h-11 shrink-0 rounded-full px-4 text-xs font-bold" style={{ background: 'var(--os-sun-soft)', color: 'var(--os-ember-deep)' }}>Today</button>
+        <button onClick={() => shift(1)} aria-label="Next" className="os-card flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition hover:opacity-80" style={{ color: 'var(--os-ink-soft)' }}><ChevronRight size={18} /></button>
+        <div className="ml-1 min-w-0 os-display text-lg font-semibold leading-tight" style={{ color: 'var(--os-ink-soft)' }}>
           {focused.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
         </div>
       </div>
@@ -614,7 +660,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
           </p>
           <div className="flex flex-wrap gap-2">
             {(detail.available_defaults ?? integrations.filter((i) => i.enabled).map((i) => i.type)).map((t) => (
-              <button key={t} onClick={() => setDefaultMutation.mutate(t)} className="rounded-full border px-3 py-1.5 text-xs font-bold" style={{ borderColor: 'var(--os-ember)', background: 'var(--os-ember-soft)', color: 'var(--os-ember-deep)' }}>
+              <button key={t} onClick={() => setDefaultMutation.mutate(t)} className="min-h-11 rounded-full border px-4 text-xs font-bold" style={{ borderColor: 'var(--os-ember)', background: 'var(--os-ember-soft)', color: 'var(--os-ember-deep)' }}>
                 {integrationMeta(t).label}
               </button>
             ))}
@@ -624,14 +670,14 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
 
       {/* Integration chips */}
       <div className="mb-5 flex flex-wrap gap-2">
-        <button onClick={() => setActiveIntegration('all')} className={`rounded-full border px-4 py-1.5 text-xs font-bold transition ${activeIntegration === 'all' ? '' : 'hover:opacity-80'}`} style={activeIntegration === 'all' ? { background: 'var(--os-ember)', borderColor: 'var(--os-ember)', color: '#fffdf8' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
+        <button onClick={() => setActiveIntegration('all')} className={`min-h-11 rounded-full border px-4 text-xs font-bold transition ${activeIntegration === 'all' ? '' : 'hover:opacity-80'}`} style={activeIntegration === 'all' ? { background: 'var(--os-ember)', borderColor: 'var(--os-ember)', color: '#fffdf8' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
           All
         </button>
         {integrations.filter((i) => i.enabled && i.provides_calendar).map((i) => {
           const meta = integrationMeta(i.type);
           const active = activeIntegration === i.type;
           return (
-            <button key={i.type} onClick={() => setActiveIntegration(i.type)} className="flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs font-bold transition" style={active ? { background: meta.color, borderColor: meta.color, color: textOn(meta.color) } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
+            <button key={i.type} onClick={() => setActiveIntegration(i.type)} className="flex min-h-11 items-center gap-2 rounded-full border px-4 text-xs font-bold transition" style={active ? { background: meta.color, borderColor: meta.color, color: textOn(meta.color) } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
               <span className="h-2 w-2 rounded-full" style={{ background: meta.color }} />
               {meta.label}
             </button>
@@ -649,10 +695,10 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
               if (evs.length === 0) return null;
               const isToday = key === todayKey;
               return (
-                <div key={key} className="flex gap-4 py-2">
-                  <button onClick={() => openDay(key)} className={`flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-2xl ${isToday ? '' : ''}`} style={isToday ? { ...todayNum, boxShadow: 'var(--os-shadow)' } : { background: 'var(--os-paper-deep)', color: 'var(--os-ink)' }}>
+                <div key={key} className="flex gap-2 py-2 sm:gap-4">
+                  <button onClick={() => openDay(key)} aria-label={`Open ${day.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`} className="flex h-16 w-14 shrink-0 flex-col items-center justify-center rounded-2xl sm:h-20 sm:w-20" style={isToday ? { ...todayNum, boxShadow: 'var(--os-shadow)' } : { background: 'var(--os-paper-deep)', color: 'var(--os-ink)' }}>
                     <span className={`text-xs font-extrabold uppercase ${isToday ? 'text-white/80' : 'text-[#a89f8d]'}`}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
-                    <span className="os-display text-3xl leading-none">{day.getDate()}</span>
+                    <span className="os-display text-2xl leading-none sm:text-3xl">{day.getDate()}</span>
                     <span className={`text-xs font-bold ${isToday ? 'text-white/80' : 'text-[#a89f8d]'}`}>{day.toLocaleDateString('en-US', { month: 'short' })}</span>
                   </button>
                   <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -677,7 +723,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
             {(byDay.get(ymd(focused)) ?? []).length === 0 && (
               <div className="mt-12 flex flex-col items-center gap-4 text-center">
                 <div className="os-display text-3xl" style={{ color: 'var(--os-ink-faint)' }}>A clear day</div>
-                <button onClick={() => setShowSources(true)} className="rounded-full px-5 py-2.5 text-sm font-bold text-[#fffdf8]" style={{ background: 'var(--os-ember)' }}><Plus size={16} className="inline mr-1" />Add something</button>
+                <button onClick={addOnFocusedDay} className="min-h-11 rounded-full px-5 py-2.5 text-sm font-bold text-[#fffdf8]" style={{ background: 'var(--os-ember)' }}><Plus size={16} className="inline mr-1" />Add something</button>
               </div>
             )}
           </div>
@@ -779,14 +825,14 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
       <div className="mt-6 rounded-2xl border p-4" style={{ background: 'var(--os-panel-bg)', borderColor: 'var(--os-line)' }}>
         <p className="mb-3 text-xs font-black uppercase tracking-widest" style={{ color: 'var(--os-ink-faint)' }}>Add Event</p>
         <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-          <input type="text" value={summary} onChange={(e) => setSummary(e.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="Event title" />
-          <input type="text" value={startInput} onChange={(e) => setStartInput(e.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="When (e.g. tomorrow at 2pm)" />
+          <input ref={addTitleRef} type="text" value={summary} onChange={(e) => setSummary(e.target.value)} aria-label="Event title" className="min-h-11 rounded-xl border px-3 py-2 text-base outline-none sm:text-sm" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="Event title" />
+          <input type="text" value={startInput} onChange={(e) => setStartInput(e.target.value)} aria-label="Event time" className="min-h-11 rounded-xl border px-3 py-2 text-base outline-none sm:text-sm" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="When (e.g. tomorrow at 2pm)" />
           <div className="flex gap-2">
-            <select aria-label="Target calendar" value={addIntegration} onChange={(e) => setAddIntegration(e.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }}>
+            <select aria-label="Target calendar" value={addIntegration} onChange={(e) => setAddIntegration(e.target.value)} className="min-h-11 min-w-0 flex-1 rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }}>
               <option value="">Default ({integrationMeta(detail?.default).label})</option>
               {writable.map((i) => <option key={i.type} value={i.type}>{integrationMeta(i.type).label}</option>)}
             </select>
-            <button onClick={() => { if (!summary.trim() || !startInput.trim()) { toast.error('Enter a title and time'); return; } addMutation.mutate(); }} className="shrink-0 rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-[#fffdf8]" style={{ background: 'var(--os-ember)' }}><Plus size={14} />Add</button>
+            <button disabled={addMutation.isPending} onClick={() => { if (!summary.trim() || !startInput.trim()) { toast.error('Enter a title and time'); return; } addMutation.mutate(); }} className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest text-[#fffdf8] disabled:opacity-60" style={{ background: 'var(--os-ember)' }}><Plus size={14} />Add</button>
           </div>
         </div>
       </div>
@@ -795,7 +841,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
         <div className="mt-6 rounded-2xl border p-4 space-y-4" style={{ background: 'var(--os-panel-bg)', borderColor: 'var(--os-line)' }}>
           <div className="flex items-center justify-between">
             <p className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>Connected Sources</p>
-            <button onClick={() => setShowSources(false)} className="p-1" style={{ color: 'var(--os-ink-soft)' }}><X size={16} /></button>
+            <button onClick={() => setShowSources(false)} aria-label="Close sources" className="flex h-11 w-11 items-center justify-center" style={{ color: 'var(--os-ink-soft)' }}><X size={16} /></button>
           </div>
           {integrations.map((i) => {
             const meta = integrationMeta(i.type);
@@ -811,7 +857,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
                     <p className="text-[10px]" style={{ color: isSoftDown ? 'var(--os-ink-faint)' : 'var(--os-ink-soft)' }}>{isDisabled ? 'Disabled' : i.writable ? 'Read & write' : 'Read-only'}{isSoftDown ? ' · no data, retrying' : isHardDown ? ' · retrying' : ''}</p>
                   </div>
                 </div>
-                <button onClick={() => toggleDisabledMutation.mutate(i.type)} className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[10px] font-bold transition`} style={isDisabled ? { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
+                <button onClick={() => toggleDisabledMutation.mutate(i.type)} className="flex min-h-11 items-center gap-1 rounded-full border px-4 text-[10px] font-bold transition" style={isDisabled ? { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
                   {isDisabled ? <Check size={12} /> : null}{isDisabled ? 'Enable' : 'Disable'}
                 </button>
               </div>
@@ -820,10 +866,15 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
           <div className="pt-2 border-t" style={{ borderColor: 'var(--os-line)' }}>
             <p className="mb-2 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>iCal Subscriptions</p>
             <div className="flex gap-2">
-              <input type="text" value={icalUrl} onChange={(e) => setIcalUrl(e.target.value)} className="flex-1 rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="https://example.com/feed.ics" />
-              <button onClick={() => { if (!icalUrl.trim()) { toast.error('Enter a .ics URL'); return; } addIcalMutation.mutate(icalUrl.trim()); }} className="rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[#fffdf8]" style={{ background: 'var(--os-ember)' }}><Plus size={12} />Add</button>
+              <input type="url" value={icalUrl} onChange={(e) => setIcalUrl(e.target.value)} aria-label="iCal feed URL" className="min-h-11 min-w-0 flex-1 rounded-xl border px-3 py-2 text-base outline-none sm:text-sm" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="https://example.com/feed.ics" />
+              <button onClick={() => { if (!icalUrl.trim()) { toast.error('Enter a .ics URL'); return; } addIcalMutation.mutate(icalUrl.trim()); }} className="inline-flex min-h-11 items-center gap-1 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest text-[#fffdf8]" style={{ background: 'var(--os-ember)' }}><Plus size={12} />Add</button>
             </div>
-            {(settingsData?.settings?.ical_urls ?? []).map((u) => <p key={u} className="mt-2 truncate text-[10px]" style={{ color: 'var(--os-ink-soft)' }}>{u}</p>)}
+            {(settingsData?.settings?.ical_urls ?? []).map((u) => (
+              <div key={u} className="mt-2 flex items-center gap-2">
+                <p className="min-w-0 flex-1 truncate text-xs" style={{ color: 'var(--os-ink-soft)' }}>{u}</p>
+                <button onClick={() => removeIcalMutation.mutate(u)} aria-label={`Remove ${u}`} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full" style={{ color: 'var(--os-ink-soft)' }}><X size={14} /></button>
+              </div>
+            ))}
           </div>
           <div className="border-t pt-4" style={{ borderColor: 'var(--os-line)' }}>
             <p className="mb-3 text-xs font-black uppercase tracking-widest" style={{ color: 'var(--os-ink-faint)' }}>People</p>
@@ -831,7 +882,14 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
           </div>
         </div>
       )}
-      {editing && <EditEventModal event={editing} onClose={() => setEditing(null)} people={people} />}
+      {editing && (
+        <EditEventModal
+          event={editing}
+          onClose={() => setEditing(null)}
+          people={people}
+          readOnly={!integrations.some((i) => i.type === editing.integration && i.writable)}
+        />
+      )}
     </section>
   );
 };

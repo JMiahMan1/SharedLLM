@@ -5,6 +5,27 @@ from services.execution.handlers import android_tv, media
 from services.execution.handlers import roku as roku_handler
 from services.execution.schemas import MediaTransportRequest, UserContext
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_ha_registry(monkeypatch):
+    """No test here may reach a real Home Assistant: the companion-remote
+    lookup (device registry template, then names) answers "unknown" unless a
+    test says otherwise, and its cache starts empty."""
+    from services.execution import ha_client
+
+    async def no_template(ha_url, ha_token, template):
+        return None
+
+    async def no_states(ha_url, ha_token):
+        return []
+
+    ha_client._REMOTE_CACHE.clear()
+    monkeypatch.setattr(ha_client, "_render_template", no_template)
+    monkeypatch.setattr(ha_client, "get_states", no_states)
+
+
 ANDROID_ATTRS = {"app_id": "com.google.android.youtube.tv", "supported_features": 0}
 ROKU_ATTRS = {"friendly_name": "Roku Living Room", "supported_features": 0}
 
@@ -289,3 +310,127 @@ async def test_unjoin_uses_media_player_service(monkeypatch):
         "entity_id": "media_player.office_tv",
         "data": None,
     }]
+
+
+# ── Remote page: d-pad keys and power ────────────────────────────────────────
+
+from pydantic import ValidationError  # noqa: E402
+
+
+@pytest.mark.parametrize("key, atv", [
+    ("up", "DPAD_UP"), ("down", "DPAD_DOWN"), ("left", "DPAD_LEFT"),
+    ("right", "DPAD_RIGHT"), ("select", "DPAD_CENTER"), ("menu", "MENU"),
+])
+async def test_android_dpad_keys_are_real_remote_keys(monkeypatch, key, atv):
+    """The Remote page's arrows used to all send "home"; each key must reach the TV."""
+    calls = []
+    states = {"media_player.office_tv": _state("media_player.office_tv", dict(ANDROID_ATTRS))}
+    _patch_ha(monkeypatch, states, calls)
+
+    result = await media.handle_media_transport(_request("office_tv", key))
+
+    assert result.status == "SUCCESS"
+    assert calls == [{
+        "domain": "remote",
+        "service": "send_command",
+        "entity_id": "remote.office_tv",
+        "data": {"command": [atv]},
+    }]
+
+
+async def test_roku_select_key(monkeypatch):
+    calls = []
+    states = {"media_player.roku_living_room": _state("media_player.roku_living_room", dict(ROKU_ATTRS), state="idle")}
+    _patch_ha(monkeypatch, states, calls)
+
+    result = await media.handle_media_transport(_request("roku_living_room", "select"))
+
+    assert result.status == "SUCCESS"
+    assert calls[0]["data"] == {"command": ["select"]}
+
+
+@pytest.mark.parametrize("command, service", [("power_on", "turn_on"), ("power_off", "turn_off")])
+async def test_power_uses_turn_on_off_when_advertised(monkeypatch, command, service):
+    """TURN_ON (128) / TURN_OFF (256) beat a brand POWER toggle, which can't tell on from off."""
+    calls = []
+    attrs = {"app_id": "com.google.android.youtube.tv", "supported_features": 128 | 256}
+    states = {"media_player.office_tv": _state("media_player.office_tv", attrs)}
+    _patch_ha(monkeypatch, states, calls)
+
+    result = await media.handle_media_transport(_request("office_tv", command))
+
+    assert result.status == "SUCCESS"
+    assert calls == [{
+        "domain": "media_player",
+        "service": service,
+        "entity_id": "media_player.office_tv",
+        "data": None,
+    }]
+
+
+async def test_generic_power_off_calls_a_real_ha_service(monkeypatch):
+    """There is no media_player.power_off service; a plain player gets turn_off."""
+    calls = []
+    states = {"media_player.kitchen": _state("media_player.kitchen", {"supported_features": 0}, state="playing")}
+    _patch_ha(monkeypatch, states, calls)
+
+    await media.handle_media_transport(_request("kitchen", "power_off"))
+
+    assert calls[0]["domain"] == "media_player"
+    assert calls[0]["service"] == "turn_off"
+
+
+def test_unknown_transport_command_is_rejected():
+    with pytest.raises(ValidationError):
+        _request("office_tv", "unmute")
+
+
+async def test_remote_keys_go_to_the_device_registry_companion(monkeypatch):
+    """Live: media_player.office_tv is driven by remote.office_tv_remote. HA says
+    "ok" to a call on a remote that does not exist, so a guessed name failed silently."""
+    from services.execution import ha_client
+
+    templates = []
+
+    async def registry(ha_url, ha_token, template):
+        templates.append(template)
+        return "remote.office_tv_remote"
+
+    monkeypatch.setattr(ha_client, "_render_template", registry)
+    calls = []
+    states = {"media_player.office_tv": _state("media_player.office_tv", dict(ANDROID_ATTRS))}
+    _patch_ha(monkeypatch, states, calls)
+
+    await media.handle_media_transport(_request("office_tv", "up"))
+    await media.handle_media_transport(_request("office_tv", "down"))
+
+    assert [c["entity_id"] for c in calls] == ["remote.office_tv_remote", "remote.office_tv_remote"]
+    assert "device_id('media_player.office_tv')" in templates[0]
+    assert len(templates) == 1  # cached: one lookup, not one per key press
+
+
+async def test_companion_remote_falls_back_to_a_matching_name(monkeypatch):
+    from services.execution import ha_client
+
+    async def states(ha_url, ha_token):
+        return [
+            _state("media_player.gracies_tv", {"friendly_name": "Gracies TV"}),
+            _state("remote.28_tcl_roku_tv", {"friendly_name": "Gracies TV Roku"}),
+        ]
+
+    monkeypatch.setattr(ha_client, "get_states", states)
+    assert await ha_client.find_companion_remote("http://ha.test", "t", "media_player.gracies_tv") == "remote.28_tcl_roku_tv"
+
+
+async def test_companion_remote_never_templates_an_unsafe_entity_id(monkeypatch):
+    from services.execution import ha_client
+
+    seen = []
+
+    async def registry(ha_url, ha_token, template):
+        seen.append(template)
+        return ""
+
+    monkeypatch.setattr(ha_client, "_render_template", registry)
+    await ha_client.find_companion_remote("http://ha.test", "t", "media_player.x') }}{{ states")
+    assert seen == []

@@ -1,6 +1,7 @@
 # services/execution/handlers/note.py
 import logging
 import os
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -14,6 +15,27 @@ log = logging.getLogger("execution.note")
 
 DEFAULT_NOTES_DIRS = ["Notes"]
 LOCAL_NOTES_ROOT = _LOCAL_NOTES_ROOT or "/app/data/notes"
+
+#: The header create/write put on a note: "# <title>", "Category: <dir>", blank.
+_STORED_HEADER = re.compile(r"\A[ \t]*\n*# [^\n]*\nCategory: [^\n]*\n(?:[ \t]*\n)?")
+
+
+def note_body(content: str | None) -> str:
+    """A note's text without the stored header(s).
+
+    ``read`` returns the whole file, header included, so an editor that saved
+    what it was given wrote the header again on top of itself every time.
+    Stripping it here (repeatedly, which also heals notes already stacked
+    with copies) makes ``write`` idempotent whatever the caller sends.
+    """
+    text = content or ""
+    while (m := _STORED_HEADER.match(text)):
+        text = text[m.end():]
+    return text
+
+
+def _with_header(title: str | None, category: str | None, content: str | None) -> str:
+    return f"# {title}\nCategory: {category}\n\n{note_body(content)}"
 
 async def handle_note(req: NoteRequest) -> ExecutionResult:
     storage_mode = getattr(req, "storage", "nextcloud")
@@ -106,7 +128,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             file_title = provider.sanitize_filename(req.title or "untitled", "note")
             filename = f"{file_title}.md"
             url = provider.file_url(f"{req.category or 'Notes'}/{filename}")
-            content = f"# {req.title}\nCategory: {req.category}\n\n{req.content or ''}"
+            content = _with_header(req.title, req.category, req.content)
             resp = await http_request("PUT", url, data=content.encode('utf-8'), auth=(provider.username, provider.password), verify=False)
             if resp["status_code"] in [200, 201, 204]:
                 # The path comes back so a caller that wants to point at this
@@ -155,7 +177,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             else:
                 file_title = provider.sanitize_filename(req.title or "untitled", "note")
                 url = provider.file_url(f"{category}/{file_title}.md")
-            content = f"# {req.title}\nCategory: {category}\n\n{req.content or ''}"
+            content = _with_header(req.title, category, req.content)
             resp = await http_request(
                 "PUT", url, data=content.encode('utf-8'),
                 auth=(provider.username, provider.password), verify=False,

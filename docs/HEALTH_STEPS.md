@@ -13,8 +13,13 @@
    cadence (`ensureStepSyncTimer`). Daily steps are also piggybacked on
    location updates, and a midnight timer re-baselines the count.
 3. **Geo storage** — `services/geo/main.py` writes a Redis hash
-   `geo:steps:{user}` (field = local day, value = max seen), with a 30-day
-   read window and `America/Phoenix` day boundaries.
+   `geo:steps:{user}` (field = local day, value = max seen) with
+   `APP_TIMEZONE` day boundaries. Reads are cut to the requested window
+   (`days=N` returns only the last N local days, however sparse).
+4. **Health reports** — the telemetry service's scheduled `health` reports
+   read `/steps` and `/workouts`; only workouts that started inside the
+   report's window count. No schedules existed on the server on 2026-10-15
+   (Settings → Reports creates them).
 
 ## Endpoints
 
@@ -73,12 +78,15 @@ closes on selection, backdrop tap or Escape.
 
 ## Known gaps
 
-- **No background step sync.** A location foreground service now exists
-  (`LocationTrackingService`, resumed after reboot/update by `BootReceiver`),
-  but steps are not uploaded from it: while the app is suspended the native
-  counter still advances (SharedPreferences) and the server is only updated
-  when the app runs again. Uploading steps from the foreground service (or a
-  WorkManager job) is the next step.
+- **Background step sync rides on location sharing.** With Steps on, the
+  app starts `LocationTrackingService` with `steps: true`; on start and on
+  every heartbeat (5 min, ~10 min in Doze) it takes one pedometer reading
+  through `StepCounterPlugin.recordReading` (same ledger and day/hour rules
+  as the app) and sends the day's count as `daily_steps` with its location
+  uploads — only when the reading and the fix are from the same local day.
+  Steps keep syncing with the app closed, and the regular readings keep the
+  midnight credit window satisfied. With location sharing off, steps still
+  sync only while the app runs.
 - Distance is an estimate from stride length, not GPS.
 - Health Connect (`ACTIVITY_RECOGNITION` runtime grant) is still pending.
 
@@ -112,7 +120,7 @@ went a whole day without a reading (app never opened, so the plugin never
 polled), every step from that missing day landed on today — which is exactly
 the "it didn't reset at midnight" report: a missing 2026-09-25 bucket and an
 inflated 2026-09-26 total. Steps taken during a long gap are now dropped rather
-than misattributed; keeping them would require a background service (see gaps).
+than misattributed; the location service's regular readings (see gaps) now keep that window met while sharing is on.
 
 **Server (`_record_daily_steps`).** The day is derived from the reading's own
 `timestamp` (not arrival time), and each day keeps the **max** value seen, so a

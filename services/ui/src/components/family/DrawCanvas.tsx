@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, Eraser, Loader2, Sparkles, Wand2 } from 'lucide-react';
+import { Download, Eraser, Loader2, Undo2, Wand2 } from 'lucide-react';
 import { api } from '../../services/api';
+import SendToChat from '../chat/SendToChat';
 import { canvasPoint, type Point } from './canvasPoint';
 
 const COLORS = ['#1e293b', '#dc2626', '#2563eb', '#16a34a', '#9333ea', '#ea580c'];
@@ -14,7 +15,7 @@ const WIDTHS = [3, 6, 12];
  * device that already has to download an APK, and the same component can be
  * swapped for Excalidraw later without changing who calls it.
  */
-export default function DrawCanvas({ onSend }: { onSend?: (dataUrl: string) => void }) {
+export default function DrawCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawing = useRef(false);
   const last = useRef<Point | null>(null);
@@ -148,7 +149,8 @@ export default function DrawCanvas({ onSend }: { onSend?: (dataUrl: string) => v
 
   return (
     <div className="glass-panel p-4 rounded-2xl border border-white/5 space-y-3" data-testid="draw-canvas">
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Two rows that fit a phone: colours, then brush sizes and tools. */}
+      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Colour">
         {COLORS.map((c) => (
           <button
             key={c}
@@ -156,10 +158,16 @@ export default function DrawCanvas({ onSend }: { onSend?: (dataUrl: string) => v
             aria-label={`Colour ${c}`}
             aria-pressed={color === c}
             onClick={() => setColor(c)}
-            className={`h-8 w-8 rounded-full border-2 ${color === c ? 'border-white' : 'border-white/20'}`}
-            style={{ background: c }}
-          />
+            className="flex h-11 w-11 items-center justify-center"
+          >
+            <span
+              className={`h-9 w-9 rounded-full border-2 ${color === c ? 'border-white' : 'border-white/20'}`}
+              style={{ background: c }}
+            />
+          </button>
         ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
         {WIDTHS.map((w) => (
           <button
             key={w}
@@ -167,19 +175,20 @@ export default function DrawCanvas({ onSend }: { onSend?: (dataUrl: string) => v
             aria-label={`Brush ${w}`}
             aria-pressed={width === w}
             onClick={() => setWidth(w)}
-            className={`glass-button min-h-8 px-2 text-[11px] ${width === w ? 'border-purple-400/50 text-purple-200' : ''}`}
+            className={`glass-button flex h-11 w-11 items-center justify-center p-0 ${width === w ? 'border-purple-400/50' : ''}`}
           >
-            {w}px
+            <span className="rounded-full bg-slate-200" style={{ width: w + 2, height: w + 2 }} />
           </button>
         ))}
-        <button type="button" onClick={clear} className="glass-button min-h-8 px-2 text-[11px]" aria-label="Clear">
-          <Eraser size={12} /> Clear
+        <span className="mx-1 h-6 w-px bg-white/10" aria-hidden />
+        <button type="button" onClick={undo} className="glass-button flex h-11 w-11 items-center justify-center p-0" aria-label="Undo" title="Undo">
+          <Undo2 size={16} />
         </button>
-        <button type="button" onClick={undo} className="glass-button min-h-8 px-2 text-[11px]" aria-label="Undo">
-          Undo
+        <button type="button" onClick={clear} className="glass-button flex h-11 w-11 items-center justify-center p-0" aria-label="Clear" title="Clear">
+          <Eraser size={16} />
         </button>
-        <button type="button" onClick={download} className="glass-button min-h-8 px-2 text-[11px]" aria-label="Download">
-          <Download size={12} />
+        <button type="button" onClick={download} className="glass-button flex h-11 w-11 items-center justify-center p-0" aria-label="Download" title="Download">
+          <Download size={16} />
         </button>
       </div>
 
@@ -205,15 +214,7 @@ export default function DrawCanvas({ onSend }: { onSend?: (dataUrl: string) => v
         >
           {improving ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />} Make it way better
         </button>
-        {onSend && (
-          <button
-            type="button"
-            onClick={() => onSend(toPng())}
-            className="glass-button min-h-11 px-3 py-2 text-sm"
-          >
-            <Sparkles size={14} /> Send to chat
-          </button>
-        )}
+        <SendToChat getDataUrl={() => (isBlank() ? '' : toPng())} fileName="drawing.png" emptyMessage="Draw something first" />
         {error && (
           <span className="text-xs text-rose-300" role="alert">
             {error}
@@ -225,6 +226,7 @@ export default function DrawCanvas({ onSend }: { onSend?: (dataUrl: string) => v
         <div className="space-y-1" data-testid="draw-result">
           <p className="text-[11px] uppercase tracking-wider text-slate-500">Jarvis improved it</p>
           <img src={result} alt="Improved drawing" className="w-full max-w-md rounded-xl border border-white/10" />
+          <SendToChat getDataUrl={() => result} fileName="drawing-improved.png" label="Send this one" />
         </div>
       )}
     </div>

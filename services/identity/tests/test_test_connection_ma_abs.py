@@ -183,3 +183,23 @@ def test_github_requires_token(test_client):
     data = _test(test_client, "GitHub", {})
     assert data["status"] == "ERROR"
     assert "token" in data["message"].lower()
+
+
+# ── Testing an already-saved integration ─────────────────────────────────────
+
+def test_blank_secret_is_tested_with_the_saved_one(test_client, monkeypatch):
+    """Saved secrets never reach the browser, so Manage -> Test sends the token
+    blank; the test must use the caller's saved token, not fail."""
+    from services.identity.crypto import encrypt
+
+    with Session(identity_main.engine) as session:
+        user = session.exec(select(User).where(User.username == "default")).first()
+        user.ha_token_enc = encrypt("saved-ha-token")
+        session.add(user)
+        session.commit()
+    calls = _patch_client(monkeypatch, 200, payload={})
+
+    data = _test(test_client, "Home Assistant", {"ha_url": "http://ha:8123", "ha_token": ""})
+
+    assert data["status"] == "SUCCESS"
+    assert calls[0]["headers"]["Authorization"] == "Bearer saved-ha-token"

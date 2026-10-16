@@ -1,4 +1,4 @@
-import { useState, FC, ReactNode } from 'react';
+import { useState, FC } from 'react';
 import { 
   Cloud, 
   Music, 
@@ -22,7 +22,8 @@ import {
   Calendar,
   Shield,
   ListMusic,
-  Watch
+  Watch,
+  Copy
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -39,39 +40,29 @@ import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel'
 import VoiceSignaturePanel from '../components/settings/VoiceSignaturePanel';
 import UserAvatar from '../components/UserAvatar';
 import AvatarPicker from '../components/AvatarPicker';
+import Modal from '../components/ui/Modal';
 
-interface ModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  title?: string;
-  children: ReactNode;
-}
+// Tailwind only ships classes it can see whole in the source, so the tile
+// tints are spelled out rather than built from `bg-${color}-500/20`.
+const TILE_TINT = {
+  blue: 'bg-blue-500/20 text-blue-400',
+  emerald: 'bg-emerald-500/20 text-emerald-400',
+  amber: 'bg-amber-500/20 text-amber-400',
+  fuchsia: 'bg-fuchsia-500/20 text-fuchsia-400',
+  rose: 'bg-rose-500/20 text-rose-400',
+  slate: 'bg-slate-500/20 text-slate-300',
+  purple: 'bg-purple-500/20 text-purple-400',
+} as const;
 
-const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-      <div className="glass-panel w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/5">
-          <h3 className="text-xl font-bold text-white">{title}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
-            <X size={24} />
-          </button>
-        </div>
-        <div className="p-6 overflow-y-auto flex-1">
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-};
+/** Services Identity's /api/auth/test-connection can actually check. */
+const TESTABLE = new Set(['Home Assistant', 'Nextcloud', 'GitHub', 'GitLab', 'Audiobookshelf', 'Music Assistant']);
 
 const NO_SERVICE_DEFAULTS = { urls: {} as Record<string, string | null>, source: {} as Record<string, string> };
 
 interface IntegrationTileProps {
   name: string;
   icon: LucideIcon;
-  color: string;
+  color: keyof typeof TILE_TINT;
   configKeys: Record<string, string>;
   /** Fields that are arrays of strings, rendered as chip inputs */
   listKeys?: Record<string, string>;  // label -> field_key
@@ -193,20 +184,22 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
 
   return (
     <>
-      <div className="glass-panel p-6 flex flex-col items-center text-center gap-4 group hover:border-purple-500/30 transition-all duration-500 hover:shadow-2xl hover:shadow-purple-500/10">
-        <div className={`p-4 rounded-2xl bg-${color}-500/20 text-${color}-400 group-hover:scale-110 transition-transform duration-500`}>
-          <Icon size={32} />
+      {/* A compact row on phones (nine full-height cards were a 3000px
+          scroll), the original card from md up. */}
+      <div className="glass-panel p-4 md:p-6 flex flex-row md:flex-col items-center text-left md:text-center gap-3 md:gap-4 group hover:border-purple-500/30 transition-all duration-500 hover:shadow-2xl hover:shadow-purple-500/10">
+        <div className={`p-3 md:p-4 rounded-2xl shrink-0 ${TILE_TINT[color]} group-hover:scale-110 transition-transform duration-500`}>
+          <Icon className="w-6 h-6 md:w-8 md:h-8" />
         </div>
-        <div>
+        <div className="flex-1 md:flex-none min-w-0">
           <h3 className="font-bold text-white">{name}</h3>
-          <p className="text-[10px] text-slate-500 mt-1 truncate max-w-[150px] font-mono" data-testid={`integration-status-${name}`}>
+          <p className="text-[10px] text-slate-500 mt-1 truncate md:max-w-[150px] font-mono" data-testid={`integration-status-${name}`}>
             {statusLine}
           </p>
         </div>
-        <button onClick={handleOpen} aria-label={`${isConnected || sharedSkylight ? 'Manage' : 'Connect'} ${name}`} className="glass-button w-full text-[10px] uppercase font-bold tracking-widest mt-2 py-2">
-          {sharedSkylight ? (skylightStatus === 'not_set_up' ? 'Details' : 'Turn on or off') : isConnected ? 'Manage Integration' : 'Connect Service'}
+        <button onClick={handleOpen} aria-label={`${isConnected || sharedSkylight ? 'Manage' : 'Connect'} ${name}`} className="glass-button shrink-0 md:w-full text-[10px] uppercase font-bold tracking-widest md:mt-2 min-h-11 px-3">
+          {sharedSkylight ? (skylightStatus === 'not_set_up' ? 'Details' : 'Turn on or off') : isConnected ? 'Manage' : 'Connect'}
         </button>
-        <div className="flex items-center gap-2 mt-2">
+        <div className="hidden md:flex items-center gap-2 mt-2">
           <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-slate-600'}`} />
           <span className="text-[9px] uppercase font-black tracking-tighter text-slate-500">
             {sharedSkylight ? (isConnected ? 'Connected' : 'Not Connected') : isConnected ? 'Linked' : 'Not Linked'}
@@ -214,13 +207,13 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
         </div>
       </div>
 
-      <Modal isOpen={isOpen} onClose={() => setIsOpen(false)} title={`Secure Vault: ${name}`}>
+      <Modal isOpen={isOpen} onClose={() => setIsOpen(false)} title={name}>
         <div className="space-y-6">
           <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex gap-4">
              <LockKeyhole className="text-indigo-400 shrink-0" size={24} />
              <div className="text-xs text-slate-300 leading-relaxed">
-               <p className="font-bold text-white mb-1">Identity Encryption Active</p>
-               All credentials are encrypted at rest using AES-256 Fernet. They are only decrypted in-memory during service orchestration.
+               <p className="font-bold text-white mb-1">Stored encrypted</p>
+               Passwords and tokens are encrypted at rest (Fernet) and never sent back to the browser; a saved one shows as Saved. Leave it blank to keep it.
              </div>
           </div>
 
@@ -243,7 +236,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                 <div key={key}>
                   <div className="flex items-center mb-2">
                     <label className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</label>
-                    <HelpTooltip docName="integrations.md" sectionTitle={name} label={label} />
+                    <HelpTooltip docName="INTEGRATIONS.md" sectionTitle={name} label={label} />
                   </div>
                   {isSecret ? (
                     <SecretInput
@@ -317,7 +310,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
               <div key={key} className="space-y-2">
                 <div className="flex items-center mb-2">
                   <label className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</label>
-                  <HelpTooltip docName="integrations.md" sectionTitle={name} label={label} />
+                  <HelpTooltip docName="INTEGRATIONS.md" sectionTitle={name} label={label} />
                 </div>
                 {/* Chip display */}
                 <div className="flex flex-wrap gap-2 min-h-[32px] p-2 glass-input rounded-xl bg-black/20">
@@ -326,10 +319,11 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                       {chip}
                       <button
                         type="button"
+                        aria-label={`Remove ${chip}`}
                         onClick={() => setListForm(lf => ({ ...lf, [key]: lf[key].filter(c => c !== chip) }))}
-                        className="text-purple-400 hover:text-red-400 transition-colors ml-0.5"
+                        className="text-purple-400 hover:text-red-400 transition-colors ml-0.5 p-1 -m-1"
                       >
-                        <X size={10} />
+                        <X size={12} />
                       </button>
                     </span>
                   ))}
@@ -376,14 +370,14 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
           )}
 
           <div className="flex gap-3 pt-4">
-            {!(name === 'Skylight' && !userData?.is_system_default) && (
+            {TESTABLE.has(name) && (
               <button 
                 onClick={handleTest}
                 disabled={isTesting}
                 className="glass-button px-6 py-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
               >
                 <RefreshCcw size={16} className={isTesting ? 'animate-spin' : ''} />
-                {isTesting ? 'Verifying...' : 'Test Sync'}
+                {isTesting ? 'Testing...' : 'Test'}
               </button>
             )}
             <button 
@@ -410,7 +404,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
               className="glass-button flex-1 py-3 bg-purple-600/40 border-purple-500/30 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
             >
               <Save size={18} />
-              {updateMutation.isPending ? 'Syncing Vault...' : 'Commit Changes'}
+              {updateMutation.isPending ? 'Saving...' : 'Save'}
             </button>
           </div>
           {missingList.length > 0 && (
@@ -419,21 +413,21 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
           {isConnected && !(name === 'Skylight' && !userData?.is_system_default) && (
             <div className="border-t border-white/5 pt-3">
               {confirmDisconnect ? (
-                <div className="flex items-center gap-3 text-xs text-rose-200" role="alert">
+                <div className="flex flex-wrap items-center gap-3 text-xs text-rose-200" role="alert">
                   Remove your {name} login from Jarvis?
                   <button
                     type="button"
-                    className="font-semibold underline"
+                    className="font-semibold underline min-h-11 px-2"
                     onClick={() => updateMutation.mutate({ clear_fields: fieldKeys.filter((k) => k !== 'skylight_enabled') } as Partial<UserProfile>)}
                   >
                     Remove
                   </button>
-                  <button type="button" className="text-slate-300" onClick={() => setConfirmDisconnect(false)}>
+                  <button type="button" className="text-slate-300 min-h-11 px-2" onClick={() => setConfirmDisconnect(false)}>
                     Cancel
                   </button>
                 </div>
               ) : (
-                <button type="button" className="text-xs text-rose-300 hover:underline" onClick={() => setConfirmDisconnect(true)}>
+                <button type="button" className="text-xs text-rose-300 hover:underline min-h-11" onClick={() => setConfirmDisconnect(true)}>
                   Disconnect {name}
                 </button>
               )}
@@ -462,38 +456,132 @@ const APIKeyRows = () => {
     onError: () => toast.error('Revocation failed')
   });
 
+  const [confirmRevoke, setConfirmRevoke] = useState<string | number | null>(null);
   const isAdmin = user?.is_admin || false;
   const hasKeys = keys?.length;
 
-  if (isLoading) return <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500 animate-pulse">Scanning Vault...</td></tr>;
-  if (!hasKeys) return <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500 italic">No active external keys found.</td></tr>;
+  if (isLoading) return <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500 animate-pulse">Loading keys…</td></tr>;
+  if (!hasKeys) return <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500 italic">No API keys yet.</td></tr>;
 
   return (
     <>
       {keys?.map((k) => (
         <tr key={k.id} className="group hover:bg-white/5 transition-colors">
-           <td className="px-6 py-4">
-              <div className="flex items-center gap-3">
-                 <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400"><Smartphone size={14} /></div>
-                 <span className="font-bold text-white tracking-tight">{k.label}</span>
+           <td className="px-4 md:px-6 py-4">
+              <div className="flex items-center gap-3 min-w-0">
+                 <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 shrink-0"><Smartphone size={14} /></div>
+                 <div className="min-w-0">
+                   <span className="block font-bold text-white tracking-tight break-words">{k.label}</span>
+                   {/* Phones: the prefix column is hidden, so show it here. */}
+                   <span className="sm:hidden block font-mono text-slate-500 text-[10px]">••••{k.prefix}</span>
+                 </div>
               </div>
            </td>
-           <td className="px-6 py-4 font-mono text-slate-500 text-[10px]">sk-jarvis-••••{k.prefix}</td>
-           <td className="px-6 py-4">
+           <td className="hidden sm:table-cell px-6 py-4 font-mono text-slate-500 text-[10px]">sk-jarvis-••••{k.prefix}</td>
+           <td className="hidden sm:table-cell px-6 py-4">
               <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${isAdmin ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
                 {isAdmin ? `Owner: ${k.owner_username}` : 'Active'}
               </span>
            </td>
-           <td className="px-6 py-4 text-right">
-              <button 
-                onClick={() => confirm(`Permanently revoke access for ${k.label}?`) && revokeMutation.mutate(k.id)}
-                className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
-              >
-                 <Trash2 size={16} />
-              </button>
+           <td className="px-4 md:px-6 py-4 text-right">
+              {confirmRevoke === k.id ? (
+                <span className="inline-flex items-center gap-1">
+                  <button
+                    onClick={() => { revokeMutation.mutate(k.id); setConfirmRevoke(null); }}
+                    className="min-h-11 px-3 rounded-lg text-[10px] font-bold uppercase tracking-widest text-red-300 bg-red-500/10 border border-red-500/30"
+                  >
+                    Revoke
+                  </button>
+                  <button onClick={() => setConfirmRevoke(null)} className="min-h-11 px-2 text-[10px] text-slate-400">
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  onClick={() => setConfirmRevoke(k.id)}
+                  aria-label={`Revoke ${k.label}`}
+                  className="inline-flex items-center justify-center w-11 h-11 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+                >
+                   <Trash2 size={16} />
+                </button>
+              )}
            </td>
         </tr>
       ))}
+    </>
+  );
+};
+
+/**
+ * New-key flow: a label field, then the key shown once with a copy button.
+ * It used window.prompt() for both, which on the Android app is a bare
+ * WebView dialog and on desktop offered no way to see the key if the
+ * clipboard write was refused.
+ */
+const NewApiKey = () => {
+  const queryClient = useQueryClient();
+  const [label, setLabel] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ label: string; key: string } | null>(null);
+  const generate = useMutation({
+    mutationFn: (name: string) => api.generateAPIKey(name),
+    onSuccess: (res, name) => {
+      setLabel(null);
+      setCreated({ label: name, key: res.key || '' });
+      queryClient.invalidateQueries({ queryKey: ['api-keys'] });
+    },
+    onError: () => toast.error('Failed to generate key'),
+  });
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(created?.key ?? '');
+      toast.success('Key copied');
+    } catch {
+      toast.error('Copy failed: select the key and copy it by hand');
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setLabel('')}
+        className="glass-button text-[10px] min-h-11 px-4 bg-emerald-600/20 text-emerald-400 border-emerald-500/20"
+      >
+        <Plus size={14} /> Generate New Key
+      </button>
+      <Modal isOpen={label !== null} onClose={() => setLabel(null)} title="New API key" size="md">
+        <form
+          className="space-y-4"
+          onSubmit={(e) => { e.preventDefault(); if (label?.trim()) generate.mutate(label.trim()); }}
+        >
+          <label className="block text-xs text-slate-400" htmlFor="new-key-label">Which client is this for?</label>
+          <input
+            id="new-key-label"
+            autoFocus
+            value={label ?? ''}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. OpenWebUI"
+            className="glass-input w-full text-sm"
+          />
+          <button
+            type="submit"
+            disabled={!label?.trim() || generate.isPending}
+            className="glass-button w-full min-h-11 bg-emerald-600/30 text-emerald-200 disabled:opacity-50"
+          >
+            {generate.isPending ? 'Generating…' : 'Generate'}
+          </button>
+        </form>
+      </Modal>
+      <Modal isOpen={created !== null} onClose={() => setCreated(null)} title={`Key for ${created?.label ?? ''}`} size="md">
+        <div className="space-y-4">
+          <p className="text-xs text-amber-300">Copy it now: it will not be shown again.</p>
+          <code data-testid="new-api-key" className="block p-3 rounded-xl bg-black/40 text-xs text-emerald-300 break-all select-all">
+            {created?.key}
+          </code>
+          <button onClick={copy} className="glass-button w-full min-h-11">
+            <Copy size={14} /> Copy key
+          </button>
+        </div>
+      </Modal>
     </>
   );
 };
@@ -519,23 +607,24 @@ const Identity = () => {
     mutationFn: (data: Partial<UserProfile>) => api.updateProfile(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['me'] });
-      toast.success('Persona updated');
-    }
+      toast.success('Name saved');
+    },
+    onError: () => toast.error('Could not save your name'),
   });
 
   return (
-    <div className="space-y-12 pb-12">
+    <div className="space-y-8 md:space-y-12 pb-12">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
-          <h2 className="text-4xl font-black text-white tracking-tighter uppercase">IDENTITY HUB</h2>
-          <p className="text-slate-400 mt-2 max-w-md">Manage your digital footprint, encrypted credentials, and biometric profiles for the SharedLLM mesh.</p>
+          <h2 className="text-2xl md:text-4xl font-black text-white tracking-tight">Accounts & Integrations</h2>
+          <p className="text-slate-400 mt-2 max-w-md">Your profile, the services Jarvis signs in to for you, your voice, devices and API keys.</p>
         </div>
         <div className="flex items-center gap-4 bg-white/5 p-3 rounded-2xl border border-white/5">
            <div className="w-12 h-12 rounded-xl bg-purple-600 flex items-center justify-center text-xl font-black text-white shadow-lg shadow-purple-500/20">
-              {user?.username[0].toUpperCase()}
+              {user?.username?.[0]?.toUpperCase()}
            </div>
            <div>
-              <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Active Operator</p>
+              <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Signed in as</p>
               <p className="text-white font-mono font-bold text-sm">@{user?.username}</p>
            </div>
         </div>
@@ -553,7 +642,7 @@ const Identity = () => {
                 <p className="text-sm text-slate-400">Secure connection points for cloud and home services</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6">
               <IntegrationTile 
                 name="Home Assistant" 
                 icon={Home} 
@@ -696,7 +785,7 @@ const Identity = () => {
                 <div>
                   <h3 className="text-xl font-bold text-white flex items-center gap-2">
                     External Client Access
-                    <HelpTooltip docName="integrations.md" sectionTitle="External Client Setup" label="API Keys" />
+                    <HelpTooltip docName="INTEGRATIONS.md" sectionTitle="External Client Setup" label="API Keys" />
                   </h3>
                   <p className="text-sm text-slate-400">Manage API keys for OpenWebUI, Lobechat, and other compatible interfaces</p>
                 </div>
@@ -704,43 +793,22 @@ const Identity = () => {
             </div>
             
             <div className="glass-panel overflow-hidden border-emerald-500/10">
-              <div className="p-6 border-b border-white/5 flex items-center justify-between bg-emerald-500/5">
+              <div className="p-4 md:p-6 border-b border-white/5 flex flex-wrap gap-3 items-center justify-between bg-emerald-500/5">
                  <div className="flex items-center gap-2">
                     <Globe size={16} className="text-emerald-400" />
                     <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">OpenAI-Compatible Endpoints</span>
                  </div>
-                 <button 
-                   onClick={async () => {
-                     const label = prompt('Enter a label for this key (e.g. OpenWebUI):');
-                     if (label) {
-                        try {
-                          const res = await api.generateAPIKey(label);
-                          try {
-                            await navigator.clipboard.writeText(res.key || '');
-                            toast.success('Key copied to clipboard! Save it now, it will not be shown again.', { duration: 8000 });
-                          } catch {
-                            prompt('Key generated! COPY IT NOW, it will not be shown again:', res.key || '');
-                          }
-                          queryClient.invalidateQueries({ queryKey: ['api-keys'] });
-                        } catch {
-                          toast.error('Failed to generate key');
-                        }
-                     }
-                   }}
-                   className="glass-button text-[10px] py-1.5 px-4 bg-emerald-600/20 text-emerald-400 border-emerald-500/20"
-                 >
-                   <Plus size={14} /> Generate New Key
-                 </button>
+                 <NewApiKey />
               </div>
               
               <div className="p-0">
                  <table className="w-full text-left text-xs">
                     <thead className="bg-white/5 text-slate-500 font-black uppercase text-[9px] tracking-widest">
                        <tr>
-                          <th className="px-6 py-4">Client Label</th>
-                          <th className="px-6 py-4">API Key Prefix</th>
-                          <th className="px-6 py-4">Status</th>
-                          <th className="px-6 py-4 text-right">Actions</th>
+                          <th className="px-4 md:px-6 py-4">Client Label</th>
+                          <th className="hidden sm:table-cell px-6 py-4">API Key Prefix</th>
+                          <th className="hidden sm:table-cell px-6 py-4">Status</th>
+                          <th className="px-4 md:px-6 py-4 text-right">Actions</th>
                        </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -753,10 +821,10 @@ const Identity = () => {
         </div>
 
         <div className="space-y-8">
-          <section className="glass-panel p-8 bg-purple-900/10 border-purple-500/20">
+          <section className="glass-panel p-6 md:p-8 bg-purple-900/10 border-purple-500/20">
              <div className="flex items-center gap-3 mb-6">
                 <User size={20} className="text-purple-400" />
-                <h3 className="font-bold text-white uppercase text-xs tracking-widest">Digital Persona</h3>
+                <h3 className="font-bold text-white uppercase text-xs tracking-widest">Profile</h3>
              </div>
              
              <div className="space-y-6">
@@ -779,28 +847,30 @@ const Identity = () => {
                       </span>
                    </button>
                    {pickingAvatar && fullUser && <AvatarPicker user={fullUser} onClose={() => setPickingAvatar(false)} />}
-                   <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Avatar & Identity</p>
+                   <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Tap to change your picture</p>
                    <p className="text-white font-bold">{fullUser?.full_name || 'Set Full Name'}</p>
                 </div>
 
                 <div className="space-y-4 pt-4 border-t border-white/5">
                    <div>
                       <label className="text-[9px] text-slate-500 uppercase font-black block mb-2 tracking-widest">Display Name</label>
-                      <input 
-                        type="text" 
-                        defaultValue={fullUser?.full_name}
-                        onBlur={(e) => updateProfileMutation.mutate({ full_name: e.target.value })}
-                        className="glass-input w-full text-xs" 
-                        placeholder="Display name" 
-                      />
-                   </div>
-                   <div>
-                      <label className="text-[9px] text-slate-500 uppercase font-black block mb-2 tracking-widest">Voice ID</label>
-                      <input 
-                        type="text" 
-                        value={fullUser?.voice_id || 'Not enrolled'} 
-                        disabled 
-                        className="glass-input w-full text-xs opacity-50 cursor-not-allowed" 
+                      {/* Keyed on the loaded name: defaultValue is read once, so
+                          before the profile arrived the box stayed empty and
+                          blurring it saved an empty name over the real one. */}
+                      <input
+                        key={fullUser ? `name-${fullUser.full_name ?? ''}` : 'name-loading'}
+                        type="text"
+                        aria-label="Display name"
+                        defaultValue={fullUser?.full_name ?? ''}
+                        disabled={!fullUser}
+                        onBlur={(e) => {
+                          const next = e.target.value.trim();
+                          if (fullUser && next && next !== (fullUser.full_name ?? '')) {
+                            updateProfileMutation.mutate({ full_name: next });
+                          }
+                        }}
+                        className="glass-input w-full text-sm"
+                        placeholder="Display name"
                       />
                    </div>
                 </div>
@@ -809,7 +879,7 @@ const Identity = () => {
 
           {fullUser?.is_admin && (
             <section className="glass-panel p-6 border-blue-500/20">
-               <h3 className="font-bold text-white mb-4 text-xs tracking-widest uppercase">System Hierarchy</h3>
+               <h3 className="font-bold text-white mb-4 text-xs tracking-widest uppercase">Family accounts</h3>
                <div className="space-y-3">
                   {usersList?.map((u) => (
                     <div key={u.id} className="flex items-center justify-between p-3 glass-card text-xs">

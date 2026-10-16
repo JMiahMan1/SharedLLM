@@ -1,19 +1,20 @@
-import { BookMarked, NotebookPen } from 'lucide-react';
+import { Bookmark, BookMarked, NotebookPen } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { BibleMark, BibleVerse } from '../../types/api';
 import { MARK_EDGE, MARK_WASH } from './readingPage';
+import { marksOnVerse } from './verseMarks';
 
 interface ChapterReaderProps {
   verses: BibleVerse[];
+  /**
+   * The reader's marks (any book; each verse picks out its own). A highlight
+   * washes the verse; a bookmark or a note shows a glyph. A note lives in
+   * Nextcloud and its mark only says one exists, so the glyph is a pointer
+   * rather than the content.
+   */
   marks: BibleMark[];
   /** `"chapter:verse"` keys of verses that carry study material in this translation. */
   studiedVerses?: Set<string>;
-  /**
-   * `"chapter:verse"` keys of verses the reader has written a note about. A
-   * note lives in Nextcloud and this only says one exists, so the glyph is a
-   * pointer rather than the content.
-   */
-  notedVerses?: Set<string>;
   /**
    * The verses of a second translation for the same passage. Absent or empty
    * means no comparison is being asked for.
@@ -28,15 +29,6 @@ interface ChapterReaderProps {
   error?: string | null;
   onVerseTap: (verse: BibleVerse) => void;
   onRetry?: () => void;
-}
-
-function markFor(marks: BibleMark[], verse: BibleVerse): BibleMark | undefined {
-  return marks.find(
-    (m) =>
-      m.chapter === verse.chapter &&
-      m.verse_start <= verse.verse &&
-      (m.verse_end ?? m.verse_start) >= verse.verse,
-  );
 }
 
 /**
@@ -60,7 +52,6 @@ export default function ChapterReader({
   verses,
   marks,
   studiedVerses,
-  notedVerses,
   compareVerses,
   compareName,
   fontScale,
@@ -127,10 +118,12 @@ export default function ChapterReader({
         </p>
       )}
       {verses.map((verse) => {
-        const mark = markFor(marks, verse);
+        const own = marksOnVerse(marks, verse);
+        const mark = own.find((m) => m.kind === 'highlight');
         const color = mark && MARK_WASH[mark.color] ? mark.color : 'yellow';
         const studied = studiedVerses?.has(`${verse.chapter}:${verse.verse}`) ?? false;
-        const noted = notedVerses?.has(`${verse.chapter}:${verse.verse}`) ?? false;
+        const noted = own.some((m) => m.kind === 'note' && Boolean(m.note_path));
+        const bookmarked = own.some((m) => m.kind === 'bookmark');
         const compareText = comparing ? byVerse.get(verse.verse) : undefined;
         return (
           <button
@@ -142,7 +135,7 @@ export default function ChapterReader({
             }}
             aria-label={`${verse.reference}. ${verse.text}${studied ? '. Has study notes.' : ''}${
               noted ? '. Has your note.' : ''
-            }${comparing && !compareText ? '. Not in the compared translation.' : ''}`}
+            }${bookmarked ? '. Bookmarked.' : ''}${comparing && !compareText ? '. Not in the compared translation.' : ''}`}
             data-testid={`bible-verse-${verse.chapter}-${verse.verse}`}
             className="w-full text-left rounded-lg px-2 py-1 min-h-11 pointer-coarse:min-h-11 border-l-2 border-transparent hover:bg-[var(--page-hover)] transition-colors"
             style={mark ? { backgroundColor: MARK_WASH[color], borderLeftColor: MARK_EDGE[color] } : undefined}
@@ -181,7 +174,7 @@ export default function ChapterReader({
                   </span>
                 </span>
               )}
-              {(studied || noted) && (
+              {(studied || noted || bookmarked) && (
                 <span className="ml-auto shrink-0 self-center flex items-center gap-1 font-sans">
                   {studied && (
                     <span
@@ -190,6 +183,15 @@ export default function ChapterReader({
                       data-testid={`bible-verse-studied-${verse.chapter}-${verse.verse}`}
                     >
                       <BookMarked size={12} />
+                    </span>
+                  )}
+                  {bookmarked && (
+                    <span
+                      className="text-purple-400"
+                      title="Bookmarked"
+                      data-testid={`bible-verse-bookmarked-${verse.chapter}-${verse.verse}`}
+                    >
+                      <Bookmark size={12} />
                     </span>
                   )}
                   {noted && (

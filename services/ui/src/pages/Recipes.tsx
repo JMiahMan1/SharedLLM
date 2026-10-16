@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Loader2, Plus, Trash2, Users } from 'lucide-react';
+import { BookOpen, Loader2, Plus, Save, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
+import { saveNote } from '../lib/noteSave';
+import { noteBody } from '../lib/notesMeta';
 import type { ExecutionResponse } from '../types/api';
 import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
@@ -12,7 +14,7 @@ const STORAGE = 'nextcloud';
 
 interface RecipeSummary {
   title: string;
-  path?: string;
+  path: string;
   modified?: string;
 }
 
@@ -51,11 +53,19 @@ export default function Recipes() {
   const read = useMutation({
     mutationFn: (recipe: RecipeSummary) => api.readNote(recipe.title, STORAGE, recipe.path, asUser),
     onSuccess: (res: ExecutionResponse) => {
-      // note_read returns the markdown body as the message text.
-      setBody(res.status === 'SUCCESS' ? res.message ?? '' : '');
+      // note_read returns the whole file; the editor shows the recipe without
+      // the stored header, or every save would stack another copy of it.
+      if (res.status === 'SUCCESS') setBody(noteBody(res.message ?? ''));
+      else toast.error(res.message || 'Could not open that recipe');
     },
     onError: (error: Error) => toast.error(error.message || 'Could not open that recipe'),
   });
+
+  const startNew = () => {
+    setSelected(null);
+    setTitle('');
+    setBody('');
+  };
 
   const save = async () => {
     const name = title.trim();
@@ -65,38 +75,42 @@ export default function Recipes() {
     }
     setSaving(true);
     try {
-      const res = await api.writeNote({
+      // Editing an open recipe saves over it (or renames it); otherwise it is new.
+      const saved = await saveNote({
         title: name,
         content: body,
         category: RECIPES_DIR,
-        storage: STORAGE,
-        as_user: asUser,
+        previous: selected ? { title: selected.title, category: RECIPES_DIR, path: selected.path } : undefined,
+        asUser,
       });
-      if (res.status === 'SUCCESS') {
+      if (saved.response.status === 'SUCCESS') {
         toast.success('Recipe saved');
-        setTitle('');
-        setBody('');
-        setSelected(null);
+        if (saved.leftOldCopy) toast.error('Saved under the new name, but the old copy is still there');
+        startNew();
         queryClient.invalidateQueries({ queryKey: ['recipes'] });
       } else {
-        toast.error(res.message || 'Could not save the recipe');
+        toast.error(saved.response.message || 'Could not save the recipe');
       }
+    } catch {
+      toast.error('Could not save the recipe');
     } finally {
       setSaving(false);
     }
   };
 
   const remove = async (recipe: RecipeSummary) => {
-    const res = await api.deleteNote(recipe.title, STORAGE, recipe.path, asUser);
-    if (res.status === 'SUCCESS') {
-      toast.success('Recipe removed');
-      if (selected?.title === recipe.title) {
-        setSelected(null);
-        setBody('');
+    if (!window.confirm(`Delete the recipe "${recipe.title}"?`)) return;
+    try {
+      const res = await api.deleteNote(recipe.title, STORAGE, recipe.path, asUser);
+      if (res.status === 'SUCCESS') {
+        toast.success('Recipe removed');
+        if (selected?.path === recipe.path) startNew();
+        queryClient.invalidateQueries({ queryKey: ['recipes'] });
+      } else {
+        toast.error(res.message || 'Could not remove that recipe');
       }
-      queryClient.invalidateQueries({ queryKey: ['recipes'] });
-    } else {
-      toast.error(res.message || 'Could not remove that recipe');
+    } catch {
+      toast.error('Could not remove that recipe');
     }
   };
 
@@ -116,7 +130,7 @@ export default function Recipes() {
           Saved in Nextcloud under <code className="text-slate-300">{RECIPES_DIR}/</code> — yours, or the house account
           when an admin switches.
         </p>
-        {isAdmin && <SendAsSelector value={sendAs} onChange={setSendAs} />}
+        {isAdmin && <SendAsSelector value={sendAs} onChange={(next) => { startNew(); setSendAs(next); }} />}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
@@ -129,9 +143,9 @@ export default function Recipes() {
           )}
           {recipes.map((recipe) => (
             <div
-              key={recipe.path || recipe.title}
-              className={`flex items-center gap-2 rounded-xl border p-2.5 ${
-                selected?.title === recipe.title ? 'border-purple-400/40 bg-purple-500/10' : 'border-white/5 bg-white/5'
+              key={recipe.path}
+              className={`flex items-center gap-2 rounded-xl border p-1.5 pl-3 ${
+                selected?.path === recipe.path ? 'border-purple-400/40 bg-purple-500/10' : 'border-white/5 bg-white/5'
               }`}
             >
               <button
@@ -141,7 +155,8 @@ export default function Recipes() {
                   setTitle(recipe.title);
                   read.mutate(recipe);
                 }}
-                className="min-h-11 flex-1 text-left text-sm text-slate-100"
+                aria-current={selected?.path === recipe.path ? 'true' : undefined}
+                className="min-h-11 min-w-0 flex-1 truncate text-left text-sm text-slate-100"
               >
                 {recipe.title}
               </button>
@@ -149,7 +164,7 @@ export default function Recipes() {
                 type="button"
                 aria-label={`Delete ${recipe.title}`}
                 onClick={() => void remove(recipe)}
-                className="glass-button p-2"
+                className="glass-button flex h-11 w-11 shrink-0 items-center justify-center p-0"
               >
                 <Trash2 size={14} />
               </button>
@@ -158,12 +173,22 @@ export default function Recipes() {
         </div>
 
         <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              {selected ? 'Editing' : 'New recipe'}
+            </span>
+            {selected && (
+              <button type="button" onClick={startNew} className="glass-button min-h-11 px-3 text-xs">
+                <Plus size={14} /> New recipe
+              </button>
+            )}
+          </div>
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Recipe name"
             aria-label="Recipe name"
-            className="glass-input w-full px-3 py-2 text-sm"
+            className="glass-input min-h-11 w-full px-3 py-2 text-base sm:text-sm"
           />
           <textarea
             value={body}
@@ -171,7 +196,7 @@ export default function Recipes() {
             placeholder="Ingredients and steps (markdown)"
             aria-label="Recipe body"
             rows={10}
-            className="glass-input w-full resize-y px-3 py-2 text-sm"
+            className="glass-input w-full resize-y px-3 py-2 text-base sm:text-sm"
           />
           <button
             type="button"
@@ -179,7 +204,8 @@ export default function Recipes() {
             disabled={saving}
             className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
           >
-            {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Save recipe
+            {saving ? <Loader2 size={14} className="animate-spin" /> : selected ? <Save size={14} /> : <Plus size={14} />}
+            {selected ? 'Save changes' : 'Save recipe'}
           </button>
         </div>
       </div>

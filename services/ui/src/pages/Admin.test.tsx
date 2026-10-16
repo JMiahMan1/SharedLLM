@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import Admin from './Admin';
 import { renderWithProviders } from '../test/render';
 import { api } from '../services/api';
+import { http, HttpResponse } from 'msw';
+import { server } from '../test/setup';
 
 // The Users & Devices tab has two entity dropdowns (device assignment and
 // entity protection), so the mock honours `testId` — `getByTestId` throws on
@@ -134,8 +136,8 @@ describe('Admin page', () => {
 
     fireEvent.click(await screen.findByText('Raven Ops'));
     expect(await screen.findByText('Raven Mission Control')).toBeInTheDocument();
-    expect(screen.getByText('Pending Triage Queue')).toBeInTheDocument();
-    expect(screen.getByText('Active Missions Monitor')).toBeInTheDocument();
+    expect(screen.getByText('Proposed fixes')).toBeInTheDocument();
+    expect(screen.getByText('Running now')).toBeInTheDocument();
   });
 
   it('shows LLM settings when tab is clicked', async () => {
@@ -151,5 +153,58 @@ describe('Admin page', () => {
     fireEvent.click(screen.getByText('Database & Audit'));
     expect(await screen.findByText('Advanced Database Insights')).toBeInTheDocument();
     expect(screen.getByText('Audit Trail')).toBeInTheDocument();
+  });
+
+  it('services: an unreachable registry is not reported as "0 updates", and restart asks first', async () => {
+    const restarts: string[] = [];
+    server.use(
+      http.get('/api/admin/services/health', () => HttpResponse.json({
+        total_services: 1, running: 1, stopped: 0, unhealthy: 0,
+        control_plane: { status: 'running', git_sha: 'abc1234', start_time: 0, uptime: '1h' },
+        services: [{ name: 'sharedllm_geo', status: 'running', image: 'ghcr.io/o/sharedllm-geo:abc1234', uptime: '1h' }],
+      })),
+      http.get('/api/admin/services/updates', () => HttpResponse.json({
+        checked: 1, updates_available: 0, check_error: 'registry_unreachable',
+        services: [{ service: 'geo', has_update: false, check_error: 'registry_unreachable' }],
+      })),
+      http.post('/api/admin/services/:name/restart', ({ params }) => {
+        restarts.push(String(params.name));
+        return HttpResponse.json({ status: 'SUCCESS' });
+      }),
+    );
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    renderWithProviders(<Admin />);
+
+    fireEvent.click(await screen.findByText('System Services'));
+    expect(await screen.findByText('geo')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Check Failed')).toBeInTheDocument());
+    expect(screen.getByText('—')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^restart$/i }));
+    expect(confirm).toHaveBeenCalled();
+    expect(restarts).toEqual([]);
+    vi.stubGlobal('confirm', vi.fn(() => true));
+  });
+
+  it('deleting a user asks first', async () => {
+    const deleted: string[] = [];
+    server.use(
+      http.get('/api/users', () => HttpResponse.json([
+        { id: 2, username: 'leo', full_name: 'Leo', is_admin: false, is_system_default: false },
+      ])),
+      http.delete('/api/users/:name', ({ params }) => {
+        deleted.push(String(params.name));
+        return HttpResponse.json({ status: 'ok' });
+      }),
+    );
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    renderWithProviders(<Admin />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete leo' }));
+    expect(confirm).toHaveBeenCalled();
+    expect(deleted).toEqual([]);
+    vi.stubGlobal('confirm', vi.fn(() => true));
   });
 });

@@ -63,9 +63,36 @@ which one is active (`backend: sqlite-vec | numpy`).
   worker thread in cost-bounded batches (`embed_batched`) and **commit once**
   per batch, so a large sync costs one disk sync, not one per item.
 
+## Row owners
+
+`rag_items.id` is the table's primary key, so an id must be unique per owner:
+
+- HA entities: `ha:{user}:{entity_id}`. The gateway's background loop syncs
+  every user's entities every ~5 min; unchanged text keeps its vector and only
+  metadata is refreshed. (The id used to be `ha:{entity_id}` for everyone, so
+  each user's sync replaced the previous user's rows and re-embedded all ~700
+  entities every time. Old-format rows are removed on each user's next sync.)
+- Nextcloud and Calibre chunks are stored under the **Nextcloud username**
+  (storage indexes with the provider's credentials), not the Jarvis username.
+- `system_capabilities` and `system_learnings` live under `default` and are
+  shared; search and stats always include them.
+
+## Knowledge Hub routes (gateway)
+
+| Route | Who | Notes |
+| --- | --- | --- |
+| `GET /api/search` | signed in | Searches the caller's Jarvis + Nextcloud rows and `default`; each hit has `snippet` and `collection`. |
+| `GET /api/storage/stats` | signed in | Counts for both usernames; shared `system_*` collections counted once. |
+| `GET /api/storage/status` | signed in | Indexer state and the running crawl (`crawl.phase`, `done/total`, `error`). |
+| `POST /api/storage/list`, `/index` | signed in | Uses the caller's Nextcloud credentials; indexing runs only when started (no schedule). |
+| `POST /api/storage/purge/{collection}` | signed in | Deletes the caller's rows under both usernames; returns `removed`. |
+| `GET /api/storage/learning` | signed in | Raven lessons. |
+| `PATCH`/`DELETE /api/storage/learning/{id}` | admin | RAG refuses ids outside `system_learnings` (404). |
+| `GET /api/storage/collection/{name}` | admin | Admin page's raw collection inspector. |
+
 ## Tests
 
 `services/rag/tests/` — schema migrations (`test_rag_search.py`), batch
-embedding and single-commit syncs (`test_ha_sync_embed_batches.py`), cost
+embedding, single-commit and per-user HA syncs (`test_ha_sync_embed_batches.py`), cost
 budget, curriculum. The `sqlite_vec`-dependent tests skip where the extension
 is not installed.

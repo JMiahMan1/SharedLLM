@@ -417,6 +417,45 @@ describe('Bible page', () => {
     expect(mocked.putBibleMark).not.toHaveBeenCalled();
   });
 
+  it('stays in Focus mode when the page is turned', async () => {
+    renderPage();
+    await screen.findByTestId('bible-chapter-heading');
+    fireEvent.click(screen.getByTestId('bible-focus-open'));
+    await screen.findByTestId('bible-focus');
+
+    fireEvent.click(screen.getByTestId('bible-focus-next'));
+
+    await waitFor(() => expect(mocked.getBiblePassage).toHaveBeenCalledWith('Ps 24', 'kjv'));
+    expect(screen.getByTestId('bible-focus')).toBeInTheDocument();
+  });
+
+  it('does not treat a mark in another book as a mark on this verse', async () => {
+    mocked.getBibleMarks.mockResolvedValue({
+      marks: [{ ...MARKS().marks[0], id: 9, osis: 'Gen', book_name: 'Genesis', chapter: 23, verse_start: 2, verse_end: 2 }],
+    });
+    renderPage();
+
+    const verse = await screen.findByTestId('bible-verse-23-2');
+    expect(verse.getAttribute('style') ?? '').not.toContain('background');
+    fireEvent.click(verse);
+    const action = await screen.findByTestId('bible-action-highlight');
+    expect(action).toHaveTextContent('Highlight');
+    expect(action).not.toHaveTextContent('Remove');
+    fireEvent.click(action);
+
+    await waitFor(() =>
+      expect(mocked.putBibleMark).toHaveBeenCalledWith({ ref: 'Psalms 23:2', kind: 'highlight', color: 'yellow', version_code: 'kjv' })
+    );
+    expect(mocked.deleteBibleMark).not.toHaveBeenCalled();
+  });
+
+  it('says why the Bible could not open instead of loading forever', async () => {
+    mocked.getBibleVersions.mockRejectedValue(new Error('Network Error'));
+    renderPage();
+
+    expect(await screen.findByTestId('bible-load-error')).toHaveTextContent('Network Error');
+  });
+
   it('never tells a reader to run a command when no corpus is installed', async () => {
     mocked.getBibleVersions.mockResolvedValue({ versions: [] });
 
@@ -516,11 +555,12 @@ describe('Bible page', () => {
     expect(await screen.findByText('sam')).toBeInTheDocument();
   });
 
-  it('explains that later-phase badge rules are not counted yet', async () => {
+  it('does not claim plans, memorisation or quizzes are still to come', async () => {
     renderPage();
     fireEvent.click(screen.getByTestId('bible-tab-progress'));
 
-    expect(await screen.findByText(/badge[s]? arrive with those features/)).toBeInTheDocument();
+    expect(await screen.findByText('Badges')).toBeInTheDocument();
+    expect(screen.queryByText(/arrive with those features/)).not.toBeInTheDocument();
   });
 
   it('keeps Read the default tab even when the devotional link was the entry point', async () => {
@@ -707,6 +747,17 @@ describe('Bible page', () => {
       await waitFor(() =>
         expect(mocked.putBibleState).toHaveBeenCalledWith({ favorite_version: code }),
       );
+    });
+
+    it('goes back to the favourite in one tap when reading another translation', async () => {
+      mocked.getBibleState.mockResolvedValue(
+        STATE({ preferences: { ...STATE().preferences, default_version: 'kjv', favorite_version: 'asv' } }),
+      );
+      renderPage();
+      const toggle = await screen.findByTestId('bible-favorite-toggle');
+      expect(toggle).toHaveAttribute('aria-pressed', 'false');
+      fireEvent.click(await screen.findByTestId('bible-favorite-switch'));
+      await waitFor(() => expect(mocked.putBibleState).toHaveBeenCalledWith({ default_version: 'asv' }));
     });
 
     it('takes the favourite back off the same button', async () => {

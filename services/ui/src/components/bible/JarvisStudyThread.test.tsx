@@ -74,6 +74,7 @@ describe('asking about the passage on screen', () => {
       'What does this mean?',
       { version: 'nkjv', edition: 'nkjv-tmn', crossVersion: false, depth: 'adult' },
       expect.any(Function),
+      expect.any(AbortSignal),
     );
     expect(await screen.findByTestId('bible-ask-answer')).toHaveTextContent('It is about love for the whole world.');
     expect(screen.queryByTestId('bible-ask-streaming')).not.toBeInTheDocument();
@@ -133,6 +134,24 @@ describe('asking about the passage on screen', () => {
     expect(apiMock.streamBibleStudy).not.toHaveBeenCalled();
   });
 
+  it('stops the answer being written when the panel closes', async () => {
+    let signal: AbortSignal | undefined;
+    apiMock.streamBibleStudy.mockImplementation(
+      (_r: string, _q: string, _o: unknown, _e: OnEvent, s: AbortSignal) => {
+        signal = s;
+        return new Promise(() => undefined);
+      },
+    );
+    const user = userEvent.setup();
+    const { unmount } = render(<JarvisStudyThread passage="John 3:16" version="nkjv" onClose={vi.fn()} />);
+    await user.type(screen.getByTestId('bible-ask-question'), 'Why?');
+    await user.click(screen.getByTestId('bible-ask-submit'));
+    await waitFor(() => expect(signal).toBeDefined());
+    expect(signal?.aborted).toBe(false);
+    unmount();
+    expect(signal?.aborted).toBe(true);
+  });
+
   it('closes from the scrim', async () => {
     const { onClose } = renderPanel();
     await userEvent.click(screen.getByTestId('bible-ask-scrim'));
@@ -158,6 +177,7 @@ describe('depth and references', () => {
       'Why?',
       expect.objectContaining({ depth: 'child' }),
       expect.any(Function),
+      expect.any(AbortSignal),
     );
     await user.click(await screen.findByRole('button', { name: /Romans 5:8/ }));
     expect(onOpenRef).toHaveBeenCalledWith('Romans 5:8');

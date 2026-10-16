@@ -1,20 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle, FlaskConical, Shield, Activity, Download } from 'lucide-react';
+import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle, FlaskConical, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { artifactKind, downloadBlobUrl } from '../lib/artifactKinds';
+import { errorText } from '../lib/errorText';
 import { api } from '../services/api';
-import type { HealthStatus, LogEntry, RavenMission, SmokeTestResult, Workspace } from '../services/api';
-
-interface ExecutionLogItem {
-  timestamp?: number;
-  raw_type?: string;
-  type?: string;
-  data?: unknown;
-}
+import type { LogEntry, RavenMission, SmokeTestResult, Workspace } from '../services/api';
 import RavenLiveTrace from '../components/settings/RavenLiveTrace';
+import RavenMissionDetail from '../components/settings/RavenMissionDetail';
+import { useWebSocket, type ConnectionState } from '../lib/wsManager';
 import { useAuth } from '../context/AuthContext';
+import { useSystemHealth } from '../hooks/useSystemHealth';
 
 const MISSION_TEMPLATES = [
   { label: 'Audit Codebase', query: 'Audit the codebase for lint errors, unused imports, and code quality issues. Fix all findings.' },
@@ -44,11 +40,11 @@ const JarvisLab = () => {
     <div className="space-y-8 pb-12">
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-4xl font-black tracking-tighter text-white uppercase">Jarvis Lab</h2>
+          <h2 className="text-3xl sm:text-4xl font-black tracking-tighter text-white uppercase">Jarvis Lab</h2>
           <p className="mt-2 text-slate-400">Live verification, autonomous missions, and workspace management.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex rounded-2xl border border-white/10 bg-white/5 p-1">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap rounded-2xl border border-white/10 bg-white/5 p-1">
             {([
               ['missions', 'Missions'],
               ['tests', 'Tests'],
@@ -56,7 +52,7 @@ const JarvisLab = () => {
               <button
                 key={key}
                 onClick={() => handleTabChange(key)}
-                className={`rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest ${
+                className={`min-h-11 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest ${
                   activeTab === key ? 'bg-indigo-600/40 text-white' : 'text-slate-500 hover:text-white'
                 }`}
               >
@@ -67,8 +63,9 @@ const JarvisLab = () => {
           {isAdmin && (
             <button
               onClick={() => navigate('/lab/admin')}
-              className="flex items-center gap-2 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-purple-300 hover:bg-purple-500/20 transition-colors"
+              className="flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 text-[10px] font-black uppercase tracking-widest text-purple-300 hover:bg-purple-500/20 transition-colors"
               title="Switch to Admin Lab view"
+              aria-label="Admin view"
             >
               <Shield size={14} />
               <span className="hidden md:inline">Admin View</span>
@@ -111,15 +108,15 @@ export const JarvisLabAdmin = () => {
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="flex items-center gap-3">
-            <h2 className="text-4xl font-black tracking-tighter text-white uppercase">Advanced Lab</h2>
+            <h2 className="text-3xl sm:text-4xl font-black tracking-tighter text-white uppercase">Advanced Lab</h2>
             <span className="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/20">
               Admin
             </span>
           </div>
           <p className="mt-2 text-slate-400">System-wide diagnostics, live telemetry, and advanced controls.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex rounded-2xl border border-white/10 bg-white/5 p-1">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap rounded-2xl border border-white/10 bg-white/5 p-1">
             {([
               ['overview', 'System Health'],
               ['logs', 'Live Telemetry'],
@@ -128,7 +125,7 @@ export const JarvisLabAdmin = () => {
               <button
                 key={key}
                 onClick={() => setActiveTab(key)}
-                className={`rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest ${
+                className={`min-h-11 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest ${
                   activeTab === key ? 'bg-indigo-600/40 text-white' : 'text-slate-500 hover:text-white'
                 }`}
               >
@@ -138,8 +135,9 @@ export const JarvisLabAdmin = () => {
           </div>
           <button
             onClick={() => navigate('/lab')}
-            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            className="flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
             title="Switch to User Lab view"
+            aria-label="User view"
           >
             <FlaskConical size={14} />
             <span className="hidden md:inline">User View</span>
@@ -158,11 +156,7 @@ export const JarvisLabAdmin = () => {
 
 // Advanced overview adds faster polling and more runtime detail
 const AdvancedOverviewPane = () => {
-  const { data: health } = useQuery<HealthStatus>({
-    queryKey: ['health'],
-    queryFn: () => api.getHealth(),
-    refetchInterval: 3000,
-  });
+  const { data: health } = useSystemHealth();
 
   const { data: workspaces = [] } = useQuery<Workspace[]>({
     queryKey: ['workspaces'],
@@ -172,7 +166,7 @@ const AdvancedOverviewPane = () => {
 
   return (
     <div className="grid gap-8 xl:grid-cols-[0.9fr_1.1fr]">
-      <section className="glass-panel p-6">
+      <section className="glass-panel p-4 sm:p-6">
         <div className="mb-6 flex items-center gap-3">
           <CheckCircle2 size={20} className="text-emerald-300" />
           <div>
@@ -192,7 +186,7 @@ const AdvancedOverviewPane = () => {
         </div>
       </section>
 
-      <section className="glass-panel p-6">
+      <section className="glass-panel p-4 sm:p-6">
         <div className="mb-6 flex items-center gap-3">
           <Wrench size={20} className="text-cyan-300" />
           <div>
@@ -236,8 +230,8 @@ const TestsPane = ({ advanced = false }: { advanced?: boolean }) => {
   const lastResult = runSmokeMutation.data || runUnitMutation.data;
 
   return (
-    <section className="glass-panel p-6">
-      <div className="mb-6 flex items-center justify-between gap-4">
+    <section className="glass-panel p-4 sm:p-6">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h3 className="text-xl font-bold text-white">
             {advanced ? 'Verification Engine' : 'Test Runner'}
@@ -248,12 +242,12 @@ const TestsPane = ({ advanced = false }: { advanced?: boolean }) => {
               : 'Run a smoke test to verify core system connectivity.'}
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           {advanced && (
             <button
               onClick={() => runUnitMutation.mutate()}
               disabled={!!activeMutation}
-              className="glass-button flex items-center gap-2 px-4 py-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              className="glass-button min-h-11 flex items-center gap-2 px-4 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
             >
               {runUnitMutation.isPending ? <RefreshCcw size={14} className="animate-spin" /> : <Terminal size={14} />}
               Run Unit Tests
@@ -262,7 +256,7 @@ const TestsPane = ({ advanced = false }: { advanced?: boolean }) => {
           <button
             onClick={() => runSmokeMutation.mutate()}
             disabled={!!activeMutation}
-            className="glass-button flex items-center gap-2 px-4 py-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+            className="glass-button min-h-11 flex items-center gap-2 px-4 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
           >
             {runSmokeMutation.isPending ? <RefreshCcw size={14} className="animate-spin" /> : <Play size={14} />}
             Run Smoke Test
@@ -293,79 +287,74 @@ const TestsPane = ({ advanced = false }: { advanced?: boolean }) => {
   );
 };
 
-// Single shared log stream — used by both admin and (previously) user views
+const HEALTH_CHECK_PATTERNS = ['/health', '/health/ready', 'health check', 'heartbeat'];
+const isHealthCheck = (log: LogEntry) => {
+  const msg = String(log.message ?? '').toLowerCase();
+  return HEALTH_CHECK_PATTERNS.some((p) => msg.includes(p));
+};
+
+const STREAM_STATE: Record<ConnectionState, { label: string; color: string }> = {
+  CONNECTING: { label: 'Connecting', color: 'text-slate-400' },
+  CONNECTED: { label: 'Live', color: 'text-emerald-300' },
+  RECONNECTING: { label: 'Reconnecting', color: 'text-amber-300' },
+  DISCONNECTED: { label: 'Offline', color: 'text-slate-500' },
+  FAILED: { label: 'Stream unavailable', color: 'text-red-300' },
+};
+
+// The system's logs: the last 50 from the logging service, then live lines
+// over its WebSocket (admin key required).
 const LogTelemetryStream = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [hideHealthChecks, setHideHealthChecks] = useState(true);
-  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     api.getLogs(50).then((historical) => {
-      setLogs(historical.slice(0, 80));
+      setLogs((current) => [...current, ...historical].slice(0, 80));
     }).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    const connect = () => {
-      const ws = api.getLogWebSocket();
-      wsRef.current = ws;
-
-      ws.onmessage = (event) => {
-        const payload = JSON.parse(event.data);
-        if (payload.ping) {
-          return;
-        }
-        setLogs((current) => [payload, ...current].slice(0, 80));
-      };
-
-      ws.onclose = () => {
-        reconnectTimeout = setTimeout(connect, 2000);
-      };
-    };
-
-    connect();
-
-    return () => {
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
+  const [streamUrl] = useState(() => api.getLogWebSocketUrl());
+  const { state } = useWebSocket(streamUrl, {
+    onMessage: (event) => {
+      let payload: (LogEntry & { ping?: boolean }) | null;
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        return;
       }
-      wsRef.current?.close();
-    };
-  }, []);
+      if (!payload || payload.ping) return;
+      const entry: LogEntry = payload;
+      setLogs((current) => [entry, ...current].slice(0, 80));
+    },
+  });
 
-  const HEALTH_CHECK_PATTERNS = ['/health', '/health/ready', 'health check', 'heartbeat'];
-  const isHealthCheck = (log: LogEntry) => {
-    const msg = (log.message || '').toLowerCase();
-    return HEALTH_CHECK_PATTERNS.some(p => msg.includes(p));
-  };
-
-  const visibleLogs = hideHealthChecks
-    ? logs.filter(log => !isHealthCheck(log))
-    : logs;
+  const visibleLogs = hideHealthChecks ? logs.filter((log) => !isHealthCheck(log)) : logs;
+  const status = STREAM_STATE[state];
 
   return (
-    <section className="glass-panel p-6">
-      <div className="mb-6 flex items-center justify-between">
+    <section className="glass-panel p-4 sm:p-6">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Terminal size={20} className="text-indigo-300" />
+          <Terminal size={20} className="text-indigo-300 shrink-0" />
           <div>
             <h3 className="text-xl font-bold text-white">Live Telemetry</h3>
-            <p className="text-sm text-slate-400">Streaming websocket telemetry from the logging service.</p>
+            <p className="text-sm text-slate-400">
+              Every service&rsquo;s log lines as they arrive.{' '}
+              <span className={`text-[10px] font-black uppercase tracking-widest ${status.color}`}>{status.label}</span>
+            </p>
           </div>
         </div>
-        <label className="flex items-center gap-2 cursor-pointer select-none">
+        <label className="flex min-h-11 items-center gap-2 cursor-pointer select-none">
           <input
             type="checkbox"
             checked={hideHealthChecks}
             onChange={(e) => setHideHealthChecks(e.target.checked)}
-            className="sr-only peer"
+            className="sr-only"
           />
-          <div className="w-8 h-4 rounded-full bg-slate-700 peer-checked:bg-indigo-600 relative transition-colors">
-            <div className="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform peer-checked:translate-x-4" />
-          </div>
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Hide Health Checks</span>
+          <span aria-hidden className={`w-8 h-4 rounded-full relative transition-colors ${hideHealthChecks ? 'bg-indigo-600' : 'bg-slate-700'}`}>
+            <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform ${hideHealthChecks ? 'translate-x-4' : ''}`} />
+          </span>
+          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Hide health checks</span>
         </label>
       </div>
       <div className="space-y-3">
@@ -375,15 +364,15 @@ const LogTelemetryStream = () => {
               <p className="font-semibold text-white truncate">{log.service}</p>
               <span className="text-[10px] uppercase tracking-widest text-slate-500 shrink-0">{log.level}</span>
             </div>
-            <p className="mt-2 text-sm text-slate-300 break-words">{log.message}</p>
+            <p className="mt-2 text-sm text-slate-300 break-words">{String(log.message ?? '')}</p>
             <p className="mt-2 text-xs text-slate-500">{log.timestamp}</p>
           </div>
         ))}
         {!visibleLogs.length && (
           <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
             {logs.length > 0
-              ? 'All visible logs are health checks. Toggle the filter to see them.'
-              : 'Waiting for live log traffic...'}
+              ? 'Every line so far is a health check. Turn the filter off to see them.'
+              : 'Waiting for log lines…'}
           </p>
         )}
       </div>
@@ -391,116 +380,70 @@ const LogTelemetryStream = () => {
   );
 };
 
+// Statuses a mission can be in (services/identity/models.py RavenMission.status).
+const STATUS_FILTERS = ['all', 'pending', 'queued', 'executing', 'paused', 'completed', 'failed'] as const;
+const isLive = (status: string) => status === 'executing' || status === 'running';
+
+const actionBtn = 'glass-button min-h-11 px-3 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50';
+
 const MissionsPane = () => {
   const [missionQuery, setMissionQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>('all');
   const [liveMissionId, setLiveMissionId] = useState<number | null>(null);
-  const [detailedMission, setDetailedMission] = useState<RavenMission | null>(null);
-  const [refinePrompt, setRefinePrompt] = useState('');
-  const [loadingDetails, setLoadingDetails] = useState<number | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
 
-  const { data: missions = [], refetch } = useQuery({
+  const { data: missions = [], refetch, isLoading } = useQuery<RavenMission[]>({
     queryKey: ['user-missions'],
     queryFn: () => api.getUserMissions(),
     refetchInterval: 5000,
   });
 
-  const refineMissionMutation = useMutation({
-    mutationFn: ({ id, prompt }: { id: number; prompt: string }) => api.refineRavenMission(id, prompt),
-    onSuccess: (resp) => {
-      toast.success('🎯 Refinement enqueued! Launching live monitor.');
-      setDetailedMission(null);
-      setRefinePrompt('');
-      if (resp && resp.mission_id) {
-        setLiveMissionId(resp.mission_id);
-      }
+  const act = (fn: (id: number) => Promise<unknown>, done: string, failed: string) => ({
+    mutationFn: fn,
+    onSuccess: () => {
+      toast.success(done);
       refetch();
     },
-    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to refine mission'),
+    onError: (err: unknown) => toast.error(errorText(err, failed)),
   });
-
-  const handleOpenDetails = async (id: number) => {
-    try {
-      setLoadingDetails(id);
-      const missionData = await api.getRavenMission(id);
-      setDetailedMission(missionData);
-    } catch {
-      toast.error('Failed to load mission details');
-    } finally {
-      setLoadingDetails(null);
-    }
-  };
 
   const createMissionMutation = useMutation({
-    mutationFn: () => api.createUserMission(missionQuery),
+    mutationFn: () => api.createUserMission(missionQuery.trim()),
     onSuccess: () => {
       setMissionQuery('');
-      toast.success('Mission Dispatched');
+      toast.success('Mission dispatched');
       refetch();
     },
-    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to dispatch mission'),
+    onError: (err: unknown) => toast.error(errorText(err, 'Failed to dispatch mission')),
   });
+  const killMissionMutation = useMutation(act((id) => api.killRavenMission(id), 'Stop requested', 'Failed to stop mission'));
+  const deleteMissionMutation = useMutation(act((id) => api.deleteRavenMission(id), 'Mission deleted', 'Failed to delete mission'));
+  const pauseMissionMutation = useMutation(act((id) => api.pauseRavenMission(id), 'Mission paused', 'Failed to pause mission'));
+  const resumeMissionMutation = useMutation(act((id) => api.resumeRavenMission(id), 'Mission resumed', 'Failed to resume mission'));
 
-  const killMissionMutation = useMutation({
-    mutationFn: (id: number) => api.killRavenMission(id),
-    onSuccess: () => {
-      toast.success('Kill Signal Dispatched');
-      refetch();
-    },
-    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to kill mission'),
-  });
-
-  const deleteMissionMutation = useMutation({
-    mutationFn: (id: number) => api.deleteRavenMission(id),
-    onSuccess: () => {
-      toast.success('Mission Deleted');
-      refetch();
-    },
-    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to delete mission'),
-  });
-
-  const pauseMissionMutation = useMutation({
-    mutationFn: (id: number) => api.pauseRavenMission(id),
-    onSuccess: () => {
-      toast.success('Mission Paused');
-      refetch();
-    },
-    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to pause mission'),
-  });
-
-  const resumeMissionMutation = useMutation({
-    mutationFn: (id: number) => api.resumeRavenMission(id),
-    onSuccess: () => {
-      toast.success('Mission Resumed');
-      refetch();
-    },
-    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to resume mission'),
-  });
-
-  const filteredMissions = statusFilter === 'all'
-    ? missions
-    : missions.filter((m: { status: string }) => m.status === statusFilter);
+  const filteredMissions = statusFilter === 'all' ? missions : missions.filter((m) => m.status === statusFilter);
+  const dispatch = () => {
+    if (missionQuery.trim() && !createMissionMutation.isPending) createMissionMutation.mutate();
+  };
 
   return (
-    <section className="glass-panel p-6">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div>
-          <h3 className="text-xl font-bold text-white flex items-center gap-2">
-            <Play size={20} className="text-indigo-400" />
-            Raven Autonomous Missions
-          </h3>
-          <p className="text-sm text-slate-400 mt-1">Assign long-running background tasks to Raven (e.g., File conversions, analysis).</p>
-        </div>
+    <section className="glass-panel p-4 sm:p-6">
+      <div className="mb-6">
+        <h3 className="text-xl font-bold text-white flex items-center gap-2">
+          <Play size={20} className="text-indigo-400" />
+          Raven Missions
+        </h3>
+        <p className="text-sm text-slate-400 mt-1">Hand Raven a long-running task; it works in the background and reports back here.</p>
       </div>
 
-      <div className="mb-6">
-        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Quick Actions</h4>
+      <div className="mb-4">
+        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Start from</h4>
         <div className="flex flex-wrap gap-2">
           {MISSION_TEMPLATES.map(t => (
             <button
               key={t.label}
               onClick={() => setMissionQuery(t.query)}
-              className="px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 text-xs text-slate-300 hover:bg-indigo-500/20 hover:border-indigo-500/30 hover:text-indigo-300 transition-colors"
+              className="min-h-11 px-3 rounded-xl border border-white/10 bg-white/5 text-xs text-slate-300 hover:bg-indigo-500/20 hover:border-indigo-500/30 hover:text-indigo-300 transition-colors"
             >
               <Zap size={12} className="inline mr-1" />
               {t.label}
@@ -509,43 +452,39 @@ const MissionsPane = () => {
         </div>
       </div>
 
-      <div className="flex gap-3 mb-8">
-        <input
-          type="text"
+      <div className="flex flex-col sm:flex-row gap-3 mb-8">
+        <textarea
           value={missionQuery}
           onChange={(e) => setMissionQuery(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && missionQuery.trim()) {
-              createMissionMutation.mutate();
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              dispatch();
             }
           }}
-          placeholder="Describe the task (e.g., 'Convert all PNGs in the Assets workspace to WebP')"
-          className="glass-input flex-1"
+          rows={3}
+          aria-label="Mission"
+          placeholder="Describe the task, e.g. 'Convert the PNGs in my Assets workspace to WebP'"
+          className="glass-input flex-1 resize-none"
         />
         <button
-          onClick={() => createMissionMutation.mutate()}
+          onClick={dispatch}
           disabled={!missionQuery.trim() || createMissionMutation.isPending}
-          className="glass-button px-6 py-3 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/30 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center gap-2"
+          className="glass-button min-h-11 px-6 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/30 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-2"
         >
-          {createMissionMutation.isPending ? 'Dispatching...' : (
-            <>
-              <Play size={14} /> Dispatch
-            </>
-          )}
+          {createMissionMutation.isPending ? 'Dispatching…' : (<><Play size={14} /> Dispatch</>)}
         </button>
       </div>
 
-      <div className="flex items-center gap-2 mb-4">
-        <Filter size={14} className="text-slate-500" />
-        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Filter:</span>
-        {['all', 'executing', 'paused', 'completed', 'failed', 'pending'].map(s => (
+      <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1" role="group" aria-label="Filter by status">
+        <Filter size={14} className="text-slate-500 shrink-0" />
+        {STATUS_FILTERS.map(s => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}
-            className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors ${
-              statusFilter === s
-                ? 'bg-indigo-500/30 text-indigo-300'
-                : 'text-slate-500 hover:text-white'
+            aria-pressed={statusFilter === s}
+            className={`min-h-11 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors whitespace-nowrap ${
+              statusFilter === s ? 'bg-indigo-500/30 text-indigo-300' : 'text-slate-500 hover:text-white'
             }`}
           >
             {s}
@@ -555,130 +494,41 @@ const MissionsPane = () => {
 
       <div className="space-y-4">
         <h4 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2">
-          Active & Recent Missions ({filteredMissions.length})
+          Missions ({filteredMissions.length})
         </h4>
 
-        {filteredMissions.length === 0 ? (
+        {isLoading ? (
+          <p className="text-sm text-slate-500">Loading missions…</p>
+        ) : filteredMissions.length === 0 ? (
           <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
-            No missions match the current filter.
+            {missions.length ? 'No missions match this filter.' : 'No missions yet. Describe a task above to start one.'}
           </div>
         ) : (
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          filteredMissions.map((mission: any) => (
-            <div key={mission.id} className="glass-card p-4 border-l-4 border-l-indigo-500/50 flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${
-                      mission.status === 'completed' ? 'bg-emerald-500/10 text-emerald-300' :
-                      mission.status === 'failed' ? 'bg-red-500/10 text-red-300' :
-                      mission.status === 'executing' ? 'bg-indigo-500/10 text-indigo-300 animate-pulse' :
-                      'bg-slate-500/10 text-slate-300'
-                    }`}>
-                      {mission.status}
-                    </span>
-                    <span className="text-xs text-slate-400">Mission #{mission.id}</span>
-                    {(mission.status === 'executing' || mission.status === 'running') && (
-                      <span className="text-[10px] text-slate-500 font-mono">Started: {new Date(mission.created_at).toLocaleTimeString()}</span>
-                    )}
-                  </div>
-                  <p className="text-sm text-white line-clamp-2">{mission.proposed_mission}</p>
+          filteredMissions.map((mission) => (
+            <div key={mission.id} className="glass-card p-4 border-l-4 border-l-indigo-500/50 flex flex-col gap-3 min-w-0">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-1">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${
+                    mission.status === 'completed' ? 'bg-emerald-500/10 text-emerald-300' :
+                    mission.status === 'failed' ? 'bg-red-500/10 text-red-300' :
+                    isLive(mission.status) ? 'bg-indigo-500/10 text-indigo-300 animate-pulse' :
+                    'bg-slate-500/10 text-slate-300'
+                  }`}>
+                    {mission.status}
+                  </span>
+                  <span className="text-xs text-slate-400">#{mission.id}</span>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    {new Date(mission.started_at ?? mission.created_at).toLocaleString()}
+                  </span>
                 </div>
-                <div className="flex-shrink-0 flex items-center gap-2">
-                  {(mission.status === 'executing' || mission.status === 'running') && (
-                    <>
-                      <button
-                        onClick={() => setLiveMissionId(mission.id)}
-                        className="glass-button bg-blue-500/10 border-blue-500/20 text-blue-300 hover:bg-blue-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest"
-                      >
-                        <Eye size={12} /> Watch Live
-                      </button>
-                      <button
-                        onClick={() => handleOpenDetails(mission.id)}
-                        disabled={loadingDetails === mission.id}
-                        className="glass-button bg-indigo-500/10 border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-                      >
-                        <Terminal size={12} /> {loadingDetails === mission.id ? 'Loading...' : 'Inspect'}
-                      </button>
-                      <button
-                        onClick={() => pauseMissionMutation.mutate(mission.id)}
-                        disabled={pauseMissionMutation.isPending}
-                        className="glass-button bg-yellow-500/10 border-yellow-500/20 text-yellow-300 hover:bg-yellow-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-                      >
-                        <Pause size={12} /> Pause
-                      </button>
-                      <button
-                        onClick={() => killMissionMutation.mutate(mission.id)}
-                        disabled={killMissionMutation.isPending}
-                        className="glass-button bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-                      >
-                        Stop
-                      </button>
-                    </>
-                  )}
-                  {mission.status === 'paused' && (
-                    <>
-                      <button
-                        onClick={() => handleOpenDetails(mission.id)}
-                        disabled={loadingDetails === mission.id}
-                        className="glass-button bg-indigo-500/10 border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-                      >
-                        <Terminal size={12} /> {loadingDetails === mission.id ? 'Loading...' : 'Inspect & Refine'}
-                      </button>
-                      <button
-                        onClick={() => resumeMissionMutation.mutate(mission.id)}
-                        disabled={resumeMissionMutation.isPending}
-                        className="glass-button bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-                      >
-                        <PlayCircle size={12} /> Resume
-                      </button>
-                    </>
-                  )}
-                  {(mission.status === 'completed' || mission.status === 'failed') && (
-                    <>
-                      <button
-                        onClick={() => handleOpenDetails(mission.id)}
-                        disabled={loadingDetails === mission.id}
-                        className="glass-button bg-indigo-500/10 border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-                      >
-                        <Terminal size={12} /> {loadingDetails === mission.id ? 'Loading...' : 'Inspect & Refine'}
-                      </button>
-                      <button
-                        onClick={() => deleteMissionMutation.mutate(mission.id)}
-                        disabled={deleteMissionMutation.isPending}
-                        className="glass-button bg-slate-500/10 border-slate-500/20 text-slate-400 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/30 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-                      >
-                        <Trash2 size={12} /> Delete
-                      </button>
-                    </>
-                  )}
-                  {(mission.status !== 'executing' && mission.status !== 'running' && mission.status !== 'paused' && mission.status !== 'completed' && mission.status !== 'failed') && (
-                    <>
-                      <button
-                        onClick={() => handleOpenDetails(mission.id)}
-                        disabled={loadingDetails === mission.id}
-                        className="glass-button bg-indigo-500/10 border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-                      >
-                        <Terminal size={12} /> {loadingDetails === mission.id ? 'Loading...' : 'Inspect'}
-                      </button>
-                      <button
-                        onClick={() => deleteMissionMutation.mutate(mission.id)}
-                        disabled={deleteMissionMutation.isPending}
-                        className="glass-button bg-slate-500/10 border-slate-500/20 text-slate-400 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/30 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-                      >
-                        <Trash2 size={12} /> Delete
-                      </button>
-                    </>
-                  )}
-                </div>
+                <p className="text-sm text-white line-clamp-2 break-words">{mission.proposed_mission}</p>
               </div>
 
-              {(mission.status === 'executing' || (mission.progress !== undefined && mission.progress > 0)) && (
+              {(isLive(mission.status) || mission.progress > 0) && (
                 <div className="w-full bg-black/40 rounded-full h-1.5 overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${
-                      mission.status === 'failed' ? 'bg-red-500' :
-                      mission.status === 'completed' ? 'bg-emerald-500' : 'bg-indigo-500'
+                      mission.status === 'failed' ? 'bg-red-500' : mission.status === 'completed' ? 'bg-emerald-500' : 'bg-indigo-500'
                     }`}
                     style={{ width: `${Math.max(5, mission.progress || 0)}%` }}
                   />
@@ -686,281 +536,69 @@ const MissionsPane = () => {
               )}
 
               {mission.result && (
-                <div className="p-3 bg-black/30 rounded-xl border border-white/5 text-xs text-slate-300 font-mono overflow-x-auto whitespace-pre-wrap">
+                <div className="p-3 bg-black/30 rounded-xl border border-white/5 text-xs text-slate-300 font-mono whitespace-pre-wrap break-words line-clamp-6">
                   {mission.result}
                 </div>
               )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                {isLive(mission.status) && (
+                  <button onClick={() => setLiveMissionId(mission.id)} className={`${actionBtn} text-blue-300`}>
+                    <Eye size={12} /> Watch live
+                  </button>
+                )}
+                <button onClick={() => setDetailId(mission.id)} className={`${actionBtn} text-indigo-300`}>
+                  <Terminal size={12} /> {mission.status === 'completed' || mission.status === 'failed' || mission.status === 'paused' ? 'Inspect & refine' : 'Inspect'}
+                </button>
+                {isLive(mission.status) && (
+                  <>
+                    <button onClick={() => pauseMissionMutation.mutate(mission.id)} disabled={pauseMissionMutation.isPending} className={`${actionBtn} text-yellow-300`}>
+                      <Pause size={12} /> Pause
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Stop mission #${mission.id}?`)) killMissionMutation.mutate(mission.id);
+                      }}
+                      disabled={killMissionMutation.isPending}
+                      className={`${actionBtn} text-red-400`}
+                    >
+                      Stop
+                    </button>
+                  </>
+                )}
+                {mission.status === 'paused' && (
+                  <button onClick={() => resumeMissionMutation.mutate(mission.id)} disabled={resumeMissionMutation.isPending} className={`${actionBtn} text-emerald-300`}>
+                    <PlayCircle size={12} /> Resume
+                  </button>
+                )}
+                {!isLive(mission.status) && mission.status !== 'paused' && (
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Delete mission #${mission.id} and its log?`)) deleteMissionMutation.mutate(mission.id);
+                    }}
+                    disabled={deleteMissionMutation.isPending}
+                    className={`${actionBtn} text-slate-400 hover:text-red-300`}
+                  >
+                    <Trash2 size={12} /> Delete
+                  </button>
+                )}
+              </div>
             </div>
           ))
         )}
       </div>
 
-      <RavenLiveTrace
-        isOpen={liveMissionId !== null}
-        onClose={() => setLiveMissionId(null)}
-        missionId={liveMissionId}
+      <RavenLiveTrace isOpen={liveMissionId !== null} onClose={() => setLiveMissionId(null)} missionId={liveMissionId} />
+      <RavenMissionDetail
+        missionId={detailId}
+        onClose={() => setDetailId(null)}
+        onRefined={(id) => {
+          refetch();
+          setLiveMissionId(id);
+        }}
       />
-
-      {/* 🔍 Mission Details & Chat Refinement Modal */}
-      {detailedMission && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-white/10 rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col justify-between text-left">
-            <div>
-              {/* Header */}
-              <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/5">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Terminal size={18} className="text-indigo-400" />
-                  Mission #{detailedMission.id} Details & Refinement
-                </h3>
-                <button
-                  onClick={() => {
-                    setDetailedMission(null);
-                    setRefinePrompt('');
-                  }}
-                  className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-colors"
-                >
-                  ✖️
-                </button>
-              </div>
-
-              {/* Grid Metadata */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 bg-white/5 p-4 rounded-xl border border-white/5 text-xs">
-                <div>
-                  <span className="text-slate-500 uppercase font-black text-[9px] block">Status</span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold inline-block uppercase mt-1 ${
-                    detailedMission.status === 'completed' ? 'bg-emerald-500/20 text-emerald-300' :
-                    detailedMission.status === 'failed' ? 'bg-red-500/20 text-red-300' : 'bg-slate-500/20 text-slate-300'
-                  }`}>
-                    {detailedMission.status}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500 uppercase font-black text-[9px] block">Container</span>
-                  <span className="text-white font-semibold block mt-1 truncate">{detailedMission.target_container || 'System'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 uppercase font-black text-[9px] block">Duration</span>
-                  <span className="text-white font-semibold block mt-1">
-                    {detailedMission.duration != null ? `${Math.floor(detailedMission.duration / 60)}m ${detailedMission.duration % 60}s` : '—'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500 uppercase font-black text-[9px] block">Workspace ID</span>
-                  <span className="text-blue-300 font-mono block mt-1 truncate">{detailedMission.workspace_id || 'System Default'}</span>
-                </div>
-              </div>
-
-              {/* Sections */}
-              <div className="space-y-4 mb-6">
-                <div>
-                  <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Original Mission Directive</label>
-                  <div className="bg-black/30 border border-white/5 p-3 rounded-lg text-xs text-slate-300 max-h-24 overflow-y-auto">
-                    {detailedMission.proposed_mission}
-                  </div>
-                </div>
-
-                {detailedMission.result && (
-                  <div>
-                    <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Final Result Summary</label>
-                    <div className="bg-black/30 border border-white/5 p-3 rounded-lg text-xs text-emerald-300 max-h-24 overflow-y-auto">
-                      {detailedMission.result}
-                    </div>
-                  </div>
-                )}
-
-                {detailedMission.workspace_id && (
-                  <div>
-                    <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Mission Artifacts</label>
-                    <MissionArtifacts workspaceId={detailedMission.workspace_id} />
-                  </div>
-                )}
-
-                <div>
-                  <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Audit Execution Timeline</label>
-                  {renderTimeline(detailedMission.output_log)}
-                </div>
-              </div>
-            </div>
-
-            {/* Chat Refinement Interface */}
-            <div className="mt-4 pt-4 border-t border-white/5 space-y-4">
-              <div>
-                <label className="text-xs font-bold text-slate-300 mb-2 block flex items-center gap-1.5">
-                  <Activity size={14} className="text-indigo-400" />
-                  Tweak or Fix Results (Interactive Chat)
-                </label>
-                <p className="text-[10px] text-slate-500 mb-2 leading-relaxed">
-                  Provide follow-up instructions to resolve remaining errors. Raven will run in the exact same workspace, preserve history context, and update outputs/artifacts.
-                </p>
-                <div className="flex gap-2">
-                  <textarea
-                    value={refinePrompt}
-                    onChange={(e) => setRefinePrompt(e.target.value)}
-                    placeholder="💬 Enter follow-up instructions (e.g. 'Fix the syntax error on line 42', 'Add missing import sys')"
-                    rows={2}
-                    disabled={refineMissionMutation.isPending}
-                    className="flex-1 bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:border-indigo-500/50 focus:outline-none transition-all resize-none"
-                  />
-                  <button
-                    onClick={() => refineMissionMutation.mutate({ id: detailedMission.id, prompt: refinePrompt })}
-                    disabled={!refinePrompt.trim() || refineMissionMutation.isPending}
-                    className="px-4 py-2 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 rounded-xl font-black text-[10px] uppercase tracking-widest text-indigo-300 hover:from-indigo-500/30 hover:to-purple-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
-                  >
-                    {refineMissionMutation.isPending ? 'Sending...' : 'Refine'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </section>
   );
 };
-
-const renderTimeline = (outputLog: string | null | undefined) => {
-  if (!outputLog) return <p className="text-slate-500 text-xs italic">No audit trail logs recorded.</p>;
-  try {
-    const logs = JSON.parse(outputLog);
-    if (!Array.isArray(logs) || logs.length === 0) return <p className="text-slate-500 text-xs italic text-center p-2">No execution events captured.</p>;
-    
-    const displayedLogs = logs.slice(-500);
-    
-    return (
-      <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-2 font-mono text-[10px] text-slate-300 bg-black/40 p-3 rounded-lg border border-white/5">
-        {displayedLogs.map((logItem: ExecutionLogItem, idx: number) => {
-          const timeStr = logItem.timestamp ? new Date(logItem.timestamp * 1000).toLocaleTimeString() : '';
-          const itemType = logItem.raw_type || logItem.type;
-          let bgClass = 'bg-slate-800 text-slate-300';
-          let label = itemType;
-          
-          if (itemType === 'action') {
-            bgClass = 'bg-blue-500/20 text-blue-300 border border-blue-500/30';
-            label = '🔧 TOOL';
-          } else if (itemType === 'action_payload') {
-            return null; // Skip payload for clean view
-          } else if (itemType === 'result_success') {
-            bgClass = 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
-            label = '✅ SUCCESS';
-          } else if (itemType === 'result_error') {
-            bgClass = 'bg-red-500/20 text-red-300 border border-red-500/30';
-            label = '❌ ERROR';
-          } else if (itemType === 'system') {
-            bgClass = 'bg-purple-500/20 text-purple-300 border border-purple-500/30';
-            label = 'ℹ️ SYSTEM';
-          } else if (itemType === 'reasoning') {
-            bgClass = 'bg-slate-800/85 text-slate-400 border border-white/5';
-            label = '🧠 THOUGHT';
-          }
-          
-          return (
-            <div key={idx} className="flex gap-2 items-start border-b border-white/5 pb-1.5 last:border-0 last:pb-0">
-              <span className="text-[9px] text-slate-500 select-none">{timeStr}</span>
-              <span className={`px-1 rounded text-[8px] font-black uppercase tracking-wider select-none ${bgClass}`}>
-                {label}
-              </span>
-              <span className="break-all">{logItem.data == null ? '' : String(logItem.data)}</span>
-            </div>
-          );
-        })}
-      </div>
-    );
-  } catch (e) {
-    return <p className="text-red-400 text-xs italic text-center p-2">Failed to parse execution log: {String(e)}</p>;
-  }
-};
-
-function MissionArtifacts({ workspaceId }: { workspaceId: string }) {
-  const [entries, setEntries] = useState<{ path: string; size: number }[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [blobs, setBlobs] = useState<Record<string, { url: string; text?: string }>>({});
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .listWorkspaceFiles(workspaceId, '.', true, 4)
-      .then((res) => {
-        if (cancelled) return;
-        setEntries((res.entries ?? []).filter((f) => !f.is_dir).map((f) => ({ path: f.path ?? f.name, size: f.size ?? 0 })));
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
-
-  const loadBlob = useCallback(
-    async (path: string, kind: string) => {
-      if (blobs[path]) return;
-      try {
-        const blob = await api.fetchWorkspaceFileRaw(workspaceId, path);
-        const url = URL.createObjectURL(blob);
-        if (kind === 'text') {
-          const text = await blob.text();
-          setBlobs((prev) => ({ ...prev, [path]: { url, text } }));
-        } else {
-          setBlobs((prev) => ({ ...prev, [path]: { url } }));
-        }
-      } catch (e) {
-        toast.error(`Failed to load ${path}: ${String(e)}`);
-      }
-    },
-    [workspaceId, blobs],
-  );
-
-  useEffect(() => {
-    if (!entries) return;
-    entries.forEach((e) => {
-      const kind = artifactKind(e.path);
-      if (kind === 'audio' || kind === 'video' || kind === 'image' || kind === 'pdf' || kind === 'text') void loadBlob(e.path, kind);
-    });
-  }, [entries, loadBlob]);
-
-  if (error) return <p className="text-red-400 text-xs italic p-2">Failed to load artifacts: {error}</p>;
-  if (!entries) return <p className="text-slate-500 text-xs p-2">Loading artifacts…</p>;
-  if (entries.length === 0) return <p className="text-slate-500 text-xs p-2">No artifact files in workspace.</p>;
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      {entries.map((e) => {
-        const kind = artifactKind(e.path);
-        const b = blobs[e.path];
-        return (
-          <div key={e.path} className="bg-black/30 border border-white/5 rounded-lg p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] text-slate-300 font-mono truncate" title={e.path}>{e.path.split('/').pop()}</span>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="text-[9px] text-slate-500">{formatBytes(e.size)}</span>
-                <button
-                  onClick={() => b?.url && downloadBlobUrl(b.url, e.path)}
-                  disabled={!b?.url}
-                  className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30"
-                  title="Download"
-                >
-                  <Download size={13} />
-                </button>
-              </div>
-            </div>
-            {kind === 'audio' && b?.url && <audio controls src={b.url} className="w-full" />}
-            {kind === 'video' && b?.url && <video controls src={b.url} className="w-full max-h-56 rounded bg-black" />}
-            {kind === 'image' && b?.url && <img src={b.url} alt={e.path} className="max-h-56 max-w-full object-contain rounded bg-black/40 mx-auto" />}
-            {kind === 'pdf' && b?.url && <iframe src={b.url} title={e.path} className="w-full h-48 rounded bg-white/5 border border-white/10" />}
-            {kind === 'text' && b?.text != null && <pre className="text-[10px] text-slate-300 bg-black/40 p-2 rounded max-h-40 overflow-auto whitespace-pre-wrap">{b.text.slice(0, 2000)}</pre>}
-            {kind === 'other' && <p className="text-[10px] text-slate-500 italic">Binary file — download to inspect.</p>}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function formatBytes(n?: number | null): string {
-  if (n == null) return '';
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 export default JarvisLab;

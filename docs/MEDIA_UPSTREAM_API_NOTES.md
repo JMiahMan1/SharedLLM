@@ -511,3 +511,27 @@ Live probe of a book (item `510e38dd-3196-4755-8a9b-7c81208c373b`, "God's Smuggl
   but the playlist **never** appears (404 for a full 120s poll): a podcast
   session is only playable with an episode id, which is exactly what BUG-26
   fixed.
+
+## HA companion `remote.*` entities and stale web-player state (2026-10-15)
+
+Read-only probes of the live install (`/api/entities`, `/execute/media/status`,
+the playback registry):
+
+* TV `media_player` and `remote` entities are **not** named alike:
+  `media_player.office_tv` ↔ `remote.office_tv_remote`,
+  `media_player.gracies_tv` ↔ `remote.28_tcl_roku_tv`
+  (`loft_tv` and `master_bedroom_samsung` happen to match). The Android TV and
+  Roku handlers built the remote name by string replacement, so their keys went
+  to entities that do not exist. `ha_client.find_companion_remote` asks HA's
+  template API for the remote on the same device
+  (`device_entities(device_id('<media_player>'))`), then falls back to a name
+  match, then to the same-named entity; results are cached 10 min.
+* Live MA players mostly have an HA twin; `/execute/media/status` exposes the
+  link as `ma_player_id` (`up309587157251` → `media_player.office_tv_3`). The
+  Media page uses it to list each speaker once.
+* The registry held `web_player playing "Hey"` for ~18 h after the app was
+  closed (the only heartbeat lived on the Media page). Status now ignores a
+  local `playing` row older than 2 min (paused: 30 min).
+* MA `recent` items carry `last_played: ""` and playlists `items: 0` on this
+  install, so Jump back in orders MA items after dated ABS books and playlist
+  rows say "Playlist" rather than a track count.

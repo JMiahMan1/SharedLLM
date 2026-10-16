@@ -53,7 +53,14 @@ async def collect_health_stats(
     )
     daily = steps.get("daily_steps") or {}
     values = [float(v) for v in daily.values() if isinstance(v, (int, float))]
-    workout_list = workouts.get("workouts") or []
+    # Geo lists the most recent workouts whatever their age; only those that
+    # started inside this report's window belong to it (a daily report used
+    # to count every workout of the last hundred).
+    start, _ = window_for(period, tz=tz)
+    workout_list = [
+        w for w in (workouts.get("workouts") or [])
+        if float(w.get("start_time") or 0) >= start.timestamp()
+    ]
     return {
         "source": "geo",
         "steps_today": steps.get("today"),

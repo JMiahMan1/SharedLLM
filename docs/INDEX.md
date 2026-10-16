@@ -20,11 +20,14 @@
 
 ## Features
 
+- **docs/DASHBOARD.md** — app shell (navigation, bell, readiness), dashboard, settings, sign-in, docs page
+- **docs/INTEGRATIONS.md** — Accounts & Integrations page: each service's fields, API keys
 - **docs/FAMILY_HUB.md** — family chat (Nextcloud Talk), games, drawing, music, recipes, voice signatures, calls, phone notifications
 - **docs/BIBLE_STUDY.md** — Bible reader, study help, plans, games, memorization, interlinear
 - **docs/ACHIEVEMENTS.md** — goals, achievements, opt-in sharing, stars
 - **docs/HEALTH_STEPS.md** — pedometer capture, device ledger, widgets
-- **docs/NOTES.md** — Keep-style notes over Nextcloud markdown
+- **docs/NOTES.md** — Keep-style notes over Nextcloud markdown (and the Recipes cookbook)
+- **docs/CALENDAR.md** — merged Nextcloud/Skylight/iCal agenda, windows, repeats, edit by UID
 - **docs/ARCADE_INTEGRATION.md** — Alpaca arcade games in the Family hub
 - **docs/ENTITY_PROTECTION.md** — locking Home Assistant entities to admins and chosen users
 - **docs/THEMES.md** — Jarvis-wide theme packs, import/export, widget tinting
@@ -51,6 +54,7 @@
 
 ## Reference
 
+- **docs/BACKGROUND_JOBS.md** — every periodic/background job: owner service, interval, what it does
 - **docs/api_reference.md** — selected endpoints (the full list is the live OpenAPI at `/docs`)
 - **docs/SCRIPTS.md** — deploy, test and diagnostic scripts
 

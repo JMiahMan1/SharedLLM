@@ -1,6 +1,7 @@
 import asyncio
 import fnmatch
 import hashlib
+import hmac
 import io
 import json
 import logging
@@ -2866,18 +2867,34 @@ def run_unit_tests(x_internal_secret: str | None = Header(default=None)):
     }
 
 
+def _github_signature_matches(signature: str | None, body: bytes, secret: str) -> bool:
+    """True when ``signature`` is GitHub's ``sha256=<hex>`` HMAC of ``body`` under ``secret``."""
+    if not signature or not signature.startswith("sha256="):
+        return False
+    expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
 @app.post("/webhook/git-pull/{workspace_id}")
 @app.post("/api/webhook/git-pull/{workspace_id}")
 async def git_pull_webhook(
     workspace_id: str,
+    request: Request,
     background_tasks: BackgroundTasks,
     x_webhook_secret: str | None = Header(None, alias="X-Webhook-Secret"),
+    x_gitlab_token: str | None = Header(None, alias="X-Gitlab-Token"),
+    x_hub_signature_256: str | None = Header(None, alias="X-Hub-Signature-256"),
     token: str | None = None
 ):
     """
     Automated webhook endpoint for triggering a git pull.
-    Expects a secret in the X-Webhook-Secret header or as a 'token' query parameter.
+
+    The workspace's token proves the caller, in whichever form the sender uses:
+    the ``token`` query parameter, ``X-Webhook-Secret``, GitLab's
+    ``X-Gitlab-Token``, or GitHub's ``X-Hub-Signature-256`` (an HMAC of the
+    body keyed with the token -- GitHub never sends the secret itself).
     """
+    raw_body = await request.body()
     from services.config import GIT_WEBHOOK_SECRET
     webhook_secret = GIT_WEBHOOK_SECRET
 
@@ -2895,8 +2912,11 @@ async def git_pull_webhook(
                 log.warning(f"No webhook secret configured for workspace: {workspace_id}")
                 raise HTTPException(status_code=503, detail="Webhook service unavailable")
 
-            provided_secret = x_webhook_secret or token or ""
-            if not secret_matches(provided_secret, expected_secret):
+            provided_secret = x_webhook_secret or x_gitlab_token or token or ""
+            if not (
+                secret_matches(provided_secret, expected_secret)
+                or _github_signature_matches(x_hub_signature_256, raw_body, expected_secret)
+            ):
                 log.warning(f"Invalid webhook secret attempt for workspace: {workspace_id}")
                 raise HTTPException(status_code=403, detail="Forbidden")
 

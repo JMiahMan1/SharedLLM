@@ -88,12 +88,24 @@ export function sortNotes<T extends { title: string; path: string }>(notes: T[])
   });
 }
 
-/** Strip the stored `# title` / `Category:` header so previews show content. */
+/** The `# title` + `Category:` header the notes handler writes on top of a note. */
+const STORED_HEADER = /^[ \t]*\n*# [^\n]*\nCategory: [^\n]*\n(?:[ \t]*\n)?/;
+
+/**
+ * A note's own text, without the stored header (or a stack of them, from
+ * saves before the server stripped it). This is what the editor shows, so
+ * saving does not write the header into the body again. Mirrors
+ * `note_body` in services/execution/handlers/note.py.
+ */
+export function noteBody(content: string): string {
+  let text = content;
+  for (let m = STORED_HEADER.exec(text); m; m = STORED_HEADER.exec(text)) text = text.slice(m[0].length);
+  return text;
+}
+
+/** A card preview: the note's text without its stored header. */
 export function notePreview(content: string, max = 220): string {
-  const body = content
-    .replace(/^#\s.*$/m, '')
-    .replace(/^Category:\s.*$/m, '')
-    .trim();
+  const body = noteBody(content).trim();
   return body.length > max ? `${body.slice(0, max)}…` : body;
 }
 

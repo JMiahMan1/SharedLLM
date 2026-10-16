@@ -1,1052 +1,45 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Play, Pause, Volume2, Volume1, VolumeX, Cast,
-  Music, BookOpen, List, Loader2, X, Library, Search,
-  SkipBack as SkipBackIcon, SkipForward as SkipForwardIcon,
-  ChevronRight, Grid3X3, Clock, Heart, Square,
-  Mic2, Users
-} from 'lucide-react';
-import { api } from '../services/api';
+import { useQuery } from '@tanstack/react-query';
+import { BookOpen, Library, List, Loader2, Music, Play, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import { storageGetSync } from '../lib/storage';
-import { releaseControl } from '../lib/webPlayer';
 import { useSharedMAWebPlayer } from '../context/MediaPlayerContext';
 import { getServerOrigin } from '../lib/serverUrl';
-import { formatClock } from '../lib/utils';
+import { errorText } from '../lib/errorText';
 import { formatDeviceLabel } from '../lib/deviceLabels';
-
-interface MediaStatus {
-  entity_id?: string;
-  friendly_name?: string;
-  state?: string;
-  media_title?: string;
-  media_artist?: string;
-  media_album?: string;
-  volume_level?: number;
-  is_volume_muted?: boolean;
-  position?: number;
-  duration?: number;
-  entity_picture?: string;
-  media_content_id?: string;
-  media_type?: string;
-}
-
-interface MediaEntity {
-  entity_id: string;
-  friendly_name: string;
-  state: string;
-  domain: string;
-}
-
-interface TrackDetail {
-  item_id: string;
-  name: string;
-  uri: string;
-  favorite: boolean;
-  media_type: string;
-  artists?: Array<{ name: string }>;
-  album?: { name: string };
-  podcast?: { name: string };
-}
+import type { MaPlayerListEntry } from '../lib/deviceLabels';
+import { DeviceSelector } from '../components/media/DeviceSelector';
+import { NowPlayingCard, type NowPlayingView } from '../components/media/NowPlayingCard';
+import { MediaExplorer } from '../components/media/MediaExplorer';
+import type { DeviceOption, MediaStatus, PlayRequest } from '../components/media/types';
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
 
-const emptySection = (msg: string) => (
-  <div className="glass-panel rounded-2xl p-8 text-center text-slate-500 text-sm">
-    {msg}
-  </div>
-);
+const STATUS_POLL_MS = 3000;
+/** After the user moves a volume slider, ignore polled volumes this long. */
+const VOLUME_GRACE_MS = 4000;
 
-const loadingSection = () => (
-  <div className="flex items-center justify-center py-8">
-    <Loader2 size={24} className="text-slate-500 animate-spin" />
-  </div>
-);
-
-/* ── device selector (horizontal card list) ────────────────────────── */
-
-
-
-const DeviceSelector = ({
-  selectedTarget,
-  entities,
-  onDeviceSelect,
-  localMode,
-  onLocalToggle,
-  maPlayers,
-}: {
-  selectedTarget: string;
-  entities: MediaEntity[];
-  onDeviceSelect?: (entityId: string) => void;
-  localMode: boolean;
-  onLocalToggle?: (mode: boolean) => void;
-  maPlayers?: Array<{ player_id: string; name: string; available: boolean; state: string; powered: boolean }>;
-}) => {
-  const { trigger } = useHaptics();
-
-  const targets = useMemo(
-    () =>
-      entities.map((e) => ({
-        id: e.entity_id,
-        // A poisoned friendly_name (see deviceLabels) must not reach the picker;
-        // the entity id is always something a person could read.
-        name: formatDeviceLabel(e.friendly_name, e.entity_id),
-        room: e.entity_id.split('.')[1]?.replace(/_/g, ' ') || 'Unknown',
-        online: e.state !== 'unavailable' && e.state !== 'unknown',
-      })),
-    [entities],
-  );
-
-  const handleLocalSelect = useCallback(() => {
-    trigger('light');
-    onLocalToggle?.(true);
-  }, [onLocalToggle, trigger]);
-
-  const handleDeviceSelect = useCallback(
-    (id: string) => {
-      trigger('light');
-      onLocalToggle?.(false);
-      onDeviceSelect?.(id);
-    },
-    [onDeviceSelect, onLocalToggle, trigger],
-  );
-
-  const hasHaDevices = targets.length > 0;
-
-  return (
-    <div className="glass-panel rounded-2xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-          <Cast size={12} />Select Device
-        </h2>
-        <span className="text-[10px] text-slate-600">{localMode ? '🎧 Browser Audio' : `${targets.filter((t) => t.online).length} online`}</span>
-      </div>
-      <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
-        {/* Web Player */}
-        <button
-          onClick={handleLocalSelect}
-          className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] relative overflow-hidden ${
-            !selectedTarget
-              ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
-              : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
-          }`}
-        >
-          {localMode && (
-            <div className="absolute inset-0 bg-cyan-500/5 animate-pulse pointer-events-none" />
-          )}
-          <div className="relative flex items-center gap-2.5">
-            <div className="w-2.5 h-2.5 rounded-full shrink-0 bg-green-400" />
-            <div className="min-w-0 flex-1">
-              <p className="text-white text-sm font-medium truncate">Web Player</p>
-              <p className="text-[10px] text-slate-500 truncate">Browser / Android App</p>
-            </div>
-            {localMode && (
-              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />
-            )}
-          </div>
-        </button>
-        {/* Music Assistant Players */}
-        {maPlayers && maPlayers.length > 0 && (
-          <>
-            {maPlayers.map((p) => {
-              const pid = `ma:${p.player_id}`;
-              const active = selectedTarget === pid;
-              return (
-                <button
-                  key={pid}
-                  onClick={() => onDeviceSelect?.(pid)}
-                  className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] relative overflow-hidden ${
-                    active
-                      ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
-                      : p.available
-                        ? 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
-                        : 'bg-white/3 border-white/5 opacity-40'
-                  }`}
-                >
-                  {active && <div className="absolute inset-0 bg-cyan-500/5 pointer-events-none" />}
-                  <div className="relative flex items-center gap-2.5">
-                    <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${p.available ? 'bg-green-400' : 'bg-slate-600'}`} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-white text-sm font-medium truncate">{p.name}</p>
-                      <p className="text-[10px] text-slate-500 truncate">Music Assistant</p>
-                    </div>
-                    {active && <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />}
-                  </div>
-                </button>
-              );
-            })}
-          </>
-        )}
-        {/* HA Devices */}
-        {hasHaDevices && (
-          <>
-            {targets.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => handleDeviceSelect(t.id)}
-                className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] relative overflow-hidden ${
-                  selectedTarget === t.id
-                    ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
-                    : t.online
-                      ? 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
-                      : 'bg-white/3 border-white/5 opacity-40'
-                }`}
-              >
-                {selectedTarget === t.id && (
-                  <div className="absolute inset-0 bg-cyan-500/5 pointer-events-none" />
-                )}
-                <div className="relative flex items-center gap-2.5">
-                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${t.online ? 'bg-green-400' : 'bg-slate-600'}`} />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-white text-sm font-medium truncate">{t.name}</p>
-                    <p className="text-[10px] text-slate-500 truncate">{t.room}</p>
-                  </div>
-                  {selectedTarget === t.id && (
-                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />
-                  )}
-                </div>
-              </button>
-            ))}
-          </>
-        )}
-        {!hasHaDevices && (!maPlayers || maPlayers.length === 0) && (
-          <div className="flex items-center justify-center px-4 py-2.5 rounded-xl border border-dashed border-white/5 text-slate-600 text-xs shrink-0">
-            Tap a device to start
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-/* ── player header ──────────────────────────────────────────────────── */
-
-// Cover image that gracefully falls back to nothing (so the parent shows the
-// gradient + music-note icon) if the proxied URL fails to load. Keyed by `src`
-// at the call site, so changing the cover remounts this and clears `failed`.
-function CoverImage({ src, alt }: { src: string; alt: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return null;
-  return (
-    <img
-      src={src}
-      alt={alt}
-      onError={() => setFailed(true)}
-      className="w-full h-full object-cover relative z-10"
-    />
-  );
+/** Cover art through the gateway's per-user image proxy. */
+function proxiedImage(raw?: string | null): string | null {
+  if (!raw) return null;
+  const apiToken = storageGetSync('jarvis_api_key') ?? '';
+  const base = getServerOrigin().replace(/\/+$/, '');
+  return `${base}/api/media/imageproxy?path=${encodeURIComponent(raw)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
 }
 
-const NowPlayingCard = ({
-  mediaStatus,
-  selectedTarget,
-  targetLabel,
-  localMode,
-  volume,
-  muted,
-  loading,
-  currentTime = 0,
-  duration = 0,
-  isFavorite = false,
-  onPrevious,
-  onTogglePlay,
-  onNext,
-  onVolumeChange,
-  onMuteToggle,
-  onFavoriteToggle,
-  onSeek,
-  onStopPlayback,
-  maPlayer,
-}: {
-  mediaStatus: MediaStatus | null;
-  selectedTarget: string;
-  /** Friendly name for the selected device, when known. */
-  targetLabel?: string;
-  localMode?: boolean;
-  volume: number;
-  muted: boolean;
-  loading: string | null;
-  currentTime?: number;
-  duration?: number;
-  isFavorite?: boolean;
-  onPrevious: () => void;
-  onTogglePlay: () => void;
-  onNext: () => void;
-  onVolumeChange: (v: number) => void;
-  onMuteToggle: () => void;
-  onFavoriteToggle?: () => void;
-  onSeek?: (time: number) => void;
-  onStopPlayback?: () => void;
-  maPlayer?: { isConnected: boolean; connectionState: string; reconnect: () => void; mediaTitle?: string | null; mediaArtist?: string | null; mediaImage?: string | null; mediaUri?: string | null; mediaFavorite?: boolean | null };
-}) => {
-  const nowPlaying = mediaStatus?.state === 'playing' || mediaStatus?.state === 'paused';
-  const isWebPlayer = !selectedTarget;
-
-  const coverRaw = isWebPlayer ? maPlayer?.mediaImage : mediaStatus?.entity_picture;
-  const coverUrl = useMemo(() => {
-    if (!coverRaw) return null;
-    const apiToken = storageGetSync('jarvis_api_key') ?? '';
-    const base = getServerOrigin().replace(/\/+$/, '');
-    return `${base}/api/media/imageproxy?path=${encodeURIComponent(coverRaw)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
-  }, [coverRaw]);
-
-  const displayTitle = isWebPlayer ? (maPlayer?.mediaTitle ?? undefined) : mediaStatus?.media_title;
-  const displayArtist = isWebPlayer ? (maPlayer?.mediaArtist ?? undefined) : mediaStatus?.media_artist;
-  const displayAlbum = isWebPlayer ? undefined : mediaStatus?.media_album;
-
-  const trackRef = useRef<HTMLDivElement>(null);
-  const dragRaf = useRef<number | null>(null);
-  const dragClientX = useRef<number | null>(null);
-  const draggingRef = useRef(false);
-  const [dragTime, setDragTimeState] = useState<number | null>(null);
-  /**
-   * Drag state is keyed on the track identity (not the title/metadata), so a
-   * status refresh mid-drag — which happens every 3 s — no longer cancels the
-   * seek under the user's finger.
-   */
-  const trackKey = mediaStatus?.media_content_id || `${displayTitle || ''}|${displayArtist || ''}`;
-  useEffect(() => {
-    // New track: clear any leftover drag position (but never mid-drag).
-    if (!draggingRef.current) setDragTimeState(null);
-  }, [trackKey]);
-
-  const getTimeFromPointer = (clientX: number): number => {
-    if (!trackRef.current || duration <= 0) return 0;
-    const rect = trackRef.current.getBoundingClientRect();
-    if (rect.width <= 0) return 0;
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    return Math.round(ratio * duration);
-  };
-
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!onSeek || duration <= 0) return;
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch { /* ignore pointer capture error */ }
-    draggingRef.current = true;
-    setDragTimeState(getTimeFromPointer(e.clientX));
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current || !onSeek || duration <= 0) return;
-    // Coalesce moves into an animation frame: pointermove can fire far faster
-    // than the WebView can paint, which made the knob visibly lag the finger.
-    dragClientX.current = e.clientX;
-    if (dragRaf.current === null) {
-      dragRaf.current = requestAnimationFrame(() => {
-        dragRaf.current = null;
-        if (dragClientX.current !== null && draggingRef.current) {
-          setDragTimeState(getTimeFromPointer(dragClientX.current));
-        }
-      });
-    }
-  };
-
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragRaf.current !== null) {
-      cancelAnimationFrame(dragRaf.current);
-      dragRaf.current = null;
-    }
-    if (draggingRef.current && onSeek) {
-      const time = getTimeFromPointer(e.clientX);
-      draggingRef.current = false;
-      setDragTimeState(null);
-      try {
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-          e.currentTarget.releasePointerCapture(e.pointerId);
-        }
-      } catch { /* ignore */ }
-      onSeek(time);
-    }
-  };
-
-  const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragRaf.current !== null) {
-      cancelAnimationFrame(dragRaf.current);
-      dragRaf.current = null;
-    }
-    draggingRef.current = false;
-    setDragTimeState(null);
-    try {
-      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      }
-    } catch { /* ignore */ }
-  };
-
-  return (
-    <div className="glass-panel rounded-2xl p-5 border border-cyan-500/20 relative overflow-visible">
-      <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-purple-500/5 pointer-events-none rounded-2xl" />
-
-      <div className="relative flex flex-col sm:flex-row sm:items-center gap-4">
-        {/* cover art or icon */}
-        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-gradient-to-br from-cyan-500/30 to-purple-500/30 flex items-center justify-center shrink-0 shadow-lg shadow-cyan-500/10 relative overflow-hidden group">
-          {coverUrl ? (
-            <>
-              <div className="absolute inset-0 bg-cyan-500/20 blur-xl opacity-50 group-hover:opacity-80 transition-opacity" />
-              <CoverImage key={coverUrl} src={coverUrl} alt="Cover art" />
-            </>
-          ) : nowPlaying ? (
-            <Music size={28} className="text-cyan-400" />
-          ) : (
-            <Play size={28} className="text-cyan-400" />
-          )}
-        </div>
-
-        {/* metadata + transport */}
-        <div className="flex-1 min-w-0">
-          {nowPlaying ? (
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-white font-medium text-lg truncate">{displayTitle || 'Unknown Title'}</p>
-                <p className="text-sm text-slate-400 truncate">
-                  {displayArtist || 'Unknown Artist'}
-                  {displayAlbum ? <span className="text-slate-500"> · {displayAlbum}</span> : null}
-                </p>
-              </div>
-              {onFavoriteToggle && (
-                <button
-                  onClick={onFavoriteToggle}
-                  className={`p-2 rounded-xl hover:bg-white/5 transition-all shrink-0 ${
-                    isFavorite ? 'text-red-500 scale-110' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
-                >
-                  <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
-                </button>
-              )}
-            </div>
-          ) : (
-            <>
-              <p className="text-white font-medium text-lg">No Active Playback</p>
-              <p className="text-sm text-slate-400">
-                {localMode ? 'Select a track below to stream locally' : 'Select a device and content to begin'}
-              </p>
-            </>
-          )}
-
-          <div className="flex items-center justify-center gap-4 mt-3">
-            <button onClick={onPrevious} disabled={loading !== null}
-              className="text-slate-400 hover:text-white transition-colors p-2 disabled:opacity-50 rounded-lg hover:bg-white/5" aria-label="Previous track">
-              {loading === 'previous' ? <Loader2 size={20} className="animate-spin" /> : <SkipBackIcon size={20} />}
-            </button>
-            <button onClick={onTogglePlay} disabled={loading !== null}
-              className="w-12 h-12 rounded-full bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 hover:bg-cyan-500/30 hover:scale-105 transition-all disabled:opacity-50"
-              aria-label={mediaStatus?.state === 'playing' ? 'Pause' : 'Play'}>
-              {loading === 'play' || loading === 'pause' ? <Loader2 size={20} className="animate-spin" /> :
-                mediaStatus?.state === 'playing' ? <Pause size={22} /> : <Play size={22} />}
-            </button>
-            <button onClick={onNext} disabled={loading !== null}
-              className="text-slate-400 hover:text-white transition-colors p-2 disabled:opacity-50 rounded-lg hover:bg-white/5" aria-label="Next track">
-              {loading === 'next' ? <Loader2 size={20} className="animate-spin" /> : <SkipForwardIcon size={20} />}
-            </button>
-            {onStopPlayback && (
-              <button onClick={onStopPlayback}
-                className="text-red-400 hover:text-red-300 transition-colors p-2 rounded-lg hover:bg-white/5 ml-1" aria-label="Stop playback">
-                <Square size={20} />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* volume control */}
-        <div className="flex items-center justify-between w-full sm:w-auto sm:flex-col sm:items-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <button onClick={onMuteToggle}
-              className="text-slate-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 shrink-0"
-              aria-label={muted ? 'Unmute' : 'Mute'}>
-              {muted || volume === 0 ? <VolumeX size={18} /> : volume < 50 ? <Volume1 size={18} /> : <Volume2 size={18} />}
-            </button>
-            <input type="range" min="0" max="100" value={muted ? 0 : volume}
-              onChange={(e) => onVolumeChange(Number(e.target.value))}
-              className="flex-1 sm:w-24 accent-cyan-400 h-2 bg-white/10 rounded-lg cursor-pointer" aria-label="Volume" />
-            <span className="text-xs text-slate-400 w-9 text-right tabular-nums shrink-0 font-mono">{muted ? 'M' : `${volume}%`}</span>
-          </div>
-        </div>
-      </div>
-
-      {nowPlaying && duration > 0 && (
-        <div className="mt-4 pt-3 border-t border-white/5">
-          <div
-            ref={trackRef}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerCancel}
-            role={onSeek ? "slider" : undefined}
-            tabIndex={onSeek ? 0 : undefined}
-            aria-label="Track progress scrubber"
-            aria-valuemin={0}
-            aria-valuemax={Math.round(duration)}
-            aria-valuenow={Math.round(dragTime !== null ? dragTime : currentTime)}
-            onKeyDown={onSeek ? (e) => {
-              if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
-                e.preventDefault();
-                onSeek(Math.min(duration, currentTime + 5));
-              } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
-                e.preventDefault();
-                onSeek(Math.max(0, currentTime - 5));
-              }
-            } : undefined}
-            className={`relative py-5 sm:py-3 select-none touch-none ${onSeek ? 'cursor-pointer group' : ''}`}
-          >
-            {/* Visual track */}
-            <div className="w-full h-2.5 sm:h-2 bg-white/10 rounded-full overflow-hidden relative pointer-events-none">
-              <div
-                className="h-full bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full transition-[width] duration-75 relative"
-                style={{ width: `${Math.min(100, Math.max(0, (((dragTime !== null ? dragTime : currentTime) / duration) * 100)))}%` }}
-              />
-            </div>
-            {/* Thumb knob — always visible on touch, hover-revealed on desktop */}
-            {onSeek && (
-              <div
-                className={`absolute top-1/2 -translate-y-1/2 h-5 w-5 sm:h-4 sm:w-4 bg-white rounded-full shadow-md shadow-cyan-500/50 pointer-events-none -ml-2.5 sm:-ml-2 transition-transform ${
-                  dragTime !== null ? 'scale-125' : 'sm:opacity-0 sm:group-hover:opacity-100 sm:group-hover:scale-110'
-                }`}
-                style={{ left: `${Math.min(100, Math.max(0, (((dragTime !== null ? dragTime : currentTime) / duration) * 100)))}%` }}
-              />
-            )}
-          </div>
-          <div className="flex justify-between mt-1 text-[10px] text-slate-500 font-mono">
-            <span>{formatClock(dragTime !== null ? dragTime : currentTime)}</span>
-            <span>{formatClock(duration)}</span>
-          </div>
-          </div>
-        )}
-        {nowPlaying && duration <= 0 && (
-          <div className="mt-4 pt-3 border-t border-white/5">
-            <div className="flex items-center gap-2 py-4 sm:py-2" aria-label="Live stream, duration unknown">
-              <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse" aria-hidden />
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-rose-300">Live</span>
-              <div className="flex-1 h-1.5 rounded-full bg-gradient-to-r from-rose-500/40 via-rose-400/20 to-transparent" />
-              <span className="text-[10px] text-slate-500 font-mono">{formatClock(currentTime)}</span>
-            </div>
-          </div>
-        )}
-
-      {localMode ? (
-        <div className="relative mt-4 pt-3 border-t border-white/5">
-          <div className="flex items-center justify-center gap-2 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-sm">
-            <Music size={14} className="animate-pulse" />
-            {maPlayer?.isConnected 
-              ? 'Web Player (Browser Audio) — Connected to MA' 
-              : maPlayer?.connectionState === 'FAILED'
-                ? 'Web Player Connection Failed — '
-                : 'Web Player (Browser Audio) — Connecting...'
-            }
-            {maPlayer?.connectionState === 'FAILED' && (
-              <button
-                onClick={maPlayer?.reconnect}
-                className="ml-2 text-xs underline hover:text-cyan-300"
-              >
-                Reconnect
-              </button>
-            )}
-          </div>
-        </div>
-      ) : !selectedTarget ? (
-        <div className="relative mt-4 pt-3 border-t border-white/5">
-          <div className="flex items-center justify-center gap-2 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm">
-            <Cast size={14} />
-            Select a device above to enable playback
-          </div>
-        </div>
-      ) : (
-        <div className="relative mt-4 pt-3 border-t border-white/5">
-          <div className="flex items-center justify-center gap-2 py-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 text-sm">
-            <Cast size={14} />
-            Playing through {targetLabel || selectedTarget.replace(/^ma:/, '').replace(/_/g, ' ')} (HA/MA Device)
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-/* ── resume / playlist item cards ───────────────────────────────────── */
-
-const QuickResumeItem = ({
-  item, onPlay, isDisabled, isLoading,
-}: {
-  item: { id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; progress?: number; lastPlayed?: number };
-  onPlay: () => void;
-  isDisabled: boolean;
-  isLoading: boolean;
-}) => (
-  <button
-    onClick={onPlay} disabled={isDisabled}
-    className="glass-panel rounded-xl p-3 flex items-center gap-3 text-left transition-all hover:bg-white/10 hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed group"
-  >
-    <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
-      item.type === 'audiobook' ? 'bg-amber-500/20 text-amber-400' : 'bg-purple-500/20 text-purple-400'
-    }`}>
-      {isLoading ? <Loader2 size={18} className="animate-spin" /> :
-        item.type === 'audiobook' ? <BookOpen size={18} /> : <Music size={18} />}
-    </div>
-    <div className="min-w-0 flex-1">
-      <p className="text-white text-sm font-medium truncate">{item.title}</p>
-      <p className="text-xs text-slate-400 truncate">{item.subtitle}</p>
-      {item.type === 'audiobook' && item.progress !== undefined && (
-        <div className="flex items-center gap-2 mt-1.5">
-          <div className="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
-            <div className="h-full bg-amber-400 rounded-full transition-all"
-              style={{ width: `${Math.min(100, Math.round(item.progress * 100))}%` }} />
-          </div>
-          <span className="text-[10px] text-slate-500 shrink-0 tabular-nums">{Math.min(100, Math.round(item.progress * 100))}%</span>
-        </div>
-      )}
-      {item.lastPlayed !== undefined && (
-        <p className="text-[10px] text-slate-500 mt-1">{formatTimeAgo(item.lastPlayed)}</p>
-      )}
-    </div>
-    <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-  </button>
-);
-
-const PlaylistItem = ({
-  name, trackCount, onPlay, isDisabled, isLoading,
-}: {
-  name: string; trackCount: number; onPlay: () => void; isDisabled: boolean; isLoading: boolean;
-}) => (
-  <button
-    onClick={onPlay} disabled={isDisabled}
-    className="glass-panel rounded-xl p-3 flex items-center gap-3 text-left transition-all hover:bg-white/10 hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed group"
-  >
-    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-purple-500/20 text-cyan-400 flex items-center justify-center shrink-0">
-      {isLoading ? <Loader2 size={18} className="animate-spin" /> : <List size={18} />}
-    </div>
-    <div className="min-w-0 flex-1">
-      <p className="text-white text-sm font-medium truncate">{name}</p>
-      {trackCount > 0 && (
-        <p className="text-xs text-slate-400">{trackCount} {trackCount === 1 ? 'track' : 'tracks'}</p>
-      )}
-    </div>
-    <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-  </button>
-);
-
-/* ── explorer modal ─────────────────────────────────────────────────── */
-
-const MediaExplorerModal = ({
-  show, onClose, playAudiobook, playPlaylist, playMedia, playLocal, selectedTarget, localMode,
-}: {
-  show: boolean; onClose: () => void;
-  playAudiobook: (id: string, title?: string) => void;
-  playPlaylist: (uri: string) => void;
-  playMedia: (query: string, mediaType?: string) => void;
-  playLocal: (id: string, title: string, subtitle: string, type: 'audiobook' | 'music', source: 'abs' | 'ma') => void;
-  selectedTarget: string;
-  localMode: boolean;
-}) => {
-  const { trigger } = useHaptics();
-  const [tab, setTab] = useState<'ma' | 'abs'>('ma');
-  const [search, setSearch] = useState('');
-  const [libraryId, setLibraryId] = useState<string | null>(null);
-  const [itemLoading, setItemLoading] = useState<string | null>(null);
-
-  const { data: absLibraries, isLoading: absLibrariesLoading, error: absLibrariesError } = useQuery({
-    queryKey: ['abs-libraries'],
-    queryFn: () => api.getAudiobookshelfLibraries(),
-    enabled: show && tab === 'abs' && !libraryId,
-    retry: 2,
-    staleTime: 60000,
-  });
-
-  const { data: absLibraryItems, isLoading: absLibraryItemsLoading, error: absLibraryItemsError } = useQuery({
-    queryKey: ['abs-library-items', libraryId],
-    queryFn: () => api.getAudiobookshelfLibrary(libraryId!, 50),
-    enabled: show && tab === 'abs' && !!libraryId,
-    retry: 2,
-    staleTime: 60000,
-  });
-
-  const { data: absSearchResults, isLoading: absSearchLoading, error: absSearchError } = useQuery({
-    queryKey: ['abs-search', search],
-    queryFn: () => api.searchAudiobookshelf(search, 30),
-    enabled: show && tab === 'abs' && search.length >= 2,
-    retry: 2,
-    staleTime: 60000,
-  });
-
-  const { data: maSearchResults, isLoading: maSearchLoading, error: maSearchError } = useQuery({
-    queryKey: ['ma-search', search],
-    queryFn: () => api.searchMusicAssistant(search, undefined, 30, false),
-    enabled: show && tab === 'ma' && search.length >= 2,
-    retry: 2,
-    staleTime: 60000,
-  });
-
-  const { data: maPlaylists, isLoading: playlistsLoading, error: maPlaylistsError, refetch: refetchPlaylists } = useQuery({
-    queryKey: ['ma-playlists'],
-    queryFn: () => api.getMusicAssistantPlaylists(),
-    enabled: show && tab === 'ma',
-    retry: 2,
-    staleTime: 60000,
-  });
-
-  const { data: maRecent, isLoading: maRecentLoading, error: maRecentError, refetch: refetchRecent } = useQuery({
-    queryKey: ['ma-recent'],
-    queryFn: () => api.getMusicAssistantRecent(),
-    enabled: show && tab === 'ma',
-    retry: 2,
-    staleTime: 60000,
-  });
-
-  const handlePlay = useCallback(
-    (id: string, type: 'audiobook' | 'music' | 'playlist', title?: string, subtitle?: string) => {
-      if (localMode) {
-        if (title && subtitle) {
-          trigger('heavy');
-          setItemLoading(id);
-          try {
-            const source = type === 'audiobook' ? 'abs' : 'ma';
-            playLocal(id, title, subtitle, type === 'audiobook' ? 'audiobook' : 'music', source);
-          } finally { setItemLoading(null); }
-        }
-        return;
-      }
-      if (!selectedTarget) {
-        if (title && subtitle) {
-          trigger('heavy');
-          setItemLoading(id);
-          try {
-            const source = type === 'audiobook' ? 'abs' : 'ma';
-            playLocal(id, title, subtitle, type === 'audiobook' ? 'audiobook' : 'music', source);
-          } finally { setItemLoading(null); }
-        }
-        return;
-      }
-      trigger('heavy');
-      setItemLoading(id);
-      try {
-        if (type === 'audiobook') playAudiobook(id, title);
-        else if (type === 'playlist') playPlaylist(id);
-        else playMedia(id, 'music');
-      } finally { setItemLoading(null); }
-    },
-    [selectedTarget, localMode, trigger, playAudiobook, playPlaylist, playMedia, playLocal],
-  );
-
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    if (!show) { setSearch(''); setLibraryId(null); setTab('ma'); setItemLoading(null); }
-  }, [show]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  if (!show) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="glass-panel w-full sm:max-w-3xl h-[92vh] sm:h-[85vh] sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden border border-white/10 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-
-        {/* header */}
-        <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
-          <div className="flex items-center gap-2">
-            <Grid3X3 size={18} className="text-cyan-400" />
-            <h2 className="text-lg font-semibold text-white">Browse All Media</h2>
-          </div>
-          <button onClick={onClose}
-            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors" aria-label="Close">
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* tabs */}
-        <div className="flex border-b border-white/10 shrink-0">
-          <button onClick={() => { setTab('ma'); setLibraryId(null); setSearch(''); }}
-            className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 transition-all ${
-              tab === 'ma' ? 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-500/5' : 'text-slate-400 hover:text-white'}`}>
-            <Music size={16} />Music Assistant
-          </button>
-          <button onClick={() => { setTab('abs'); setLibraryId(null); setSearch(''); }}
-            className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 transition-all ${
-              tab === 'abs' ? 'text-amber-400 border-b-2 border-amber-400 bg-amber-500/5' : 'text-slate-400 hover:text-white'}`}>
-            <BookOpen size={16} />Audiobooks
-          </button>
-        </div>
-
-        {/* sticky search */}
-        <div className="p-3 border-b border-white/5 shrink-0 bg-slate-950/30">
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input type="text"
-              placeholder={tab === 'abs' ? 'Search audiobooks...' : 'Search music...'}
-              value={search} onChange={(e) => setSearch(e.target.value)}
-              className="w-full glass-input pl-9 h-10 text-sm rounded-xl" />
-            {search && (
-              <button onClick={() => setSearch('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5" aria-label="Clear">
-                <X size={14} />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* content */}
-        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-          {tab === 'ma' && (
-            <div className="space-y-6">
-              {search.length >= 2 ? (
-                <div>
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                    <Search size={12} />Search Results ({maSearchResults?.results?.length || 0})
-                  </h3>
-                  {maSearchLoading ? loadingSection() : maSearchError ? (
-                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
-                      <p className="text-sm text-red-400">Music Assistant search failed: {maSearchError.message || 'Connection to Music Assistant server is down or credentials are invalid.'}</p>
-                    </div>
-                  ) : !maSearchResults?.results?.length ? emptySection(`No results for "${search}"`) : (
-                    <div className="space-y-1.5">
-                      {maSearchResults.results.map((item) => (
-                        <button key={item.uri} onClick={() => handlePlay(item.uri, item.type === 'playlist' ? 'playlist' : 'music', item.name, item.artist || item.type)} disabled={!localMode && !selectedTarget}
-                          className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
-                          {itemLoading === `ma-${item.uri}` ?
-                            <Loader2 size={18} className="text-purple-400 animate-spin shrink-0" /> :
-                            <Music size={18} className="text-purple-400 shrink-0" />}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-white text-sm font-medium truncate">{item.name}</p>
-                            <p className="text-xs text-slate-400 truncate">
-                              {item.artist || 'Unknown Artist'}{item.album ? ` • ${item.album}` : ''}
-                            </p>
-                          </div>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 shrink-0 capitalize">{item.type}</span>
-                          <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <div>
-                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <List size={12} />Playlists
-                    </h3>
-                    {playlistsLoading ? loadingSection() : maPlaylistsError ? (
-                      <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
-                        <p className="text-sm text-red-400">Failed to load playlists. Check your server connection.</p>
-                        <button
-                          onClick={() => { void refetchPlaylists(); }}
-                          className="mt-2 text-xs text-red-300 underline hover:text-red-200"
-                        >
-                          Retry
-                        </button>
-                      </div>
-                    ) : !maPlaylists?.playlists?.length ? emptySection('No playlists found') : (
-                      <div className="space-y-1.5">
-                        {maPlaylists.playlists
-                          .map((pl) => (
-                            <PlaylistItem key={pl.uri} name={pl.name} trackCount={pl.items}
-                              onPlay={() => handlePlay(pl.uri, 'playlist', pl.name, pl.items > 0 ? `${pl.items} tracks` : 'Playlist')}
-                              isDisabled={!localMode && !selectedTarget} isLoading={itemLoading === `pl-${pl.uri}`} />
-                          ))}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <Clock size={12} />Recently Played
-                    </h3>
-                    {maRecentLoading ? loadingSection() : maRecentError ? (
-                      <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
-                        <p className="text-sm text-red-400">Failed to load recent items. Check your server connection.</p>
-                        <button
-                          onClick={() => { void refetchRecent(); }}
-                          className="mt-2 text-xs text-red-300 underline hover:text-red-200"
-                        >
-                          Retry
-                        </button>
-                      </div>
-                    ) : !maRecent?.recent?.length ? emptySection('No recent items') : (
-                      <div className="space-y-1.5">
-                        {maRecent.recent
-                          .map((item) => (
-                            <button key={item.uri} onClick={() => handlePlay(item.uri, 'music', item.name, item.artist)} disabled={!localMode && !selectedTarget}
-                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
-                              {itemLoading === `ma-${item.uri}` ?
-                                <Loader2 size={18} className="text-purple-400 animate-spin shrink-0" /> :
-                                <Music size={18} className="text-purple-400 shrink-0" />}
-                              <div className="min-w-0 flex-1">
-                                <p className="text-white text-sm font-medium truncate">{item.name}</p>
-                                <p className="text-xs text-slate-400 truncate">{item.artist}</p>
-                              </div>
-                              <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                            </button>
-                          ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {tab === 'abs' && (
-            <div>
-              {libraryId && absLibraries && (
-                <button onClick={() => { setLibraryId(null); setSearch(''); }}
-                  className="text-sm text-amber-400 hover:text-amber-300 mb-3 flex items-center gap-1 transition-colors">
-                  <ChevronRight size={14} className="rotate-180" />Back to Libraries
-                </button>
-              )}
-
-              {!libraryId && (
-                <div>
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                    <Library size={12} />Libraries
-                  </h3>
-                  {absLibrariesLoading ? loadingSection() : absLibrariesError ? (
-                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
-                      <p className="text-sm text-red-400">Failed to load libraries. Check your server connection.</p>
-                    </div>
-                  ) : !absLibraries?.libraries?.length ? emptySection('No libraries found') : (
-                    <div className="space-y-1.5">
-                      {absLibraries.libraries
-                        .filter((lib) => !search || lib.name.toLowerCase().includes(search.toLowerCase()))
-                        .map((lib) => (
-                          <button key={lib.id} onClick={() => setLibraryId(lib.id)}
-                            className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left">
-                            <Library size={18} className="text-amber-400 shrink-0" />
-                            <div className="min-w-0 flex-1">
-                              <p className="text-white text-sm font-medium truncate">{lib.name}</p>
-                              <p className="text-xs text-slate-400 capitalize">{lib.media_type}</p>
-                            </div>
-                            <ChevronRight size={16} className="text-slate-500 shrink-0" />
-                          </button>
-                        ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {libraryId && (
-                <div>
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                    {absLibraryItems?.status ? 'Browse Books' : 'Loading...'}
-                  </h3>
-                  {absLibraryItemsLoading ? loadingSection() : absLibraryItemsError ? (
-                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
-                      <p className="text-sm text-red-400">Failed to load library. Check your server connection.</p>
-                    </div>
-                  ) : !absLibraryItems?.books?.length ? emptySection('No books in this library') : (
-                    <div className="space-y-1.5">
-                      {absLibraryItems.books
-                        .filter((b) => !search || b.title.toLowerCase().includes(search.toLowerCase()) || b.author.toLowerCase().includes(search.toLowerCase()))
-                        .map((book) => (
-<button key={book.id} onClick={() => handlePlay(book.id, 'audiobook', book.title, book.author)} disabled={!localMode && !selectedTarget}
-                            className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
-                            {itemLoading === `abs-${book.id}` ?
-                              <Loader2 size={18} className="text-amber-400 animate-spin shrink-0" /> :
-                              <BookOpen size={18} className="text-amber-400 shrink-0" />}
-                            <div className="min-w-0 flex-1">
-                              <p className="text-white text-sm font-medium truncate">{book.title}</p>
-                              <p className="text-xs text-slate-400">{book.author}</p>
-                            </div>
-                            <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                          </button>
-                        ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {search.length >= 2 && (
-                <div className="mt-4">
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                    <Search size={12} />Search Results ({absSearchResults?.total || 0})
-                  </h3>
-                  {absSearchLoading ? loadingSection() : absSearchError ? (
-                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
-                      <p className="text-sm text-red-400">Search failed. Check your server connection.</p>
-                    </div>
-                  ) : !absSearchResults?.books?.length && !absSearchResults?.podcasts?.length && !absSearchResults?.authors?.length ? emptySection(`No results for "${search}"`) : (
-                    <div className="space-y-1.5">
-                      {absSearchResults.books.map((book) => (
-                        <button key={`book-${book.id}`} onClick={() => handlePlay(book.id, 'audiobook', book.title, book.author)} disabled={!localMode && !selectedTarget}
-                          className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
-                          {itemLoading === `abs-${book.id}` ?
-                            <Loader2 size={18} className="text-amber-400 animate-spin shrink-0" /> :
-                            <BookOpen size={18} className="text-amber-400 shrink-0" />}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-white text-sm font-medium truncate">{book.title}</p>
-                            <p className="text-xs text-slate-400">{book.author || book.narrator || 'Unknown author'}</p>
-                            {book.duration_formatted && (
-                              <p className="text-[10px] text-slate-500">{book.duration_formatted}</p>
-                            )}
-                          </div>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 shrink-0">book</span>
-                          <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                        </button>
-                      ))}
-                      {absSearchResults.podcasts.map((pod) => (
-                        <button key={`pod-${pod.id}`} onClick={() => handlePlay(pod.id, 'playlist', pod.title, pod.author)} disabled={!localMode && !selectedTarget}
-                          className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
-                          {itemLoading === `abs-pod-${pod.id}` ?
-                            <Loader2 size={18} className="text-blue-400 animate-spin shrink-0" /> :
-                            <Mic2 size={18} className="text-blue-400 shrink-0" />}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-white text-sm font-medium truncate">{pod.title}</p>
-                            <p className="text-xs text-slate-400">{pod.author || 'Unknown'}</p>
-                          </div>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 shrink-0">podcast</span>
-                          <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                        </button>
-                      ))}
-                      {absSearchResults.authors.map((author) => (
-                        <button key={`auth-${author.id}`} onClick={() => { setSearch(author.name); }} disabled={!localMode && !selectedTarget}
-                          className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
-                          {itemLoading === `abs-auth-${author.id}` ?
-                            <Loader2 size={18} className="text-emerald-400 animate-spin shrink-0" /> :
-                            <Users size={18} className="text-emerald-400 shrink-0" />}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-white text-sm font-medium truncate">{author.name}</p>
-                            <p className="text-xs text-slate-400">Search author</p>
-                          </div>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 shrink-0">author</span>
-                          <Search size={14} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ── main page ──────────────────────────────────────────────────────── */
-
-// Normalize the various `last_played` shapes (epoch seconds, epoch ms, or ISO
-// string) returned by Music Assistant / Audiobookshelf into epoch-ms numbers.
-// Returns undefined when the value is missing or unparseable.
+// Normalize `last_played` (epoch s, epoch ms or ISO string) to epoch ms.
 const normalizePlayedAt = (value: unknown): number | undefined => {
   if (value === undefined || value === null || value === '') return undefined;
-  if (typeof value === 'number') {
-    if (value <= 0) return undefined;
-    return value > 1e12 ? value : value * 1000;
-  }
-  if (typeof value === 'string') {
-    const n = Number(value);
-    if (!Number.isNaN(n)) {
-      if (n <= 0) return undefined;
-      return n > 1e12 ? n : n * 1000;
-    }
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? undefined : parsed;
-  }
-  return undefined;
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isNaN(n)) return n <= 0 ? undefined : n > 1e12 ? n : n * 1000;
+  const parsed = Date.parse(String(value));
+  return Number.isNaN(parsed) ? undefined : parsed;
 };
 
 const formatTimeAgo = (ts: number): string => {
-  const diff = Date.now() - ts;
-  const mins = Math.floor(diff / 60000);
+  const mins = Math.floor((Date.now() - ts) / 60000);
   if (mins < 1) return 'Just now';
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
@@ -1056,1225 +49,577 @@ const formatTimeAgo = (ts: number): string => {
   return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
+const playerState = (s?: string): NowPlayingView['state'] =>
+  s === 'playing' || s === 'buffering' ? 'playing' : s === 'paused' ? 'paused' : 'idle';
+
+interface ShelfItem {
+  key: string;
+  req: PlayRequest;
+  subtitle: string;
+  kind: 'audiobook' | 'music' | 'playlist';
+  progress?: number;
+  lastPlayed?: number;
+}
+
+function ShelfCard({ item, busy, disabled, onPlay }: { item: ShelfItem; busy: boolean; disabled: boolean; onPlay: () => void }) {
+  const tone =
+    item.kind === 'audiobook' ? 'bg-amber-500/20 text-amber-400'
+      : item.kind === 'playlist' ? 'bg-cyan-500/20 text-cyan-400'
+        : 'bg-purple-500/20 text-purple-400';
+  const Icon = item.kind === 'audiobook' ? BookOpen : item.kind === 'playlist' ? List : Music;
+  return (
+    <button
+      type="button"
+      onClick={onPlay}
+      disabled={disabled}
+      className="glass-panel rounded-xl p-3 min-h-11 flex items-center gap-3 text-left transition-colors hover:bg-white/10 disabled:opacity-60 group"
+    >
+      <span className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${tone}`}>
+        {busy ? <Loader2 size={18} className="animate-spin" /> : <Icon size={18} />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-white text-sm font-medium truncate">{item.req.title}</span>
+        {item.subtitle ? <span className="block text-xs text-slate-400 truncate">{item.subtitle}</span> : null}
+        {item.progress !== undefined && (
+          <span className="flex items-center gap-2 mt-1.5">
+            <span className="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
+              <span className="block h-full bg-amber-400 rounded-full" style={{ width: `${Math.round(item.progress * 100)}%` }} />
+            </span>
+            <span className="text-[11px] text-slate-500 shrink-0 tabular-nums">{Math.round(item.progress * 100)}%</span>
+          </span>
+        )}
+        {item.lastPlayed !== undefined && <span className="block text-[11px] text-slate-500 mt-1">{formatTimeAgo(item.lastPlayed)}</span>}
+      </span>
+      <Play size={16} className="text-slate-500 shrink-0 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100" aria-hidden />
+    </button>
+  );
+}
+
+function ShelfMessage({ title, detail, onRetry }: { title: string; detail?: string; onRetry?: () => void }) {
+  return (
+    <div className="glass-panel rounded-2xl p-6 text-center">
+      <p className="text-sm text-slate-300">{title}</p>
+      {detail ? <p className="text-xs text-slate-500 mt-1">{detail}</p> : null}
+      {onRetry && (
+        <button type="button" onClick={onRetry} className="mt-2 min-h-11 px-4 inline-flex items-center gap-2 text-sm text-cyan-300 hover:text-cyan-200">
+          <RefreshCw size={14} />Try again
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ── page ────────────────────────────────────────────────────────────── */
+
 const Media = () => {
   const { trigger } = useHaptics();
-  const queryClient = useQueryClient();
-  const [selectedTarget, setSelectedTarget] = useState<string>('');
-  const [volume, setVolume] = useState(70);
-  const [muted, setMuted] = useState(false);
-  const [loading, setLoading] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [mediaStatus, setMediaStatus] = useState<MediaStatus | null>(null);
-  // Players reported by the (always-working) media/status poll. Used as the
-  // device source of truth so devices appear even when the HA entity list or
-  // the MA WebSocket are unavailable for this user.
-  const [availablePlayers, setAvailablePlayers] = useState<MediaStatus[]>([]);
-  const [showMediaPicker, setShowMediaPicker] = useState(false);
-  const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
-  const [localMode, setLocalMode] = useState(true);
+  const maPlayer = useSharedMAWebPlayer();
+
+  /** '' = this device's web player, `ma:<id>` = an MA-only player, else an HA entity. */
+  const [selectedTarget, setSelectedTarget] = useState('');
   const isWebPlayer = !selectedTarget;
-  // Once the user taps a device (speaker or Web Player) the page must stop
-  // second-guessing them; before that, an already-playing speaker is adopted
-  // automatically so the page never shows an empty card over live music.
-  const userPickedDeviceRef = useRef(false);
-  const autoAdoptedRef = useRef(false);
-  const [maPlayers, setMaPlayers] = useState<Array<{ player_id: string; name: string; available: boolean; state: string; powered: boolean }>>([]);
-
-  // Local player states
-  const [localIsPlaying, setLocalIsPlaying] = useState(false);
-  const [localVolume, setLocalVolume] = useState(70);
-  const [localMuted, setLocalMuted] = useState(false);
-  const [localCurrentTime, setLocalCurrentTime] = useState(0);
-  const [localDuration, setLocalDuration] = useState(0);
-  const lastVolumeChangeTimeRef = useRef<number>(0);
-  const volumeDebounceTimerRef = useRef<number | null>(null);
-
-  // MA Web Player (sendspin-js). App-wide, so leaving this page does not stop
-  // it; the callback replays its current state when the page is reopened.
-  const maPlayer = useSharedMAWebPlayer(useCallback((playerState) => {
-    if (playerState.isPlaying !== undefined) {
-      setLocalIsPlaying(playerState.isPlaying);
-    }
-    if (playerState.error) {
-      // The web player auto-connects speculatively on load. Don't alarm the
-      // user with a red banner for a player they never asked to use; only
-      // surface connection failures after they explicitly picked it.
-      if (userPickedDeviceRef.current) {
-        setError(playerState.error);
-      } else {
-        console.warn('[Media] Web player probe failed (not user-selected):', playerState.error);
-      }
-      setLocalIsPlaying(false);
-      setLoading(null);
-    }
-    if (playerState.volume !== undefined) {
-      if (Date.now() - lastVolumeChangeTimeRef.current >= 4000) {
-        setLocalVolume(playerState.volume);
-      }
-    }
-    if (playerState.muted !== undefined) {
-      setLocalMuted(playerState.muted);
-    }
-    if (playerState.position !== undefined) {
-      setLocalCurrentTime(playerState.position);
-    }
-    if (playerState.duration !== undefined) {
-      setLocalDuration(playerState.duration);
-    }
-    if (playerState.mediaTitle || playerState.mediaArtist || playerState.mediaUri) {
-      setLocalTrack(prev => {
-        const nextId = playerState.mediaUri || prev?.id || '';
-        const nextTitle = playerState.mediaTitle || prev?.title || 'Unknown Title';
-        const nextSubtitle = playerState.mediaArtist || prev?.subtitle || 'Unknown Artist';
-        if (prev && prev.id === nextId && prev.title === nextTitle && prev.subtitle === nextSubtitle) {
-          return prev;
-        }
-        return {
-          id: nextId,
-          title: nextTitle,
-          subtitle: nextSubtitle,
-          type: prev?.type || 'music',
-          source: prev?.source || 'ma',
-        };
-      });
-    }
-  }, []));
-
-  // Fetch Music Assistant players for the device picker. Uses the browser's
-  // ma-jsonrpc WebSocket, which reaches MA directly and avoids the gateway's
-  // server-side hostname loop (ha.sumemail.com resolves to the host internally).
-  //
-  // MA speakers that are integrated into Home Assistant also arrive through
-  // media/status as ordinary media_player entities, so the picker still lists
-  // them when this socket is not connected.
+  const selectedRef = useRef(selectedTarget);
   useEffect(() => {
-    let cancelled = false;
-    if (maPlayer.isConnected) {
-      maPlayer.listMaPlayers()
-        .then((players) => { if (!cancelled) setMaPlayers(players); })
-        .catch(() => { if (!cancelled) setMaPlayers([]); });
-    }
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maPlayer.isConnected, maPlayer.listMaPlayers]);
+    selectedRef.current = selectedTarget;
+  }, [selectedTarget]);
+  // Once the person picks a device the page stops second-guessing them; until
+  // then, a speaker that is already playing is followed automatically so the
+  // page never shows an empty card over live music.
+  const userPickedRef = useRef(false);
 
-  // Music Assistant metadata & favorites state
-  const [detailedMetadata, setDetailedMetadata] = useState<TrackDetail | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [players, setPlayers] = useState<MediaStatus[]>([]);
+  const [maPlayers, setMaPlayers] = useState<MaPlayerListEntry[]>([]);
+  const [showExplorer, setShowExplorer] = useState(false);
 
-  const activeUri = useMemo(() => {
-    if (localMode) {
-      if (maPlayer.mediaUri && maPlayer.mediaUri.includes('://')) {
-        return maPlayer.mediaUri;
-      }
-      return localTrack?.source === 'ma' ? localTrack.id : null;
-    } else {
-      return mediaStatus?.media_content_id || null;
-    }
-  }, [localMode, localTrack, mediaStatus, maPlayer.mediaUri]);
+  // Remote (HA / MA) volume, position and duration.
+  const [volume, setVolume] = useState(50);
+  const [muted, setMuted] = useState(false);
+  const lastVolumeChangeRef = useRef(0);
+  const volumeTimerRef = useRef<number | null>(null);
+  const [remoteTime, setRemoteTime] = useState(0);
 
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    setDetailedMetadata(null);
-    if (!activeUri || !activeUri.includes('://')) {
-      return;
-    }
-    let active = true;
-    api.getMediaDetail(activeUri)
-      .then((data) => {
-        if (active) {
-          const detail = (data && data.result ? data.result : data) as unknown as TrackDetail;
-          setDetailedMetadata(detail);
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to fetch media detail:', err);
-        if (active) setDetailedMetadata(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [activeUri]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  /* ── device status ─────────────────────────────────────────────── */
 
-  const isFavorite = useMemo(() => {
-    if (!activeUri) return false;
-    if (detailedMetadata) {
-      if (detailedMetadata.uri && detailedMetadata.uri !== activeUri) {
-        return false;
-      }
-      return Boolean(detailedMetadata.favorite);
-    }
-    if (localMode && maPlayer.mediaFavorite !== undefined && maPlayer.mediaFavorite !== null) {
-      return Boolean(maPlayer.mediaFavorite);
-    }
-    return false;
-  }, [detailedMetadata, activeUri, localMode, maPlayer.mediaFavorite]);
-
-  const handleFavoriteToggle = useCallback(async () => {
-    if (!activeUri) return;
-    const currentFavorite = isFavorite;
-    const targetFavorite = !currentFavorite;
-    
-    // Optimistic update
-    setDetailedMetadata((prev) => prev ? { ...prev, uri: activeUri, favorite: targetFavorite } : { item_id: '', name: '', uri: activeUri, favorite: targetFavorite, media_type: 'track' });
-    
+  const refreshStatus = useCallback(async () => {
     try {
-      const resp = await api.setMediaFavorite(activeUri, targetFavorite);
-      if (resp && (resp.status === 'SUCCESS' || resp.favorite !== undefined)) {
-        setDetailedMetadata((prev) => prev ? { ...prev, uri: activeUri, favorite: resp.favorite } : null);
+      const resp = await api.mediaStatus();
+      if (resp.status !== 'SUCCESS' || !resp.detail) return;
+      const detail = resp.detail as { active?: MediaStatus | null; all_players?: MediaStatus[] };
+      const active = detail.active;
+      // `active` carries the richest view of the playing device; prefer it.
+      const all = (detail.all_players || [])
+        .filter((p) => p.entity_id && p.entity_id !== 'web_player')
+        .map((p) => (active && p.entity_id === active.entity_id ? { ...p, ...active } : p));
+      setPlayers(all);
+      if (
+        active?.entity_id && active.entity_id !== 'web_player' && playerState(active.state) === 'playing' &&
+        !userPickedRef.current && !selectedRef.current
+      ) {
+        userPickedRef.current = true; // adopt once
+        setSelectedTarget(active.entity_id);
+        if (!all.some((p) => p.entity_id === active.entity_id)) setPlayers([active, ...all]);
       }
-    } catch (err) {
-      console.error('Failed to toggle favorite:', err);
-      setDetailedMetadata((prev) => prev ? { ...prev, uri: activeUri, favorite: currentFavorite } : null);
-      setError('Failed to update favorite status');
+    } catch {
+      /* the next poll retries */
     }
-  }, [activeUri, isFavorite]);
+  }, []);
 
-  const detailedSubtitle = useMemo(() => {
-    const baseArtist = localMode ? localTrack?.subtitle : mediaStatus?.media_artist;
-    const baseAlbum = localMode ? '' : mediaStatus?.media_album;
-    
-    const isStale = detailedMetadata?.uri && activeUri && detailedMetadata.uri !== activeUri;
-    const artist = (!isStale && detailedMetadata?.artists?.map((a) => a.name).join(', ')) || baseArtist || '';
-    const album = (!isStale && detailedMetadata?.album?.name) || baseAlbum || '';
-    
-    const podcast = !isStale ? detailedMetadata?.podcast?.name : undefined;
-    const albumOrPodcast = podcast || album;
-
-    if (artist && albumOrPodcast) {
-      return `${artist} • ${albumOrPodcast}`;
-    }
-    return artist || albumOrPodcast || '';
-  }, [localMode, localTrack, mediaStatus, detailedMetadata, activeUri]);
-
-  const detailedTitle = useMemo(() => {
-    const baseTitle = localMode ? localTrack?.title : mediaStatus?.media_title;
-    const isStale = detailedMetadata?.uri && activeUri && detailedMetadata.uri !== activeUri;
-    return (!isStale && detailedMetadata?.name) || baseTitle || 'Unknown Title';
-  }, [localMode, localTrack, mediaStatus, detailedMetadata, activeUri]);
-
-
-  const localSyncDataRef = useRef({ localTrack, localCurrentTime, localDuration, localVolume, localMuted });
   useEffect(() => {
-    localSyncDataRef.current = { localTrack, localCurrentTime, localDuration, localVolume, localMuted };
-  }, [localTrack, localCurrentTime, localDuration, localVolume, localMuted]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- polling an external service
+    void refreshStatus();
+    const id = window.setInterval(() => {
+      if (!document.hidden) void refreshStatus();
+    }, STATUS_POLL_MS);
+    return () => clearInterval(id);
+  }, [refreshStatus]);
 
-  // Periodic local playback state sync to backend (uses true track position and duration)
+  // Music Assistant players that Home Assistant does not also expose. Needs the
+  // web player's control socket, so it fills in once that is connected.
+  const { isConnected: maConnected, listMaPlayers } = maPlayer;
+  const isMaTarget = selectedTarget.startsWith('ma:');
   useEffect(() => {
-    if (!localIsPlaying) return;
-    const timer = window.setInterval(() => {
-      const data = localSyncDataRef.current;
-      if (!data.localTrack) return;
-      api.syncMediaState({
-        entity_id: 'web_player',
-        state: 'playing',
-        media_type: data.localTrack.type,
-        media_content_id: data.localTrack.id,
-        media_title: data.localTrack.title,
-        media_artist: data.localTrack.subtitle,
-        position: data.localCurrentTime,
-        duration: data.localDuration,
-        volume_level: data.localVolume / 100,
-        is_volume_muted: data.localMuted
-      }).catch(err => console.error('Failed to sync progress:', err));
-    }, 5000);
-
+    if (!maConnected) return;
+    let cancelled = false;
+    const load = () => listMaPlayers().then((list) => {
+      if (!cancelled) setMaPlayers((prev) => (JSON.stringify(prev) === JSON.stringify(list) ? prev : list));
+    });
+    void load();
+    // A selected MA player's state only comes from here, so keep it fresh.
+    const id = isMaTarget ? window.setInterval(() => { if (!document.hidden) void load(); }, STATUS_POLL_MS * 2) : null;
     return () => {
-      clearInterval(timer);
+      cancelled = true;
+      if (id !== null) clearInterval(id);
     };
-  }, [localIsPlaying]);
-
-  const [remoteCurrentTime, setRemoteCurrentTime] = useState(0);
-  const [remoteDuration, setRemoteDuration] = useState(0);
-
-  /* eslint-disable react-hooks/set-state-in-effect */
-  // Sync remote time when mediaStatus changes
-  useEffect(() => {
-    if (mediaStatus) {
-      const pos = mediaStatus.position ?? (mediaStatus as unknown as { media_position?: number }).media_position ?? 0;
-      const dur = mediaStatus.duration ?? (mediaStatus as unknown as { media_duration?: number }).media_duration ?? 0;
-      setRemoteCurrentTime((prev) => {
-        // Do not revert to 0 or jump back while playing unless track changed or significant seek
-        if (mediaStatus.state === 'playing' && prev > 0 && (pos === 0 || Math.abs(pos - prev) < 3)) {
-          return prev;
-        }
-        return pos;
-      });
-      if (dur > 0) {
-        setRemoteDuration(dur);
-      }
-    } else {
-      setRemoteCurrentTime(0);
-      setRemoteDuration(0);
-    }
-  }, [mediaStatus]);
-
-  // Tick remote time locally while playing to keep progress smooth between status polls
-  useEffect(() => {
-    let timer: number | null = null;
-    if (mediaStatus?.state === 'playing' && !localMode) {
-      timer = window.setInterval(() => {
-        setRemoteCurrentTime((prev) => {
-          const dur = remoteDuration || mediaStatus.duration || (mediaStatus as unknown as { media_duration?: number }).media_duration || 0;
-          if (dur > 0 && prev >= dur) return dur;
-          return prev + 1;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [mediaStatus?.state, mediaStatus?.duration, remoteDuration, localMode]);
-
-  // If localMode is turned off, pause the local player automatically so it doesn't leak audio
-  // When switching back to localMode, restore WebPlayer state and resume if it was playing
-  useEffect(() => {
-    if (!localMode && localIsPlaying) {
-      // Saving state before pausing for recovery later
-      const savedPosition = maPlayer.position || 0;
-      
-      setLocalIsPlaying(false);
-      maPlayer.pause();
-      if (localTrack) {
-        api.syncMediaState({
-          entity_id: 'web_player',
-          state: 'paused',
-          media_type: localTrack.type,
-          media_content_id: localTrack.id,
-          media_title: localTrack.title,
-          media_artist: localTrack.subtitle,
-          position: savedPosition,
-          duration: localDuration,
-          volume_level: localVolume / 100,
-          is_volume_muted: localMuted
-        }).catch(err => console.error('Failed to sync local pause on mode change:', err));
-      }
-    } else if (localMode && localTrack && !maPlayer.isConnected) {
-      // Auto-reconnect WebPlayer when switching back to local mode with a track
-      console.log('[Media] Switching back to local mode, reconnecting WebPlayer...');
-      maPlayer.connect().catch(err => console.error('[Media] Reconnect failed:', err));
-    }
-  }, [localMode, localTrack, localDuration, localVolume, localMuted, localIsPlaying, maPlayer.isConnected, maPlayer.connect]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  const { data: maPlaylists, isLoading: maPlaylistsLoading } = useQuery({
-    queryKey: ['ma-playlists'],
-    queryFn: () => api.getMusicAssistantPlaylists(),
-    retry: false,
-    staleTime: 60000,
-  });
-  const { data: maRecent, isLoading: maRecentLoading } = useQuery({
-    queryKey: ['ma-recent'],
-    queryFn: () => api.getMusicAssistantRecent(),
-    retry: false,
-    staleTime: 60000,
-  });
-  const { data: absLastPlayed, isLoading: absLoading } = useQuery({
-    queryKey: ['abs-last-played'],
-    queryFn: () => api.getAudiobookshelfLastPlayed(),
-    retry: false,
-    staleTime: 60000,
-  });
+  }, [maConnected, listMaPlayers, isMaTarget]);
 
   const { data: entities = [] } = useQuery({
     queryKey: ['media-entities'],
     queryFn: () => api.getEntities(),
-    select: (data: MediaEntity[]) => data.filter((e) => e.domain === 'media_player'),
+    select: (data) => data.filter((e) => e.domain === 'media_player'),
+    staleTime: 60_000,
   });
 
-  // Friendly name for whatever device is selected (HA entity, MA player, or
-  // the raw id as a last resort) so status lines don't show entity ids.
-  const selectedDeviceLabel = useMemo(() => {
-    if (!selectedTarget) return '';
-    const fromEntities = entities.find((e) => e.entity_id === selectedTarget)?.friendly_name;
-    if (fromEntities) return fromEntities;
-    if (selectedTarget.startsWith('ma:')) {
-      const id = selectedTarget.slice(3);
-      return maPlayers.find((p) => p.player_id === id)?.name || id;
+  const devices = useMemo<DeviceOption[]>(() => {
+    const byId = new Map<string, DeviceOption>();
+    const statusById = new Map(players.map((p) => [p.entity_id as string, p]));
+    for (const e of entities) {
+      const p = statusById.get(e.entity_id);
+      const state = p?.state ?? e.state;
+      byId.set(e.entity_id, {
+        id: e.entity_id,
+        name: formatDeviceLabel(e.friendly_name, p?.friendly_name, e.entity_id),
+        detail: p?.icon_kind === 'tv' ? 'TV' : state === 'playing' ? 'Playing' : 'Speaker',
+        online: state !== 'unavailable' && state !== 'unknown',
+      });
     }
-      return availablePlayers.find((p) => p.entity_id === selectedTarget)?.friendly_name || '';
-  }, [selectedTarget, entities, availablePlayers, maPlayers]);
-
-  const quickResumeItems = useMemo(() => {
-    const items: Array<{
-      id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; progress?: number; lastPlayed?: number;
-    }> = [];
-
-    if (absLastPlayed?.books) {
-      for (const book of absLastPlayed.books) {
-        // Backend returns progress as 0-100 percentage, normalize to 0-1 ratio for UI
-        let progress: number | undefined;
-        if (book.progress !== undefined && book.progress !== null) {
-          const raw = Number(book.progress);
-          progress = raw > 1 ? raw / 100 : raw;
-        }
-        items.push({
-          id: `abs-${book.id}`, title: book.title, subtitle: book.author,
-          type: 'audiobook', progress,
-          lastPlayed: normalizePlayedAt(book.last_played),
-        });
-      }
+    for (const p of players) {
+      if (byId.has(p.entity_id as string)) continue;
+      byId.set(p.entity_id as string, {
+        id: p.entity_id as string,
+        name: formatDeviceLabel(p.friendly_name, p.entity_id),
+        detail: p.icon_kind === 'tv' ? 'TV' : p.state === 'playing' ? 'Playing' : 'Speaker',
+        online: p.state !== 'unavailable' && p.state !== 'unknown',
+      });
     }
-    if (maRecent?.recent) {
-      for (const item of maRecent.recent) {
-        items.push({
-          id: `ma-${item.uri}`, title: item.name, subtitle: item.artist,
-          type: 'music',
-          lastPlayed: normalizePlayedAt(item.last_played),
-        });
-      }
+    // Most MA players are Home Assistant entities too; list those once. Our own
+    // web player is the "This device" chip.
+    const covered = new Set<string>([...byId.keys(), ...players.map((p) => p.ma_player_id || '').filter(Boolean)]);
+    for (const p of maPlayers) {
+      if (covered.has(p.player_id) || p.player_id === maPlayer.playerId) continue;
+      byId.set(`ma:${p.player_id}`, { id: `ma:${p.player_id}`, name: p.name, detail: 'Music Assistant', online: p.available });
     }
-    // Merge both services and show the 3 most-recently-played items across them.
-    return items
-      .sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0))
-      .slice(0, 3);
-  }, [absLastPlayed, maRecent]);
+    return [...byId.values()].sort((a, b) => Number(b.online) - Number(a.online));
+  }, [entities, players, maPlayers, maPlayer.playerId]);
 
-  /* ── media status polling ───────────────────────────────────── */
+  const selectedDevice = devices.find((d) => d.id === selectedTarget);
+  const remoteStatus = useMemo<MediaStatus | null>(() => {
+    if (!selectedTarget) return null;
+    if (isMaTarget) {
+      const p = maPlayers.find((m) => `ma:${m.player_id}` === selectedTarget);
+      return p ? { entity_id: selectedTarget, friendly_name: p.name, state: p.state } : null;
+    }
+    return players.find((p) => p.entity_id === selectedTarget) ?? null;
+  }, [selectedTarget, isMaTarget, maPlayers, players]);
 
-  const fetchMediaStatus = useCallback(async () => {
-    try {
-      const resp = await api.mediaStatus();
-      if (resp.status === 'SUCCESS' && resp.detail) {
-        const detail = resp.detail as {
-          active?: (MediaStatus & { position?: number; duration?: number; media_content_id?: string; media_type?: string }) | null;
-          available?: MediaStatus[];
-          all_players?: MediaStatus[];
-        };
-        const allPlayers = detail.all_players || [];
-        const active = detail.active;
-        setAvailablePlayers(allPlayers);
-        
-        if (active) {
-          if (active.entity_id === 'web_player') {
-            if (!selectedTarget) {
-              setLocalMode(true);
-              setSelectedTarget('');
-              
-              // Sync local player states
-              const activeCleanId = (active.media_content_id || '').replace(/^library:\/\/track\//, '').replace(/^ma-/, '').replace(/^abs-/, '');
-              const currentCleanId = (localTrack?.id || '').replace(/^library:\/\/track\//, '').replace(/^ma-/, '').replace(/^abs-/, '');
-              const isSameTrack = Boolean(localTrack && (
-                localTrack.id === active.media_content_id ||
-                (activeCleanId && currentCleanId && activeCleanId === currentCleanId)
-              ));
-
-              if (active.media_content_id && !isSameTrack) {
-                const idClean = active.media_content_id;
-                const title = active.media_title || 'Unknown Title';
-                const subtitle = active.media_artist || 'Unknown Artist';
-                const type = active.media_type as 'audiobook' | 'music';
-                const source = active.media_type === 'audiobook' ? 'abs' : 'ma';
-                
-                setLocalTrack({ id: idClean, title, subtitle, type, source });
-                setLocalIsPlaying(active.state === 'playing');
-                if (typeof active.position === 'number' && active.position > 0) {
-                  setLocalCurrentTime(active.position);
-                }
-              } else if (localTrack) {
-                const backendPlaying = active.state === 'playing';
-                if (backendPlaying !== localIsPlaying) {
-                  setLocalIsPlaying(backendPlaying);
-                }
-              }
-              
-              const inGrace = Date.now() - lastVolumeChangeTimeRef.current < 4000;
-              if (!inGrace && active.volume_level !== undefined && active.volume_level !== null) {
-                setLocalVolume(Math.round(active.volume_level * 100));
-              }
-              if (!inGrace && active.is_volume_muted !== undefined) {
-                setLocalMuted(active.is_volume_muted);
-              }
-            } else {
-              // User has selected a device; backend still reports web_player as active.
-              // Find the selected device in the all_players list to update mediaStatus.
-              const targetPlayer = allPlayers.find(p => p.entity_id === selectedTarget);
-              if (targetPlayer) {
-                setMediaStatus(targetPlayer);
-                const inGrace = Date.now() - lastVolumeChangeTimeRef.current < 4000;
-                if (!inGrace && targetPlayer.volume_level !== undefined && targetPlayer.volume_level !== null) {
-                  setVolume(Math.round(Number(targetPlayer.volume_level) * 100));
-                }
-                if (!inGrace && targetPlayer.is_volume_muted !== undefined) {
-                  setMuted(Boolean(targetPlayer.is_volume_muted));
-                }
-              }
-            }
-          } else {
-            // Something is already playing on a real speaker. Until the user
-            // makes a choice, follow it instead of showing an idle web-player
-            // card over live music. No sync/idle POST — we're only observing.
-            if (
-              active &&
-              active.entity_id !== 'web_player' &&
-              !userPickedDeviceRef.current &&
-              !autoAdoptedRef.current &&
-              !selectedTarget
-            ) {
-              autoAdoptedRef.current = true;
-              setSelectedTarget(active.entity_id || '');
-              setLocalMode(false);
-            }
-            setMediaStatus(active);
-            const inGrace = Date.now() - lastVolumeChangeTimeRef.current < 4000;
-            if (!inGrace && active.volume_level !== undefined && active.volume_level !== null) {
-              setVolume(Math.round(Number(active.volume_level) * 100));
-            }
-            if (!inGrace && active.is_volume_muted !== undefined) {
-              setMuted(Boolean(active.is_volume_muted));
-            }
-          }
-        } else {
-          // If no active target is reported, we check standard HA player target matching
-          const targetPlayer = selectedTarget ? allPlayers.find(p => p.entity_id === selectedTarget) : null;
-          if (targetPlayer) {
-            setMediaStatus(targetPlayer);
-            const inGrace = Date.now() - lastVolumeChangeTimeRef.current < 4000;
-            if (!inGrace && targetPlayer.volume_level !== undefined && targetPlayer.volume_level !== null) {
-              setVolume(Math.round(Number(targetPlayer.volume_level) * 100));
-            }
-            if (!inGrace && targetPlayer.is_volume_muted !== undefined) {
-              setMuted(Boolean(targetPlayer.is_volume_muted));
-            }
-          } else {
-            setMediaStatus(null);
-          }
-        }
-      }
-    } catch { /* ignore */ }
-    /* eslint-disable react-hooks/exhaustive-deps -- maPlayer is accessed for current value, not as a dependency */
-  }, [selectedTarget, localTrack, localIsPlaying]);
-
-  /* eslint-disable react-hooks/set-state-in-effect */
+  // Follow the device's volume unless the person is moving the slider.
   useEffect(() => {
-    fetchMediaStatus();
-    const interval = setInterval(fetchMediaStatus, 3000);
-    return () => clearInterval(interval);
-  }, [fetchMediaStatus]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+    if (!remoteStatus || Date.now() - lastVolumeChangeRef.current < VOLUME_GRACE_MS) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- mirror polled device state */
+    if (typeof remoteStatus.volume_level === 'number') setVolume(Math.round(remoteStatus.volume_level * 100));
+    if (typeof remoteStatus.is_volume_muted === 'boolean') setMuted(remoteStatus.is_volume_muted);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [remoteStatus]);
 
-  
+  // Position: take each poll, and tick between polls while playing. A poll
+  // within 3 s of the ticked value is ignored so the clock does not stutter.
+  const remotePos = remoteStatus?.position ?? 0;
+  const remotePlaying = playerState(remoteStatus?.state) === 'playing';
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirror polled position
+    setRemoteTime((prev) => (remotePlaying && prev > 0 && Math.abs(remotePos - prev) < 3 ? prev : remotePos));
+  }, [remotePos, remotePlaying, remoteStatus?.media_content_id]);
+  const remoteDuration = remoteStatus?.duration ?? 0;
+  useEffect(() => {
+    if (!remotePlaying) return;
+    const id = window.setInterval(() => {
+      setRemoteTime((t) => (remoteDuration > 0 && t >= remoteDuration ? remoteDuration : t + 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [remotePlaying, remoteDuration]);
 
-  /* ── device selection ───────────────────────────────────────────── */
+  /* ── favourites (Music Assistant items) ────────────────────────── */
 
-  const handleDeviceSelect = useCallback((entityId: string) => {
-    trigger('light');
-    userPickedDeviceRef.current = true;
-    setSelectedTarget(entityId);
-    setLocalMode(false);
+  const activeUri = isWebPlayer ? maPlayer.mediaUri : remoteStatus?.media_content_id || null;
+  const maItemUri = activeUri && activeUri.includes('://') ? activeUri : null;
+  const { data: detail } = useQuery({
+    queryKey: ['media-detail', maItemUri],
+    queryFn: async () => {
+      const data = await api.getMediaDetail(maItemUri!);
+      return ((data && (data as { result?: unknown }).result) || data) as {
+        uri?: string; name?: string; favorite?: boolean;
+        artists?: Array<{ name: string }>; album?: { name: string }; podcast?: { name: string };
+      };
+    },
+    enabled: !!maItemUri,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const [favoriteOverride, setFavoriteOverride] = useState<{ uri: string; value: boolean } | null>(null);
+  const isFavorite = favoriteOverride?.uri === maItemUri
+    ? favoriteOverride.value
+    : Boolean(detail?.favorite ?? (isWebPlayer ? maPlayer.mediaFavorite : false));
+
+  const toggleFavorite = useCallback(async () => {
+    if (!maItemUri) return;
+    const target = !isFavorite;
+    setFavoriteOverride({ uri: maItemUri, value: target });
+    try {
+      await api.setMediaFavorite(maItemUri, target);
+    } catch (err) {
+      setFavoriteOverride({ uri: maItemUri, value: !target });
+      toast.error(errorText(err, 'Could not update favorites'));
+    }
+  }, [maItemUri, isFavorite]);
+
+  /* ── playback ──────────────────────────────────────────────────── */
+
+  /** Start `req` on the selected device; `key` is the row showing a spinner. */
+  const playItem = useCallback(async (req: PlayRequest, key: string) => {
+    void trigger('heavy');
+    setBusy(key);
     setError(null);
-    api.syncMediaState({
-      entity_id: entityId,
-      state: 'idle'
-    }).catch(err => console.error('Failed to sync device select:', err));
+    const target = selectedRef.current;
+    // Music Assistant only plays its own URIs; an Audiobookshelf id is mapped
+    // server-side (a guessed URI leaves the player silent).
+    const maUri = async () =>
+      req.kind === 'abs' ? (await api.resolveMALibraryUri(req.id, req.title)).ma_uri : req.uri;
+    try {
+      if (!target) {
+        await maPlayer.play(await maUri());
+      } else if (target.startsWith('ma:')) {
+        const pid = target.slice(3);
+        const media = await maUri();
+        await maPlayer.connect();
+        await maPlayer.maCommand('player_queues/play_media', { queue_id: pid, media: [media], option: 'replace' });
+      } else {
+        const resp = req.kind === 'abs'
+          ? await api.playAudiobook({ book_id: req.id, entity_id: target, resume: true })
+          : await api.mediaPlay({ entity_id: target, query: req.uri, media_type: 'music' });
+        if (resp.status === 'FAILURE') throw new Error(resp.message || 'Playback failed');
+        void refreshStatus();
+      }
+    } catch (err) {
+      setError(errorText(err, 'Playback failed'));
+    } finally {
+      setBusy(null);
+    }
+  }, [maPlayer, refreshStatus, trigger]);
+
+  /** Transport for the selected remote device. */
+  const sendTransport = useCallback(async (command: 'play' | 'resume' | 'pause' | 'next' | 'previous' | 'stop') => {
+    const target = selectedRef.current;
+    if (!target) return;
+    void trigger('light');
+    setBusy(command);
+    setError(null);
+    try {
+      if (target.startsWith('ma:')) {
+        const pid = target.slice(3);
+        const maCmd = {
+          play: 'players/cmd/play', resume: 'players/cmd/play', pause: 'players/cmd/pause',
+          next: 'player_queues/next', previous: 'player_queues/previous', stop: 'players/cmd/stop',
+        }[command];
+        await maPlayer.connect();
+        await maPlayer.maCommand(maCmd, maCmd.startsWith('player_queues/') ? { queue_id: pid } : { player_id: pid });
+        setMaPlayers(await maPlayer.listMaPlayers());
+      } else {
+        const resp = await api.mediaTransport({ entity_id: target, command });
+        if (resp.status === 'FAILURE') throw new Error(resp.message || 'Command failed');
+        await refreshStatus();
+      }
+    } catch (err) {
+      setError(errorText(err, 'Command failed'));
+    } finally {
+      setBusy(null);
+    }
+  }, [maPlayer, refreshStatus, trigger]);
+
+  const runWeb = useCallback(async (command: string, fn: () => Promise<unknown>) => {
+    void trigger('light');
+    setBusy(command);
+    try {
+      await fn();
+    } catch (err) {
+      setError(errorText(err, 'Command failed'));
+    } finally {
+      setBusy(null);
+    }
   }, [trigger]);
 
-  const handleLocalToggle = useCallback((mode: boolean) => {
-    userPickedDeviceRef.current = true;
-    setLocalMode(mode);
-    if (mode) {
-      setSelectedTarget('');
-      api.syncMediaState({
-        entity_id: 'web_player',
-        state: localTrack ? (localIsPlaying ? 'playing' : 'paused') : 'idle',
-        media_type: localTrack?.type,
-        media_content_id: localTrack?.id,
-        media_title: localTrack?.title,
-        media_artist: localTrack?.subtitle,
-        position: localCurrentTime,
-        duration: localDuration,
-        volume_level: localVolume / 100,
-        is_volume_muted: localMuted
-      }).catch(err => console.error('Failed to sync local toggle:', err));
-    }
-  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted]);
-
-  /* ── transport helpers ────────────────────────────────────────── */
-
-  const sendTransport = useCallback(async (command: string) => {
-    if (!selectedTarget) { setError('No media player selected'); return; }
-    if (selectedTarget.startsWith('ma:')) {
-      const pid = selectedTarget.slice(3);
-      const cmdMap: Record<string, string> = {
-        play: 'players/cmd/play', resume: 'players/cmd/play', pause: 'players/cmd/pause',
-        next: 'player_queues/next', previous: 'player_queues/previous', stop: 'players/cmd/stop',
-      };
-      const maCmd = cmdMap[command];
-      if (!maCmd) { setError(`Unsupported command: ${command}`); return; }
-      trigger('light');
-      setLoading(command);
-      setError(null);
-      try {
-        if (!maPlayer.isConnected) await maPlayer.connect();
-        const args: Record<string, unknown> = maCmd.startsWith('player_queues/')
-          ? { queue_id: pid, player_id: pid }
-          : { player_id: pid };
-        await maPlayer.maCommand(maCmd, args);
-        // Refresh now-playing state so the UI reflects the advanced track
-        // (the JSON-RPC event may lag or not update the HA media_status poll).
-        await fetchMediaStatus();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Command failed');
-      } finally { setLoading(null); }
-      return;
-    }
-    trigger('light');
-    setLoading(command);
-    setError(null);
-    try {
-      const resp = await api.mediaTransport({ entity_id: selectedTarget, command });
-      if (resp.status === 'FAILURE') setError(resp.message || 'Command failed');
-      await fetchMediaStatus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Command failed');
-    } finally { setLoading(null); }
-  }, [selectedTarget, trigger, fetchMediaStatus]);
-
-  const playMedia = useCallback(async (query: string, mediaType?: string) => {
-    if (!selectedTarget) {
-      trigger('heavy');
-      setLoading('play');
-      setError(null);
-      try {
-        if (!maPlayer.isConnected) {
-          console.log('[Media] Connecting MA WebPlayer before play...');
-          await maPlayer.connect();
-        }
-        maPlayer.setVolume(localVolume);
-        maPlayer.setMuted(localMuted);
-        console.log('[Media] Sending play for:', query);
-        await maPlayer.play(query);
-      } catch (err) {
-        console.error('[Media] WebPlayer play failed:', err);
-        setError(err instanceof Error ? err.message : 'Playback failed');
-        return;
-      } finally {
-        setLoading(null);
-      }
-      return;
-    }
-    if (selectedTarget.startsWith('ma:')) {
-      const pid = selectedTarget.slice(3);
-      trigger('heavy');
-      setLoading('play');
-      setError(null);
-      try {
-        if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('player_queues/play_media', { queue_id: pid, media: query, option: 'replace' });
-      } catch (err) {
-        console.error('[Media] MA player play failed:', err);
-        setError(err instanceof Error ? err.message : 'Playback failed');
-        return;
-      } finally {
-        setLoading(null);
-      }
-      return;
-    }
-    trigger('heavy');
-    setLoading('play');
-    setError(null);
-    try {
-      const resp = await api.mediaPlay({ entity_id: selectedTarget, query, media_type: mediaType });
-      if (resp.status === 'FAILURE') setError(resp.message || 'Playback failed');
-      else await fetchMediaStatus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Playback failed');
-    } finally {
-      setLoading(null);
-    }
-  }, [selectedTarget, trigger, fetchMediaStatus, maPlayer, localVolume, localMuted]);
-
-  const playAudiobook = useCallback(async (bookId: string, bookTitle = '') => {
-    const idClean = bookId.replace('abs-', '').replace('ma-', '');
-    if (!selectedTarget) {
-      trigger('heavy');
-      setLoading('play');
-      setError(null);
-      try {
-        // The web player is an MA player, so it needs an MA library URI. An
-        // `audiobookshelf://` id is not one: MA has no media controller for that
-        // media type and the request is rejected, leaving silence. Resolve it
-        // server-side instead of guessing the URI shape here.
-        const { ma_uri: mediaUri } = await api.resolveMALibraryUri(idClean, bookTitle);
-        if (!maPlayer.isConnected) {
-          console.log('[Media] Connecting MA WebPlayer before play...');
-          await maPlayer.connect();
-        }
-        maPlayer.setVolume(localVolume);
-        maPlayer.setMuted(localMuted);
-        console.log('[Media] Sending play for ABS book:', mediaUri);
-        await maPlayer.play(mediaUri);
-      } catch (err) {
-        console.error('[Media] WebPlayer play failed:', err);
-        setError(err instanceof Error ? err.message : 'Playback failed');
-        return;
-      } finally {
-        setLoading(null);
-      }
-      return;
-    }
-    if (selectedTarget.startsWith('ma:')) {
-      const pid = selectedTarget.slice(3);
-      trigger('heavy');
-      setLoading('play');
-      setError(null);
-      try {
-        // Same reason as the web player branch above.
-        const { ma_uri: mediaUri } = await api.resolveMALibraryUri(idClean, bookTitle);
-        if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('player_queues/play_media', { queue_id: pid, media: [mediaUri], option: 'replace' });
-      } catch (err) {
-        console.error('[Media] MA player audiobook play failed:', err);
-        setError(err instanceof Error ? err.message : 'Playback failed');
-        return;
-      } finally {
-        setLoading(null);
-      }
-      return;
-    }
-    trigger('heavy');
-    setLoading('play');
-    setError(null);
-    try {
-      const resp = await api.playAudiobook({ book_id: idClean, entity_id: selectedTarget, resume: true });
-      if (resp.status === 'FAILURE') setError(resp.message || 'Playback failed');
-      else await fetchMediaStatus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Playback failed');
-    } finally {
-      setLoading(null);
-    }
-  }, [selectedTarget, trigger, fetchMediaStatus, maPlayer, localVolume, localMuted]);
-
-  const playPlaylist = useCallback(async (uri: string) => {
-    if (!selectedTarget) {
-      trigger('heavy');
-      setLoading('play');
-      setError(null);
-      try {
-        if (!maPlayer.isConnected) {
-          console.log('[Media] Connecting MA WebPlayer before play...');
-          await maPlayer.connect();
-        }
-        maPlayer.setVolume(localVolume);
-        maPlayer.setMuted(localMuted);
-        console.log('[Media] Sending play for playlist:', uri);
-        await maPlayer.play(uri);
-      } catch (err) {
-        console.error('[Media] WebPlayer play failed:', err);
-        setError(err instanceof Error ? err.message : 'Playback failed');
-        return;
-      } finally {
-        setLoading(null);
-      }
-      return;
-    }
-    if (selectedTarget.startsWith('ma:')) {
-      const pid = selectedTarget.slice(3);
-      trigger('heavy');
-      setLoading('play');
-      setError(null);
-      try {
-        if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('player_queues/play_media', { queue_id: pid, media: uri, option: 'replace' });
-      } catch (err) {
-        console.error('[Media] MA player playlist play failed:', err);
-        setError(err instanceof Error ? err.message : 'Playback failed');
-        return;
-      } finally {
-        setLoading(null);
-      }
-      return;
-    }
-    trigger('heavy');
-    setLoading('play');
-    setError(null);
-    try {
-      const resp = await api.playPlaylist({ playlist_uri: uri, entity_id: selectedTarget });
-      if (resp.status === 'FAILURE') setError(resp.message || 'Playback failed');
-      else await fetchMediaStatus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Playback failed');
-    } finally {
-      setLoading(null);
-    }
-  }, [selectedTarget, trigger, fetchMediaStatus, maPlayer, localVolume, localMuted]);
-
- const playLocal = useCallback(async (id: string, title: string, subtitle: string, type: 'audiobook' | 'music', source: 'abs' | 'ma') => {
-    console.log('[Media] playLocal CALLED with id:', id, 'title:', title, 'localMode:', localMode, 'isConnected:', maPlayer.isConnected);
-    trigger('heavy');
-    setError(null);
-    const idClean = id.replace('abs-', '').replace('ma-', '');
-    setLocalTrack({ id: idClean, title, subtitle, type, source });
-    setDetailedMetadata(null);
-    setLocalVolume((prev) => { setLocalIsPlaying(true); return prev; });
-
-    // Initialize player if not connected (establishes Sendspin + JSON-RPC)
-    console.log('[Media] playLocal checking isConnected:', maPlayer.isConnected);
-    if (!maPlayer.isConnected) {
-      console.log('[Media] Connecting MA WebPlayer before play...');
-      try {
-        await maPlayer.connect();
-        console.log('[Media] playLocal: connect completed successfully');
-      } catch (err) {
-        console.error('[Media] WebPlayer connect failed:', err);
-        setError('Failed to connect Web Player');
-        return;
-      }
-    } else {
-      console.log('[Media] playLocal: already connected, skipping connect');
-    }
-
-    // Set initial volume and muted state
-    maPlayer.setVolume(localVolume);
-    maPlayer.setMuted(localMuted);
-
-    // Build the MA-compatible URI (ABS books get converted)
-    let mediaUri = idClean;
-    if (source === 'abs') {
-      // ABS books need to be converted to MA URIs for play_media
-      mediaUri = `audiobookshelf://${idClean}`;
-    }
-
-    console.log('[Media] Sending play for:', mediaUri);
-    try {
-      await maPlayer.play(mediaUri);
-    } catch (err) {
-      console.error('[Media] playLocal failed:', err);
-      const errMsg = err instanceof Error ? err.message : 'Playback failed';
-      setError(errMsg);
-      setLocalIsPlaying(false);
-      return;
-    }
-
-    try {
-      await api.syncMediaState({
-        entity_id: 'web_player',
-        state: 'playing',
-        media_type: type,
-        media_content_id: idClean,
-        media_title: title,
-        media_artist: subtitle,
-        position: 0.0,
-        duration: 0.0,
-        volume_level: localVolume / 100,
-        is_volume_muted: localMuted
-      });
-    } catch (err) {
-      console.error('[Media] Failed to sync local play:', err);
-    }
-  }, [trigger, localVolume, localMuted, maPlayer, setLocalTrack, setLocalVolume, setLocalIsPlaying]);
-
-  const toggleLocalPlay = useCallback(() => {
-    console.log('[Media] toggleLocalPlay CALLED, localTrack:', !!localTrack, 'localIsPlaying:', localIsPlaying, 'isConnected:', maPlayer.isConnected);
-    if (!localTrack) {
-      console.log('[Media] toggleLocalPlay: no localTrack, returning early');
-      return;
-    }
-    const nextPlaying = !localIsPlaying;
-    if (localIsPlaying) {
-      setLocalIsPlaying(false);
-      console.log('[Media] Pausing WebPlayer...');
-      maPlayer.pause();
-    } else {
-      setLocalIsPlaying(true);
-      (document.activeElement as HTMLElement)?.setAttribute('data-webplayer-interact', 'true');
-      if (!maPlayer.isConnected) {
-        console.log('[Media] Connecting WebPlayer for toggle play...');
-        maPlayer.connect().catch(err => {
-          console.error('[Media] WebPlayer connect failed:', err);
-          setError('Failed to connect Web Player');
-        });
-      } else {
-        console.log('[Media] toggleLocalPlay: already connected, skipping connect');
-      }
-      // Re-send play in case it was paused/idle
-      const mediaUri = localTrack.source === 'abs'
-        ? `audiobookshelf://${localTrack.id}`
-        : localTrack.id;
-      console.log('[Media] Re-sending play:', mediaUri);
-      maPlayer.play(mediaUri).catch(err => {
-        console.error('[Media] toggleLocalPlay failed:', err);
-        setError(err instanceof Error ? err.message : 'Playback failed');
-        setLocalIsPlaying(false);
-      });
-    }
-    api.syncMediaState({
-      entity_id: 'web_player',
-      state: nextPlaying ? 'playing' : 'paused',
-      media_type: localTrack.type,
-      media_content_id: localTrack.id,
-      media_title: localTrack.title,
-      media_artist: localTrack.subtitle,
-      position: localCurrentTime,
-      duration: localDuration,
-      volume_level: localVolume / 100,
-      is_volume_muted: localMuted
-    }).catch(err => console.error('[Media] Failed to sync toggleLocalPlay:', err));
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, localCurrentTime, maPlayer, setLocalIsPlaying]);
-
-  const handleLocalVolume = useCallback((v: number) => {
-    lastVolumeChangeTimeRef.current = Date.now();
-    setLocalVolume(v);
-    setLocalMuted(false);
-    console.log('[Media] Setting volume to:', v);
-    maPlayer.setVolume(v);
-    if (volumeDebounceTimerRef.current) {
-      clearTimeout(volumeDebounceTimerRef.current);
-    }
-    volumeDebounceTimerRef.current = window.setTimeout(() => {
-      if (localTrack) {
-        api.syncMediaState({
-          entity_id: 'web_player',
-          state: localIsPlaying ? 'playing' : 'paused',
-          media_type: localTrack.type,
-          media_content_id: localTrack.id,
-          media_title: localTrack.title,
-          media_artist: localTrack.subtitle,
-          position: localCurrentTime,
-          duration: localDuration,
-          volume_level: v / 100,
-          is_volume_muted: false
-        }).catch(err => console.error('[Media] Failed to sync volume:', err));
-      }
-    }, 200);
-  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, maPlayer.setVolume]);
-
-  const toggleLocalMute = useCallback(() => {
-    const nextMuted = !localMuted;
-    lastVolumeChangeTimeRef.current = Date.now();
-    setLocalMuted(nextMuted);
-    console.log('[Media] Muting:', nextMuted);
-    maPlayer.setMuted(nextMuted);
-    if (localTrack) {
-      api.syncMediaState({
-        entity_id: 'web_player',
-        state: localIsPlaying ? 'playing' : 'paused',
-        media_type: localTrack.type,
-        media_content_id: localTrack.id,
-        media_title: localTrack.title,
-        media_artist: localTrack.subtitle,
-        position: localCurrentTime,
-        duration: localDuration,
-        volume_level: localVolume / 100,
-        is_volume_muted: nextMuted
-      }).catch(err => console.error('[Media] Failed to sync mute:', err));
-    }
-  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted, maPlayer.setMuted]);
-
-  const handleLocalSeek = useCallback((time: number) => {
-    console.log('[Media] Seek to:', time);
-    maPlayer.seek(time);
-    setLocalCurrentTime(time);
-    if (localTrack) {
-      api.syncMediaState({
-        entity_id: 'web_player',
-        state: localIsPlaying ? 'playing' : 'paused',
-        media_type: localTrack.type,
-        media_content_id: localTrack.id,
-        media_title: localTrack.title,
-        media_artist: localTrack.subtitle,
-        position: time,
-        duration: localDuration,
-        volume_level: localVolume / 100,
-        is_volume_muted: localMuted
-      }).catch(err => console.error('[Media] Failed to sync seek:', err));
-    }
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer.seek]);
-
-  const handleRemoteSeek = useCallback(async (time: number) => {
-    if (!selectedTarget) return;
-    setRemoteCurrentTime(time);
-    if (selectedTarget.startsWith('ma:')) {
-      const pid = selectedTarget.slice(3);
-      try {
-        if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('players/cmd/seek', { player_id: pid, position: time });
-      } catch (err) {
-        // Surface it: the optimistic position snaps back on the next poll, and
-        // silently doing nothing looked like a broken scrubber.
-        console.error('[Media] Seek failed:', err);
-        toast.error('Could not seek on that player');
-      }
-      return;
-    }
-    try {
-      await api.mediaTransport({ entity_id: selectedTarget, command: 'seek', position: time });
-    } catch (err) {
-      console.error('[Media] Seek failed:', err);
-      toast.error('Could not seek on that player');
-    }
-  }, [selectedTarget, maPlayer.isConnected, maPlayer.connect, maPlayer.maCommand]);
-
-  const handleStopPlayback = useCallback(() => {
-    console.log('[Media] Stop playback');
-    if (localTrack) {
-      releaseControl(false);
-      api.syncMediaState({
-        entity_id: 'web_player',
-        state: 'idle',
-        media_type: localTrack.type,
-        media_content_id: localTrack.id,
-        media_title: localTrack.title,
-        media_artist: localTrack.subtitle,
-        position: localCurrentTime,
-        duration: localDuration,
-        volume_level: localVolume / 100,
-        is_volume_muted: localMuted
-      }).catch(err => console.error('[Media] Failed to sync stop playback:', err));
-    }
-    setLocalTrack(null);
-    setLocalIsPlaying(false);
-    setLocalCurrentTime(0);
-    setLocalDuration(0);
-    void maPlayer.pause();
-  }, [localTrack, releaseControl, localCurrentTime, localDuration, localVolume, localMuted, maPlayer.pause]);
-
-  const handleVolume = useCallback((v: number) => {
-    if (!selectedTarget) return;
-    lastVolumeChangeTimeRef.current = Date.now();
+  const handleRemoteVolume = useCallback((v: number) => {
+    const target = selectedRef.current;
+    if (!target) return;
+    lastVolumeChangeRef.current = Date.now();
     setVolume(v);
     setMuted(false);
-    if (volumeDebounceTimerRef.current) {
-      clearTimeout(volumeDebounceTimerRef.current);
-    }
-    volumeDebounceTimerRef.current = window.setTimeout(async () => {
-      if (selectedTarget.startsWith('ma:')) {
-        const pid = selectedTarget.slice(3);
-        try {
-          if (!maPlayer.isConnected) await maPlayer.connect();
-          await maPlayer.maCommand('players/cmd/volume_set', { player_id: pid, volume_level: v });
-        } catch { /* ignore */ }
-        return;
+    if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current);
+    volumeTimerRef.current = window.setTimeout(() => {
+      const send = target.startsWith('ma:')
+        ? maPlayer.maCommand('players/cmd/volume_set', { player_id: target.slice(3), volume_level: v })
+        : api.mediaTransport({ entity_id: target, command: 'volume_set', volume_level: v / 100 });
+      void Promise.resolve(send).catch(() => toast.error('Could not change the volume'));
+    }, 200);
+  }, [maPlayer]);
+
+  const toggleRemoteMute = useCallback(() => {
+    const target = selectedRef.current;
+    if (!target) return;
+    const next = !muted;
+    lastVolumeChangeRef.current = Date.now();
+    setMuted(next);
+    const send = target.startsWith('ma:')
+      ? maPlayer.maCommand('players/cmd/volume_mute', { player_id: target.slice(3), muted: next })
+      : api.mediaTransport({ entity_id: target, command: 'volume_mute', muted: next });
+    void Promise.resolve(send).catch(() => {
+      setMuted(!next);
+      toast.error('Could not mute that player');
+    });
+  }, [muted, maPlayer]);
+
+  const handleRemoteSeek = useCallback(async (seconds: number) => {
+    const target = selectedRef.current;
+    if (!target) return;
+    setRemoteTime(seconds);
+    try {
+      if (target.startsWith('ma:')) {
+        await maPlayer.maCommand('player_queues/seek', { queue_id: target.slice(3), position: Math.round(seconds) });
+      } else {
+        const resp = await api.mediaTransport({ entity_id: target, command: 'seek', position: seconds });
+        if (resp.status === 'FAILURE') throw new Error(resp.message);
       }
-      try { await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_set', volume_level: v / 100 }); }
-      catch { /* ignore */ }
-    }, 150);
-  }, [selectedTarget, maPlayer.isConnected, maPlayer.connect, maPlayer.maCommand]);
-
-  const toggleMute = useCallback(async () => {
-    if (!selectedTarget) return;
-    const newMuted = !muted;
-    lastVolumeChangeTimeRef.current = Date.now();
-    setMuted(newMuted);
-    if (selectedTarget.startsWith('ma:')) {
-      const pid = selectedTarget.slice(3);
-      try {
-        if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('players/cmd/volume_mute', { player_id: pid, muted: newMuted });
-      } catch { /* ignore */ }
-      return;
+    } catch {
+      // The optimistic position snaps back on the next poll; say why.
+      toast.error('Could not seek on that player');
     }
-    try { await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_mute', muted: newMuted }); }
-    catch { /* ignore */ }
-  }, [selectedTarget, muted, volume, maPlayer.isConnected, maPlayer.connect, maPlayer.maCommand]);
+  }, [maPlayer]);
 
-  /* ── render ───────────────────────────────────────────────────── */
+  const selectDevice = useCallback((id: string) => {
+    void trigger('light');
+    userPickedRef.current = true;
+    setSelectedTarget(id);
+    setError(null);
+    // Remember the choice server-side (voice "pause" and the dashboard follow
+    // it). The web player records itself once it plays.
+    if (id && !id.startsWith('ma:')) {
+      void api.syncMediaState({ entity_id: id, state: 'idle' }).catch(() => {});
+    }
+  }, [trigger]);
 
-  // Merge the HA entity list with the players reported by media/status so that
-  // devices always appear for the user even when the HA entity list or the MA
-  // WebSocket are unavailable. media/status is the reliable source of truth.
-  const deviceEntities = useMemo(() => {
-    const seen = new Set((entities || []).map((e) => e.entity_id));
-    const fromStatus: MediaEntity[] = (availablePlayers || [])
-      .filter((p) => p.entity_id)
-      .map((p) => ({
-        entity_id: p.entity_id as string,
-        friendly_name: p.friendly_name || (p.entity_id as string),
-        state: p.state || 'unknown',
-        domain: (p.entity_id as string).split('.')[0],
-      }))
-      .filter((p) => !seen.has(p.entity_id));
-    return [...(entities || []), ...fromStatus];
-  }, [entities, availablePlayers]);
+  /* ── shelves ───────────────────────────────────────────────────── */
+
+  const playlistsQ = useQuery({ queryKey: ['ma-playlists'], queryFn: () => api.getMusicAssistantPlaylists(), retry: 1, staleTime: 60_000 });
+  const recentQ = useQuery({ queryKey: ['ma-recent'], queryFn: () => api.getMusicAssistantRecent(), retry: 1, staleTime: 60_000 });
+  const lastPlayedQ = useQuery({ queryKey: ['abs-last-played'], queryFn: () => api.getAudiobookshelfLastPlayed(), retry: 1, staleTime: 60_000 });
+
+  const jumpBackIn = useMemo<ShelfItem[]>(() => {
+    const items: ShelfItem[] = [];
+    for (const book of lastPlayedQ.data?.books ?? []) {
+      // The gateway reports progress as a percentage (older builds: a ratio).
+      const raw = Number(book.progress ?? 0);
+      const progress = raw > 1 ? raw / 100 : raw;
+      if (book.is_complete || progress >= 1) continue; // finished: nothing to jump back into
+      items.push({
+        key: `abs-${book.id}`,
+        req: { kind: 'abs', id: book.id, title: book.title },
+        subtitle: book.author,
+        kind: 'audiobook',
+        progress,
+        lastPlayed: normalizePlayedAt(book.last_played),
+      });
+    }
+    for (const item of recentQ.data?.recent ?? []) {
+      if (items.some((i) => i.req.title === item.name)) continue; // the same book from both services
+      items.push({
+        key: `ma-${item.uri}`,
+        req: { kind: 'uri', uri: item.uri, title: item.name },
+        subtitle: item.artist,
+        kind: item.type === 'audiobook' ? 'audiobook' : 'music',
+        lastPlayed: normalizePlayedAt(item.last_played),
+      });
+    }
+    return items.sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0)).slice(0, 6);
+  }, [lastPlayedQ.data, recentQ.data]);
+
+  const shelvesFailed = (recentQ.isError || !!lastPlayedQ.data?.notice || lastPlayedQ.isError) && jumpBackIn.length === 0;
+
+  /* ── render ────────────────────────────────────────────────────── */
+
+  const remoteView: NowPlayingView = {
+    title: detail?.name && maItemUri === remoteStatus?.media_content_id ? detail.name : remoteStatus?.media_title,
+    artist: [remoteStatus?.media_artist, remoteStatus?.media_album].filter(Boolean).join(' · '),
+    coverUrl: proxiedImage(remoteStatus?.entity_picture),
+    state: playerState(remoteStatus?.state),
+    position: remoteTime,
+    duration: remoteDuration,
+    trackKey: remoteStatus?.media_content_id || remoteStatus?.media_title || '',
+  };
+  const webView: NowPlayingView = {
+    title: maPlayer.mediaTitle || undefined,
+    artist: maPlayer.mediaArtist || undefined,
+    coverUrl: proxiedImage(maPlayer.mediaImage),
+    state: maPlayer.isPlaying ? 'playing' : maPlayer.mediaTitle ? 'paused' : 'idle',
+    position: maPlayer.position,
+    duration: maPlayer.duration,
+    trackKey: maPlayer.mediaUri || maPlayer.mediaTitle || '',
+  };
+  const view = isWebPlayer ? webView : remoteView;
+
+  const webFooter = (() => {
+    switch (maPlayer.connectionState) {
+      case 'CONNECTED':
+        return <p className="text-sm text-cyan-300 text-center">Playing on this device</p>;
+      case 'CONNECTING':
+        return <p className="text-sm text-slate-400 text-center">Connecting to Music Assistant…</p>;
+      case 'RECONNECTING':
+        return (
+          <p className="text-sm text-amber-300 text-center">
+            Connection lost — reconnecting{maPlayer.reconnectAttempts ? ` (try ${maPlayer.reconnectAttempts} of ${maPlayer.maxReconnectAttempts})` : ''}…
+          </p>
+        );
+      case 'FAILED':
+        return (
+          <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-red-300">
+            <span>{maPlayer.error || 'Could not connect to Music Assistant.'}</span>
+            <button type="button" onClick={() => void maPlayer.reconnect()} className="min-h-11 px-4 rounded-xl bg-white/10 text-white hover:bg-white/15">
+              Reconnect
+            </button>
+          </div>
+        );
+      default:
+        return <p className="text-sm text-slate-400 text-center">Plays through this device’s speakers or headphones</p>;
+    }
+  })();
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto pb-24">
+    <div className="space-y-5 max-w-4xl mx-auto pb-24">
       <h1 className="text-2xl font-bold text-white">Media</h1>
 
       {error && (
-        <div className="bg-red-500/20 border border-red-500/30 rounded-xl p-3 text-red-400 text-sm flex items-center justify-between">
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-3 underline text-xs shrink-0">Dismiss</button>
+        <div role="alert" className="bg-red-500/20 border border-red-500/30 rounded-xl p-3 text-red-200 text-sm flex items-center justify-between gap-3">
+          <span className="min-w-0 break-words">{error}</span>
+          <button type="button" onClick={() => setError(null)} className="min-h-11 px-3 underline text-xs shrink-0">Dismiss</button>
         </div>
       )}
 
-      {/* 1. Device Selector */}
       <DeviceSelector
         selectedTarget={selectedTarget}
-        entities={deviceEntities}
-        onDeviceSelect={handleDeviceSelect}
-        localMode={localMode}
-        onLocalToggle={handleLocalToggle}
-        maPlayers={maPlayers}
+        devices={devices}
+        onSelect={selectDevice}
+        webPlayerPlaying={maPlayer.isPlaying}
       />
 
-      {/* 2. Active Player Header */}
       <NowPlayingCard
-        mediaStatus={
-          localMode
-            ? (localTrack || maPlayer.isPlaying || maPlayer.mediaTitle)
-              ? {
-                  entity_id: 'web_player',
-                  state: localIsPlaying ? 'playing' : 'paused',
-                  media_title: detailedTitle,
-                  media_artist: detailedSubtitle,
-                  media_type: localTrack?.type || 'music',
-                  volume_level: localVolume / 100,
-                  is_volume_muted: localMuted,
-                }
-              : null
-            : mediaStatus
-              ? {
-                  ...mediaStatus,
-                  media_title: detailedTitle,
-                  media_artist: detailedSubtitle,
-                }
-              : null
-        }
-        selectedTarget={selectedTarget}
-        targetLabel={selectedDeviceLabel}
-        localMode={localMode}
-        volume={localMode ? localVolume : volume}
-        muted={localMode ? localMuted : muted}
-        loading={localMode ? null : loading}
-        currentTime={isWebPlayer || localMode ? localCurrentTime : remoteCurrentTime}
-        duration={isWebPlayer || localMode ? localDuration : remoteDuration}
+        view={view}
+        volume={isWebPlayer ? maPlayer.volume : volume}
+        muted={isWebPlayer ? maPlayer.muted : muted}
+        busy={busy && ['play', 'resume', 'pause', 'next', 'previous', 'stop'].includes(busy) ? busy : null}
         isFavorite={isFavorite}
-        onPrevious={localMode ? () => maPlayer.previous() : isWebPlayer ? () => maPlayer.previous() : () => sendTransport('previous')}
+        idleHint={isWebPlayer ? 'Pick something below to play it here' : `Pick something below to play on ${selectedDevice?.name || 'this speaker'}`}
+        footer={isWebPlayer ? webFooter : (
+          <p className="text-sm text-purple-300 text-center truncate">
+            {selectedDevice && !selectedDevice.online ? `${selectedDevice.name} is offline` : `Playing through ${selectedDevice?.name || remoteStatus?.friendly_name || 'the selected speaker'}`}
+          </p>
+        )}
+        onPrevious={isWebPlayer ? () => void runWeb('previous', maPlayer.previous) : () => void sendTransport('previous')}
+        onNext={isWebPlayer ? () => void runWeb('next', maPlayer.next) : () => void sendTransport('next')}
         onTogglePlay={
-          localMode
-            ? toggleLocalPlay
-            : isWebPlayer
-              ? () => (maPlayer.isPlaying ? maPlayer.pause() : maPlayer.play())
-              : () => sendTransport(mediaStatus?.state === 'playing' ? 'pause' : 'resume')
+          isWebPlayer
+            ? () => void runWeb(maPlayer.isPlaying ? 'pause' : 'play', () => (maPlayer.isPlaying ? maPlayer.pause() : maPlayer.play()))
+            : () => void sendTransport(remoteView.state === 'playing' ? 'pause' : 'resume')
         }
-        onNext={localMode ? () => maPlayer.next() : isWebPlayer ? () => maPlayer.next() : () => sendTransport('next')}
-        onVolumeChange={localMode ? handleLocalVolume : handleVolume}
-        onMuteToggle={localMode ? toggleLocalMute : toggleMute}
-        onFavoriteToggle={activeUri ? handleFavoriteToggle : undefined}
-        onSeek={isWebPlayer || localMode ? handleLocalSeek : (selectedTarget ? handleRemoteSeek : undefined)}
-        onStopPlayback={localMode && (localTrack || maPlayer.isPlaying) ? handleStopPlayback : undefined}
-        maPlayer={maPlayer}
+        onStop={view.state !== 'idle' ? (isWebPlayer ? () => void runWeb('stop', maPlayer.stop) : () => void sendTransport('stop')) : undefined}
+        onVolumeChange={isWebPlayer ? maPlayer.setVolume : handleRemoteVolume}
+        onMuteToggle={isWebPlayer ? () => maPlayer.setMuted(!maPlayer.muted) : toggleRemoteMute}
+        onFavoriteToggle={maItemUri ? () => void toggleFavorite() : undefined}
+        onSeek={view.duration > 0 ? (isWebPlayer ? (s) => void maPlayer.seek(s) : (s) => void handleRemoteSeek(s)) : undefined}
       />
 
-      {/* 3. Jump Back In */}
       <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Jump Back In</h2>
-          {(maRecentLoading || absLoading) && quickResumeItems.length === 0 && (
-            <button onClick={() => {
-              queryClient.invalidateQueries({ queryKey: ['ma-recent'] });
-              queryClient.invalidateQueries({ queryKey: ['abs-last-played'] });
-            }} className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
-              <Loader2 size={12} className="animate-spin" /> Refresh
-            </button>
-          )}
-        </div>
-        {maRecentLoading || absLoading ? (
-          loadingSection()
-        ) : quickResumeItems.length === 0 ? (
-          <div className="glass-panel rounded-2xl p-8 text-center"><p className="text-sm text-slate-400 mb-2">No recently played content</p><p className="text-xs text-slate-600">Requires Music Assistant or Audiobookshelf credentials to be configured in the Identity service.</p></div>
+        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Jump back in</h2>
+        {(recentQ.isLoading || lastPlayedQ.isLoading) && jumpBackIn.length === 0 ? (
+          <div className="flex justify-center py-8" role="status" aria-label="Loading"><Loader2 size={24} className="text-slate-500 animate-spin" /></div>
+        ) : shelvesFailed ? (
+          <ShelfMessage
+            title="Couldn’t load your recent listening"
+            detail="Music Assistant or Audiobookshelf did not answer. Check their settings in Identity."
+            onRetry={() => { void recentQ.refetch(); void lastPlayedQ.refetch(); }}
+          />
+        ) : jumpBackIn.length === 0 ? (
+          <ShelfMessage title="Nothing to jump back into yet" detail="Books in progress and recent music show up here." />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {quickResumeItems.map((item) => {
-              const id = item.id;
-              const handlePlay = item.type === 'audiobook'
-                ? () => {
-                    if (localMode) {
-                      playLocal(item.id.replace('abs-', ''), item.title, item.subtitle, 'audiobook', 'abs');
-                      return;
-                    }
-                    if (!selectedTarget) {
-                      playLocal(item.id.replace('abs-', ''), item.title, item.subtitle, 'audiobook', 'abs');
-                      return;
-                    }
-                    playAudiobook(item.id.replace('abs-', ''), item.title);
-                  }
-                : () => {
-                    if (localMode) {
-                      playLocal(item.id.replace('ma-', ''), item.title, item.subtitle, 'music', 'ma');
-                      return;
-                    }
-                    if (!selectedTarget) {
-                      playLocal(item.id.replace('ma-', ''), item.title, item.subtitle, 'music', 'ma');
-                      return;
-                    }
-                    playMedia(item.id.replace('ma-', ''), 'music');
-                  };
-              return (
-                <QuickResumeItem
-                  key={id} item={item}
-                  onPlay={handlePlay} isDisabled={false}
-                  isLoading={loading !== null}
-                />
-              );
+            {jumpBackIn.map((item) => (
+              <ShelfCard key={item.key} item={item} busy={busy === item.key} disabled={busy !== null} onPlay={() => void playItem(item.req, item.key)} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Playlists</h2>
+        {playlistsQ.isLoading ? (
+          <div className="flex justify-center py-8" role="status" aria-label="Loading"><Loader2 size={24} className="text-slate-500 animate-spin" /></div>
+        ) : playlistsQ.isError ? (
+          <ShelfMessage title="Couldn’t load playlists" detail="Music Assistant did not answer." onRetry={() => void playlistsQ.refetch()} />
+        ) : !playlistsQ.data?.playlists?.length ? (
+          <ShelfMessage title="No playlists yet" detail="Playlists you make in Music Assistant appear here." />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {playlistsQ.data.playlists.map((pl) => {
+              const item: ShelfItem = {
+                key: `pl-${pl.uri}`,
+                req: { kind: 'uri', uri: pl.uri, title: pl.name },
+                subtitle: pl.items > 0 ? `${pl.items} tracks` : 'Playlist',
+                kind: 'playlist',
+              };
+              return <ShelfCard key={item.key} item={item} busy={busy === item.key} disabled={busy !== null} onPlay={() => void playItem(item.req, item.key)} />;
             })}
           </div>
         )}
       </section>
 
-      {/* 4. Playlists */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Playlists</h2>
-          {!maPlaylists && !maPlaylistsLoading && (
-            <button onClick={() => queryClient.invalidateQueries({ queryKey: ['ma-playlists'] })}
-              className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
-              <Loader2 size={12} className="animate-spin" /> Refresh
-            </button>
-          )}
-        </div>
-        {maPlaylistsLoading ? loadingSection() : (
-          !maPlaylists?.playlists?.length ? (
-            quickResumeItems.length === 0
-              ? <div className="glass-panel rounded-2xl p-8 text-center"><p className="text-sm text-slate-400 mb-2">No playlists available</p><p className="text-xs text-slate-600">Requires Music Assistant credentials to be configured in the Identity service.</p></div>
-              : emptySection('No playlists available')
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {maPlaylists.playlists.map((pl) => (
-                <PlaylistItem
-                  key={pl.uri} name={pl.name} trackCount={pl.items}
-                  onPlay={() => {
-                    if (localMode) {
-                      playLocal(pl.uri, pl.name, pl.items > 0 ? `${pl.items} tracks` : 'Playlist', 'music', 'ma');
-                      return;
-                    }
-                    if (!selectedTarget) {
-                      playLocal(pl.uri, pl.name, pl.items > 0 ? `${pl.items} tracks` : 'Playlist', 'music', 'ma');
-                      return;
-                    }
-                    playPlaylist(pl.uri);
-                  }}
-                  isDisabled={false} isLoading={loading !== null}
-                />
-              ))}
-            </div>
-          )
-        )}
-      </section>
-
-      {/* 4. Browse All Media */}
       <button
-        onClick={() => { setShowMediaPicker(true); }}
-        className={`w-full py-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20 text-cyan-400 font-medium hover:from-cyan-500/20 hover:to-purple-500/20 transition-all flex items-center justify-center gap-2`}
+        type="button"
+        onClick={() => setShowExplorer(true)}
+        className="w-full min-h-11 py-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20 text-cyan-300 font-medium hover:from-cyan-500/20 hover:to-purple-500/20 transition-colors flex items-center justify-center gap-2"
       >
         <Library size={20} />
-        Browse All Media
+        Browse all media
       </button>
 
-      {/* 5. Explorer Modal */}
-      <MediaExplorerModal
-        show={showMediaPicker}
-        onClose={() => setShowMediaPicker(false)}
-        playAudiobook={playAudiobook}
-        playPlaylist={playPlaylist}
-        playMedia={playMedia}
-        playLocal={playLocal}
-        selectedTarget={selectedTarget}
-        localMode={localMode}
-      />
-
+      <MediaExplorer open={showExplorer} onClose={() => setShowExplorer(false)} onPlay={playItem} />
     </div>
   );
 };

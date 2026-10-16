@@ -37,6 +37,35 @@ Google.
 | Vehicles | `GET/POST /vehicles`, `DELETE /vehicles/{id}`, `GET /vehicles/assigned/{user}`, `POST /vehicles/assign`, `GET /vehicle-lookup/*`, `GET /fuel-prices` |
 | Maps | `GET /map/regions` |
 
+## Trips: how a drive is recorded
+
+Every fix that reaches `record_point` (accuracy ≤ 100 m, not an impossible
+jump checked against OSRM) goes through `process_trip_point`:
+
+- **Start / advance** at ≥ 10 mph. Speed is the fix's own, else derived from
+  the previous breadcrumb **only when the two are ≤ 120 s apart**.
+- **Finish** after 5 min without moving (`TRIP_IDLE_S`). A background
+  sweeper (`_idle_trip_sweeper`, every 60 s) finishes idle drives on the
+  server's clock; reads of `/trips` do too. Before the sweeper a drive ended
+  only on that phone's next fix, and a phone that went quiet lost it.
+- On finish the trail is map-matched (OSRM): road distance wins; a trail that
+  fits no road, or matches below the confidence floor, is discarded as a
+  phantom; anything under 0.2 mi is dropped.
+
+So trip detection needs a phone that reports every ~30 s while moving. A
+phone that only sends its 5–10 minute heartbeat (no "Allow all the time",
+battery optimisation on, or an OEM that kills the service) never produces a
+trip — its fixes are stored, but no two are close enough in time to measure a
+speed. Seen live 2026-10-15: Michele's phone reported every ~600 s for days,
+so none of the 15 trips were hers.
+
+`GET /trips?scope=family&viewer=…` is what Wander shows: the viewer's trips
+plus those of everyone who shares their activity with them
+(`_viewer_may_see`, one sharing lookup per request), newest first, with
+shared rides paired across people (`group_shared_trips` only pairs trips in
+the same list). `user_id=…` returns one person's (consent-gated); the
+`all` bucket is admin-only.
+
 Trip start/end locations store `{name, latitude, longitude, address?}`.
 Coordinates and distance are locked GPS telemetry, but `PATCH /trips/{id}`
 accepts `start_name` / `end_name` / `start_address` / `end_address`, so a user
@@ -73,7 +102,13 @@ routed via Caddy `:8009`.
   `MiniRouteMap.tsx`, `TripLocationsMap.tsx`. Freshness: live < 2 min, recent
   < 15 min, last seen up to 24 h (dimmed pin); members within 60 m cluster;
   the map starts at the home zone and auto-fits once. The UI reads positions
-  from `GET /api/users/location/all`.
+  from `GET /api/users/location/all` (signed-in members only, as is
+  `GET /api/users/{user}/location`) and ages a pin by when the fix was taken
+  (`timestamp`), not when it arrived (`updated_at`): a phone re-sends a held
+  fix when it gets no new one.
+- **Wander cards** (`lib/familyCards.ts`) merge each HA `person` with the
+  app's own fix, whichever is newer. Route thumbnails are one TanStack query
+  per trip (`routeQueryKey`), shared with the Route Map modal.
 - **Standalone**: a MapLibre page at `GET /` (`services/geo/static/index.html`,
   OSM raster tiles, no build step) for any browser on the LAN.
 

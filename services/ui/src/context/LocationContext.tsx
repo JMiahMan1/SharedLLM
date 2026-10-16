@@ -827,7 +827,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     if (sensorsRef.current.location.enabled) {
       const user = await resolveSyncUsername();
       if (user) {
-        const state = await startBackgroundTracking(user);
+        const state = await startBackgroundTracking(user, { steps: sensorsRef.current.steps.enabled });
         if (!state.supported) {
           logSensor('location', 'background tracking unavailable on this build', null);
         }
@@ -855,6 +855,16 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     }
     setState((s) => ({ ...s, isTracking: false }));
   }, []);
+
+  /**
+   * The native service reads the pedometer with the app closed only while
+   * Steps is on; tell a running service when that switch changes.
+   */
+  const syncBackgroundSteps = useCallback(async () => {
+    if (!sensorsRef.current.location.enabled || watchIdRef.current === null) return;
+    const user = await resolveSyncUsername();
+    if (user) await startBackgroundTracking(user, { steps: sensorsRef.current.steps.enabled });
+  }, [resolveSyncUsername]);
 
   const enableSensor = useCallback(async (id: SensorId): Promise<boolean> => {
     if (id === 'steps') {
@@ -896,6 +906,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         void refreshDailySteps().then(() => syncDailySteps());
         void backfillStepHistory();
         await startStepService();
+        void syncBackgroundSteps();
         return true;
       } catch (err) {
         // A failure while *enabling* is usually transient (bridge not ready).
@@ -919,7 +930,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     await storageSet('jarvis_location_tracking_enabled', 'true');
     await startTracking();
     return watchIdRef.current !== null || sensorsRef.current.location.enabled === true;
-  }, [patchSensor, refreshDailySteps, syncDailySteps, startTracking]);
+  }, [patchSensor, refreshDailySteps, syncDailySteps, startTracking, syncBackgroundSteps]);
 
   const disableSensor = useCallback(async (id: SensorId): Promise<void> => {
     if (id === 'steps') {
@@ -927,6 +938,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       stepRecoveringRef.current = false;
       await storageSet(KEY_STEPS_ENABLED, 'false');
       await stopStepService();
+      void syncBackgroundSteps();
       logSensor('steps', 'sensor disabled by user');
       return;
     }
@@ -937,7 +949,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     stopTracking();
     lastLocationRef.current = null;
     logSensor('location', 'sensor disabled by user');
-  }, [patchSensor, stopStepService, stopTracking]);
+  }, [patchSensor, stopStepService, stopTracking, syncBackgroundSteps]);
 
   const openSensorSettings = useCallback(async (id: SensorId) => {
     if (id !== 'steps') {

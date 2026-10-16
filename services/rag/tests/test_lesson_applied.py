@@ -126,3 +126,36 @@ def test_apply_citation_scanner_extracts_ids():
     ]
     # No citation -> no bump.
     assert scan("I did not reuse any lesson.", []) == []
+
+
+@pytest.mark.asyncio
+async def test_lesson_edit_and_delete_cannot_reach_other_collections(tmp_path):
+    """The Knowledge Hub's Edit/Delete look rows up by id alone; they used to
+    rewrite or delete any row (a file chunk, an HA entity) whose id was sent."""
+    conn = _install_fakes(tmp_path)
+    resp = await rag_main.ingest(
+        IngestRequest(user_id="summers", content="Budget 2026", collection_name="nextcloud_files", metadata={"path": "/b.md"})
+    )
+    other_id = resp["id"]
+
+    edited = await rag_main.edit_learning(other_id, {"content": "pwned"})
+    deleted = await rag_main.delete_learning(other_id)
+
+    assert edited.status_code == 404
+    assert deleted.status_code == 404
+    row = conn.execute("SELECT content FROM rag_items WHERE id = ?", [other_id]).fetchone()
+    assert row["content"] == "Budget 2026"
+
+
+@pytest.mark.asyncio
+async def test_a_lesson_can_still_be_edited_and_deleted(tmp_path):
+    conn = _install_fakes(tmp_path)
+    resp = await rag_main.ingest(
+        IngestRequest(user_id="default", content="Old rule", collection_name="system_learnings", metadata={"topic": "t"})
+    )
+    lesson_id = resp["id"]
+
+    assert (await rag_main.edit_learning(lesson_id, {"content": "New rule"}))["status"] == "SUCCESS"
+    assert conn.execute("SELECT content FROM rag_items WHERE id = ?", [lesson_id]).fetchone()["content"] == "New rule"
+    assert (await rag_main.delete_learning(lesson_id))["status"] == "SUCCESS"
+    assert conn.execute("SELECT 1 FROM rag_items WHERE id = ?", [lesson_id]).fetchone() is None

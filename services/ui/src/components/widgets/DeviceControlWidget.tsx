@@ -1,6 +1,8 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useWidgetStore } from '../../stores/widgetStore';
+import { titleize } from '../../lib/climate';
 import { api, apiClient } from '../../services/api';
 import type { DeviceEntry, IWidgetProps } from '../../types/widget';
 import { WidgetCard } from './WidgetCard';
@@ -8,8 +10,6 @@ import {
   Star, 
   Power, 
   Tv, 
-  Bluetooth, 
-  MapPin, 
   Lock, 
   Volume2, 
   Play, 
@@ -24,11 +24,11 @@ import {
   ArrowUp,
   ArrowDown,
   Info,
-  Sliders
+  Sliders,
+  LayoutGrid
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import TokenBridge from '../../plugins/tokenBridge';
-import { Capacitor } from '@capacitor/core';
 
 const DEVICE_ICONS: Record<string, string> = {
   light: '💡',
@@ -93,16 +93,14 @@ function getDomainLabel(domain: string): string {
   return DOMAIN_LABELS[domain] || domain.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-const resolveDeviceRoom = (device: DeviceEntry): string => {
-  if (device.room && device.room !== 'unknown') return device.room;
-  const name = (device.friendly_name || device.entity_id).toLowerCase();
-  if (name.includes('living') || name.includes('tv') || name.includes('couch')) return 'Living Room';
-  if (name.includes('bedroom') || name.includes('bed') || name.includes('sleep')) return 'Bedroom';
-  if (name.includes('kitchen') || name.includes('cook') || name.includes('dining') || name.includes('spots')) return 'Kitchen';
-  if (name.includes('office') || name.includes('desk') || name.includes('work')) return 'Office';
-  if (name.includes('garage') || name.includes('car')) return 'Garage';
-  return 'Living Room'; // Fallback
-};
+/**
+ * The device's Home Assistant area, or null when it has none. No guessing from
+ * the name: a "Living Room" fallback put every unplaced device in one room.
+ */
+const deviceRoom = (device: DeviceEntry): string | null =>
+  device.room && device.room !== 'unknown' ? titleize(device.room) : null;
+
+const UNPLACED = 'No room';
 
 const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   const { user, role } = useAuth();
@@ -119,22 +117,19 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   // Tabs
   const [activeTab, setActiveTab] = useState<'favorites' | 'all' | 'room'>('favorites');
 
-  // Room presence state
-  const [currentRoom, setCurrentRoom] = useState<string>('Living Room');
-  const [bleScanning, setBleScanning] = useState(false);
-
   // Assignments & Users
   const [assignments, setAssignments] = useState<{ id: number; device_id: string; username: string }[]>([]);
   const [allUsers, setAllUsers] = useState<{ username: string; display_name?: string; is_admin?: boolean }[]>([]);
 
   // Detailed modal
   const [selectedDevice, setSelectedDevice] = useState<DeviceEntry | null>(null);
-  const [adminAssignments, setAdminAssignments] = useState<string[]>([]);
+  const [assignedTo, setAssignedTo] = useState<string>('');
   const [updatingAssignment, setUpdatingAssignment] = useState(false);
 
   // Local attribute state for controls inside modal
   const [brightness, setBrightness] = useState<number>(100);
-  const [temperature, setTemperature] = useState<number>(72);
+  // Null until the thermostat reports a target: no invented 72°F.
+  const [temperature, setTemperature] = useState<number | null>(null);
   const [volume, setVolume] = useState<number>(50);
 
   const loadDevices = useCallback(async () => {
@@ -198,39 +193,20 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     return devices.some((d) => d.entity_id === entityId);
   }, [devices]);
 
+  // Away = the server's presence for this user is somewhere other than home
+  // (GPS against Home Assistant's home zone). Unknown counts as home, so a
+  // missing fix never blocks the door; it only skips the extra question.
+  const username = user?.username;
   const isAwayFromHome = useCallback(async (): Promise<boolean> => {
-    if (!Capacitor.isNativePlatform()) return false;
+    if (!username) return false;
     try {
-      // TokenBridge mirrors last GPS; if stale/missing we treat as home (no confirm)
-      const homeLat = 33.16670697948413;
-      const homeLng = -111.56466007232666;
-      // Distance is also enforced natively; here we reuse window.location last fix via preferences bridge side-channel.
-      // Best-effort: only confirm when native reports away via a lightweight heuristic on stored coords is handled in TokenBridge.
-      // For in-app actions we check after fetch of last location stored by LocationContext through TokenBridge — not readable from JS.
-      // Fallback: use navigator.geolocation when available and permission granted.
-      if (typeof navigator !== 'undefined' && navigator.geolocation) {
-        const pos = await new Promise<GeolocationPosition | null>((resolve) => {
-          navigator.geolocation.getCurrentPosition(
-            (p) => resolve(p),
-            () => resolve(null),
-            { enableHighAccuracy: false, timeout: 4000, maximumAge: 60000 }
-          );
-        });
-        if (!pos) return false;
-        const R = 6371e3;
-        const φ1 = (homeLat * Math.PI) / 180;
-        const φ2 = (pos.coords.latitude * Math.PI) / 180;
-        const Δφ = ((pos.coords.latitude - homeLat) * Math.PI) / 180;
-        const Δλ = ((pos.coords.longitude - homeLng) * Math.PI) / 180;
-        const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-        const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return d > 200;
-      }
+      const resp = await api.getUserPresence(username);
+      const room = resp.presence?.room?.toLowerCase();
+      return Boolean(room) && room !== 'home';
     } catch {
-      // ignore
+      return false;
     }
-    return false;
-  }, []);
+  }, [username]);
 
   const callHAService = useCallback(async (domain: string, service: string, entityId: string, serviceData: unknown = null) => {
     if (!hasControlPermission(entityId)) {
@@ -308,37 +284,6 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     [togglePinnedDevice]
   );
 
-  // Real room presence from gateway (ESPresense / people pipeline); no fake cycles
-  const handleBLEScan = async () => {
-    setBleScanning(true);
-    try {
-      const token = (await import('../../lib/storage')).storageGetSync('jarvis_api_key');
-      const origin = (await import('../../lib/serverUrl')).getServerOrigin();
-      const userId = user?.username || 'jeremiah';
-      const resp = await fetch(`${origin}/api/presence/${encodeURIComponent(userId)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        const presence = data?.presence ?? data;
-        const room =
-          presence?.room || presence?.current_room || presence?.location || presence?.closest_room || null;
-        if (room) {
-          setCurrentRoom(String(room));
-          toast.success(`Presence: ${room}`);
-        } else {
-          toast('Presence offline — ESPresense not reporting yet', { icon: 'ℹ️' });
-        }
-      } else {
-        toast('Presence API unavailable', { icon: '⚠️' });
-      }
-    } catch {
-      toast('Presence check failed', { icon: '⚠️' });
-    } finally {
-      setBleScanning(false);
-    }
-  };
-
   // Open modal & load detailed settings
   const handleOpenDetail = async (device: DeviceEntry) => {
     setSelectedDevice(device);
@@ -354,50 +299,42 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       );
     } else if (device.domain === 'climate') {
       const tempAttr = typeof attrs?.temperature === 'number' ? attrs.temperature : null;
-      setTemperature(tempAttr != null ? Math.round(tempAttr) : 72);
+      setTemperature(tempAttr != null ? Math.round(tempAttr) : null);
     } else if (device.domain === 'media_player') {
       const volAttr = typeof attrs?.volume_level === 'number' ? attrs.volume_level : null;
       setVolume(volAttr != null ? Math.round(volAttr * 100) : 50);
     }
 
-    // Filter assignments for this specific device
-    const deviceAssignedUsers = assignments
-      .filter((a) => a.device_id === device.entity_id)
-      .map((a) => a.username);
-    setAdminAssignments(deviceAssignedUsers);
+    // A device has at most one assigned member (identity reassigns on save).
+    setAssignedTo(assignments.find((a) => a.device_id === device.entity_id)?.username ?? '');
   };
 
   const selectedToggleAction = selectedDevice
     ? getToggleAction(selectedDevice.domain, selectedDevice.state)
     : null;
 
-  // Handle Admin User Assignment changes
-  const handleToggleUserAssignment = async (username: string) => {
+  // Admin: who this device belongs to. Identity keeps one assignment per
+  // device and moves it on reassign, so this is a single choice, not the
+  // checkbox list it used to be (ticking a second member silently took the
+  // device away from the first, and unticking could remove the wrong one).
+  const handleAssign = async (username: string) => {
     if (!selectedDevice) return;
-    
     setUpdatingAssignment(true);
     const targetEntity = selectedDevice.entity_id;
-    const isAssigned = adminAssignments.includes(username);
-
     try {
-      if (isAssigned) {
-        // Unassign
-        await api.deleteDeviceAssignment(targetEntity);
-        setAdminAssignments((prev) => prev.filter((u) => u !== username));
-        toast.success(`Revoked assignment for ${username}`);
-      } else {
-        // Assign
+      if (username) {
         await api.updateDeviceAssignment({ username, device_id: targetEntity });
-        setAdminAssignments((prev) => [...prev, username]);
-        toast.success(`Assigned control to ${username}`);
+        toast.success(`Assigned to ${username}`);
+      } else {
+        await api.deleteDeviceAssignment(targetEntity);
+        toast.success('Assignment removed');
       }
-      
-      // Reload assignments list
       const userDevices = await api.getDevices();
       setAssignments(userDevices);
+      setAssignedTo(userDevices.find((a) => a.device_id === targetEntity)?.username ?? '');
     } catch (e) {
       console.error(e);
-      toast.error('Failed to update user assignment');
+      toast.error('Failed to update the assignment');
     } finally {
       setUpdatingAssignment(false);
     }
@@ -437,25 +374,47 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     })).sort((a, b) => a.label.localeCompare(b.label));
   }, [activeDevices]);
 
-  const roomDevicesList = useMemo(() => {
-    return activeDevices.filter((d) => resolveDeviceRoom(d) === currentRoom);
-  }, [activeDevices, currentRoom]);
+  // Home Assistant areas, alphabetical, with unplaced devices last.
+  const roomGroups = useMemo(() => {
+    const groups: Record<string, DeviceEntry[]> = {};
+    for (const d of activeDevices) {
+      const room = deviceRoom(d) ?? UNPLACED;
+      (groups[room] ??= []).push(d);
+    }
+    return Object.entries(groups)
+      .sort(([a], [b]) => (a === UNPLACED ? 1 : b === UNPLACED ? -1 : a.localeCompare(b)))
+      .map(([room, devs]) => ({
+        room,
+        devices: devs.sort((x, y) => (x.friendly_name || '').localeCompare(y.friendly_name || '')),
+      }));
+  }, [activeDevices]);
+  const hasRooms = roomGroups.some((g) => g.room !== UNPLACED);
+
+  const renderRoomGroups = () =>
+    roomGroups.map((group) => (
+      <div key={group.room} className="space-y-1.5">
+        <p className="text-[9px] font-black uppercase text-slate-500 tracking-wider mt-2 mb-1 border-b border-slate-800/40 pb-0.5">
+          {group.room} ({group.devices.length})
+        </p>
+        {group.devices.map(renderDeviceRow)}
+      </div>
+    ));
 
   // Render a standard device row
   const renderDeviceRow = (device: DeviceEntry) => {
     const isFav = pinnedDevices.includes(device.entity_id);
     const isDeviceActive = isActive(device.state);
     const hasControl = hasControlPermission(device.entity_id);
-    const room = resolveDeviceRoom(device);
+    const room = deviceRoom(device);
 
     return (
       <div
         key={device.entity_id}
         onClick={() => handleOpenDetail(device)}
-        className="flex items-center justify-between p-3 rounded-xl bg-slate-900/30 border border-slate-800/40 hover:bg-slate-800/20 hover:border-white/5 transition-all duration-200 cursor-pointer group"
+        className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-900/30 border border-slate-800/40 hover:bg-slate-800/20 hover:border-white/5 transition-all duration-200 cursor-pointer group"
       >
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <span className="text-xl p-2 bg-slate-950/40 border border-white/5 rounded-lg shrink-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <span className="text-base p-1.5 bg-slate-950/40 border border-white/5 rounded-lg shrink-0">
             {getDeviceIcon(device.domain)}
           </span>
           <div className="min-w-0">
@@ -471,17 +430,23 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
             </div>
             <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
               <span>{getDomainLabel(device.domain)}</span>
-              <span>•</span>
-              <span>{room}</span>
+              {room && (
+                <>
+                  <span>•</span>
+                  <span className="truncate">{room}</span>
+                </>
+              )}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => toggleFavorite(device.entity_id)}
-            className="p-1.5 text-slate-500 hover:text-amber-400 transition-colors"
+            className="p-1.5 text-slate-500 hover:text-amber-400 transition-colors pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
             title={isFav ? 'Remove Favorite' : 'Favorite'}
+            aria-label={`${isFav ? 'Unfavorite' : 'Favorite'} ${device.friendly_name || device.entity_id}`}
+            aria-pressed={isFav}
           >
             <Star size={14} className={isFav ? 'fill-amber-400 text-amber-400' : ''} />
           </button>
@@ -490,13 +455,13 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
             <button
               onClick={() => toggleDevice(device.entity_id, device.state)}
               disabled={!hasControl}
-              className={`text-xs px-3 py-1 rounded-lg font-semibold transition-all duration-200 ${
+              className={`text-xs px-3 py-1 rounded-lg font-semibold transition-all duration-200 pointer-coarse:min-h-11 ${
                 isDeviceActive
                   ? 'bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20'
                   : 'bg-slate-950/40 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
               } disabled:opacity-30 disabled:cursor-not-allowed`}
             >
-              <Power size={12} className="inline mr-1" />
+              <Power size={12} className="hidden sm:inline mr-1" />
               {getToggleAction(device.domain, device.state)?.label}
             </button>
           ) : (
@@ -526,8 +491,9 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
           <button
             onClick={loadDevices}
             disabled={loading}
-            className="p-1 hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors"
+            className="p-1 hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
             title="Refresh device states"
+            aria-label="Refresh device states"
           >
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
           </button>
@@ -584,39 +550,17 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
               </div>
             </div>
 
-            {/* Middle Col: BLE & Room Context */}
+            {/* Middle Col: devices by Home Assistant area */}
             <div className="glass-card p-4 flex flex-col h-[400px] border border-white/5 bg-slate-900/10">
-              <div className="flex items-center justify-between mb-3">
-                <h5 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                  <Bluetooth size={12} className="text-indigo-400" /> BLE Room Scan
-                </h5>
-                <button
-                  onClick={handleBLEScan}
-                  disabled={bleScanning}
-                  className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition-colors flex items-center gap-1"
-                >
-                  <MapPin size={10} className={bleScanning ? 'animate-pulse' : ''} />
-                  {bleScanning ? 'Scanning...' : 'Scan Beacons'}
-                </button>
-              </div>
-
-              <div className="bg-indigo-950/20 border border-indigo-500/20 rounded-xl p-3 mb-4 flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">BLE Presence Location</p>
-                  <p className="text-sm font-black text-white mt-0.5">{currentRoom}</p>
-                </div>
-                <div className="h-2 w-2 rounded-full bg-indigo-500 animate-ping shrink-0" />
-              </div>
-
+              <h5 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-1.5">
+                <LayoutGrid size={12} className="text-indigo-400" /> By Room
+              </h5>
               <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-                {roomDevicesList.length === 0 ? (
+                {hasRooms ? renderRoomGroups() : (
                   <div className="h-full flex flex-col items-center justify-center text-center p-6">
-                    <span className="text-2xl mb-2">📡</span>
-                    <p className="text-xs text-slate-400">No BLE devices in {currentRoom}</p>
-                    <p className="text-[10px] text-slate-600 mt-1">Try scanning for a different room beacon.</p>
+                    <p className="text-xs text-slate-400">No devices have a room yet</p>
+                    <p className="text-[10px] text-slate-600 mt-1">Assign areas to devices in Home Assistant and they group here.</p>
                   </div>
-                ) : (
-                  roomDevicesList.map(renderDeviceRow)
                 )}
               </div>
             </div>
@@ -647,7 +591,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       <div className="flex border-b border-white/5 mb-3 select-none">
         <button
           onClick={() => setActiveTab('favorites')}
-          className={`flex-1 text-center py-2 text-xs font-bold transition-all relative ${
+          className={`flex-1 text-center py-2 text-xs font-bold transition-all relative pointer-coarse:min-h-11 ${
             activeTab === 'favorites' ? 'text-white' : 'text-slate-500 hover:text-slate-300'
           }`}
         >
@@ -658,7 +602,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
         </button>
         <button
           onClick={() => setActiveTab('all')}
-          className={`flex-1 text-center py-2 text-xs font-bold transition-all relative ${
+          className={`flex-1 text-center py-2 text-xs font-bold transition-all relative pointer-coarse:min-h-11 ${
             activeTab === 'all' ? 'text-white' : 'text-slate-500 hover:text-slate-300'
           }`}
         >
@@ -669,11 +613,11 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
         </button>
         <button
           onClick={() => setActiveTab('room')}
-          className={`flex-1 text-center py-2 text-xs font-bold transition-all relative ${
+          className={`flex-1 text-center py-2 text-xs font-bold transition-all relative pointer-coarse:min-h-11 ${
             activeTab === 'room' ? 'text-white' : 'text-slate-500 hover:text-slate-300'
           }`}
         >
-          BLE ({currentRoom.split(' ')[0]})
+          Rooms
           {activeTab === 'room' && (
             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-purple-500 to-indigo-500" />
           )}
@@ -681,7 +625,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       </div>
 
       {/* Tab Contents */}
-      <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[300px]">
+      <div className="space-y-2 pr-1">
         {activeTab === 'favorites' && (
           favoriteDevicesList.length === 0 ? (
             <div className="flex flex-col items-center justify-center text-center py-8">
@@ -711,46 +655,27 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
         )}
 
         {activeTab === 'room' && (
-          <div className="space-y-3">
-            {/* BLE scan header */}
-            <div className="flex items-center justify-between p-2 rounded-xl bg-indigo-950/10 border border-indigo-500/10">
-              <div className="min-w-0">
-                <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-wide">Current Room (BLE Scan)</p>
-                <p className="text-xs font-black text-white mt-0.5">{currentRoom}</p>
-              </div>
-              <button
-                onClick={handleBLEScan}
-                disabled={bleScanning}
-                className="text-[10px] bg-indigo-600 text-white font-bold px-2.5 py-1 rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-50 flex items-center gap-1"
-              >
-                <Bluetooth size={10} className={bleScanning ? 'animate-pulse' : ''} />
-                {bleScanning ? 'Scanning...' : 'Scan'}
-              </button>
+          hasRooms ? renderRoomGroups() : (
+            <div className="text-center py-6">
+              <p className="text-[10px] text-slate-500">No devices have a room yet</p>
+              <p className="text-[9px] text-slate-600 mt-0.5">Assign areas in Home Assistant and devices group here.</p>
             </div>
-
-            <div className="space-y-2">
-              {roomDevicesList.length === 0 ? (
-                <div className="text-center py-6">
-                  <p className="text-[10px] text-slate-500">No controllable devices in {currentRoom}</p>
-                  <p className="text-[9px] text-slate-600 mt-0.5">Assigned devices update dynamically.</p>
-                </div>
-              ) : (
-                roomDevicesList.map(renderDeviceRow)
-              )}
-            </div>
-          </div>
+          )
         )}
       </div>
 
       {/* Device Details Dialog */}
-      {selectedDevice && (
+      {/* Portalled for the same reason as the expanded card: a transformed
+          ancestor would otherwise anchor this "fixed" dialog to the page. */}
+      {selectedDevice && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setSelectedDevice(null)} />
           
-          <div className="relative w-full max-w-md bg-slate-900 border border-white/10 p-6 rounded-2xl shadow-2xl flex flex-col gap-4 animate-in fade-in zoom-in duration-200">
+          <div className="relative w-full max-w-md max-h-[90dvh] overflow-y-auto bg-slate-900 border border-white/10 p-5 sm:p-6 rounded-2xl shadow-2xl flex flex-col gap-4 animate-in fade-in zoom-in duration-200">
             <button
               onClick={() => setSelectedDevice(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded hover:bg-white/5"
+              aria-label="Close device details"
+              className="absolute top-3 right-3 text-slate-400 hover:text-white p-1 rounded hover:bg-white/5 min-h-11 min-w-11 flex items-center justify-center"
             >
               <X size={18} />
             </button>
@@ -766,7 +691,9 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
               </div>
               <p className="text-[10px] text-slate-400 mt-2 flex items-center gap-2">
                 <span className="bg-slate-800 px-2 py-0.5 rounded border border-slate-700">Domain: {getDomainLabel(selectedDevice.domain)}</span>
-                <span className="bg-slate-800 px-2 py-0.5 rounded border border-slate-700">Location: {resolveDeviceRoom(selectedDevice)}</span>
+                {deviceRoom(selectedDevice) && (
+                  <span className="bg-slate-800 px-2 py-0.5 rounded border border-slate-700">Room: {deviceRoom(selectedDevice)}</span>
+                )}
               </p>
             </div>
 
@@ -834,19 +761,19 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                     <p className="text-xs text-slate-500">Quick Color Temperature Presets</p>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp: 153 })}
+                        onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp_kelvin: 2700 })}
                         className="text-[10px] font-semibold px-2 py-1 rounded bg-orange-400/10 border border-orange-400/20 text-orange-400"
                       >
                         Warm (2700K)
                       </button>
                       <button
-                        onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp: 250 })}
+                        onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp_kelvin: 4000 })}
                         className="text-[10px] font-semibold px-2 py-1 rounded bg-yellow-400/10 border border-yellow-400/20 text-yellow-400"
                       >
                         Natural (4000K)
                       </button>
                       <button
-                        onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp: 370 })}
+                        onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp_kelvin: 6500 })}
                         className="text-[10px] font-semibold px-2 py-1 rounded bg-blue-400/10 border border-blue-400/20 text-blue-400"
                       >
                         Cool (6500K)
@@ -864,26 +791,32 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-xs text-slate-500">Target Temperature</p>
-                      <p className="text-2xl font-black text-white mt-1">{temperature}°F</p>
+                      <p className="text-2xl font-black text-white mt-1">{temperature == null ? '—' : `${temperature}°`}</p>
                     </div>
                     <div className="flex gap-2">
                       <button
+                        disabled={temperature == null}
+                        aria-label="Lower target temperature"
                         onClick={() => {
+                          if (temperature == null) return;
                           const next = temperature - 1;
                           setTemperature(next);
                           callHAService('climate', 'set_temperature', selectedDevice.entity_id, { temperature: next });
                         }}
-                        className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white hover:bg-slate-700 transition-colors"
+                        className="w-11 h-11 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white hover:bg-slate-700 transition-colors disabled:opacity-40"
                       >
                         -
                       </button>
                       <button
+                        disabled={temperature == null}
+                        aria-label="Raise target temperature"
                         onClick={() => {
+                          if (temperature == null) return;
                           const next = temperature + 1;
                           setTemperature(next);
                           callHAService('climate', 'set_temperature', selectedDevice.entity_id, { temperature: next });
                         }}
-                        className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white hover:bg-slate-700 transition-colors"
+                        className="w-11 h-11 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white hover:bg-slate-700 transition-colors disabled:opacity-40"
                       >
                         +
                       </button>
@@ -998,32 +931,26 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                 <h4 className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
                   <Shield size={12} className="text-indigo-400" /> User Access Control (Admin)
                 </h4>
-                <p className="text-[10px] text-slate-500">Select which home members have permission to control this device.</p>
-                <div className="max-h-36 overflow-y-auto space-y-2 border border-white/5 rounded-xl p-3 bg-slate-950/40">
-                  {allUsers.length === 0 ? (
-                    <p className="text-xs text-slate-500 text-center py-2">No other users configured</p>
-                  ) : (
-                    allUsers.map((userProfile) => {
-                      const isAssigned = adminAssignments.includes(userProfile.username);
-                      return (
-                        <div key={userProfile.username} className="flex items-center justify-between">
-                          <span className="text-xs text-white font-medium">{userProfile.display_name || userProfile.username}</span>
-                          <input
-                            type="checkbox"
-                            checked={isAssigned || userProfile.is_admin}
-                            disabled={userProfile.is_admin || updatingAssignment}
-                            onChange={() => handleToggleUserAssignment(userProfile.username)}
-                            className="w-4 h-4 rounded text-purple-600 bg-slate-800 border-slate-700 accent-purple-500 disabled:opacity-50"
-                          />
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+                <p className="text-[10px] text-slate-500">
+                  The member this device belongs to. Admins can always control it.
+                </p>
+                <select
+                  value={assignedTo}
+                  disabled={updatingAssignment}
+                  onChange={(e) => void handleAssign(e.target.value)}
+                  aria-label="Assigned to"
+                  className="glass-input w-full px-3 py-2 text-sm min-h-11 disabled:opacity-50"
+                >
+                  <option value="">Nobody (admins only)</option>
+                  {allUsers.filter((u) => !u.is_admin).map((u) => (
+                    <option key={u.username} value={u.username}>{u.display_name || u.username}</option>
+                  ))}
+                </select>
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </WidgetCard>
   );

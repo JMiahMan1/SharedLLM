@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
-import { disablePush, enablePush, permissionState, pushSupported } from '../../lib/push';
 import type {
   TelemetryNotification,
   TelemetryReport,
@@ -43,16 +42,14 @@ function localTimezone(): string {
 export default function TelemetryReportsPanel() {
   const [reportType, setReportType] = useState<TelemetryReportType>('health');
   const [period, setPeriod] = useState<TelemetryReportPeriod>('daily');
-  const [runAt, setRunAt] = useState('21:00');
-  const [enabled, setEnabled] = useState(true);
+  // null = follow the saved schedule for this report/frequency (or 21:00).
+  const [runAtDraft, setRunAtDraft] = useState<string | null>(null);
   const [jobs, setJobs] = useState<TelemetrySchedule[]>([]);
   const [reports, setReports] = useState<TelemetryReport[]>([]);
   const [notifications, setNotifications] = useState<TelemetryNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [requesting, setRequesting] = useState(false);
-  const [pushState, setPushState] = useState<string>(() =>
-    pushSupported() ? 'default' : 'unsupported'
-  );
+  const [saving, setSaving] = useState(false);
 
   const timezone = localTimezone();
 
@@ -60,12 +57,14 @@ export default function TelemetryReportsPanel() {
     const [scheduleRes, reportRes, notificationRes] = await Promise.all([
       api.getTelemetrySchedules(),
       api.getTelemetryReports({ type: reportType, limit: 10 }),
-      api.getTelemetryNotifications(10),
+      // The outbox also carries arrivals, reminders and chat notices; fetch
+      // enough to find the report ones among them.
+      api.getTelemetryNotifications(50),
     ]);
     return {
       jobs: scheduleRes.jobs ?? [],
       reports: reportRes.reports ?? [],
-      notifications: notificationRes.notifications ?? [],
+      notifications: (notificationRes.notifications ?? []).filter((n) => n.kind?.startsWith('report_')),
     };
   }, [reportType]);
 
@@ -103,43 +102,34 @@ export default function TelemetryReportsPanel() {
     };
   }, [loadData]);
 
-  useEffect(() => {
-    if (!pushSupported()) return;
-    navigator.serviceWorker
-      .getRegistration('/push-sw.js')
-      .then(async (registration) => {
-        const subscription = await registration?.pushManager.getSubscription();
-        setPushState(subscription ? 'granted' : permissionState());
-      })
-      .catch(() => setPushState(permissionState()));
-  }, []);
+  const activeJob = jobs.find((j) => j.type === reportType && j.period === period);
+  const runAt = runAtDraft ?? activeJob?.run_at ?? '21:00';
 
-  const togglePush = async () => {
-    if (pushState === 'granted') {
-      await disablePush();
-      setPushState(permissionState());
-      toast.success('Push notifications turned off');
-      return;
-    }
-    const result = await enablePush();
-    if (result.ok) {
-      setPushState('granted');
-      toast.success('Push notifications enabled');
-    } else {
-      setPushState(result.reason ?? 'denied');
-      toast.error('Could not enable push notifications');
-    }
-  };
-
-  const saveSchedule = async () => {
+  const writeSchedule = async (enabled: boolean, okMessage: string, at: string = runAt) => {
+    setSaving(true);
     try {
-      await api.saveTelemetrySchedule({ type: reportType, period, run_at: runAt, timezone, enabled });
-      toast.success(`${PERIODS.find((p) => p.value === period)?.label} ${reportType} report scheduled`);
+      await api.saveTelemetrySchedule({ type: reportType, period, run_at: at, timezone, enabled });
+      toast.success(okMessage);
+      setRunAtDraft(null);
       await refresh();
     } catch {
       toast.error('Could not save the report schedule');
+    } finally {
+      setSaving(false);
     }
   };
+
+  const saveSchedule = () =>
+    writeSchedule(
+      activeJob?.enabled ?? true,
+      `${PERIODS.find((p) => p.value === period)?.label} ${reportType} report scheduled`,
+    );
+
+  // Pausing acts on the saved schedule itself: a local-only flag used to
+  // flip the label while the server kept running the job.
+  const togglePaused = () =>
+    activeJob &&
+    writeSchedule(!activeJob.enabled, activeJob.enabled ? 'Schedule paused' : 'Schedule resumed', activeJob.run_at);
 
   const requestNow = async () => {
     setRequesting(true);
@@ -163,7 +153,7 @@ export default function TelemetryReportsPanel() {
     }
   };
 
-  const activeJob = jobs.find((j) => j.type === reportType && j.period === period);
+  const btn = 'glass-button px-3 py-1.5 text-xs pointer-coarse:min-h-11';
 
   return (
     <div className="glass-panel rounded-2xl p-4 space-y-4" data-testid="telemetry-reports-panel">
@@ -172,7 +162,7 @@ export default function TelemetryReportsPanel() {
           Health &amp; power reports
         </h2>
         <p className="text-xs text-slate-500 mt-1">
-          Reports run on its own model, never while the assistant is busy, and retry if they fail.
+          Reports are written by the local model when it is not busy with the assistant, and retry if they fail.
         </p>
       </div>
 
@@ -180,9 +170,12 @@ export default function TelemetryReportsPanel() {
         <label className="text-xs text-slate-400 space-y-1">
           Report
           <select
-            className="w-full glass-input px-2 py-1.5 rounded-lg text-sm text-slate-200"
+            className="w-full glass-input px-2 py-1.5 rounded-lg text-sm text-slate-200 pointer-coarse:min-h-11"
             value={reportType}
-            onChange={(e) => setReportType(e.target.value as TelemetryReportType)}
+            onChange={(e) => {
+              setReportType(e.target.value as TelemetryReportType);
+              setRunAtDraft(null);
+            }}
             aria-label="Report type"
           >
             {REPORT_TYPES.map((t) => (
@@ -193,9 +186,12 @@ export default function TelemetryReportsPanel() {
         <label className="text-xs text-slate-400 space-y-1">
           Frequency
           <select
-            className="w-full glass-input px-2 py-1.5 rounded-lg text-sm text-slate-200"
+            className="w-full glass-input px-2 py-1.5 rounded-lg text-sm text-slate-200 pointer-coarse:min-h-11"
             value={period}
-            onChange={(e) => setPeriod(e.target.value as TelemetryReportPeriod)}
+            onChange={(e) => {
+              setPeriod(e.target.value as TelemetryReportPeriod);
+              setRunAtDraft(null);
+            }}
             aria-label="Report frequency"
           >
             {PERIODS.map((p) => (
@@ -210,8 +206,8 @@ export default function TelemetryReportsPanel() {
           <button
             key={preset.value}
             type="button"
-            onClick={() => setRunAt(preset.value)}
-            className={`px-3 py-1.5 text-xs rounded-lg border ${
+            onClick={() => setRunAtDraft(preset.value)}
+            className={`px-3 py-1.5 text-xs rounded-lg border pointer-coarse:min-h-11 ${
               runAt === preset.value
                 ? 'border-purple-400 text-purple-200'
                 : 'border-white/10 text-slate-400'
@@ -222,65 +218,51 @@ export default function TelemetryReportsPanel() {
         ))}
         <input
           type="time"
-          className="glass-input px-2 py-1.5 rounded-lg text-xs text-slate-200"
+          className="glass-input px-2 py-1.5 rounded-lg text-xs text-slate-200 pointer-coarse:min-h-11"
           value={runAt}
-          onChange={(e) => setRunAt(e.target.value)}
+          onChange={(e) => setRunAtDraft(e.target.value)}
           aria-label="Run time"
         />
         <span className="text-[11px] text-slate-500">{timezone}</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="glass-button px-3 py-1.5 text-xs" onClick={saveSchedule}>
-          {enabled ? 'Save schedule' : 'Save (paused)'}
+        <button type="button" className={btn} onClick={() => void saveSchedule()} disabled={saving}>
+          {activeJob ? 'Update schedule' : 'Save schedule'}
         </button>
-        <button
-          type="button"
-          className="glass-button px-3 py-1.5 text-xs"
-          onClick={() => setEnabled((v) => !v)}
-          aria-pressed={enabled}
-        >
-          {enabled ? 'Pause schedule' : 'Resume schedule'}
-        </button>
-        <button
-          type="button"
-          className="glass-button px-3 py-1.5 text-xs"
-          onClick={requestNow}
-          disabled={requesting}
-        >
+        {activeJob && (
+          <button type="button" className={btn} onClick={() => void togglePaused()} disabled={saving}>
+            {activeJob.enabled ? 'Pause schedule' : 'Resume schedule'}
+          </button>
+        )}
+        <button type="button" className={btn} onClick={requestNow} disabled={requesting}>
           {requesting ? 'Queuing…' : 'Request report now'}
         </button>
         {activeJob && (
           <button
             type="button"
-            className="glass-button px-3 py-1.5 text-xs text-rose-300"
+            className={`${btn} text-rose-300`}
             onClick={() => removeSchedule(activeJob.id)}
+            disabled={saving}
           >
             Remove schedule
-          </button>
-        )}
-        {pushState !== 'unsupported' && (
-          <button
-            type="button"
-            className="glass-button px-3 py-1.5 text-xs"
-            onClick={togglePush}
-            data-testid="toggle-push"
-          >
-            {pushState === 'granted' ? 'Disable push alerts' : 'Enable push alerts'}
           </button>
         )}
       </div>
 
       {activeJob && (
         <p className="text-[11px] text-slate-500" data-testid="active-schedule">
-          Next run: {activeJob.next_run_at ? new Date(activeJob.next_run_at).toLocaleString() : '—'}
+          {activeJob.enabled
+            ? `Next run: ${activeJob.next_run_at ? new Date(activeJob.next_run_at).toLocaleString() : '—'}`
+            : 'Paused — no scheduled runs until resumed'}
           {activeJob.last_status ? ` · last: ${activeJob.last_status}` : ''}
         </p>
       )}
 
       {notifications.length > 0 && (
         <div className="space-y-1" data-testid="report-notifications">
-          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Notifications</h3>
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Report notices</h3>
+          {/* The outbox is oldest-first: show the newest three. */}
           {notifications.slice(-3).reverse().map((n) => (
             <p key={n.id} className="text-xs text-slate-400">
               {n.title}

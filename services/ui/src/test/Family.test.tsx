@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 import Family from '../pages/Family';
 import { renderWithProviders } from './render';
+import { server } from './setup';
 
 describe('Family hub', () => {
   beforeEach(() => localStorage.clear());
@@ -29,7 +31,41 @@ describe('Family hub', () => {
     expect(games).not.toHaveTextContent(/planned/i);
 
     await user.click(screen.getByRole('tab', { name: /create/i }));
-    expect(await screen.findByTestId('family-create')).toHaveTextContent(/shared family space/i);
+    const create = await screen.findByTestId('family-create');
+    expect(create).toHaveTextContent(/sent straight into a conversation/i);
+    // What the copy promises is there: a drawing goes to a chat from the canvas.
+    expect(within(create).getAllByRole('button', { name: /send to chat/i }).length).toBeGreaterThan(0);
+  });
+
+  it('sends a drawing into a conversation the person picks', async () => {
+    const user = userEvent.setup();
+    const sent: Array<{ token?: string; mime_type?: string; file_name?: string }> = [];
+    server.use(
+      http.post('/api/communication/talk/file', async ({ request }) => {
+        sent.push((await request.json()) as never);
+        return HttpResponse.json({ status: 'SUCCESS', message: 'Sent' });
+      }),
+    );
+    // jsdom has no canvas: stand in a PNG export and a 2D context so a stroke counts.
+    const toDataURL = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,QUJD');
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, fillRect() {}, clearRect() {}, drawImage() {},
+    } as never);
+    renderWithProviders(<Family />);
+
+    await user.click(screen.getByRole('tab', { name: /create/i }));
+    const surface = await screen.findByTestId('draw-surface');
+    fireEvent.pointerDown(surface, { clientX: 5, clientY: 5, pointerId: 1 });
+    fireEvent.pointerUp(surface, { pointerId: 1 });
+    await user.click(within(screen.getByTestId('draw-canvas')).getByRole('button', { name: /send to chat/i }));
+
+    const sheet = await screen.findByTestId('send-to-chat');
+    await user.click(await within(sheet).findByRole('button', { name: /^family$/i }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({ token: expect.any(String), file_base64: 'QUJD', mime_type: 'image/png', file_name: 'drawing.png' });
+    toDataURL.mockRestore();
+    getContext.mockRestore();
   });
 
   it('starts a direct message by picking a person', async () => {

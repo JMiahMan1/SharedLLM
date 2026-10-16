@@ -1,21 +1,19 @@
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
 import { useLocation } from '../context/LocationContext';
 import { Capacitor } from '@capacitor/core';
-import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, Settings as SettingsIcon } from 'lucide-react';
+import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, Settings as SettingsIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../services/api';
-import type { GlobalSetting } from '../services/api';
 import LocationPanel from '../components/location/LocationPanel';
 import ActivitySharingPanel from '../components/settings/ActivitySharingPanel';
 import PresenceAlertsToggle from '../components/settings/PresenceAlertsToggle';
 import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
 import Toggle from '../components/ui/Toggle';
-import { isAdminPinSet, setAdminPin, clearAdminPin } from '../lib/adminPin';
+import { isAdminPinSet, setAdminPin, clearAdminPin, verifyAdminPin } from '../lib/adminPin';
+import { disablePush, enablePush, permissionState, pushSupported } from '../lib/push';
 import {
   checkForAppUpdates,
   checkApkUpdate,
@@ -35,12 +33,7 @@ const Settings = () => {
   const { trigger } = useHaptics();
   const { theme, setThemeMode } = useDarkModeSync();
   const navigate = useNavigate();
-  const [notifications, setNotifications] = useState(true);
-
-  const handleToggle = (setter: (v: boolean) => void, value: boolean) => {
-    trigger('light');
-    setter(!value);
-  };
+  const native = Capacitor.isNativePlatform();
 
   const cycleTheme = () => {
     trigger('light');
@@ -87,13 +80,7 @@ const Settings = () => {
           <span className="text-xs text-purple-400 font-medium">{themeLabel}</span>
         </button>
 
-        <SettingToggle
-          icon={<Bell size={18} />}
-          label="Notifications"
-          description="Show push notifications"
-          value={notifications}
-          onChange={() => handleToggle(setNotifications, notifications)}
-        />
+        <NotificationsRow />
       </div>
 
       <SiteThemePanel />
@@ -131,28 +118,28 @@ const Settings = () => {
             <ChevronRight size={16} className="text-slate-500" />
           </button>
 
-          <AdminPinManager trigger={trigger} />
+          <button
+            onClick={() => { trigger('light'); navigate('/admin/integrations'); }}
+            className="w-full flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <SlidersHorizontal size={18} className="text-slate-400" />
+              <div className="text-left">
+                <p className="text-white text-sm font-medium">System Configuration</p>
+                <p className="text-xs text-slate-400">Models, service URLs and shared integrations</p>
+              </div>
+            </div>
+            <ChevronRight size={16} className="text-slate-500" />
+          </button>
+
+          {/* The PIN gates admin pages only in the Android app (AdminElevation),
+              so offering it in a browser would promise protection it does not give. */}
+          {native && <AdminPinManager trigger={trigger} />}
         </div>
       )}
 
-      <SystemConfigSection isAdmin={Boolean(user?.is_admin)} onEdit={() => navigate('/admin/integrations')} />
-
       <div className="glass-panel rounded-2xl p-4 space-y-1">
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider px-3 pt-1 mb-2">Account</h2>
-
-        <button
-          onClick={() => { trigger('light'); }}
-          className="w-full flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <Key size={18} className="text-slate-400" />
-            <div className="text-left">
-              <p className="text-white text-sm font-medium">Personal Integrations</p>
-              <p className="text-xs text-slate-400">Nextcloud, Skylight, GitHub, CalDAV</p>
-            </div>
-          </div>
-          <ChevronRight size={16} className="text-slate-500" />
-        </button>
 
         <button
           onClick={() => { trigger('light'); navigate('/identity'); }}
@@ -161,8 +148,8 @@ const Settings = () => {
           <div className="flex items-center gap-3">
             <User size={18} className="text-slate-400" />
             <div className="text-left">
-              <p className="text-white text-sm font-medium">Identity & API Keys</p>
-              <p className="text-xs text-slate-400">Manage your profile and credentials</p>
+              <p className="text-white text-sm font-medium">Accounts & Integrations</p>
+              <p className="text-xs text-slate-400">Profile, Nextcloud / Skylight / GitHub / CalDAV, voice, devices, API keys</p>
             </div>
           </div>
           <ChevronRight size={16} className="text-slate-500" />
@@ -188,6 +175,7 @@ const AdminPinManager = ({
   onChanged?: () => void;
 }) => {
   const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState('');
   const [pin, setPin] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
@@ -195,6 +183,7 @@ const AdminPinManager = ({
   const [configured, setConfigured] = useState(isAdminPinSet());
 
   const reset = () => {
+    setCurrent('');
     setPin('');
     setConfirm('');
     setError('');
@@ -205,7 +194,18 @@ const AdminPinManager = ({
     reset();
   };
 
+  // Settings is not behind AdminElevation, so without this anyone holding an
+  // unlocked phone could replace or clear the PIN and walk into /admin.
+  const currentPinOk = async () => {
+    if (!configured) return true;
+    if (await verifyAdminPin(current)) return true;
+    setError('Current PIN is incorrect');
+    trigger('error');
+    return false;
+  };
+
   const save = async () => {
+    if (!(await currentPinOk())) return;
     if (pin.length < 4) {
       setError('PIN must be at least 4 digits');
       return;
@@ -230,6 +230,7 @@ const AdminPinManager = ({
   };
 
   const remove = async () => {
+    if (!(await currentPinOk())) return;
     clearAdminPin();
     setConfigured(false);
     trigger('light');
@@ -259,7 +260,7 @@ const AdminPinManager = ({
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xl">
           <div className="glass-panel w-full max-w-sm mx-4 p-6 rounded-2xl relative">
-            <button onClick={close} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+            <button onClick={close} aria-label="Close" className="absolute top-2 right-2 w-11 h-11 flex items-center justify-center text-slate-400 hover:text-white">
               <X size={20} />
             </button>
 
@@ -268,11 +269,24 @@ const AdminPinManager = ({
             </h2>
             <p className="text-sm text-slate-400 text-center mb-6">Use at least 4 digits</p>
 
+            {configured && (
+              <input
+                type="password"
+                inputMode="numeric"
+                autoComplete="current-password"
+                placeholder="Current PIN"
+                aria-label="Current PIN"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value.replace(/\D/g, ''))}
+                className="w-full mb-3 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-center tracking-[0.5em] text-lg outline-none focus:border-purple-500/50"
+              />
+            )}
             <input
               type="password"
               inputMode="numeric"
               autoComplete="new-password"
               placeholder="New PIN"
+              aria-label="New PIN"
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
               className="w-full mb-3 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-center tracking-[0.5em] text-lg outline-none focus:border-purple-500/50"
@@ -282,6 +296,7 @@ const AdminPinManager = ({
               inputMode="numeric"
               autoComplete="new-password"
               placeholder="Confirm PIN"
+              aria-label="Confirm PIN"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value.replace(/\D/g, ''))}
               className="w-full mb-3 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-center tracking-[0.5em] text-lg outline-none focus:border-purple-500/50"
@@ -312,24 +327,92 @@ const AdminPinManager = ({
   );
 };
 
-const SettingToggle = ({ icon, label, description, value, onChange }: {
-  icon: React.ReactNode;
-  label: string;
-  description: string;
-  value: boolean;
-  onChange: () => void;
-}) => (
-  <div className="w-full flex items-center justify-between gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors">
-    <div className="flex items-center gap-3 min-w-0 text-left">
-      <span className="text-slate-400 shrink-0">{icon}</span>
-      <div className="min-w-0">
-        <p className="text-white text-sm font-medium">{label}</p>
-        <p className="text-xs text-slate-400">{description}</p>
+/**
+ * Notifications are real on both surfaces but delivered differently, so the
+ * row says how and offers the one switch that exists for that surface:
+ * - Android app: ChatNotifyService (started at sign-in and boot) posts family
+ *   chat, arrival/departure and report notices; Android's own per-channel
+ *   settings are the off switch.
+ * - Browser: Web Push via /push-sw.js and the telemetry service's VAPID key,
+ *   carrying the same notices. Everything also lands under the header bell.
+ */
+const NotificationsRow = () => {
+  const native = Capacitor.isNativePlatform();
+  const supported = !native && pushSupported();
+  const [state, setState] = useState<string>(() => (supported ? permissionState() : 'unsupported'));
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!supported) return;
+    let active = true;
+    navigator.serviceWorker
+      .getRegistration('/push-sw.js')
+      .then(async (registration) => {
+        const subscription = await registration?.pushManager.getSubscription();
+        if (active) setState(subscription ? 'subscribed' : permissionState());
+      })
+      .catch(() => {
+        if (active) setState(permissionState());
+      });
+    return () => {
+      active = false;
+    };
+  }, [supported]);
+
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    try {
+      if (!next) {
+        await disablePush();
+        setState(permissionState());
+        toast.success('Browser notifications off');
+        return;
+      }
+      const result = await enablePush();
+      if (result.ok) {
+        setState('subscribed');
+        toast.success('Browser notifications on');
+      } else {
+        setState(result.reason ?? 'denied');
+        toast.error(result.reason === 'denied'
+          ? 'Notifications are blocked for this site in the browser settings'
+          : 'Could not turn on browser notifications');
+      }
+    } catch {
+      toast.error('Could not change browser notifications');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const description = native
+    ? 'Family chat, arrivals and reports arrive as Android notifications. Silence a kind in Android Settings › Apps › Jarvis › Notifications.'
+    : !supported
+      ? 'This browser cannot receive push notifications. Alerts still appear under the bell in the header.'
+      : state === 'denied'
+        ? 'Blocked in this browser. Allow notifications for this site, then turn this on.'
+        : 'Family chat, arrivals and reports as browser notifications on this device. Alerts also appear under the bell.';
+
+  return (
+    <div className="w-full flex items-center justify-between gap-3 p-3 rounded-xl bg-white/5" data-testid="notifications-row">
+      <div className="flex items-center gap-3 min-w-0 text-left">
+        <span className="text-slate-400 shrink-0"><Bell size={18} /></span>
+        <div className="min-w-0">
+          <p className="text-white text-sm font-medium">Notifications</p>
+          <p className="text-xs text-slate-400">{description}</p>
+        </div>
       </div>
+      {supported && (
+        <Toggle
+          checked={state === 'subscribed'}
+          disabled={busy || state === 'denied'}
+          onChange={(next) => void toggle(next)}
+          ariaLabel="Browser notifications"
+        />
+      )}
     </div>
-    <Toggle checked={value} onChange={() => onChange()} ariaLabel={label} />
-  </div>
-);
+  );
+};
 
 /** Always-on info-gathering sensors — each can be turned off; related services stop with it. */
 const SensorsSection = () => {
@@ -421,52 +504,6 @@ const SensorsSection = () => {
   );
 };
 
-const SystemConfigSection = ({ isAdmin, onEdit }: { isAdmin: boolean; onEdit: () => void }) => {
-  const { trigger } = useHaptics();
-  const { data: settings = [] } = useQuery<GlobalSetting[]>({
-    queryKey: ['settings'],
-    queryFn: () => api.getSettings(),
-    retry: 1,
-  });
-
-  const visibleSettings = settings.filter(
-    (s) => !['assistant_model', 'coding_model', 'librarian_model'].includes(s.key)
-  );
-
-  return (
-    <div className="glass-panel rounded-2xl p-4 space-y-1">
-      <div className="flex items-center justify-between px-3 pt-1 mb-2">
-        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">System Configuration</h2>
-        {isAdmin && (
-          <button
-            onClick={() => { trigger('light'); onEdit(); }}
-            className="flex items-center gap-1 text-xs font-medium text-purple-400 hover:text-purple-300 transition-colors"
-          >
-            <SlidersHorizontal size={14} />
-            Edit
-          </button>
-        )}
-      </div>
-
-      {visibleSettings.length === 0 ? (
-        <p className="px-3 py-3 text-xs text-slate-500">No system configuration available.</p>
-      ) : (
-        <div className="space-y-1">
-          {visibleSettings.map((setting) => (
-            <div key={setting.key} className="px-3 py-2.5 rounded-xl bg-white/5">
-              <p className="font-mono text-xs text-purple-300 truncate">{setting.key}</p>
-              <p className="mt-1 text-xs text-slate-300 break-words">{setting.value}</p>
-              {setting.description && (
-                <p className="mt-1 text-[10px] text-slate-600 italic">{setting.description}</p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
 const formatBytes = (bytes?: number) => {
   if (!bytes || bytes <= 0) return null;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -493,7 +530,7 @@ const AppUpdatesSection = () => {
     remoteVersion?: string;
     releaseNotes?: string;
     hasUpdate?: boolean;
-  }>({ version: '1.2.0', gitSha: 'unknown' });
+  }>({ version: '', gitSha: '…' });
 
   useEffect(() => {
     let active = true;
@@ -595,6 +632,10 @@ const AppUpdatesSection = () => {
     ? { label: 'App Update Ready', cls: 'text-amber-300 border-amber-500/40 bg-amber-500/10' }
     : updateInfo.hasUpdate
       ? { label: 'Update Available', cls: 'text-amber-300 border-amber-500/40 bg-amber-500/10' }
+      : updateInfo.remoteSha === 'unknown'
+        // checkForAppUpdates reports a failed check as remote sha 'unknown';
+        // that is not "Up to Date".
+        ? { label: 'Check Failed', cls: 'text-red-300 border-red-500/40 bg-red-500/10' }
       : updateInfo.remoteSha
         ? { label: 'Up to Date', cls: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10' }
         : { label: 'Not Checked', cls: 'text-slate-400 border-white/10 bg-white/5' };
@@ -606,13 +647,15 @@ const AppUpdatesSection = () => {
           <Smartphone size={16} className="text-purple-400" />
           App &amp; OTA Updates
         </h2>
-        <span className="text-[10px] text-slate-500 font-mono">v{updateInfo.version} ({updateInfo.gitSha})</span>
+        <span className="text-[10px] text-slate-500 font-mono">
+          {updateInfo.version ? `v${updateInfo.version} ` : ''}({updateInfo.gitSha})
+        </span>
       </div>
 
       <div className="p-3.5 rounded-xl bg-white/5 space-y-2.5">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <p className="text-sm font-medium text-white">Live Over-The-Air Updates</p>
               <span className={`px-2 py-0.5 rounded-full border text-[9px] font-bold uppercase tracking-wider ${updateState.cls}`}>
                 {updateState.label}
@@ -621,9 +664,9 @@ const AppUpdatesSection = () => {
             <p className="text-xs text-slate-400 mt-0.5">
               Web UI updates install silently; background checks run on launch and every 6 hours
             </p>
-            {updateInfo.remoteSha && (
+            {updateInfo.remoteSha && updateInfo.remoteSha !== 'unknown' && (
               <p className="text-[10px] text-slate-500 font-mono mt-1">
-                Server: {updateInfo.remoteVersion || '1.2.0'} ({updateInfo.remoteSha})
+                Server: {updateInfo.remoteVersion ? `${updateInfo.remoteVersion} ` : ''}({updateInfo.remoteSha})
                 {lastChecked && ` · checked ${lastChecked.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
               </p>
             )}
@@ -634,7 +677,7 @@ const AppUpdatesSection = () => {
           <button
             onClick={handleCheck}
             disabled={checking}
-            className="glass-button shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold text-purple-300 hover:text-white flex items-center gap-1.5 border-purple-500/30 pointer-coarse:min-h-11"
+            className="glass-button shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold text-purple-300 hover:text-white flex items-center gap-1.5 border-purple-500/30 pointer-coarse:min-h-11 self-start sm:self-auto"
           >
             <RefreshCw size={13} className={checking ? 'animate-spin text-purple-400' : ''} />
             <span>{checking ? 'Checking...' : 'Check Now'}</span>

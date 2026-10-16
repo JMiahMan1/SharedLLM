@@ -162,6 +162,7 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
   // The shell header polls this for its notification bell on every page; without
   // a mock the catch-all aborts it and the spec fails on an unmocked call.
   await page.route('**/api/admin/logs**', (route) => route.fulfill({ json: [] }));
+  await page.route('**/api/telemetry/notifications**', (route) => route.fulfill({ json: { notifications: [] } }));
 
   await page.route('**/api/raven/missions', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/admin/services/updates', (route) =>

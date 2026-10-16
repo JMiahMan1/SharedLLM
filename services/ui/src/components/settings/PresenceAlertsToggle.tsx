@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
+import Toggle from '../ui/Toggle';
 
 /**
  * Family arrival / departure notices: "Jeremiah left Work · home in about
@@ -9,7 +10,7 @@ import { api } from '../../services/api';
  */
 export default function PresenceAlertsToggle() {
   const queryClient = useQueryClient();
-  const { data } = useQuery({ queryKey: ['presence-alerts'], queryFn: () => api.getPresenceAlerts() });
+  const { data, isError } = useQuery({ queryKey: ['presence-alerts'], queryFn: () => api.getPresenceAlerts() });
   const save = useMutation({
     mutationFn: (enabled: boolean) => api.setPresenceAlerts(enabled),
     onSuccess: (r) => {
@@ -26,18 +27,16 @@ export default function PresenceAlertsToggle() {
         <p className="text-xs text-slate-400 mt-0.5">
           When family who share their location with you arrive at or leave a saved place, with the drive time home.
         </p>
+        {isError && (
+          <p className="text-xs text-amber-300 mt-1" role="status">Could not load this setting. Try again later.</p>
+        )}
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        aria-label="Arrival and departure alerts"
+      <Toggle
+        checked={enabled}
+        onChange={(next) => save.mutate(next)}
         disabled={!data || save.isPending}
-        onClick={() => save.mutate(!enabled)}
-        className={`relative shrink-0 h-7 w-12 rounded-full transition min-h-11 pointer-coarse:min-h-11 flex items-center ${enabled ? 'bg-purple-500/70' : 'bg-white/10'}`}
-      >
-        <span className={`h-5 w-5 rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
-      </button>
+        ariaLabel="Arrival and departure alerts"
+      />
     </div>
   );
 }

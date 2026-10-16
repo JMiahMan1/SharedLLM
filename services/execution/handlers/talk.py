@@ -205,6 +205,27 @@ async def _get_talk_model_from_settings() -> str:
     raise RuntimeError("No assistant/librarian model configured in Identity settings")
 
 
+async def _claim_jarvis_question(token: str, message_id: Any) -> None:
+    """Mark an @Jarvis question as answered here (see JARVIS_TALK_CLAIM_KEY).
+
+    Best effort: without Redis the worst case is the old double answer.
+    """
+    if message_id is None:
+        return
+    try:
+        import redis.asyncio as redis
+
+        from services.config import JARVIS_TALK_CLAIM_KEY, REDIS_URL
+
+        r = redis.from_url(REDIS_URL, decode_responses=True)
+        try:
+            await r.set(JARVIS_TALK_CLAIM_KEY.format(token=token, message_id=message_id), "1", ex=86400)
+        finally:
+            await r.aclose()
+    except Exception as e:  # never block the send on this
+        log.warning(f"[Jarvis] could not claim question {message_id}: {e}")
+
+
 def _assistant_post(answer: str) -> str:
     """Mark an answer as Jarvis's own words.
 
@@ -792,6 +813,7 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             if validate_jarvis_mention(req.message):
                 query = req.message.lstrip()[len("@Jarvis"):].strip()
                 question_id = data.get("id") if isinstance(data, dict) else None
+                await _claim_jarvis_question(req.token, question_id)
                 # Keep a reference: an unreferenced task can be garbage-collected
                 # mid-answer, and Jarvis would silently never reply.
                 task = asyncio.create_task(run_jarvis_orchestration(query, req.token, req.user_context, reply_to=question_id))

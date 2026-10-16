@@ -88,13 +88,12 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
       if (resp.status !== 'SUCCESS') {
         throw new Error(resp.message || 'Failed to save note');
       }
-      setNotes((prev) => [
-        { id: Date.now().toString(), title: newTitle, content: newNote, category: 'Quick' },
-        ...prev,
-      ]);
       setNewTitle('');
       setNewNote('');
       toast.success('Note saved');
+      // Reload rather than inventing a row: the saved note's real path is what
+      // delete needs, and a made-up id left delete guessing by title.
+      void loadNotes();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save note');
     } finally {
@@ -105,6 +104,8 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
   const deleteNote = async (id: string) => {
     const note = notes.find((n) => n.id === id);
     if (!note) return;
+    // Deletes the file from the notes storage, so it is not a one-tap action.
+    if (!window.confirm(`Delete "${note.title}"?`)) return;
     // Optimistic removal
     setNotes((prev) => prev.filter((n) => n.id !== id));
     try {
@@ -166,8 +167,8 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
                   <button
                     onClick={(e) => { e.stopPropagation(); deleteNote(note.id); }}
                     onKeyDown={(e) => e.stopPropagation()}
-                    className="shrink-0 p-1 text-slate-600 hover:text-red-400 transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
-                    aria-label="Delete note"
+                    className="shrink-0 p-1 text-slate-600 hover:text-red-400 transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
+                    aria-label={`Delete ${note.title}`}
                   >
                     <Trash2 size={13} />
                   </button>

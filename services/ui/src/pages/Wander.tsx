@@ -40,6 +40,7 @@ import {
   tripsQueryOptions,
   vehiclesQueryKey,
   userLocationsQuery,
+  routeQueryKey,
 } from '../lib/wanderQueries';
 import { buildFamilyCards, type Place } from '../lib/familyCards';
 import toast from 'react-hot-toast';
@@ -76,6 +77,8 @@ interface VehicleOption {
   cost_per_gallon: number;
   fuel_type: string;
 }
+
+const tripRoutePoints = (tripId: string) => api.getTripRoute(tripId).then((r) => r.points);
 
 const Wander = () => {
   const { user } = useAuth();
@@ -114,10 +117,6 @@ const Wander = () => {
   useEffect(() => {
     if (showAllTrips) tripsHeaderRef.current?.scrollIntoView({ block: 'start' });
   }, [showAllTrips]);
-
-  // Route previews (fetched lazily per card)
-  const [routePoints, setRoutePoints] = useState<Record<string, RoutePoint[]>>({});
-  const routeCache = useRef<Record<string, RoutePoint[]>>({});
 
   // Trip locations modal (clickable start/destination)
   const [tripLocations, setTripLocations] = useState<TripLocationsResponse | null>(null);
@@ -244,21 +243,6 @@ const Wander = () => {
 
   const loadError = tripsQuery.isError || peopleQuery.isError || zonesQuery.isError;
 
-  // Lazy route loading for trip cards
-  const loadRoute = useCallback(async (key: string, loader: () => Promise<RoutePoint[]>) => {
-    if (routeCache.current[key]) {
-      setRoutePoints((prev) => ({ ...prev, [key]: routeCache.current[key] }));
-      return;
-    }
-    try {
-      const points = await loader();
-      routeCache.current[key] = points;
-      setRoutePoints((prev) => ({ ...prev, [key]: points }));
-    } catch {
-      // Route unavailable (e.g. no breadcrumbs) — card renders without map
-    }
-  }, []);
-
   // Open the trip-locations map modal for a given trip
   const openTripLocations = useCallback(async (trip: Trip) => {
     setTripLocationsTitle(`${trip.user_name || 'Trip'} — Route Map`);
@@ -280,18 +264,21 @@ const Wander = () => {
         source: 'stored',
       },
     });
-    setTripLocationsPath(routeCache.current[`${trip.id}:route`] || []);
+    setTripLocationsPath(queryClient.getQueryData<RoutePoint[]>(routeQueryKey(trip.id)) || []);
     try {
       const [locs, route] = await Promise.allSettled([
         api.getTripLocations(trip.id),
-        api.getTripRoute(trip.id),
+        queryClient.fetchQuery({
+          queryKey: routeQueryKey(trip.id),
+          queryFn: () => tripRoutePoints(trip.id),
+          staleTime: Infinity,
+        }),
       ]);
       if (locs.status === 'fulfilled') {
         setTripLocations(locs.value);
       }
-      if (route.status === 'fulfilled' && route.value.points.length > 0) {
-        setTripLocationsPath(route.value.points);
-        routeCache.current[`${trip.id}:route`] = route.value.points;
+      if (route.status === 'fulfilled' && route.value.length > 0) {
+        setTripLocationsPath(route.value);
       } else if (locs.status === 'fulfilled') {
         const s = locs.value.start;
         const e = locs.value.end;
@@ -305,7 +292,7 @@ const Wander = () => {
     } catch {
       // Modal already open with card-seeded coords
     }
-  }, []);
+  }, [queryClient]);
 
   // Filtering and stats come from lib/wanderTrips, where they are unit-tested.
   const displayedTrips = useMemo(
@@ -438,7 +425,7 @@ const Wander = () => {
       toast.success('Trip updated!');
 
       // Update in local state
-      queryClient.setQueryData<TripsResponse>(['geo-trips'], (prev) =>
+      queryClient.setQueryData<TripsResponse>(tripsQueryKey(), (prev) =>
         prev
           ? { ...prev, trips: prev.trips.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)) }
           : prev,
@@ -472,7 +459,7 @@ const Wander = () => {
     setIsSavingShare(true);
     try {
       const updated = await api.shareTrip(sharingTrip.id, shareSelection);
-      queryClient.setQueryData<TripsResponse>(['geo-trips'], (prev) =>
+      queryClient.setQueryData<TripsResponse>(tripsQueryKey(), (prev) =>
         prev
           ? { ...prev, trips: prev.trips.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)) }
           : prev,
@@ -514,6 +501,35 @@ const Wander = () => {
             const isShared = trip.is_shared;
             const ActivityIcon = ACTIVITY_ICONS[trip.activity_type || 'driving'] || Car;
             const isDrive = (trip.activity_type || 'driving') === 'driving';
+            // Share / Edit for the owner, a lock for everyone else.
+            const tripActions = canEdit ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenShare(trip)}
+                  className="glass-button flex items-center gap-1.5 px-3 min-h-11 text-xs font-semibold text-indigo-300 hover:text-white border-indigo-500/30 rounded-lg transition-all"
+                >
+                  <Share2 size={12} />
+                  <span>Share</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenEdit(trip)}
+                  className="glass-button flex items-center gap-1.5 px-3 min-h-11 text-xs font-semibold text-purple-300 hover:text-white border-purple-500/30 rounded-lg transition-all"
+                >
+                  <Edit2 size={12} />
+                  <span>{isDrive ? 'Edit Vehicle & Fuel' : 'Edit Activity'}</span>
+                </button>
+              </div>
+            ) : (
+              <div
+                className="flex items-center gap-1.5 text-[11px] text-slate-500 px-2 py-1 bg-white/[0.02] rounded-lg border border-white/5"
+                title={`Only ${trip.user_name || 'the trip owner'} can edit this trip`}
+              >
+                <Lock size={11} className="text-slate-500" />
+                <span>Owner locked</span>
+              </div>
+            );
 
             return (
               <div
@@ -527,7 +543,7 @@ const Wander = () => {
               >
                 {/* Top Badge Row */}
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 min-w-0">
                     {/* User Badge */}
                     <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 text-xs font-semibold text-slate-200 border border-white/5">
                       <span className="w-2 h-2 rounded-full bg-purple-400" />
@@ -588,8 +604,12 @@ const Wander = () => {
                     </div>
 
                     <div
-                      className="flex-1 space-y-2 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1 transition-colors"
+                      role="button"
+                      tabIndex={0}
+                      title="Open route map"
+                      className="flex-1 min-w-0 space-y-2 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1 transition-colors"
                       onClick={() => openTripLocations(trip)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openTripLocations(trip); } }}
                     >
                       <div>
                         <span className="text-[10px] text-slate-500 uppercase font-semibold">Start</span>
@@ -632,7 +652,7 @@ const Wander = () => {
                         {isDrive ? 'Trip Cost' : 'Activity'}
                       </span>
                       {isDrive ? (
-                        <span className="text-sm font-bold text-emerald-400 mt-0.5">${trip.trip_cost_usd}</span>
+                        <span className="text-sm font-bold text-emerald-400 mt-0.5">${Number(trip.trip_cost_usd ?? 0).toFixed(2)}</span>
                       ) : (
                         <span className="text-sm font-bold text-purple-300 mt-0.5">{formatActivityLabel(trip)}</span>
                       )}
@@ -677,67 +697,14 @@ const Wander = () => {
                       </div>
                     </div>
 
-                    {/* Action Buttons (Only for owner) */}
-                    <div className="flex items-center gap-2">
-                      {canEdit ? (
-                        <>
-                          <button
-                            onClick={() => handleOpenShare(trip)}
-                            className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:text-white border-indigo-500/30 rounded-lg transition-all"
-                          >
-                            <Share2 size={12} />
-                            <span>Share</span>
-                          </button>
-                          <button
-                            onClick={() => handleOpenEdit(trip)}
-                            className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-300 hover:text-white border-purple-500/30 rounded-lg transition-all"
-                          >
-                            <Edit2 size={12} />
-                            <span>Edit Vehicle & Fuel</span>
-                          </button>
-                        </>
-                      ) : (
-                        <div
-                          className="flex items-center gap-1.5 text-[11px] text-slate-500 px-2 py-1 bg-white/[0.02] rounded-lg border border-white/5 cursor-not-allowed"
-                          title={`Only ${trip.user_name || 'the trip owner'} can edit this trip`}
-                        >
-                          <Lock size={11} className="text-slate-500" />
-                          <span>Owner locked</span>
-                        </div>
-                      )}
-                    </div>
+                    {tripActions}
                   </div>
                 )}
 
                 {/* Non-drive action row */}
                 {!isDrive && (
                   <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-white/5 text-xs">
-                    {canEdit ? (
-                      <>
-                        <button
-                          onClick={() => handleOpenShare(trip)}
-                          className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:text-white border-indigo-500/30 rounded-lg transition-all"
-                        >
-                          <Share2 size={12} />
-                          <span>Share</span>
-                        </button>
-                        <button
-                          onClick={() => handleOpenEdit(trip)}
-                          className="glass-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-300 hover:text-white border-purple-500/30 rounded-lg transition-all"
-                        >
-                          <Edit2 size={12} />
-                          <span>Edit Activity</span>
-                        </button>
-                      </>
-                    ) : (
-                      <div
-                        className="flex items-center gap-1.5 text-[11px] text-slate-500 px-2 py-1 bg-white/[0.02] rounded-lg border border-white/5 cursor-not-allowed"
-                        title={`Only ${trip.user_name || 'the trip owner'} can edit this trip`}
-                      >
-                        <Lock size={11} className="text-slate-500" />
-                        <span>Owner locked</span>
-                      </div>
-                    )}
+                    {tripActions}
                   </div>
                 )}
 
@@ -751,9 +718,7 @@ const Wander = () => {
                 <RoutePreview
                   id={trip.id}
                   completed={trip.status === 'completed'}
-                  points={routePoints[trip.id]}
-                  loadRoute={loadRoute}
-                  fetcher={() => api.getTripRoute(trip.id).then((r) => r.points)}
+                  fetcher={() => tripRoutePoints(trip.id)}
                   onOpenMap={() => openTripLocations(trip)}
                   hidden={Boolean(tripLocations)}
                 />
@@ -812,7 +777,7 @@ const Wander = () => {
           <button
             onClick={refreshAll}
             disabled={isRefreshing}
-            className="glass-button flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-300 hover:text-white rounded-xl"
+            className="glass-button flex items-center gap-2 px-3 min-h-11 text-xs font-semibold text-slate-300 hover:text-white rounded-xl"
             title="Refresh Trips & Telemetry"
           >
             <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-purple-400' : ''} />
@@ -1003,7 +968,7 @@ const Wander = () => {
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            All Wander Trips
+            Family trips
           </button>
           <button
             onClick={() => {
@@ -1017,7 +982,7 @@ const Wander = () => {
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            My Trips ({currentUsername || 'Me'})
+            My trips
           </button>
         </div>
       </div>

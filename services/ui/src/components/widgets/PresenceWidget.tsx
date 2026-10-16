@@ -64,11 +64,6 @@ function EtaHome({ userId }: { userId: string }) {
   );
 }
 
-export interface PresenceWidgetConfig {
-  /** Show the most recent trip row beneath the member list. */
-  showLatestTrip?: boolean;
-}
-
 const PresenceWidget = ({ settingsButton }: IWidgetProps) => {
   const navigate = useNavigate();
   const { trigger } = useHaptics();
@@ -143,6 +138,11 @@ const PresenceWidget = ({ settingsButton }: IWidgetProps) => {
             <div className="h-8 skeleton rounded-lg" />
             <div className="h-8 skeleton rounded-lg" />
           </div>
+        ) : locationsQuery.isError && members.length === 0 ? (
+          // A failed fetch is not "nobody is sharing": say it could not load.
+          <p className="text-xs text-amber-300/90" data-testid="presence-error">
+            Couldn&apos;t load locations. It will retry shortly.
+          </p>
         ) : members.length === 0 ? (
           <p className="text-xs text-slate-400">
             No one is sharing location right now.

@@ -4,6 +4,7 @@ Unified MediaPlaybackService for routing media commands (play, transport, status
 to either local clients (browser, mobile) or hardware devices (via HA/MA).
 """
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from services.execution import media_playback_registry as registry
@@ -17,6 +18,40 @@ log = logging.getLogger("execution.media_playback_service")
 # (was previously two divergent tuples: status only checked local/web_player,
 # which left browser/android routed to the HA path — BUG-24).
 LOCAL_PLAYER_ALIASES = frozenset({"local", "web_player", "browser", "android"})
+
+# The app's web player reports itself every 15 s while it plays (and on every
+# play/pause). A "playing" row older than this means the app was closed or the
+# phone lost its connection mid-song -- it is not playing any more. A paused
+# row is kept longer (it can be resumed), but not forever.
+LOCAL_PLAYING_STALE_SECONDS = 120
+LOCAL_PAUSED_STALE_SECONDS = 30 * 60
+
+
+def _local_state_age_seconds(db_state: dict[str, Any]) -> float | None:
+    """Seconds since the local player last reported, or None if unknown."""
+    stamp = db_state.get("updated_at")
+    if not stamp:
+        return None
+    try:
+        updated = datetime.fromisoformat(str(stamp))
+    except ValueError:
+        return None
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - updated).total_seconds()
+
+
+def _local_state_is_live(db_state: dict[str, Any]) -> bool:
+    """Whether a stored playing/paused local state still describes reality."""
+    state = (db_state.get("state") or "idle").lower()
+    age = _local_state_age_seconds(db_state)
+    if age is None:
+        return True
+    if state in ("playing", "buffering"):
+        return age <= LOCAL_PLAYING_STALE_SECONDS
+    if state == "paused":
+        return age <= LOCAL_PAUSED_STALE_SECONDS
+    return True
 
 class MediaPlaybackService:
     """
@@ -208,7 +243,11 @@ class MediaPlaybackService:
             # Reporting it as active is what put "Unknown / Unknown Artist / Web
             # Player" on the dashboard and in the voice summary for every user
             # whose chosen target is the browser and whose tab had closed.
-            is_now_playing = stored_state in ("playing", "paused", "buffering") and bool(stored_title)
+            is_now_playing = (
+                stored_state in ("playing", "paused", "buffering")
+                and bool(stored_title)
+                and _local_state_is_live(db_state)
+            )
             if is_now_playing:
                 detail["active"] = web_player
                 detail["available"] = ha_available
@@ -262,6 +301,19 @@ class MediaPlaybackService:
     async def sync_local(req: MediaStateSyncRequest) -> ExecutionResult:
         """Sync a local playback state from client to database."""
         username = req.user_context.user or "default"
+        reported_local = (req.entity_id or "local").lower() in LOCAL_PLAYER_ALIASES
+        if reported_local and (req.state or "idle").lower() not in ("playing", "buffering"):
+            # The web player pausing or going idle (often *because* the person
+            # just picked a speaker) must not take the "chosen device" back from
+            # that speaker. Only starting playback makes the web player the target.
+            current = await registry.get_playback_state(username) or {}
+            current_target = (current.get("entity_id") or "").lower()
+            if current_target and current_target not in LOCAL_PLAYER_ALIASES:
+                return ExecutionResult(
+                    status="SUCCESS",
+                    message="Local player is not the chosen target; state not recorded.",
+                    service="media_sync_local",
+                )
         state_data = {
             "entity_id": req.entity_id or "local",
             "state": req.state or "idle",

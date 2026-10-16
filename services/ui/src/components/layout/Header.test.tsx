@@ -24,6 +24,13 @@ vi.mock('../../services/api', async (importOriginal) => {
       ...(actual.api as Record<string, unknown>),
       getHealth: vi.fn().mockResolvedValue({ status: 'ok' }),
       getLogs: vi.fn().mockResolvedValue([]),
+      getTelemetryNotifications: vi.fn().mockResolvedValue({
+        notifications: [
+          { id: 'n1', kind: 'presence', title: 'Michele left Home', body: '', created_at: '2026-10-14T21:35:39+00:00', read: false },
+          { id: 'n2', kind: 'presence', title: 'Michele arrived at Home', body: 'Just now', created_at: '2026-10-15T03:20:42+00:00', read: false },
+        ],
+      }),
+      checkAllUpdates: vi.fn().mockResolvedValue({}),
       getUpdateStatus: vi.fn().mockResolvedValue({ updates_available: false }),
       pollUpdateStatus: vi.fn().mockResolvedValue({ updates_available: false }),
     },
@@ -98,5 +105,28 @@ describe('Header profile menu', () => {
     fireEvent.click(screen.getByLabelText('Account menu'));
     fireEvent.mouseDown(document.body);
     expect(screen.queryByTestId('profile-menu')).toBeNull();
+  });
+});
+
+describe('Header notifications bell', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    mockUser = { username: 'michele', is_admin: false };
+  });
+
+  it('shows the user\'s own notices newest first, for non-admins too', async () => {
+    renderHeader();
+    const bell = await screen.findByRole('button', { name: /notifications, 2 new/i });
+    fireEvent.click(bell);
+    const titles = screen.getAllByText(/Michele (left|arrived)/).map((el) => el.textContent);
+    expect(titles).toEqual(['Michele arrived at Home', 'Michele left Home']);
+    // No "Clear All": it used to delete the whole system log.
+    expect(screen.queryByText(/clear all/i)).toBeNull();
+  });
+
+  it('clears the new-notice dot once the bell has been opened', async () => {
+    renderHeader();
+    fireEvent.click(await screen.findByRole('button', { name: /notifications, 2 new/i }));
+    expect(screen.getByRole('button', { name: /^notifications$/i })).toBeTruthy();
   });
 });

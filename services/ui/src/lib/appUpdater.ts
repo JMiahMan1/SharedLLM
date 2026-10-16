@@ -227,12 +227,13 @@ export async function getRunningVersion(): Promise<{ version: string; gitSha: st
     if (res.ok) {
       const data = await res.json();
       currentRuntimeSha = data.gitSha || data.git_sha || currentRuntimeSha;
-      return { version: data.version || '1.2.0', gitSha: currentRuntimeSha };
+      return { version: data.version || '', gitSha: currentRuntimeSha };
     }
   } catch {
     // ignore — fall back to embedded build SHA
   }
-  return { version: '1.2.0', gitSha: currentRuntimeSha };
+  // No version.json: say nothing rather than a made-up version number.
+  return { version: '', gitSha: currentRuntimeSha };
 }
 
 /**
@@ -410,7 +411,7 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
       isDownloading: false,
       currentGitSha: currentRuntimeSha,
       remoteGitSha: 'unknown',
-      remoteVersion: '1.2.0',
+      remoteVersion: '',
       apkUpdateAvailable: false,
     };
   }
