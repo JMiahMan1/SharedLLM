@@ -156,6 +156,21 @@ def test_admins_fan_out_to_every_admin(client, rc, sent, identity):
     assert all(r == {"duplicate": True} for r in again["recipients"].values())
 
 
+def test_a_system_notice_never_reaches_a_non_admin(client, rc, sent, identity):
+    """Outage, network and error notices are for admins, whoever a sender named."""
+    identity["admins"] = ["jeremiah"]
+    body = {"user": "michele", "category": "admin", "title": "The internet is down"}
+    resp = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
+    assert resp["dropped"] == "not_admin"
+    assert sent["webpush"] == [] and sent["ntfy"] == [] and _outbox(client, "michele") == []
+    to_admin = client.post("/api/telemetry/notify", headers=HEADERS, json={**body, "user": "Jeremiah"}).json()
+    assert set(to_admin["recipients"]) == {"jeremiah"}
+    # Other categories still go to the person named.
+    family = client.post("/api/telemetry/notify", headers=HEADERS,
+                         json={"user": "michele", "category": "home", "title": "Garage left open"}).json()
+    assert "dropped" not in family and sent["webpush"][-1] == "michele"
+
+
 def test_admins_unresolvable_is_503(client, rc, sent):
     resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "@admins", "title": "x"})
     assert resp.status_code == 503

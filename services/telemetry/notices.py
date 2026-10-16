@@ -21,6 +21,8 @@ from services.telemetry.store import internal_headers, utcnow_iso
 log = logging.getLogger("telemetry.notices")
 
 ADMINS = "@admins"
+#: System notices: delivered to admins only (main.deliver_notice).
+ADMIN_CATEGORY = "admin"
 DEFAULT_CATEGORY = "general"
 ACTION_TYPES = ("view", "callback", "reply")
 MAX_ACTIONS = 3
