@@ -32,6 +32,7 @@ from services.gateway.agent_loop import (
 from services.gateway.agent_loop import (
     extract_action_json,
     get_dynamic_llm_settings,
+    sd_proxy_base_url,
     get_vram_safe_params,
 )
 from services.gateway.apk_manifest import clear_cache as clear_apk_version_cache
@@ -43,7 +44,6 @@ from services.gateway.config import (
     ALPACA_ARCADE_PUBLIC_URL,
     ALPACA_ARCADE_URL,
     ALPACA_AUDIO_URL,
-    ALPACA_SD_URL,
     CONFIG,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
@@ -5501,28 +5501,13 @@ async def _sd_request_authorized(request: Request) -> bool:
         return False
     return await _api_key_is_valid(api_key.strip())
 
-async def _sd_proxy_base_url() -> str:
-    """Resolve the SD/image proxy base URL from Identity settings (llm_local_url).
-
-    The alpaca SD backend is only reachable through the user-configured LLM proxy
-    (Settings > AI & Compute > llm_local_url); the legacy ALPACA_SD_URL default
-    (port 8081 direct) is refused from the server. Fail loudly when unconfigured.
-    """
-    settings = await get_dynamic_llm_settings()
-    url = (settings.get("llm_local_url") or "").strip().rstrip("/")
-    if not url:
-        raise RuntimeError(
-            "llm_local_url not configured in Identity settings (Settings > AI & Compute)."
-        )
-    return url
-
 @app.post("/api/images/generate")
 async def sd_image_generate_proxy(request: Request):
     if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     body = await request.json()
     try:
-        base_url = await _sd_proxy_base_url()
+        base_url = await sd_proxy_base_url()
         resp = await get_http_client().post(f"{base_url}/v1/images/generations", json=body)
         return JSONResponse(status_code=resp.status, content=await resp.json())
     except RuntimeError as exc:
@@ -5696,7 +5681,7 @@ async def sd_image_models_proxy(request: Request):
     if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     try:
-        base_url = await _sd_proxy_base_url()
+        base_url = await sd_proxy_base_url()
         resp = await get_http_client().get(f"{base_url}/v1/images/models")
         return JSONResponse(status_code=resp.status, content=await resp.json())
     except RuntimeError as exc:
@@ -8508,7 +8493,7 @@ async def ui_delete_dns_record(record_id: int):
 
 # --- Tool Registry (OpenAI/Ollama tool-calling) ---
 
-def resolve_service_base_url(service: str) -> str:
+async def resolve_service_base_url(service: str) -> str:
     """Map a tool_registry service id to its base URL."""
     if service == SVC_EXECUTION:
         if EXECUTION_SVC is None:
@@ -8519,7 +8504,7 @@ def resolve_service_base_url(service: str) -> str:
             raise ValueError("WORKSPACE_RUNTIME_SVC not configured")
         return WORKSPACE_RUNTIME_SVC
     if service == SVC_ALPACA_SD:
-        return ALPACA_SD_URL
+        return await sd_proxy_base_url()
     raise ValueError(f"Unknown tool service: {service}")
 
 
@@ -8534,7 +8519,7 @@ async def run_sharedllm_tool(
     X-Internal-Secret handshake. The alpaca SD backend is treated as an external
     image service and called without internal credentials.
     """
-    base = resolve_service_base_url(resolved.service)
+    base = await resolve_service_base_url(resolved.service)
     url = f"{base}{resolved.path}"
     headers = {}
     if resolved.service in (SVC_EXECUTION, SVC_WORKSPACE):

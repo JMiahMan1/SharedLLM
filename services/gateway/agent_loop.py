@@ -15,7 +15,6 @@ import aiohttp
 import redis.asyncio as redis
 
 from services.gateway.config import (
-    ALPACA_SD_URL,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
     IDENTITY_SVC,
@@ -1778,6 +1777,20 @@ def is_verification_action(action_name: str, payload: dict | None) -> bool:
 def pending_verification(written: set[str], verified: set[str]) -> list[str]:
     """Files that were written but never linted/tested before finishing."""
     return sorted(set(written) - set(verified))
+
+async def sd_proxy_base_url() -> str:
+    """The desktop image (SD) proxy's base URL: the llm_local_url setting.
+
+    The SD backend is only reachable through that proxy; the old fixed
+    ALPACA_SD_URL (port 8081 direct) cannot be reached from the server, so
+    every caller asks here. Raises RuntimeError when it is not configured.
+    """
+    settings = await get_dynamic_llm_settings()
+    url = (settings.get("llm_local_url") or "").strip().rstrip("/")
+    if not url:
+        raise RuntimeError("llm_local_url not configured in Identity settings (Settings > AI & Compute).")
+    return url
+
 
 async def get_dynamic_llm_settings() -> dict:
     """Fetches elastic LLM routing configuration directly from the Identity DB."""
@@ -3968,7 +3981,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "storagetexttoaudiorequest": (EXECUTION_SVC, "/execute/storage_text_to_audio"),
                 "networkdevicescanrequest": (EXECUTION_SVC, "/discovery/network_scan"),
                 "ghrequest": (EXECUTION_SVC, "/execute/gh"),
-                "imagegenerationrequest": (ALPACA_SD_URL, "/v1/images/generations"),
+                # Served by the ImageGenerationRequest branch below, which asks
+                # sd_proxy_base_url() for the desktop proxy.
+                "imagegenerationrequest": ("", "/v1/images/generations"),
                 "ocrrequest": (EXECUTION_SVC, "/execute/ocr"),
                 "imageeditrequest": (EXECUTION_SVC, "/execute/image_edit"),
                 "podcastrenderrequest": (EXECUTION_SVC, "/execute/podcast_render"),
@@ -4143,7 +4158,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         try:
                             async with shared_http_client() as _c:
                                 _sd = await _c.post(
-                                    f"{ALPACA_SD_URL}/v1/images/generations",
+                                    f"{await sd_proxy_base_url()}/v1/images/generations",
                                     json={"prompt": _img_prompt, "model": _img_model, "size": _img_size, "n": _img_n},
                                     timeout=aiohttp.ClientTimeout(total=180.0),
                                 )

@@ -13,7 +13,7 @@ the concrete execution-service request, and :func:`get_tool_schemas` for discove
 Services targeted:
     * execution        -> SharedLLM execution service (gh, git, ...)
     * workspace_runtime -> workspace file APIs
-    * alpaca_sd        -> alpaca Stable Diffusion backend (port 8081)
+    * alpaca_sd        -> alpaca Stable Diffusion backend, through the llm_local_url proxy
 """
 from __future__ import annotations
 
