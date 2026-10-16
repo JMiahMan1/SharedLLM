@@ -1,4 +1,5 @@
 # services/execution/handlers/diagnostics.py
+import asyncio
 import logging
 import subprocess
 
@@ -37,7 +38,7 @@ async def handle_get_system_logs(req_data: dict) -> ExecutionResult:
         if req_data.get("action") == "ls":
             path = req_data.get("path", "/app")
             cmd = ["ls", "-la", path]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 return ExecutionResult(
                     status="SUCCESS",

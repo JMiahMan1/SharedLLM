@@ -1239,7 +1239,7 @@ async def execute_docker(req: DockerComposeRequest):
             cmd = ["docker-compose", "up", "-d", "--build", *list(services)]
             from services.config import COMPOSE_PROJECT_DIR
             compose_dir = COMPOSE_PROJECT_DIR or os.path.expanduser("~/workspace")
-            res = subprocess.run(cmd, capture_output=True, text=True, cwd=compose_dir)
+            res = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, cwd=compose_dir)
             if res.returncode == 0:
                 return _ok(f"Docker Compose up -d --build successful for {len(services)} services.", "docker", {"output": res.stdout})
             else:
@@ -1632,7 +1632,7 @@ async def execute_index_capabilities():
         env = {**os.environ}
         env["PYTHONPATH"] = f"{os.getcwd()}:{os.path.expanduser('~/workspace')}:/app"
 
-        result = subprocess.run(
+        result = await asyncio.to_thread(subprocess.run,
             [sys.executable, script_path],
             capture_output=True,
             text=True,
