@@ -661,3 +661,19 @@ def test_a_comparison_against_a_translation_we_do_not_have_is_refused(loaded_cli
     )
     assert resp.status_code == 400
     assert "nkjv" in resp.json()["detail"]
+
+
+def test_requests_return_their_database_connections(loaded_client: TestClient, engine):
+    """get_session used to return an unclosed session, so connections stayed
+    checked out; with steady traffic the pool ran out and /health hung."""
+    import gc
+
+    before = engine.pool.checkedout()  # the fixtures' own sessions
+    gc.disable()  # leaked sessions must not be rescued by the garbage collector
+    try:
+        for _ in range(30):
+            assert loaded_client.get("/health").status_code == 200
+            loaded_client.get("/api/bible/versions", headers=auth())
+        assert engine.pool.checkedout() == before
+    finally:
+        gc.enable()
