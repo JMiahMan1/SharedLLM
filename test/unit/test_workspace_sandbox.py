@@ -82,7 +82,8 @@ def test_run_workspace_cmd_shapes_exec(fake_docker):
     assert res["stdout"] == "hello\n"
     # exec_run was called with the absolute (container-equivalent) cwd
     args, kwargs = container.exec_run.call_args
-    assert args[0] == ["git", "status", "--short"]
+    # Run under timeout(1) so a command that never exits ends by itself.
+    assert args[0][:3] == ["timeout", "-k", "5"] and args[0][4:] == ["git", "status", "--short"]
     assert kwargs["workdir"] == "/workspaces/users/default/raven/src"
     assert kwargs["user"].startswith("1000:")
     # our env was merged in
@@ -133,4 +134,5 @@ def test_run_workspace_cmd_shell_wraps_sh(fake_docker):
 
     asyncio.run(go())
     args, _ = container.exec_run.call_args
-    assert args[0] == ["/bin/sh", "-c", "echo hi && ls"]
+    # Run under timeout(1) so a command that never exits ends by itself.
+    assert args[0][:3] == ["timeout", "-k", "5"] and args[0][4:] == ["/bin/sh", "-c", "echo hi && ls"]

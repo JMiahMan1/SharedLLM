@@ -7,7 +7,9 @@ export function useRavenMissions() {
     queryKey: ['raven-missions'],
     queryFn: () => api.getUserMissions(),
     refetchInterval: 30000,
+    // The worker marks a running mission "executing"; filtering on "running"
+    // alone hid every running mission from the dashboard.
     select: (missions) =>
-      missions.filter((m) => ['queued', 'running', 'paused'].includes(m.status)),
+      missions.filter((m) => ['queued', 'executing', 'running', 'paused'].includes(m.status)),
   });
 }

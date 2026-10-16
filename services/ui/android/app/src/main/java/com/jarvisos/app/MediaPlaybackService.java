@@ -60,8 +60,11 @@ public class MediaPlaybackService extends Service {
     }
 
     static void stop(Context context) {
+        // stopService is always allowed. startService with a "stop" action is
+        // refused from the background (Android 8+), which is where a paused
+        // player is, so the paused notification used to stay behind.
         try {
-            context.startService(new Intent(context, MediaPlaybackService.class).setAction("stop"));
+            context.stopService(new Intent(context, MediaPlaybackService.class));
         } catch (Exception e) {
             Log.w(TAG, "could not stop: " + e.getMessage());
         }
@@ -196,6 +199,9 @@ public class MediaPlaybackService extends Service {
             session.setActive(false);
             session.release();
         }
+        stopForeground(true);
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) nm.cancel(NOTIFICATION_ID);
         super.onDestroy();
     }
 

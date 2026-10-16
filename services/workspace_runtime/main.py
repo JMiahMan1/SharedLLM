@@ -332,7 +332,8 @@ _redis_client: redis.Redis | None = None
 def _get_redis() -> redis.Redis:
     global _redis_client
     if _redis_client is None:
-        _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+        # Used from async routes; without a timeout a hung Redis froze the loop.
+        _redis_client = redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=5, socket_connect_timeout=5)
     return _redis_client
 
 def _record_verification_failure(file_path: str) -> int:
@@ -2182,8 +2183,9 @@ def delete_workspace(workspace_id: str, x_internal_secret: str | None = Header(d
     # a wsbox-* container (and its wsnet-* subnet) that would otherwise exhaust
     # Docker's predefined address pools over time. Best-effort: a missing
     # container/network is not an error.
-    from services.workspace_sandbox import remove_workspace_container
+    from services.workspace_sandbox import remove_workspace_container, unexpose_all_workspace_ports
 
+    unexpose_all_workspace_ports(real_id)
     remove_workspace_container(real_id)
     return {"status": "SUCCESS", "message": f"Workspace {real_id} deleted"}
 
@@ -2198,13 +2200,17 @@ def read_file(req: FileReadRequest, x_internal_secret: str | None = Header(defau
     target = resolve_safe_path(workspace_path, req.relative_path)
     if not target.is_file():
         raise HTTPException(status_code=400, detail=f"Path is not a file: {req.relative_path}")
-    content = target.read_text(errors="replace")
+    # Read only what is returned: opening a multi-GB log used to load all of
+    # it into memory before keeping the first max_bytes.
+    with target.open("rb") as fh:
+        raw = fh.read(req.max_bytes + 1)
+    text = raw.decode("utf-8", errors="replace")
     return {
         "status": "SUCCESS",
         "workspace": workspace,
         "relative_path": req.relative_path,
-        "content": content[: req.max_bytes],
-        "truncated": len(content) > req.max_bytes,
+        "content": text[: req.max_bytes],
+        "truncated": len(raw) > req.max_bytes or len(text) > req.max_bytes,
     }
 
 

@@ -483,6 +483,13 @@ class MAWebSocketClient:
             self._last_error = e
             self._connected = False
             self._schedule_reconnect()
+        else:
+            # A normal close (MA restarting sends 1000/1001) ends the loop
+            # without raising, which left this client "connected" and silent.
+            if not self._shutdown_event.is_set():
+                log.warning("[MA-WS] Connection closed by MA; reconnecting")
+                self._connected = False
+                self._schedule_reconnect()
 
     async def _handle_message(self, message: str) -> None:
         """

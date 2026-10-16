@@ -114,7 +114,9 @@ def get_redis() -> "_redis_lib.Redis":
     global _redis
     if _redis is None:
         from services.gateway.config import REDIS_URL
-        _redis = _redis_lib.from_url(REDIS_URL, decode_responses=True)
+        # Synchronous and called from async handlers: without a timeout a hung
+        # Redis would freeze the whole gateway.
+        _redis = _redis_lib.from_url(REDIS_URL, decode_responses=True, socket_timeout=5, socket_connect_timeout=5)
     return _redis
 
 

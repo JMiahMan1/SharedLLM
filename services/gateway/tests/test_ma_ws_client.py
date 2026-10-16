@@ -790,12 +790,13 @@ class TestErrorHandling:
             if call_count == 1:
                 raise ValueError("handler error")
 
-        with patch.object(client, "_handle_message", bad_handler):
+        with patch.object(client, "_handle_message", bad_handler), patch.object(client, "_schedule_reconnect"):
             await client._message_loop()
 
         assert call_count == 1
-        # Handler exceptions are caught and logged but don't disconnect the client
-        assert client._connected is True
+        # A handler error is logged, not treated as a connection error. (The
+        # stream ending afterwards is MA closing, which reconnects.)
+        assert client._last_error is None
 
     @pytest.mark.asyncio
     async def test_shutdown_event_stops_message_loop(self, client, mock_websocket):
@@ -1223,3 +1224,38 @@ class TestBug23Hardening:
         await client.send_command("player_queues/play_media", {"queue_id": "player_9"}, timeout=0.05)
 
         assert client._queue_id == "player_9"
+
+
+@pytest.mark.asyncio
+async def test_a_clean_close_by_ma_schedules_a_reconnect(client):
+    """An MA restart closes normally, which ends the loop without raising."""
+    class ClosedSocket:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    reconnects = []
+    client._ws = ClosedSocket()
+    client._connected = True
+    client._schedule_reconnect = lambda: reconnects.append(True)
+    await client._message_loop()
+    assert client._connected is False and reconnects == [True]
+
+
+@pytest.mark.asyncio
+async def test_shutting_down_does_not_reconnect(client):
+    class ClosedSocket:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    reconnects = []
+    client._ws = ClosedSocket()
+    client._shutdown_event.set()
+    client._schedule_reconnect = lambda: reconnects.append(True)
+    await client._message_loop()
+    assert reconnects == []
