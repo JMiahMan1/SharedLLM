@@ -34,6 +34,7 @@ import {
   Users,
   Sparkles,
   BookMarked,
+  Wifi,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import SecretInput from '../components/ui/SecretInput';
@@ -67,14 +68,16 @@ import DnsManagementPanel from '../components/settings/DnsManagementPanel';
 import TelemetryAdminPanel from '../components/settings/TelemetryAdminPanel';
 import StarBalance from '../components/wander/StarBalance';
 import BibleAdminPanel from '../components/admin/BibleAdminPanel';
+import NetworkPanel from '../components/admin/NetworkPanel';
 
-type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
+type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'network' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
 
 const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string }[] = [
   { id: 'users', label: 'Users & Devices', icon: Shield, path: '/admin/users' },
   { id: 'groups', label: 'Device Groups', icon: Layers, path: '/admin/groups' },
   { id: 'hardware', label: 'Hardware', icon: Cpu, path: '/admin/hardware' },
   { id: 'telemetry', label: 'Telemetry', icon: Activity, path: '/admin/monitor' },
+  { id: 'network', label: 'Network', icon: Wifi, path: '/admin/network' },
   { id: 'intercom', label: 'Intercom', icon: Phone, path: '/admin/intercom' },
   { id: 'raven', label: 'Raven Ops', icon: ShieldAlert, path: '/admin/ops' },
   { id: 'settings', label: 'LLM & Settings', icon: Code2, path: '/admin/integrations' },
@@ -88,6 +91,7 @@ const adminTabFromPathname = (pathname: string): AdminTab => {
   if (pathname.startsWith('/admin/groups')) return 'groups';
   if (pathname.startsWith('/admin/hardware')) return 'hardware';
   if (pathname.startsWith('/admin/monitor')) return 'telemetry';
+  if (pathname.startsWith('/admin/network')) return 'network';
   if (pathname.startsWith('/admin/integrations')) return 'settings';
   if (pathname.startsWith('/admin/sounds')) return 'database';
   if (pathname.startsWith('/admin/database')) return 'database';
@@ -1278,6 +1282,7 @@ const Admin = () => {
       )}
 
       {activeTab === 'telemetry' && <TelemetryAdminPanel />}
+      {activeTab === 'network' && <NetworkPanel />}
 
       {activeTab === 'intercom' && (
         <div className="space-y-6">

@@ -60,6 +60,12 @@ class User(SQLModel, table=True):  # type: ignore
     skylight_pass_enc: str | None = None
     git_token_enc: str | None = None
     huggingface_token_enc: str | None = None
+    # The home router (system user only; docs/NETWORK.md): a read-only rpcd
+    # login, and the SHA-256 of its self-signed certificate, pinned on first use.
+    router_url: str | None = None
+    router_user: str | None = None
+    router_pass_enc: str | None = None
+    router_cert_sha256: str | None = None
 
     # Label of the enrolled voice signature (``VoiceSignature``), set only by
     # enrollment: "ge2e:<hash of the profile>", or None until enrolled.

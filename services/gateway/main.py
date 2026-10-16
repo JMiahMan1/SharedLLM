@@ -98,7 +98,7 @@ from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, S
 from services.gateway.skylight_scope import ChoreScopeError, resolve_chore_scope
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas, tool_catalog
 from services.gateway.external_agent import run_external_agent
-from services.gateway import family_safety, notices, push_routes
+from services.gateway import family_safety, network_routes, notices, push_routes
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
 from services.shared.media_token import sign, verify
@@ -823,6 +823,7 @@ app.add_middleware(
 app.include_router(info_router)
 app.include_router(family_safety.router)
 app.include_router(push_routes.router)
+app.include_router(network_routes.router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
