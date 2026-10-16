@@ -545,9 +545,16 @@ async def test_run_sharedllm_tool_gets_image_models(monkeypatch):
 
     monkeypatch.setattr(main, "get_http_client", lambda: MockAsyncClient())
 
+    async def desktop_proxy():
+        return "http://desktop:11434"
+
+    # The SD backend is reached through the llm_local_url proxy, not a fixed
+    # address the server cannot reach.
+    monkeypatch.setattr(main, "sd_proxy_base_url", desktop_proxy)
+
     result = await main.run_sharedllm_tool(resolved)
     assert result["status"] == 200
-    assert "v1/images/models" in captured["url"]
+    assert captured["url"] == "http://desktop:11434/v1/images/models"
 
 
 @pytest.mark.asyncio

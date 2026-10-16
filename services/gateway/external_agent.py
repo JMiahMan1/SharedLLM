@@ -30,7 +30,6 @@ from typing import Any
 import aiohttp
 
 from services.gateway.config import (
-    ALPACA_SD_URL,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
     INTERNAL_SECRET,
@@ -56,13 +55,15 @@ GATEWAY_SELF_URL = "http://gateway:11435"
 _TOOL_TIMEOUT = aiohttp.ClientTimeout(total=180.0)
 
 
-def _service_base(service: str) -> str:
+async def _service_base(service: str) -> str:
     if service == SVC_EXECUTION:
         return EXECUTION_SVC
     if service == SVC_WORKSPACE:
         return WORKSPACE_RUNTIME_SVC
     if service == SVC_ALPACA_SD:
-        return ALPACA_SD_URL
+        from services.gateway.agent_loop import sd_proxy_base_url
+
+        return await sd_proxy_base_url()
     if service == SVC_RAG:
         return RAG_SVC
     if service == SVC_STORAGE:
@@ -84,7 +85,7 @@ async def _execute_resolved(
     api_key: str | None,
 ) -> dict:
     """POST/GET a resolved tool call against its backend service."""
-    url = f"{_service_base(service)}{path}"
+    url = f"{await _service_base(service)}{path}"
     headers: dict[str, str] = {}
     if service in (SVC_EXECUTION, SVC_WORKSPACE, SVC_RAG, SVC_STORAGE, SVC_CONTROL_PLANE):
         headers["X-Internal-Secret"] = INTERNAL_SECRET

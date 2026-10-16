@@ -32,7 +32,6 @@ LLAMA_SERVER_PROXY_URL = os.getenv("LLAMA_SERVER_PROXY_URL")
 TELEMETRY_SVC = os.getenv("TELEMETRY_SVC_URL", "http://telemetry:11438").rstrip("/")
 
 # alpaca Stable Diffusion image backend (exposed to external clients as a tool).
-ALPACA_SD_URL = os.getenv("ALPACA_SD_URL", "http://jeremiah-home-desktop.local:8081")
 
 # alpaca Arcade game shelf (JSON cards + playable HTML games, port 5001).
 ALPACA_ARCADE_URL = os.getenv("ALPACA_ARCADE_URL", "http://jeremiah-home-desktop.local:5001").rstrip("/")

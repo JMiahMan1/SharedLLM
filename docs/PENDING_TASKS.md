@@ -57,7 +57,7 @@ that review were not re-checked one by one; the full list is in git history
 Source: `services/identity/seed.py`, `services/identity/models.py`, `services/config.py`.
 
 - Seed the `.env` runtime keys that still have no GlobalSetting row, among them
-  `ALPACA_SD_URL`, `ANNOUNCEMENT_BLACKLIST` and `GATEWAY_INTERNAL_URL`.
+  `ANNOUNCEMENT_BLACKLIST` and `GATEWAY_INTERNAL_URL`.
 - Complete `resolve_runtime_config()`'s settings map for the keys it still
   ignores, and fix the name mismatches between `seed.py` and the map
   (`WORKSPACE_ROOT`/`workspace_root`, `MODELS_DIR`/`models_dir`,
