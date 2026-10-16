@@ -29,6 +29,11 @@ import java.util.Map;
  * with inline reply, and cleared when the conversation is opened in the app.
  */
 final class PushNotifier {
+    /** The one status-bar icon for every Jarvis notification. Android draws it as
+     *  a white silhouette, so a simple shape reads; the old per-category and bell
+     *  icons blurred into a blob at that size. */
+    static final int STATUS_ICON = R.drawable.mi_bolt;
+
     /** A tapped notification carries the page to open (MainActivity reads it). */
     static final String EXTRA_OPEN_PATH = "jarvis_open_path";
 
@@ -73,7 +78,7 @@ final class PushNotifier {
         int id = n.notificationId();
         NotificationCompat.Builder b = new NotificationCompat.Builder(
                 context, PushCategories.channelId(n.category, n.priority))
-                .setSmallIcon(icon(n.category))
+                .setSmallIcon(STATUS_ICON)
                 .setContentTitle(n.title)
                 .setContentText(n.body)
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(n.body))
@@ -97,7 +102,7 @@ final class PushNotifier {
         nm.notify(PushNotice.chatNotificationId(token), chat(context, n, token, recent, false).build());
         nm.notify(SUMMARY_NOTIFICATION_ID, new NotificationCompat.Builder(
                 context, PushCategories.channelId(PushCategories.CHAT, n.priority))
-                .setSmallIcon(R.drawable.mi_chat)
+                .setSmallIcon(STATUS_ICON)
                 .setContentTitle("Family chat")
                 .setGroup(GROUP_CHAT)
                 .setGroupSummary(true)
@@ -129,7 +134,7 @@ final class PushNotifier {
         CharSequence last = recent.isEmpty() ? n.body : recent.get(recent.size() - 1).text;
         NotificationCompat.Builder b = new NotificationCompat.Builder(
                 context, PushCategories.channelId(PushCategories.CHAT, n.priority))
-                .setSmallIcon(R.drawable.mi_chat)
+                .setSmallIcon(STATUS_ICON)
                 .setContentTitle(n.title)
                 .setContentText(last)
                 .setStyle(style)
@@ -230,7 +235,7 @@ final class PushNotifier {
                 ? "You replied: " + reply
                 : "Could not reach Jarvis. Tap to open the app.";
         nm.notify(id, new NotificationCompat.Builder(context, PushCategories.channelId(category, 3))
-                .setSmallIcon(icon(category))
+                .setSmallIcon(STATUS_ICON)
                 .setContentTitle(title == null || title.isEmpty() ? "Jarvis" : title)
                 .setContentText(text)
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
@@ -310,33 +315,6 @@ final class PushNotifier {
                 return NotificationCompat.CATEGORY_STATUS;
             default:
                 return null;
-        }
-    }
-
-    private static int icon(String category) {
-        switch (category == null ? "" : category) {
-            case "chat":
-                return R.drawable.mi_chat;
-            case "family_presence":
-            case "home":
-                return R.drawable.mi_home;
-            case "family_safety":
-                return R.drawable.mi_shield;
-            case "leave_by":
-                return R.drawable.mi_car;
-            case "bible":
-                return R.drawable.mi_bookmark;
-            case "health":
-                return R.drawable.mi_favorite;
-            case "jobs":
-                return R.drawable.mi_star;
-            case "raven":
-                return R.drawable.mi_flag;
-            case "app_updates":
-            case "admin":
-                return R.drawable.mi_settings;
-            default:
-                return R.drawable.mi_notifications;
         }
     }
 
