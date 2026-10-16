@@ -59,12 +59,13 @@ JSON
 
 echo "== 3. Creating the '$LOGIN' login"
 password="$(openssl rand -base64 30 | tr -d '/+=\n' | cut -c1-32)"
-# The password arrives on stdin, so it is not on any command line here; on
-# the router it is hashed with uhttpd's crypt and only the hash is stored.
-printf '%s\n' "$password" | rsh "LOGIN=$LOGIN sh -s" <<'SH'
-read -r pw
+# The password arrives as the first line on stdin, so it is not on any
+# command line here; the router reads it, then runs the rest as the script,
+# and stores only uhttpd's crypt hash of it.
+{ printf '%s\n' "$password"; cat <<'SH'; } | rsh "read -r pw; export pw LOGIN=$LOGIN; exec sh -s"
 hash="$(uhttpd -m "$pw")"
-for s in $(uci -q show rpcd | sed -n "s/^rpcd\.\(@login\[[0-9]*\]\)\.username='$LOGIN'$/\1/p"); do uci delete "rpcd.$s"; done
+# Drop an earlier login of the same name (stable section names, not indexes).
+for s in $(uci -q -X show rpcd | sed -n "s/^rpcd\.\([^.]*\)\.username='$LOGIN'$/\1/p"); do uci delete "rpcd.$s"; done
 s="$(uci add rpcd login)"
 uci set "rpcd.$s.username=$LOGIN"
 uci set "rpcd.$s.password=$hash"
@@ -81,8 +82,9 @@ if [ -z "$SERVER" ]; then
 fi
 
 echo "== 4. Saving the login in Jarvis and checking it"
-printf '%s\n%s\n%s\n' "$ROUTER_URL" "$LOGIN" "$password" | ssh -o ConnectTimeout=20 "$SERVER" \
-  "cd '$SERVER_DIR' && docker compose exec -T gateway python -c \"\$(cat <<'PY'
+# The program travels base64-encoded (no quoting to get wrong); the login
+# follows on stdin, so neither appears on a command line.
+program="$(base64 <<'PY' | tr -d '\n'
 import json, os, sys, urllib.request
 from services.config import IDENTITY_SVC_URL, CONTROL_PLANE_URL
 url, user, password = (sys.stdin.readline().rstrip('\n') for _ in range(3))
@@ -98,5 +100,7 @@ print('   connected:', s.get('connected'), '| error:', s.get('error'))
 print('   router:', (s.get('router') or {}).get('model'), '| internet up:', s.get('internet'))
 print('   access points:', len(radios), '| Wi-Fi clients:', sum(len(r['clients']) for r in radios))
 PY
-)\"" 2>&1 | grep -v 'level=warning'
+)"
+printf '%s\n%s\n%s\n' "$ROUTER_URL" "$LOGIN" "$password" | ssh -o ConnectTimeout=20 "$SERVER" \
+  "cd '$SERVER_DIR' && docker compose exec -T gateway python -c \"\$(echo $program | base64 -d)\"" 2>&1 | grep -v 'level=warning'
 unset password
