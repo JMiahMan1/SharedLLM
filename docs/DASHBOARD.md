@@ -53,7 +53,11 @@ Widget notes: Device Control groups by Home Assistant area and has one owner
 per device (admins always have control); Energy shows about the last 100
 minutes in 5-minute buckets of household totals, from the execution
 telemetry loop (every 60 s); timers pause and resume by id and paused timers
-stay listed.
+stay listed. A timer that runs out on screen plays a short two-tone chime
+(`lib/chime.ts`, synthesised with Web Audio, no sound file). Browsers only
+allow sound after a tap, so audio is unlocked by the first tap on the page and
+again when a timer is set. A speaker picked in the widget still gets the
+spoken alert, and the phone still gets its notice.
 
 ## Settings (`pages/Settings.tsx`)
 
