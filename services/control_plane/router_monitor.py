@@ -154,6 +154,7 @@ def collect(client: RouterClient, last_log_id: int) -> dict[str, Any]:
         "leases": [{"mac": (le.get("macaddr") or "").lower(), "ip": le.get("ipaddr"),
                     "name": le.get("hostname") or "", "expires": le.get("expires")} for le in leases],
         "hosts": _static_hosts(dhcp),
+        "host_ips": _static_host_ips(dhcp),
         "pools": _pools(dhcp, interfaces, leases),
         "radios": radios,
         "conntrack": conntrack,
@@ -195,6 +196,19 @@ def _interface(i: dict[str, Any]) -> dict[str, Any]:
     return {"name": i.get("interface"), "up": bool(i.get("up")), "uptime": i.get("uptime", 0),
             "proto": i.get("proto"), "device": i.get("l3_device") or i.get("device"),
             "ipv4": [f"{a.get('address')}/{a.get('mask')}" for a in addrs if a.get("address")]}
+
+
+def _static_host_ips(dhcp: dict[str, Any]) -> dict[str, str]:
+    """MAC -> address of each fixed DHCP lease, for devices whose lease is not
+    in the active list (a fixed address the router never hands out again)."""
+    ips: dict[str, str] = {}
+    for section in dhcp.values():
+        if section.get(".type") != "host" or not section.get("ip"):
+            continue
+        macs = section.get("mac") or []
+        for mac in (macs if isinstance(macs, list) else str(macs).split()):
+            ips[mac.lower()] = section["ip"]
+    return ips
 
 
 def _static_hosts(dhcp: dict[str, Any]) -> dict[str, str]:
@@ -257,7 +271,7 @@ def device_name(mac: str, snap: dict[str, Any]) -> tuple[str, str | None]:
     mac = mac.lower()
     lease = next((le for le in snap.get("leases", []) if le["mac"] == mac), None)
     name = snap.get("hosts", {}).get(mac) or (lease or {}).get("name") or mac
-    return name, (lease or {}).get("ip")
+    return name, (lease or {}).get("ip") or snap.get("host_ips", {}).get(mac)
 
 
 def _label(mac: str, snap: dict[str, Any]) -> str:

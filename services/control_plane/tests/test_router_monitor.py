@@ -329,3 +329,13 @@ def test_an_outage_is_recorded_when_the_internet_returns(monkeypatch):
         m.tick(now=t)
     outage = json.loads(r.lrange(rm.OUTAGES_KEY, 0, 0)[0])
     assert outage == {"start": 0, "end": 900}
+
+
+def test_a_fixed_lease_gives_its_address_when_not_in_the_active_list():
+    dhcp = {"cfg9": {".type": "host", "name": "desktop", "mac": "AA:00:00:00:00:07", "ip": "192.168.2.43"}}
+    s = snap(0)
+    s["hosts"] = {**s["hosts"], **rm._static_hosts(dhcp)}
+    s["host_ips"] = rm._static_host_ips(dhcp)
+    assert rm.device_name("aa:00:00:00:00:07", s) == ("desktop", "192.168.2.43")
+    # An active lease still wins.
+    assert rm.device_name(SERVER, s)[1] == "192.168.2.205"
