@@ -17,6 +17,7 @@ final class PushGateway {
     static final String ACTION = "/api/push/action";
     static final String UP_REGISTER = "/api/push/up/register";
     static final String UP_UNREGISTER = "/api/push/up/unregister";
+    static final String UP_LIST = "/api/push/up";
 
     private PushGateway() {}
 
@@ -40,10 +41,20 @@ final class PushGateway {
 
     /** POST as the signed-in person. Network trouble surfaces as an IOException. */
     static JSONObject post(Context context, String path, JSONObject body) throws Exception {
+        return request(context, "POST", path, body);
+    }
+
+    /** GET as the signed-in person. Network trouble surfaces as an IOException. */
+    static JSONObject get(Context context, String path) throws Exception {
+        return request(context, "GET", path, null);
+    }
+
+    private static JSONObject request(Context context, String method, String path, JSONObject body)
+            throws Exception {
         WidgetApi.ensureCredentials(context);
         String key = WidgetApi.apiKey(context);
         if (key == null || key.isEmpty()) throw new IllegalStateException("Not signed in");
-        return WidgetApi.request(WidgetApi.serverUrl(context), key, "POST", path, body, headers(context));
+        return WidgetApi.request(WidgetApi.serverUrl(context), key, method, path, body, headers(context));
     }
 
     /** POST with credentials given explicitly (the key being signed out). */

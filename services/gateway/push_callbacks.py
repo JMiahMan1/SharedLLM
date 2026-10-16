@@ -104,7 +104,7 @@ async def _raven_creds(request: Request) -> dict:
 
 @push_callback("raven_approve")
 async def raven_approve(request: Request, params: dict, reply: str | None) -> dict:
-    """Run a mission waiting in Raven Ops (admins, or its owner)."""
+    """Run a mission waiting in Raven Ops (admins only, as Execute there)."""
     from services.gateway import raven_approval
 
     return await raven_approval.approve(await _raven_creds(request), params)
@@ -112,7 +112,7 @@ async def raven_approve(request: Request, params: dict, reply: str | None) -> di
 
 @push_callback("raven_reject")
 async def raven_reject(request: Request, params: dict, reply: str | None) -> dict:
-    """Drop a mission waiting in Raven Ops (admins, or its owner)."""
+    """Drop a mission waiting in Raven Ops (admins only, as Delete there)."""
     from services.gateway import raven_approval
 
     return await raven_approval.reject(await _raven_creds(request), params)

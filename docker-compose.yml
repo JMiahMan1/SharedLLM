@@ -43,6 +43,9 @@ services:
     container_name: sharedllm_caddy
     restart: unless-stopped
     mem_limit: 256m
+    environment:
+      # The reverse proxy in front of this stack (docs/PUSH.md, "Limits").
+      - PUBLIC_PROXY_IP=${PUBLIC_PROXY_IP:-127.0.0.1}
     networks:
       - sharedllm
     ports:
@@ -296,7 +299,9 @@ services:
     dns:
       - 172.26.0.254
     networks:
-      - sharedllm
+      # Fixed address: ntfy exempts it from rate limits (ntfy/server.yml).
+      sharedllm:
+        ipv4_address: 172.26.0.252
 
   logging:
     image: ghcr.io/jmiahman1/sharedllm-logging:latest
@@ -415,7 +420,9 @@ services:
     dns:
       - 172.26.0.254
     networks:
-      - sharedllm
+      # Fixed address: ntfy exempts it from rate limits (ntfy/server.yml).
+      sharedllm:
+        ipv4_address: 172.26.0.253
 
   storage:
     image: ghcr.io/jmiahman1/sharedllm-storage:latest
@@ -691,6 +698,7 @@ services:
     environment:
       - NTFY_AUTH_USERS=${NTFY_AUTH_USERS:-}
       - NTFY_AUTH_TOKENS=${NTFY_AUTH_TOKENS:-}
+      - NTFY_PROXY_TRUSTED_HOSTS=${PUBLIC_PROXY_IP:-127.0.0.1}
       - TZ=America/Phoenix
     volumes:
       - ./ntfy/server.yml:/etc/ntfy/server.yml:ro

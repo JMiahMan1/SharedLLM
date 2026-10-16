@@ -79,4 +79,16 @@ public class PushCategoriesTest {
             assertFalse(c.name.contains("_"));
         }
     }
+
+    @Test
+    public void onlyJarvisNoticeChannelsAreClearedOnAnAccountSwitch() {
+        for (PushCategories.Category c : PushCategories.ALL) {
+            assertTrue(PushCategories.isPushChannel(c.channelId()));
+        }
+        assertTrue(PushCategories.isPushChannel(PushCategories.channelId("anything", 5)));
+        // BackgroundNotice's and MediaPlaybackService's channels stay.
+        assertFalse(PushCategories.isPushChannel("background_hidden"));
+        assertFalse(PushCategories.isPushChannel("media_playback"));
+        assertFalse(PushCategories.isPushChannel(null));
+    }
 }

@@ -73,6 +73,7 @@ secrets shared with the ntfy container:
 | `NTFY_AUTH_USERS`, `NTFY_AUTH_TOKENS` | ntfy container | The `jarvis` user (bcrypt hash) and its access token, provisioned on every start. Single-quoted in `.env` (the hash contains `$`); `.env.example` shows how to generate them |
 | `NTFY_TOKEN` | `services/config.py` (telemetry, gateway) | The same token. Blank: nothing is published and `/api/push/stream` answers 503 |
 | `NTFY_URL` | `services/config.py` | Internal ntfy address, default `http://ntfy:80` |
+| `PUBLIC_PROXY_IP` | Caddy, ntfy | Address of the reverse proxy in front of the stack (the `remote_ip` in Caddy's access log for the public host name). Caddy's `:80` site trusts its `X-Forwarded-For` and ntfy drops it again, so outside UnifiedPush senders are limited by their own address (PUSH.md, Limits). Blank: `127.0.0.1`, nothing is trusted |
 | `JARVIS_HOST` | gateway | Public base of UnifiedPush endpoints (`<JARVIS_HOST>/push/up<id>`); blank: `https://` plus the request's host |
 
 **Not here:** Music Assistant and per-service logins are per-user credentials

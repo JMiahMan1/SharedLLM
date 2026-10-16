@@ -31,16 +31,64 @@ This document is the contract the services and the app are built against.
 - `everyone` gets write-only on `up*` topics, so outside servers can deliver
   to UnifiedPush endpoints. Nobody but `jarvis` can read any topic.
 - Message cache 12h, attachments off, `behind-proxy: true`, keepalive every
-  30s. The stack network (172.26.0.0/16) is exempt from request rate limits
-  and may hold 200 subscriptions, because every stream and publish is the
-  one `jarvis` user.
+  30s. Limits are below.
 - No Caddy route to ntfy except: `POST /push/up*` on the public site goes to
   ntfy with the `/push` prefix stripped and `up=1` added (so a binary,
   encrypted body is kept as the message, base64-encoded, whatever headers the
-  sender used). Other methods there get 405.
+  sender used). A body over 4096 bytes gets 413 from Caddy. Other methods
+  there get 405.
 - `scripts/deploy_remote.sh` runs `docker compose up -d ntfy` on every deploy,
   which starts it when it is not running. A change to `ntfy/server.yml` needs
   `docker compose restart ntfy`; a Caddyfile change needs Caddy restarted.
+
+### Limits
+
+Anyone on the internet can POST to an `up*` topic, so what they can store is
+bounded:
+
+- Each outside address may publish 2000 messages a day
+  (`visitor-message-daily-limit`), each at most 4096 bytes
+  (`message-size-limit`, and Caddy's `request_body max_size 4096` before
+  that; 4096 is the UnifiedPush minimum a distributor must accept), within
+  ntfy's default request limit (a burst of 60, then one per 5 s). Messages
+  are kept 12h (`cache-duration`). ntfy has no setting for the total size of
+  its message cache; these limits are the bound instead: one address can keep
+  at most 2000 messages of 5464 bytes (a 4096 byte binary body, base64) in
+  the cache, about 11 MB.
+- Subscriber-based limiting (`visitor-subscriber-rate-limiting`) stays off:
+  it would charge outside senders to the subscriber, the gateway, which is
+  exempt.
+
+How ntfy knows the sender's address. Public traffic reaches Caddy's `:80`
+site (host port 8080) from one reverse proxy on another machine; nothing else
+on the server (its nginx serves only another site) is in that path. Caddy
+replaces `X-Forwarded-For` with its immediate peer unless that peer is
+trusted, so without trust every outside sender looked like the proxy itself.
+`PUBLIC_PROXY_IP` in `.env` names that proxy: Caddy's `:80` server trusts it
+alone (`trusted_proxies static`) and appends it to the client address it
+forwarded, and ntfy removes it again (`proxy-trusted-hosts`, set from the
+same variable in `docker-compose.yml`) and takes the address before it. Any
+other peer still has `X-Forwarded-For` replaced by its own address, so
+nobody can claim another address, including a stack address.
+
+Exemptions. The `jarvis` user has no ntfy tier, and ntfy limits a user
+without a tier by address like any visitor (only a tier makes limits per
+user). The gateway (one subscription per phone stream) and telemetry (every
+notice) would hit the request and daily message limits, so their fixed
+addresses, 172.26.0.252 and 172.26.0.253 (`ipv4_address` in
+`docker-compose.yml`), and only those, are exempt
+(`visitor-request-limit-exempt-hosts`); an exempt address skips both limits.
+The subscription limit has no exemption in ntfy and is raised to 200 for the
+gateway's streams. Nothing else on the stack network is exempt.
+
+Found on the live server (2026-10-15): Caddy's access log shows every request
+for the public host name arriving from 192.168.2.30 (a Caddy, `Via: 1.1
+Caddy`) with `X-Forwarded-For` and `X-Real-Ip` of 192.168.2.1, the router,
+for every client, GitHub's webhook deliveries included. So that proxy itself
+sees all of the internet as the router's address: until the router forwards
+without rewriting the source address, all outside senders share one limit
+(2000 a day, one 60 request burst). This still keeps outside traffic apart
+from the stack and from the LAN, but per-sender limits need the router fixed.
 
 ### Topics
 
@@ -83,7 +131,10 @@ Every service keeps calling telemetry; nobody else talks to ntfy.
 - `tag` groups and replaces: a newer notice with the same tag replaces the
   older one on the phone (timer countdowns, "N new messages").
 - `actions` (up to 3):
-  - `view`: opens `url` in the app.
+  - `view`: opens `url`: an in-app path (`/wander?person=leo`) opens in the
+    app, an `https://` URL with a host (SOS Directions) opens in the
+    browser. Any other URL is dropped by the phone. The notice's own
+    `data.url` (a tap on it) stays in-app only.
   - `callback`: the phone calls `POST /api/push/action` on the gateway with
     `{"callback": ..., "params": ..., "reply"?: text}` and the person's own
     API key. Allowed callbacks are a fixed list in the gateway
@@ -107,7 +158,11 @@ Every service keeps calling telemetry; nobody else talks to ntfy.
   cannot say who the admins are.
 - Order per person: preference check (identity's
   `GET /api/internal/push/preferences`, cached 60s; unreadable counts as on),
-  `once` dedupe (3 days), in-app outbox, browser web push, ntfy. Answer for
+  `once` dedupe (3 days; the key is released again if the outbox write fails,
+  so the sender's retry is not taken for a duplicate), in-app outbox, browser
+  web push, ntfy (the person's topic from identity's
+  `GET /api/internal/push/topic`, cached 10 min). The outbox entry and the
+  ntfy message carry the same `id`. Answer for
   one person: `{"status": "SUCCESS", "push": {...}, "ntfy": bool}`, or
   `{"status": "SUCCESS", "dropped": "preference"}`, or
   `{"status": "SUCCESS", "duplicate": true}`. A failing ntfy never fails the
@@ -138,9 +193,12 @@ sees its own topic and its own device's `up*` topics.
 - Successful streams are routine polls (`_ROUTINE_POLL_PREFIXES`): not sent to
   the logging service.
 - Code: `services/gateway/push_routes.py`.
+- `GET /api/push/up` (below) is how a phone checks its own UnifiedPush
+  registrations each time this stream opens.
 
-The old long poll `/api/telemetry/notifications/wait` stays until every phone
-runs a build that uses the stream, then is removed.
+The old long poll `/api/telemetry/notifications/wait` stays: phones on older
+builds use it, and newer ones fall back to it while the stream is
+unavailable (Android, below).
 
 ## UnifiedPush (other apps)
 
@@ -195,6 +253,18 @@ Adding one is a single function decorated with `@push_callback("name")`.
 `chat_reply` posts `reply` into Talk conversation `params.token` as the
 caller (the chat page's send).
 
+`raven_approve` and `raven_reject` follow Execute and Delete in Raven Ops:
+admins only, whatever the mission type (a mission's owner is not enough), and
+only while the mission is `pending`. Approve also refuses (409) a mission
+whose `depends_on_mission_id` has not `completed` (the background worker
+starts it when that one finishes). Each first claims the mission in identity
+with one conditional status change, `POST /api/raven/missions/{id}/transition`
+`{"from_status": "pending", "to_status": "queued"}` (or `"dismissed"` for
+Reject; internal secret; 409 when the status is no longer `from_status`), so
+two taps, or a tap and Execute, never enqueue it twice. A dispatch that fails
+after the claim puts it back to `pending`. Code:
+`services/gateway/raven_approval.py`.
+
 ## Android
 
 All in `services/ui/android/app/src/main/java/com/jarvisos/app/`.
@@ -210,6 +280,23 @@ All in `services/ui/android/app/src/main/java/com/jarvisos/app/`.
   sooner when the network comes back; 401/403 waits 5 min; a 120 s read
   timeout (no keepalive) counts as a drop. A new or removed UnifiedPush
   registration reconnects at once so the gateway streams the right topics.
+- Stream unavailable: when `/api/push/stream` answers 502, 503 or 504 (push
+  not configured, ntfy or identity unreachable), `PushService` reads the
+  in-app outbox through the long poll
+  `GET /api/telemetry/notifications/wait` instead (`PushFallback`, one poll
+  loop, the same `show()` as the stream) and tries the stream again every 2
+  minutes, or at once on a reconnect. Jarvis notices keep arriving;
+  UnifiedPush messages wait in ntfy's 12h cache until the stream is back.
+  The poll starts from when the stream last worked; when the stream resumes
+  from its last ntfy id, notices the poll already showed are skipped by id.
+- Credentials: changing the API key or the server (`setCredentials`)
+  reconnects the stream at once, so it never runs on the previous account's
+  key. When another person signs in, the previous person's Jarvis
+  notifications are cleared (so none of their buttons can act as the new
+  person) and each UnifiedPush registration moves to the new account (its
+  app gets NEW_ENDPOINT; the old account's registration is removed with the
+  previous key, unless the topic is the same; an app that cannot be moved
+  gets UNREGISTERED).
 - `PushEvent` parses stream lines. A message whose `topic` is `up*` goes to
   UnifiedPush (body base64-decoded when ntfy marks `encoding: base64`);
   anything else is a Jarvis notice (`PushNotice`), or shown as plain text
@@ -237,10 +324,17 @@ All in `services/ui/android/app/src/main/java/com/jarvisos/app/`.
   are disabled in the manifest and enabled only while someone is signed in.
   The caller is identified by `getSentFromPackage()` on SDK 34+ or the `pi`
   PendingIntent's creator; requests with invalid extras or no identity are
-  ignored. REGISTER calls `/api/push/up/register` and answers NEW_ENDPOINT
-  (an unchanged registration gets its stored endpoint again), or
-  REGISTRATION_FAILED with `NETWORK`, `INTERNAL_ERROR` or `ACTION_REQUIRED`
-  (signed out). UNREGISTER, removal in Settings and sign-out send
+  ignored. Every REGISTER calls `/api/push/up/register`, which returns the
+  existing topic or a new one (the registration may have been removed on the
+  web page or from another phone), and answers NEW_ENDPOINT with it; only
+  when the gateway cannot be asked is a stored endpoint sent again. With no
+  stored registration a failure answers REGISTRATION_FAILED with `NETWORK`
+  or `INTERNAL_ERROR`, and signed out with `ACTION_REQUIRED`. Each time the
+  stream opens the phone compares its registrations with `GET /api/push/up`
+  for this device: one the server no longer has is dropped and its app gets
+  UNREGISTERED (AND_3: the distributor ended it; the app may register
+  again), one whose topic changed gets NEW_ENDPOINT; nothing changes when
+  the gateway cannot be asked. UNREGISTER, removal in Settings and sign-out send
   UNREGISTERED and call `/api/push/up/unregister`. Messages are delivered as
   MESSAGE with `bytesMessage` (1 to 4096 bytes) and the ntfy id as `id`,
   after binding the app's RAISE_TO_FOREGROUND service for 5 s when it has
@@ -263,7 +357,7 @@ All in `services/ui/android/app/src/main/java/com/jarvisos/app/`.
 |---|---|---|
 | chat | gateway `chat_notify` | new family message, Jarvis answer (Reply, Open); tag per conversation |
 | family_presence | geo `_notify_presence` | arrivals and departures (Map) |
-| family_safety | identity `battery_alerts`, geo `safety`, gateway `family_safety` | low phone battery, arrived at or left a place marked important (school), unusually long stop somewhere unknown, "On my way" and SOS (priority 5) from the app |
+| family_safety | identity `battery_alerts`, geo `safety`, gateway `family_safety` | low phone battery (below `LOW_BATTERY_PCT` and not charging; armed again only by charging or a reading of `LOW_BATTERY_PCT` + 5, and at most once a day per phone owner through `once`), arrived at or left a place marked important (school; admins choose the places), unusually long stop somewhere unknown, "On my way" (once per 5 min per person) and SOS (priority 5, once a minute per person; sooner is a 429 saying when) from the app |
 | leave_by | execution `leave_by` | time to leave for an event with a location (tag per event) |
 | calendar | execution `calendar_reminders` | event reminders, `reminder_minutes` before (calendar settings, default 30, 0 = off); all-day events at 8:00 on each of their days; in the person's `timezone` calendar setting, else the household's |
 | timers | automation / execution `notify_timer_done` | timer or alarm done, tag per timer (Stop, Snooze 5 min, +1 min: callbacks `timer_stop`, `timer_snooze`, `timer_add_minute`) |

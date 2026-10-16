@@ -1,5 +1,8 @@
 package com.jarvisos.app;
 
+import java.util.HashMap;
+import java.util.Map;
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -36,6 +39,39 @@ final class UnifiedPushRegistration {
             throw new IllegalStateException(e);
         }
         return o.toString();
+    }
+
+    /** Whether {@code other} is the same app and token with the same topic and endpoint. */
+    boolean sameDelivery(UnifiedPushRegistration other) {
+        return other != null && token.equals(other.token) && app.equals(other.app)
+                && topic.equals(other.topic) && endpoint.equals(other.endpoint);
+    }
+
+    /** The same registration under the gateway's current topic and endpoint. */
+    UnifiedPushRegistration movedTo(UnifiedPushRegistration server) {
+        return new UnifiedPushRegistration(token, app, server.topic, server.endpoint, description);
+    }
+
+    static String key(String app, String token) {
+        return app + "\n" + token;
+    }
+
+    /**
+     * This device's registrations in a {@code GET /api/push/up} answer (those
+     * marked {@code this_device}), keyed by {@link #key}. Null when the answer
+     * has no registrations list, so nothing is taken as removed by mistake.
+     */
+    static Map<String, UnifiedPushRegistration> thisDevice(JSONObject answer) {
+        JSONArray list = answer == null ? null : answer.optJSONArray("registrations");
+        if (list == null) return null;
+        Map<String, UnifiedPushRegistration> out = new HashMap<>();
+        for (int i = 0; i < list.length(); i++) {
+            JSONObject o = list.optJSONObject(i);
+            if (o == null || !o.optBoolean("this_device", false)) continue;
+            UnifiedPushRegistration r = fromJson(o.toString());
+            if (r != null) out.put(key(r.app, r.token), r);
+        }
+        return out;
     }
 
     /** The stored record, or null when it is missing a part and cannot be used. */

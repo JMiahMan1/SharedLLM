@@ -1,5 +1,7 @@
 package com.jarvisos.app;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -17,6 +19,8 @@ import org.json.JSONObject;
  */
 final class PushNotice {
     static final int MAX_ACTIONS = 3;
+    /** Telemetry cuts a view action's url at 500 characters. */
+    static final int MAX_URL_LENGTH = 500;
 
     static final class Action {
         static final String VIEW = "view";
@@ -44,6 +48,11 @@ final class PushNotice {
 
         boolean isReply() {
             return REPLY.equals(type);
+        }
+
+        /** A view button for a web page (directions, say), opened in the browser. */
+        boolean isExternal() {
+            return isView() && url.startsWith("https://");
         }
     }
 
@@ -122,7 +131,7 @@ final class PushNotice {
             String type = str(a, "type");
             if (label.isEmpty()) continue;
             if (Action.VIEW.equals(type)) {
-                String url = safePath(str(a, "url"));
+                String url = safeActionUrl(str(a, "url"));
                 if (url.isEmpty()) continue;
                 out.add(new Action(label, type, url, "", "{}"));
             } else if (Action.CALLBACK.equals(type) || Action.REPLY.equals(type)) {
@@ -172,6 +181,27 @@ final class PushNotice {
     static String safePath(String url) {
         if (url == null || url.length() < 1 || url.charAt(0) != '/') return "";
         if (url.startsWith("//") || url.startsWith("/\\")) return "";
+        return url;
+    }
+
+    /**
+     * Where a view button may go: a page inside the app ({@link #safePath}),
+     * or a web page over https with a host, which the browser opens. Anything
+     * else (http, javascript:, intent:, a malformed address) becomes empty.
+     */
+    static String safeActionUrl(String url) {
+        String path = safePath(url);
+        if (!path.isEmpty()) return path;
+        if (url == null || url.length() > MAX_URL_LENGTH || !url.startsWith("https://")) return "";
+        try {
+            URI uri = new URI(url);
+            String host = uri.getHost();
+            if (!"https".equals(uri.getScheme()) || host == null || host.isEmpty() || uri.getUserInfo() != null) {
+                return "";
+            }
+        } catch (URISyntaxException e) {
+            return "";
+        }
         return url;
     }
 

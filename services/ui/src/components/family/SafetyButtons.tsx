@@ -10,8 +10,15 @@ import Modal from '../ui/Modal';
  *
  * On my way tells everyone else you are heading home, with the drive time by
  * road when the server has your position. SOS is an urgent notice with your
- * last position that nobody can switch off, so it always asks first.
+ * last position that nobody can switch off, so it always asks first. The
+ * server takes one SOS a minute and one On my way every five minutes per
+ * person; sooner, it answers 429 with when it can be sent again, shown as is.
  */
+/** The server's answer to a repeat within its cooldown (429). */
+function isTooSoon(err: unknown): boolean {
+  return (err as { response?: { status?: number } })?.response?.status === 429;
+}
+
 export default function SafetyButtons() {
   const [busy, setBusy] = useState<'way' | 'sos' | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -23,7 +30,8 @@ export default function SafetyButtons() {
       const minutes = res.eta_s ? Math.max(1, Math.round(res.eta_s / 60)) : null;
       toast.success(minutes ? `Family told: home in about ${minutes} min` : 'Family told you are on the way');
     } catch (err) {
-      toast.error(errorText(err, 'Could not tell the family'));
+      if (isTooSoon(err)) toast(errorText(err));
+      else toast.error(errorText(err, 'Could not tell the family'));
     } finally {
       setBusy(null);
     }
@@ -38,7 +46,13 @@ export default function SafetyButtons() {
         res.located ? `SOS sent to ${res.sent} with your location` : `SOS sent to ${res.sent}. Your location is not known.`,
       );
     } catch (err) {
-      toast.error(errorText(err, 'The SOS did not go out. Call someone.'));
+      if (isTooSoon(err)) {
+        // The last SOS already went out; this one was not needed.
+        setConfirming(false);
+        toast(errorText(err));
+      } else {
+        toast.error(errorText(err, 'The SOS did not go out. Call someone.'));
+      }
     } finally {
       setBusy(null);
     }

@@ -27,7 +27,7 @@ Google.
 |---|---|
 | Health / client | `GET /health`, `GET /` (static map client) |
 | People and places | `GET /people`, `GET /zones`, `GET /people/{id}/history`, `POST /people/{id}/see` (internal secret), `POST /people/{id}/record`, `GET /closest`, `GET /people/{id}/eta`, `GET /people/{id}/telemetry`, `GET /telemetry/{id}`, `GET /android_auto` |
-| Places | `PUT /place-settings/{zone_id}` `{important, notify}` (gateway `PUT /api/geo/places/{zone_id}`); `GET /zones` features carry `important` and `notify` |
+| Places | `PUT /place-settings/{zone_id}` `{important, notify}` (gateway `PUT /api/geo/places/{zone_id}`, admins only: HA zones have no owner; the body must be an object with `important` a boolean and `notify` a list of family usernames, else 422); `GET /zones` features carry `important` and `notify` |
 | Trips | `GET /trips`, `GET/PATCH /trips/{id}`, `PATCH /trips/{id}/share`, `GET /trips/{id}/route`, `GET /trips/{id}/locations`, `GET /locations/suggestions` |
 | Steps and metrics | `POST/GET /steps`, `GET /steps/sources`, `GET /steps/ranges`, `GET/PUT /steps/goal`, `GET /metrics/ranges`, `GET /metrics/catalog`, `GET /events` |
 | Workouts | `GET /workouts`, `POST /workouts/start`, `GET /workouts/active`, `POST /workouts/stop`, `GET /workouts/{id}/route` |

@@ -21,6 +21,7 @@ auth-access:
   - "everyone:up*:wo"
 
 # Messages are kept 12h so a phone that reconnects with since=<id> catches up.
+# This is also the age cap on everything outside senders can store.
 cache-file: /var/lib/ntfy/cache.db
 cache-duration: 12h
 
@@ -29,12 +30,30 @@ cache-duration: 12h
 # Keepalives every 30s keep the gateway stream (and Caddy) from idling out.
 keepalive-interval: 30s
 
-# Every phone stream and every published notice is made by the one jarvis
-# user from the gateway or telemetry on the stack network, so that network is
-# exempt from request rate limiting and the subscription limit (default 30)
-# is raised. Outside UnifiedPush senders arrive through Caddy and are limited
-# by their own address (X-Forwarded-For).
+# Visitors and limits (docs/PUSH.md, "Limits").
+#
+# Caddy trusts the public reverse proxy (PUBLIC_PROXY_IP in .env) and appends
+# it to X-Forwarded-For; ntfy drops that address again (proxy-trusted-hosts,
+# set from the same variable in docker-compose.yml) and counts each outside
+# sender by the address the proxy saw. Gateway and telemetry connect directly
+# and are counted by their own container address.
+#
+# The jarvis user has no tier, so ntfy limits it by address like any visitor.
+# Only the fixed addresses of the gateway and telemetry (docker-compose.yml)
+# are exempt from the request and daily message limits; every other address
+# on the stack network is limited normally. The subscription limit has no
+# exemption: the gateway holds one subscription per phone, hence 200.
+behind-proxy: true
+visitor-request-limit-exempt-hosts: "172.26.0.252,172.26.0.253"
 visitor-subscription-limit: 200
-visitor-request-limit-exempt-hosts: "172.26.0.0/16"
+
+# Outside UnifiedPush senders (everyone:up*:wo) may store at most 2000
+# messages a day per address, each at most 4096 bytes (the UnifiedPush
+# minimum; Caddy refuses larger bodies before they get here). A binary push is
+# stored base64 (5464 bytes for 4096), so with the 12h cache one address can
+# keep at most about 11 MB on disk. ntfy has no total cache size setting;
+# docs/PUSH.md explains the bound.
+visitor-message-daily-limit: 2000
+message-size-limit: 4096
 
 log-level: info

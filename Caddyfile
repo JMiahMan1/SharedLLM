@@ -1,3 +1,14 @@
+# Public traffic reaches the :80 site through one reverse proxy
+# (PUBLIC_PROXY_IP in .env). Trusting only that address keeps the client
+# address it forwards in X-Forwarded-For, which ntfy needs to rate limit
+# outside UnifiedPush senders (docs/PUSH.md, "Limits"). Any other peer has
+# X-Forwarded-For replaced by its own address, so it cannot claim another.
+{
+    servers :80 {
+        trusted_proxies static {$PUBLIC_PROXY_IP}
+    }
+}
+
 # Cross-Network Routes (Host Network → Bridge Network)
 :8001 {
     reverse_proxy identity:8001
@@ -297,9 +308,14 @@
     # binary (encrypted) body as the message, base64-encoded, even from a
     # sender that does not say Content-Encoding: aes128gcm. Nothing else of
     # ntfy is reachable from outside; phones read through the gateway.
+    # Bodies over 4096 bytes (the UnifiedPush minimum, and ntfy's
+    # message-size-limit) are refused here with 413.
     handle /push/up* {
         @deliver method POST
         handle @deliver {
+            request_body {
+                max_size 4096
+            }
             uri strip_prefix /push
             uri query up 1
             reverse_proxy ntfy:80

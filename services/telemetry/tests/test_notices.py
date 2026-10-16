@@ -214,3 +214,42 @@ async def test_oversized_notices_are_not_published(monkeypatch):
     monkeypatch.setattr(ntfy, "NTFY_TOKEN", "tk_test")
     async with aiohttp.ClientSession() as session:
         assert await ntfy.publish(session, "t", {"id": "n", "data": {"x": "y" * 5000}}) is False
+
+
+def test_the_topic_is_cached_for_ten_minutes(client, rc, sent, identity, monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(notices.time, "monotonic", lambda: now[0])
+    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "michele", "title": "x"})
+    now[0] += notices.TOPIC_CACHE_SECONDS - 1
+    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "michele", "title": "x"})
+    assert identity["calls"].count("/api/internal/push/topic") == 1
+    now[0] += 2
+    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "michele", "title": "x"})
+    assert identity["calls"].count("/api/internal/push/topic") == 2
+
+
+def test_a_failed_outbox_write_does_not_mark_the_notice_sent(rc, sent, identity, monkeypatch):
+    """The ``once`` key is released, so the sender's retry is delivered."""
+    import asyncio
+
+    real = notices.store.push_notification
+    failures = [1]
+
+    async def flaky(rc_, user, notification):
+        if failures:
+            failures.pop()
+            raise ConnectionError("redis went away")
+        await real(rc_, user, notification)
+
+    monkeypatch.setattr(notices.store, "push_notification", flaky)
+    fields = notices.parse({"user": "michele", "category": "bible", "title": "Read Psalm 23", "once": "bible:1"})
+
+    async def run():
+        with pytest.raises(ConnectionError):
+            await notices.deliver(rc, None, "michele", fields)
+        assert not any(k.startswith("telemetry:notify_once") for k in rc.strings)
+        retry = await notices.deliver(rc, None, "michele", fields)
+        assert retry.get("duplicate") is None and sent["webpush"] == ["michele"]
+        assert await notices.deliver(rc, None, "michele", fields) == {"duplicate": True}
+
+    asyncio.run(run())

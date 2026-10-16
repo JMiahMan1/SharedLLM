@@ -30,7 +30,17 @@ import java.nio.charset.StandardCharsets;
  * Jarvis notices go to {@link PushNotifier}; messages on an {@code up*} topic
  * go to the app that registered it ({@link UnifiedPushDistributor}). After a
  * drop the stream reconnects with backoff and asks for {@code since} the last
- * message read, so nothing in ntfy's cache is missed.
+ * message read, so nothing in ntfy's cache is missed. Each time the stream
+ * opens, this device's UnifiedPush registrations are checked against the
+ * gateway's.
+ *
+ * While the server says the stream is unavailable (ntfy down or not set up),
+ * Jarvis notices come from the outbox long poll instead ({@link PushFallback})
+ * and the stream is tried again every few minutes. UnifiedPush messages only
+ * travel on the stream.
+ *
+ * A change of API key or server reconnects at once, so the stream never runs
+ * on the previous account's credentials.
  *
  * A foreground service because nothing else may keep a connection open once
  * the app is closed; its notice is the hidden {@link BackgroundNotice}.
@@ -46,12 +56,20 @@ public class PushService extends Service {
     private static final long MIN_BACKOFF_MS = 2_000L;
     private static final long MAX_BACKOFF_MS = 5 * 60_000L;
     private static final long UNAUTHORISED_WAIT_MS = 5 * 60_000L;
-    /** The long poll's cursor from earlier builds; meaningless to the stream. */
+    /** The long poll's cursor from earlier builds, which kept it in another form. */
     private static final String RETIRED_CURSOR = "chat_notify_cursor";
 
     private volatile boolean running = false;
     private volatile boolean reconnectNow = false;
     private volatile HttpURLConnection current;
+    /** Reading the outbox long poll because the stream is unavailable. */
+    private boolean polling = false;
+    /** While polling, when the stream is tried again; 0 tries it now. */
+    private volatile long streamRetryAt = 0L;
+    /** When the stream last showed it was working, or 0. */
+    private long streamHealthyAt = 0L;
+    /** Notices the long poll showed, so the stream's replay does not repeat them. */
+    private final PushFallback.Shown polled = new PushFallback.Shown();
     private final Object pause = new Object();
     private Thread worker;
     private ConnectivityManager.NetworkCallback networkCallback;
@@ -78,7 +96,10 @@ public class PushService extends Service {
         command(context, ACTION_STOP);
     }
 
-    /** Open the stream again at once, so it covers a newly registered topic. */
+    /**
+     * Open the stream again at once, so it covers a newly registered topic or
+     * runs on newly saved credentials. While polling, the stream is tried now.
+     */
     static void reconnect(Context context) {
         command(context, ACTION_RECONNECT);
     }
@@ -110,6 +131,7 @@ public class PushService extends Service {
         }
         if (ACTION_RECONNECT.equals(action) && worker != null && worker.isAlive()) {
             reconnectNow = true;
+            streamRetryAt = 0L;
             dropConnection();
             wake();
             return START_STICKY;
@@ -135,9 +157,13 @@ public class PushService extends Service {
                 stopSelf();
                 return;
             }
+            String base = server.endsWith("/") ? server.substring(0, server.length() - 1) : server;
+            if (polling && System.currentTimeMillis() < streamRetryAt) {
+                backoffMs = poll(p, base, token, backoffMs);
+                continue;
+            }
             HttpURLConnection conn = null;
             try {
-                String base = server.endsWith("/") ? server.substring(0, server.length() - 1) : server;
                 String since = p.getString(TokenBridgePlugin.KEY_PUSH_SINCE, "");
                 String url = base + PushGateway.STREAM
                         + (since.isEmpty() ? "" : "?since=" + URLEncoder.encode(since, "UTF-8"));
@@ -154,13 +180,19 @@ public class PushService extends Service {
                     sleep(UNAUTHORISED_WAIT_MS);
                     continue;
                 }
+                if (PushFallback.streamUnavailable(status)) {
+                    startPolling(p, status);
+                    continue;
+                }
                 if (status != 200) throw new Exception("HTTP " + status);
+                streamOpened(p);
                 BufferedReader in = new BufferedReader(
                         new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
                 String line;
                 while (running && (line = in.readLine()) != null) {
                     PushEvent event = PushEvent.parse(line);
                     if (event == null) continue;
+                    streamHealthyAt = System.currentTimeMillis();
                     if (event.isLiveness()) backoffMs = MIN_BACKOFF_MS;
                     if (!event.isMessage()) continue;
                     handle(event);
@@ -188,6 +220,94 @@ public class PushService extends Service {
         }
     }
 
+    /**
+     * The stream answered: polling (if it was) ends, and this device's
+     * UnifiedPush registrations are checked against the gateway's.
+     */
+    private void streamOpened(SharedPreferences p) {
+        streamHealthyAt = System.currentTimeMillis();
+        if (p.contains(TokenBridgePlugin.KEY_POLL_CURSOR)) {
+            p.edit().remove(TokenBridgePlugin.KEY_POLL_CURSOR).apply();
+        }
+        if (polling) {
+            polling = false;
+            Log.i(TAG, "push stream is back; long poll ended");
+        }
+        UnifiedPushDistributor.reconcile(getApplicationContext());
+    }
+
+    /**
+     * The server cannot stream right now: read the outbox long poll until the
+     * next try. The poll starts from when the stream last worked, so notices
+     * made in between are not missed; with no such moment in this run the
+     * cursor saved by an earlier poll is kept, and with none the gateway
+     * answers at once with a cursor of its own. The stream later resumes from
+     * its own last message, so ntfy replays what it kept meanwhile
+     * (UnifiedPush messages among it) and {@link #polled} skips the notices
+     * the poll already showed.
+     */
+    private void startPolling(SharedPreferences p, int status) {
+        if (!polling) {
+            polling = true;
+            if (streamHealthyAt > 0) {
+                p.edit().putString(TokenBridgePlugin.KEY_POLL_CURSOR,
+                        PushFallback.outboxCursor(streamHealthyAt)).apply();
+            }
+            Log.w(TAG, "push stream unavailable (HTTP " + status + "); long polling until it is back");
+        }
+        streamRetryAt = System.currentTimeMillis() + PushFallback.STREAM_RETRY_MS;
+    }
+
+    /** One long poll of the outbox. Returns the backoff for the next failure. */
+    private long poll(SharedPreferences p, String base, String token, long backoffMs) {
+        HttpURLConnection conn = null;
+        try {
+            String cursor = p.getString(TokenBridgePlugin.KEY_POLL_CURSOR, "");
+            String url = base + PushFallback.WAIT + "?timeout=" + PushFallback.WAIT_SECONDS
+                    + "&since=" + URLEncoder.encode(cursor, "UTF-8");
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setConnectTimeout(15_000);
+            conn.setReadTimeout(PushFallback.WAIT_READ_TIMEOUT_MS);
+            conn.setRequestProperty("Authorization", "Bearer " + token);
+            conn.setRequestProperty("Accept", "application/json");
+            current = conn;
+            int status = conn.getResponseCode();
+            if (status == 401 || status == 403) {
+                Log.w(TAG, "not authorised (" + status + "); retrying in 5 min");
+                sleep(UNAUTHORISED_WAIT_MS);
+                return backoffMs;
+            }
+            if (status != 200) throw new Exception("HTTP " + status);
+            PushFallback.Answer answer = PushFallback.parse(read(conn), cursor);
+            for (PushNotice notice : answer.notices) {
+                if (polled.add(notice.id)) show(notice);
+            }
+            if (!answer.cursor.equals(cursor)) {
+                p.edit().putString(TokenBridgePlugin.KEY_POLL_CURSOR, answer.cursor).apply();
+            }
+            return MIN_BACKOFF_MS;
+        } catch (Exception e) {
+            if (!running || reconnectNow) return backoffMs;
+            Log.w(TAG, "long poll failed (" + e.getMessage() + "); retry in " + (backoffMs / 1000) + "s");
+            sleep(backoffMs);
+            return Math.min(backoffMs * 2, MAX_BACKOFF_MS);
+        } finally {
+            current = null;
+            reconnectNow = false;
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private static String read(HttpURLConnection conn) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader in = new BufferedReader(
+                new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = in.readLine()) != null) sb.append(line);
+        }
+        return sb.toString();
+    }
+
     private void handle(PushEvent event) {
         try {
             if (event.isUnifiedPush()) {
@@ -199,10 +319,21 @@ public class PushService extends Service {
             }
             PushNotice notice = PushNotice.parse(event.message);
             if (notice == null) notice = PushNotice.plain(event.id, event.title, event.message);
-            PushNotifier.show(this, notice);
+            if (polled.contains(notice.id)) return;
+            show(notice);
         } catch (Exception e) {
             // One bad message must not end the stream.
             Log.w(TAG, "could not handle message " + event.id + ": " + e.getMessage());
+        }
+    }
+
+    /** A Jarvis notice from the stream or the long poll. */
+    private void show(PushNotice notice) {
+        try {
+            PushNotifier.show(this, notice);
+        } catch (Exception e) {
+            // One bad notice must not end the stream or the poll.
+            Log.w(TAG, "could not show notice " + notice.id + ": " + e.getMessage());
         }
     }
 

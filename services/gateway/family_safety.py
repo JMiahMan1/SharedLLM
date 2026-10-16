@@ -6,8 +6,11 @@
   ``family_safety`` notice to everyone else, with your last known position.
   Telemetry delivers priority 5 family_safety notices even to people who
   switched the category off.
+* Each person may send one SOS a minute and one On my way every five
+  minutes; sooner is answered 429 with when it can be sent again.
 * ``PUT /api/geo/places/{zone_id}`` marks a place important and chooses who
-  hears about arrivals and departures there (geo sends those notices).
+  hears about arrivals and departures there (geo sends those notices). Only
+  an admin may: places are Home Assistant zones, which have no owner.
 
 The other family_safety notices come from identity (low phone battery) and
 geo (important places, long stops). See docs/FAMILY_HUB.md.
@@ -33,6 +36,9 @@ _HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
 #: A last position older than this is said to be old in the SOS notice.
 STALE_FIX_S = 15 * 60
+#: Seconds before the same person can send another SOS or On my way.
+SOS_COOLDOWN_S = 60
+ON_MY_WAY_COOLDOWN_S = 5 * 60
 
 
 async def _caller(request: Request) -> str:
@@ -58,6 +64,45 @@ def _ago(seconds: float) -> str:
         return f"{minutes} min ago"
     hours, rest = divmod(minutes, 60)
     return f"{hours} h {rest} min ago" if rest else f"{hours} h ago"
+
+
+def _wait_text(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds} s"
+    return f"{-(-seconds // 60)} min"
+
+
+async def _start_cooldown(kind: str, user: str, seconds: int, sent_already: str) -> str | None:
+    """Claim ``user``'s cooldown for ``kind`` (Redis SET NX EX); its key, or
+    None when Redis cannot be reached. Already running: 429 saying when it
+    can be sent again. A Redis failure lets the notice through, because a
+    missed cooldown is better than a lost SOS."""
+    from services.gateway.notices import _redis
+
+    key = f"family_safety:cooldown:{kind}:{user}"
+    try:
+        async with _redis() as conn:
+            if await conn.set(key, "1", nx=True, ex=seconds):
+                return key
+            left = max(1, int(await conn.ttl(key)))
+    except Exception as e:
+        log.warning(f"[family-safety] cooldown for {kind} unavailable: {type(e).__name__}: {e}")
+        return None
+    raise HTTPException(status_code=429, headers={"Retry-After": str(left)},
+                        detail=f"{sent_already} You can send it again in {_wait_text(left)}.")
+
+
+async def _end_cooldown(key: str | None) -> None:
+    """Nobody was told, so the person may try again at once."""
+    if key is None:
+        return
+    from services.gateway.notices import _redis
+
+    try:
+        async with _redis() as conn:
+            await conn.delete(key)
+    except Exception as e:
+        log.warning(f"[family-safety] could not clear {key}: {type(e).__name__}: {e}")
 
 
 def on_my_way_text(name: str, eta: dict | None) -> tuple[str, str]:
@@ -88,6 +133,8 @@ def sos_text(name: str, location: dict | None, now: float) -> tuple[str, str, st
 @router.post("/api/family/on-my-way")
 async def on_my_way(request: Request):
     user = await _caller(request)
+    cooldown = await _start_cooldown("on_my_way", user, ON_MY_WAY_COOLDOWN_S,
+                                     "Your family was already told you are on the way.")
     eta = await _get_json(f"{GEO_SVC}/people/{user}/eta", to="home", viewer=user)
     title, body = on_my_way_text(user.title(), eta)
     url = f"/wander?person={user}"
@@ -97,6 +144,8 @@ async def on_my_way(request: Request):
             viewer, "family_safety", title, body, url=url, priority=3, tag=f"on_my_way:{user}",
             data={"person": user, "eta": (eta or {}).get("eta")}, actions=[notify.view_action(url, "Map")]),
     )
+    if not sent:
+        await _end_cooldown(cooldown)
     return {"status": "SUCCESS", "sent": sent, "eta_s": (eta or {}).get("duration_s")}
 
 
@@ -109,6 +158,7 @@ async def sos(request: Request):
         body = {}
     if not isinstance(body, dict) or body.get("confirm") is not True:
         raise HTTPException(status_code=422, detail="An SOS must be confirmed")
+    cooldown = await _start_cooldown("sos", user, SOS_COOLDOWN_S, "Your SOS went out less than a minute ago.")
     now = time.time()
     location = await _get_json(f"{IDENTITY_SVC}/api/users/{user}/location")
     title, text, link = sos_text(user.title(), location, now)
@@ -124,18 +174,48 @@ async def sos(request: Request):
             once=f"sos:{user}:{int(now)}", data={"person": user, "sos": True, "map": link}, actions=actions),
     )
     log.warning(f"[family-safety] SOS from {user}: {sent} of {len(family)} notices accepted")
+    if not sent:
+        await _end_cooldown(cooldown)
+
     return {"status": "SUCCESS", "sent": sent, "family": len(family), "located": link is not None}
+
+
+def place_payload(body: Any, family: list[str]) -> dict[str, Any]:
+    """The validated ``{"important", "notify"}`` for geo. Raises 422 unless
+    ``important`` is a boolean and ``notify`` (optional) a list of family
+    usernames."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="The body must be an object")
+    important = body.get("important")
+    if not isinstance(important, bool):
+        raise HTTPException(status_code=422, detail="important must be true or false")
+    notify_list = body.get("notify", [])
+    if not isinstance(notify_list, list) or not all(isinstance(u, str) for u in notify_list):
+        raise HTTPException(status_code=422, detail="notify must be a list of usernames")
+    names = [u.strip().lower() for u in notify_list]
+    unknown = sorted(set(names) - set(family))
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Not in the family: {', '.join(unknown)}")
+    return {"important": important, "notify": list(dict.fromkeys(names))}
 
 
 @router.put("/api/geo/places/{zone_id}")
 async def put_place(request: Request, zone_id: str):
-    """Mark a place important and pick who hears about it (empty: everyone)."""
-    await _caller(request)
-    body = await request.json()
-    payload = {
-        "important": bool(body.get("important")),
-        "notify": [str(u) for u in body.get("notify") or [] if isinstance(u, str)],
-    }
+    """Mark a place important and pick who hears about it (empty: everyone).
+    Admins only."""
+    from services.gateway.main import _resolve_identity_from_request
+
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Only an admin can change the family's places")
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    family = await notify.family()
+    if not family:
+        raise HTTPException(status_code=503, detail="Could not read the family list")
+    payload = place_payload(body, family)
     async with get_client().put(f"{GEO_SVC}/place-settings/{zone_id}", json=payload,
                                 headers=_HEADERS, timeout=_TIMEOUT) as resp:
         answer = await resp.json(content_type=None)

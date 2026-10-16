@@ -60,11 +60,20 @@ itself on every save; its calendar only printed "Loaded N events").
   priority 5 `family_safety` notice to everyone else with your last position
   (how long ago, coordinates, an OpenStreetMap link). Telemetry delivers it
   even to people who switched family safety off. Both live in
-  `services/gateway/family_safety.py`. The other safety notices: identity
+  `services/gateway/family_safety.py`. Each person can send one SOS a minute
+  and one On my way every five minutes; sooner, the server answers 429 with
+  when it can go again, which the app shows as is (an SOS repeat also closes
+  the dialog, since the first one went out). A send nobody received does not
+  start the wait. The other safety notices: identity
   tells the family once per discharge when a phone drops below 15% and is not
-  charging (`services/identity/battery_alerts.py`, `LOW_BATTERY_PCT`; a
-  charging report, or a higher reading than the last, arms it again), and geo
-  sends important places and long stops (GEO_SERVICE.md, Notices).
+  charging (`services/identity/battery_alerts.py`, `LOW_BATTERY_PCT`; only a
+  charging report, or a reading of at least `LOW_BATTERY_PCT` + 5, arms it
+  again, and each notice carries a `once` key per person per day, so a
+  reading wobbling around 15% or two phones on one account never repeat it
+  the same day). The announcement runs after the location upload has been
+  answered. Geo sends important places and long stops (GEO_SERVICE.md,
+  Notices). Only admins can mark places important (Wander's Places panel shows
+  the settings read only to everyone else).
 - **Job notices** (category `jobs`): a finished song (with "expires in 30
   minutes"), Jarvis's improved drawing and a finished audiobook conversion
   notify whoever asked; the first two open `/family?tab=create`.

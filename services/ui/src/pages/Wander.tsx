@@ -906,6 +906,7 @@ const Wander = () => {
         <PlacesPanel
           places={places.filter((p) => p.id.startsWith('zone.'))}
           members={familyMembers.map((m) => ({ username: m.id.replace(/^(person|user)\./, '').toLowerCase(), name: m.name }))}
+          canEdit={Boolean(user?.is_admin)}
           onSaved={() => void queryClient.invalidateQueries({ queryKey: geoZonesQueryKey() })}
         />
       </div>
