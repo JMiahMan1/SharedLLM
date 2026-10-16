@@ -4,6 +4,7 @@ import {
   getNoteMeta,
   notePreview,
   parseChecklist,
+  readNoteMetaMap,
   setNoteMeta,
   sortNotes,
 } from '../lib/notesMeta';
@@ -43,5 +44,16 @@ describe('notesMeta', () => {
     ];
     setNoteMeta('Notes/b.md', { pinned: true });
     expect(sortNotes(notes).map((n) => n.title)).toEqual(['B', 'A']);
+  });
+
+  it('sorts from a metadata map read once', () => {
+    const notes = [
+      { title: 'B', path: 'Notes/b.md' },
+      { title: 'A', path: 'Notes/a.md' },
+    ];
+    setNoteMeta('Notes/a.md', { pinned: true, color: 'sky' });
+    const meta = readNoteMetaMap();
+    expect(meta['Notes/a.md']).toEqual({ pinned: true, color: 'sky' });
+    expect(sortNotes(notes, meta).map((n) => n.title)).toEqual(['A', 'B']);
   });
 });

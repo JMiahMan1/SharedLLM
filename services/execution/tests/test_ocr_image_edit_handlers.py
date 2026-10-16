@@ -246,3 +246,92 @@ async def test_image_edit_save_sends_plain_dict_user_context(tmpdir, monkeypatch
     assert save_json["user_context"]["user"] == "default"
     assert save_json["user_context"]["is_admin"] is True
     assert save_json["relative_path"] == "sign_original_edited.jpg"
+
+
+# --- Inline edits: the picture travels in the request (Family drawings) -----
+
+
+def _png_data_url(size=(640, 416)) -> str:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGB", size, color=(255, 255, 255)).save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def _inline_req(**overrides):
+    from services.execution.schemas import ImageEditInlineRequest
+
+    fields = {"image": _png_data_url(), "prompt": "Make this drawing much better"}
+    fields.update(overrides)
+    return ImageEditInlineRequest(**fields)
+
+
+@pytest.mark.asyncio
+async def test_inline_edit_returns_the_picture_without_a_workspace(monkeypatch):
+    monkeypatch.setattr(image_edit_mod, "get_image_edit_model", _async("qwen-image-edit-rapid-aio:q4_k"))
+    sent = {}
+
+    def route(url, kwargs):
+        sent["url"] = url
+        sent["form"] = kwargs.get("data")
+        return _FakeResponse(200, json_data={"data": [{"b64_json": "RURJVEVE"}]})
+
+    _patch_aiohttp(monkeypatch, route)
+
+    result = await image_edit_mod.handle_image_edit_inline(_inline_req(proxy_url="http://proxy:11434/"))
+
+    assert result.status == "SUCCESS"
+    assert result.detail == {"b64_json": "RURJVEVE", "model": "qwen-image-edit-rapid-aio:q4_k", "size": "640x416"}
+    assert sent["url"] == "http://proxy:11434/v1/images/edits"
+    # The proxy takes multipart with the model named; a JSON body is refused.
+    fields = {f[0]["name"]: f for f in sent["form"]._fields}
+    assert {"model", "prompt", "size", "response_format", "image"} <= set(fields)
+
+
+@pytest.mark.asyncio
+async def test_inline_edit_without_a_model_names_the_setting(monkeypatch):
+    monkeypatch.setattr(image_edit_mod, "get_image_edit_model", _async(None))
+
+    result = await image_edit_mod.handle_image_edit_inline(_inline_req())
+
+    assert result.status == "FAILURE"
+    assert "image_edit_model" in result.message
+
+
+@pytest.mark.asyncio
+async def test_inline_edit_rejects_something_that_is_not_a_picture(monkeypatch):
+    monkeypatch.setattr(image_edit_mod, "get_image_edit_model", _async("m"))
+
+    result = await image_edit_mod.handle_image_edit_inline(_inline_req(image="data:image/png;base64,???"))
+
+    assert result.status == "FAILURE"
+    assert "base64" in result.message
+
+
+@pytest.mark.asyncio
+async def test_inline_edit_reports_a_backend_refusal(monkeypatch):
+    monkeypatch.setattr(image_edit_mod, "get_image_edit_model", _async("m"))
+    _patch_aiohttp(monkeypatch, lambda url, kw: _FakeResponse(503, text_data="model not loaded"))
+
+    result = await image_edit_mod.handle_image_edit_inline(_inline_req(proxy_url="http://proxy:11434"))
+
+    assert result.status == "FAILURE"
+    assert "503" in result.message and "model not loaded" in result.message
+
+
+@pytest.mark.asyncio
+async def test_inline_edit_reports_an_unreachable_backend(monkeypatch):
+    monkeypatch.setattr(image_edit_mod, "get_image_edit_model", _async("m"))
+
+    def route(url, kwargs):
+        raise TimeoutError()
+
+    _patch_aiohttp(monkeypatch, route)
+
+    result = await image_edit_mod.handle_image_edit_inline(_inline_req(proxy_url="http://proxy:11434"))
+
+    assert result.status == "FAILURE"
+    assert "http://proxy:11434" in result.message and "TimeoutError" in result.message

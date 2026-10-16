@@ -91,9 +91,14 @@ async def ocs_request(
 
 async def ensure_webdav_dir(base_url: str, username: str, password: str, path: str) -> None:
     folder_url = webdav_url(base_url, username, path)
+    # Depth 0 and one property: this only asks whether the folder exists. With
+    # no Depth header Nextcloud answers with every file in it and every
+    # default property, which made each note save and list list the folder.
     resp = await request(
         "PROPFIND", folder_url,
         auth=(username, password),
+        headers={"Depth": "0", "Content-Type": "application/xml; charset=utf-8"},
+        data='<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>',
         timeout=30,
         verify=False,
     )

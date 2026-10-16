@@ -175,9 +175,11 @@ async def get_session(host: str, verify: bool = True) -> ClientSession:
     )
 
     previous = _SESSION_CACHE.get(cache_key)
-    if previous is not None:
-        with contextlib.suppress(Exception):
-            await previous[0].close()
+    if previous is not None and not previous[0].closed:
+        # Retire, do not close: requests still running on the old session
+        # failed with "Connector is closed" when it was closed here at once.
+        # It is closed once the longest request it can be serving has ended.
+        _retire_later(previous[0])
     # No cookie jar. One session per host is shared by every user, and
     # Nextcloud answers each request with session cookies; kept, they rode
     # along on the next user's request beside its own Basic auth, so a
@@ -189,9 +191,32 @@ async def get_session(host: str, verify: bool = True) -> ClientSession:
     return session
 
 
+#: Longer than any timeout a caller passes here, so a retired session is only
+#: closed once nothing can still be using it.
+_RETIRE_AFTER_S = 330.0
+
+
+def _retire_later(session: ClientSession) -> None:
+    async def close_when_idle() -> None:
+        await asyncio.sleep(_RETIRE_AFTER_S)
+        _RETIRING.pop(session, None)
+        with contextlib.suppress(Exception):
+            await session.close()
+
+    _RETIRING[session] = asyncio.get_running_loop().create_task(close_when_idle())
+
+
+_RETIRING: dict[ClientSession, asyncio.Task] = {}
+
+
 async def close_all_sessions():
     """Close all cached sessions."""
     for host in list(_SESSION_CACHE.keys()):
         session = _SESSION_CACHE.pop(host)[0]
+        with contextlib.suppress(Exception):
+            await session.close()
+    for session, task in list(_RETIRING.items()):
+        task.cancel()
+        _RETIRING.pop(session, None)
         with contextlib.suppress(Exception):
             await session.close()

@@ -220,6 +220,13 @@ export const notesFixtures = [
   { title: 'Trip ideas', path: 'Notes/Trip ideas.md', size: 48, modified: '2026-05-09T12:00:00.000Z' },
 ];
 export const notesWriteCalls: Array<{ title?: string; content?: string }> = [];
+export const notesReadCalls: Array<{ title?: string }> = [];
+/** What the fake Nextcloud stores for each fixture note, header included. */
+function noteFixtureText(title?: string): string {
+  return title === 'Trip ideas'
+    ? '# Trip ideas\nCategory: Notes\n\nSedona in the fall, then the coast.'
+    : '# Shared Checklist\nCategory: Notes\n\n- [ ] Pick up groceries\n- [x] Take out recycling';
+}
 export const notesCheckOffCalls: Array<{ item?: string }> = [];
 
 const userThemePref = {  theme_id: 'aurora',
@@ -591,16 +598,16 @@ export const server = setupServer(
   })),
   http.post('/api/communication/notes/read', async ({ request }) => {
     const body = await request.json() as { title?: string };
-    const message = body?.title === 'Trip ideas'
-      ? '# Trip ideas\nCategory: Notes\n\nSedona in the fall, then the coast.'
-      : '# Shared Checklist\nCategory: Notes\n\n- [ ] Pick up groceries\n- [x] Take out recycling';
-    return HttpResponse.json({ status: 'SUCCESS', message, service: 'note_read' });
+    notesReadCalls.push(body);
+    return HttpResponse.json({ status: 'SUCCESS', message: noteFixtureText(body?.title), service: 'note_read' });
   }),
-  http.post('/api/communication/notes/list', () => HttpResponse.json({
-    status: 'SUCCESS',
-    message: 'Notes listed',
-    detail: { notes: notesFixtures, directories: ['Notes'] },
-  })),
+  http.post('/api/communication/notes/list', async ({ request }) => {
+    const body = await request.json() as { previews?: boolean };
+    const notes = body?.previews
+      ? notesFixtures.map((n) => ({ ...n, content: noteFixtureText(n.title) }))
+      : notesFixtures;
+    return HttpResponse.json({ status: 'SUCCESS', message: 'Notes listed', detail: { notes, directories: ['Notes'] } });
+  }),
   http.post('/api/communication/notes/write', async ({ request }) => {
     const body = await request.json() as { title?: string; content?: string };
     notesWriteCalls.push(body);
@@ -1007,6 +1014,7 @@ afterEach(() => {
   telemetrySchedules = [];
   notesWriteCalls.length = 0;
   notesCheckOffCalls.length = 0;
+  notesReadCalls.length = 0;
 });
 
 // Timers and refetch intervals can outlive a file's tests. Once msw is closed

@@ -1668,8 +1668,11 @@ export const api = {
     return resp.data;
   },
 
-  async listNotes(payload: { storage?: string; directories?: string[]; as_user?: 'admin' } = {}): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/list', payload);
+  // `previews` asks for the newest notes' text in the same reply (on each
+  // note's `content`), so a page of cards is one request, not one per card.
+  // Listing walks Nextcloud folders over WebDAV, which can outlast 15s.
+  async listNotes(payload: { storage?: string; directories?: string[]; as_user?: 'admin'; previews?: boolean } = {}): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/list', payload, { timeout: 60_000 });
     return resp.data;
   },
 
@@ -2777,8 +2780,11 @@ export const api = {
     return resp.data;
   },
 
+  // Edit a picture sent as a data: URL (Family drawings). The gateway runs it
+  // through the execution service with the configured image_edit_model; a
+  // CPU-offloaded edit takes minutes, so this outlives the 15s default.
   async editImage(payload: { prompt: string; image: string; model?: string }): Promise<{ status: string; data?: Array<{ url?: string; b64_json?: string }>; message?: string }> {
-    const resp = await apiClient.post('/api/images/edit', payload);
+    const resp = await apiClient.post('/api/images/edit', payload, { timeout: 640_000 });
     return resp.data;
   },
 

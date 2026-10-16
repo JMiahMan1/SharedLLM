@@ -103,6 +103,7 @@ from services.execution.schemas import (
     NetworkDeviceScanRequest,
     NoteRequest,
     OcrRequest,
+    ImageEditInlineRequest,
     ImageEditRequest,
     ListVoicesRequest,
     PodcastRenderRequest,
@@ -1016,6 +1017,12 @@ async def execute_ocr(req: OcrRequest):
 async def execute_image_edit(req: ImageEditRequest):
     from services.execution.handlers import image_edit
     return await image_edit.handle_image_edit(req)
+
+@app.post("/execute/image_edit_inline", response_model=ExecutionResult)
+async def execute_image_edit_inline(req: ImageEditInlineRequest):
+    """Edit a picture carried in the request; the result comes back as base64."""
+    from services.execution.handlers import image_edit
+    return await image_edit.handle_image_edit_inline(req)
 
 @app.post("/execute/podcast_render", response_model=ExecutionResult)
 async def execute_podcast_render(req: PodcastRenderRequest):

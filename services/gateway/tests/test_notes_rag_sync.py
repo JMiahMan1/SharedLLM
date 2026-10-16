@@ -86,3 +86,26 @@ async def test_sync_reports_a_refusal_instead_of_success(monkeypatch):
     resp = await main.proxy_sync_notes_rag(_request({}))
     assert resp.status_code == 502
     assert json.loads(resp.body)["status"] == "FAILURE"
+
+
+@pytest.mark.asyncio
+async def test_the_notes_list_passes_the_preview_request_through(monkeypatch):
+    """The Notes page gets its card previews in the list reply; dropping the
+    flag here sent it back to one read per card."""
+    from services.gateway import main
+
+    seen = {}
+
+    async def fake_proxy(request, path, payload, as_user=None):
+        seen.update(path=path, payload=payload, as_user=as_user)
+        return JSONResponse(content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
+
+    req = _request({"storage": "nextcloud", "previews": True, "as_user": "admin"})
+    req.method = "POST"
+    await main.proxy_list_notes(req)
+
+    assert seen["path"] == "/execute/note"
+    assert seen["payload"]["previews"] is True
+    assert seen["as_user"] == "admin"

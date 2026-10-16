@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, Eraser, Loader2, Undo2, Wand2 } from 'lucide-react';
 import { api } from '../../services/api';
+import { errorText } from '../../lib/errorText';
 import SendToChat from '../chat/SendToChat';
 import { canvasPoint, type Point } from './canvasPoint';
 
@@ -132,7 +133,9 @@ export default function DrawCanvas() {
         setError(edited?.message || 'The image backend did not return a picture');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not improve that drawing');
+      // The gateway's reason (no model configured, backend down) rather than
+      // axios's bare "Request failed with status code 502".
+      setError(errorText(err, 'Could not improve that drawing'));
     } finally {
       setImproving(false);
     }
@@ -195,7 +198,9 @@ export default function DrawCanvas() {
       <canvas
         ref={canvasRef}
         width={640}
-        height={420}
+        // Both sides are multiples of 32: image edit models work on 16 or 32
+        // pixel blocks and some refuse other sizes.
+        height={416}
         data-testid="draw-surface"
         onPointerDown={start}
         onPointerMove={move}
@@ -214,6 +219,7 @@ export default function DrawCanvas() {
         >
           {improving ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />} Make it way better
         </button>
+        {improving && <span className="text-xs text-slate-400">This can take a few minutes</span>}
         <SendToChat getDataUrl={() => (isBlank() ? '' : toPng())} fileName="drawing.png" emptyMessage="Draw something first" />
         {error && (
           <span className="text-xs text-rose-300" role="alert">

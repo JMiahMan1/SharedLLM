@@ -59,6 +59,15 @@ export function getNoteMeta(key: string): NoteMeta {
   return readAll()[key] ?? {};
 }
 
+/**
+ * Every note's metadata in one read. A page drawing many cards reads this
+ * once per render; getNoteMeta per card and per sort comparison parsed the
+ * whole stored map hundreds of times on each keystroke.
+ */
+export function readNoteMetaMap(): Readonly<Record<string, NoteMeta>> {
+  return readAll();
+}
+
 export function setNoteMeta(key: string, patch: NoteMeta): NoteMeta {
   const all = readAll();
   const next = { ...all[key], ...patch };
@@ -80,12 +89,12 @@ export function forgetNoteMeta(key: string): void {
 }
 
 /** Sort: pinned first, then the order the backend returned (modified desc). */
-export function sortNotes<T extends { title: string; path: string }>(notes: T[]): T[] {
-  return [...notes].sort((a, b) => {
-    const ap = getNoteMeta(noteKey(a.title, a.path)).pinned ? 1 : 0;
-    const bp = getNoteMeta(noteKey(b.title, b.path)).pinned ? 1 : 0;
-    return bp - ap;
-  });
+export function sortNotes<T extends { title: string; path: string }>(
+  notes: T[],
+  meta: Readonly<Record<string, NoteMeta>> = readAll(),
+): T[] {
+  const pinned = (n: T) => (meta[noteKey(n.title, n.path)]?.pinned ? 1 : 0);
+  return [...notes].sort((a, b) => pinned(b) - pinned(a));
 }
 
 /** The `# title` + `Category:` header the notes handler writes on top of a note. */

@@ -4589,6 +4589,9 @@ async def proxy_list_notes(request: Request):
         "action": "list",
         "storage": body.get("storage", "nextcloud"),
         "directories": body.get("directories"),
+        # The Notes page asks for the newest notes' text in the same reply
+        # instead of one read per card.
+        "previews": bool(body.get("previews")),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
@@ -5615,15 +5618,42 @@ async def music_song_cancel(request: Request, job_id: str):
 
 @app.post("/api/images/edit")
 async def sd_image_edit_proxy(request: Request):
+    """Edit a picture sent as a data: URL (Family > Create's drawing pass).
+
+    Runs through the execution service's inline image edit, which uses the
+    same image_edit_model and llm_local_url proxy as the workspace edit and
+    sends the multipart form /v1/images/edits expects. This route used to
+    forward the JSON body to the legacy ALPACA_SD_URL, which the server cannot
+    reach and which only takes multipart, so every drawing came back 502.
+    Answers ``{"status": "SUCCESS", "data": [{"b64_json": ...}]}`` or a
+    ``FAILURE`` with the reason. Long timeout: CPU-offloaded edits take minutes.
+    """
     if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     body = await request.json()
-    base_url = resolve_service_base_url(SVC_ALPACA_SD)
+    if not str(body.get("image") or "").strip() or not str(body.get("prompt") or "").strip():
+        return JSONResponse(status_code=400, content={"status": "ERROR", "message": "image and prompt are required."})
+    payload = {key: body.get(key) for key in ("image", "prompt", "size", "model")}
     try:
-        resp = await get_http_client().post(f"{base_url}/v1/images/edits", json=body)
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/image_edit_inline",
+                json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=620.0),
+            )
+            try:
+                result = await resp.json()
+            except Exception:
+                result = {"status": "ERROR", "message": (await resp.text())[:500]}
     except Exception as exc:
-        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Stable Diffusion backend unreachable: {exc}"})
+        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Image edit failed: {exc}"})
+    if resp.status != 200 or not isinstance(result, dict):
+        return JSONResponse(status_code=resp.status if resp.status != 200 else 502, content=result)
+    b64 = (result.get("detail") or {}).get("b64_json")
+    if result.get("status") == "SUCCESS" and b64:
+        return {"status": "SUCCESS", "data": [{"b64_json": b64}], "model": result["detail"].get("model")}
+    return {"status": "FAILURE", "message": result.get("message") or "The image backend did not return a picture."}
 
 
 @app.get("/api/ai/capabilities")
