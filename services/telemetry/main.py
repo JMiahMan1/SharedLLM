@@ -22,8 +22,10 @@ from typing import Any
 
 import aiohttp
 import redis.asyncio as redis
+from fastapi import HTTPException
 
-from services.telemetry import push, store
+from services.common.secrets import secret_matches
+from services.telemetry import notices, push, store
 from services.telemetry.alpaca import is_busy
 from services.telemetry.config import (
     BUSY_DEFER_SECONDS,
@@ -39,7 +41,6 @@ from services.telemetry.config import (
 from services.telemetry.reports import generate_report
 from services.telemetry.schedule import PERIODS, REPORT_TYPES, next_run_at
 from services.telemetry.store import utcnow_iso
-from services.common.secrets import secret_matches
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
@@ -115,31 +116,44 @@ async def _all_jobs(rc) -> list[dict[str, Any]]:
 
 # Worker
 
+async def deliver_notice(body: dict[str, Any]) -> dict[str, Any]:
+    """One notice to one user, or to every admin with ``"user": "@admins"``
+    (docs/PUSH.md, services/telemetry/notices.py): preference check, ``once``
+    dedupe, the in-app outbox, then web push and ntfy, best effort. Report
+    notices use it too, so every notice takes the same path."""
+    try:
+        fields = notices.parse(body)
+    except notices.NoticeError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    rc = _redis()
+    if fields["user"] != notices.ADMINS:
+        return {"status": "SUCCESS", **await notices.deliver(rc, _client(), fields["user"], fields)}
+    try:
+        names = await notices.admins(_client())
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Could not resolve the admins: {e}") from None
+    recipients = {name: await notices.deliver(rc, _client(), name, fields) for name in names}
+    return {"status": "SUCCESS", "recipients": recipients}
+
+
+def _report_notice(job: dict[str, Any], kind: str, title: str, body: str, data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "user": job["user"],
+        "category": "reports",
+        "kind": kind,
+        "title": title,
+        "body": body,
+        "tag": f"report:{job.get('type')}:{job.get('period')}",
+        "data": {"url": "/settings", "report_type": job.get("type"), "period": job.get("period"), **data},
+    }
+
+
 async def _notify(rc, job: dict[str, Any], report: dict[str, Any]) -> None:
     title = f"Your {report.get('period')} {report.get('type')} report is ready"
-    notification = {
-        "id": store.new_id(),
-        "kind": "report_ready",
-        "report_type": report.get("type"),
-        "period": report.get("period"),
-        "report_id": report.get("id"),
-        "status": report.get("status"),
-        "title": title,
-        "body": (report.get("analysis") or "")[:180],
-        "created_at": utcnow_iso(),
-        "read": False,
-    }
-    # In-app outbox first: push is best-effort and must never lose the report.
-    await store.push_notification(rc, job["user"], notification)
-    try:
-        await push.send_to_user(
-            job["user"],
-            title,
-            notification["body"],
-            {"report_id": report.get("id"), "type": report.get("type")},
-        )
-    except Exception as e:  # push must never break report delivery
-        log.warning("Push delivery failed for %s: %s", job["user"], e)
+    await deliver_notice(_report_notice(
+        job, "report_ready", title, (report.get("analysis") or "")[:180],
+        {"report_id": report.get("id"), "status": report.get("status")},
+    ))
 
 
 async def _handle_failure(rc, job: dict[str, Any], error: str) -> None:
@@ -154,23 +168,7 @@ async def _handle_failure(rc, job: dict[str, Any], error: str) -> None:
         job["failed_at"] = utcnow_iso()
         await store.save_job(rc, job)
         failure_title = f"Your {job.get('period')} {job.get('type')} report could not be generated"
-        await store.push_notification(
-            rc,
-            job["user"],
-            {
-                "id": store.new_id(),
-                "kind": "report_failed",
-                "report_type": job.get("type"),
-                "period": job.get("period"),
-                "title": failure_title,
-                "body": error[:180],
-                "error": error[:200],
-                "created_at": utcnow_iso(),
-                "read": False,
-            },
-        )
-        with contextlib.suppress(Exception):
-            await push.send_to_user(job["user"], failure_title, error[:180])
+        await deliver_notice(_report_notice(job, "report_failed", failure_title, error[:180], {"error": error[:200]}))
         log.error("Job %s failed permanently after %s attempts: %s", job["id"], attempts, error)
         return
     await store.save_job(rc, job)
@@ -382,35 +380,8 @@ def create_app():
 
     @application.post("/api/telemetry/notify")
     async def notify(body: dict = Body(...), _: bool = Depends(require_internal)):
-        """Send one notification to a user from another service (arrivals,
-        leave-by reminders): the in-app outbox first, then push to their
-        devices, best effort. body: {user, kind, title, body, data?, once?} --
-        a notice with a ``once`` key already sent to the user is not sent again."""
-        user = str(body.get("user") or "").strip().lower()
-        title = str(body.get("title") or "").strip()
-        if not user or not title:
-            raise HTTPException(status_code=422, detail="user and title required")
-        text = str(body.get("body") or "")[:180]
-        data = body.get("data") if isinstance(body.get("data"), dict) else {}
-        rc = _redis()
-        once = str(body.get("once") or "").strip()[:200]
-        if once and not await rc.set(f"telemetry:notify_once:{user}:{once}", "1", nx=True, ex=3 * 86400):
-            return {"status": "SUCCESS", "duplicate": True}
-        await store.push_notification(rc, user, {
-            "id": store.new_id(),
-            "kind": str(body.get("kind") or "notice"),
-            "title": title[:120],
-            "body": text,
-            "data": data,
-            "created_at": utcnow_iso(),
-            "read": False,
-        })
-        delivered = {}
-        try:
-            delivered = await push.send_to_user(user, title[:120], text, data)
-        except Exception as e:  # the outbox already has it
-            log.warning("Push delivery failed for %s: %s", user, e)
-        return {"status": "SUCCESS", "push": delivered}
+        """Send one notification to a user from another service (docs/PUSH.md)."""
+        return await deliver_notice(body)
 
     @application.get("/api/telemetry/push/key")
     async def get_push_key(_: bool = Depends(require_internal)):

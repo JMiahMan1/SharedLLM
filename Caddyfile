@@ -292,6 +292,21 @@
         reverse_proxy gateway:11435
     }
 
+    # UnifiedPush endpoints (docs/PUSH.md): outside servers POST to
+    # /push/up<id>, which ntfy serves as topic up<id>. up=1 makes ntfy keep a
+    # binary (encrypted) body as the message, base64-encoded, even from a
+    # sender that does not say Content-Encoding: aes128gcm. Nothing else of
+    # ntfy is reachable from outside; phones read through the gateway.
+    handle /push/up* {
+        @deliver method POST
+        handle @deliver {
+            uri strip_prefix /push
+            uri query up 1
+            reverse_proxy ntfy:80
+        }
+        respond 405
+    }
+
     # Catch-all: Route UI traffic to the React container
     handle /* {
         reverse_proxy ui:8008

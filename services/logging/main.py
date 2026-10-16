@@ -35,6 +35,22 @@ async def retention_cleanup_task():
             py_logging.error(f"[Retention] Cleanup error: {e}")
         await asyncio.sleep(3600)
 
+async def error_alert_task():
+    """Tell admins about error spikes in the central log (error_alerts.py)."""
+    from services import config as runtime_config
+    from services.logging import error_alerts
+
+    while True:
+        await asyncio.sleep(error_alerts.CHECK_SECONDS)
+        try:
+            await error_alerts.check_once(
+                await get_redis(),
+                runtime_config.ALERT_ERROR_SPIKE_THRESHOLD,
+                runtime_config.ALERT_ERROR_REPEAT_THRESHOLD,
+            )
+        except Exception as e:
+            py_logging.warning(f"[ErrorAlerts] {type(e).__name__}: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Resolve runtime config from Identity service. The limits were imported
@@ -48,8 +64,10 @@ async def lifespan(app: FastAPI):
 
     py_logging.info(f"[Logging] Redis backend initialized (retention={LOG_RETENTION_DAYS}d, max_entries={LOG_MAX_ENTRIES})")
     task = asyncio.create_task(retention_cleanup_task())
+    alerts = asyncio.create_task(error_alert_task())
     yield
     task.cancel()
+    alerts.cancel()
 
 app = FastAPI(title="SOA Logging Service", lifespan=lifespan)
 

@@ -8,7 +8,8 @@ import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock
 import { useNavigate } from 'react-router-dom';
 import LocationPanel from '../components/location/LocationPanel';
 import ActivitySharingPanel from '../components/settings/ActivitySharingPanel';
-import PresenceAlertsToggle from '../components/settings/PresenceAlertsToggle';
+import NotificationPreferencesPanel from '../components/settings/NotificationPreferencesPanel';
+import PushAppsPanel from '../components/settings/PushAppsPanel';
 import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
 import Toggle from '../components/ui/Toggle';
@@ -83,10 +84,12 @@ const Settings = () => {
         <NotificationsRow />
       </div>
 
+      <NotificationPreferencesPanel />
+      {native && <PushAppsPanel />}
+
       <SiteThemePanel />
 
       <ActivitySharingPanel />
-      <PresenceAlertsToggle />
 
       <TelemetryReportsPanel />
 
@@ -330,9 +333,9 @@ const AdminPinManager = ({
 /**
  * Notifications are real on both surfaces but delivered differently, so the
  * row says how and offers the one switch that exists for that surface:
- * - Android app: ChatNotifyService (started at sign-in and boot) posts family
- *   chat, arrival/departure and report notices; Android's own per-channel
- *   settings are the off switch.
+ * - Android app: PushService (started at sign-in and boot) holds the push
+ *   stream and posts every notice on a channel per kind; the Notifications
+ *   section below and Android's channel settings are the off switches.
  * - Browser: Web Push via /push-sw.js and the telemetry service's VAPID key,
  *   carrying the same notices. Everything also lands under the header bell.
  */
@@ -386,7 +389,7 @@ const NotificationsRow = () => {
   };
 
   const description = native
-    ? 'Family chat, arrivals and reports arrive as Android notifications. Silence a kind in Android Settings › Apps › Jarvis › Notifications.'
+    ? 'Notices arrive as Android notifications. Choose which kinds below, or tune each one in Android Settings › Apps › Jarvis › Notifications.'
     : !supported
       ? 'This browser cannot receive push notifications. Alerts still appear under the bell in the header.'
       : state === 'denied'

@@ -36,6 +36,20 @@ describe('Settings page', () => {
     expect(screen.queryByRole('switch', { name: /notifications/i })).not.toBeInTheDocument();
   });
 
+  it('offers a switch per kind of notice, and the push app list only in the app', async () => {
+    renderWithProviders(<Settings />);
+
+    expect(await screen.findByRole('switch', { name: 'Family chat' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /apps using jarvis for push/i })).not.toBeInTheDocument();
+  });
+
+  it('lists apps using Jarvis for push in the Android app', async () => {
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    renderWithProviders(<Settings />);
+
+    expect(await screen.findByRole('heading', { name: /apps using jarvis for push/i })).toBeInTheDocument();
+  });
+
   it('hides the admin PIN on the web, where it gates nothing', async () => {
     renderWithProviders(<Settings />);
     await screen.findByRole('button', { name: /system configuration/i });

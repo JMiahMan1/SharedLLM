@@ -13,6 +13,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -141,7 +142,16 @@ public final class WidgetApi {
         if (key == null || key.isEmpty()) {
             throw new IllegalStateException("Not signed in");
         }
-        String base = serverUrl(context);
+        return request(serverUrl(context), key, method, path, body, null);
+    }
+
+    /**
+     * The same call with credentials given explicitly (signing out uses the
+     * key that is about to be forgotten) and extra headers such as the push
+     * service's X-Device-Id.
+     */
+    public static JSONObject request(String base, String key, String method, String path, JSONObject body,
+                                     Map<String, String> headers) throws Exception {
         URL url = new URL(base + path);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         try {
@@ -151,6 +161,11 @@ public final class WidgetApi {
             conn.setRequestProperty("Authorization", "Bearer " + key);
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setRequestProperty("Accept", "application/json");
+            if (headers != null) {
+                for (Map.Entry<String, String> h : headers.entrySet()) {
+                    conn.setRequestProperty(h.getKey(), h.getValue());
+                }
+            }
             if (body != null) {
                 conn.setDoOutput(true);
                 byte[] data = body.toString().getBytes(StandardCharsets.UTF_8);

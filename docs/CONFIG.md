@@ -53,6 +53,7 @@ Names: `IDENTITY`, `EXECUTION`, `RAG`, `STORAGE`, `LOGGING`,
 | `blb_base_url`, `bible_devotional_dir`, `bible_import_dir`, `bible_provider_cache`, `bible_provider_call_budget`, `calibre_library_path` | | Bible and Calibre |
 | `log_retention_days`, `log_max_entries`, `rag_retention_days` | | Retention (30 d, 10000 entries by default) |
 | `raven_max_total_seconds`, `raven_iteration_timeout`, `raven_heartbeat_interval`, `raven_hung_threshold`, `raven_error_threshold`, `raven_check_interval` | | Raven limits (1800 s, 600 s, 30 s, 600 s, 5, 300 s) |
+| `alert_error_spike_threshold`, `alert_error_repeat_threshold`, `alert_disk_free_percent`, `alert_desktop_down_minutes` | `ALERT_*` | Admin alerts (20 errors in 5 min, one error 10 times, 10% free, 10 min); see `docs/BACKGROUND_JOBS.md`. The gateway reads them live each pass, logging at startup, the control plane each hourly check |
 | `workspace_root`, `workspace_runtime_root` | | Workspaces |
 | `upstream_dns`, `dns_poll_interval` | | DNS |
 | `execution_external_host` | | Host used in links to execution media |
@@ -63,6 +64,16 @@ Feature settings read directly from Identity by the service that uses them
 `raven_max_iterations` (default 60).
 
 `REDIS_URL` is environment-only (it differs between bridge and host).
+
+Push (`docs/PUSH.md`) is environment-only too, because the values are
+secrets shared with the ntfy container:
+
+| Variable | Read by | What |
+|---|---|---|
+| `NTFY_AUTH_USERS`, `NTFY_AUTH_TOKENS` | ntfy container | The `jarvis` user (bcrypt hash) and its access token, provisioned on every start. Single-quoted in `.env` (the hash contains `$`); `.env.example` shows how to generate them |
+| `NTFY_TOKEN` | `services/config.py` (telemetry, gateway) | The same token. Blank: nothing is published and `/api/push/stream` answers 503 |
+| `NTFY_URL` | `services/config.py` | Internal ntfy address, default `http://ntfy:80` |
+| `JARVIS_HOST` | gateway | Public base of UnifiedPush endpoints (`<JARVIS_HOST>/push/up<id>`); blank: `https://` plus the request's host |
 
 **Not here:** Music Assistant and per-service logins are per-user credentials
 in Identity, with admin grants for sharing; see `docs/PER_USER_CREDENTIALS.md`.

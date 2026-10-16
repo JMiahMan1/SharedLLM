@@ -17,8 +17,9 @@ import logging
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-import aiohttp
 from sqlmodel import Session, select
+
+from services.common import notify
 
 from . import plans
 from .metrics import OPEN_KINDS, READING_KINDS
@@ -101,18 +102,9 @@ def due_now(session: Session, now: datetime) -> list[tuple[str, dict]]:
 
 
 async def send(username: str, note: dict, today: str, telemetry_url: str, secret: str) -> bool:
-    body = {"user": username, "kind": "bible_reminder", "once": f"bible-nudge:{today}", **note}
-    async with aiohttp.ClientSession() as client:
-        async with client.post(
-            f"{telemetry_url.rstrip('/')}/api/telemetry/notify",
-            json=body,
-            headers={"X-Internal-Secret": secret},
-            timeout=aiohttp.ClientTimeout(total=10.0),
-        ) as resp:
-            if resp.status >= 400:
-                log.warning("[Bible] reminder for %s refused: HTTP %s", username, resp.status)
-                return False
-    return True
+    body = {"user": username, "category": "bible", "kind": "bible_reminder", "tag": "bible:reminder",
+            "once": f"bible-nudge:{today}", **note}
+    return await notify.send(body, telemetry=telemetry_url, secret=secret)
 
 
 async def remind_once(engine, telemetry_url: str, secret: str, now: datetime | None = None) -> int:

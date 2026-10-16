@@ -40,6 +40,18 @@
 
 The goal is stored as `geo:steps_goal:{user}`; the default remains 10,000.
 
+## Notices (category `health`, docs/PUSH.md)
+
+- **Goal reached**: every time a day's fused total is stored
+  (`_store_fused_day`, from any source), today's total at or past the goal
+  sends the person one notice ("8,200 steps today, past your goal of 8,000"),
+  once per day (`geo:notice:step_goal:<user>:<day>` and a telemetry `once`).
+  Earlier days filled in late never announce.
+- **Weekly summary**: geo's notice sweep, on Sunday from `WEEKLY_SUMMARY_HOUR`
+  (19, `APP_TIMEZONE`), sends each person with steps this week or last the
+  week's total (Monday to Sunday), the daily average over days with steps, and
+  the change from last week, once per week. Both open `/fitness`.
+
 ## Surfaces
 
 | Surface | File | Notes |

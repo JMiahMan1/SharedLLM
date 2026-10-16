@@ -43,6 +43,7 @@ import {
   routeQueryKey,
 } from '../lib/wanderQueries';
 import { buildFamilyCards, type Place } from '../lib/familyCards';
+import PlacesPanel from '../components/wander/PlacesPanel';
 import toast from 'react-hot-toast';
 import {
   Users,
@@ -88,7 +89,7 @@ const Wander = () => {
 
   const currentUsername = (user?.username || '').toLowerCase();
 
-  const [focusMember, setFocusMember] = useState<string | null>(null);
+  const [chosenMember, setFocusMember] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<TripFilter>('all');
   // The all-trips view lives in the URL, so Android's back button closes it
   // like a native screen instead of leaving Wander.
@@ -210,10 +211,12 @@ const Wander = () => {
           lat,
           lon,
           radius: Number.isFinite(radius) && radius > 0 ? radius : 100,
+          important: props.important === true,
+          notify: Array.isArray(props.notify) ? props.notify.map(String) : [],
         };
       })
       .filter(
-        (z): z is { id: string; name: string; lat: number; lon: number; radius: number } =>
+        (z): z is { id: string; name: string; lat: number; lon: number; radius: number; important: boolean; notify: string[] } =>
           z !== null,
       );
   }, [zonesQuery.data]);
@@ -229,6 +232,13 @@ const Wander = () => {
       locationsQuery.dataUpdatedAt || peopleQuery.dataUpdatedAt,
     );
   }, [peopleQuery.data, peopleQuery.dataUpdatedAt, locationsQuery.data, locationsQuery.dataUpdatedAt, places]);
+  // A notice about someone opens Wander as ?person=<username>, focused on them
+  // until another card is tapped.
+  const personParam = searchParams.get('person')?.toLowerCase();
+  const focusMember =
+    chosenMember ??
+    familyMembers.find((m) => personParam && m.id.replace(/^(person|user)\./, '').toLowerCase() === personParam)?.id ??
+    null;
 
   const refreshAll = useCallback(() => {
     trigger('light');
@@ -892,6 +902,12 @@ const Wander = () => {
             </div>
           </>
         )}
+
+        <PlacesPanel
+          places={places.filter((p) => p.id.startsWith('zone.'))}
+          members={familyMembers.map((m) => ({ username: m.id.replace(/^(person|user)\./, '').toLowerCase(), name: m.name }))}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: geoZonesQueryKey() })}
+        />
       </div>
 
       {/* Aggregate Statistics Ribbon */}

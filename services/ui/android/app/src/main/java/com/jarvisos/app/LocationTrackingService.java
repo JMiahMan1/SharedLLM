@@ -462,6 +462,11 @@ public class LocationTrackingService extends Service {
         // the battery the app had reported.
         int battery = batteryPercent();
         if (battery >= 0) body.put("battery", battery);
+        // Lets the low battery notice re-arm as soon as the phone is plugged in.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            BatteryManager bm = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
+            if (bm != null) body.put("charging", bm.isCharging());
+        }
         // Steps are filed under the fix's day on the server, so only with a
         // recent reading from the same local day as the fix (a held fix from
         // before midnight would file today's count under yesterday, and the

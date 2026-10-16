@@ -27,7 +27,7 @@ Google.
 |---|---|
 | Health / client | `GET /health`, `GET /` (static map client) |
 | People and places | `GET /people`, `GET /zones`, `GET /people/{id}/history`, `POST /people/{id}/see` (internal secret), `POST /people/{id}/record`, `GET /closest`, `GET /people/{id}/eta`, `GET /people/{id}/telemetry`, `GET /telemetry/{id}`, `GET /android_auto` |
-| Presence alerts | `GET/PUT /presence-alerts/{viewer}` (arrive/leave notices, on by default) |
+| Places | `PUT /place-settings/{zone_id}` `{important, notify}` (gateway `PUT /api/geo/places/{zone_id}`); `GET /zones` features carry `important` and `notify` |
 | Trips | `GET /trips`, `GET/PATCH /trips/{id}`, `PATCH /trips/{id}/share`, `GET /trips/{id}/route`, `GET /trips/{id}/locations`, `GET /locations/suggestions` |
 | Steps and metrics | `POST/GET /steps`, `GET /steps/sources`, `GET /steps/ranges`, `GET/PUT /steps/goal`, `GET /metrics/ranges`, `GET /metrics/catalog`, `GET /events` |
 | Workouts | `GET /workouts`, `POST /workouts/start`, `GET /workouts/active`, `POST /workouts/stop`, `GET /workouts/{id}/route` |
@@ -36,6 +36,31 @@ Google.
 | Trends | `GET /trends/activity` (read-only), `POST /trends/activity/analyze` (explicit opt-in, per-user lock) |
 | Vehicles | `GET/POST /vehicles`, `DELETE /vehicles/{id}`, `GET /vehicles/assigned/{user}`, `POST /vehicles/assign`, `GET /vehicle-lookup/*`, `GET /fuel-prices` |
 | Maps | `GET /map/regions` |
+
+## Notices
+
+All through `services/common/notify.py` (docs/PUSH.md), to the family members
+who may see the person (sharing consent), never to the person themselves.
+
+- **Arrivals and departures** (`_notify_presence`): entering or leaving an HA
+  zone is a `family_presence` notice (tag `presence:<user>`, Map button to
+  `/wander?person=<user>`); a departure from anywhere but home carries the
+  drive time home. Whether someone wants them is their `family_presence`
+  preference, applied by telemetry. Geo's own per-person switch
+  (`GET/PUT /presence-alerts`) is gone; the notice sweep moved anyone who had
+  it off to `family_presence=false` once.
+- **Important places**: a zone marked important in Wander's Places list
+  (`geo:place_settings`, `services/geo/safety.py`) makes its arrivals and
+  departures `family_safety` notices (priority 4, tag `place:<user>`) for the
+  people chosen for it, or everyone who may see the person when none are
+  chosen. Everyone else still gets the ordinary `family_presence` notice.
+- **Long stops**: every breadcrumb moves the person's stop (`geo:stop:<user>`;
+  within `LONG_STOP_RADIUS_M`, 150 m, it is the same stop). A stop of
+  `LONG_STOP_HOURS` (2) somewhere that is not a zone is one `family_safety`
+  notice naming the place (Nominatim), once per stop, only during
+  `LONG_STOP_ACTIVE_HOURS` local (`8-21`; `0-24` for any hour). A stop with no
+  fix for 6 h is a phone that went quiet and is left alone.
+- **Steps**: the daily goal and the Sunday summary, see HEALTH_STEPS.md.
 
 ## Trips: how a drive is recorded
 
@@ -81,6 +106,8 @@ User-picked names win on read (`source: "stored"`).
 | `NOMINATIM_URL` | compose env | self-hosted geocoding (public Nominatim is the fallback outside the import) |
 | `FAMILY_CHAT_TOKEN` | env | room for achievement cards (silent when unset) |
 | `APP_TIMEZONE` | env | day boundaries (default `America/Phoenix`) |
+| `LONG_STOP_HOURS`, `LONG_STOP_RADIUS_M`, `LONG_STOP_ACTIVE_HOURS` | env | long stop notices (2 h, 150 m, `8-21`) |
+| `WEEKLY_SUMMARY_HOUR` | env | Sunday step summary from this local hour (19) |
 
 Registered in `services/config.py` as `GEO_SVC_URL` (`BRIDGE_GEO_SVC_URL`),
 routed via Caddy `:8009`.

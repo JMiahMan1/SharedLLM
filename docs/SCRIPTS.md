@@ -9,7 +9,8 @@ API keys, HA token) from the environment; none are hard-coded.
 
 | Script | Purpose |
 |---|---|
-| `deploy_remote.sh` | **The deploy.** `bash scripts/deploy_remote.sh <user@host> <dir> <service…>`: waits for the CI image build of the commit, merges `.env` append-only (`merge_env.py`), pulls and recreates the named services, publishes the latest APK for the in-app updater, verifies |
+| `deploy_remote.sh` | **The deploy.** `bash scripts/deploy_remote.sh <user@host> <dir> <service…>`: waits for the CI image build of the commit, merges `.env` append-only (`merge_env.py`), pulls and recreates the named services, publishes the latest APK for the in-app updater, verifies, then tells admins it finished (commit, services) or failed (the step, and the server's `[FAIL]` line) |
+| `notify_admins.sh` | `scripts/notify_admins.sh "<title>" "<body>" [priority] [tag]`: one admin notice on every admin's phone (category `admin`, `docs/PUSH.md`). Run on the server, from cron or by hand; posts from inside the telemetry container, so `INTERNAL_SECRET` never appears in arguments or output. `deploy_remote.sh` uses it to report each deploy's result |
 | `merge_env.py` | Append-only `.env` merge used by `deploy_remote.sh` (never overwrites a key the host already has) |
 | `deploy.sh` | Restart the stack on the server after a `git pull` (used by the post-merge hook); does not build |
 | `deploy_local_build.sh` | Emergency only: build images **on the server** when GHCR/Actions are down. Normal deploys never build on the server (see `CONTRIBUTING.md`) |

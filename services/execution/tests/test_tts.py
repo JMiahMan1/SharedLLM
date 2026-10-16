@@ -280,6 +280,13 @@ def test_audiobook_regenerate_full_pipeline(mocker, tmp_path):
     # synchronously in the test and stub out subprocess.run itself.
     mocker.patch("asyncio.to_thread", side_effect=lambda fn, *a, **k: fn(*a, **k))
     mocker.patch("subprocess.run", side_effect=fake_run)
+    notices = []
+
+    async def fake_send(payload, **kw):
+        notices.append(payload)
+        return True
+
+    mocker.patch("services.common.notify.send", side_effect=fake_send)
 
     resp = client.post(
         "/execute/audiobook/regenerate",
@@ -294,6 +301,11 @@ def test_audiobook_regenerate_full_pipeline(mocker, tmp_path):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "SUCCESS"
+    # Whoever asked hears it is done, with a link to the workspace.
+    (notice,) = notices
+    assert notice["user"] == "testuser" and notice["category"] == "jobs"
+    assert notice["title"] == "Your audiobook is ready"
+    assert notice["data"]["url"] == "/workspaces?select=ws-abc"
     assert (tmp_path / "scripture_day_01.wav").exists()
     assert (tmp_path / "scripture_day_02.wav").exists()
     assert (tmp_path / "audiobook_scripture.mp3").exists()

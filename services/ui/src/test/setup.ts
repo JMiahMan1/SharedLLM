@@ -301,6 +301,10 @@ export const server = setupServer(
   ...mediaHandlers,
   http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
   http.get('/api/users/me', () => HttpResponse.json(users[0])),
+  // Notice categories: nothing saved yet, so every kind is on.
+  http.get('/api/users/me/notification-preferences', () => HttpResponse.json({})),
+  http.put('/api/users/me/notification-preferences', async ({ request }) => HttpResponse.json((await request.json()) as Record<string, boolean>)),
+  http.get('/api/push/up', () => HttpResponse.json([])),
   http.get('/api/users/service-defaults', () => HttpResponse.json({ ha_url: 'https://ha.example.com', nextcloud_url: 'https://cloud.example.com' })),
   http.get('/api/users/me/theme', () => HttpResponse.json({
     status: 'SUCCESS',

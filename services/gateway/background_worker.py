@@ -30,6 +30,7 @@ from services.gateway.config import (
     SYSTEM_IDENTITY,
     WORKSPACE_RUNTIME_SVC,
 )
+from services.gateway import notices
 from services.gateway.intent_engine import is_raven_intent
 from services.shared.rag_client import push_mission
 
@@ -82,6 +83,13 @@ async def _capture_mission_artifacts(mission_id: str, workspace_id: str | None) 
         log.warning(f"[Worker] Artifact capture error for mission {mission_id}: {e}")
         return None
 
+def _mission_owner(payload: dict[str, Any]) -> str:
+    """The username a mission's notices go to: whoever started or approved it
+    ("" for the system account, which has no phone)."""
+    user = str((payload.get("creds") or {}).get("user") or "")
+    return "" if user in ("default", SYSTEM_IDENTITY) else user
+
+
 GATEWAY_SVC = "http://localhost:11435"
 # Longest the cleanup loop waits for one user's Home Assistant sync into RAG.
 HA_SYNC_TIMEOUT_SECONDS = int(os.getenv("HA_SYNC_TIMEOUT_SECONDS", "1800"))
@@ -94,6 +102,8 @@ class RavenWorker:
         self._talk_task = None
         self._chat_notify_task = None
         self._cleanup_task = None
+        self._admin_alerts_task = None
+        self._songs_task = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         # Initialize the self-repair cooldown here rather than lazily behind a
@@ -175,7 +185,9 @@ class RavenWorker:
         self._talk_task = self._loop.create_task(self._talk_monitor_loop())
         self._chat_notify_task = self._loop.create_task(self._chat_notify_loop())
         self._cleanup_task = self._loop.create_task(self._cleanup_loop())
-        log.info("Raven Background Worker (Health + Inference + Talk Monitor + Chat Notify + Cleanup) started.")
+        self._admin_alerts_task = self._loop.create_task(self._admin_alerts_loop())
+        self._songs_task = self._loop.create_task(self._songs_loop())
+        log.info("Raven Background Worker (Health + Inference + Talk Monitor + Chat Notify + Cleanup + Admin Alerts) started.")
 
     def stop(self):
         """Signal the worker loops to stop and shut the worker loop down."""
@@ -192,7 +204,7 @@ class RavenWorker:
 
     async def _shutdown(self):
         for t in (self._health_task, self._inference_task, self._talk_task,
-                  self._chat_notify_task, self._cleanup_task):
+                  self._chat_notify_task, self._cleanup_task, self._admin_alerts_task, self._songs_task):
             if t is not None:
                 t.cancel()
         await self.job_queue.close()
@@ -432,6 +444,58 @@ class RavenWorker:
                         await r.aclose()
                     r = None
                 await asyncio.sleep(min(5 * failures, 60))
+
+    async def _admin_alerts_loop(self):
+        """Tells admins when a service goes down or comes back, and when the
+        desktop GPU services stop answering (services/gateway/admin_alerts.py)."""
+        import redis.asyncio as redis
+
+        from services.gateway import admin_alerts
+        from services.gateway.agent_loop import get_dynamic_llm_settings
+
+        r = None
+        while self.is_running:
+            # Sleep first: a gateway that just restarted is usually mid-deploy,
+            # with other services still coming up.
+            await asyncio.sleep(admin_alerts.CHECK_SECONDS)
+            try:
+                if r is None:
+                    r = redis.from_url(REDIS_URL, decode_responses=True)
+                settings = await get_dynamic_llm_settings()
+                async with _shared_http_client() as client:
+                    await admin_alerts.check_once(r, client, settings, gateway=GATEWAY_SVC)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning(f"Admin alerts: {type(e).__name__}: {e}")
+                if r is not None:
+                    with suppress(Exception):
+                        await r.aclose()
+                    r = None
+
+    async def _songs_loop(self):
+        """Tells people when a song they asked for is written
+        (services/gateway/notices.py)."""
+        import redis.asyncio as redis
+
+        from services.gateway import notices
+
+        r = None
+        while self.is_running:
+            await asyncio.sleep(notices.SONG_POLL_SECONDS)
+            try:
+                if r is None:
+                    r = redis.from_url(REDIS_URL, decode_responses=True)
+                async with _shared_http_client() as client:
+                    await notices.check_songs_once(r, client)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning(f"Song notices: {type(e).__name__}: {e}")
+                if r is not None:
+                    with suppress(Exception):
+                        await r.aclose()
+                    r = None
 
     async def _check_talk_once(self, r):
         """Perform a single poll of Nextcloud Talk."""
@@ -741,6 +805,7 @@ class RavenWorker:
                             json={"status": status, "result": result_str, "completed_at": completed_iso, "duration": duration, "artifacts": artifacts},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
+                        await notices.mission_finished(_mission_owner(payload), mission_id, status, result_str, workspace_id)
                         # Best-effort: persist a mission post-mortem into RAG for
                         # self-repair recall (Section 6: mission_history).
                         task_desc = str(payload.get("query") or payload.get("prompt") or "")
@@ -803,6 +868,7 @@ class RavenWorker:
                             json={"status": "failed", "result": str(e), "completed_at": completed_iso, "duration": duration, "artifacts": fail_artifacts},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
+                        await notices.mission_finished(_mission_owner(payload), mission_id, "failed", str(e), fail_workspace_id)
                 except Exception as patch_e:
                     log.error(f"Failed to update mission {mission_id} to failed: {patch_e}")
         finally:
@@ -1299,6 +1365,8 @@ class RavenWorker:
                     if resp.status == 200:
                         log.info(f"Mission for {c['name']} successfully pushed to Triage Queue.")
                         self._self_repair_cooldown[c["name"]] = now
+                        created = await resp.json(content_type=None)
+                        await notices.mission_needs_approval({**mission_payload, **(created if isinstance(created, dict) else {})})
                     else:
                         log.error(f"Failed to push mission to Triage Queue: {await resp.text()}")
             except Exception as e:

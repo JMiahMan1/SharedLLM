@@ -129,6 +129,7 @@ async def test_job_runs_when_alpaca_idle(rc, monkeypatch):
 
     notifications = await store.list_notifications(rc, "jeremiah")
     assert notifications[-1]["kind"] == "report_ready"
+    assert notifications[-1]["data"]["report_id"] == "r1"
 
     stored = await store.get_job(rc, job["id"])
     assert stored["attempts"] == 0
@@ -242,3 +243,12 @@ async def test_a_daily_health_report_counts_only_todays_workouts(monkeypatch):
     assert stats["workout_count"] == 1
     assert stats["workout_types"] == ["walking"]
     assert stats["workout_distance_miles"] == 1.0
+
+
+def test_report_notices_carry_the_reports_category():
+    from services.telemetry.main import _report_notice
+
+    note = _report_notice(make_job(), "report_ready", "Ready", "Solid week.", {"report_id": "r1"})
+    assert note["category"] == "reports" and note["user"] == "jeremiah"
+    assert note["tag"] == "report:health:daily"
+    assert note["data"]["report_id"] == "r1" and note["data"]["report_type"] == "health"

@@ -40,6 +40,7 @@ def test_reminder_text_and_once_key():
     assert note["title"] == "Leave by 1:28 pm for Dentist"
     assert note["body"] == "22 min drive to 12 Oak St, Mesa; starts at 2 pm."
     assert note["once"].startswith("leave_by:abc:")
+    assert note["category"] == "leave_by" and note["tag"] == "leave_by:abc"
     late = leave_by.reminder(e, {"duration_s": 4000}, NOW - 60, NOW, TZ)
     assert late["title"] == "Leave now for Dentist" and late["body"].startswith("1 h 07 min drive")
 
@@ -64,5 +65,6 @@ def test_only_your_own_events_remind_you():
 def test_flagged_all_day_events_and_calendar_coordinates():
     allday = ev(1, all_day=True)
     assert leave_by.candidates([allday], NOW) == []
+    assert leave_by.all_day(allday) and leave_by.all_day(ev(-13)) and not leave_by.all_day(ev(1))
     assert leave_by.destination(ev(1, lat=33.42, lon=-111.83)) == "33.420000,-111.830000"
     assert leave_by.destination(ev(1)) == "12 Oak St, Mesa"

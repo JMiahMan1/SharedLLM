@@ -5,9 +5,9 @@ import { useAuth } from '../context/AuthContext';
 import ChatNotify from '../plugins/chatNotify';
 
 /**
- * Android glue that needs the router: once signed in, family chat
- * notifications are switched on (asking for permission the first time), and a
- * tapped notification opens the page it is about.
+ * Android glue that needs the router: once signed in, notifications are
+ * switched on (asking for permission the first time), and a tapped
+ * notification opens the page it is about.
  */
 export default function NativeBridge() {
   const navigate = useNavigate();

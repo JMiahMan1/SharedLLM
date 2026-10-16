@@ -24,6 +24,8 @@ import type { ExecutionResponse } from '../../services/api';
 
 // Date helpers (native, no luxon)
 const DAY_MS = 86_400_000;
+/** Minutes-before choices for phone event reminders (0 = off). */
+const REMINDER_CHOICES = [0, 10, 15, 30, 60, 120];
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
 const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -586,6 +588,16 @@ const CalendarApp = () => {
     addTitleRef.current?.focus();
   };
 
+  // Phone reminders before events (execution calendar_reminders); the zone
+  // is this device's, so "1:25 pm" is the person's own clock.
+  const reminderMinutes = (settingsData?.settings as { reminder_minutes?: number } | undefined)?.reminder_minutes ?? 30;
+  const deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const reminderMutation = useMutation({
+    mutationFn: (minutes: number) => api.updateCalendarSettings({ reminder_minutes: minutes, timezone: deviceZone }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['calendar-settings'] }); toast.success('Reminders updated'); },
+    onError: (e: Error) => toast.error(e.message || 'Failed to update reminders'),
+  });
+
   const savePeopleMutation = useMutation({
     mutationFn: (next: CalendarPerson[]) => api.updateCalendarSettings({ people: next }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['calendar-settings'] }); queryClient.invalidateQueries({ queryKey: ['calendar-app'] }); toast.success('People saved'); },
@@ -863,6 +875,15 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
               </div>
             );
           })}
+          <div className="pt-2 border-t" style={{ borderColor: 'var(--os-line)' }}>
+            <label className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>Phone reminders</span>
+              <select aria-label="Event reminder" value={reminderMinutes} onChange={(e) => reminderMutation.mutate(Number(e.target.value))} className="min-h-11 rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }}>
+                {[...new Set([...REMINDER_CHOICES, reminderMinutes])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{m === 0 ? 'Off' : `${m} min before`}</option>)}
+              </select>
+            </label>
+            <p className="mt-1 text-[10px]" style={{ color: 'var(--os-ink-faint)' }}>All-day events remind at 8:00 am. Times in {deviceZone}.</p>
+          </div>
           <div className="pt-2 border-t" style={{ borderColor: 'var(--os-line)' }}>
             <p className="mb-2 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>iCal Subscriptions</p>
             <div className="flex gap-2">

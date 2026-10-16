@@ -1,0 +1,184 @@
+package com.jarvisos.app;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+/**
+ * A Jarvis notice as telemetry publishes it (docs/PUSH.md): the JSON carried
+ * in the ntfy message's {@code message} field.
+ *
+ * Free of Android imports so the rules (which conversation a chat notice
+ * belongs to, which notification a tag replaces, which actions are usable)
+ * run in plain JVM tests.
+ */
+final class PushNotice {
+    static final int MAX_ACTIONS = 3;
+
+    static final class Action {
+        static final String VIEW = "view";
+        static final String CALLBACK = "callback";
+        static final String REPLY = "reply";
+
+        final String label;
+        final String type;
+        final String url;
+        final String callback;
+        /** The callback's params as JSON text, {@code {}} when none. */
+        final String params;
+
+        Action(String label, String type, String url, String callback, String params) {
+            this.label = label;
+            this.type = type;
+            this.url = url;
+            this.callback = callback;
+            this.params = params;
+        }
+
+        boolean isView() {
+            return VIEW.equals(type);
+        }
+
+        boolean isReply() {
+            return REPLY.equals(type);
+        }
+    }
+
+    final String id;
+    final String category;
+    final String kind;
+    final String title;
+    final String body;
+    /** ntfy's scale, 1 (min) to 5 (urgent). */
+    final int priority;
+    final String tag;
+    /** The in-app page the notice is about, already checked by {@link #safePath}. */
+    final String path;
+    final String dataToken;
+    final List<Action> actions;
+
+    private PushNotice(String id, String category, String kind, String title, String body,
+                       int priority, String tag, String path, String dataToken, List<Action> actions) {
+        this.id = id;
+        this.category = category;
+        this.kind = kind;
+        this.title = title;
+        this.body = body;
+        this.priority = priority;
+        this.tag = tag;
+        this.path = path;
+        this.dataToken = dataToken;
+        this.actions = actions;
+    }
+
+    /** The notice in a stream message, or null when the text is not a notice. */
+    static PushNotice parse(String json) {
+        if (json == null) return null;
+        String trimmed = json.trim();
+        if (trimmed.isEmpty() || trimmed.charAt(0) != '{') return null;
+        JSONObject o;
+        try {
+            o = new JSONObject(trimmed);
+        } catch (JSONException e) {
+            return null;
+        }
+        String title = str(o, "title");
+        String body = str(o, "body");
+        if (title.isEmpty() && body.isEmpty()) return null;
+        JSONObject data = o.optJSONObject("data");
+        String url = data != null ? str(data, "url") : "";
+        String token = data != null ? str(data, "token") : "";
+        String category = str(o, "category");
+        return new PushNotice(
+                str(o, "id"),
+                category.isEmpty() ? PushCategories.GENERAL : category,
+                str(o, "kind"),
+                title.isEmpty() ? "Jarvis" : title,
+                body,
+                clampPriority(o.optInt("priority", 3)),
+                str(o, "tag"),
+                safePath(url),
+                token,
+                actions(o.optJSONArray("actions")));
+    }
+
+    /** A message that is not a notice (sent to the topic by hand): shown as it is. */
+    static PushNotice plain(String id, String title, String body) {
+        return new PushNotice(id == null ? "" : id, PushCategories.GENERAL, "",
+                title == null || title.isEmpty() ? "Jarvis" : title, body == null ? "" : body,
+                3, "", "", "", Collections.<Action>emptyList());
+    }
+
+    private static List<Action> actions(JSONArray list) {
+        List<Action> out = new ArrayList<>();
+        if (list == null) return out;
+        for (int i = 0; i < list.length() && out.size() < MAX_ACTIONS; i++) {
+            JSONObject a = list.optJSONObject(i);
+            if (a == null) continue;
+            String label = str(a, "label");
+            String type = str(a, "type");
+            if (label.isEmpty()) continue;
+            if (Action.VIEW.equals(type)) {
+                String url = safePath(str(a, "url"));
+                if (url.isEmpty()) continue;
+                out.add(new Action(label, type, url, "", "{}"));
+            } else if (Action.CALLBACK.equals(type) || Action.REPLY.equals(type)) {
+                String callback = str(a, "callback");
+                if (callback.isEmpty()) continue;
+                JSONObject params = a.optJSONObject("params");
+                out.add(new Action(label, type, "", callback, params == null ? "{}" : params.toString()));
+            }
+        }
+        return out;
+    }
+
+    boolean isChat() {
+        return chatToken() != null;
+    }
+
+    /**
+     * The conversation a chat notice belongs to: {@code data.token}, else the
+     * {@code chat:<token>} tag. Null for anything that is not a chat message.
+     */
+    String chatToken() {
+        if (!PushCategories.CHAT.equals(category) && !PushCategories.CHAT.equals(kind)) return null;
+        if (!dataToken.isEmpty()) return dataToken;
+        if (tag.startsWith("chat:") && tag.length() > 5) return tag.substring(5);
+        return null;
+    }
+
+    /** Same tag, same notification: a newer notice replaces the older one. */
+    int notificationId() {
+        if (!tag.isEmpty()) return ("tag:" + tag).hashCode();
+        if (!id.isEmpty()) return ("id:" + id).hashCode();
+        return ("text:" + title + "\n" + body).hashCode();
+    }
+
+    static int chatNotificationId(String token) {
+        return ("chat:" + token).hashCode();
+    }
+
+    static int clampPriority(int p) {
+        return Math.max(1, Math.min(5, p));
+    }
+
+    /**
+     * Only a page inside the app may be opened: a path starting with one
+     * slash. Anything else (a full URL, {@code //host}) becomes empty.
+     */
+    static String safePath(String url) {
+        if (url == null || url.length() < 1 || url.charAt(0) != '/') return "";
+        if (url.startsWith("//") || url.startsWith("/\\")) return "";
+        return url;
+    }
+
+    /** A string field, empty when missing or JSON null (org.json differs by platform there). */
+    static String str(JSONObject o, String key) {
+        if (o == null || !o.has(key) || o.isNull(key)) return "";
+        Object v = o.opt(key);
+        return v == null ? "" : String.valueOf(v);
+    }
+}

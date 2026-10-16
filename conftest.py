@@ -101,6 +101,10 @@ _TEST_ENV_DEFAULTS = {
     # pairing tests set it themselves, and the rest must not depend on a
     # developer's .env.
     "JARVIS_HOST": "",
+    # ntfy (docs/PUSH.md): no token in tests, so nothing is published unless
+    # a test sets one against its own fake server.
+    "NTFY_URL": "http://localhost:2586",
+    "NTFY_TOKEN": "",
     "NETWORK_MODE": "bridge",
     "REDIS_URL": "redis://localhost:6379/0",
     "SEARXNG_URL": "http://localhost:8080",

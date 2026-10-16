@@ -69,18 +69,15 @@ async def test_sending_uses_a_once_key_per_day(monkeypatch):
             sent.append((url, json, headers))
             return _Resp()
 
-        async def __aenter__(self):
-            return self
+    from services.common import http
 
-        async def __aexit__(self, *a):
-            return False
-
-    monkeypatch.setattr(reminders.aiohttp, "ClientSession", lambda *a, **kw: _Client())
+    monkeypatch.setattr(http, "get_client", _Client)
     ok = await reminders.send("sam", {"title": "t", "body": "b"}, "2026-10-13", "http://telemetry:11438", "s3")
     assert ok
     url, body, headers = sent[0]
     assert url.endswith("/api/telemetry/notify") and headers == {"X-Internal-Secret": "s3"}
     assert body["once"] == "bible-nudge:2026-10-13" and body["user"] == "sam"
+    assert body["category"] == "bible" and body["tag"] == "bible:reminder"
 
 
 def test_a_failing_reminder_pass_is_logged_and_the_loop_continues(monkeypatch, caplog):

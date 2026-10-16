@@ -440,6 +440,10 @@ async def lifespan(app: FastAPI):
     # Leave-by reminders for calendar events with a location (drive time by road)
     from services.execution.leave_by import leave_by_loop
     leave_by_task = asyncio.create_task(leave_by_loop())
+    # Phone reminders before calendar events, and Home Assistant home notices
+    from services.execution.calendar_reminders import calendar_reminder_loop
+    from services.execution.home_alerts import home_alert_loop
+    reminder_tasks = [asyncio.create_task(calendar_reminder_loop()), asyncio.create_task(home_alert_loop())]
 
     # Start ESPresense BLE presence pipeline (E7: was never invoked)
     from services.config import REDIS_URL as _PRESENCE_REDIS_URL
@@ -513,6 +517,10 @@ async def lifespan(app: FastAPI):
     leave_by_task.cancel()
     with suppress(Exception):
         await leave_by_task
+    for task in reminder_tasks:
+        task.cancel()
+        with suppress(Exception):
+            await task
     with suppress(Exception):
         from services.execution.presence import get_presence_tracker
         await get_presence_tracker().stop()
@@ -3138,6 +3146,20 @@ async def transcribe_workspace_audio(request: Request):
         return _fail(f"Transcription failed: {e!s}", "stt")
 
 
+async def _notify_audiobook_done(req: AudiobookRegenerateRequest, output_mp3: str, all_ok: bool) -> None:
+    """A conversion takes minutes to hours: tell whoever asked when it is done."""
+    from services.common import notify
+
+    user = req.user_context.user if req.user_context else ""
+    if not user or user == "default":
+        return
+    url = f"/workspaces?select={req.workspace_id}" if req.workspace_id else "/workspaces"
+    body = f"{output_mp3} is ready." if all_ok else f"{output_mp3} is ready, with some chapters missing."
+    await notify.send(notify.notice(
+        user, "jobs", "Your audiobook is ready", body, url=url, tag=f"audiobook:{req.workspace_id or ''}",
+        actions=[notify.view_action(url)]))
+
+
 @app.post("/execute/audiobook/regenerate", response_model=ExecutionResult)
 async def execute_audiobook_regenerate(req: AudiobookRegenerateRequest):
     """
@@ -3254,6 +3276,7 @@ async def execute_audiobook_regenerate(req: AudiobookRegenerateRequest):
         "wavs": [{"file": r.get("file"), "wav": r.get("wav"), "bytes": r.get("bytes"), "status": r.get("status")} for r in results],
     }
     status = "SUCCESS" if all_ok else "PARTIAL"
+    await _notify_audiobook_done(req, output_mp3, all_ok)
     return ExecutionResult(
         status=status,
         message=(

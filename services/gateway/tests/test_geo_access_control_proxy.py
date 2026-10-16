@@ -436,14 +436,6 @@ def test_eta_requires_a_viewer_and_forwards_it(anon_client, make_client, monkeyp
     assert call["params"]["viewer"] == "jeremiah" and call["params"]["to"] == "work"
 
 
-def test_presence_alerts_are_your_own_setting(anon_client, make_client, monkeypatch):
-    captured = _patch_geo(monkeypatch, payload={"enabled": False})
-    assert anon_client.get("/api/geo/presence-alerts").status_code == 401
-    assert make_client(user="michele").put("/api/geo/presence-alerts", json={"enabled": False}).status_code == 200
-    call = captured["calls"][-1]
-    assert call["url"].endswith("/presence-alerts/michele") and call["json"] == {"enabled": False}
-
-
 def test_closest_and_routes_forward_the_viewer(anon_client, make_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"people": []})
     assert anon_client.get("/api/geo/closest", params={"to": "home"}).status_code == 401

@@ -19,6 +19,14 @@ describe('Family hub', () => {
     );
   });
 
+  it('opens the tab a notice links to, with On my way and SOS beside the title', async () => {
+    renderWithProviders(<Family />, { route: '/family?tab=create' });
+    expect(await screen.findByTestId('family-create')).toBeInTheDocument();
+    const safety = screen.getByTestId('family-safety');
+    expect(within(safety).getByRole('button', { name: /on my way/i })).toBeInTheDocument();
+    expect(within(safety).getByRole('button', { name: /^sos$/i })).toBeInTheDocument();
+  });
+
   it('switches to Games and Create tabs', async () => {
     const user = userEvent.setup();
     renderWithProviders(<Family />);

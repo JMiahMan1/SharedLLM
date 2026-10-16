@@ -8,7 +8,7 @@ import logging
 
 import pytest
 
-from services.execution import leave_by, watch_glance
+from services.execution import calendar_reminders, home_alerts, leave_by, watch_glance
 
 
 class _Stop(Exception):
@@ -17,7 +17,12 @@ class _Stop(Exception):
 
 @pytest.mark.parametrize(
     "module, loop_name, pass_name",
-    [(watch_glance, "glance_loop", "push_glances"), (leave_by, "leave_by_loop", "remind_once")],
+    [
+        (watch_glance, "glance_loop", "push_glances"),
+        (leave_by, "leave_by_loop", "remind_once"),
+        (calendar_reminders, "calendar_reminder_loop", "remind_once"),
+        (home_alerts, "home_alert_loop", "check_once"),
+    ],
 )
 def test_a_failing_pass_is_logged_and_the_loop_continues(module, loop_name, pass_name, monkeypatch, caplog):
     calls = {"pass": 0, "sleep": 0}

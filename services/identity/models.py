@@ -44,6 +44,9 @@ class User(SQLModel, table=True):  # type: ignore
     avatar: str | None = None
     # The family chat conversation (Talk token) opened on launch.
     chat_default_token: str | None = None
+    # The ntfy topic this person's Jarvis notices go to (docs/PUSH.md):
+    # "jarvis-<user>-<24 random URL-safe chars>", created on first use.
+    push_topic: str | None = None
     git_url: str | None = None
     git_user: str | None = None
 
@@ -484,6 +487,15 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "raven_hung_threshold", "value": "600", "description": "Seconds before a mission is considered hung"},
     {"key": "raven_check_interval", "value": "300", "description": "Interval in seconds between Raven health checks"},
 
+    # --- ADMIN ALERTS (category "admin", docs/PUSH.md) ---
+    {"key": "alert_error_spike_threshold", "value": "20", "description": "Errors in the central log within 5 minutes that send admins an error spike notice"},
+    {"key": "alert_error_repeat_threshold", "value": "10", "description": "Times one error may repeat within 5 minutes before admins get a notice about it"},
+    {"key": "alert_disk_free_percent", "value": "10", "description": "Free space (percent) below which a data disk counts as nearly full; admins hear once per crossing"},
+    {"key": "alert_desktop_down_minutes", "value": "10", "description": "Minutes a desktop GPU service (alpaca audio, image, LLM) must stay unreachable before admins are told"},
+
+    # --- HOME ALERTS (category "home", docs/INTEGRATIONS.md) ---
+    {"key": "home_alert_entities", "value": "[]", "description": "Home Assistant entities that send home notices (JSON list of {entity_id, event, people, minutes, watts}). event is doorbell, motion_away, garage_open, door_unlocked_night, appliance_done or water_leak; people empty = everyone. Edit in Admin > Users & Devices > Home alerts."},
+
     # --- LOCAL TTS HARDWARE ---
     {"key": "system_default_tts_engine", "value": "kokoro", "description": "Global default local TTS engine (kokoro, piper)"},
     {"key": "system_default_tts_voice", "value": "af_heart", "description": "Global default voice style for local TTS"},
@@ -608,3 +620,31 @@ class UserAvatarImage(SQLModel, table=True):  # type: ignore
     mime: str
     data: bytes
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class UserNotificationPreference(SQLModel, table=True):  # type: ignore
+    """Which notice categories a person receives (docs/PUSH.md).
+
+    ``data`` is a JSON object ``{category: bool}``. An absent category is on,
+    except ``admin``, which only admins can receive.
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    data: str = Field(default="{}")
+
+
+class UnifiedPushRegistration(SQLModel, table=True):  # type: ignore
+    """One UnifiedPush registration: one app on one of a person's devices.
+
+    ``topic`` ("up" + 32 random chars) is the ntfy topic outside servers POST
+    to; being unguessable is what protects it. ``token`` is the connector
+    token the app gave the Jarvis distributor.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    device_id: str = Field(index=True)
+    app: str
+    token: str
+    topic: str = Field(index=True, unique=True)
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

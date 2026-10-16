@@ -45,19 +45,43 @@ unreachable" and poll every 30 s instead of every 5 minutes.
   A repeating Nextcloud event is edited or deleted as a whole series, and the
   dialog says so. iCal events open read-only.
 - Sources: enable/disable, add or remove iCal feeds, map calendar accounts to
-  people (colours and names).
+  people (colours and names), and phone reminders (off or 10 to 120 minutes
+  before; saving also records this device's time zone).
 
 ## Background
 
 `services/execution/leave_by.py` (every 5 minutes) reads each person's next
 few hours and sends a "leave by" notice for events with a location (see
-`docs/BACKGROUND_JOBS.md`). There are no other calendar reminders.
+`docs/BACKGROUND_JOBS.md`).
+
+`services/execution/calendar_reminders.py` (every 2 minutes) sends a
+`calendar` phone notice before each of a person's own events, using the same
+reading and the same "whose event is this" rule as leave-by
+(`leave_by.events_for`, `belongs_to`): a household event with nobody's name
+on it reminds nobody. Per-person calendar settings
+(`PUT /api/calendar/settings`):
+
+| Key | Meaning |
+|---|---|
+| `reminder_minutes` | Minutes before an event the notice goes out. Unset = 30, 0 = off, at most 1440. |
+| `timezone` | IANA zone the reminder's clock times and the 8:00 morning use. Unset = the household zone (`timezone` setting). |
+
+A timed event reminds once, when its start is within `reminder_minutes`
+(title "Dentist at 1:25 pm", body "In 25 min at 12 Oak St."). An all-day
+event (flagged, or starting at local midnight) reminds at 8:00 on each day it
+covers, until 10:00; later than that the day's notice is skipped. Telemetry's
+`once` key (`calendar:<event id>:<start>`, or `:<date>` for all-day) keeps a
+reminder from repeating across rounds and restarts.
 
 ## Tests
 
 - `services/execution/tests/test_calendar_handlers.py`,
   `test_calendar_window_and_uid.py`: merge, failures, noise calendars,
   window, recurrence, EXDATE, local time, edit/delete by UID, read-only iCal
+- `services/execution/tests/test_calendar_reminders.py`: lead, off, all-day
+  mornings, per-person zone
+- `services/identity/tests/test_calendar_reminder_settings.py`: the reminder
+  keys are stored and validated
 - `services/gateway/tests/test_calendar_proxy.py`: window forwarding
 - `services/ui/src/components/calendar/CalendarApp.test.tsx`: range per
-  view, edit by id, read-only events
+  view, edit by id, read-only events, reminder setting
