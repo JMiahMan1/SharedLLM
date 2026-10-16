@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import time
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
@@ -179,8 +180,15 @@ def _db():
     return app.state.engine
 
 
-def get_session() -> Session:
-    return Session(_db())
+def get_session() -> Iterator[Session]:
+    """One session per request, closed when the request ends.
+
+    A plain ``return Session(...)`` was never closed: each request kept its
+    database connection until garbage collection, and on 2026-10-16 the 15
+    pooled connections ran out, so every route, /health included, hung.
+    """
+    with Session(_db()) as session:
+        yield session
 
 
 # health / info
