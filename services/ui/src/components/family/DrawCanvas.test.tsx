@@ -66,12 +66,35 @@ describe('DrawCanvas', () => {
     fireEvent.click(screen.getByRole('button', { name: /make it way better/i }));
 
     await waitFor(() => expect(screen.getByTestId('draw-result')).toBeTruthy());
-    expect(editImage).toHaveBeenCalledWith({
-      prompt: 'Make this drawing much better',
-      image: expect.any(String),
-    });
+    expect(editImage).toHaveBeenCalledWith(
+      {
+        prompt: 'Make this drawing much better',
+        image: expect.any(String),
+      },
+      { signal: expect.any(AbortSignal) },
+    );
     const img = screen.getByAltText('Improved drawing') as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('data:image/png;base64,AAAA');
+  });
+
+  it('stops polling when the Create tab is left', async () => {
+    const view = render(<DrawCanvas />);
+    draw();
+
+    editImage.mockImplementation(
+      (_payload, options) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () =>
+            reject(Object.assign(new Error('cancelled'), { name: 'AbortError' })),
+          );
+        }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /make it way better/i }));
+    await waitFor(() => expect(editImage).toHaveBeenCalled());
+    const [, options] = editImage.mock.calls[0];
+    view.unmount();
+    expect(options?.signal?.aborted).toBe(true);
   });
 
   it('reports a backend refusal instead of pretending it worked', async () => {

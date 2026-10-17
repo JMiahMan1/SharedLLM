@@ -28,6 +28,7 @@ export default function DrawCanvas() {
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const touched = useRef(false);
+  const improvingRequest = useRef<AbortController | null>(null);
 
   const ctx = useCallback(() => canvasRef.current?.getContext('2d') ?? null, []);
 
@@ -102,6 +103,10 @@ export default function DrawCanvas() {
     }
   }, []);
 
+  // Leaving the Create tab must stop the job poll, not keep it running and
+  // then set state on an unmounted component.
+  useEffect(() => () => improvingRequest.current?.abort(), []);
+
   const toPng = (): string => {
     try {
       return canvasRef.current?.toDataURL('image/png') ?? '';
@@ -122,10 +127,17 @@ export default function DrawCanvas() {
       setError('Draw something first');
       return;
     }
+    improvingRequest.current?.abort();
+    const controller = new AbortController();
+    improvingRequest.current = controller;
     setImproving(true);
     setError(null);
     try {
-      const edited = await api.editImage({ prompt: 'Make this drawing much better', image: toPng() });
+      const edited = await api.editImage(
+        { prompt: 'Make this drawing much better', image: toPng() },
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
       const raw = edited?.data?.[0]?.b64_json ?? edited?.data?.[0]?.url;
       if (edited?.status === 'SUCCESS' && raw) {
         setResult(raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`);
@@ -133,11 +145,18 @@ export default function DrawCanvas() {
         setError(edited?.message || 'The image backend did not return a picture');
       }
     } catch (err) {
+      // Leaving the tab aborts the poll; that is not a failure to show.
+      if (controller.signal.aborted) return;
       // The gateway's reason (no model configured, backend down) rather than
       // axios's bare "Request failed with status code 502".
       setError(errorText(err, 'Could not improve that drawing'));
     } finally {
-      setImproving(false);
+      if (improvingRequest.current === controller) {
+        improvingRequest.current = null;
+        // An abort means the tab is gone; there is no mounted component left
+        // to show a spinner in.
+        if (!controller.signal.aborted) setImproving(false);
+      }
     }
   };
 
