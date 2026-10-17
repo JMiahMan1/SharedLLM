@@ -76,11 +76,19 @@ RUN pip install --no-cache-dir \
     wakeonlan \
     aioesphomeapi \
     paho-mqtt \
-    openai-whisper \
     dnspython \
     easywebdav \
     html2text \
     && playwright install --with-deps chromium
+
+# Whisper without triton: its metadata requires triton on Linux, but triton
+# (about 900 MB) only compiles GPU kernels and this stack runs on the CPU.
+# Its other dependencies are installed by name; the check fails the build if
+# something brings triton back or Whisper stops importing.
+RUN pip install --no-cache-dir --no-deps openai-whisper \
+    && pip install --no-cache-dir more-itertools numba tiktoken tqdm \
+    && python -c "import whisper" \
+    && ! pip show triton >/dev/null 2>&1
 
 # Testing and dev tools, available in all containers for debugging
 RUN pip install --no-cache-dir \
