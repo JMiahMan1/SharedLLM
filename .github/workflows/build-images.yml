@@ -61,9 +61,10 @@ jobs:
         with:
           base: ${{ steps.base.outputs.ref }}
           filters: |
+            # Only what the base image is built from: it copies no source,
+            # and rebuilding it makes every deploy pull gigabytes again.
             base:
               - 'docker/Dockerfile.base'
-              - 'services/common/**'
               - '.github/workflows/build-images.yml'
             caddy:
               - 'Caddyfile'
