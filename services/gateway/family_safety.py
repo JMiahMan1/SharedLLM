@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from services.common import notify
 from services.common.http import get_client
+from services.gateway import notices
 from services.gateway.config import GEO_SVC, IDENTITY_SVC, INTERNAL_SECRET
 
 log = logging.getLogger("gateway.family_safety")
@@ -178,6 +179,15 @@ async def sos(request: Request):
         await _end_cooldown(cooldown)
 
     return {"status": "SUCCESS", "sent": sent, "family": len(family), "located": link is not None}
+
+
+@router.post("/api/phone/find")
+async def find_phone(request: Request):
+    """Ring the caller's phone. The watch's Find my phone button calls this."""
+    user = await _caller(request)
+    if not await notices.find_phone(user):
+        raise HTTPException(status_code=502, detail="Could not reach your phone")
+    return {"status": "SUCCESS", "message": "Your phone is ringing."}
 
 
 def place_payload(body: Any, family: list[str]) -> dict[str, Any]:

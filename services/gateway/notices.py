@@ -115,6 +115,21 @@ async def check_songs_once(r, client=None) -> int:
     return sent
 
 
+# --------------------------------------------------------------- find phone
+
+
+async def find_phone(user: str) -> bool:
+    """Ring the person's phone: the watch's Find my phone button.
+
+    Priority 5 on ``family_safety`` because this is how someone finds a lost
+    phone; the Android app answers it with the alarm stream and a Stop action.
+    """
+    return await notify.send(notify.notice(
+        user, "family_safety", "Find my phone", "Your phone is ringing.",
+        priority=5, tag="find_phone", kind="find_phone", data={"find_phone": True},
+    ))
+
+
 # ------------------------------------------------------------------ pictures
 
 

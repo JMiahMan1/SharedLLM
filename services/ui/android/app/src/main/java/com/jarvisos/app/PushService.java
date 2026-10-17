@@ -92,6 +92,7 @@ public class PushService extends Service {
     }
 
     public static void stop(Context context) {
+        FindPhoneService.stop(context);
         PushNotifier.clearConversations();
         command(context, ACTION_STOP);
     }
@@ -330,6 +331,11 @@ public class PushService extends Service {
     /** A Jarvis notice from the stream or the long poll. */
     private void show(PushNotice notice) {
         try {
+            if (notice.isFindPhone()) {
+                // The service posts its own ongoing notification with Stop.
+                FindPhoneService.start(this);
+                return;
+            }
             PushNotifier.show(this, notice);
         } catch (Exception e) {
             // One bad notice must not end the stream or the poll.
