@@ -117,7 +117,7 @@ export default function FocusReader({
         }}
         {...swipe}
         data-testid="bible-focus-text"
-        className="block w-full max-w-2xl mx-auto px-5 pb-[max(4rem,env(safe-area-inset-bottom))] pt-6 text-left min-h-[80vh]"
+        className="block w-full max-w-2xl mx-auto px-5 pb-clear-bottom-bar pt-6 text-left min-h-[80vh]"
       >
         {loading && verses.length === 0 && (
           <p className="py-10 text-center text-sm text-[var(--page-muted)]" data-testid="bible-focus-loading">

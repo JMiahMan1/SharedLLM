@@ -190,7 +190,7 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
     // animation leaves a transform on an ancestor, which otherwise pins the
     // overlay to the page instead of the screen.
     return createPortal(
-      <div className={`fixed inset-0 z-50 flex flex-col p-4 md:p-8 animate-fade-up ${expandedClassName ?? 'bg-slate-950/98 backdrop-blur-xl'}`}>
+      <div className={`fixed inset-0 z-50 flex flex-col px-4 md:px-8 pt-[max(1rem,env(safe-area-inset-top))] md:pt-8 pb-clear-system-bar animate-fade-up ${expandedClassName ?? 'bg-slate-950/98 backdrop-blur-xl'}`}>
         {/* Close strip */}
         <div className="flex items-center justify-between mb-6 max-w-7xl mx-auto w-full shrink-0">
           <div className="flex items-center gap-3">

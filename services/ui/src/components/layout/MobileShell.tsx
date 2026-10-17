@@ -27,10 +27,7 @@ const MobileShell = ({ children }: MobileShellProps) => {
         <ServerConfigBanner />
         <Header />
       </div>
-      <main 
-        className="flex-1 overflow-y-auto overflow-x-hidden p-4 scroll-smooth transition-all duration-300" 
-        style={{ paddingBottom: showBottomNav ? 'calc(5.5rem + env(safe-area-inset-bottom, 0px))' : '1rem' }}
-      >
+      <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-clear-bottom-bar scroll-smooth transition-all duration-300">
         {children}
       </main>
       {showBottomNav && (
