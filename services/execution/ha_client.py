@@ -35,6 +35,9 @@ def authorize_action(user_context: dict, domain: str, action: str) -> bool:
     only as sensitive as the thermostat it belongs to.
     """
     is_admin = user_context.get("is_admin", False)
+    # A voice can be imitated or replayed, so recognising one never opens the
+    # house, whoever it sounds like.
+    by_voice = user_context.get("identified_by") == "voice"
 
     # SENSITIVE ACTIONS (Admins Only)
     sensitive_actions = {
@@ -43,8 +46,9 @@ def authorize_action(user_context: dict, domain: str, action: str) -> bool:
         "alarm_control_panel": ["alarm_disarm"],
     }
 
-    if domain in sensitive_actions and action in sensitive_actions[domain] and not is_admin:
-        log.warning(f"[Security] BLOCK: Non-admin user '{user_context.get('user')}' attempted '{action}' on '{domain}'")
+    if domain in sensitive_actions and action in sensitive_actions[domain] and (by_voice or not is_admin):
+        reason = "recognised by voice" if by_voice else "non-admin"
+        log.warning(f"[Security] BLOCK: {reason} user '{user_context.get('user')}' attempted '{action}' on '{domain}'")
         return False
 
     return True

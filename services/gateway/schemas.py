@@ -53,6 +53,8 @@ class ResolvedCredentials(BaseModel):
     mass_url: str | None = None
     mass_token: str | None = None
     is_admin: bool = False
+    #: "voice" when the chat request's speaker was recognised by voice alone.
+    identified_by: str | None = None
 
     @field_validator(
         "github_token", "nextcloud_url", "nextcloud_user", "nextcloud_pass",

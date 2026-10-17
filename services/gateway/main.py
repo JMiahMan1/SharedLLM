@@ -2716,6 +2716,23 @@ def _mission_requires_github_auth(query: str) -> bool:
     return any(sig in q for sig in _GITHUB_AUTH_SIGNALS)
 
 
+async def _recognised_speaker(query: str) -> str | None:
+    """Who said ``query`` at a voice satellite just now (services/common/voice_speaker)."""
+    from services.common import voice_speaker
+    from services.gateway.cache import get_redis
+
+    key = voice_speaker.key(query)
+    if not key:
+        return None
+    try:
+        # Used once: a second request with the same words is not this one.
+        raw = await asyncio.to_thread(get_redis().getdel, key)
+    except Exception as e:  # recognition is optional
+        log.warning(f"[ChatHandler] voice speaker lookup failed: {e}")
+        return None
+    return voice_speaker.decode(raw)
+
+
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks=None):
@@ -2788,10 +2805,23 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(err_msg, "unknown", "model_config_error")
         return _make_ollama_response(err_msg, "unknown", "model_config_error")
 
+    # A voice satellite's request names nobody; if the speech-to-text proxy
+    # recognised who said these words, answer as them. A client never names a
+    # voice itself: that would let any caller claim to be anyone.
+    body.pop("voice_id", None)
+    voice_speaker_name = None
+    if not any(body.get(k) for k in ("api_key", "user_id", "rag_user")):
+        voice_speaker_name = await _recognised_speaker(query)
+        if voice_speaker_name:
+            body["voice_id"] = voice_speaker_name
+
     try:
         creds_data = await resolve_identity(body)
         creds = ResolvedCredentials(**creds_data)
         user_id = creds.user
+        if voice_speaker_name and creds.user == voice_speaker_name:
+            creds.identified_by = "voice"
+            log.info(f"[ChatHandler] Answering as {user_id}, recognised by voice")
     except HTTPException as he:
         if he.status_code == 401:
             msg = "Authentication failed. Please log in or provide a valid API key."
