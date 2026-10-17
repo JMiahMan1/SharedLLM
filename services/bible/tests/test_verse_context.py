@@ -7,6 +7,9 @@ translation and verse, and a failed generation leaves the old note readable
 instead of replacing it with an error or an empty string.
 """
 
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -260,3 +263,56 @@ def test_the_context_route_requires_the_internal_secret(loaded_client: TestClien
         headers={"X-Internal-Secret": "wrong"},
     )
     assert resp.status_code == 403
+
+
+# the warm-up loop
+
+
+def _sleeps_until_stopped(monkeypatch, stop_after: int) -> list[int]:
+    """Replace the loop's sleep, stopping the otherwise endless task."""
+    sleeps: list[int] = []
+
+    async def sleep(seconds: int) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) >= stop_after:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(
+        verse_context,
+        "asyncio",
+        SimpleNamespace(sleep=sleep, CancelledError=asyncio.CancelledError),
+    )
+    return sleeps
+
+
+def test_a_failed_warm_up_pass_is_retried_after_a_minute(engine, monkeypatch):
+    sleeps = _sleeps_until_stopped(monkeypatch, 1)
+
+    def pick(session):
+        raise RuntimeError("the gateway is still restarting")
+
+    monkeypatch.setattr(verse_context.votd, "pick", pick)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(verse_context.ensure_daily_loop(lambda: engine, "url", "secret"))
+    assert sleeps == [verse_context.RETRY_SECONDS]
+
+
+def test_repeated_failures_back_off_to_the_normal_interval(engine, monkeypatch):
+    sleeps = _sleeps_until_stopped(monkeypatch, 2)
+
+    def pick(session):
+        raise RuntimeError("the gateway is still restarting")
+
+    monkeypatch.setattr(verse_context.votd, "pick", pick)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(verse_context.ensure_daily_loop(lambda: engine, "url", "secret"))
+    assert sleeps == [verse_context.RETRY_SECONDS, verse_context.RETRY_SECONDS * 2]
+
+
+def test_a_successful_pass_waits_for_the_normal_interval(engine, monkeypatch):
+    sleeps = _sleeps_until_stopped(monkeypatch, 1)
+    monkeypatch.setattr(verse_context.votd, "pick", lambda session: VERSE)
+    monkeypatch.setattr(verse_context, "cached", lambda session, verse: object())
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(verse_context.ensure_daily_loop(lambda: engine, "url", "secret"))
+    assert sleeps == [verse_context.INTERVAL_SECONDS]

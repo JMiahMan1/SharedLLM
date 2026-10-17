@@ -874,7 +874,8 @@ order), **weekly set** (Sunday review of the week's due verses).
   and the installed study notes. The answer is cached per translation+verse,
   so every surface showing that verse gets it from `/verse-of-day` and
   `/daily` without calling the model again. A background pass fills today's
-  missing note at startup and every 30 minutes; the panel's refresh button
+  missing note at startup and every 30 minutes, retrying quickly if the first
+  pass starts before the gateway is ready; the panel's refresh button
   regenerates it, and a failed refresh leaves the previous note readable.
 - **Fail-fast**: no gateway URL, an HTTP error, a non-JSON body, an
   unreachable model or an empty reply each become a named 503 carrying the
