@@ -42,6 +42,10 @@ WINDOW_VERSES = 8
 #: missing note immediately, and midnight is allowed to be a little late.
 INTERVAL_SECONDS = 30 * 60
 
+#: A failed pass (for example the gateway is still restarting) is retried
+#: quickly before settling back into the half-hourly cadence.
+RETRY_SECONDS = 60
+
 CONTEXT_SYSTEM_PROMPT = (
     "You are a careful Bible study helper for a family. Explain the context of "
     "the verse you are given: who is speaking or writing and to whom, what is "
@@ -265,8 +269,10 @@ async def ensure_daily_loop(
 
     The first pass runs at startup, so a restart fills a missing note without
     waiting for somebody to press Get context. A failure is logged and retried
-    on the next pass; it never stops the service or another reader's request.
+    after a minute, backing off to the normal interval; it never stops the
+    service or another reader's request.
     """
+    retry = RETRY_SECONDS
     while True:
         try:
             with Session(engine_factory()) as session:
@@ -285,4 +291,9 @@ async def ensure_daily_loop(
             log.info("[Bible] verse context waiting for a corpus: %s", exc)
         except Exception as exc:  # noqa: BLE001 - the loop must survive a bad pass
             log.warning("[Bible] verse context pass failed: %s: %s", type(exc).__name__, exc)
-        await asyncio.sleep(interval)
+        else:
+            retry = RETRY_SECONDS
+            await asyncio.sleep(interval)
+            continue
+        await asyncio.sleep(retry)
+        retry = min(interval, retry * 2)
