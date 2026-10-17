@@ -276,3 +276,15 @@ async def test_cache_stays_bounded(monkeypatch):
     for i in range(cache._max_entries + 25):
         cache.remember(f"user{i}", EntityPermissions())
     assert len(cache) <= cache._max_entries
+
+
+def test_a_role_can_grant_every_unlocked_entity():
+    perms = entity_access._permissions_from_payload({
+        "device_ids": [],
+        "protected_entity_ids": ["lock.front_door"],
+        "permitted_entity_ids": [],
+        "all_unprotected": True,
+    })
+    assert perms.may_control("light.anything")
+    # A lock still wins: only a permit (or a role with locked devices) opens it.
+    assert not perms.may_control("lock.front_door")

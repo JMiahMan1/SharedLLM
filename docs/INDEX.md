@@ -32,6 +32,7 @@
 - `docs/CALENDAR.md`: merged Nextcloud/Skylight/iCal agenda, windows, repeats, edit by UID
 - `docs/ARCADE_INTEGRATION.md`: Alpaca arcade games in the Family hub
 - `docs/ENTITY_PROTECTION.md`: locking Home Assistant entities to admins and chosen users
+- `docs/ROLES.md`: roles and permissions short of admin, and devices shared by several users
 - `docs/THEMES.md`: Jarvis-wide theme packs, import/export, widget tinting
 
 ## Media

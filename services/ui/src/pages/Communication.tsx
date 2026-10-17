@@ -47,7 +47,10 @@ const Communication = () => {
   const { data: mediaTargets = EMPTY_DEVICES } = useQuery<DeviceAssignment[], Error, DeviceAssignment[]>({
     queryKey: ['devices'],
     queryFn: () => api.getDevices(),
-    select: (data) => data.filter((device) => device.device_id.startsWith('media_player.')),
+    // One row per person who may use a speaker; list each speaker once.
+    select: (data) => [
+      ...new Map(data.filter((d) => d.device_id.startsWith('media_player.')).map((d) => [d.device_id, d])).values(),
+    ],
   });
 
   useEffect(() => {

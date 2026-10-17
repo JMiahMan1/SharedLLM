@@ -482,24 +482,32 @@ export const server = setupServer(
   http.get('/api/users/devices', () => HttpResponse.json(devices)),
   http.post('/api/users/devices', async ({ request }) => {
     const body = await request.json() as Record<string, unknown>;
-    const existing = devices.find((device) => device.device_id === body.device_id);
+    // One row per (device, user), like Identity: sharing adds, never moves.
+    const existing = devices.find((device) => device.device_id === body.device_id && device.username === body.username);
+    if (existing) return HttpResponse.json(existing);
     const user = users.find((entry) => entry.username === body.username);
     const saved = {
-      id: existing?.id || devices.length + 1,
+      id: devices.length + 1,
       device_id: body.device_id,
       user_id: user?.id || 1,
       username: body.username,
     };
-    devices = existing
-      ? devices.map((device) => device.device_id === body.device_id ? saved : device)
-      : [...devices, saved];
+    devices = [...devices, saved];
     return HttpResponse.json(saved);
   }),
-  http.delete('/api/devices/:deviceId', ({ params }) => {
+  http.delete('/api/devices/:deviceId', ({ params, request }) => {
     const deviceId = decodeURIComponent(String(params.deviceId));
-    devices = devices.filter((device) => device.device_id !== deviceId);
+    const username = new URL(request.url).searchParams.get('username');
+    devices = devices.filter((device) => device.device_id !== deviceId || (username !== null && device.username !== username));
     return HttpResponse.json({ status: 'SUCCESS' });
   }),
+  http.get('/api/users/roles', () => HttpResponse.json({
+    permissions: [
+      { key: 'devices.use_all', description: 'Control every device that is not locked' },
+      { key: 'devices.assign', description: 'Choose who can use each device' },
+    ],
+    roles: [{ id: 1, name: 'Home manager', description: 'Runs the house.', permissions: ['devices.use_all', 'devices.assign'], builtin: true, members: [] }],
+  })),
   http.post('/api/discovery/sync', () => HttpResponse.json({ status: 'SUCCESS', entities_count: devices.length })),
   http.get('/api/settings', () => HttpResponse.json(settings)),
   http.patch('/api/settings/:key', async ({ params, request }) => {

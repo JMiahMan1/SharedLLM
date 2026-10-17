@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { UserWidgetSettings } from '../types/widget';
 
-const authState = { user: { username: 'kid', is_admin: false }, role: 'user' };
+const authState = { user: { username: 'kid', is_admin: false }, role: 'user', can: () => false };
 vi.mock('../context/AuthContext', () => ({ useAuth: () => authState }));
 vi.mock('../plugins/tokenBridge', () => ({ default: { refreshWidgets: vi.fn() } }));
 vi.mock('../services/api', () => ({

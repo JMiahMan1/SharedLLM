@@ -117,6 +117,9 @@ export interface UserProfileRaw {
   role?: 'admin' | 'user';
   is_admin?: boolean;
   is_system_default?: boolean;
+  /** Roles this user holds, and the permissions they add up to (all for an admin). */
+  role_ids?: number[];
+  permissions?: string[];
   /** Credential fields that hold a saved value (names only, never values). */
   saved_credentials?: string[];
   nextcloud_url?: string | null;
@@ -236,11 +239,30 @@ export interface DiscoveredUser {
   mail_address?: string;
 }
 
+/** A named set of permissions given to users (services/identity/roles.py). */
+export interface Role {
+  id: number;
+  name: string;
+  description: string;
+  permissions: string[];
+  /** Seeded by Jarvis: can be edited, not deleted. */
+  builtin: boolean;
+  members: string[];
+}
+
+export interface RoleCatalog {
+  /** Every permission a role can hold, with what it allows. */
+  permissions: { key: string; description: string }[];
+  roles: Role[];
+}
+
+/** One user's use of a Home Assistant entity; a device can have several. */
 export interface DeviceAssignment {
   id: number;
   device_id: string;
   user_id: number;
   username: string;
+  revoked?: boolean;
 }
 
 /**

@@ -100,7 +100,7 @@ describe('Admin page', () => {
     fireEvent.change(screen.getByLabelText('Device User'), {
       target: { value: 'default' },
     });
-    fireEvent.click(screen.getByText('Save Assignment'));
+    fireEvent.click(screen.getByText('Add person'));
 
     expect(await screen.findByText('media_player.kitchen_echo')).toBeInTheDocument();
 

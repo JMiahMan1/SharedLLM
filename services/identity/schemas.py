@@ -203,6 +203,10 @@ class UserRead(BaseModel):
     display_name: str
     is_admin: bool
     is_system_default: bool
+    #: Ids of the roles this user holds, and the permissions they add up to
+    #: (every permission for an admin). Filled by Identity, not stored.
+    role_ids: list[int] = []
+    permissions: list[str] = []
     nextcloud_url: str | None = None
     nextcloud_user: str | None = None
     ha_url: str | None = None
@@ -256,7 +260,7 @@ class UserRead(BaseModel):
 class DeviceAssignmentCreate(BaseModel):
     device_id: str
     username: str  # resolved to user_id on server
-    revoked: bool = False  # not used on create, but included for schema completeness
+    revoked: bool = False
 
 
 class DeviceAssignmentRead(BaseModel):
@@ -265,6 +269,25 @@ class DeviceAssignmentRead(BaseModel):
     user_id: int
     username: str
     revoked: bool = False
+
+
+class RoleWrite(BaseModel):
+    name: str
+    description: str = ""
+    permissions: list[str] = []
+
+
+class RoleRead(BaseModel):
+    id: int
+    name: str
+    description: str
+    permissions: list[str]
+    builtin: bool
+    members: list[str]
+
+
+class UserRolesUpdate(BaseModel):
+    role_ids: list[int]
 
 
 class EntityProtectionUpdate(BaseModel):

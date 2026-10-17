@@ -7,12 +7,14 @@ Identity is the single authority. It answers one question per user:
       device_ids            -> plain DeviceAssignment grants (unprotected entities)
       protected_entity_ids  -> every locked entity (NOT a grant; only says it is locked)
       permitted_entity_ids  -> the locked entities this user may actually control
+      all_unprotected       -> a role lets this user control every unlocked entity
 
 Two rules, and they are the whole feature:
 
 1. Protection wins. A locked entity ignores its DeviceAssignment row entirely;
-   only admins (plus Identity's system-default user) and the entity's own permit
-   list may control it.
+   only admins (plus Identity's system-default user, and anyone whose role
+   allows locked devices; Identity lists those as permitted) and the entity's
+   own permit list may control it.
 2. Visibility follows control. An entity you may not control is not listed at
    all, so a locked entity simply does not exist as far as your UI is concerned.
 
@@ -80,6 +82,8 @@ class EntityPermissions:
     # `assigned`, because a magic id would have to be honoured by every
     # membership test and would leak into payloads and comparisons.
     unrestricted: bool = False
+    # A role grants every unlocked entity, assigned or not.
+    all_unprotected: bool = False
 
     def may_control(self, entity_id: str) -> bool:
         """Protection wins: a locked entity ignores its assignment row."""
@@ -89,7 +93,7 @@ class EntityPermissions:
             return True
         if entity_id in self.protected:
             return entity_id in self.permitted
-        return entity_id in self.assigned
+        return self.all_unprotected or entity_id in self.assigned
 
     def may_view(self, entity_id: str) -> bool:
         """Same predicate as control: we do not advertise what you cannot use."""
@@ -119,7 +123,9 @@ def _permissions_from_payload(data: object) -> EntityPermissions:
     A bare list is still accepted for `device_ids` so a partially-rolled-back
     Identity cannot hard-break every control path.
     """
+    all_unprotected = False
     if isinstance(data, dict):
+        all_unprotected = data.get("all_unprotected") is True
         assigned = _id_set(data.get("device_ids") or data.get("entities") or [])
         protected = _id_set(data.get("protected_entity_ids") or [])
         permitted = _id_set(data.get("permitted_entity_ids") or [])
@@ -131,7 +137,9 @@ def _permissions_from_payload(data: object) -> EntityPermissions:
     # A permit for something that is not locked is meaningless; ignore it rather
     # than letting it widen access later if the entity ever gets locked.
     permitted = permitted & protected
-    return EntityPermissions(assigned=assigned, protected=protected, permitted=permitted)
+    return EntityPermissions(
+        assigned=assigned, protected=protected, permitted=permitted, all_unprotected=all_unprotected,
+    )
 
 
 async def _fetch_permissions(username: str) -> EntityPermissions:
