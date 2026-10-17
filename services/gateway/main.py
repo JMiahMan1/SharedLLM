@@ -5759,9 +5759,28 @@ async def music_song_cancel(request: Request, job_id: str):
     return _music_job_answer(resp.status, result)
 
 
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def _run_in_background(coro) -> None:
+    """Schedule a fire-and-forget coroutine and keep a strong reference.
+
+    asyncio only keeps a weak reference to a running task, so without this the
+    task can be collected mid-flight.
+    """
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+
 @app.post("/api/images/edit")
 async def sd_image_edit_proxy(request: Request):
     """Edit a picture sent as a data: URL (Family > Create's drawing pass).
+
+    This is the original synchronous route. It stays for older app builds, but
+    it holds the request open for the whole edit, which can be minutes. The
+    current UI starts a job at ``POST /api/images/edit/jobs`` and polls it, so
+    no proxy has to keep a request alive that long.
 
     Runs through the execution service's inline image edit, which uses the
     same image_edit_model and llm_local_url proxy as the workspace edit and
@@ -5769,14 +5788,71 @@ async def sd_image_edit_proxy(request: Request):
     forward the JSON body to the legacy ALPACA_SD_URL, which the server cannot
     reach and which only takes multipart, so every drawing came back 502.
     Answers ``{"status": "SUCCESS", "data": [{"b64_json": ...}]}`` or a
-    ``FAILURE`` with the reason. Long timeout: CPU-offloaded edits take minutes.
+    ``FAILURE`` with the reason.
     """
     if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     body = await request.json()
+    payload, error = _image_edit_payload(body)
+    if error:
+        return JSONResponse(status_code=400, content={"status": "ERROR", "message": error})
+    status, result = await _execute_image_edit(payload)
+    if status != 200:
+        return JSONResponse(status_code=status, content=result)
+    answer = _image_edit_answer(result)
+    if answer["status"] == "SUCCESS" and (user := await _user_id_from_request(request)):
+        _run_in_background(notices.picture_ready(user))
+    return answer
+
+
+# Inline drawing edits run on a CPU-offloaded model for minutes. Holding one
+# HTTP request open that long failed as soon as a proxy had a shorter timeout
+# (the public nginx used its 60s default and answered 504, which the old app
+# retried as a fresh edit). Jobs are ephemeral and in-memory: a result is a few
+# hundred KB, and losing one on a gateway restart is better than a database
+# table for a drawing. The UI starts a job and polls its status.
+_IMAGE_EDIT_JOBS: dict[str, dict] = {}
+_IMAGE_EDIT_JOB_TTL_SECONDS = 3600.0
+_IMAGE_EDIT_JOB_MAX = 50
+
+
+def _purge_image_edit_jobs(now: float | None = None) -> None:
+    """Drop finished jobs past their TTL and keep the registry bounded."""
+    current = time.monotonic() if now is None else now
+    for job_id, job in list(_IMAGE_EDIT_JOBS.items()):
+        if current - job["created_at"] > _IMAGE_EDIT_JOB_TTL_SECONDS:
+            _IMAGE_EDIT_JOBS.pop(job_id, None)
+    if len(_IMAGE_EDIT_JOBS) <= _IMAGE_EDIT_JOB_MAX:
+        return
+    finished = sorted(
+        (job_id for job_id, job in _IMAGE_EDIT_JOBS.items() if job["status"] not in ("PENDING", "RUNNING")),
+        key=lambda job_id: _IMAGE_EDIT_JOBS[job_id]["created_at"],
+    )
+    for job_id in finished[: len(_IMAGE_EDIT_JOBS) - _IMAGE_EDIT_JOB_MAX]:
+        _IMAGE_EDIT_JOBS.pop(job_id, None)
+
+
+def _image_edit_job_view(job_id: str, job: dict) -> dict:
+    """A job as the UI reads it. The source image stays on the server."""
+    view = {"status": job["status"], "job_id": job_id}
+    if job["status"] == "SUCCESS":
+        view["data"] = job.get("data") or []
+        if job.get("model"):
+            view["model"] = job["model"]
+    elif job["status"] == "FAILURE":
+        view["message"] = job.get("message") or "The image backend did not return a picture."
+    return view
+
+
+def _image_edit_payload(body: dict) -> tuple[dict | None, str | None]:
+    """Validate a drawing request and keep only the fields execution accepts."""
     if not str(body.get("image") or "").strip() or not str(body.get("prompt") or "").strip():
-        return JSONResponse(status_code=400, content={"status": "ERROR", "message": "image and prompt are required."})
-    payload = {key: body.get(key) for key in ("image", "prompt", "size", "model")}
+        return None, "image and prompt are required."
+    return {key: body.get(key) for key in ("image", "prompt", "size", "model")}, None
+
+
+async def _execute_image_edit(payload: dict) -> tuple[int, dict]:
+    """Ask execution for one inline edit. Backend failures are returns, not raises."""
     try:
         async with shared_http_client() as client:
             resp = await client.post(
@@ -5789,16 +5865,114 @@ async def sd_image_edit_proxy(request: Request):
                 result = await resp.json()
             except Exception:
                 result = {"status": "ERROR", "message": (await resp.text())[:500]}
-    except Exception as exc:
-        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Image edit failed: {exc}"})
+    except Exception as exc:  # reported to the caller
+        return 502, {"status": "ERROR", "message": f"Image edit failed: {exc}"}
     if resp.status != 200 or not isinstance(result, dict):
-        return JSONResponse(status_code=resp.status if resp.status != 200 else 502, content=result)
-    b64 = (result.get("detail") or {}).get("b64_json")
+        return (resp.status if resp.status != 200 else 502), result
+    return 200, result
+
+
+def _image_edit_answer(result: dict) -> dict:
+    """The drawing canvas's shape, from execution's ExecutionResult."""
+    detail = result.get("detail") or {}
+    b64 = detail.get("b64_json")
     if result.get("status") == "SUCCESS" and b64:
-        if user := await _user_id_from_request(request):
-            asyncio.create_task(notices.picture_ready(user))
-        return {"status": "SUCCESS", "data": [{"b64_json": b64}], "model": result["detail"].get("model")}
-    return {"status": "FAILURE", "message": result.get("message") or "The image backend did not return a picture."}
+        answer = {"status": "SUCCESS", "data": [{"b64_json": b64}]}
+        if detail.get("model"):
+            answer["model"] = detail["model"]
+        return answer
+    return {
+        "status": "FAILURE",
+        "message": result.get("message") or "The image backend did not return a picture.",
+    }
+
+
+def _find_image_edit_job(request_id: str, user: str | None) -> tuple[str, dict] | None:
+    """An existing job for this idempotency key, if one is still in the registry."""
+    if not request_id:
+        return None
+    for job_id, job in _IMAGE_EDIT_JOBS.items():
+        if job.get("request_id") == request_id and job.get("user") == user:
+            return job_id, job
+    return None
+
+
+def _schedule_image_edit_job(job_id: str) -> None:
+    """Run the edit independently of the request that started it."""
+    _run_in_background(_run_image_edit_job(job_id))
+
+
+async def _run_image_edit_job(job_id: str) -> None:
+    job = _IMAGE_EDIT_JOBS.get(job_id)
+    if job is None:
+        return
+    job["status"] = "RUNNING"
+    try:
+        status, result = await _execute_image_edit(job.pop("payload", {}) or {})
+    except Exception as exc:  # a task must not die with the job PENDING
+        status, result = 502, {"status": "ERROR", "message": f"Image edit failed: {exc}"}
+    job = _IMAGE_EDIT_JOBS.get(job_id)
+    if job is None:
+        return
+    if status == 200:
+        job.update(_image_edit_answer(result))
+    else:
+        job.update({
+            "status": "FAILURE",
+            "message": (result or {}).get("message") or f"The image backend returned {status}.",
+        })
+    job["updated_at"] = time.monotonic()
+    if job["status"] == "SUCCESS" and job.get("user"):
+        _run_in_background(notices.picture_ready(job["user"]))
+
+
+@app.post("/api/images/edit/jobs")
+async def sd_image_edit_job_start(request: Request):
+    """Start a drawing edit and answer at once with a job to poll.
+
+    The edit itself takes minutes; a phone should not have to keep one HTTP
+    request open across every proxy on the way. ``request_id`` is optional and
+    makes the start idempotent, so a repeated tap or a network retry returns
+    the existing job instead of starting a second GPU edit.
+    """
+    if not await _sd_request_authorized(request):
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
+    body = await request.json()
+    payload, error = _image_edit_payload(body)
+    if error:
+        return JSONResponse(status_code=400, content={"status": "ERROR", "message": error})
+    user = await _user_id_from_request(request)
+    request_id = str(body.get("request_id") or "").strip()[:128]
+    _purge_image_edit_jobs()
+    existing = _find_image_edit_job(request_id, user)
+    if existing is not None:
+        job_id, job = existing
+        return JSONResponse(status_code=202, content=_image_edit_job_view(job_id, job))
+    job_id = uuid.uuid4().hex
+    now = time.monotonic()
+    _IMAGE_EDIT_JOBS[job_id] = {
+        "status": "PENDING",
+        "created_at": now,
+        "updated_at": now,
+        "payload": payload,
+        "request_id": request_id or None,
+        "user": user,
+    }
+    _schedule_image_edit_job(job_id)
+    return JSONResponse(status_code=202, content={"status": "PENDING", "job_id": job_id})
+
+
+@app.get("/api/images/edit/jobs/{job_id}")
+async def sd_image_edit_job_status(request: Request, job_id: str):
+    """Where a drawing edit is, or its finished picture."""
+    if not await _sd_request_authorized(request):
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
+    if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+        return JSONResponse(status_code=404, content={"status": "ERROR", "message": "No such image edit"})
+    job = _IMAGE_EDIT_JOBS.get(job_id)
+    if job is None:
+        return JSONResponse(status_code=404, content={"status": "ERROR", "message": "No such image edit"})
+    return _image_edit_job_view(job_id, job)
 
 
 @app.get("/api/ai/capabilities")

@@ -400,6 +400,105 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+/**
+ * Whether a failed request may be replayed.
+ *
+ * Only idempotent requests are safe to repeat. A proxy that gives up before a
+ * slow endpoint answers (the public nginx cuts off at its default 60s) returns
+ * 504, and retrying a POST there starts a second copy of the same side effect:
+ * two drawing edits, two sent messages. GET/HEAD/OPTIONS can be repeated
+ * without that. Kept separate from the interceptor so the rule is testable.
+ */
+export function isRetryableRequest(
+  method: string | undefined,
+  status: number | undefined,
+  code: string | undefined,
+): boolean {
+  const verb = (method || 'GET').toUpperCase();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(verb)) return false;
+  return Boolean(
+    (status && [408, 503, 504].includes(status)) ||
+      (code && ['ECONNABORTED', 'ERR_NETWORK', 'ECONNREFUSED', 'ENOTFOUND'].includes(code)),
+  );
+}
+
+export type ImageEditResult = {
+  status: string;
+  data?: Array<{ url?: string; b64_json?: string }>;
+  message?: string;
+  model?: string;
+  job_id?: string;
+};
+
+function isNotFound(error: unknown): boolean {
+  return (error as { response?: { status?: number } } | null)?.response?.status === 404;
+}
+
+function abortedError(): Error {
+  const error = new Error('Image edit cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
+/**
+ * Poll an image-edit job until it finishes.
+ *
+ * The edit runs on a CPU-offloaded model for minutes, so the request that
+ * starts it returns at once and this loop asks for its state. The delay backs
+ * off from 2s to 10s to keep a long edit from making hundreds of requests.
+ * Extracted with injectable sleep/clock so the polling rules are testable.
+ */
+export async function waitForImageEdit(
+  fetchJob: (jobId: string) => Promise<ImageEditResult>,
+  jobId: string,
+  options: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  } = {},
+): Promise<ImageEditResult> {
+  const timeoutMs = options.timeoutMs ?? 700_000;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = options.now ?? (() => Date.now());
+  const maxDelayMs = options.maxDelayMs ?? 10_000;
+  const deadline = now() + timeoutMs;
+  let delay = options.initialDelayMs ?? 2_000;
+
+  while (now() < deadline) {
+    if (options.signal?.aborted) throw abortedError();
+    await sleep(delay);
+    if (options.signal?.aborted) throw abortedError();
+    let job: ImageEditResult;
+    try {
+      job = await fetchJob(jobId);
+    } catch (error) {
+      if (isNotFound(error)) {
+        return {
+          status: 'FAILURE',
+          message: 'The image edit was interrupted by a server restart. Please try again.',
+        };
+      }
+      throw error;
+    }
+    if (job.status === 'SUCCESS' || job.status === 'FAILURE' || job.status === 'ERROR') return job;
+    delay = Math.min(Math.round(delay * 1.5), maxDelayMs);
+  }
+  return { status: 'FAILURE', message: 'The image edit did not finish in time. Please try again.' };
+}
+
+function newImageEditRequestId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function fetchImageEditJob(jobId: string): Promise<ImageEditResult> {
+  const resp = await apiClient.get(`/api/images/edit/jobs/${encodeURIComponent(jobId)}`, { timeout: 15_000 });
+  return resp.data;
+}
+
 let isLoggingOut = false;
 let lastConnectivityToast = 0;
 // "Reconnected successfully!" needs the same throttle as the error toast. On a
@@ -474,10 +573,7 @@ apiClient.interceptors.response.use(
     // Check if error is retryable
     const status = error.response?.status;
     const code = error.code;
-    const isRetryable = isAxiosError && (
-      (status && [408, 503, 504].includes(status)) ||
-      (code && ['ECONNABORTED', 'ERR_NETWORK', 'ECONNREFUSED', 'ENOTFOUND'].includes(code))
-    );
+    const isRetryable = isAxiosError && isRetryableRequest(config?.method, status, code);
 
     if (config && isRetryable) {
       const currentRetry = config.__retryCount || 0;
@@ -2861,12 +2957,32 @@ export const api = {
     return resp.data;
   },
 
-  // Edit a picture sent as a data: URL (Family drawings). The gateway runs it
-  // through the execution service with the configured image_edit_model; a
-  // CPU-offloaded edit takes minutes, so this outlives the 15s default.
-  async editImage(payload: { prompt: string; image: string; model?: string }): Promise<{ status: string; data?: Array<{ url?: string; b64_json?: string }>; message?: string }> {
-    const resp = await apiClient.post('/api/images/edit', payload, { timeout: 640_000 });
-    return resp.data;
+  // Edit a picture sent as a data: URL (Family drawings). The gateway starts
+  // a job and this polls it, so a long edit never depends on one HTTP request
+  // staying open across every proxy. Older gateways answer 404 for the job
+  // route, in which case the original synchronous call is still available.
+  async editImage(
+    payload: { prompt: string; image: string; model?: string },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ImageEditResult> {
+    let started: ImageEditResult;
+    try {
+      const resp = await apiClient.post(
+        '/api/images/edit/jobs',
+        { ...payload, request_id: newImageEditRequestId() },
+        { timeout: 30_000, signal: options.signal },
+      );
+      started = resp.data;
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+      const resp = await apiClient.post('/api/images/edit', payload, {
+        timeout: 640_000,
+        signal: options.signal,
+      });
+      return resp.data;
+    }
+    if (!['PENDING', 'RUNNING'].includes(started.status) || !started.job_id) return started;
+    return waitForImageEdit(fetchImageEditJob, started.job_id, options);
   },
 
   // Workspace-scoped AI image edit (execution service path). Uses a dedicated

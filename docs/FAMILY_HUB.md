@@ -184,18 +184,29 @@ pass that sends the PNG to the existing image-edit backend and shows the result
 have worked. A blank canvas is not sent.
 
 How the improve pass runs: the PNG goes as a data URL to
-`POST /api/images/edit`, the gateway hands it to execution's
-`/execute/image_edit_inline`, and that sends it as multipart to the
+`POST /api/images/edit/jobs`, which answers at once with a job id. The gateway
+hands the edit to execution's `/execute/image_edit_inline` in the background,
+and the app polls `GET /api/images/edit/jobs/{id}` every few seconds until the
+picture or a refusal is ready. Execution sends the image as multipart to the
 `llm_local_url` proxy's `/v1/images/edits` with the `image_edit_model` setting,
 the same model, proxy and error wording as the workspace image edit
-(`handlers/image_edit.py`). The answer is `{"status": "SUCCESS", "data":
-[{"b64_json": ...}]}` or a `FAILURE` naming the cause (no model set, proxy down,
-backend refused). The canvas is 640x416 because edit models work in 16 or 32
-pixel blocks. An edit on a CPU-offloaded model takes minutes, so the request
-waits up to 640s and the button says so. Measured on the desktop, a 640x416
-edit spent 276 s sampling at the backend's default 20 steps; the
-`image_edit_steps` setting sends a lower count (the rapid edit models are made
-for about 4 to 8), and a model switch on the desktop adds about a minute. Until this was fixed the gateway
+(`handlers/image_edit.py`). The finished job answers `{"status": "SUCCESS",
+"data": [{"b64_json": ...}]}` or a `FAILURE` naming the cause (no model set,
+proxy down, backend refused). The canvas is 640x416 because edit models work in
+16 or 32 pixel blocks.
+
+The job route exists because an edit on a CPU-offloaded model takes minutes.
+Holding one HTTP request open that long failed as soon as a proxy had a shorter
+timeout: the public nginx used its 60s default, answered 504, and the old app
+retried the POST as a fresh edit. Jobs also carry an optional `request_id`, so a
+repeated tap or a retried start returns the same job instead of starting a
+second GPU edit. The job table is in memory and expires after an hour; a gateway
+restart loses an unfinished edit, and the app says so rather than polling
+forever. `POST /api/images/edit` remains as the synchronous path for app builds
+that predate the job route. Measured on the desktop, a 640x416 edit spent 276 s
+sampling at the backend's default 20 steps; the `image_edit_steps` setting sends
+a lower count (the rapid edit models are made for about 4 to 8), and a model
+switch on the desktop adds about a minute. Until this was fixed the gateway
 forwarded the JSON body straight to the legacy `ALPACA_SD_URL`
 (`jeremiah-home-desktop.local:8081`), which the server cannot reach and which
 only takes multipart, so every press answered 502 in under 100ms.
