@@ -1,14 +1,15 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Brain, Brush, ChevronRight, Crown, Gamepad2, MessageCircle } from 'lucide-react';
+import { Brain, Brush, ChevronRight, Crown, Gamepad2, MessageCircle, Phone } from 'lucide-react';
 import ChatPanel from '../components/chat/ChatPanel';
 import ArcadeGames from '../components/family/ArcadeGames';
+import FamilyCalls from '../components/family/FamilyCalls';
 import DrawCanvas from '../components/family/DrawCanvas';
 import MakeMusic from '../components/family/MakeMusic';
 import SafetyButtons from '../components/family/SafetyButtons';
 import Recipes from './Recipes';
 
-type Tab = 'chat' | 'games' | 'create';
+type Tab = 'chat' | 'calls' | 'games' | 'create';
 
 /** The Bible games that exist today, one tap away from the family hub. */
 const BIBLE_GAMES = [
@@ -19,6 +20,7 @@ const BIBLE_GAMES = [
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof MessageCircle }> = [
   { id: 'chat', label: 'Chat', icon: MessageCircle },
+  { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'games', label: 'Games', icon: Gamepad2 },
   { id: 'create', label: 'Create', icon: Brush },
 ];
@@ -68,7 +70,7 @@ export default function Family() {
               role="tab"
               aria-selected={tab === id}
               onClick={() => setTab(id)}
-              className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] font-medium transition ${
+              className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2 text-[13px] font-medium transition sm:px-3 ${
                 tab === id ? 'bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -80,6 +82,12 @@ export default function Family() {
       </div>
 
       {tab === 'chat' && <ChatPanel onOpenTab={setTab} />}
+
+      {tab === 'calls' && (
+        <div data-testid="family-calls-tab">
+          <FamilyCalls />
+        </div>
+      )}
 
       {tab === 'games' && (
         <div className="space-y-4" data-testid="family-games">

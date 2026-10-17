@@ -1470,6 +1470,12 @@ export const api = {
     return resp.data;
   },
 
+  /** The Nextcloud Talk page that opens this room's call in a browser. */
+  async getTalkCallLink(token: string, as_user?: 'admin'): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/call/link', { token, as_user });
+    return resp.data;
+  },
+
   async getStars(userId?: string): Promise<StarsResponse> {
     const query = new URLSearchParams();
     withUserParam(query, userId);
