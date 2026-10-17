@@ -22,7 +22,7 @@ from contextlib import suppress
 import aiohttp
 import numpy as np
 
-from services.common import voice_speaker
+from services.common import voice_learning, voice_speaker
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, REDIS_URL
 from services.execution import voiceprint
 
@@ -37,6 +37,10 @@ _MAX_AUDIO_SECONDS = 30
 #: and the request is answered as if no one were recognised.
 _IDENTIFY_WAIT_S = 2.0
 _IDENTIFY_TIMEOUT = aiohttp.ClientTimeout(total=3.0)
+#: Learning is background work; it must not delay the transcript either.
+_LEARN_TIMEOUT = aiohttp.ClientTimeout(total=5.0)
+#: Keep background learning tasks referenced until they finish.
+_LEARNING_TASKS: set[asyncio.Task] = set()
 
 
 class Event:
@@ -99,7 +103,57 @@ async def identify(samples: np.ndarray) -> dict | None:
         if resp.status == 404:  # nobody has enrolled a voice
             return None
         resp.raise_for_status()
-        return await resp.json()
+        verdict = await resp.json()
+        if not isinstance(verdict, dict):
+            return None
+        # Identity only returns the verdict. The proxy needs the signature to
+        # offer this take to a learning session without running the model twice.
+        verdict["embedding"] = signature["embedding"]
+        verdict["speech_seconds"] = signature.get("speech_seconds")
+        return verdict
+
+
+async def _learn(redis, verdict: dict) -> None:
+    """Offer a confidently matched command to that person's open learning session."""
+    username = verdict.get("matched_username")
+    embedding = verdict.get("embedding")
+    score = verdict.get("score")
+    if not username or not embedding or not isinstance(score, (int, float)):
+        return
+    if score < voice_learning.MIN_SCORE:
+        return
+    session_key = voice_learning.key(username)
+    try:
+        if voice_learning.remaining(await redis.get(session_key)) is None:
+            return
+        async with aiohttp.ClientSession() as client:
+            resp = await client.post(
+                f"{IDENTITY_SVC_URL}/api/voice/learn",
+                json={
+                    "username": username,
+                    "embedding": embedding,
+                    "speech_seconds": verdict.get("speech_seconds"),
+                    "model": voiceprint.MODEL,
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=_LEARN_TIMEOUT,
+            )
+            body = await resp.json(content_type=None)
+        if resp.status != 200:
+            detail = body.get("detail") if isinstance(body, dict) else resp.status
+            log.info("[voice] not learned for %s: %s", username, detail)
+            return
+        left = await redis.decr(session_key)
+        if left <= 0:
+            await redis.delete(session_key)
+        log.info(
+            "[voice] learned %s's voice (%s); %s sample(s) left in this session",
+            username,
+            body.get("status") if isinstance(body, dict) else "stored",
+            max(0, left),
+        )
+    except Exception as e:  # learning is optional, never fatal
+        log.warning("[voice] could not learn %s's voice: %s", username, e)
 
 
 class _Utterance:
@@ -175,6 +229,10 @@ async def _handle(ha_reader, ha_writer, redis) -> None:
                         ex=voice_speaker.TTL_SECONDS,
                     )
                     log.info("[voice] recognised %s (score %s)", verdict["matched_username"], verdict.get("score"))
+                    if verdict.get("embedding"):
+                        task = asyncio.create_task(_learn(redis, verdict))
+                        _LEARNING_TASKS.add(task)
+                        task.add_done_callback(_LEARNING_TASKS.discard)
                 elif verdict:
                     log.info("[voice] speaker not recognised (best score %s)", verdict.get("score"))
             ha_writer.write(event.raw)

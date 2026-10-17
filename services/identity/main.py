@@ -1125,6 +1125,64 @@ class VoiceIdentifyRequest(BaseModel):
     threshold: float | None = None
 
 
+class VoiceLearnRequest(BaseModel):
+    username: str
+    embedding: list[float]
+    speech_seconds: float | None = None
+    model: str = voice.MODEL
+
+
+@app.post("/api/voice/learn", dependencies=[Depends(require_internal)])
+def learn_voice(request: Request, req: VoiceLearnRequest, session: Session = Depends(get_session)):
+    """Add a confidently recognised command to an enrolled profile (internal).
+
+    The speech-to-text proxy calls this only while that person has an open
+    learning session. A take is still checked against the profile they already
+    have, so a misheard command or a television in the background is refused
+    rather than averaged in.
+    """
+    if req.model != voice.MODEL:
+        raise HTTPException(status_code=422, detail=f"Signatures are {voice.MODEL}, not {req.model}.")
+    try:
+        embedding = voice.valid_embedding(req.embedding)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    row = session.get(VoiceSignature, req.username)
+    samples = voice.load_samples(row.samples) if row and row.model == voice.MODEL else []
+    if len(samples) < voice.MIN_SAMPLES:
+        raise HTTPException(
+            status_code=409,
+            detail="That voice does not have an enrolled profile yet; record the first samples in Settings.",
+        )
+    score = voice.cosine(embedding, voice.centroid(samples))
+    if score < voice.CONSISTENCY_FLOOR:
+        raise HTTPException(
+            status_code=422,
+            detail=f"That take does not sound like the enrolled voice (similarity {score:.2f}).",
+        )
+    if max(voice.cosine(embedding, s["embedding"]) for s in samples) >= voice.DUPLICATE_SAMPLE:
+        return {"status": "SKIPPED", "reason": "already known", **_voice_status(row)}
+    samples.append({
+        "embedding": embedding,
+        "speech_seconds": req.speech_seconds,
+        "recorded_at": datetime.now(UTC).isoformat(),
+        "source": "learned",
+    })
+    samples = samples[-voice.MAX_SAMPLES:]
+    row.model = voice.MODEL
+    row.samples = json.dumps(samples)
+    row.updated_at = datetime.now(UTC)
+    session.add(row)
+    user = session.exec(select(User).where(User.username == req.username)).first()
+    if user is not None:
+        user.voice_fingerprint = voice.fingerprint(samples) if len(samples) >= voice.MIN_SAMPLES else None
+        session.add(user)
+    session.commit()
+    _audit(request, session, "user.voice_learn", req.username, note=f"learned sample {len(samples)}")
+    log.info(f"[voice] learned sample {len(samples)} for {req.username} ({req.speech_seconds}s of speech)")
+    return {"status": "STORED", "speech_seconds": req.speech_seconds, **_voice_status(row)}
+
+
 @app.post("/api/voice/identify", dependencies=[Depends(require_internal)])
 def identify_voice(req: VoiceIdentifyRequest, session: Session = Depends(get_session)):
     """Which enrolled family member a signature belongs to (internal)."""

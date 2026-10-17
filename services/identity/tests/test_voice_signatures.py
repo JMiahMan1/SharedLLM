@@ -170,6 +170,53 @@ def test_checking_before_enrolling_says_what_to_do(client):
     assert resp.status_code == 409 and "samples" in resp.json()["detail"]
 
 
+def _learn(client, who: str, embedding=None):
+    return client.post("/api/voice/learn", json={
+        "username": who,
+        "embedding": _take(who, 88) if embedding is None else embedding,
+        "speech_seconds": 2.6,
+        "model": voice.MODEL,
+    })
+
+
+def test_learning_adds_a_confident_take_to_an_enrolled_profile(client, session):
+    _enroll(client, "jeremiah")
+    body = _learn(client, "jeremiah").json()
+
+    assert body["status"] == "STORED"
+    assert body["samples"] == voice.MIN_SAMPLES + 1
+    row = session.get(VoiceSignature, "jeremiah")
+    assert voice.load_samples(row.samples)[-1]["source"] == "learned"
+    assert client.post("/api/voice/identify", json={"embedding": _take("jeremiah", 101)}).json()["matched"] is True
+
+
+def test_learning_refuses_a_take_from_someone_else(client):
+    _enroll(client, "jeremiah")
+    refused = _learn(client, "jeremiah", _take("michele", 5))
+
+    assert refused.status_code == 422 and "does not sound like" in refused.json()["detail"]
+    assert client.get("/api/users/me/voice").json()["samples"] == voice.MIN_SAMPLES
+
+
+def test_learning_needs_an_enrolled_profile(client):
+    assert _learn(client, "jeremiah").status_code == 409
+
+
+def test_learning_skips_a_recording_the_profile_already_has(client):
+    _enroll(client, "jeremiah")
+    body = _learn(client, "jeremiah", _take("jeremiah", 0)).json()
+
+    assert body["status"] == "SKIPPED" and body["samples"] == voice.MIN_SAMPLES
+
+
+def test_learning_keeps_the_newest_samples(client):
+    _enroll(client, "jeremiah", takes=voice.MAX_SAMPLES)
+    for n in range(voice.MAX_SAMPLES):
+        assert _learn(client, "jeremiah", _take("jeremiah", 90 + n)).status_code == 200
+
+    assert client.get("/api/users/me/voice").json()["samples"] == voice.MAX_SAMPLES
+
+
 def test_forgetting_erases_the_profile(client, session):
     _enroll(client, "jeremiah")
     assert client.delete("/api/users/me/voice").json()["samples"] == 0

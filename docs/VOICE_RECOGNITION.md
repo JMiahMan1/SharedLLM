@@ -33,6 +33,24 @@ needs a score of 0.80 and a clear lead over the next person
 (`services/identity/voice.py`); short commands score lower, so a one-word
 command is often "not sure" and answered as the household.
 
+## Refreshing a voice by talking
+
+Once enrolled, a person can add to their own profile without opening Settings.
+At a satellite, say **"Hey Jarvis, learn my voice"** (or "update my voice",
+"refresh my voice", "retrain my voice"). Jarvis confirms and then learns from
+the next three commands that it confidently recognises as that person.
+
+Each take still has to look like the enrolled voice: it needs a match score of
+at least 0.85, at least one second of speech, agreement with the existing
+profile, and it must not be a near-duplicate of a sample already stored. The
+newest six samples are kept. The learning window lasts five minutes; say
+"stop learning my voice" to close it early. Only the signature is stored, never
+the audio.
+
+This refreshes an existing profile. A voice Jarvis has never enrolled cannot be
+attributed to a person safely, so first-time enrollment stays in Settings ->
+Vocal Signature.
+
 ## What a voice cannot do
 
 A voice can be imitated or replayed, so a request recognised by voice never

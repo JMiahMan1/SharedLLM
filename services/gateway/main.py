@@ -2733,6 +2733,117 @@ async def _recognised_speaker(query: str) -> str | None:
     return voice_speaker.decode(raw)
 
 
+#: Things a person says to refresh their own voice profile from a satellite.
+#: The phrasing is deliberately narrow: a question ("how do I update my
+#: voice?") should be answered, not turned into a learning session.
+_VOICE_LEARN_PHRASES = (
+    "learn my voice",
+    "learning my voice",
+    "update my voice",
+    "refresh my voice",
+    "retrain my voice",
+    "train my voice",
+    "improve my voice",
+    "remember my voice",
+    "learn my voiceprint",
+    "update my voiceprint",
+    "update my voice signature",
+    "refresh my voice signature",
+    "start voice learning",
+    "voice learning mode",
+    "add this to my voice",
+)
+_VOICE_LEARN_STOP_PHRASES = (
+    "stop learning my voice",
+    "stop voice learning",
+    "cancel voice learning",
+    "stop learning voice",
+)
+_VOICE_QUESTION_STARTS = (
+    "how ", "what ", "why ", "when ", "where ", "who ", "which ",
+    "tell me how ", "explain how ", "can you explain ",
+)
+
+
+def _voice_words(text: object) -> str:
+    """Lower-case words without punctuation, the way a transcript and a typed
+    command can be compared."""
+    return " ".join(re.sub(r"[^\w\s']", " ", str(text or "").lower()).split())
+
+
+def _matches_voice_phrase(query: object, phrases: tuple[str, ...]) -> bool:
+    words = _voice_words(query)
+    if not words or len(words.split()) > 14 or words.startswith(_VOICE_QUESTION_STARTS):
+        return False
+    return any(phrase in words for phrase in phrases)
+
+
+def _wants_voice_learning(query: object) -> bool:
+    return _matches_voice_phrase(query, _VOICE_LEARN_PHRASES)
+
+
+def _wants_voice_learning_stop(query: object) -> bool:
+    return _matches_voice_phrase(query, _VOICE_LEARN_STOP_PHRASES)
+
+
+def _start_voice_learning(username: str) -> bool:
+    """Open a short session in which the proxy may add samples for ``username``."""
+    from services.common import voice_learning
+    from services.gateway.cache import get_redis
+
+    try:
+        get_redis().set(
+            voice_learning.key(username),
+            voice_learning.encode(voice_learning.TARGET_SAMPLES),
+            ex=voice_learning.TTL_SECONDS,
+        )
+        return True
+    except Exception as e:
+        log.warning(f"[VoiceLearning] could not start for {username}: {e}")
+        return False
+
+
+def _stop_voice_learning(username: str) -> bool:
+    from services.common import voice_learning
+    from services.gateway.cache import get_redis
+
+    try:
+        return bool(get_redis().delete(voice_learning.key(username)))
+    except Exception as e:
+        log.warning(f"[VoiceLearning] could not stop for {username}: {e}")
+        return False
+
+
+async def _handle_voice_learning(
+    query: str,
+    creds: ResolvedCredentials,
+    user_id: str,
+    selected_model: str,
+    is_openai: bool,
+):
+    """Answer a spoken request to refresh the caller's voice profile."""
+    if _wants_voice_learning_stop(query):
+        stopped = _stop_voice_learning(user_id)
+        message = "Okay, I've stopped learning your voice." if stopped else "Voice learning wasn't running."
+    elif creds.identified_by != "voice":
+        message = (
+            "I can only refresh a voice I already recognise. Record your first three samples in "
+            "Settings, Vocal Signature; after that, ask me again and I'll learn from your commands."
+        )
+    elif _start_voice_learning(user_id):
+        message = (
+            "I'll learn from your next three voice commands. Just talk to me normally, and longer "
+            "sentences work best."
+        )
+    else:
+        message = "I couldn't start voice learning just now. Try again in a moment."
+    await update_history(user_id, "user", query)
+    await update_history(user_id, "assistant", message)
+    if is_openai:
+        return _make_openai_response(message, selected_model, "voice_learning")
+    return _make_ollama_response(message, selected_model, "voice_learning")
+
+
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks=None):
@@ -2836,6 +2947,9 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(msg, selected_model, "degraded")
         return _make_ollama_response(msg, selected_model, "degraded")
     log.info(f"Chat request from {user_id} query='{query}'")
+
+    if _wants_voice_learning_stop(query) or _wants_voice_learning(query):
+        return await _handle_voice_learning(query, creds, user_id, selected_model, is_openai)
 
     if is_time_or_date_query(query):
         ans = await build_time_or_date_response(query)
