@@ -146,6 +146,18 @@ async def test_an_improved_picture_tells_who_asked(sent):
     assert sent[0]["actions"] == [{"label": "Open", "type": "view", "url": "/family?tab=create"}]
 
 
+# --------------------------------------------------------------- find phone
+
+
+async def test_find_phone_is_urgent_and_asks_the_phone_to_ring(sent):
+    assert await notices.find_phone("leo")
+    notice = sent[0]
+    assert notice["user"] == "leo" and notice["category"] == "family_safety"
+    assert notice["priority"] == 5 and notice["kind"] == "find_phone"
+    assert notice["tag"] == "find_phone" and notice["data"]["find_phone"] is True
+    assert notice["title"] == "Find my phone"
+
+
 # -------------------------------------------------------------- app updates
 
 
@@ -397,6 +409,25 @@ def test_sos_text_without_a_position_or_with_an_old_one():
     assert family_safety.sos_text("Leo", None, 1000.0) == ("SOS from Leo", "Leo needs help. No position is known.", None)
     _, body, _ = family_safety.sos_text("Leo", {"latitude": 1, "longitude": 2, "timestamp": 0}, 7200.0)
     assert "2 h ago (may be out of date)" in body
+
+
+def test_find_phone_rings_the_authenticated_person(safety_client, sent):
+    client, _ = safety_client
+    assert client.post("/api/phone/find").json() == {
+        "status": "SUCCESS", "message": "Your phone is ringing."}
+    assert len(sent) == 1 and sent[0]["user"] == "leo"
+    assert sent[0]["kind"] == "find_phone" and sent[0]["priority"] == 5
+
+
+def test_find_phone_says_so_when_the_phone_cannot_be_reached(safety_client, monkeypatch):
+    client, _ = safety_client
+
+    async def refused(payload, **kw):
+        return False
+
+    monkeypatch.setattr(notify, "send", refused)
+    resp = client.post("/api/phone/find")
+    assert resp.status_code == 502 and resp.json()["detail"] == "Could not reach your phone"
 
 
 def test_sos_and_on_my_way_wait_between_sends(safety_client, sent):

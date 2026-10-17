@@ -148,6 +148,11 @@ final class PushNotice {
         return chatToken() != null;
     }
 
+    /** The watch asked for this phone to ring (see {@link FindPhoneService}). */
+    boolean isFindPhone() {
+        return "find_phone".equals(kind) || "find_phone".equals(tag);
+    }
+
     /**
      * The conversation a chat notice belongs to: {@code data.token}, else the
      * {@code chat:<token>} tag. Null for anything that is not a chat message.

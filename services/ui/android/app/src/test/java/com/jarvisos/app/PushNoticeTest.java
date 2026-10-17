@@ -50,6 +50,15 @@ public class PushNoticeTest {
     }
 
     @Test
+    public void aFindPhoneNoticeIsRecognisedByKindOrTag() {
+        assertTrue(PushNotice.parse("{\"kind\":\"find_phone\",\"title\":\"Find my phone\",\"body\":\"Ringing\"}")
+                .isFindPhone());
+        assertTrue(PushNotice.parse("{\"tag\":\"find_phone\",\"title\":\"Find my phone\",\"body\":\"Ringing\"}")
+                .isFindPhone());
+        assertFalse(PushNotice.parse("{\"kind\":\"chat\",\"title\":\"M\",\"body\":\"hi\"}").isFindPhone());
+    }
+
+    @Test
     public void aNonChatNoticeIsNotGroupedAsAConversation() {
         PushNotice n = PushNotice.parse("{\"category\":\"timers\",\"title\":\"Timer\",\"body\":\"Done\","
             + "\"tag\":\"chat:looks-like-one\"}");
