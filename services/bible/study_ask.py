@@ -206,9 +206,21 @@ def _extract_answer(data: object) -> str:
 
 
 def _request(
-    *, prompt: str, user: str, gateway_url: str, internal_secret: str, depth: str, stream: bool
+    *,
+    prompt: str,
+    user: str,
+    gateway_url: str,
+    internal_secret: str,
+    depth: str,
+    stream: bool,
+    system: str | None = None,
 ) -> tuple[str, dict, dict]:
-    """The gateway call for a study question: URL, body and headers."""
+    """The gateway call for a study question: URL, body and headers.
+
+    ``system`` replaces the study-helper persona for callers that ask the same
+    grounded question in a different shape (the Verse of the Day context note).
+    The passage, notes and gateway plumbing stay identical.
+    """
     if not gateway_url:
         raise StudyAskUnavailable(
             "The language model gateway is not configured, so study help is "
@@ -218,7 +230,7 @@ def _request(
     body = {
         "model": "assistant",
         "messages": [
-            {"role": "system", "content": system_prompt(depth)},
+            {"role": "system", "content": system or system_prompt(depth)},
             {"role": "user", "content": prompt},
         ],
         "rag_user": user,
@@ -255,6 +267,7 @@ async def ask(
     internal_secret: str,
     timeout: float = STUDY_ASK_TIMEOUT,
     depth: str = "adult",
+    system: str | None = None,
 ) -> str:
     """Send the assembled question to the gateway and return the answer.
 
@@ -263,7 +276,13 @@ async def ask(
     panel. Failures are never turned into a placeholder answer.
     """
     url, body, headers = _request(
-        prompt=prompt, user=user, gateway_url=gateway_url, internal_secret=internal_secret, depth=depth, stream=False
+        prompt=prompt,
+        user=user,
+        gateway_url=gateway_url,
+        internal_secret=internal_secret,
+        depth=depth,
+        stream=False,
+        system=system,
     )
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
@@ -295,6 +314,7 @@ async def ask_stream(
     internal_secret: str,
     timeout: float = STUDY_ASK_TIMEOUT,
     depth: str = "adult",
+    system: str | None = None,
 ):
     """Yield the answer as it is written (OpenAI-style server-sent events).
 
@@ -302,7 +322,13 @@ async def ask_stream(
     a stream that ends without a word of answer.
     """
     url, body, headers = _request(
-        prompt=prompt, user=user, gateway_url=gateway_url, internal_secret=internal_secret, depth=depth, stream=True
+        prompt=prompt,
+        user=user,
+        gateway_url=gateway_url,
+        internal_secret=internal_secret,
+        depth=depth,
+        stream=True,
+        system=system,
     )
     wrote = False
     try:

@@ -1625,6 +1625,27 @@ export interface BibleSearchResult {
   count: number;
 }
 
+/**
+ * Jarvis's stored context note for one verse. It is shared study material, not
+ * a reader's own writing, so the same note is served to every surface showing
+ * that verse in the same translation.
+ */
+export interface BibleVerseContext {
+  key: string;
+  version: string;
+  edition: string;
+  osis: string;
+  chapter: number;
+  verse: number;
+  reference: string;
+  text: string;
+  body: string;
+  model: string;
+  verses_used: number;
+  notes_used: number;
+  generated_at: string | null;
+}
+
 export interface BibleVerseOfDay {
   day: string;
   day_of_year: number;
@@ -1637,6 +1658,8 @@ export interface BibleVerseOfDay {
   verse: number;
   reference: string;
   text: string;
+  /** Present once Jarvis has written (or read) a context note for the verse. */
+  context?: BibleVerseContext | null;
 }
 
 /**

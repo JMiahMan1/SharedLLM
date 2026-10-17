@@ -433,3 +433,34 @@ class PlanEnrollment(SQLModel, table=True):
     finished_on: str = Field(default="")
     active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class VerseContext(SQLModel, table=True):
+    """Jarvis's context note for one verse, kept so it is only written once.
+
+    The note is about the verse, not about the day it happened to be the Verse
+    of the Day: the same verse can be drawn again in another year or for another
+    translation, and regenerating it would spend the model's time to produce a
+    second answer to the same question. ``key`` is the canonical position plus
+    the translation, because context written from the KJV's words is not
+    necessarily the note for the same verse in another translation.
+
+    ``body`` is the model's answer and ``text`` is the verse it was asked
+    about. Neither is a place for a reader's own words; this is shared study
+    material, like a commentary row.
+    """
+
+    __table_args__ = {"extend_existing": True}
+    key: str = Field(primary_key=True)
+    version_code: str = Field(default="", index=True)
+    edition_code: str = Field(default="")
+    osis: str = Field(default="", index=True)
+    chapter: int = Field(default=1)
+    verse: int = Field(default=1)
+    reference: str = Field(default="")
+    text: str = Field(default="")
+    body: str = Field(default="")
+    model: str = Field(default="")
+    verses_used: int = Field(default=0)
+    notes_used: int = Field(default=0)
+    generated_at: datetime = Field(default_factory=utcnow)

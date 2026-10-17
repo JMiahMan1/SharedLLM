@@ -48,6 +48,7 @@ ROUTES = [
     ("get", "/api/bible/narration/chunk?ref=John+3:16&index=0"),
     ("post", "/api/bible/study/ask"),
     ("post", "/api/bible/study/ask/stream"),
+    ("post", "/api/bible/verse-of-day/context"),
     ("get", "/api/bible/admin/imports"),
     ("get", "/api/bible/admin/providers/api.bible/estimate?translation_id=niv"),
     ("post", "/api/bible/admin/imports"),
@@ -301,6 +302,43 @@ def test_activity_feed_is_scoped_to_the_caller(make_client, monkeypatch):
 
 
 # translation of upstream failures
+def test_verse_context_forwards_only_the_four_choices(make_client, monkeypatch):
+    """A client may choose the day, translation, scope and refresh -- nothing else."""
+    captured = _patch_bible(monkeypatch, payload={"verse": {}, "context": {}})
+    resp = make_client(user="michele").post(
+        "/api/bible/verse-of-day/context",
+        json={
+            "day": "2026-10-17",
+            "version": "kjv",
+            "scope": "nt",
+            "refresh": True,
+            "username": "jeremiah",
+            "question": "my private question",
+        },
+    )
+    assert resp.status_code == 200
+    call = captured["calls"][-1]
+    assert call["verb"] == "post"
+    assert call["json"] == {
+        "day": "2026-10-17",
+        "version": "kjv",
+        "scope": "nt",
+        "refresh": True,
+    }
+    assert "username" not in call["json"]
+
+
+def test_verse_context_defaults_to_every_verse_without_a_refresh(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={"verse": {}, "context": {}})
+    make_client(user="michele").post("/api/bible/verse-of-day/context", json={})
+    assert captured["calls"][-1]["json"] == {
+        "day": None,
+        "version": None,
+        "scope": "all",
+        "refresh": False,
+    }
+
+
 def test_study_notes_forward_only_what_the_caller_asked_for(make_client, monkeypatch):
     """Study notes are reference material, so no username travels with them."""
     captured = _patch_bible(

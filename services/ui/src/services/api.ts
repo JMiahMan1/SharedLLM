@@ -128,6 +128,7 @@ import type {
   BibleVersionInfo,
   BibleBookInfo,
   BibleSearchResult,
+  BibleVerseContext,
   BibleVerseOfDay,
   BibleDevotionalSourceInfo,
   BibleDevotionalResponse,
@@ -3242,6 +3243,18 @@ export const api = {
   async getBibleVerseOfDay(params: { day?: string; version?: string; scope?: 'all' | 'ot' | 'nt' } = {}): Promise<BibleVerseOfDay> {
     const resp = await apiClient.get('/api/bible/verse-of-day', { params });
     return resp.data;
+  },
+
+  /**
+   * Jarvis's context note for the Verse of the Day. The first request for a
+   * verse can take as long as a study answer; later ones are served from the
+   * stored note. `refresh` asks for a new note.
+   */
+  async getBibleVerseContext(
+    params: { day?: string; version?: string; scope?: 'all' | 'ot' | 'nt'; refresh?: boolean } = {},
+  ): Promise<BibleVerseContext> {
+    const resp = await apiClient.post('/api/bible/verse-of-day/context', params, { timeout: 320_000 });
+    return resp.data.context;
   },
 
   async getBibleDevotional(params: { day?: string; work?: string } = {}): Promise<BibleDevotionalResponse> {

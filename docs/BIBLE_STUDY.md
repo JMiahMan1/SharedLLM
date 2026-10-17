@@ -706,7 +706,8 @@ family only via the opt-in scopes.
 | `POST /plans/{id}/days/{day}/complete`, `DELETE /plans/{id}/days/{day}` | Complete or un-complete a plan day |
 | `POST /plans/{id}/catch-up` | Mark missed days complete in one tap |
 | `GET /plans/{id}/family` | Family members on the same plan and their progress (consent-gated) |
-| `GET /verse-of-day?day=&version=&scope=all\|ot\|nt` | Deterministic-by-date verse + share card data |
+| `GET /verse-of-day?day=&version=&scope=all\|ot\|nt` | Deterministic-by-date verse + share card data, including a stored context note when one exists |
+| `POST /verse-of-day/context` (`{day?, version?, scope?, refresh?}`) | Jarvis's plain-language context for the Verse of the Day. Generated on demand from the surrounding chapter (±8 verses) and installed study notes, cached per translation+verse, and returned with the verse. `refresh` asks for new words; a failed refresh keeps the old note. Gateway: `POST /api/bible/verse-of-day/context`, caller-scoped, 300s timeout |
 | `GET /devotional`, `GET /devotional/sources` | Today's devotional, and every source with the reason any was skipped |
 | `GET /daily` | Verse, devotional, streaks and plan line in one call (the `bible_daily` widget) |
 | `GET/POST /memorize`, `DELETE /memorize/{verse_id}`, `POST /memorize/{verse_id}/recall` | Memory verses + record a recall result (advances SRS) |
@@ -864,6 +865,17 @@ order), **weekly set** (Sunday review of the week's due verses).
   plan-day discussion questions, a quiz from any passage) with the server
   validating every generated answer key against the corpus before it is
   offered.
+- **Verse of the Day context** (shipped): press and hold the verse card (or
+  right-click it) and choose **Get context**, **Read passage** or **Copy
+  verse**. *Get context* opens a panel backed by
+  `POST /api/bible/verse-of-day/context`: the bible service asks Jarvis for two
+  or three plain-language paragraphs on who is speaking, what surrounds the
+  verse and where it sits in the chapter, built from the chapter (±8 verses)
+  and the installed study notes. The answer is cached per translation+verse,
+  so every surface showing that verse gets it from `/verse-of-day` and
+  `/daily` without calling the model again. A background pass fills today's
+  missing note at startup and every 30 minutes; the panel's refresh button
+  regenerates it, and a failed refresh leaves the previous note readable.
 - **Fail-fast**: no gateway URL, an HTTP error, a non-JSON body, an
   unreachable model or an empty reply each become a named 503 carrying the
   upstream's own sentence. The panel shows it verbatim and keeps the question
