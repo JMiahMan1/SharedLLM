@@ -57,6 +57,7 @@ Names: `IDENTITY`, `EXECUTION`, `RAG`, `STORAGE`, `LOGGING`,
 | `workspace_root`, `workspace_runtime_root` | | Workspaces |
 | `upstream_dns`, `dns_poll_interval` | | DNS |
 | `execution_external_host` | | Host used in links to execution media |
+| | `VOICE_STT_UPSTREAM`, `VOICE_STT_PORT` | Voice recognition for Home Assistant: the Wyoming speech-to-text server that transcribes (`host:port`, unset turns it off) and the port Jarvis listens on for Home Assistant (10310); see `docs/VOICE_RECOGNITION.md` |
 
 Feature settings read directly from Identity by the service that uses them
 (not through `resolve_runtime_config`) include `dns_mappings`,

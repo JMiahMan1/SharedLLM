@@ -444,6 +444,9 @@ async def lifespan(app: FastAPI):
     from services.execution.calendar_reminders import calendar_reminder_loop
     from services.execution.home_alerts import home_alert_loop
     reminder_tasks = [asyncio.create_task(calendar_reminder_loop()), asyncio.create_task(home_alert_loop())]
+    # Home Assistant's speech-to-text, passed through, recognising who speaks
+    from services.execution.wyoming_stt import serve as serve_voice_stt
+    voice_stt_task = asyncio.create_task(serve_voice_stt())
 
     # Start ESPresense BLE presence pipeline (E7: was never invoked)
     from services.config import REDIS_URL as _PRESENCE_REDIS_URL
@@ -517,7 +520,7 @@ async def lifespan(app: FastAPI):
     leave_by_task.cancel()
     with suppress(Exception):
         await leave_by_task
-    for task in reminder_tasks:
+    for task in [*reminder_tasks, voice_stt_task]:
         task.cancel()
         with suppress(Exception):
             await task

@@ -112,6 +112,8 @@ class UserContext(BaseModel):
     model_config = {"extra": "ignore"}
     user: str
     is_admin: bool = False
+    #: "voice" when the person was recognised by their voice alone.
+    identified_by: str | None = None
     ha_url: str | None = None
     ha_token: str | None = None
     nextcloud_url: str | None = None

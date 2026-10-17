@@ -24,6 +24,10 @@ SAMPLE_RATE = 16000
 #: Kokoro voices: one sentence (~3 s) already separates speakers cleanly, and
 #: 2 s leaves room for a short phrase without accepting a cough.
 MIN_SPEECH_SECONDS = 2.0
+#: A spoken command ("turn off the kitchen lights") is often under 2 s. It is
+#: still worth trying: a short clip scores lower, and identity's threshold and
+#: margin then answer "not sure" rather than naming the wrong person.
+COMMAND_MIN_SPEECH_SECONDS = 1.0
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 _DECODE_TIMEOUT_S = 60
 
@@ -74,14 +78,18 @@ def embed(audio: bytes) -> dict:
 
     Blocking (ffmpeg + CPU inference); async callers run it in a thread.
     """
+    return embed_samples(decode(audio))
+
+
+def embed_samples(samples: np.ndarray, min_speech_seconds: float = MIN_SPEECH_SECONDS) -> dict:
+    """The signature of 16 kHz mono float32 samples (see ``embed``)."""
     from resemblyzer import preprocess_wav
 
-    samples = decode(audio)
     speech = preprocess_wav(samples, source_sr=SAMPLE_RATE)
     speech_seconds = len(speech) / SAMPLE_RATE
-    if speech_seconds < MIN_SPEECH_SECONDS:
+    if speech_seconds < min_speech_seconds:
         raise VoiceprintError(
-            f"Only {speech_seconds:.1f}s of speech was heard; at least {MIN_SPEECH_SECONDS:.0f}s is needed. "
+            f"Only {speech_seconds:.1f}s of speech was heard; at least {min_speech_seconds:.0f}s is needed. "
             "Speak a full sentence close to the microphone."
         )
     vector = _get_encoder().embed_utterance(speech)
