@@ -70,7 +70,9 @@ async def test_an_unrecognised_voice_is_sent_to_settings(monkeypatch):
         "learn my voice", creds, "michele", "assistant", False
     )
 
-    assert "first three samples" in _message(response)
+    reply = _message(response)
+    assert "first three samples" in reply
+    assert "longer phrase" in reply
 
 
 @pytest.mark.asyncio

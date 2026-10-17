@@ -36,9 +36,11 @@ command is often "not sure" and answered as the household.
 ## Refreshing a voice by talking
 
 Once enrolled, a person can add to their own profile without opening Settings.
-At a satellite, say **"Hey Jarvis, learn my voice"** (or "update my voice",
-"refresh my voice", "retrain my voice"). Jarvis confirms and then learns from
-the next three commands that it confidently recognises as that person.
+At a satellite, say **"Jarvis, please learn my voice"** (or "please update my
+voice signature", "please refresh my voice", "please retrain my voice"). Use a
+full sentence: the request itself has to be long enough for Jarvis to recognise
+the speaker. Jarvis confirms and then learns from the next three commands that
+it confidently recognises as that person.
 
 Each take still has to look like the enrolled voice: it needs a match score of
 at least 0.85, at least one second of speech, agreement with the existing

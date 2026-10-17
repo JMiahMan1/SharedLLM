@@ -2827,8 +2827,9 @@ async def _handle_voice_learning(
         message = "Okay, I've stopped learning your voice." if stopped else "Voice learning wasn't running."
     elif creds.identified_by != "voice":
         message = (
-            "I can only refresh a voice I already recognise. Record your first three samples in "
-            "Settings, Vocal Signature; after that, ask me again and I'll learn from your commands."
+            "I can only refresh a voice I already recognise. If you haven't enrolled yet, record "
+            "your first three samples in Settings, Vocal Signature. If you have, try again with a "
+            "longer phrase, like 'Jarvis, please learn my voice'."
         )
     elif _start_voice_learning(user_id):
         message = (
