@@ -67,6 +67,7 @@ from services.bible import (
     reminders,
     study,
     study_ask,
+    verse_context,
     votd,
 )
 from services.bible.corpus import CorpusError
@@ -130,8 +131,12 @@ async def lifespan(app: FastAPI):
         bool(BLB_BASE_URL),
     )
     reminder_task = asyncio.create_task(reminders.reminder_loop(_db, TELEMETRY_SVC_URL, INTERNAL_SECRET))
+    context_task = asyncio.create_task(
+        verse_context.ensure_daily_loop(_db, GATEWAY_INTERNAL_URL, INTERNAL_SECRET)
+    )
     yield
     reminder_task.cancel()
+    context_task.cancel()
 
 
 app = FastAPI(title="SOA Bible Service", lifespan=lifespan)
@@ -803,9 +808,59 @@ def verse_of_day(
     when = _parse_day(day)
     resolved_version = _require_version(session, version) if version else None
     try:
-        return votd.pick(session, day=when, version=resolved_version, scope=scope)
+        verse = votd.pick(session, day=when, version=resolved_version, scope=scope)
     except LookupError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    # The card can show a stored note immediately; a missing one is generated
+    # on demand (or by the daily loop) rather than making this read wait.
+    verse["context"] = verse_context.cached_payload(session, verse)
+    return verse
+
+
+class VerseContextPayload(BaseModel):
+    """Which Verse of the Day's context to read or write."""
+
+    day: str | None = None
+    version: str | None = None
+    scope: str = Field(default="all", pattern="^(all|ot|nt)$")
+    refresh: bool = False
+
+
+@app.post("/verse-of-day/context")
+async def verse_of_day_context(
+    payload: VerseContextPayload,
+    session: Session = Depends(get_session),
+):
+    """Jarvis's context note for the Verse of the Day.
+
+    The note is cached per translation and verse, so pressing Get context on a
+    verse that has been explained before returns the stored answer without
+    calling the model. ``refresh`` asks for a new one; the old note stays in
+    place until the new answer has arrived.
+    """
+    when = _parse_day(payload.day)
+    resolved_version = _require_version(session, payload.version) if payload.version else None
+    try:
+        verse = votd.pick(session, day=when, version=resolved_version, scope=payload.scope)
+    except LookupError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    try:
+        row = await verse_context.ensure(
+            session,
+            verse,
+            gateway_url=GATEWAY_INTERNAL_URL,
+            internal_secret=INTERNAL_SECRET,
+            refresh=payload.refresh,
+        )
+    except study_ask.StudyAskError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except study_ask.StudyAskUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    note = verse_context.payload(row)
+    verse["context"] = note
+    return {"verse": verse, "context": note}
 
 
 def _parse_day(raw: str | None) -> date | None:
@@ -2336,9 +2391,11 @@ def daily(username: str | None = Query(default=None), session: Session = Depends
 
 def _verse_of_day(session: Session) -> dict:
     try:
-        return votd.pick(session)
+        verse = votd.pick(session)
     except LookupError as exc:
         return {"error": str(exc)}
+    verse["context"] = verse_context.cached_payload(session, verse)
+    return verse
 
 # admin: installing translations and study Bibles
 

@@ -241,6 +241,20 @@ async def test_the_question_goes_to_the_gateway_with_thinking_turned_off(monkeyp
     assert headers == {"X-Internal-Secret": "s3cret"}
 
 
+async def test_a_custom_persona_replaces_the_study_helper(monkeypatch):
+    session = _patch(monkeypatch, _Session(_answer()))
+    await study_ask.ask(
+        prompt="Verse of the Day: Genesis 1:1",
+        user="jeremiah",
+        gateway_url="http://gateway:11435",
+        internal_secret="s3cret",
+        system="You explain the passage in its historical setting.",
+    )
+    _url, body, _headers = session.calls[0]
+    assert body["messages"][0]["content"] == "You explain the passage in its historical setting."
+    assert body["messages"][1]["content"].startswith("Verse of the Day")
+
+
 async def test_a_trailing_slash_on_the_gateway_url_does_not_double_up(monkeypatch):
     session = _patch(monkeypatch, _Session(_answer()))
     await study_ask.ask(

@@ -10197,6 +10197,30 @@ async def proxy_bible_verse_of_day(
     )
 
 
+@app.post("/api/bible/verse-of-day/context")
+async def proxy_bible_verse_of_day_context(request: Request):
+    """Jarvis's context note for the Verse of the Day.
+
+    Generating one can take as long as a study answer, so this uses the same
+    long timeout. The client may ask for a refresh, but cannot name a user or
+    send any other field to the bible service.
+    """
+    await _bible_caller(request)
+    body = await request.json()
+    return await _bible_json(
+        "POST",
+        "/verse-of-day/context",
+        label="Verse context unavailable",
+        json={
+            "day": body.get("day"),
+            "version": body.get("version"),
+            "scope": body.get("scope") or "all",
+            "refresh": bool(body.get("refresh", False)),
+        },
+        timeout=_BIBLE_STUDY_TIMEOUT,
+    )
+
+
 @app.get("/api/bible/devotional")
 async def proxy_bible_devotional(request: Request, day: str | None = None, work: str | None = None):
     """Today's devotional. Unconfigured sources come back as a named warning."""

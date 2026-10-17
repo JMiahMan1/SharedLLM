@@ -1,8 +1,23 @@
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Bell, BellOff, BookOpen, BookOpenText, ChevronRight, ExternalLink, Flame, Sparkles } from 'lucide-react';
+import {
+  AlertTriangle,
+  Bell,
+  BellOff,
+  BookOpen,
+  BookOpenText,
+  ChevronRight,
+  Copy,
+  ExternalLink,
+  Flame,
+  Sparkles,
+} from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
+import type { BibleVerseOfDay } from '../../types/api';
 import BiblePlans from './BiblePlans';
+import VerseContextPanel from './VerseContextPanel';
 import { pageStyle } from './readingPage';
 
 interface BibleTodayProps {
@@ -38,6 +53,93 @@ export default function BibleToday({ onOpenRef, page, reminderTime = '', onRemin
   const entry = data?.devotional?.entry ?? null;
   const skipped = data?.devotional?.skipped ?? [];
 
+  // The verse card's press-and-hold menu. `longPressed` is read by the click
+  // that follows a release so opening the menu never also opens the passage.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [contextVerse, setContextVerse] = useState<BibleVerseOfDay | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const pressTimer = useRef<number | null>(null);
+  const pressReset = useRef<number | null>(null);
+  const pressStart = useRef<{ x: number; y: number } | null>(null);
+  const longPressed = useRef(false);
+
+  const clearPressTimer = () => {
+    if (pressTimer.current !== null) {
+      window.clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+    pressStart.current = null;
+  };
+
+  useEffect(
+    () => () => {
+      if (pressTimer.current !== null) window.clearTimeout(pressTimer.current);
+      if (pressReset.current !== null) window.clearTimeout(pressReset.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMenu(null);
+        return;
+      }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+      if (items.length === 0) return;
+      event.preventDefault();
+      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      items[current === -1 ? 0 : (current + step + items.length) % items.length]?.focus();
+    };
+    document.addEventListener('keydown', onKey);
+    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menu]);
+
+  const openMenuAt = (x: number, y: number) => {
+    // First-paint clamp: three actions are about 180px tall, and a phone's
+    // bottom edge must not cut the last one off.
+    const width = 216;
+    const height = 190;
+    setMenu({
+      x: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
+      y: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
+    });
+  };
+
+  const startPress = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    clearPressTimer();
+    longPressed.current = false;
+    pressStart.current = { x: event.clientX, y: event.clientY };
+    pressTimer.current = window.setTimeout(() => {
+      pressTimer.current = null;
+      longPressed.current = true;
+      void trigger('medium');
+      openMenuAt(event.clientX, event.clientY);
+    }, 500);
+  };
+
+  const movePress = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const start = pressStart.current;
+    if (!start) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) clearPressTimer();
+  };
+
+  const endPress = () => {
+    clearPressTimer();
+    if (!longPressed.current) return;
+    // Clear after the click that follows this release has been suppressed. The
+    // timer is a fallback for browsers that do not send that click at all.
+    pressReset.current = window.setTimeout(() => {
+      longPressed.current = false;
+      pressReset.current = null;
+    }, 400);
+  };
+
   return (
     <div className="space-y-4" data-testid="bible-today">
       <section className="glass-panel rounded-2xl p-4 sm:p-5 border border-amber-400/15">
@@ -66,11 +168,32 @@ export default function BibleToday({ onOpenRef, page, reminderTime = '', onRemin
         ) : verse ? (
           <button
             type="button"
+            data-testid="bible-votd"
+            aria-haspopup="menu"
+            title="Press and hold for verse options"
+            onPointerDown={startPress}
+            onPointerMove={movePress}
+            onPointerUp={endPress}
+            onPointerCancel={endPress}
+            onPointerLeave={clearPressTimer}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              clearPressTimer();
+              openMenuAt(event.clientX, event.clientY);
+            }}
             onClick={() => {
+              if (longPressed.current) {
+                longPressed.current = false;
+                if (pressReset.current !== null) {
+                  window.clearTimeout(pressReset.current);
+                  pressReset.current = null;
+                }
+                return;
+              }
               void trigger('light');
               onOpenRef(verse.reference);
             }}
-            className="w-full text-left min-h-11 pointer-coarse:min-h-11 rounded-xl px-4 py-3 border border-[var(--page-rule)] transition-colors"
+            className="w-full text-left min-h-11 pointer-coarse:min-h-11 rounded-xl px-4 py-3 border border-[var(--page-rule)] transition-colors select-none"
             style={pageStyle(page)}
           >
             <p className="text-xs font-semibold text-[var(--page-number)]">{verse.reference}</p>
@@ -192,6 +315,79 @@ export default function BibleToday({ onOpenRef, page, reminderTime = '', onRemin
           </div>
         )}
       </section>
+
+      {menu &&
+        verse &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-sm"
+              onClick={() => setMenu(null)}
+              data-testid="bible-votd-menu-scrim"
+            />
+            <div
+              ref={menuRef}
+              style={{ top: menu.y, left: menu.x }}
+              className="fixed z-50 glass-card min-w-[200px] max-h-[calc(100dvh-16px)] overflow-y-auto overscroll-contain p-2 animate-in fade-in"
+              role="menu"
+              aria-label={`${verse.reference} options`}
+              data-testid="bible-votd-menu"
+            >
+              <div className="px-2 py-1 mb-1 text-xs font-semibold text-white">{verse.reference}</div>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  void trigger('light');
+                  setMenu(null);
+                  setContextVerse(verse);
+                }}
+                className="w-full text-left text-xs px-2 py-1.5 rounded-md min-h-11 pointer-coarse:min-h-11 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors flex items-center gap-2"
+                data-testid="bible-votd-context"
+              >
+                <Sparkles size={13} />
+                Get context
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  void trigger('light');
+                  setMenu(null);
+                  onOpenRef(verse.reference);
+                }}
+                className="w-full text-left text-xs px-2 py-1.5 rounded-md min-h-11 pointer-coarse:min-h-11 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors flex items-center gap-2"
+              >
+                <BookOpenText size={13} />
+                Read passage
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  void trigger('success');
+                  if (navigator.clipboard) {
+                    void navigator.clipboard.writeText(`${verse.reference}\n${verse.text}`).catch(() => {});
+                  }
+                  setMenu(null);
+                }}
+                className="w-full text-left text-xs px-2 py-1.5 rounded-md min-h-11 pointer-coarse:min-h-11 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors flex items-center gap-2"
+              >
+                <Copy size={13} />
+                Copy verse
+              </button>
+            </div>
+          </>,
+          document.body,
+        )}
+
+      {contextVerse && (
+        <VerseContextPanel
+          verse={contextVerse}
+          onClose={() => setContextVerse(null)}
+          onOpenRef={onOpenRef}
+        />
+      )}
     </div>
   );
 }
