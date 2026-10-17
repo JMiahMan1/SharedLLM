@@ -6,7 +6,7 @@ import json
 import numpy as np
 import pytest
 
-from services.common import voice_speaker
+from services.common import voice_learning, voice_speaker
 from services.execution import wyoming_stt
 from services.execution.ha_client import authorize_action
 
@@ -26,8 +26,20 @@ class _FakeRedis:
     async def set(self, key, value, ex=None):
         self.values[key] = (value, ex)
 
+    async def get(self, key):
+        found = self.values.get(key)
+        return found[0] if found else None
 
-async def _run(identify_result, monkeypatch):
+    async def decr(self, key):
+        left = int(await self.get(key) or 0) - 1
+        self.values[key] = (str(left), None)
+        return left
+
+    async def delete(self, key):
+        return 1 if self.values.pop(key, None) is not None else 0
+
+
+async def _run(identify_result, monkeypatch, learning_for=None):
     """One utterance through the proxy; returns (what upstream got, what HA got, redis)."""
     received = []
 
@@ -48,6 +60,8 @@ async def _run(identify_result, monkeypatch):
 
     monkeypatch.setattr(wyoming_stt, "identify", fake_identify)
     redis = _FakeRedis()
+    if learning_for:
+        redis.values[voice_learning.key(learning_for)] = (voice_learning.encode(), None)
     proxy = await asyncio.start_server(lambda r, w: wyoming_stt._handle(r, w, redis), "127.0.0.1", 0)
     reader, writer = await asyncio.open_connection("127.0.0.1", proxy.sockets[0].getsockname()[1])
 
@@ -84,6 +98,102 @@ async def test_an_unsure_match_records_nobody(monkeypatch):
     _, _, reply, redis = await _run({"matched": False, "score": 0.7}, monkeypatch)
     assert reply.type == "transcript"
     assert redis.values == {}
+
+
+@pytest.mark.asyncio
+async def test_a_learning_session_is_offered_the_next_match(monkeypatch):
+    learned = asyncio.Event()
+
+    async def fake_learn(redis, verdict):
+        learned.set()
+
+    monkeypatch.setattr(wyoming_stt, "_learn", fake_learn)
+    await _run(
+        {
+            "matched": True,
+            "matched_username": "michele",
+            "score": 0.91,
+            "embedding": [0.01] * 256,
+            "speech_seconds": 2.8,
+        },
+        monkeypatch,
+        learning_for="michele",
+    )
+    await asyncio.wait_for(learned.wait(), 2)
+
+
+class _LearnRedis:
+    def __init__(self, value="2"):
+        self.value = value
+        self.deleted = False
+
+    async def get(self, _key):
+        return self.value
+
+    async def decr(self, _key):
+        self.value = str(int(self.value) - 1)
+        return int(self.value)
+
+    async def delete(self, _key):
+        self.deleted = True
+
+
+class _FakeResponse:
+    status = 200
+
+    async def json(self, content_type=None):
+        return {"status": "STORED"}
+
+
+@pytest.mark.asyncio
+async def test_learning_posts_the_signature_and_spends_a_sample(monkeypatch):
+    calls = {}
+
+    class FakeSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, json=None, headers=None, timeout=None):
+            calls["url"] = url
+            calls["json"] = json
+            return _FakeResponse()
+
+    monkeypatch.setattr(wyoming_stt.aiohttp, "ClientSession", FakeSession)
+    redis = _LearnRedis()
+    await wyoming_stt._learn(redis, {
+        "matched_username": "michele",
+        "score": 0.91,
+        "embedding": [0.01] * 256,
+        "speech_seconds": 2.8,
+    })
+
+    assert calls["url"].endswith("/api/voice/learn")
+    assert calls["json"]["username"] == "michele"
+    assert calls["json"]["model"] == wyoming_stt.voiceprint.MODEL
+    assert redis.value == "1" and not redis.deleted
+
+
+@pytest.mark.asyncio
+async def test_an_unsure_match_is_never_learned(monkeypatch):
+    class NoSession:
+        def __init__(self, *args, **kwargs):
+            pytest.fail("must not call Identity")
+
+    monkeypatch.setattr(wyoming_stt.aiohttp, "ClientSession", NoSession)
+    redis = _LearnRedis()
+    await wyoming_stt._learn(redis, {
+        "matched_username": "michele",
+        "score": 0.7,
+        "embedding": [0.01] * 256,
+    })
+
+    assert redis.value == "2"
 
 
 def test_transcript_and_chat_text_meet_despite_punctuation_and_case():

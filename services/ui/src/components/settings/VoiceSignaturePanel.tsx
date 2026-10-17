@@ -242,6 +242,9 @@ export default function VoiceSignaturePanel() {
 
       <p className="text-xs text-slate-500 leading-relaxed">
         Each recording is turned into a voice signature on this server and the audio is thrown away. Nothing is sent to an outside service.
+        {status.enrolled
+          ? ' You can also refresh it by voice: say “Hey Jarvis, learn my voice” at a satellite, then talk normally for three commands.'
+          : ' Once enrolled, you can say “Hey Jarvis, learn my voice” at a satellite to add three more samples by talking normally.'}
       </p>
     </div>
   );

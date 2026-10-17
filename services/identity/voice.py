@@ -33,6 +33,9 @@ MATCH_MARGIN = 0.04
 #: is almost certainly someone else, or mostly noise. Real-microphone
 #: same-speaker scores sit well above it; different speakers mostly below.
 CONSISTENCY_FLOOR = 0.65
+#: A learned take this close to one already in the profile says nothing new;
+#: repeating the same command must not push older, more varied takes out.
+DUPLICATE_SAMPLE = 0.995
 
 
 def _norm(v: list[float]) -> list[float]:

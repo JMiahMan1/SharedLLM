@@ -233,6 +233,11 @@ the person's earlier ones is refused rather than averaged in. "Test: who am I?"
 (`POST /api/users/me/voice/check`) scores a new recording against everyone
 enrolled, exactly as identification does.
 
+Once enrolled, a person can refresh the profile by voice: say "Hey Jarvis,
+learn my voice" at a satellite and speak three normal commands. Each take is
+checked against the existing profile before it is added, and the audio is still
+never stored.
+
 `sharedllm_speaker_identify` signs a workspace clip the same way and asks
 identity (`POST /api/voice/identify`, internal) who it is: a match needs
 similarity 0.80 and a 0.04 lead over the runner-up, so two family members who
