@@ -461,6 +461,10 @@ export interface TalkConversation {
   unread_messages?: number;
   last_activity?: number | null;
   last_message?: string | null;
+  /** Talk room type: 1 direct, 2 group, 3 public, 6 note to self. */
+  type?: number | null;
+  has_call?: boolean;
+  can_start_call?: boolean;
 }
 
 export interface TalkMessage {

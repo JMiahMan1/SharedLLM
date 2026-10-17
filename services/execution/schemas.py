@@ -437,7 +437,7 @@ class TalkFileRequest(BaseModel):
 
 class TalkRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["list", "open", "messages", "send", "send_voice", "send_file", "edit_message", "delete_message", "mentions", "reactions", "react", "polls", "create_poll", "vote_poll", "mark_read", "post_card", "game", "call_join", "call_leave", "create_group", "delete_conversation", "participants", "add_participant", "remove_participant", "people"]
+    action: Literal["list", "open", "messages", "send", "send_voice", "send_file", "edit_message", "delete_message", "mentions", "reactions", "react", "polls", "create_poll", "vote_poll", "mark_read", "post_card", "game", "call_join", "call_leave", "call_link", "create_group", "delete_conversation", "participants", "add_participant", "remove_participant", "people"]
     token: str | None = None
     target_user: str | None = None
     message: str | None = None

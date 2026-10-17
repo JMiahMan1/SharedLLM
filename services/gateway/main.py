@@ -5124,6 +5124,14 @@ async def proxy_talk_call(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/communication/talk/call/link")
+async def proxy_talk_call_link(request: Request):
+    """Return the Nextcloud Talk page that opens a room's call in a browser."""
+    body = await request.json()
+    payload = {"action": "call_link", "token": body.get("token")}
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+
+
 @app.post("/api/communication/talk/game")
 async def proxy_talk_game(request: Request):
     """Drive a family game in a room: start | answer | flip | stop."""

@@ -274,15 +274,21 @@ with the resident LLM: a job uses the GPU only when there is room, otherwise
 500. `ALPACA_AUDIO_URL` has **no default**: an unset value is a 503 naming the
 setting.
 
-## Calls (signalling shipped; media is the next slice)
+## Calls
 
-`call_join` / `call_leave` go through Nextcloud's own call API
-(`/ocs/v2.php/apps/spreed/api/v4/call/<token>`) and return the call id, call
-token and signalling URL, with no second media stack and no TURN server of ours.
-The composer has a call button that reflects in-call state and reports a
-refusal in place. Gateway: `POST /api/communication/talk/call`.
+Family → Calls lists the family rooms and one-to-one conversations. The call
+button opens that room's Talk page (`/call/<token>`) in a new tab, where
+Nextcloud Talk runs the WebRTC audio/video call with its own signalling server
+and microphone/camera permissions. The page keeps working if the Jarvis tab is
+closed, and the Talk phone app can open the same link. Gateway:
+`POST /api/communication/talk/call/link` → execution `call_link`;
+`call_join` / `call_leave` remain for clients that already have a Talk browser
+session. The chat header's call button opens the same page.
 
-**Not yet:** media. Carrying audio/video in-app needs a Talk client library
-(or LiveKit as a fallback), and restrictive networks still need a reachable
-STUN/TURN server, which is infrastructure to run, not code to write. Tests:
-`services/execution/tests/test_talk_calls.py`.
+The gateway deliberately does not try to join the call with its OCS app
+password: Talk only lets a logged-in browser session join, so `call_join`
+alone cannot carry media. The ESP32 watch has **no microphone or speaker**, so
+it cannot be a call endpoint; it can show a call notification, but audio and
+video need a phone, tablet, or computer. Tests:
+`services/execution/tests/test_talk_calls.py`,
+`services/ui/src/test/FamilyCalls.test.tsx`.

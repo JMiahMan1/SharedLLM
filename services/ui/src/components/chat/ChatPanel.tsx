@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import ChatNotify from '../../plugins/chatNotify';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Loader2, Phone, PhoneOff, Plus, X } from 'lucide-react';
+import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Loader2, Phone, Plus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
@@ -84,9 +84,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const [showPollForm, setShowPollForm] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
-  const [inCall, setInCall] = useState(false);
+  const [callOpening, setCallOpening] = useState(false);
   const [historyLimit, setHistoryLimit] = useState<Record<string, number>>({});
-  const [callError, setCallError] = useState<string | null>(null);
 
   const threadRef = useRef<HTMLElement | null>(null);
   // Keep the composer above the phone keyboard (iOS does not resize the page for it).
@@ -215,8 +214,6 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     setEditing(null);
     setStaged([]);
     setShowPollForm(false);
-    setInCall(false);
-    setCallError(null);
   };
 
   // A tapped phone notification lands on /family?chat=<token>: open it, then
@@ -360,18 +357,28 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     onError: (error: Error) => toast.error(error.message || 'Voice message failed'),
   });
 
-  const call = useMutation({
-    mutationFn: (leave: boolean) => (leave ? api.leaveTalkCall(activeToken, asUser) : api.joinTalkCall(activeToken, asUser)),
-    onSuccess: (res, leave) => {
-      if (res.status === 'SUCCESS') {
-        setInCall(!leave);
-        setCallError(null);
-      } else {
-        setCallError(res.message || (leave ? 'Could not leave the call' : 'Could not join the call'));
+  const openCall = async () => {
+    // Joining needs the browser's Nextcloud session, so open the Talk call
+    // page in a tab. Opening the tab now keeps popup blockers happy while the
+    // URL is fetched.
+    const tab = window.open('about:blank', '_blank');
+    if (tab) tab.opener = null;
+    setCallOpening(true);
+    try {
+      const response = await api.getTalkCallLink(activeToken, asUser);
+      const url = (response.detail as { url?: unknown } | null | undefined)?.url;
+      if (response.status !== 'SUCCESS' || typeof url !== 'string' || !url) {
+        throw new Error(response.message || 'Could not open the call.');
       }
-    },
-    onError: (error: Error) => setCallError(error.message || 'Could not start the call'),
-  });
+      if (tab) tab.location.replace(url);
+      else window.location.assign(url);
+    } catch (error) {
+      tab?.close();
+      toast.error(error instanceof Error ? error.message : 'Could not open the call.');
+    } finally {
+      setCallOpening(false);
+    }
+  };
 
   const react = async (message: TalkMessage, emoji: string) => {
     if (typeof message.id !== 'number') return;
@@ -495,24 +502,23 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
             {activeConversation && <ConversationAvatar conversation={activeConversation} people={people} size={42} />}
             <div className="min-w-0 flex-1">
               <p className="truncate text-[16px] font-bold text-white">{name}</p>
-              <p className={`truncate text-[12px] ${jarvisThinking ? 'text-fuchsia-300' : inCall ? 'text-emerald-300' : 'text-slate-400'}`}>
+              <p className={`truncate text-[12px] ${jarvisThinking ? 'text-fuchsia-300' : 'text-slate-400'}`}>
                 {jarvisThinking
                   ? 'Jarvis is thinking…'
-                  : callError ?? (inCall ? 'In call' : activeConversation?.description || (isGroup ? 'Family group · @Jarvis to ask' : 'Direct message'))}
+                  : activeConversation?.description || (isGroup ? 'Family group · @Jarvis to ask' : 'Direct message')}
               </p>
             </div>
           </button>
           {activeToken && (
             <button
               type="button"
-              className={`flex h-10 w-10 items-center justify-center rounded-xl ${inCall ? 'bg-rose-500 text-white' : 'bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]'}`}
-              onClick={() => call.mutate(inCall)}
-              disabled={call.isPending}
-              aria-pressed={inCall}
-              aria-label={inCall ? 'Leave the call' : 'Join the call'}
-              title={callError ?? (inCall ? 'Leave the call' : 'Join the call')}
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"
+              onClick={() => void openCall()}
+              disabled={callOpening}
+              aria-label="Open the call in Nextcloud Talk"
+              title="Open the call in Nextcloud Talk"
             >
-              {call.isPending ? <Loader2 size={17} className="animate-spin" /> : inCall ? <PhoneOff size={17} /> : <Phone size={17} />}
+              {callOpening ? <Loader2 size={17} className="animate-spin" /> : <Phone size={17} />}
             </button>
           )}
           {activeConversation && (
