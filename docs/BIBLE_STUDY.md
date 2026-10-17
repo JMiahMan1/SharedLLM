@@ -955,6 +955,11 @@ marked *planned* are not built.
   back in on the next, and the page tint follows the hour
   (`components/bible/focusAmbience.ts`, a pure `ambienceFor(hour)` kept in its
   own module so the component file exports only a component).
+  The app's bottom bar stays over the page, so the text ends exactly clear of
+  it (`pb-clear-bottom-bar`): the bar publishes its measured height, gesture
+  area included, as `--bottom-bar` (`lib/bottomBar.ts`). A fixed padding was
+  shorter than the bar on phones with a tall gesture area, which hid the
+  last lines and stopped scrolling early.
 - **Study notes** (`components/bible/BibleStudyNotes.tsx`): the sheet's
   "Study notes" row opens a panel that asks `/study/notes` for *that verse*
   in *that translation*. Verses carrying material are marked in the reader
@@ -1073,8 +1078,10 @@ verse opens `/bible?ref=…`; the devotional opens `/bible?tab=devotional`.
   popover opens on tap-hold on touch).
 - Phone grid fit: widget content scales with container (SVG `viewBox`,
   no fixed pixel canvas); page sections fit 280px/200px bands.
-- `safe-area-*` insets on sticky bars and composers; `text-base` inputs
-  (no iOS zoom); single-column stacking on phones.
+- `safe-area-*` insets on sticky bars and composers; content that the
+  bottom bar can cover ends with `pb-clear-bottom-bar`, a full-screen layer
+  above the bar with `pb-clear-system-bar` (`index.css`), never a guessed
+  number; `text-base` inputs (no iOS zoom); single-column stacking on phones.
 - Native branches via `Capacitor.isNativePlatform()`: share sheet,
   in-app browser for BLB links, haptics gating; `useHaptics()` on streak,
   correct answer, level-up, achievement unlock.

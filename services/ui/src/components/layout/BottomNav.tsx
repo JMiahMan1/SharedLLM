@@ -1,16 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useAuth } from '../../context/AuthContext';
 import { cn } from '../../lib/utils';
 import { navPagesFor } from './navItems';
+import { usePublishBottomBarHeight } from '../../lib/bottomBar';
 
 const BottomNav = () => {
   const { trigger } = useHaptics();
   const { user } = useAuth();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+  usePublishBottomBarHeight(navRef);
 
   const isAdmin = user?.is_admin ?? false;
 
@@ -93,6 +96,7 @@ const BottomNav = () => {
         </div>
       )}
       <nav
+        ref={navRef}
         className="fixed bottom-0 left-0 right-0 z-50 app-bar backdrop-blur-2xl border-t shadow-[0_-8px_30px_rgba(0,0,0,0.85)]"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >

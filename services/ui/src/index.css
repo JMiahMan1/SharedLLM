@@ -12,8 +12,25 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* The end of content the bottom bar can cover (the page, the Bible focus
+   reader): exactly clear of the bar, however tall the phone's gesture area
+   makes it, else of the system's own bar, plus a margin. Real utilities (not
+   component classes) so they win over a p-4 beside them. */
+@utility pb-clear-bottom-bar {
+  padding-bottom: calc(max(var(--bottom-bar), env(safe-area-inset-bottom, 0px)) + 1rem);
+}
+
+/* The end of a full-screen layer drawn above the bottom bar: only the
+   system's gesture or button bar is in the way. */
+@utility pb-clear-system-bar {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+}
+
 /* CSS Variables */
 :root {
+  /* How much of the bottom of the screen the app's bottom bar covers right
+     now, measured by BottomNav (lib/bottomBar.ts); 0 where it is not shown. */
+  --bottom-bar: 0px;
   --color-bg-base: #030711;
   --site-bg-glow-a: rgba(88, 28, 220, 0.18);
   --site-bg-glow-b: rgba(15, 118, 200, 0.10);
