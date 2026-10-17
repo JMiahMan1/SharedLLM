@@ -55,6 +55,7 @@ import type {
 import Modal from '../components/ui/Modal';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import { EntityProtectionPanel } from '../components/admin/EntityProtectionPanel';
+import { RolesPanel } from '../components/admin/RolesPanel';
 import { HomeAlertsPanel } from '../components/admin/HomeAlertsPanel';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import ServiceAccessSetup from '../components/admin/ServiceAccessSetup';
@@ -243,6 +244,14 @@ const Admin = () => {
   const discoveredUsers = useMemo(() => discoveryData?.users ?? [], [discoveryData]);
   const discoveryWarnings = discoveryData?.warnings ?? [];
   const discoveryErrors = discoveryData?.errors ?? [];
+
+  const { data: roleCatalog } = useQuery({
+    queryKey: ['roles'],
+    queryFn: () => api.getRoles(),
+    enabled: activeTab === 'users',
+  });
+  const roleNames = (user: UserProfile) =>
+    (roleCatalog?.roles ?? []).filter((r) => user.role_ids?.includes(r.id)).map((r) => r.name).join(' · ');
 
   const { data: devices = [] } = useQuery<DeviceAssignment[]>({
     queryKey: ['devices'],
@@ -444,13 +453,13 @@ const Admin = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['devices'] });
       setDeviceId('');
-      toast.success('Device assignment updated');
+      toast.success('Device shared');
     },
     onError: (error: Error) => toast.error(error.message || 'Device assignment failed'),
   });
 
   const removeDeviceMutation = useMutation({
-    mutationFn: (targetDeviceId: string) => api.deleteDeviceAssignment(targetDeviceId),
+    mutationFn: (target: { device_id: string; username: string }) => api.deleteDeviceAssignment(target.device_id, target.username),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['devices'] });
       toast.success('Device assignment removed');
@@ -729,7 +738,7 @@ const Admin = () => {
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-widest ${
                           user.is_admin ? 'bg-indigo-500/10 text-indigo-300' : 'bg-white/5 text-slate-400'
                         }`}>
-                          {user.is_admin ? 'Admin' : 'User'}
+                          {user.is_admin ? 'Admin' : roleNames(user) || 'User'}
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-slate-400">@{user.username}</p>
@@ -868,6 +877,8 @@ const Admin = () => {
             </section>
           </div>
 
+          <RolesPanel users={users} />
+
           <section className="glass-panel p-4 sm:p-6 min-w-0 overflow-hidden" data-testid="admin-stars">
             <div className="mb-6 flex items-center justify-between gap-4 flex-wrap">
               <div>
@@ -918,7 +929,7 @@ const Admin = () => {
                   <Cpu size={20} className="text-orange-300" />
                   Device Assignments
                 </h3>
-                <p className="mt-1 text-sm text-slate-400">Every entry here is live identity-to-device data.</p>
+                <p className="mt-1 text-sm text-slate-400">Who can use each device. A device can be shared: add it once per person.</p>
               </div>
               <HelpTooltip docName="ENTITY_PROTECTION.md" sectionTitle="## The rule" label="Device Assignments" />
             </div>
@@ -954,21 +965,21 @@ const Admin = () => {
                 className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
               >
                 <Save size={14} />
-                Save Assignment
+                Add person
               </button>
             </div>
 
             <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-2">
               {devices.map((device) => (
-                <div key={device.device_id} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
+                <div key={device.id} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-mono text-sm text-white truncate">{device.device_id}</p>
-                    <p className="mt-1 text-xs text-slate-400">Assigned to @{device.username}</p>
+                    <p className="mt-1 text-xs text-slate-400">@{device.username}</p>
                   </div>
                   <button
-                    onClick={() => removeDeviceMutation.mutate(device.device_id)}
+                    onClick={() => removeDeviceMutation.mutate({ device_id: device.device_id, username: device.username })}
                     className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
-                    aria-label={`Remove ${device.device_id}`}
+                    aria-label={`Remove @${device.username} from ${device.device_id}`}
                   >
                     <Trash2 size={16} />
                   </button>

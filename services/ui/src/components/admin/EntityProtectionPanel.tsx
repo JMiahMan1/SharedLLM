@@ -27,6 +27,9 @@ const formatWhen = (iso?: string | null) => {
   return Number.isNaN(parsed) ? iso : new Date(parsed).toLocaleString();
 };
 
+const bypassesLocks = (u: UserProfile) =>
+  u.is_admin || u.username.toLowerCase() === 'default' || Boolean(u.permissions?.includes('devices.use_locked'));
+
 export const EntityProtectionPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
   const queryClient = useQueryClient();
   const [entityId, setEntityId] = useState('');
@@ -55,16 +58,11 @@ export const EntityProtectionPanel: FC<{ users: UserProfile[] }> = ({ users }) =
     setPermitted(selected ? selected.permitted_usernames : []);
   }
 
-  // Admins and the system default user bypass every lock, so offering them as
-  // permits would be a no-op that reads as if it did something.
-  const alwaysAllowed = useMemo(
-    () => users.filter((u) => u.is_admin || u.username.toLowerCase() === 'default'),
-    [users]
-  );
-  const choosable = useMemo(
-    () => users.filter((u) => !u.is_admin && u.username.toLowerCase() !== 'default'),
-    [users]
-  );
+  // Admins, the system default user and anyone whose role covers locked
+  // devices bypass every lock, so offering them as permits would be a no-op
+  // that reads as if it did something.
+  const alwaysAllowed = useMemo(() => users.filter(bypassesLocks), [users]);
+  const choosable = useMemo(() => users.filter((u) => !bypassesLocks(u)), [users]);
 
   const saveMutation = useMutation({
     mutationFn: (vars: { entityId: string; protected: boolean; permitted: string[]; note: string | null }) =>

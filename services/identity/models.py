@@ -4,6 +4,7 @@ SQLModel database models for the Identity & Profile Service.
 """
 from datetime import datetime, timezone
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -78,13 +79,42 @@ class User(SQLModel, table=True):  # type: ignore
 
 
 class DeviceAssignment(SQLModel, table=True):  # type: ignore
-    """Maps an HA entity_id to a User for device-based identity resolution."""
-    __table_args__ = {"extend_existing": True}
+    """Lets a User control an HA entity. One row per (entity, user), so a
+    device can be shared by several people."""
+    __table_args__ = (
+        UniqueConstraint("device_id", "user_id", name="uq_deviceassignment_device_user"),
+        {"extend_existing": True},
+    )
     id: int | None = Field(default=None, primary_key=True)
-    device_id: str = Field(index=True, unique=True)  # e.g. "media_player.kitchen_speaker"
+    device_id: str = Field(index=True)  # e.g. "media_player.kitchen_speaker"
     user_id: int = Field(foreign_key="user.id")
     revoked: bool = Field(default=False)
     user: User | None = Relationship(back_populates="devices")
+
+class Role(SQLModel, table=True):  # type: ignore
+    """A named set of permissions (services/identity/roles.py) given to users.
+
+    Admin is not a role: ``User.is_admin`` holds every permission. Built-in
+    roles are seeded on start and can be edited but not deleted.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True)
+    description: str = Field(default="")
+    permissions: str = Field(default="[]")  # JSON list of permission keys
+    builtin: str | None = Field(default=None, index=True, unique=True)  # seed key, e.g. "home_manager"
+
+
+class UserRole(SQLModel, table=True):  # type: ignore
+    """One role held by one user; a user can hold several."""
+    __table_args__ = (
+        UniqueConstraint("user_id", "role_id", name="uq_userrole_user_role"),
+        {"extend_existing": True},
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    role_id: int = Field(foreign_key="role.id", index=True)
+
 
 class EntityProtection(SQLModel, table=True):  # type: ignore
     """Per-entity control lock for entities that change the physical world.

@@ -26,7 +26,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common.http import get_client, get_client_insecure
 from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
-from services.identity import audit, battery_alerts, push, voice
+from services.identity import audit, battery_alerts, push, roles, voice
 from services.identity.crypto import decrypt, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
@@ -38,6 +38,7 @@ from services.identity.models import (
     CapabilityInventory,
     Device,
     DeviceAssignment,
+    Role,
     DeviceEvent,
     FeatureUsage,
     DnsRecord,
@@ -52,6 +53,7 @@ from services.identity.models import (
     UserCredentialShare,
     UserThemeSetting,
     UserWidget,
+    UserRole,
     UserWorkspaceSession,
     WorkspaceChat,
     WorkspaceChatMessage,
@@ -89,7 +91,10 @@ from services.identity.schemas import (
 ResolveRequest,
     ShareRecipient,
     UserCreate,
+    RoleRead,
+    RoleWrite,
     UserRead,
+    UserRolesUpdate,
     UserUpdate,
     UserWidgetRead,
     UserWidgetUpdate,
@@ -212,6 +217,20 @@ def _ensure_schema_upgrades() -> None:
 
     if _table_exists("deviceassignment"):
         _add_column("deviceassignment", "revoked", "ALTER TABLE deviceassignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0")
+        # A device used to have one user (unique device_id); now it can have
+        # several, unique per (device, user).
+        indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("deviceassignment")}
+        if indexes.get("ix_deviceassignment_device_id", {}).get("unique"):
+            with engine.connect() as conn:
+                conn.execute(text("DROP INDEX ix_deviceassignment_device_id"))
+                conn.execute(text("CREATE INDEX ix_deviceassignment_device_id ON deviceassignment (device_id)"))
+                conn.commit()
+        if "uq_deviceassignment_device_user" not in indexes:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_deviceassignment_device_user ON deviceassignment (device_id, user_id)"
+                ))
+                conn.commit()
 
     if not _table_exists("user_widgets"):
         with engine.connect() as conn:
@@ -430,6 +449,7 @@ async def lifespan(app: FastAPI):
         seed_from_env(session, force=force_reseed)
         await _ensure_default_settings(session)
         _migrate_api_key_material(session)
+        roles.seed_default_roles(session)
     yield
 
 app = FastAPI(title="Jarvis OS Identity Service", lifespan=lifespan)
@@ -650,12 +670,18 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             log.warning(f"[resolve] No user found for voice_id={req.voice_id}")
 
     if not user and req.device_id:
-        assignment = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == req.device_id)).first()
-        if assignment and not assignment.revoked:
-            user = assignment.user
+        # A device names its user only when exactly one person (other than
+        # the household account) uses it; a shared one says nothing about
+        # who is speaking.
+        assignments = _assignments_for(session, req.device_id)
+        users = {a.user.username: a.user for a in assignments if not a.revoked and a.user and not a.user.is_system_default}
+        if len(users) == 1:
+            user = next(iter(users.values()))
             log.info(f"[resolve] Resolved by device_id={req.device_id}: user={user.username}")
-        elif assignment and assignment.revoked:
-            log.warning(f"[resolve] Device {req.device_id} assignment revoked, skipping")
+        elif users:
+            log.info(f"[resolve] Device {req.device_id} is shared by {sorted(users)}, not resolving by device")
+        elif assignments:
+            log.info(f"[resolve] Device {req.device_id} names no single user, skipping")
         else:
             log.warning(f"[resolve] No device assignment found for device_id={req.device_id}")
 
@@ -817,9 +843,17 @@ def health():
 
 @app.get("/api/users/me", response_model=UserRead)
 def get_me(user: User = Depends(require_api_key), session: Session = Depends(get_session)):
-    me = UserRead.model_validate(user)
+    me = _user_read(session, user)
     me.skylight_status = skylight_status(session, user)
     return me
+
+
+def _user_read(session: Session, user: User) -> UserRead:
+    """A user as the API shows them, with their roles and what those allow."""
+    read = UserRead.model_validate(user)
+    read.role_ids = roles.user_role_ids(session, user)
+    read.permissions = sorted(roles.user_permissions(session, user))
+    return read
 
 
 def skylight_status(session: Session, user: User) -> str:
@@ -1177,6 +1211,10 @@ def _audit(
         log.error(f"[audit] could not record {action} on {target}: {exc}")
 
 
+# Granted only by an admin (PATCH /api/users/{username}), never self-assigned.
+PRIVILEGE_FIELDS = ("is_admin", "is_system_default")
+
+
 def _apply_user_update(user: User, update_data: dict, clear_fields: list[str] | None) -> None:
     """Apply a profile/credential update with the rules both PATCH routes share.
 
@@ -1188,7 +1226,7 @@ def _apply_user_update(user: User, update_data: dict, clear_fields: list[str] | 
     for field in clear_fields or []:
         if field in CREDENTIAL_COLUMNS:
             setattr(user, CREDENTIAL_COLUMNS[field], None)
-        elif field in User.model_fields and field not in ("id", "username", "password_hash", "is_admin", "is_system_default"):
+        elif field in User.model_fields and field not in ("id", "username", "password_hash", *PRIVILEGE_FIELDS):
             setattr(user, field, None)
 
     for plain, enc in CREDENTIAL_COLUMNS.items():
@@ -1219,7 +1257,7 @@ def update_me(body: UserUpdate, request: Request, session: Session = Depends(get
 
     # Privilege fields are never self-assignable here; admins use
     # PATCH /api/users/{username} which enforces is_admin.
-    for privilege_field in ("is_admin", "is_system_default"):
+    for privilege_field in PRIVILEGE_FIELDS:
         if privilege_field in update_data:
             log.warning(f"[update_me] {user.username} attempted self-update of '{privilege_field}'; ignored")
             del update_data[privilege_field]
@@ -1455,6 +1493,12 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     except Exception as e:  # cleanup is best-effort; deletion must still succeed
         log.warning(f"Telemetry cleanup for deleted user {username} failed: {e}")
 
+    # SQLite can hand a deleted user's id to the next new one, which would
+    # then inherit these.
+    for row in session.exec(select(UserRole).where(UserRole.user_id == (user.id or 0))).all():
+        session.delete(row)
+    for row in session.exec(select(DeviceAssignment).where(DeviceAssignment.user_id == (user.id or 0))).all():
+        session.delete(row)
     session.delete(user)
     session.commit()
 
@@ -1477,7 +1521,116 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
 
 @app.get("/api/users", response_model=list[UserRead])
 def list_users(session: Session = Depends(get_session), _: bool = Depends(require_admin_or_internal)):
-    return session.exec(select(User)).all()
+    return [_user_read(session, u) for u in session.exec(select(User)).all()]
+
+
+# --- Roles (services/identity/roles.py) ---------------------------------------
+# Only admins manage roles and who holds them: a role can grant control of
+# every device in the house.
+
+def _require_admin(user: User = Depends(require_api_key)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    return user
+
+
+def _role_read(session: Session, role: Role) -> RoleRead:
+    members = session.exec(
+        select(User.username).join(UserRole, UserRole.user_id == User.id).where(UserRole.role_id == role.id)
+    ).all()
+    return RoleRead(
+        id=role.id or 0,
+        name=role.name,
+        description=role.description,
+        permissions=roles.role_permissions(role),
+        builtin=role.builtin is not None,
+        members=sorted(members),
+    )
+
+
+def _write_role(session: Session, role: Role, body: RoleWrite) -> None:
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A role needs a name")
+    clash = session.exec(select(Role).where(Role.name == name, Role.id != role.id)).first()
+    if clash:
+        raise HTTPException(status_code=409, detail=f"There is already a role called {name}")
+    try:
+        role.permissions = json.dumps(roles.clean_permissions(body.permissions))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    role.name = name
+    role.description = body.description.strip()
+    session.add(role)
+    session.commit()
+    session.refresh(role)
+
+
+@app.get("/api/users/roles")
+def list_roles(session: Session = Depends(get_session), _: User = Depends(_require_admin)):
+    """Every role, and the permissions a role can be given."""
+    return {
+        "permissions": [{"key": k, "description": d} for k, d in roles.PERMISSIONS.items()],
+        "roles": [_role_read(session, r) for r in session.exec(select(Role).order_by(Role.name)).all()],
+    }
+
+
+@app.post("/api/users/roles", response_model=RoleRead)
+def create_role(body: RoleWrite, request: Request, session: Session = Depends(get_session), admin: User = Depends(_require_admin)):
+    role = Role(name="")
+    _write_role(session, role, body)
+    _audit(request, session, "role.create", role.name, actor=admin, before={}, after={"permissions": role.permissions})
+    return _role_read(session, role)
+
+
+@app.patch("/api/users/roles/{role_id}", response_model=RoleRead)
+def update_role(role_id: int, body: RoleWrite, request: Request, session: Session = Depends(get_session), admin: User = Depends(_require_admin)):
+    role = session.get(Role, role_id)
+    if not role:
+        raise HTTPException(status_code=404, detail="Role not found")
+    before = {"name": role.name, "permissions": role.permissions}
+    _write_role(session, role, body)
+    _audit(request, session, "role.update", role.name, actor=admin, before=before,
+           after={"name": role.name, "permissions": role.permissions})
+    return _role_read(session, role)
+
+
+@app.delete("/api/users/roles/{role_id}")
+def delete_role(role_id: int, request: Request, session: Session = Depends(get_session), admin: User = Depends(_require_admin)):
+    role = session.get(Role, role_id)
+    if not role:
+        raise HTTPException(status_code=404, detail="Role not found")
+    if role.builtin:
+        raise HTTPException(status_code=409, detail="A built-in role can be changed but not deleted")
+    for row in session.exec(select(UserRole).where(UserRole.role_id == role_id)).all():
+        session.delete(row)
+    session.delete(role)
+    session.commit()
+    _audit(request, session, "role.delete", role.name, actor=admin,
+           changes=[{"field": "role", "change": "cleared"}])
+    return {"status": "SUCCESS"}
+
+
+@app.put("/api/users/{username}/roles", response_model=UserRead)
+def set_user_roles(username: str, body: UserRolesUpdate, request: Request, session: Session = Depends(get_session), admin: User = Depends(_require_admin)):
+    """Replace the roles a user holds."""
+    user = session.exec(select(User).where(User.username == username.lower())).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    wanted = set(body.role_ids)
+    known = set(session.exec(select(Role.id).where(Role.id.in_(wanted))).all()) if wanted else set()  # type: ignore[union-attr]
+    if wanted - known:
+        raise HTTPException(status_code=404, detail="Role not found")
+    before = roles.user_role_ids(session, user)
+    for row in session.exec(select(UserRole).where(UserRole.user_id == (user.id or 0))).all():
+        if row.role_id not in wanted:
+            session.delete(row)
+    for role_id in wanted - set(before):
+        session.add(UserRole(user_id=user.id or 0, role_id=role_id))
+    session.commit()
+    _audit(request, session, "user.roles", user.username, actor=admin,
+           before={"role_ids": before}, after={"role_ids": sorted(wanted)})
+    return _user_read(session, user)
 
 
 @app.get("/api/users/service-defaults")
@@ -1600,34 +1753,71 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
     _audit(request, session, "user.create", user.username, actor=admin, before={}, after=audit.snapshot(user))
     return user
 
-def _require_assignment_admin(user: User = Depends(require_api_key)) -> User:
-    """Dependency: only an admin may grant or revoke control of a device.
+def _require_assignment_admin(
+    user: User = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> User:
+    """Dependency: only someone with devices.assign may grant or revoke a device.
 
-    Writing an assignment IS granting control of a real device, so this is
-    admin-only. Without it any authenticated user could assign an entity to
-    themselves and walk straight past both DeviceAssignment and entity
-    protection.
+    Writing an assignment IS granting control of a real device. Without this
+    any authenticated user could assign an entity to themselves and walk
+    straight past both DeviceAssignment and entity protection.
     """
-    if not user.is_admin:
-        raise HTTPException(
-            status_code=403,
-            detail="Only an admin can assign devices to users.",
-        )
+    if not roles.has_permission(session, user, "devices.assign"):
+        raise HTTPException(status_code=403, detail="You can't assign devices to users.")
     return user
+
+
+def _assignment_read(row: DeviceAssignment) -> DeviceAssignmentRead:
+    return DeviceAssignmentRead(
+        id=row.id or 0,
+        device_id=row.device_id,
+        user_id=row.user_id or 0,
+        username=row.user.username if row.user else "",
+        revoked=row.revoked,
+    )
+
+
+def _assignments_for(session: Session, device_id: str, username: str | None = None) -> list[DeviceAssignment]:
+    """A device's assignments, or only the named user's."""
+    query = select(DeviceAssignment).where(DeviceAssignment.device_id == device_id)
+    if username:
+        user = session.exec(select(User).where(User.username == username.lower())).first()
+        if not user:
+            return []
+        query = query.where(DeviceAssignment.user_id == (user.id or 0))
+    return list(session.exec(query).all())
+
+
+def _grant_device(session: Session, body: DeviceAssignmentCreate, *, keep_revoked: bool = False) -> DeviceAssignmentRead:
+    """Let one more user control a device; the others keep it.
+
+    ``keep_revoked`` is for automatic grants: rediscovering an entity must not
+    undo an admin's revoke.
+    """
+    target = session.exec(select(User).where(User.username == body.username.lower())).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    row = session.exec(
+        select(DeviceAssignment).where(
+            DeviceAssignment.device_id == body.device_id,
+            DeviceAssignment.user_id == (target.id or 0),
+        )
+    ).first()
+    if row is None:
+        row = DeviceAssignment(device_id=body.device_id, user_id=target.id or 0, revoked=body.revoked)
+    elif not keep_revoked:
+        row.revoked = body.revoked
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _assignment_read(row)
 
 
 @app.get("/api/devices", response_model=list[DeviceAssignmentRead])
 def list_devices(session: Session = Depends(get_session), _: User = Depends(require_api_key)):
-    results = session.exec(select(DeviceAssignment)).all()
-    return [
-        DeviceAssignmentRead(
-            id=d.id or 0,
-            device_id=d.device_id,
-            user_id=d.user_id or 0,
-            username=d.user.username if d.user else "",
-            revoked=d.revoked
-        ) for d in results
-    ]
+    return [_assignment_read(d) for d in session.exec(select(DeviceAssignment)).all()]
+
 
 @app.post("/api/devices", response_model=DeviceAssignmentRead)
 def add_device(
@@ -1635,50 +1825,46 @@ def add_device(
     session: Session = Depends(get_session),
     admin: User = Depends(_require_assignment_admin),
 ):
-    user = session.exec(select(User).where(User.username == body.username.lower())).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    return _grant_device(session, body)
 
-    assignment = DeviceAssignment(device_id=body.device_id, user_id=user.id or 0, revoked=body.revoked)
-    session.add(assignment)
-    session.commit()
-    session.refresh(assignment)
-    return DeviceAssignmentRead(
-        id=assignment.id or 0,
-        device_id=assignment.device_id,
-        user_id=assignment.user_id or 0,
-        username=user.username,
-        revoked=assignment.revoked
-    )
 
 @app.delete("/api/devices/{device_id}")
 def remove_device(
     device_id: str,
+    username: str | None = None,
     session: Session = Depends(get_session),
     admin: User = Depends(_require_assignment_admin),
 ):
-    assignment = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == device_id)).first()
-    if not assignment:
+    """Take the device away from ``username``, or from everyone when omitted."""
+    rows = _assignments_for(session, device_id, username)
+    if not rows:
         raise HTTPException(status_code=404, detail="Device assignment not found.")
-    session.delete(assignment)
+    for row in rows:
+        session.delete(row)
     session.commit()
     return {"status": "SUCCESS"}
+
 
 @app.post("/api/devices/{device_id}/revoke")
 def revoke_device(
     device_id: str,
+    username: str | None = None,
     session: Session = Depends(get_session),
     admin: User = Depends(_require_assignment_admin),
 ):
-    assignment = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == device_id)).first()
-    if not assignment:
+    """Revoke ``username``'s use of the device, or everyone's when omitted."""
+    rows = _assignments_for(session, device_id, username)
+    if not rows:
         raise HTTPException(status_code=404, detail="Device assignment not found.")
-    if assignment.revoked:
+    revoked = [row for row in rows if not row.revoked]
+    if not revoked:
         return {"status": "SUCCESS", "message": "Device already revoked."}
-    assignment.revoked = True
+    for row in revoked:
+        row.revoked = True
+        session.add(row)
     session.commit()
-    username = assignment.user.username if assignment.user else "unknown"
-    return {"status": "SUCCESS", "message": f"Device '{device_id}' revoked (was assigned to '{username}')."}
+    names = ", ".join(sorted(row.user.username for row in revoked if row.user)) or "unknown"
+    return {"status": "SUCCESS", "message": f"Device '{device_id}' revoked (was assigned to {names})."}
 
 # --- Entity Protection --------------------------------------------------------
 # A protected entity is one whose physical state only admins (plus the users on
@@ -1742,7 +1928,7 @@ def _permitted_protected_entity_ids(session: Session, user: User) -> list[str]:
     account and the one an admin uses to bootstrap the home.
     """
     rows = _entity_protection_rows(session)
-    if user.is_admin or _is_system_default_user(user):
+    if roles.has_permission(session, user, "devices.use_locked") or _is_system_default_user(user):
         return [row.entity_id for row in rows]
     username = (user.username or "").lower()
     return [
@@ -1752,17 +1938,17 @@ def _permitted_protected_entity_ids(session: Session, user: User) -> list[str]:
     ]
 
 
-def _require_protection_admin(user: User = Depends(require_api_key)) -> User:
+def _require_protection_admin(
+    user: User = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> User:
     """Dependency: entity protection is admin-only, for reads and writes alike.
 
     Protection is the only thing standing between a normal user and the house,
     so a non-admin must never be able to lock, unlock, or widen a permit list.
     """
-    if not user.is_admin:
-        raise HTTPException(
-            status_code=403,
-            detail="Only an admin can manage entity protection.",
-        )
+    if not roles.has_permission(session, user, "devices.lock"):
+        raise HTTPException(status_code=403, detail="You can't lock or unlock devices.")
     return user
 
 
@@ -1893,6 +2079,8 @@ def internal_user_device_assignments(
         "device_ids": [r.device_id for r in rows],
         "protected_entity_ids": [p.entity_id for p in protections],
         "permitted_entity_ids": _permitted_protected_entity_ids(session, user),
+        # Every unlocked entity, assigned or not (role permission).
+        "all_unprotected": roles.has_permission(session, user, "devices.use_all"),
     }
 
 
@@ -1932,17 +2120,9 @@ def internal_validate_api_key(
 @app.get("/api/users/devices", response_model=list[DeviceAssignmentRead])
 def list_devices_ui(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     query = select(DeviceAssignment)
-    if not user.is_admin:
+    if not roles.has_permission(session, user, "devices.assign"):
         query = query.where(DeviceAssignment.user_id == (user.id or 0))
-    results = session.exec(query).all()
-    return [
-        DeviceAssignmentRead(
-            id=d.id or 0,
-            device_id=d.device_id,
-            user_id=d.user_id or 0,
-            username=d.user.username if d.user else ""
-        ) for d in results
-    ]
+    return [_assignment_read(d) for d in session.exec(query).all()]
 
 @app.post("/api/users/devices", response_model=DeviceAssignmentRead)
 def add_device_ui(
@@ -1952,44 +2132,16 @@ def add_device_ui(
     x_internal_secret: str = Header(None, alias="X-Internal-Secret")
 ):
     # Internal calls (Gateway's entity auto-discovery) send only
-    # X-Internal-Secret; a user request must be an admin, because writing an
-    # assignment grants control of a real device.
+    # X-Internal-Secret; a user request must be an admin or home manager,
+    # because writing an assignment grants control of a real device.
     is_internal = x_internal_secret == INTERNAL_SECRET
     if not is_internal:
         if not authorization:
             raise HTTPException(status_code=401, detail="Missing authorization")
         caller = require_api_key(authorization, session)
-        if not caller.is_admin:
-            raise HTTPException(
-                status_code=403,
-                detail="Only an admin can assign devices to users.",
-            )
-
-    target_user = session.exec(select(User).where(User.username == body.username.lower())).first()
-    if not target_user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # Upsert logic: if device already assigned, reassign it
-    existing = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == body.device_id)).first()
-    if existing:
-        existing.user_id = target_user.id or 0
-        session.add(existing)
-        session.commit()
-        session.refresh(existing)
-        session.refresh(existing)
-        return DeviceAssignmentRead(id=existing.id or 0, device_id=existing.device_id, user_id=existing.user_id or 0, username=target_user.username, revoked=existing.revoked)
-
-    assignment = DeviceAssignment(device_id=body.device_id, user_id=target_user.id or 0, revoked=body.revoked)
-    session.add(assignment)
-    session.commit()
-    session.refresh(assignment)
-    return DeviceAssignmentRead(
-        id=assignment.id or 0,
-        device_id=assignment.device_id,
-        user_id=assignment.user_id or 0,
-        username=target_user.username,
-        revoked=assignment.revoked
-    )
+        if not roles.has_permission(session, caller, "devices.assign"):
+            raise HTTPException(status_code=403, detail="You can't assign devices to users.")
+    return _grant_device(session, body, keep_revoked=is_internal)
 
 # Auth & Discovery
 

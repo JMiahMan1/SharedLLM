@@ -103,7 +103,8 @@ const deviceRoom = (device: DeviceEntry): string | null =>
 const UNPLACED = 'No room';
 
 const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
-  const { user, role } = useAuth();
+  const { user, can } = useAuth();
+  const canAssign = can('devices.assign');
   const togglePinnedDevice = useWidgetStore((s) => s.togglePinnedDevice);
   const pinnedDevices = useWidgetStore(
     (s) => s.userWidgets['device_control']?.pinned_devices ?? EMPTY_PINNED_DEVICES
@@ -119,11 +120,10 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
 
   // Assignments & Users
   const [assignments, setAssignments] = useState<{ id: number; device_id: string; username: string }[]>([]);
-  const [allUsers, setAllUsers] = useState<{ username: string; display_name?: string; is_admin?: boolean }[]>([]);
+  const [allUsers, setAllUsers] = useState<{ username: string; display_name?: string }[]>([]);
 
   // Detailed modal
   const [selectedDevice, setSelectedDevice] = useState<DeviceEntry | null>(null);
-  const [assignedTo, setAssignedTo] = useState<string>('');
   const [updatingAssignment, setUpdatingAssignment] = useState(false);
 
   // Local attribute state for controls inside modal
@@ -154,18 +154,18 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       // Non-fatal; keep whatever assignments we already had
     }
 
-    // Load system users for admin assignments panel (isolated)
-    if (role === 'admin') {
+    // Who devices can be shared with, for the assignment panel (isolated).
+    // Not getUsers(): that is admin-only, and home managers assign too.
+    if (canAssign) {
       try {
-        const users = await api.getUsers();
-        setAllUsers(users);
+        setAllUsers(await api.getSharingRecipients());
       } catch (err) {
         console.error('Failed to load users:', err);
       }
     }
 
     setLoading(false);
-  }, [role]);
+  }, [canAssign]);
 
   useEffect(() => {
     let active = true;
@@ -304,34 +304,32 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       const volAttr = typeof attrs?.volume_level === 'number' ? attrs.volume_level : null;
       setVolume(volAttr != null ? Math.round(volAttr * 100) : 50);
     }
-
-    // A device has at most one assigned member (identity reassigns on save).
-    setAssignedTo(assignments.find((a) => a.device_id === device.entity_id)?.username ?? '');
   };
 
   const selectedToggleAction = selectedDevice
     ? getToggleAction(selectedDevice.domain, selectedDevice.state)
     : null;
 
-  // Admin: who this device belongs to. Identity keeps one assignment per
-  // device and moves it on reassign, so this is a single choice, not the
-  // checkbox list it used to be (ticking a second member silently took the
-  // device away from the first, and unticking could remove the wrong one).
-  const handleAssign = async (username: string) => {
+  // Who may use the selected device. A device can be shared: ticking a member
+  // adds them and unticking removes only them.
+  const assignedUsers = useMemo(
+    () => new Set(assignments.filter((a) => a.device_id === selectedDevice?.entity_id).map((a) => a.username)),
+    [assignments, selectedDevice],
+  );
+
+  const handleAssign = async (username: string, assign: boolean) => {
     if (!selectedDevice) return;
     setUpdatingAssignment(true);
     const targetEntity = selectedDevice.entity_id;
     try {
-      if (username) {
+      if (assign) {
         await api.updateDeviceAssignment({ username, device_id: targetEntity });
-        toast.success(`Assigned to ${username}`);
+        toast.success(`${username} can use it`);
       } else {
-        await api.deleteDeviceAssignment(targetEntity);
-        toast.success('Assignment removed');
+        await api.deleteDeviceAssignment(targetEntity, username);
+        toast.success(`${username} can no longer use it`);
       }
-      const userDevices = await api.getDevices();
-      setAssignments(userDevices);
-      setAssignedTo(userDevices.find((a) => a.device_id === targetEntity)?.username ?? '');
+      setAssignments(await api.getDevices());
     } catch (e) {
       console.error(e);
       toast.error('Failed to update the assignment');
@@ -925,28 +923,27 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
               )}
             </div>
 
-            {/* Admin Device Assignment Panel */}
-            {role === 'admin' && (
-              <div className="space-y-3">
-                <h4 className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
-                  <Shield size={12} className="text-indigo-400" /> User Access Control (Admin)
-                </h4>
+            {/* Who may use this device: anyone whose role can assign devices */}
+            {canAssign && (
+              <fieldset className="space-y-2" disabled={updatingAssignment}>
+                <legend className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
+                  <Shield size={12} className="text-indigo-400" /> Who can use it
+                </legend>
                 <p className="text-[10px] text-slate-500">
-                  The member this device belongs to. Admins can always control it.
+                  Everyone ticked can control it, as can anyone whose role covers every device.
                 </p>
-                <select
-                  value={assignedTo}
-                  disabled={updatingAssignment}
-                  onChange={(e) => void handleAssign(e.target.value)}
-                  aria-label="Assigned to"
-                  className="glass-input w-full px-3 py-2 text-sm min-h-11 disabled:opacity-50"
-                >
-                  <option value="">Nobody (admins only)</option>
-                  {allUsers.filter((u) => !u.is_admin).map((u) => (
-                    <option key={u.username} value={u.username}>{u.display_name || u.username}</option>
-                  ))}
-                </select>
-              </div>
+                {allUsers.map((u) => (
+                  <label key={u.username} className="flex items-center gap-3 min-h-11 rounded-xl px-3 bg-slate-950/20 text-sm text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={assignedUsers.has(u.username)}
+                      onChange={(e) => void handleAssign(u.username, e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    {u.display_name || u.username}
+                  </label>
+                ))}
+              </fieldset>
             )}
           </div>
         </div>,

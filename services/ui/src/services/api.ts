@@ -22,6 +22,8 @@ import type {
   APIKey,
   DiscoveredUser,
   DeviceAssignment,
+  Role,
+  RoleCatalog,
   EntityProtection,
   ShareRecipient,
   AiCapability,
@@ -197,6 +199,8 @@ export type {
   UserProfile,
   Workspace,
   DeviceAssignment,
+  Role,
+  RoleCatalog,
   EntityProtection,
   ShareRecipient,
   AiCapability,
@@ -1548,13 +1552,40 @@ export const api = {
     return resp.data;
   },
 
+  async getRoles(): Promise<RoleCatalog> {
+    const resp = await apiClient.get('/api/users/roles');
+    return resp.data;
+  },
+
+  async saveRole(role: { id?: number; name: string; description: string; permissions: string[] }): Promise<Role> {
+    const body = { name: role.name, description: role.description, permissions: role.permissions };
+    const resp = role.id
+      ? await apiClient.patch(`/api/users/roles/${role.id}`, body)
+      : await apiClient.post('/api/users/roles', body);
+    return resp.data;
+  },
+
+  async deleteRole(id: number): Promise<void> {
+    await apiClient.delete(`/api/users/roles/${id}`);
+  },
+
+  /** Replace the roles a user holds. */
+  async setUserRoles(username: string, roleIds: number[]): Promise<UserProfile> {
+    const resp = await apiClient.put(`/api/users/${encodeURIComponent(username)}/roles`, { role_ids: roleIds });
+    return normalizeUser(resp.data);
+  },
+
+  /** Let one more user control a device; whoever already has it keeps it. */
   async updateDeviceAssignment(assignment: { username: string; device_id: string }): Promise<DeviceAssignment> {
     const resp = await apiClient.post('/api/users/devices', assignment);
     return resp.data;
   },
 
-  async deleteDeviceAssignment(deviceId: string): Promise<{ status?: string; success?: boolean }> {
-    const resp = await apiClient.delete(`/api/devices/${encodeURIComponent(deviceId)}`);
+  /** Take a device away from one user, or from everyone when no user is named. */
+  async deleteDeviceAssignment(deviceId: string, username?: string): Promise<{ status?: string; success?: boolean }> {
+    const resp = await apiClient.delete(`/api/devices/${encodeURIComponent(deviceId)}`, {
+      params: username ? { username } : undefined,
+    });
     return resp.data;
   },
 

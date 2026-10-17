@@ -14,9 +14,10 @@ enforcement lives in `services/execution/entity_access.py`.
 1. **A lock overrides the device assignment.** While an entity is locked, its
    `DeviceAssignment` row is ignored. Being assigned to the thermostat does not
    help if you are not on its permit list.
-2. **Admins and the system default user always pass.** They can see and control
-   a locked entity whether or not they are on its permit list, so you can never
-   lock yourself out of your own house. The default account is the one with
+2. **Admins, the system default user and anyone whose role has
+   `devices.use_locked` always pass** (see `docs/ROLES.md`). They can see and
+   control a locked entity whether or not they are on its permit list, so you
+   can never lock yourself out of your own house. The default account is the one with
    `is_system_default` set (falling back to `id == 1`, then
    `username == "default"`, so renaming it keeps working).
 3. **A permit is per entity, not global.** Naming a user on the hallway
@@ -36,9 +37,9 @@ enforcement lives in `services/execution/entity_access.py`.
 
 | Endpoint | Who | What |
 |---|---|---|
-| `GET /api/entity-protection` | admin only | every lock: `entity_id`, `permitted_usernames`, `granted_by`, `granted_at`, `note` |
-| `PUT /api/entity-protection/{entity_id}` | admin only | `{"protected": true, "permitted_usernames": ["dana"], "note": "guest room"}`; `protected: false` releases the lock |
-| `GET /api/internal/user-device-assignments?username=…` | internal secret | `device_ids`, `protected_entity_ids`, `permitted_entity_ids` (execution only) |
+| `GET /api/entity-protection` | admin, or a role with `devices.lock` | every lock: `entity_id`, `permitted_usernames`, `granted_by`, `granted_at`, `note` |
+| `PUT /api/entity-protection/{entity_id}` | admin, or a role with `devices.lock` | `{"protected": true, "permitted_usernames": ["dana"], "note": "guest room"}`; `protected: false` releases the lock |
+| `GET /api/internal/user-device-assignments?username=…` | internal secret | `device_ids`, `protected_entity_ids`, `permitted_entity_ids`, `all_unprotected` (execution only) |
 
 `{entity_id}` is a single path segment matched against
 `^[a-z0-9_]+\.[a-z0-9_]+$`; anything else is a 400. A username that does not
@@ -121,7 +122,8 @@ covers the composite night-mode path that calls handlers directly.
 
 - `DeviceAssignment` no longer decides access on its own. It is one input to
   `EntityPermissions.may_control`, which consults the lock first.
-- **Device assignment is now admin-only to change.** `POST /api/devices`,
+- **Device assignment is now admin-only to change** (later: or a role with
+  `devices.assign`, and a device can have several users; see `docs/ROLES.md`). `POST /api/devices`,
   `DELETE /api/devices/{id}`, `POST /api/devices/{id}/revoke` and
   `POST /api/users/devices` previously accepted any authenticated user, so
   anyone could self-assign a locked entity and walk straight past the lock.

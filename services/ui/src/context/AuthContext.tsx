@@ -11,6 +11,8 @@ interface AuthContextType {
   user: UserProfile | null;
   token: string | null;
   role: 'admin' | 'user' | null;
+  /** Whether the signed-in user's roles (or admin) allow this, e.g. "devices.assign". */
+  can: (permission: string) => boolean;
   login: (credentials: { username: string; password: string }) => Promise<void>;
   logout: () => void;
   isLoading: boolean;
@@ -144,17 +146,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const role = useMemo(() => user?.role || (user?.is_admin ? 'admin' : 'user'), [user]);
+  const can = useCallback(
+    (permission: string) => Boolean(user?.is_admin || user?.permissions?.includes(permission)),
+    [user],
+  );
 
   const contextValue = useMemo(() => ({
     user,
     token,
     role: role as 'admin' | 'user' | null,
+    can,
     login,
     logout,
     isLoading,
     initError,
     refreshProfile
-  }), [user, token, role, login, logout, isLoading, initError, refreshProfile]);
+  }), [user, token, role, can, login, logout, isLoading, initError, refreshProfile]);
 
   return (
     <AuthContext.Provider value={contextValue}>
