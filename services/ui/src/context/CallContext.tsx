@@ -16,9 +16,10 @@ import { api } from '../services/api';
 import type { ActiveCall, CallParticipant } from '../types/api';
 import { useAuth } from './AuthContext';
 import { storageGetSync } from '../lib/storage';
+import { AUTO_DROP_IN_EVENT, getAutoDropIn } from '../lib/callSettings';
 
-/** How often the app looks for a family call started on another device. */
-const ACTIVE_CALL_REFRESH_MS = 10_000;
+/** How often the app looks for a family drop-in call started elsewhere. */
+const ACTIVE_CALL_REFRESH_MS = 5_000;
 
 export type CallStatus = 'connecting' | 'connected' | 'ended' | 'error';
 
@@ -95,6 +96,39 @@ export function callSocketUrl(baseUrl: string, token: string, room: string, name
 
 function messageError(error: unknown): string {
   return error instanceof Error ? error.message : 'The call could not start.';
+}
+
+/** Best-effort drop-in chime. Browsers may keep audio suspended until a tap. */
+function playDropInChime(): void {
+  try {
+    const AudioContextClass = window.AudioContext;
+    if (!AudioContextClass) return;
+    const context = new AudioContextClass();
+    void context.resume().catch(() => {});
+    const now = context.currentTime;
+    const notes = [880, 1174.66, 880];
+    notes.forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.0001, now + index * 0.18);
+      gain.gain.exponentialRampToValueAtTime(0.16, now + index * 0.18 + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.18 + 0.16);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(now + index * 0.18);
+      oscillator.stop(now + index * 0.18 + 0.18);
+    });
+    window.setTimeout(() => { void context.close().catch(() => {}); }, 1200);
+  } catch {
+    // Sound is a nicety; vibration and the visible alert still work.
+  }
+  try {
+    navigator.vibrate?.([180, 80, 180]);
+  } catch {
+    // Vibration is unavailable on desktop and some browsers.
+  }
 }
 
 interface PeerConnection {
@@ -733,14 +767,15 @@ function CallOverlay({
           ) : connecting ? (
             <div className="flex h-full min-h-48 flex-col items-center justify-center gap-3 text-center" data-testid="call-connecting">
               <Loader2 size={26} className="animate-spin text-emerald-300" />
-              <p className="text-sm text-slate-300">Connecting to the family call…</p>
+              <p className="text-sm text-slate-300">Starting a drop-in call…</p>
               <p className="text-xs text-slate-500">Allow the microphone if your browser asks.</p>
             </div>
           ) : (
             <>
               {peers.length === 0 && (
                 <p className="mb-3 rounded-xl bg-white/[0.05] px-3 py-2 text-center text-xs leading-relaxed text-slate-400" data-testid="call-waiting">
-                  You are the first one here. The family can join from Family → Calls.
+                  You're live on the family line. Everyone gets a drop-in alert and can join from
+                  Family → Calls.
                 </p>
               )}
               <div className="grid grid-cols-2 gap-2">
@@ -819,12 +854,16 @@ function CallOverlay({
  * from Family to another page never drops the microphone or the call panel.
  */
 export function CallProvider({ children }: { children: ReactNode }) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const tokenRef = useRef<string | null>(token);
+  const usernameRef = useRef<string | undefined>(user?.username);
   const sessionRef = useRef<CallSession | null>(null);
   const callRef = useRef<CallInfo | null>(null);
   const mutedRef = useRef(false);
   const cameraRef = useRef(false);
+  const autoDropInRef = useRef(false);
+  const autoTriedRef = useRef<Set<string>>(new Set());
+  const autoJoinRef = useRef<(active: ActiveCall) => void>(() => {});
 
   const [call, setCall] = useState<CallInfo | null>(null);
   const [peers, setPeers] = useState<CallPeer[]>([]);
@@ -834,10 +873,37 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [cameraOn, setCameraOn] = useState(false);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [now, setNow] = useState(() => Date.now());
+  const seenCallsRef = useRef<Set<string>>(new Set());
+  const primedRef = useRef(false);
 
   useEffect(() => {
     tokenRef.current = token;
-  }, [token]);
+    usernameRef.current = user?.username;
+    if (!token) {
+      primedRef.current = false;
+      seenCallsRef.current = new Set();
+      autoTriedRef.current = new Set();
+      setActiveCalls([]);
+      setDismissed([]);
+    }
+  }, [token, user?.username]);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      void getAutoDropIn().then((enabled) => {
+        if (active) autoDropInRef.current = enabled;
+      });
+    };
+    refresh();
+    window.addEventListener(AUTO_DROP_IN_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      active = false;
+      window.removeEventListener(AUTO_DROP_IN_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
 
   useEffect(() => {
     callRef.current = call;
@@ -857,7 +923,32 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const load = async () => {
       try {
         const calls = await api.getActiveCalls();
-        if (!cancelled) setActiveCalls(calls);
+        if (cancelled) return;
+        setActiveCalls(calls);
+
+        const tokens = new Set(calls.map((active) => active.token));
+        if (!primedRef.current) {
+          // The first poll is the baseline: calls already running should show
+          // in the banner, not trigger an automatic join.
+          primedRef.current = true;
+        } else if (!callRef.current) {
+          const fresh = calls.find((active) => !seenCallsRef.current.has(active.token));
+          if (fresh && autoDropInRef.current && !autoTriedRef.current.has(fresh.token)) {
+            const username = usernameRef.current;
+            const alreadyOnCall = username
+              ? fresh.participants.some((person) => person.username === username)
+              : false;
+            if (!alreadyOnCall) {
+              autoTriedRef.current.add(fresh.token);
+              playDropInChime();
+              autoJoinRef.current(fresh);
+            }
+          }
+        }
+        for (const tried of autoTriedRef.current) {
+          if (!tokens.has(tried)) autoTriedRef.current.delete(tried);
+        }
+        seenCallsRef.current = tokens;
       } catch {
         // A call list is a convenience, not a reason to show an error on
         // every page when the gateway is briefly unavailable.
@@ -896,22 +987,24 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [token]);
 
-  const startCall = useCallback(async (room: string, name: string) => {
+  const startCall = useCallback(async (room: string, name: string, options?: { auto?: boolean }) => {
     const apiToken = tokenRef.current;
     if (!apiToken) {
-      setCall({
-        room,
-        name: name || 'Family call',
-        status: 'error',
-        error: 'Sign in to start a family call.',
-        startedAt: Date.now(),
-      });
+      if (!options?.auto) {
+        setCall({
+          room,
+          name: name || 'Family call',
+          status: 'error',
+          error: 'Sign in to start a family call.',
+          startedAt: Date.now(),
+        });
+      }
       return;
     }
 
     if (sessionRef.current) {
       if (callRef.current?.room === room) return;
-      toast.error('You are already in a call.');
+      if (!options?.auto) toast.error('You are already in a call.');
       return;
     }
 
@@ -952,11 +1045,22 @@ export function CallProvider({ children }: { children: ReactNode }) {
       session.close();
       setPeers([]);
       setLocalStream(null);
-      setCall((current) => current && current.status === 'connecting'
-        ? { ...current, status: 'error', error: messageError(error) }
-        : current);
+      if (options?.auto) {
+        setCall(null);
+        toast.error('Could not drop in automatically. Tap the call banner to join.');
+      } else {
+        setCall((current) => current && current.status === 'connecting'
+          ? { ...current, status: 'error', error: messageError(error) }
+          : current);
+      }
     }
   }, []);
+
+  useEffect(() => {
+    autoJoinRef.current = (active) => {
+      void startCall(active.token, active.name || 'Family call', { auto: true });
+    };
+  }, [startCall]);
 
   const endCall = useCallback(() => {
     const session = sessionRef.current;
@@ -1011,18 +1115,22 @@ export function CallProvider({ children }: { children: ReactNode }) {
   return (
     <CallContext.Provider value={value}>
       {children}
-      {bannerCall && (
+      {bannerCall && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed bottom-4 left-1/2 z-[110] flex w-[min(92vw,26rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-emerald-400/30 bg-slate-900 px-3 py-2.5 shadow-2xl"
+          className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] left-1/2 z-[130] flex w-[min(92vw,28rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-emerald-400/30 bg-slate-900 px-3 py-2.5 shadow-2xl sm:bottom-4"
           data-testid="call-banner"
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
+          <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
             <Phone size={17} />
+            <span className="absolute -right-0.5 -top-0.5 flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-3 w-3 rounded-full border-2 border-slate-900 bg-emerald-400" />
+            </span>
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-white">{bannerCall.name || 'Family call'}</p>
-            <p className="truncate text-[11px] text-slate-400">
-              {bannerCall.participants.map((person) => person.name).join(', ') || 'Someone'} in the call
+            <p className="truncate text-[11px] text-emerald-300">
+              {bannerCall.participants.map((person) => person.name).join(', ') || 'Someone'} on a drop-in call
             </p>
           </div>
           <button
@@ -1030,17 +1138,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
             onClick={() => void startCall(bannerCall.token, bannerCall.name || 'Family call')}
             className="min-h-9 shrink-0 rounded-xl bg-emerald-500 px-3 text-xs font-bold text-emerald-950 hover:bg-emerald-400"
           >
-            Join
+            Drop in
           </button>
           <button
             type="button"
             onClick={() => setDismissed((current) => [...current, bannerCall.token])}
-            aria-label="Dismiss call alert"
+            aria-label="Dismiss drop-in alert"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/[0.07] hover:text-white"
           >
             <X size={15} />
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
       {call && typeof document !== 'undefined' && createPortal(
         <CallOverlay

@@ -51,17 +51,17 @@ export default function FamilyCalls() {
   };
 
   return (
-    <section className="space-y-3" data-testid="family-calls">
+    <section className="w-full min-w-0 max-w-full space-y-3 overflow-x-hidden" data-testid="family-calls">
       <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
             <Phone size={18} />
           </span>
           <div className="min-w-0">
-            <h2 className="font-semibold text-slate-100">Family calls</h2>
+            <h2 className="font-semibold text-slate-100">Drop in on family</h2>
             <p className="mt-1 text-xs leading-relaxed text-slate-400">
-              Start or join a call with the family group or one person. The call opens inside Jarvis,
-              and you can keep using the rest of the app while you talk.
+              Start a drop-in call with the family group or one person. The call opens inside
+              Jarvis, and you can keep using the rest of the app while you talk.
             </p>
           </div>
         </div>
@@ -92,7 +92,7 @@ export default function FamilyCalls() {
         </p>
       )}
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
         {sorted.map((conversation) => {
           const group = conversation.type !== 1;
           const Icon = group ? Users : Phone;
@@ -103,7 +103,7 @@ export default function FamilyCalls() {
           return (
             <div
               key={conversation.token}
-              className="flex items-center gap-3 rounded-2xl border border-white/5 bg-slate-900/60 p-3"
+              className="flex min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-2xl border border-white/5 bg-slate-900/60 p-3"
               data-testid={`family-call-${conversation.token}`}
             >
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/[0.07] text-slate-200">
@@ -130,7 +130,7 @@ export default function FamilyCalls() {
                     ? `Show the ${conversation.display_name} call`
                     : active
                       ? `Join the ${conversation.display_name} call`
-                      : `Start a call with ${conversation.display_name}`
+                      : `Drop in on ${conversation.display_name}`
                 }
                 className={`flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   active
@@ -139,7 +139,7 @@ export default function FamilyCalls() {
                 }`}
               >
                 {busy ? <Loader2 size={15} className="animate-spin" /> : <Phone size={15} />}
-                {busy ? 'Starting…' : inThisCall ? 'Open' : active ? 'Join' : 'Call'}
+                {busy ? 'Starting…' : inThisCall ? 'Open' : active ? 'Join' : 'Drop in'}
               </button>
             </div>
           );
@@ -147,9 +147,8 @@ export default function FamilyCalls() {
       </div>
 
       <p className="px-1 text-xs leading-relaxed text-slate-500">
-        Calls use your microphone and optional camera, and nothing is recorded. The current ESP32-S3
-        watch has no microphone or speaker, so it cannot carry a call itself. ESP devices with audio
-        hardware are not excluded; they can join once an ESP WebRTC client is built.
+        Drop-in calls use your microphone and optional camera, and nothing is recorded. Anyone in
+        the family can join while the call is live.
       </p>
     </section>
   );
