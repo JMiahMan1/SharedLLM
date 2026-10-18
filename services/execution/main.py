@@ -3361,6 +3361,8 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
             )
             return await media.handle_media_transport(media_req)
 
+    return {"status": "FAILURE", "message": f"Unsupported voice command: {transcript}"}
+
 
 # Skylight Integration Proxy
 # Skylight has no official/public API. We talk to the same private app API

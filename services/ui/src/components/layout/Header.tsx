@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Bell, LogOut, Satellite, User as UserIcon, Settings, Shield, ChevronUp } from 'lucide-react';
+import { Search, Bell, LogOut, Satellite, User as UserIcon, Settings, Shield, ChevronUp, Loader2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../services/api';
 import type { TelemetryNotification } from '../../types/api';
@@ -18,8 +18,6 @@ import { navPagesFor } from './navItems';
 type NavItem = { label: string; path: string; section: string; keywords: string };
 const EXTRA_ITEMS: NavItem[] = [
   { label: 'Accounts & Integrations', path: '/identity', section: 'Pages', keywords: 'identity users accounts credentials api keys home assistant nextcloud github voice devices' },
-  { label: 'Communication', path: '/communication', section: 'Pages', keywords: 'talk nextcloud messages chat' },
-  { label: 'Remote', path: '/remote', section: 'Pages', keywords: 'home assistant control devices' },
   { label: 'Profile Settings', path: '/settings', section: 'Settings', keywords: 'account name password' },
   { label: 'RAG / Storage Settings', path: '/knowledge', section: 'Settings', keywords: 'embeddings collections purge index' },
   { label: 'Voice Assistant', path: '/settings', section: 'Settings', keywords: 'microphone speech tts' },
@@ -90,7 +88,12 @@ const Header = () => {
   // notices the Android app raises as system notifications. It used to show
   // filtered system *logs* (admin only), which never matched anything, and
   // its "Clear All" wiped the whole system log.
-  const { data: notifications = [] } = useQuery<TelemetryNotification[]>({
+  const {
+    data: notifications = [],
+    isLoading: notificationsLoading,
+    isError: notificationsError,
+    refetch: refetchNotifications,
+  } = useQuery<TelemetryNotification[]>({
     queryKey: ['header-notifications'],
     queryFn: async () => {
       const { notifications: items } = await api.getTelemetryNotifications(20);
@@ -202,7 +205,7 @@ const Header = () => {
           </button>
 
           {showNotifications && (
-            <div className="fixed left-4 right-4 top-16 sm:absolute sm:left-auto sm:top-auto sm:right-0 sm:mt-4 sm:w-80 glass-menu p-4 z-50 animate-in slide-in-from-top-2 duration-200">
+            <div className="fixed left-4 right-4 top-[calc(4rem+env(safe-area-inset-top,0px))] sm:absolute sm:left-auto sm:top-auto sm:right-0 sm:mt-4 sm:w-80 glass-menu p-4 z-50 animate-in slide-in-from-top-2 duration-200">
               <div className="mb-3 flex items-center justify-between gap-3 border-b border-white/5 pb-2">
                 <h4 className="text-sm font-bold text-white">Notifications</h4>
                 {visible.length > 0 && (
@@ -216,7 +219,24 @@ const Header = () => {
               </div>
               <div className="space-y-2 max-h-[60vh] sm:max-h-72 overflow-y-auto pr-1">
                 {visible.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-6">You're all caught up</p>
+                  notificationsLoading ? (
+                    <p className="flex items-center justify-center gap-2 py-6 text-xs text-slate-500">
+                      <Loader2 size={14} className="animate-spin" /> Checking notifications…
+                    </p>
+                  ) : notificationsError ? (
+                    <div className="py-6 text-center">
+                      <p className="text-xs text-rose-300">Couldn't check notifications.</p>
+                      <button
+                        type="button"
+                        onClick={() => void refetchNotifications()}
+                        className="mt-2 min-h-9 rounded-lg bg-white/5 px-3 text-xs font-semibold text-[var(--site-text)] hover:bg-white/10"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500 text-center py-6">You're all caught up</p>
+                  )
                 ) : visible.slice(0, 10).map((n) => (
                   <SwipeToDismiss key={n.id} label={n.title} onDismiss={() => dismissNotification(String(n.id))}>
                     <div className="p-3 pr-10 rounded-xl bg-white/5 border border-white/5">

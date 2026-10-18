@@ -414,7 +414,7 @@ const Dashboard = () => {
         </div>
 
         <div className="flex items-center gap-2.5 w-full md:w-auto md:max-w-lg">
-          <form onSubmit={handleSearch} className="relative flex-1">
+          <form onSubmit={handleSearch} className="relative flex-1 min-w-0">
             <Search
               className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500"
               size={16}
