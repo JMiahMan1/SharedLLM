@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { CallProvider } from './context/CallContext';
 import { LocationProvider } from './context/LocationContext';
 import { MediaPlayerProvider } from './context/MediaPlayerContext';
 import NativeBridge from './components/NativeBridge';
@@ -101,6 +102,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <CallProvider>
         <LocationProvider>
         <Toaster position="top-right" toastOptions={{
           // The theme's menu surface and text, so a toast reads on light themes too.
@@ -149,6 +151,7 @@ function App() {
         </Router>
         </MediaPlayerProvider>
       </LocationProvider>
+      </CallProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

@@ -1,25 +1,25 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Phone, RefreshCw, Users } from 'lucide-react';
-import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse, TalkConversation } from '../../types/api';
+import { useCall } from '../../context/CallContext';
 import { detailList } from '../chat/chatModel';
 
-/** How often the room list refreshes so an active family call appears. */
+/** How often the room list refreshes so new conversations appear. */
 const REFRESH_MS = 15_000;
 
 /**
- * One-tap family calls.
+ * One-tap family calls, entirely inside Jarvis.
  *
- * The media itself runs in Nextcloud Talk: clicking a conversation opens its
- * `/call/<token>` page, where the browser (or the Talk phone app) gets the
- * microphone and camera. Talk only lets a logged-in browser session join a
- * call, so the gateway cannot join on the user's behalf; it only supplies the
- * room token and the URL.
+ * The conversation list still comes from Nextcloud Talk because that is where
+ * the family's rooms live, but the call itself is a peer-to-peer WebRTC call
+ * signalled by the Jarvis gateway. A room token is only the shared name both
+ * people join; no Nextcloud call is joined or opened in another tab.
  */
 export default function FamilyCalls() {
-  const [opening, setOpening] = useState<string | null>(null);
+  const { call, activeCalls, startCall } = useCall();
+  const [starting, setStarting] = useState<string | null>(null);
   const {
     data: conversations = [],
     isLoading,
@@ -32,31 +32,21 @@ export default function FamilyCalls() {
     select: (response) => detailList<TalkConversation>(response, 'conversations').filter((c) => c.token && c.type !== 6),
   });
 
+  const activeByToken = new Map(activeCalls.map((active) => [active.token, active]));
   const sorted = [...conversations].sort((a, b) => {
-    if (Boolean(a.has_call) !== Boolean(b.has_call)) return a.has_call ? -1 : 1;
+    const activeA = activeByToken.has(a.token);
+    const activeB = activeByToken.has(b.token);
+    if (activeA !== activeB) return activeA ? -1 : 1;
     if ((a.type === 1) !== (b.type === 1)) return a.type === 1 ? 1 : -1;
     return (b.last_activity ?? 0) - (a.last_activity ?? 0);
   });
 
-  const openCall = async (conversation: TalkConversation) => {
-    // Open the tab while the click is still a user gesture. The API call
-    // happens after this, and popup blockers would otherwise stop it.
-    const tab = window.open('about:blank', '_blank');
-    if (tab) tab.opener = null;
-    setOpening(conversation.token);
+  const start = async (conversation: TalkConversation) => {
+    setStarting(conversation.token);
     try {
-      const response = await api.getTalkCallLink(conversation.token);
-      const url = (response.detail as { url?: unknown } | null | undefined)?.url;
-      if (response.status !== 'SUCCESS' || typeof url !== 'string' || !url) {
-        throw new Error(response.message || 'Could not open the call.');
-      }
-      if (tab) tab.location.replace(url);
-      else window.location.assign(url);
-    } catch (error) {
-      tab?.close();
-      toast.error(error instanceof Error ? error.message : 'Could not open the call.');
+      await startCall(conversation.token, conversation.display_name);
     } finally {
-      setOpening(null);
+      setStarting(null);
     }
   };
 
@@ -70,8 +60,8 @@ export default function FamilyCalls() {
           <div className="min-w-0">
             <h2 className="font-semibold text-slate-100">Family calls</h2>
             <p className="mt-1 text-xs leading-relaxed text-slate-400">
-              Start a call with the family group or one person. Audio and video run in Nextcloud Talk,
-              so the call keeps working when this page is closed.
+              Start or join a call with the family group or one person. The call opens inside Jarvis,
+              and you can keep using the rest of the app while you talk.
             </p>
           </div>
         </div>
@@ -106,7 +96,10 @@ export default function FamilyCalls() {
         {sorted.map((conversation) => {
           const group = conversation.type !== 1;
           const Icon = group ? Users : Phone;
-          const busy = opening === conversation.token;
+          const active = activeByToken.get(conversation.token);
+          const inThisCall = call?.room === conversation.token;
+          const busy = starting === conversation.token;
+          const people = active?.participants.map((person) => person.name).join(', ');
           return (
             <div
               key={conversation.token}
@@ -118,27 +111,35 @@ export default function FamilyCalls() {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-semibold text-slate-100">{conversation.display_name}</p>
-                <p className={`truncate text-xs ${conversation.has_call ? 'text-emerald-300' : 'text-slate-400'}`}>
-                  {conversation.has_call
-                    ? 'Call in progress — join it'
-                    : group
-                      ? 'Family group · audio and video'
-                      : 'Direct call · audio and video'}
+                <p className={`truncate text-xs ${active ? 'text-emerald-300' : 'text-slate-400'}`}>
+                  {inThisCall
+                    ? 'You are in this call'
+                    : active
+                      ? `${people || 'Someone'} in the call`
+                      : group
+                        ? 'Family group · audio and video'
+                        : 'Direct call · audio and video'}
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => openCall(conversation)}
-                disabled={busy || (!conversation.has_call && conversation.can_start_call === false)}
-                aria-label={conversation.has_call ? `Join the ${conversation.display_name} call` : `Start a call with ${conversation.display_name}`}
+                onClick={() => void start(conversation)}
+                disabled={busy || (!active && conversation.can_start_call === false)}
+                aria-label={
+                  inThisCall
+                    ? `Show the ${conversation.display_name} call`
+                    : active
+                      ? `Join the ${conversation.display_name} call`
+                      : `Start a call with ${conversation.display_name}`
+                }
                 className={`flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                  conversation.has_call
+                  active
                     ? 'bg-emerald-500 text-emerald-950 hover:bg-emerald-400'
                     : 'bg-white/[0.08] text-slate-100 hover:bg-white/[0.14]'
                 }`}
               >
                 {busy ? <Loader2 size={15} className="animate-spin" /> : <Phone size={15} />}
-                {busy ? 'Opening…' : conversation.has_call ? 'Join' : 'Call'}
+                {busy ? 'Starting…' : inThisCall ? 'Open' : active ? 'Join' : 'Call'}
               </button>
             </div>
           );
@@ -146,8 +147,9 @@ export default function FamilyCalls() {
       </div>
 
       <p className="px-1 text-xs leading-relaxed text-slate-500">
-        The first time, Talk asks you to sign in and allow the microphone and camera. The ESP32 watch has no
-        microphone or speaker, so it can show a call alert but cannot carry the call itself.
+        Calls use your microphone and optional camera, and nothing is recorded. The current ESP32-S3
+        watch has no microphone or speaker, so it cannot carry a call itself; ESP devices with audio
+        can join as WebRTC clients.
       </p>
     </section>
   );

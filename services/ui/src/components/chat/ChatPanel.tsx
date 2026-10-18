@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import ChatNotify from '../../plugins/chatNotify';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Loader2, Phone, Plus, X } from 'lucide-react';
+import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Phone, Plus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
@@ -16,6 +16,7 @@ import ConversationAvatar from './ConversationAvatar';
 import VerseBanner from './VerseBanner';
 import { verseShareText } from '../../lib/verseShare';
 import { useFamilyDirectory } from './familyDirectory';
+import { useCall } from '../../context/CallContext';
 import MessageThread from './MessageThread';
 import Composer from './Composer';
 import PollStrip, { type TalkPoll } from './PollStrip';
@@ -59,10 +60,11 @@ interface ChatPanelProps {
  * Laid out like the messengers people already know (WhatsApp, Messenger,
  * iMessage): an inbox and a thread, which on a phone are two screens with a
  * back button and on a wide screen sit side by side. Text, photos, files,
- * voice notes, replies, reactions, edits, polls and calls all go through
- * Talk, so these are the same conversations the family uses in Nextcloud.
- * Starting a message with @Jarvis asks the assistant, which answers in the
- * thread.
+ * voice notes, replies, reactions, edits and polls go through Talk, so these
+ * are the same conversations the family uses in Nextcloud. Calls are different:
+ * the phone button starts a peer-to-peer call inside Jarvis, signalled by the
+ * gateway. Starting a message with @Jarvis asks the assistant, which answers in
+ * the thread.
  */
 export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps) {
   const queryClient = useQueryClient();
@@ -84,8 +86,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const [showPollForm, setShowPollForm] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
-  const [callOpening, setCallOpening] = useState(false);
   const [historyLimit, setHistoryLimit] = useState<Record<string, number>>({});
+  const { startCall } = useCall();
 
   const threadRef = useRef<HTMLElement | null>(null);
   // Keep the composer above the phone keyboard (iOS does not resize the page for it).
@@ -357,27 +359,9 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     onError: (error: Error) => toast.error(error.message || 'Voice message failed'),
   });
 
-  const openCall = async () => {
-    // Joining needs the browser's Nextcloud session, so open the Talk call
-    // page in a tab. Opening the tab now keeps popup blockers happy while the
-    // URL is fetched.
-    const tab = window.open('about:blank', '_blank');
-    if (tab) tab.opener = null;
-    setCallOpening(true);
-    try {
-      const response = await api.getTalkCallLink(activeToken, asUser);
-      const url = (response.detail as { url?: unknown } | null | undefined)?.url;
-      if (response.status !== 'SUCCESS' || typeof url !== 'string' || !url) {
-        throw new Error(response.message || 'Could not open the call.');
-      }
-      if (tab) tab.location.replace(url);
-      else window.location.assign(url);
-    } catch (error) {
-      tab?.close();
-      toast.error(error instanceof Error ? error.message : 'Could not open the call.');
-    } finally {
-      setCallOpening(false);
-    }
+  const openCall = () => {
+    if (!activeToken) return;
+    void startCall(activeToken, activeConversation?.display_name || 'Family call');
   };
 
   const react = async (message: TalkMessage, emoji: string) => {
@@ -513,12 +497,11 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
             <button
               type="button"
               className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"
-              onClick={() => void openCall()}
-              disabled={callOpening}
-              aria-label="Open the call in Nextcloud Talk"
-              title="Open the call in Nextcloud Talk"
+              onClick={openCall}
+              aria-label="Start or join the family call"
+              title="Start or join the family call"
             >
-              {callOpening ? <Loader2 size={17} className="animate-spin" /> : <Phone size={17} />}
+              <Phone size={17} />
             </button>
           )}
           {activeConversation && (

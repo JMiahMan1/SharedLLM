@@ -361,33 +361,6 @@ async def _bank_game_stars(user: str, total_stars: int, reason: str) -> None:
         log.warning("[talk] star banking failed for %s: %s", user, exc)
 
 
-def _call_url(provider: Any, token: str) -> str:
-    """The Talk web page that opens this room's call.
-
-    Joining a call needs the browser's Nextcloud session, not the API
-    credentials, so the UI opens this page instead of trying to join from the
-    server. Talk then handles the WebRTC signalling and the media devices.
-    """
-    return f"{str(provider.base_url).rstrip('/')}/call/{urllib.parse.quote(token, safe='')}"
-
-
-async def _talk_call_link(token: str, provider: Any) -> ExecutionResult:
-    """Return the browser page for a call without touching Nextcloud.
-
-    This deliberately does not call the OCS join endpoint: Talk only lets a
-    logged-in browser session join a call, and the service's app password
-    cannot create that session.
-    """
-    if not token:
-        return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_call_link")
-    return ExecutionResult(
-        status="SUCCESS",
-        message="Call link ready.",
-        service="talk_call_link",
-        detail={"token": token, "url": _call_url(provider, token), "in_call": False},
-    )
-
-
 async def _talk_call(token: str, provider: Any, action: str) -> ExecutionResult:
     """Join or leave a Talk call and return the signalling details.
 
@@ -421,7 +394,6 @@ async def _talk_call(token: str, provider: Any, action: str) -> ExecutionResult:
         service=f"talk_{action}",
         detail={
             "token": token,
-            "url": _call_url(provider, token),
             "call_id": call.get("callId") or call.get("call_id"),
             "call_token": call.get("callToken") or call.get("call_token"),
             "signaling": {
@@ -637,9 +609,6 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 service="talk_open",
                 detail={"conversation": _conversation_summary(data)},
             )
-
-        if action == "call_link":
-            return await _talk_call_link(req.token, provider)
 
         if action in ("call_join", "call_leave"):
             return await _talk_call(req.token, provider, action)
