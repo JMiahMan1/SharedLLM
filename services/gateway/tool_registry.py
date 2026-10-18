@@ -478,8 +478,9 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Call any Home Assistant service directly (domain.service + data).",
      "payload fields: domain, service, entity_id, service_data."),
     ("CalendarRequest", SVC_EXECUTION, "POST", "/execute/calendar", False,
-     "Calendar CRUD: list, create, update, delete events.",
-     "payload fields: action, query, summary, start_time, calendar_name, integration, event_id, priority_wins."),
+     "Calendar: read events (action=read; use range_start/range_end; answers 'what is next on my calendar'), "
+     "list calendars (action=list), create, update, delete events.",
+     "payload fields: action, query, summary, start_time, calendar_name, integration, event_id, priority_wins, range_start, range_end."),
     ("NoteRequest", SVC_EXECUTION, "POST", "/execute/note", False,
      "Notes: create, read, append, delete, list.",
      "payload fields: action, title, content, category, item, storage, directories, path."),
