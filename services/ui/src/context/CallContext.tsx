@@ -679,15 +679,18 @@ function CallOverlay({
   const talking = peers.some((peer) => peer.connection === 'connected');
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/70 sm:pointer-events-none sm:items-end sm:justify-end sm:bg-transparent sm:p-5">
+    <div className="fixed inset-0 z-[120] flex h-[100dvh] w-full items-stretch justify-center bg-slate-950/70 sm:pointer-events-none sm:h-auto sm:items-end sm:justify-end sm:bg-transparent sm:p-5">
       <section
-        className="flex h-full w-full flex-col overflow-hidden border-white/10 bg-slate-950 shadow-2xl sm:pointer-events-auto sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:w-[430px] sm:rounded-3xl sm:border"
+        className="flex h-full max-h-[100dvh] w-full flex-col overflow-hidden border-white/10 bg-slate-950 shadow-2xl sm:pointer-events-auto sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:w-[430px] sm:rounded-3xl sm:border"
         data-testid="call-overlay"
         role="dialog"
         aria-modal="true"
         aria-label={`${call.name || 'Family call'} call`}
       >
-        <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+        <header
+          className="flex items-center gap-3 border-b border-white/10 px-4 pb-3"
+          style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
+        >
           <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${finished ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
             <Phone size={18} />
           </span>
@@ -768,7 +771,10 @@ function CallOverlay({
         </div>
 
         {!finished && (
-          <footer className="flex items-center justify-center gap-3 border-t border-white/10 px-4 py-4">
+          <footer
+            className="flex items-center justify-center gap-3 border-t border-white/10 px-4 pt-4"
+            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+          >
             <button
               type="button"
               onClick={onMute}
