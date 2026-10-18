@@ -148,8 +148,8 @@ export default function FamilyCalls() {
 
       <p className="px-1 text-xs leading-relaxed text-slate-500">
         Calls use your microphone and optional camera, and nothing is recorded. The current ESP32-S3
-        watch has no microphone or speaker, so it cannot carry a call itself; ESP devices with audio
-        can join as WebRTC clients.
+        watch has no microphone or speaker, so it cannot carry a call itself. ESP devices with audio
+        hardware are not excluded; they can join once an ESP WebRTC client is built.
       </p>
     </section>
   );

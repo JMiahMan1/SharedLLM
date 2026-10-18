@@ -301,8 +301,9 @@ calls; signalling reconnects are not preserved across a deploy.
 Nextcloud Talk still owns the chat and its conversations. Talk calls are not
 used by this surface; the room token is only the shared name both people join.
 The current ESP32-S3 watch has **no microphone or speaker**, so it cannot carry
-a call itself. Other ESP devices with audio hardware can join as WebRTC
-clients; a native ESP client is not part of this slice. Tests:
+a call itself. Other ESP devices with audio hardware are not excluded; they
+can join once an ESP WebRTC client is built. That client is not part of this
+slice. Tests:
 `services/gateway/tests/test_calls.py`,
 `services/ui/src/test/FamilyCalls.test.tsx`,
 `services/ui/src/test/CallContext.test.ts`,
