@@ -1583,12 +1583,16 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
 
-    options = {"temperature": 0.0, "num_predict": 2048, "show_thinking": show_thinking or event_callback is not None}
+    options = {"temperature": 0.0, "num_predict": 2048, "show_thinking": show_thinking}
 
     def _step_stream(step: int | str):
         """Forward a step's thinking and text deltas as events."""
         async def forward(chunk):
-            if isinstance(chunk, dict) and chunk.get("type") in ("thinking", "content") and chunk.get("text"):
+            if not isinstance(chunk, dict) or not chunk.get("text"):
+                return
+            if chunk.get("type") == "thinking" and not show_thinking:
+                return
+            if chunk.get("type") in ("thinking", "content"):
                 await event_callback({"type": "thinking" if chunk["type"] == "thinking" else "text", "text": chunk["text"], "step": step})
         return forward
 

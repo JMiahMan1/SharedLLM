@@ -153,9 +153,33 @@ async def test_the_inference_loop_reports_each_step_as_events(monkeypatch):
     answer = await orchestrator._single_turn_inference(
         query="find the mkv", model="m", system_prompt="S", rag_context="", history=[],
         creds=orchestrator.ResolvedCredentials(user="u"), workspace_id="sermon", event_callback=collect,
+        show_thinking=True,
     )
     assert answer == "It is service.mkv."
     kinds = [e["type"] for e in events]
     assert kinds == ["step", "thinking", "text", "tool_call", "tool_result", "step", "thinking", "text"]
     call = events[3]
     assert call["name"] == "WorkspaceSearchRequest" and call["preamble"] == "Let me look." and call["input"] == {"query": "mkv"}
+
+async def test_default_workspace_chat_does_not_stream_thinking(monkeypatch):
+    async def fake_call(payload, **kwargs):
+        callback = payload["chunk_callback"]
+        await callback({"type": "thinking", "text": "secret reasoning"})
+        await callback({"type": "content", "text": "Final answer."})
+        return {"message": {"content": "Final answer."}}
+
+    monkeypatch.setattr(orchestrator, "call_ollama", fake_call)
+    monkeypatch.setattr(orchestrator, "load_prompt_sync", lambda _name: "Tools: WorkspaceSearchRequest")
+
+    events = []
+    async def collect(event):
+        events.append(event)
+
+    answer = await orchestrator._single_turn_inference(
+        query="find the mkv", model="m", system_prompt="S", rag_context="", history=[],
+        creds=orchestrator.ResolvedCredentials(user="u"), workspace_id="sermon", event_callback=collect,
+    )
+
+    assert answer == "Final answer."
+    assert [event["type"] for event in events] == ["step", "text"]
+    assert all(event.get("text") != "secret reasoning" for event in events)

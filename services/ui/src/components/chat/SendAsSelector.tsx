@@ -9,24 +9,36 @@ import type { SendAs } from './sendAsPref';
 export default function SendAsSelector({
   value,
   onChange,
+  disabled = false,
 }: {
   value: SendAs;
   onChange: (next: SendAs) => void;
+  disabled?: boolean;
 }) {
   const options: Array<{ id: SendAs; label: string; icon: typeof User }> = [
     { id: 'me', label: 'Me', icon: User },
     { id: 'admin', label: 'Admin', icon: Users },
   ];
   return (
-    <div className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] p-0.5" role="radiogroup" aria-label="Send as" data-testid="send-as-selector">
+    <div
+      className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] p-0.5"
+      role="radiogroup"
+      aria-label="Send as"
+      aria-disabled={disabled}
+      title={disabled ? 'Finish or close the current edit before switching accounts' : undefined}
+      data-testid="send-as-selector"
+    >
       {options.map(({ id, label, icon: Icon }) => (
         <button
           key={id}
           type="button"
           role="radio"
           aria-checked={value === id}
-          onClick={() => onChange(id)}
-          className={`relative min-h-8 px-2.5 rounded-full text-[11px] inline-flex items-center gap-1 before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] ${
+          disabled={disabled}
+          onClick={() => {
+            if (!disabled) onChange(id);
+          }}
+          className={`relative min-h-8 px-2.5 rounded-full text-[11px] inline-flex items-center gap-1 before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] disabled:opacity-50 disabled:cursor-not-allowed ${
             value === id
               ? id === 'admin'
                 ? 'bg-amber-400/20 text-amber-100'
