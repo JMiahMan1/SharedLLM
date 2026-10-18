@@ -29,6 +29,21 @@ from services.gateway.tool_registry import single_turn_tools
 
 log = logging.getLogger("gateway.orchestrator")
 
+#: Largest retrieved-context block sent to a model. The always-on curriculum
+#: can push a family-chat prompt past an 8k-token window; this keeps every
+#: single-turn request inside the context Ollama actually loaded.
+MAX_RAG_CONTEXT_CHARS = 12000
+
+
+def _truncate_rag_context(rag_context: str) -> str:
+    """Trim retrieved context to a size that fits the model window."""
+    if len(rag_context) <= MAX_RAG_CONTEXT_CHARS:
+        return rag_context
+    return (
+        rag_context[:MAX_RAG_CONTEXT_CHARS].rstrip()
+        + "\n\n[Retrieved context truncated to fit the model window.]"
+    )
+
 # Vocabulary that means "the answer is probably in something I have read", which
 # is what a Calibre library of 3,000 books holds.
 #
@@ -488,7 +503,10 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
 
     # 2. Context Injection (RAG + live HA state + workspace memory)
     workspace_id = job_payload.get("workspace_id")
-    rag_context = await _fetch_rag_context(query, user_id, creds, workspace_id=workspace_id)
+    include_curriculum = job_payload.get("include_curriculum", True)
+    rag_context = await _fetch_rag_context(
+        query, user_id, creds, workspace_id=workspace_id, include_curriculum=include_curriculum
+    )
 
     # A Raven mission may arrive with context already retrieved at dispatch
     # time, so that the mission brief can carry the sources it was launched
@@ -1536,6 +1554,13 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     ``workspace_context`` (that workspace's file listing) is shown to the model
     so it can name files instead of searching their contents for them.
     """
+    if len(rag_context) > MAX_RAG_CONTEXT_CHARS:
+        log.warning(
+            "[_single_turn_inference] RAG context %s chars exceeds %s; truncating",
+            len(rag_context),
+            MAX_RAG_CONTEXT_CHARS,
+        )
+    rag_context = _truncate_rag_context(rag_context)
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
     single_turn_guide = load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE)
     if grounded and rag_context.strip():

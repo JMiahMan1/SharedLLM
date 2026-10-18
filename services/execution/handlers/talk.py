@@ -278,7 +278,8 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any, re
             "model": await _get_talk_model_from_settings(),
             "creds": creds,
             "system": system_prompt,
-            "show_thinking": False
+            "show_thinking": False,
+            "include_curriculum": False,
         }
 
         # Invoke the execution loop orchestrator

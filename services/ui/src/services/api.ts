@@ -1872,7 +1872,9 @@ export const api = {
   },
 
   async getTalkConversations(): Promise<ExecutionResponse> {
-    const resp = await apiClient.get('/api/communication/talk/conversations');
+    // Talk can take 20s+ on a cold Nextcloud worker. The global 15s client
+    // timeout used to abort the request, leaving the Family chat list empty.
+    const resp = await apiClient.get('/api/communication/talk/conversations', { timeout: 45_000 });
     return resp.data;
   },
 
