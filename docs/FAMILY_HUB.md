@@ -276,11 +276,22 @@ setting.
 
 ## Calls
 
-Family → Calls lists the family rooms and one-to-one conversations. **Call** or
-**Join** starts a peer-to-peer WebRTC call inside Jarvis; nothing opens in
-Nextcloud or another tab. The floating call panel stays available while you
-move around the app, and a banner appears when someone else starts a call.
-The chat header's phone button starts the same call.
+Family → Calls lists the family rooms and one-to-one conversations. **Drop in**
+starts a peer-to-peer WebRTC call inside Jarvis; nothing opens in Nextcloud or
+another tab. An active call shows **Join** instead, and the chat header's phone
+button starts the same drop-in.
+
+Calls behave like a family drop-in line. Pressing **Drop in** puts you in the
+room immediately. Any device with auto drop-in enabled joins automatically with
+its microphone and speaker after a short beep, so the caller is not left waiting
+for someone to accept. There is no ringing screen or accept alert. Devices that
+are not auto-joined see a quiet banner above the mobile bottom navigation and can
+join with one tap.
+
+Auto drop-in is a per-device setting in **Settings → Family drop-in**. It is off
+by default. Browsers may still ask for microphone permission the first time; if
+auto-join is blocked, the banner is the fallback. The setting and the media
+streams stay on the device.
 
 The gateway is only the signalling relay. Browsers connect to
 `/api/communication/calls/ws`, exchange SDP offers, answers and ICE candidates,
@@ -300,10 +311,8 @@ calls; signalling reconnects are not preserved across a deploy.
 
 Nextcloud Talk still owns the chat and its conversations. Talk calls are not
 used by this surface; the room token is only the shared name both people join.
-The current ESP32-S3 watch has **no microphone or speaker**, so it cannot carry
-a call itself. Other ESP devices with audio hardware are not excluded; they
-can join once an ESP WebRTC client is built. That client is not part of this
-slice. Tests:
+Audio-capable ESP devices can join the same rooms as WebRTC clients; a native
+ESP client is still a separate piece of work. Tests:
 `services/gateway/tests/test_calls.py`,
 `services/ui/src/test/FamilyCalls.test.tsx`,
 `services/ui/src/test/CallContext.test.ts`,

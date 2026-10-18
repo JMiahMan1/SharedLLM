@@ -4,7 +4,7 @@ import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
 import { useLocation } from '../context/LocationContext';
 import { Capacitor } from '@capacitor/core';
-import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, Settings as SettingsIcon } from 'lucide-react';
+import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, PhoneIncoming, Settings as SettingsIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import LocationPanel from '../components/location/LocationPanel';
 import ActivitySharingPanel from '../components/settings/ActivitySharingPanel';
@@ -13,6 +13,7 @@ import PushAppsPanel from '../components/settings/PushAppsPanel';
 import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
 import Toggle from '../components/ui/Toggle';
+import { getAutoDropIn, setAutoDropIn } from '../lib/callSettings';
 import { isAdminPinSet, setAdminPin, clearAdminPin, verifyAdminPin } from '../lib/adminPin';
 import { disablePush, enablePush, permissionState, pushSupported } from '../lib/push';
 import {
@@ -94,6 +95,8 @@ const Settings = () => {
       <TelemetryReportsPanel />
 
       <SensorsSection />
+
+      <FamilyDropInSection />
 
       <AppUpdatesSection />
 
@@ -413,6 +416,67 @@ const NotificationsRow = () => {
           ariaLabel="Browser notifications"
         />
       )}
+    </div>
+  );
+};
+
+/**
+ * Opt-in auto drop-in. This is a per-device choice: only the device that
+ * enables it opens its microphone and speaker when a family call starts.
+ */
+const FamilyDropInSection = () => {
+  const [enabled, setEnabled] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void getAutoDropIn().then((value) => {
+      if (!active) return;
+      setEnabled(value);
+      setLoaded(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const change = async (next: boolean) => {
+    setEnabled(next);
+    try {
+      await setAutoDropIn(next);
+      toast.success(next ? 'Auto drop-in is on for this device.' : 'Auto drop-in is off for this device.');
+    } catch {
+      setEnabled(!next);
+      toast.error('Could not save the drop-in setting.');
+    }
+  };
+
+  return (
+    <div className="glass-panel rounded-2xl p-4 space-y-2">
+      <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider px-3 pt-1 mb-2 flex items-center gap-2">
+        <PhoneIncoming size={16} className="text-emerald-400" />
+        Family drop-in
+      </h2>
+      <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-white/5">
+        <div className="min-w-0">
+          <p className="text-white text-sm font-medium">Auto drop-in on this device</p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            When a family call starts, this device joins with its microphone and speaker after a
+            short beep. Off by default; calls still appear in the drop-in banner.
+          </p>
+        </div>
+        <Toggle
+          checked={enabled}
+          disabled={!loaded}
+          onChange={(next) => void change(next)}
+          ariaLabel="Auto drop-in on this device"
+          testId="auto-drop-in"
+        />
+      </div>
+      <p className="px-1 text-[11px] leading-relaxed text-slate-500">
+        This is a per-device setting. The first time, the browser or phone may ask for microphone
+        permission. If auto-join is blocked, use the Drop in banner instead.
+      </p>
     </div>
   );
 };

@@ -43,7 +43,7 @@ export default function Family() {
     <div
       // On a phone the chat tab is exactly the shell's height and only the
       // conversation list scrolls; the other tabs scroll the page as usual.
-      className={`mx-auto flex max-w-6xl flex-col gap-3 px-1 sm:gap-4 sm:px-0 ${
+      className={`mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-3 px-1 sm:gap-4 sm:px-0 ${
         tab === 'chat' ? 'max-lg:h-full max-lg:min-h-0 lg:pb-28' : 'pb-28'
       }`}
       data-testid="family-page"
@@ -84,7 +84,7 @@ export default function Family() {
       {tab === 'chat' && <ChatPanel onOpenTab={setTab} />}
 
       {tab === 'calls' && (
-        <div data-testid="family-calls-tab">
+        <div data-testid="family-calls-tab" className="w-full min-w-0 max-w-full">
           <FamilyCalls />
         </div>
       )}

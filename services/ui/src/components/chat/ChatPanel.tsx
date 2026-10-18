@@ -498,8 +498,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
               type="button"
               className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"
               onClick={openCall}
-              aria-label="Start or join the family call"
-              title="Start or join the family call"
+              aria-label="Drop in to the family call"
+              title="Drop in to the family call"
             >
               <Phone size={17} />
             </button>

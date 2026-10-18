@@ -36,8 +36,9 @@ describe('family calls', () => {
     expect(await within(calls).findByText('Family')).toBeInTheDocument();
     expect(within(calls).getByText('Michele')).toBeInTheDocument();
     expect(within(calls).queryByText('Note to self')).not.toBeInTheDocument();
+    expect(within(calls).queryByText(/microphone or speaker/i)).not.toBeInTheDocument();
 
-    await user.click(within(calls).getByRole('button', { name: 'Start a call with Family' }));
+    await user.click(within(calls).getByRole('button', { name: 'Drop in on Family' }));
     await waitFor(() => expect(startCall).toHaveBeenCalledWith('room-family', 'Family'));
   });
 
