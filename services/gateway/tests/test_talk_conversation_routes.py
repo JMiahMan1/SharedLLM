@@ -34,10 +34,3 @@ def test_conversation_management_routes(monkeypatch):
         {"action": "people", "search": "mi", "token": None},
     ]
     assert {path for path, _ in sent} == {"/execute/talk"}
-
-
-def test_a_call_link_is_requested_from_execution(monkeypatch):
-    sent = _capture(monkeypatch)
-    c = TestClient(app)
-    c.post("/api/communication/talk/call/link", json={"token": "abc", "as_user": "admin"})
-    assert sent == [("/execute/talk", {"action": "call_link", "token": "abc"})]

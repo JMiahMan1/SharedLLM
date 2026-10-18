@@ -52,36 +52,7 @@ def test_join_posts_and_returns_the_signalling_details(talk, monkeypatch):
     assert result.detail["call_id"] == "c-1"
     assert result.detail["call_token"] == "ct-1"
     assert result.detail["signaling"]["url"].startswith("wss://")
-    assert result.detail["url"] == "https://cloud.test/call/room-1"
     assert result.detail["in_call"] is True
-
-
-def test_call_link_opens_the_room_in_talk_without_an_api_call(talk, monkeypatch):
-    import asyncio
-
-    async def fail(*args, **kwargs):
-        raise AssertionError("a call link must not need the OCS call endpoint")
-
-    monkeypatch.setattr(talk, "_talk_request_with_retry", fail)
-
-    result = asyncio.run(talk.handle_talk(_request("call_link")))
-
-    assert result.status == "SUCCESS"
-    assert result.detail["url"] == "https://cloud.test/call/room-1"
-    assert result.detail["in_call"] is False
-
-
-def test_call_link_needs_a_token(talk, monkeypatch):
-    import asyncio
-
-    async def fail(*args, **kwargs):
-        raise AssertionError("must not build a link without a token")
-
-    monkeypatch.setattr(talk, "_talk_request_with_retry", fail)
-
-    result = asyncio.run(talk.handle_talk(_request("call_link", token=None)))
-    assert result.status == "FAILURE"
-    assert "token" in result.message.lower()
 
 
 def test_leave_deletes_the_call(talk, monkeypatch):

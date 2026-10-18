@@ -108,7 +108,7 @@ from services.gateway.skylight_scope import ChoreScopeError, resolve_chore_scope
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas, tool_catalog
 from services.gateway.external_agent import run_external_agent
 from services.common.relay import until_either_ends
-from services.gateway import family_safety, network_routes, notices, push_routes
+from services.gateway import calls, family_safety, network_routes, notices, push_routes
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
 from services.shared.media_token import sign, verify
@@ -834,6 +834,7 @@ app.include_router(info_router)
 app.include_router(family_safety.router)
 app.include_router(push_routes.router)
 app.include_router(network_routes.router)
+app.include_router(calls.router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -5146,14 +5147,6 @@ async def proxy_talk_call(request: Request):
     body = await request.json()
     action = "call_leave" if body.get("leave") else "call_join"
     payload = {"action": action, "token": body.get("token")}
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
-
-
-@app.post("/api/communication/talk/call/link")
-async def proxy_talk_call_link(request: Request):
-    """Return the Nextcloud Talk page that opens a room's call in a browser."""
-    body = await request.json()
-    payload = {"action": "call_link", "token": body.get("token")}
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 

@@ -5,6 +5,7 @@ import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type Of
 import type { FamilyMember } from '../components/chat/familyDirectory';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
+import type { ActiveCall } from '../types/api';
 import type {
   SongJob,
   VoiceCheck,
@@ -1470,10 +1471,10 @@ export const api = {
     return resp.data;
   },
 
-  /** The Nextcloud Talk page that opens this room's call in a browser. */
-  async getTalkCallLink(token: string, as_user?: 'admin'): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/talk/call/link', { token, as_user });
-    return resp.data;
+  /** The family calls that currently have someone in them. */
+  async getActiveCalls(): Promise<ActiveCall[]> {
+    const resp = await apiClient.get('/api/communication/calls');
+    return resp.data.calls;
   },
 
   async getStars(userId?: string): Promise<StarsResponse> {

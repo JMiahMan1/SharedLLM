@@ -480,6 +480,23 @@ export interface TalkMessage {
   is_replyable?: boolean;
 }
 
+/** Someone already in a family call, as reported by the signalling room. */
+export interface CallParticipant {
+  id: string;
+  username: string;
+  name: string;
+  muted: boolean;
+  camera: boolean;
+}
+
+/** A room that currently has at least one person in it. */
+export interface ActiveCall {
+  token: string;
+  name: string;
+  started_at: number;
+  participants: CallParticipant[];
+}
+
 export interface SmokeTestResult {
   status: string;
   passed: boolean;

@@ -276,19 +276,34 @@ setting.
 
 ## Calls
 
-Family → Calls lists the family rooms and one-to-one conversations. The call
-button opens that room's Talk page (`/call/<token>`) in a new tab, where
-Nextcloud Talk runs the WebRTC audio/video call with its own signalling server
-and microphone/camera permissions. The page keeps working if the Jarvis tab is
-closed, and the Talk phone app can open the same link. Gateway:
-`POST /api/communication/talk/call/link` → execution `call_link`;
-`call_join` / `call_leave` remain for clients that already have a Talk browser
-session. The chat header's call button opens the same page.
+Family → Calls lists the family rooms and one-to-one conversations. **Call** or
+**Join** starts a peer-to-peer WebRTC call inside Jarvis; nothing opens in
+Nextcloud or another tab. The floating call panel stays available while you
+move around the app, and a banner appears when someone else starts a call.
+The chat header's phone button starts the same call.
 
-The gateway deliberately does not try to join the call with its OCS app
-password: Talk only lets a logged-in browser session join, so `call_join`
-alone cannot carry media. The ESP32 watch has **no microphone or speaker**, so
-it cannot be a call endpoint; it can show a call notification, but audio and
-video need a phone, tablet, or computer. Tests:
-`services/execution/tests/test_talk_calls.py`,
-`services/ui/src/test/FamilyCalls.test.tsx`.
+The gateway is only the signalling relay. Browsers connect to
+`/api/communication/calls/ws`, exchange SDP offers, answers and ICE candidates,
+then send audio and video directly to each other. Media never touches the
+gateway and nothing is recorded. `GET /api/communication/calls` lists rooms
+that currently have someone in them, which is what the Calls tab and the
+in-app banner poll.
+
+Calls are a mesh: each participant encodes one stream per other participant.
+`CALL_MAX_PEERS` (default 8) refuses a room beyond that, rather than melting
+the family's phones. The default ICE configuration uses public STUN, which is
+enough on a home network and most NATs; supply a TURN service without changing
+code with `CALL_ICE_SERVERS`, a JSON list in the usual
+`[{ "urls": "turn:...", "username": "...", "credential": "..." }]` form.
+Rooms live in the gateway's memory, so restarting the gateway ends active
+calls; signalling reconnects are not preserved across a deploy.
+
+Nextcloud Talk still owns the chat and its conversations. Talk calls are not
+used by this surface; the room token is only the shared name both people join.
+The current ESP32-S3 watch has **no microphone or speaker**, so it cannot carry
+a call itself. Other ESP devices with audio hardware can join as WebRTC
+clients; a native ESP client is not part of this slice. Tests:
+`services/gateway/tests/test_calls.py`,
+`services/ui/src/test/FamilyCalls.test.tsx`,
+`services/ui/src/test/CallContext.test.ts`,
+`services/ui/src/test/ChatManage.test.tsx`.
