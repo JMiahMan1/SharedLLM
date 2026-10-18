@@ -679,9 +679,9 @@ function CallOverlay({
   const talking = peers.some((peer) => peer.connection === 'connected');
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/70 sm:items-end sm:justify-end sm:bg-transparent sm:p-5">
+    <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/70 sm:pointer-events-none sm:items-end sm:justify-end sm:bg-transparent sm:p-5">
       <section
-        className="flex h-full w-full flex-col overflow-hidden border-white/10 bg-slate-950 shadow-2xl sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:w-[430px] sm:rounded-3xl sm:border"
+        className="flex h-full w-full flex-col overflow-hidden border-white/10 bg-slate-950 shadow-2xl sm:pointer-events-auto sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:w-[430px] sm:rounded-3xl sm:border"
         data-testid="call-overlay"
         role="dialog"
         aria-modal="true"
