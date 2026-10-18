@@ -84,7 +84,16 @@ from services.gateway.media_models import (
     MediaSearchResponse,
 )
 from services.gateway.messaging import InferenceJobQueue, JobStatus
-from services.gateway.orchestrator import _get, call_ollama, get_all_settings, get_llm_settings
+from services.gateway.orchestrator import (
+    _get,
+    call_ollama,
+    get_all_settings,
+    get_llm_settings,
+    is_watch_calendar_query,
+    is_watch_weather_query,
+    watch_calendar_answer,
+    watch_weather_answer,
+)
 from services.gateway.prompts import (
     PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION,
     PROMPT_MEDIA_TROUBLESHOOTING,
@@ -2948,6 +2957,22 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(msg, selected_model, "degraded")
         return _make_ollama_response(msg, selected_model, "degraded")
     log.info(f"Chat request from {user_id} query='{query}'")
+
+    # The watch's weather and calendar buttons must not wait on a 35-75 s LLM
+    # turn (and the small model can overflow its 8k context with RAG context).
+    # Both answers already exist in HA / the calendar handler; answer directly.
+    if is_watch_weather_query(query) or is_watch_calendar_query(query):
+        if is_watch_weather_query(query):
+            watch_answer = await watch_weather_answer(creds)
+            watch_kind = "watch_weather"
+        else:
+            watch_answer = await watch_calendar_answer(creds)
+            watch_kind = "watch_calendar"
+        await update_history(user_id, "user", query)
+        await update_history(user_id, "assistant", watch_answer)
+        if is_openai:
+            return _make_openai_response(watch_answer, selected_model, watch_kind)
+        return _make_ollama_response(watch_answer, selected_model, watch_kind)
 
     if _wants_voice_learning_stop(query) or _wants_voice_learning(query):
         return await _handle_voice_learning(query, creds, user_id, selected_model, is_openai)

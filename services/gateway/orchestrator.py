@@ -852,15 +852,15 @@ async def _fetch_rag_context(
     return rag_context.strip()
 
 
-async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
-    """Dynamically discover weather entities from HA and return live forecast data."""
+async def _fetch_weather_entities(creds: ResolvedCredentials) -> list[dict]:
+    """Discover HA's weather entities, with live state and attributes."""
     settings = await get_all_settings()
     exec_svc = _get(settings, "execution_svc_url")
 
     ha_url = getattr(creds, "ha_url", None)
     ha_token = getattr(creds, "ha_token", None)
     if not ha_url or not ha_token:
-        return ""
+        return []
 
     try:
         # Fetch all entities to find weather domain
@@ -873,56 +873,167 @@ async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
                 timeout=aiohttp.ClientTimeout(total=10.0),
             )
             if resp.status != 200:
-                return ""
+                return []
             data = await resp.json()
             entities = data.get("entities", []) if isinstance(data, dict) else []
 
         # Find weather domain entities
         weather_entities = [e for e in entities if e.get("entity_id", "").startswith("weather.")]
-        if not weather_entities:
-            return ""
-
-        # Cache all states for future lookups
-        from services.gateway.ha_state_cache import cache_all_states
-        cache_all_states(entities)
-
-        parts = []
-        for e in weather_entities:
-            eid = e.get("entity_id", "")
-            friendly = e.get("attributes", {}).get("friendly_name", eid)
-            state = e.get("state", "unknown")
-            attrs = e.get("attributes", {})
-
-            details = [f"{friendly} ({eid}): {state}"]
-            for key in ["temperature", "humidity", "forecast", "wind_speed", "pressure", "dew_point", "uv_index", "precipitation"]:
-                if key in attrs:
-                    details.append(f"  {key}: {attrs[key]}")
-
-            # Include forecast if available
-            forecast = attrs.get("forecast", [])
-            if forecast:
-                forecast_items = []
-                for f in forecast[:3]:  # Next 3 forecast periods
-                    f_parts = []
-                    if "datetime" in f:
-                        f_parts.append(f["datetime"][:10])
-                    if "condition" in f:
-                        f_parts.append(f["condition"])
-                    if "temperature" in f:
-                        f_parts.append(f"{f['temperature']}°")
-                    if "precipitation" in f:
-                        f_parts.append(f"rain: {f['precipitation']}mm")
-                    if f_parts:
-                        forecast_items.append(" ".join(f_parts))
-                if forecast_items:
-                    details.append(f"  forecast: {' | '.join(forecast_items)}")
-
-            parts.append("\n".join(details))
-
-        return "\n".join(parts)
+        if weather_entities:
+            # Cache all states for future lookups
+            from services.gateway.ha_state_cache import cache_all_states
+            cache_all_states(entities)
+        return weather_entities
     except Exception as e:
-        log.error(f"Failed to fetch weather context: {e}")
+        log.error(f"Failed to fetch weather entities: {e}")
+        return []
+
+
+async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
+    """Dynamically discover weather entities from HA and return live forecast data."""
+    weather_entities = await _fetch_weather_entities(creds)
+    if not weather_entities:
         return ""
+
+    parts = []
+    for e in weather_entities:
+        eid = e.get("entity_id", "")
+        friendly = e.get("attributes", {}).get("friendly_name", eid)
+        state = e.get("state", "unknown")
+        attrs = e.get("attributes", {})
+
+        details = [f"{friendly} ({eid}): {state}"]
+        for key in ["temperature", "humidity", "forecast", "wind_speed", "pressure", "dew_point", "uv_index", "precipitation"]:
+            if key in attrs:
+                details.append(f"  {key}: {attrs[key]}")
+
+        # Include forecast if available
+        forecast = attrs.get("forecast", [])
+        if forecast:
+            forecast_items = []
+            for f in forecast[:3]:  # Next 3 forecast periods
+                f_parts = []
+                if "datetime" in f:
+                    f_parts.append(f["datetime"][:10])
+                if "condition" in f:
+                    f_parts.append(f["condition"])
+                if "temperature" in f:
+                    f_parts.append(f"{f['temperature']}°")
+                if "precipitation" in f:
+                    f_parts.append(f"rain: {f['precipitation']}mm")
+                if f_parts:
+                    forecast_items.append(" ".join(f_parts))
+            if forecast_items:
+                details.append(f"  forecast: {' | '.join(forecast_items)}")
+
+        parts.append("\n".join(details))
+
+    return "\n".join(parts)
+
+
+async def watch_weather_answer(creds: ResolvedCredentials) -> str:
+    """A one-line weather answer for the watch, without the LLM.
+
+    The assistant path took 35-73 s and could exceed the model's context; the
+    watch's HTTP timeout is shorter than that. HA already has the live state.
+    """
+    weather_entities = await _fetch_weather_entities(creds)
+    if not weather_entities:
+        return "I couldn't read the weather right now."
+    e = weather_entities[0]
+    attrs = e.get("attributes", {}) or {}
+    state = str(e.get("state") or "unknown").replace("_", " ")
+    temp = attrs.get("temperature")
+    if temp is None:
+        return f"{state.capitalize()}."
+    unit = str(attrs.get("temperature_unit") or "°")
+    if not unit.startswith("°"):
+        unit = "°" + unit
+    return f"{state.capitalize()}, {round(float(temp))}{unit}."
+
+
+def is_watch_weather_query(query: str) -> bool:
+    return re.sub(r"\s+", " ", query.strip().lower()) in {
+        "in one short sentence, what is the weather right now?",
+        "what is the weather right now?",
+    }
+
+
+async def watch_calendar_answer(creds: ResolvedCredentials) -> str:
+    """Read today's events directly and answer with the next one.
+
+    Asking the model to choose CalendarRequest(action=read) was unreliable: it
+    picked ``list`` (calendar names, not events) and the prompt could overflow
+    the small model's 8192-token context. The execution handler already knows
+    how to read; this just formats its first event.
+    """
+    now = datetime.now().astimezone()
+    end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
+    payload = {
+        "user_context": creds.model_dump(),
+        "action": "read",
+        "range_start": now.isoformat(),
+        "range_end": end_of_day.isoformat(),
+    }
+    try:
+        from services.gateway.main import shared_http_client
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/calendar",
+                json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=20.0),
+            )
+            if resp.status != 200:
+                log.warning(f"[WatchCalendar] execution returned {resp.status}")
+                return "I couldn't read your calendar right now."
+            data = await resp.json()
+    except Exception as e:
+        log.warning(f"[WatchCalendar] read failed: {e}")
+        return "I couldn't read your calendar right now."
+
+    events = data.get("events", []) if isinstance(data, dict) else []
+    for event in sorted(events, key=lambda e: e.get("start_time") or ""):
+        start_raw = event.get("start_time")
+        if not start_raw:
+            continue
+        try:
+            start = datetime.fromisoformat(str(start_raw))
+        except ValueError:
+            continue
+        if start.tzinfo is None:
+            start = start.astimezone()
+        start = start.astimezone()
+        end_raw = event.get("end_time")
+        end = None
+        if end_raw:
+            try:
+                end = datetime.fromisoformat(str(end_raw))
+                if end.tzinfo is None:
+                    end = end.astimezone()
+                end = end.astimezone()
+            except ValueError:
+                end = None
+        if end and end <= now:
+            continue
+        summary = str(event.get("summary") or "An event")
+        all_day = bool(event.get("all_day")) or (
+            start.hour == 0 and start.minute == 0
+            and end is not None and end.hour >= 23
+        )
+        if all_day:
+            return f"{summary} all day."
+        if start <= now and end:
+            return f"{summary} until {end.strftime('%-I:%M %p')}."
+        return f"{summary} at {start.strftime('%-I:%M %p')}."
+    return "Nothing else on your calendar today."
+
+
+def is_watch_calendar_query(query: str) -> bool:
+    return re.sub(r"\s+", " ", query.strip().lower()) in {
+        "read my calendar events for today and tell me the next one in one short sentence.",
+        "in one short sentence, what is next on my calendar today?",
+    }
 
 async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredentials) -> list:
     """Fetch live HA state (Redis-cached) and merge with RAG entity metadata.
