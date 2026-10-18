@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Brain, Brush, ChevronRight, Crown, Gamepad2, MessageCircle, Phone } from 'lucide-react';
 import ChatPanel from '../components/chat/ChatPanel';
@@ -36,8 +35,15 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof MessageCircle }> = [
  * See docs/FAMILY_HUB.md.
  */
 export default function Family() {
-  const [searchParams] = useSearchParams();
-  const [tab, setTab] = useState<Tab>(() => TABS.find((t) => t.id === searchParams.get('tab'))?.id ?? 'chat');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: Tab = TABS.find((t) => t.id === searchParams.get('tab'))?.id ?? 'chat';
+
+  const changeTab = (next: Tab) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'chat') params.delete('tab');
+    else params.set('tab', next);
+    setSearchParams(params, { replace: true });
+  };
 
   return (
     <div
@@ -69,7 +75,7 @@ export default function Family() {
               key={id}
               role="tab"
               aria-selected={tab === id}
-              onClick={() => setTab(id)}
+              onClick={() => changeTab(id)}
               className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2 text-[13px] font-medium transition sm:px-3 ${
                 tab === id ? 'bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
               }`}
@@ -81,7 +87,7 @@ export default function Family() {
         </div>
       </div>
 
-      {tab === 'chat' && <ChatPanel onOpenTab={setTab} />}
+      {tab === 'chat' && <ChatPanel onOpenTab={changeTab} />}
 
       {tab === 'calls' && (
         <div data-testid="family-calls-tab" className="w-full min-w-0 max-w-full">

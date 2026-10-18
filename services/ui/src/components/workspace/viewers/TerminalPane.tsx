@@ -49,17 +49,8 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [menuPos.visible]);
 
-  // Close menu when mouse leaves after right-click
-  useEffect(() => {
-    if (!menuPos.visible) return;
-    menuLeaveRef.current = false;
-    const timeout = setTimeout(() => {
-      if (!menuLeaveRef.current) {
-        setMenuPos(prev => ({ ...prev, visible: false }));
-      }
-    }, 300);
-    return () => clearTimeout(timeout);
-  }, [menuPos.visible]);
+  // The context menu stays open until the pointer leaves it or the user
+  // clicks elsewhere; do not auto-close it after opening.
 
   const handleMenuMouseLeave = useCallback(() => {
     menuLeaveRef.current = true;
@@ -282,6 +273,7 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
           className="fixed z-50 min-w-[160px] bg-[#1e293b] border border-[#334155] rounded shadow-lg py-1"
           style={{ left: menuPos.x, top: menuPos.y }}
           onClick={(e) => e.stopPropagation()}
+          onMouseEnter={() => { menuLeaveRef.current = false; }}
           onMouseLeave={handleMenuMouseLeave}
         >
           {menuItems.map((item, idx) => (

@@ -31,7 +31,7 @@ const MobileShell = ({ children }: MobileShellProps) => {
         {children}
       </main>
       {showBottomNav && (
-        <div className="safe-area-bottom z-40 transition-all duration-300">
+        <div className="z-40 transition-all duration-300">
           <BottomNav />
         </div>
       )}
