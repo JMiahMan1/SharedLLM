@@ -152,6 +152,7 @@ class CallSession {
   private muted = false;
   private camera = false;
   private closed = false;
+  private pingTimer: number | null = null;
 
   constructor(token: string, room: string, name: string, events: CallEvents) {
     this.token = token;
@@ -181,6 +182,11 @@ class CallSession {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+
+    if (this.pingTimer !== null) {
+      window.clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
 
     this.localStream?.getTracks().forEach((track) => track.stop());
     this.localStream = null;
@@ -292,6 +298,16 @@ class CallSession {
         }
         settled = true;
         window.clearTimeout(timer);
+        // Stop the close handler from turning the server's explanation into a
+        // generic "connection lost" before the provider can show it.
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+        try {
+          ws.close();
+        } catch {
+          // The socket may already be closed.
+        }
         reject(new Error(message));
       };
 
@@ -318,6 +334,7 @@ class CallSession {
             if (info) this.addPeer(info);
           }
           this.sendState();
+          this.pingTimer = window.setInterval(() => this.send({ type: 'ping' }), 20_000);
           succeed();
           return;
         }
@@ -611,9 +628,7 @@ function PeerTile({ peer }: { peer: CallPeer }) {
           className={peer.hasVideo ? 'h-full w-full object-cover' : 'pointer-events-none absolute h-px w-px opacity-0'}
         />
       )}
-      {peer.hasVideo && peer.stream ? (
-        <span className="absolute inset-0" aria-hidden="true" />
-      ) : (
+      {!peer.hasVideo && (
         <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-slate-800 to-slate-950">
           <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-lg font-bold text-white">
             {initials(peer.name)}
@@ -668,6 +683,9 @@ function CallOverlay({
       <section
         className="flex h-full w-full flex-col overflow-hidden border-white/10 bg-slate-950 shadow-2xl sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:w-[430px] sm:rounded-3xl sm:border"
         data-testid="call-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${call.name || 'Family call'} call`}
       >
         <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
           <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${finished ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
