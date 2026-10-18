@@ -167,7 +167,45 @@ if [ "$HEALTHY" = false ]; then
     exit 1
 fi
 
-# --- Step 4: Force-reseed Identity (prompts + models from .md/.env) ---
+# --- Step 4: Stage the OTA web bundle for the mobile app ---
+# Without this the native app keeps loading the bundle from the last manual
+# deploy, so a UI release can be live on the web and still invisible on phones.
+UI_CONTAINER=$(docker ps --filter 'name=sharedllm_ui' --format '{{.Names}}' | head -1)
+if [ -n "$UI_CONTAINER" ]; then
+    log "Staging OTA update bundle from $UI_CONTAINER..."
+    mkdir -p "$REPO_DIR/data/app_updates"
+    if ! docker cp "$UI_CONTAINER:/usr/share/nginx/html/bundle.zip" "$REPO_DIR/data/app_updates/bundle.zip"; then
+        log "ERROR: Could not copy bundle.zip out of $UI_CONTAINER; refusing to publish stale OTA metadata."
+        exit 1
+    fi
+    if ! docker cp "$UI_CONTAINER:/usr/share/nginx/html/version.json" "$REPO_DIR/data/app_updates/.bundle_version.json"; then
+        log "ERROR: Could not copy version.json out of $UI_CONTAINER."
+        exit 1
+    fi
+
+    BUNDLE_SHA=$(python3 -c "import json;print(json.load(open('$REPO_DIR/data/app_updates/.bundle_version.json')).get('git_sha') or json.load(open('$REPO_DIR/data/app_updates/.bundle_version.json')).get('gitSha') or 'unknown')")
+    BUNDLE_VERSION=$(python3 -c "import json;print(json.load(open('$REPO_DIR/data/app_updates/.bundle_version.json')).get('version') or '0.0.0')")
+    if [ "$BUNDLE_SHA" = "unknown" ] || [ -z "$BUNDLE_SHA" ]; then
+        log "ERROR: Built UI bundle has no git_sha; refusing to publish an unidentifiable bundle."
+        exit 1
+    fi
+
+    BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    cat << JSON_EOF > "$REPO_DIR/data/app_updates/version.json"
+{
+  "version": "$BUNDLE_VERSION",
+  "git_sha": "$BUNDLE_SHA",
+  "build_timestamp": "$BUILD_TIME",
+  "release_notes": "Jarvis OS Over-The-Air Update"
+}
+JSON_EOF
+    rm -f "$REPO_DIR/data/app_updates/.bundle_version.json"
+    log "Published OTA bundle $BUNDLE_SHA (version $BUNDLE_VERSION)."
+else
+    log "WARNING: UI container not found; OTA bundle was not updated."
+fi
+
+# --- Step 5: Force-reseed Identity (prompts + models from .md/.env) ---
 log "Force-reseeding Identity service (prompts + models)..."
 $COMPOSE exec -T identity curl -s -X POST "http://127.0.0.1:8001/api/admin/seed?force=true" \
      -H "X-Internal-Secret: $INTERNAL_SECRET" \
