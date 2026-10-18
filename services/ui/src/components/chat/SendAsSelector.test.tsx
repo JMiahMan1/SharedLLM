@@ -55,4 +55,15 @@ describe('SendAsSelector', () => {
     expect(screen.getByTestId('send-as-badge')).toBeTruthy();
     expect(localStorage.getItem('jarvis-talk-send-as')).toBe('admin');
   });
+
+  it('disables both choices when requested', () => {
+    const onChange = vi.fn();
+    render(<SendAsSelector value="me" onChange={onChange} disabled />);
+    const me = screen.getByRole('radio', { name: /me/i }) as HTMLButtonElement;
+    const admin = screen.getByRole('radio', { name: /admin/i }) as HTMLButtonElement;
+    expect(me.disabled).toBe(true);
+    expect(admin.disabled).toBe(true);
+    fireEvent.click(me);
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

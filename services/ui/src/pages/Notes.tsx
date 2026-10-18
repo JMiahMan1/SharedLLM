@@ -290,12 +290,10 @@ export default function Notes() {
         <div className="flex flex-wrap items-center gap-2">
           {isAdmin && (
             <SendAsSelector
-                value={sendAs}
-                onChange={(next) => {
-                  setEditing(null);
-                  setSendAs(next);
-                }}
-              />
+              value={sendAs}
+              onChange={setSendAs}
+              disabled={Boolean(editing)}
+            />
           )}
           <div className="relative min-w-40 flex-1 sm:flex-none">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
