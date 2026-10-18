@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import ChatNotify from '../../plugins/chatNotify';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Phone, Plus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
@@ -101,16 +101,30 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     [me?.nextcloud_user, me?.username],
   );
 
-  const { data: conversations = EMPTY_ARRAY, isFetching: loadingConversations } = useQuery<
-    ExecutionResponse,
-    Error,
-    TalkConversation[]
-  >({
+  const {
+    data: conversations = EMPTY_ARRAY,
+    isFetching: loadingConversations,
+    isError: conversationsError,
+    error: conversationsErrorObj,
+    refetch: refetchConversations,
+  } = useQuery<ExecutionResponse, Error, TalkConversation[]>({
     queryKey: ['talk-conversations'],
-    queryFn: () => api.getTalkConversations(),
+    queryFn: async () => {
+      const response = await api.getTalkConversations();
+      if (response.status === 'FAILURE') {
+        throw new Error(response.message || 'Could not load conversations');
+      }
+      return response;
+    },
     refetchInterval: 15000,
+    retry: false,
+    placeholderData: keepPreviousData,
     select: (response) => detailList<TalkConversation>(response, 'conversations'),
   });
+
+  const conversationsErrorMessage = conversationsErrorObj?.message?.toLowerCase().includes('timeout')
+    ? 'The family server is taking too long to answer.'
+    : conversationsErrorObj?.message || 'Could not load conversations.';
 
   // The conversation set to open on launch, if it still exists.
   const defaultToken = conversations.some((c) => c.token === me?.chat_default_token) ? (me?.chat_default_token ?? '') : '';
@@ -416,17 +430,51 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     >
       {/* Inbox */}
       <aside className={`min-h-0 min-w-0 flex-col border-white/5 p-3 lg:flex lg:border-r ${showThread ? 'hidden' : 'flex'}`}>
-        <ConversationList
-          conversations={conversations}
-          activeToken={activeToken}
-          myActorIds={myActorIds}
-          loading={loadingConversations}
-          opening={openConversation.isPending}
-          onSelect={select}
-          onNewChat={() => setNewChatOpen(true)}
-          defaultToken={defaultToken}
-          people={people}
-        />
+        {conversationsError && conversations.length > 0 && (
+          <div className="mb-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100" role="status">
+            <span className="font-semibold">Couldn't refresh chats.</span>{' '}
+            {conversationsErrorMessage}
+            <button
+              type="button"
+              onClick={() => void refetchConversations()}
+              disabled={loadingConversations}
+              className="ml-2 font-semibold underline underline-offset-2 disabled:opacity-50"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        {conversationsError && conversations.length === 0 ? (
+          <div
+            role="alert"
+            data-testid="conversations-error"
+            className="rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4 text-sm text-rose-100"
+          >
+            <p className="font-semibold">Couldn't load conversations</p>
+            <p className="mt-1 text-xs leading-relaxed text-rose-200/80">{conversationsErrorMessage}</p>
+            <button
+              type="button"
+              data-testid="conversations-retry"
+              onClick={() => void refetchConversations()}
+              disabled={loadingConversations}
+              className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-xl bg-rose-500/20 px-3 font-medium text-rose-100 hover:bg-rose-500/30 disabled:opacity-50"
+            >
+              {loadingConversations ? 'Retrying…' : 'Try again'}
+            </button>
+          </div>
+        ) : (
+          <ConversationList
+            conversations={conversations}
+            activeToken={activeToken}
+            myActorIds={myActorIds}
+            loading={loadingConversations}
+            opening={openConversation.isPending}
+            onSelect={select}
+            onNewChat={() => setNewChatOpen(true)}
+            defaultToken={defaultToken}
+            people={people}
+          />
+        )}
       </aside>
 
       {/* Thread */}
