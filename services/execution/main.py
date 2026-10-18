@@ -2045,7 +2045,7 @@ async def execute_entity_search(req: EntitySearchRequest):
         attr_keys = (
             "brightness", "color_temp", "color_mode", "min_mireds", "max_mireds",
             "hvac_modes", "hvac_action", "temperature", "current_temperature",
-            "min_temp", "max_temp", "volume_level", "is_volume_muted",
+            "min_temp", "max_temp", "target_temp_step", "volume_level", "is_volume_muted",
             "media_title", "media_artist", "current_position", "percent_open",
         )
         attributes = {k: attrs[k] for k in attr_keys if attrs.get(k) is not None}

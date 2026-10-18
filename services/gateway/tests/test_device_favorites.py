@@ -76,6 +76,46 @@ def test_favorites_joined_with_state_in_pin_order(monkeypatch):
     assert seen["exec_json"]["user_context"] == {"user": "jeremiah"}
 
 
+def test_climate_pins_carry_thermostat_attributes(monkeypatch):
+    """The watch builds its thermostat dialog from these keys, so they must
+    survive the gateway's compact favourites join."""
+    widgets = [{"widget_key": "device_control", "pinned_devices": ["climate.hall"]}]
+    search = {"status": "SUCCESS", "detail": {"entities": [
+        {
+            "entity_id": "climate.hall",
+            "friendly_name": "Hall Thermostat",
+            "state": "heat",
+            "attributes": {
+                "current_temperature": 68.5,
+                "temperature": 71,
+                "min_temp": 50,
+                "max_temp": 90,
+                "target_temp_step": 0.5,
+                "hvac_modes": ["off", "heat", "cool", "heat_cool"],
+                "hvac_action": "heating",
+                "unrelated": "dropped",
+            },
+        },
+    ]}}
+    _install(monkeypatch, widgets, search)
+    body = TestClient(app).get("/api/devices/favorites", headers={"Authorization": "Bearer sk-x"}).json()
+    assert body["devices"] == [{
+        "entity_id": "climate.hall",
+        "domain": "climate",
+        "name": "Hall Thermostat",
+        "state": "heat",
+        "attributes": {
+            "current_temperature": 68.5,
+            "temperature": 71,
+            "min_temp": 50,
+            "max_temp": 90,
+            "target_temp_step": 0.5,
+            "hvac_modes": ["off", "heat", "cool", "heat_cool"],
+            "hvac_action": "heating",
+        },
+    }]
+
+
 def test_no_pins_says_how_to_add_them(monkeypatch):
     seen = _install(monkeypatch, [{"widget_key": "device_control", "pinned_devices": []}], {})
     body = TestClient(app).get("/api/devices/favorites", headers={"Authorization": "Bearer sk-x"}).json()

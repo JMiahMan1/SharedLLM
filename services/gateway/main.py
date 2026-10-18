@@ -4205,15 +4205,27 @@ async def device_favorites(request: Request):
             detail=f"Could not read device states: {data.get('message') or resp.status}",
         )
     by_id = {e.get("entity_id"): e for e in (data.get("detail") or {}).get("entities", [])}
+    # The watch needs a little more than state for a thermostat: the target,
+    # the room temperature and the range the entity accepts. Keep the payload
+    # small by passing those keys for climate entities only.
+    climate_attrs = (
+        "current_temperature", "temperature", "min_temp", "max_temp",
+        "target_temp_step", "hvac_modes", "hvac_action",
+    )
     devices = []
     for eid in pinned:
         entity = by_id.get(eid)
-        devices.append({
+        domain = eid.split(".", 1)[0] if "." in eid else ""
+        device = {
             "entity_id": eid,
-            "domain": eid.split(".", 1)[0] if "." in eid else "",
+            "domain": domain,
             "name": (entity or {}).get("friendly_name") or eid,
             "state": (entity or {}).get("state") or "unavailable",
-        })
+        }
+        if domain == "climate":
+            attrs = (entity or {}).get("attributes") or {}
+            device["attributes"] = {k: attrs[k] for k in climate_attrs if attrs.get(k) is not None}
+        devices.append(device)
     return {"devices": devices}
 
 
