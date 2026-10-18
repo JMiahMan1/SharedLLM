@@ -77,7 +77,10 @@ fi
 # --- Step 1: Check what changed ---
 CHANGED_FILES=$(git diff --name-only HEAD@{1} HEAD 2>/dev/null || true)
 CADDY_CHANGE=$(printf '%s\n' "$CHANGED_FILES" | grep -E "^Caddyfile$" || true)
-INFRA_CHANGE=$(printf '%s\n' "$CHANGED_FILES" | grep -E "^docker-compose|^scripts/|^Dockerfile" || true)
+# Scripts are executed from the checkout, not baked into images. Treating a
+# deploy-script edit as an infrastructure change made a UI-only release pull
+# every image on a slow link, so scripts deliberately do not trigger that.
+INFRA_CHANGE=$(printf '%s\n' "$CHANGED_FILES" | grep -E "^docker-compose|^Dockerfile" || true)
 
 # Identify specific services that changed
 MODIFIED_SERVICES=""
