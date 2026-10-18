@@ -695,15 +695,15 @@ const Wander = () => {
                       <div className="flex items-center gap-2 text-slate-400">
                         <span className="flex items-center gap-1">
                           <Gauge size={12} className="text-slate-500" />
-                          <span>{trip.mpg} MPG</span>
+                          <span>{roundForDisplay(trip.mpg)} MPG</span>
                         </span>
                         <span>•</span>
                         <span className="flex items-center gap-1">
                           <Fuel size={12} className="text-slate-500" />
-                          <span>${trip.cost_per_gallon}/gal</span>
+                          <span>${Number(trip.cost_per_gallon ?? 0).toFixed(2)}/gal</span>
                         </span>
                         <span>•</span>
-                        <span>{trip.fuel_used_gal} gal used</span>
+                        <span>{Number(trip.fuel_used_gal ?? 0).toFixed(2)} gal used</span>
                       </div>
                     </div>
 
@@ -921,7 +921,7 @@ const Wander = () => {
 
         <div className="glass-panel p-4 rounded-xl border border-white/5 flex flex-col">
           <span className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Total Distance</span>
-          <span className="text-xl sm:text-2xl font-bold text-indigo-400 mt-1">{stats.miles} mi</span>
+          <span className="text-xl sm:text-2xl font-bold text-indigo-400 mt-1">{Number.isFinite(stats.miles) ? stats.miles.toFixed(1) : '0.0'} mi</span>
           <span className="text-[10px] text-slate-500 mt-0.5">Immutable GPS distance</span>
         </div>
 
@@ -1227,7 +1227,7 @@ const Wander = () => {
                 <option value="">Custom Vehicle Override</option>
                 {vehicles.map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.name} ({v.mpg} MPG, {v.fuel_type || 'gasoline'}, ${v.cost_per_gallon}/gal)
+                    {v.name} ({roundForDisplay(v.mpg)} MPG, {v.fuel_type || 'gasoline'}, ${Number(v.cost_per_gallon ?? 0).toFixed(2)}/gal)
                   </option>
                 ))}
               </select>
