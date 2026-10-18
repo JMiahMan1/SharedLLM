@@ -189,6 +189,7 @@
 [data-theme-scheme="light"] .bg-slate-900\/40 { background-color: var(--site-card-bg) !important; }
 [data-theme-scheme="light"] .bg-slate-900\/50 { background-color: var(--site-card-bg) !important; }
 [data-theme-scheme="light"] .bg-slate-900\/60 { background-color: color-mix(in srgb, var(--ht-surface) 60%, transparent) !important; }
+[data-theme-scheme="light"] .bg-slate-900\/70 { background-color: color-mix(in srgb, var(--ht-surface) 70%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-900\/80 { background-color: color-mix(in srgb, var(--ht-surface) 80%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-900\/90 { background-color: color-mix(in srgb, var(--ht-surface) 90%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-900\/95 { background-color: color-mix(in srgb, var(--ht-surface) 95%, transparent) !important; }
@@ -243,6 +244,7 @@
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.07\]:hover { background-color: rgba(17, 24, 39, 0.04) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.08\]:hover { background-color: rgba(17, 24, 39, 0.05) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.12\]:hover { background-color: rgba(17, 24, 39, 0.07) !important; }
+[data-theme-scheme="light"] .hover\:bg-white\/\[0\.14\]:hover { background-color: rgba(17, 24, 39, 0.08) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/10:hover { background-color: rgba(17, 24, 39, 0.06) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/15:hover { background-color: rgba(17, 24, 39, 0.09) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/20:hover { background-color: rgba(17, 24, 39, 0.12) !important; }
