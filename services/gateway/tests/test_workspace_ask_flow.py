@@ -267,6 +267,20 @@ def test_the_catalog_lists_what_dispatches_and_nothing_excluded():
         assert f"- {name}:" not in catalog
 
 
+def test_the_calendar_catalog_says_read_events_not_only_list():
+    """The model used to pick action=list for "what is next on my calendar"
+    because the catalog never mentioned reading events; it got the calendar
+    names back and then emitted malformed JSON. The catalog has to name both
+    actions and the read window."""
+    line = next(
+        line for line in tool_catalog().splitlines()
+        if line.startswith("- CalendarRequest:")
+    )
+    assert "action=read" in line
+    assert "action=list" in line
+    assert "range_start" in line
+
+
 async def _execute_capturing(action, payload, workspace_id, result):
     mock_resp = AsyncMock()
     mock_resp.status = 200
