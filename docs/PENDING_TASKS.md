@@ -1,7 +1,7 @@
 # Pending Tasks
 
 The one backlog for work that is **not done yet**. Verified against the code
-on 2026-10-15. When something here ships, delete it; history lives in git.
+on 2026-10-18. When something here ships, delete it; history lives in git.
 
 ## Security
 
@@ -45,10 +45,6 @@ that review were not re-checked one by one; the full list is in git history
 - **Discovery probes inert**: `device_discovery.py` calls `.lower()` /
   `ET.fromstring` on a `StreamReader` and an un-awaited `resp.text`; the
   blanket `except` hides it (E4).
-- **Chat history not persisted on the queued-job path**; Tier 2 runs with an
-  empty short-term history (`services/gateway/orchestrator.py`) (G4).
-- **All inference serialized behind Raven**: the worker claims jobs one at a
-  time, so one Raven mission blocks chat jobs (G5; see ADR 010).
 - **Terminal context menu** closes ~300 ms after opening
   (`TerminalPane.tsx`, inverted `menuLeaveRef` check) (U1).
 

@@ -73,17 +73,23 @@ safe starting point on 8 GB with 7-9B models.
 ## Implementation Notes
 
 * `messaging.py`: `TIER2_SEMAPHORE = asyncio.Semaphore(3)`, `TIER3_LOCK = asyncio.Lock()`.
-* `background_worker.py`: `_process_inference_job` acquires the lock or the
+* `background_worker.py`: `_inference_loop` claims jobs sequentially and runs
+  each in its own task. `_process_inference_job` acquires the lock or the
   semaphore around `process_full_orchestration()`.
+* Queued chat jobs get the user's recent turns attached by the worker before
+  orchestration, and the completed turn is written back to the history store.
+  Missions and Nextcloud Talk turns do not read the chat transcript.
 
-## Current state (2026-10-15)
+## Current state (2026-10-18)
 
 * `INFERENCE_LOCK` was **not** fully removed: `services/gateway/main.py` still
   defines it and holds it around the external-agent chat path
   (`run_external_agent`).
-* The worker still claims jobs one at a time, so in practice a long Raven
-  mission still delays queued chat jobs; the tiers only matter once more than
-  one job is in flight. Tracked in `docs/PENDING_TASKS.md` (G5).
+* The worker no longer processes jobs one at a time. It claims up to
+  `MAX_INFLIGHT_INFERENCE_JOBS` jobs and dispatches each into its own task, so
+  a running Raven mission holds only `TIER3_LOCK` while Tier 2 jobs fill
+  `TIER2_SEMAPHORE`. Claims remain sequential, and Tier 3 jobs still wait on
+  the lock, which keeps missions serialized.
 
 **Related ADRs:**
 
