@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import Workspaces from './Workspaces';
 import { renderWithProviders } from '../test/render';
 import { server } from '../test/setup';
@@ -19,6 +19,8 @@ const nextcloudWs = {
   nextcloud_path: '/Documents/Sermons', auto_pull_enabled: true, capabilities: [],
   last_sync_at: '2026-10-15T16:41:07-07:00', last_sync_status: 'ok',
 };
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('Workspaces page', () => {
   it('shows copy-paste webhook setup values for a workspace that follows its remote', async () => {
@@ -98,5 +100,38 @@ describe('Workspaces page', () => {
     await waitFor(() => expect(screen.queryByText('Add Workspace')).not.toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Delete Code' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Configure Code' })).not.toBeInTheDocument();
+  });
+
+  it('asks what to do with artifacts before deleting a workspace', async () => {
+    const deletes: unknown[] = [];
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    server.use(
+      listOf(gitWs),
+      http.delete('/api/workspaces/code', async ({ request }) => {
+        const raw = await request.text();
+        deletes.push(raw ? JSON.parse(raw) : null);
+        if (deletes.length === 1) {
+          return HttpResponse.json(
+            {
+              status: 'ERROR',
+              detail: 'This workspace has 2 artifacts.',
+              artifact_count: 2,
+              needs_confirmation: true,
+            },
+            { status: 409 },
+          );
+        }
+        return HttpResponse.json({ status: 'SUCCESS', message: 'Workspace code deleted' });
+      }),
+    );
+    renderWithProviders(<Workspaces />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Code' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Workspace has saved artifacts' });
+    expect(within(dialog).getByText(/has 2 saved artifacts/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByText('Delete workspace, keep artifacts in library'));
+    await waitFor(() => expect(deletes).toHaveLength(2));
+    expect(deletes[1]).toEqual({ delete_artifacts: false });
   });
 });

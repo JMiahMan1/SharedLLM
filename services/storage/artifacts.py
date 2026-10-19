@@ -488,6 +488,62 @@ def purge_expired() -> int:
     return removed
 
 
+def workspace_artifact_count(workspace_id: str) -> int:
+    """Count the live artifacts that belong to a workspace."""
+    with _session() as session:
+        count = session.exec(
+            select(func.count())
+            .select_from(Artifact)
+            .where(
+                Artifact.workspace_id == workspace_id,
+                Artifact.deleted_at.is_(None),
+                Artifact.is_attached.is_(True),
+            )
+        ).one()
+    return int(count or 0)
+
+
+def delete_workspace_artifacts(workspace_id: str) -> int:
+    """Delete every artifact in a workspace, including ones in the undo window.
+
+    Called only after the workspace owner confirms that the workspace and its
+    artifacts should go together, so the per-artifact phrase check does not
+    apply here.
+    """
+    provider = LocalStorageProvider(artifacts_root())
+    removed = 0
+    with _session() as session:
+        rows = session.exec(select(Artifact).where(Artifact.workspace_id == workspace_id)).all()
+        for row in rows:
+            provider.delete_file(row.storage_ref)
+            session.delete(row)
+            removed += 1
+        if removed:
+            session.commit()
+    return removed
+
+
+def orphan_workspace_artifacts(workspace_id: str) -> int:
+    """Keep a workspace's artifacts in the library after the workspace is gone."""
+    changed = 0
+    with _session() as session:
+        rows = session.exec(
+            select(Artifact).where(
+                Artifact.workspace_id == workspace_id,
+                Artifact.is_attached.is_(True),
+            )
+        ).all()
+        now = _now()
+        for row in rows:
+            row.is_attached = False
+            row.updated_at = now
+            session.add(row)
+            changed += 1
+        if changed:
+            session.commit()
+    return changed
+
+
 def usage_for(owner_user: str) -> UsageRead:
     with _session() as session:
         quota = _quota_for(session, owner_user)

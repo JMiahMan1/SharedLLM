@@ -51,12 +51,11 @@ The retention and max entry settings now take effect.
 ## Artifact framework (`services/storage`): generator wiring remains
 
 The local provider, artifact/quota database, API, signed range streaming,
-24-hour soft delete, purge loop, gateway proxies, Artifact library and admin
-Storage page are implemented. Still open:
+24-hour soft delete, purge loop, gateway proxies, Artifact library, admin
+Storage page, and the workspace-deletion 409 prompt (delete or orphan) are
+implemented. Still open:
 
 - Wire TTS, image, video and document generators through `create_artifact`.
-- Prompt before workspace deletion when artifacts exist: 409 with
-  `artifact_count` / `needs_confirmation`, then delete or orphan.
 - The local quota comes from `ARTIFACT_LOCAL_QUOTA_BYTES` and per-user rows in
   `UserStorageQuota`; the proposed Identity `artifact_local_quota_bytes`
   setting is not wired (storage does not read Identity settings).
