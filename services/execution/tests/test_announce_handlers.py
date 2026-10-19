@@ -442,6 +442,8 @@ def test_timer_targets_drop_corrupt_and_duplicate_media_players(monkeypatch):
         _media_player("media_player.master_bedroom_tv_2", "Master Bedroom TV", "off", "speaker", 7796671),
         _media_player("media_player.master_bedroom_tv_3", "Master Bedroom TV", "unavailable", "tv", 153529),
         _media_player("media_player.master_bedroom_tv_4", "Master Bedroom TV", "unavailable", "speaker", 8320575),
+        _media_player("media_player.loft_tv", "Loft TV", "off", "tv", 24381),
+        _media_player("media_player.loft_tv_2", "Loft TV", "idle", "speaker", 7796287),
         _media_player("media_player.gracies_tv", "Gracies TV", "off", "speaker", 7795643),
         _media_player("media_player.gracies_tv_2", "Gracies TV", "unavailable", "speaker", 7795643),
         _media_player("media_player.kitchen_speaker", "Kitchen Speaker", "idle", "speaker", 7796287),
@@ -458,6 +460,8 @@ def test_timer_targets_drop_corrupt_and_duplicate_media_players(monkeypatch):
     assert "media_player.master_bedroom_tv_2" in by_id
     assert "media_player.master_bedroom_tv_3" not in by_id
     assert "media_player.master_bedroom_tv_4" not in by_id
+    assert "media_player.loft_tv_2" in by_id
+    assert "media_player.loft_tv" not in by_id
     assert "media_player.gracies_tv" in by_id
     assert "media_player.gracies_tv_2" not in by_id
     assert "media_player.kitchen_speaker" in by_id

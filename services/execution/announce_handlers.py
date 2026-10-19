@@ -1260,9 +1260,15 @@ async def classify_communication_devices(
         # Avoid duplicate Music Assistant / DLNA wrapper entries when the primary TV entity is already in HA
         primary_ent = companions.get("primary_entity")
         if primary_ent and primary_ent != eid and primary_ent in {s.get("entity_id") for s in states}:
-            # Keep MA wrapper only if the primary entity is unavailable (e.g. Gracie's Roku TV)
-            prim_state = next((s.get("state") for s in states if s.get("entity_id") == primary_ent), "unknown")
-            if prim_state != "unavailable":
+            # Keep the wrapper when the primary is unavailable (for example
+            # Gracie's Roku TV) or cannot announce. A TV entity often exposes
+            # only power/volume, while its Cast or MA sibling is the one that
+            # can speak a timer alert.
+            primary_state = next((s for s in states if s.get("entity_id") == primary_ent), {})
+            prim_state = primary_state.get("state", "unknown")
+            prim_attrs = primary_state.get("attributes") or {}
+            prim_features = int(prim_attrs.get("supported_features") or 0)
+            if prim_state != "unavailable" and (prim_features & SUPPORT_MEDIA_ANNOUNCE):
                 continue
 
         # Look up cached network metadata (IP, OS version, model) if available
