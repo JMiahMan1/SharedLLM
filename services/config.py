@@ -156,6 +156,36 @@ TEMP_MEDIA_DIR = os.getenv("TEMP_MEDIA_DIR")
 SCRIPTS_DIR = os.getenv("SCRIPTS_DIR")
 LEGACY_ENV_PATH = os.getenv("LEGACY_ENV_PATH")
 IDENTITY_DATABASE_URL = os.getenv("IDENTITY_DATABASE_URL")
+
+
+def _csv_env(key: str, default: tuple[str, ...]) -> list[str]:
+    """A comma-separated env var as a list, with a deterministic default."""
+    raw = os.getenv(key)
+    if raw is None:
+        return list(default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+# Browser origins allowed to call Identity directly. The web app normally goes
+# through Caddy on its own origin (so no CORS is involved), but the Vite dev
+# server and the Android WebView call Identity across origins. Never "*":
+# Identity answers with decrypted credentials, and a wildcard lets any site a
+# signed-in browser visits read them.
+_IDENTITY_CORS_DEFAULTS = (
+    "https://jarvis.sumemail.com",
+    "http://localhost",
+    "https://localhost",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+)
+IDENTITY_CORS_ORIGINS = [
+    origin
+    for origin in _csv_env("IDENTITY_CORS_ORIGINS", _IDENTITY_CORS_DEFAULTS)
+    # A wildcard would re-open the finding this setting exists to close.
+    if origin != "*"
+]
 BIBLE_DATABASE_URL = os.getenv("BIBLE_DATABASE_URL")
 # Bible study settings. Deliberately no code defaults: an unset BLB base URL
 # must produce a visible "configure this" state in the devotional card, not a

@@ -93,6 +93,9 @@ _TEST_ENV_DEFAULTS = {
     # itself with a per-test fixture; the fix belongs here.
     "INTERNAL_SECRET": "test-secret",
     "FERNET_KEY": _test_fernet_key,
+    # Identity's browser allowlist: deterministic, and never the developer's
+    # deployment origins (or "*") leaking into the CORS tests.
+    "IDENTITY_CORS_ORIGINS": "https://jarvis.sumemail.com,http://localhost:5173",
     # Service topology: localhost everywhere, matching CI, never the docker
     # service aliases (which only resolve inside the compose network).
     "GATEWAY_INTERNAL_URL": "http://gateway:11435",

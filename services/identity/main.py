@@ -25,7 +25,7 @@ from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common.http import get_client, get_client_insecure
-from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
+from services.config import IDENTITY_CORS_ORIGINS, IDENTITY_DATABASE_URL, INTERNAL_SECRET
 from services.identity import audit, battery_alerts, push, roles, voice
 from services.identity.crypto import decrypt, digest_secret, encrypt
 from services.identity.models import (
@@ -456,7 +456,7 @@ app = FastAPI(title="Jarvis OS Identity Service", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=IDENTITY_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -636,8 +636,18 @@ app.include_router(push.build_router(get_session, require_api_key, require_inter
 
 @app.post("/api/resolve", response_model=ResolvedCredentials)
 def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session), _: None = Depends(require_internal)):
-    """
-    Downstream services call this to get decrypted credentials for a user.
+    """Downstream services call this to get decrypted credentials for a user.
+
+    A request that names a user or presents a credential must resolve to that
+    user. If it does not, this is a 401 -- it must never silently become the
+    system default user, who is an administrator. Only a request that presents
+    no identifier at all may use the fallback, and this endpoint itself is
+    internal-only (``require_internal``), so that case is a trusted service
+    asking for the household account.
+
+    The one compatibility exception is a ``device_id`` that is genuinely
+    assigned to more than one person: the device is real but cannot name a
+    single speaker, so the shared household account still answers.
     """
     user = None
     log.debug(f"[resolve] Input: user_id={req.user_id}, api_key={'***' + req.api_key[-4:] if req.api_key and len(req.api_key) > 4 else req.api_key}, rag_user={req.rag_user}, voice_id={req.voice_id}, device_id={req.device_id}")
@@ -651,17 +661,17 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             log.warning(f"[resolve] No user found for user_id={req.user_id}")
 
     # Resolve by API Key first (for OpenWebUI & UI clients)
-    if not user and req.api_key:
+    if not user and req.api_key is not None:
         user = _find_user_for_api_key(session, req.api_key)
 
-    if not user and req.rag_user:
+    if not user and req.rag_user is not None:
         user = session.exec(select(User).where(User.username == req.rag_user.lower())).first()
         if user:
             log.info(f"[resolve] Resolved by rag_user={req.rag_user}: user={user.username}")
         else:
             log.warning(f"[resolve] No user found for rag_user={req.rag_user}")
 
-    if not user and req.voice_id:
+    if not user and req.voice_id is not None:
         # Search for user by voice_id (username or biometric match)
         user = session.exec(select(User).where(User.username == req.voice_id.lower())).first()
         if user:
@@ -669,23 +679,38 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         else:
             log.warning(f"[resolve] No user found for voice_id={req.voice_id}")
 
-    if not user and req.device_id:
+    device_known = False
+    if not user and req.device_id is not None:
         # A device names its user only when exactly one person (other than
         # the household account) uses it; a shared one says nothing about
-        # who is speaking.
+        # who is speaking. A device that is not assigned at all is not a
+        # credential and must not silently become the administrator.
         assignments = _assignments_for(session, req.device_id)
-        users = {a.user.username: a.user for a in assignments if not a.revoked and a.user and not a.user.is_system_default}
+        active = [a for a in assignments if not a.revoked]
+        device_known = bool(active)
+        users = {a.user.username: a.user for a in active if a.user and not a.user.is_system_default}
         if len(users) == 1:
             user = next(iter(users.values()))
             log.info(f"[resolve] Resolved by device_id={req.device_id}: user={user.username}")
         elif users:
             log.info(f"[resolve] Device {req.device_id} is shared by {sorted(users)}, not resolving by device")
-        elif assignments:
+        elif active:
             log.info(f"[resolve] Device {req.device_id} names no single user, skipping")
         else:
-            log.warning(f"[resolve] No device assignment found for device_id={req.device_id}")
+            log.warning(f"[resolve] No active device assignment found for device_id={req.device_id}")
 
     if not user:
+        unmatched = (
+            req.user_id is not None
+            or req.api_key is not None
+            or req.rag_user is not None
+            or req.voice_id is not None
+            or (req.device_id is not None and not device_known)
+        )
+        if unmatched:
+            log.warning("[resolve] Presented identity did not match a user; refusing system-default fallback")
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
         log.warning("[resolve] No resolution path matched, falling back to system default")
         # Fallback to system account (ID 1)
         user = session.exec(select(User).where(User.id == 1)).first()
@@ -2150,12 +2175,12 @@ def internal_validate_api_key(
 ):
     """Internal: is this API key real, and whose is it?
 
-    Deliberately has **no** system-default fallback, which is what makes it
-    safe to use as an authentication gate. `POST /api/resolve` falls back to
-    the default (admin) user whenever nothing matches, so a caller that
-    validated a key through it would accept *any* string (including an
-    anonymous caller's) as the default administrator. This endpoint answers
-    only "did this exact key authenticate", and 401s otherwise.
+    Deliberately has **no** fallback of any kind, which is what makes it safe
+    to use as an authentication gate. `POST /api/resolve` still uses the
+    system-default (admin) fallback for a request with no identifier at all, so
+    a caller that validated a *missing* key through it would receive the
+    administrator. This endpoint answers only "did this exact key
+    authenticate", and 401s otherwise.
 
     Do not add a fallback here; that is the whole point of the endpoint.
 
