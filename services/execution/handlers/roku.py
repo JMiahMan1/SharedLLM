@@ -70,6 +70,12 @@ async def is_roku_device(ha_url: str, ha_token: str, entity_id: str) -> bool:
     roku_indicators = ("roku.", "com.roku.", "roku media player")
     if any(ind in app_id for ind in roku_indicators):
         return True
+    try:
+        from services.execution.announce_handlers import detect_tv_type
+    except ImportError:
+        from ..announce_handlers import detect_tv_type  # type: ignore[no-redef]
+    if detect_tv_type(entity_id, state.get("state", "unknown"), attrs) == "roku":
+        return True
     source_list = [s.lower() for s in (attrs.get("source_list") or [])]
     roku_sources = {"home", "roku media player", "the roku channel"}
     return bool(roku_sources & set(source_list))
@@ -100,26 +106,35 @@ async def find_ma_player_sibling(ha_url: str, ha_token: str, roku_entity: str) -
             roku_friendly = state.get("attributes", {}).get("friendly_name", "").lower()
             break
 
-    if not roku_friendly:
-        return None
+    if roku_friendly:
+        for state in all_states:
+            eid = state.get("entity_id", "")
+            if not eid.startswith("media_player.") or eid == roku_entity:
+                continue
+            attrs = state.get("attributes", {})
+            friendly = attrs.get("friendly_name", "").lower()
+            active_queue = attrs.get("active_queue")
 
-    for state in all_states:
-        eid = state.get("entity_id", "")
-        if not eid.startswith("media_player.") or eid == roku_entity:
-            continue
-        attrs = state.get("attributes", {})
-        friendly = attrs.get("friendly_name", "").lower()
-        active_queue = attrs.get("active_queue")
+            # Must have an active MA queue to be a valid playback target
+            if not active_queue:
+                continue
 
-        # Must have an active MA queue to be a valid playback target
-        if not active_queue:
-            continue
+            is_ma = is_music_assistant_player(attrs, eid, require_active_queue=True)
 
-        is_ma = is_music_assistant_player(attrs, eid, require_active_queue=True)
+            if is_ma and (roku_friendly in friendly or friendly in roku_friendly):
+                log.info(f"[roku] Found MA player sibling: {eid} (queue: {active_queue})")
+                return eid
 
-        if is_ma and (roku_friendly in friendly or friendly in roku_friendly):
-            log.info(f"[roku] Found MA player sibling: {eid} (queue: {active_queue})")
-            return eid
+    try:
+        from services.execution.announce_handlers import resolve_tv_companions
+    except ImportError:
+        from ..announce_handlers import resolve_tv_companions  # type: ignore[no-redef]
+    ma_comp = resolve_tv_companions(roku_entity, all_states).get("ma_entity")
+    if ma_comp:
+        for state in all_states:
+            if state.get("entity_id") == ma_comp and state.get("attributes", {}).get("active_queue"):
+                log.info(f"[roku] Found MA player sibling via companion resolver: {ma_comp}")
+                return ma_comp
 
     log.warning(f"[roku] No MA player sibling with active queue found for {roku_entity}")
     return None

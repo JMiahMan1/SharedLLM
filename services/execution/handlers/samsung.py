@@ -46,7 +46,7 @@ MEDIA_VERIFY_INTERVAL = 2
 
 
 async def is_samsung_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
-    """Check if a media_player entity is a Samsung Tizen TV."""
+    """Check if a media_player entity is a Samsung TV (Tizen or Legacy Orsay)."""
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
     if not state:
         return False
@@ -54,9 +54,13 @@ async def is_samsung_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     app_id = (attrs.get("app_id") or "").lower()
     entity_id_lower = entity_id.lower()
     samsung_indicators = ("org.tizen.", "samsung.tv", "tizen.tv")
-    if any(ind in app_id for ind in samsung_indicators):
+    if any(ind in app_id for ind in samsung_indicators) or "samsungtv" in entity_id_lower:
         return True
-    return "samsungtv" in entity_id_lower
+    try:
+        from services.execution.announce_handlers import detect_tv_type
+    except ImportError:
+        from ..announce_handlers import detect_tv_type  # type: ignore[no-redef]
+    return detect_tv_type(entity_id, state.get("state", "unknown"), attrs) == "samsung"
 
 
 async def get_samsung_ip(ha_url: str, ha_token: str, entity_id: str) -> str | None:

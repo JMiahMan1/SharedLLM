@@ -1265,7 +1265,7 @@ async def execute_trigger(payload: dict[str, Any]):
         tts_bytes = b""
         if tts_enabled:
             try:
-                tts_bytes = await _text_to_speech(message) or b""
+                tts_bytes = await text_to_speech(message) or b""
             except Exception as tts_err:
                 log.warning(f"Kokoro TTS failed during timer alert, using synthesized tone: {tts_err}")
                 tts_bytes = b""
@@ -1326,7 +1326,7 @@ async def execute_trigger(payload: dict[str, Any]):
                     log.warning(f"Direct ESPHome alert failed for {esp_name}: {esp_err}")
 
             # 2. Home Assistant TV or media_player (with optional companion ESPHome screen script/flash)
-            mapped_esp = esphome_client.find_device_for_ha_entity(t_clean, configured_esphome)
+            mapped_esp = await esphome_client.find_device_for_ha_entity(t_clean, configured_esphome)
             if mapped_esp and (timer_data.get("esphome_script") or timer_data.get("flash_screen")):
                 with suppress(Exception):
                     await esphome_client.trigger_device_alert(
@@ -1806,7 +1806,7 @@ async def execute_tts(req: TTSRequest):
     """
     import base64
     try:
-        audio_bytes = await _text_to_speech(req.text, voice=req.voice, storybook=req.storybook)
+        audio_bytes = await text_to_speech(req.text, voice=req.voice, storybook=req.storybook)
         if not audio_bytes:
             return _fail("TTS generation returned empty bytes", "tts")
 
@@ -1972,15 +1972,28 @@ async def execute_announce(req: AnnouncementRequest):
             if "roku" in active_queue:
                 # This is an MA player wrapping a Roku - store MA entity for audio
                 ma_player_entity = target_player
-                # Find the actual Roku media_player entity for ECP control
+                ma_friendly = (attrs.get("friendly_name") or "").lower().strip()
+                # Find the matching Roku media_player entity for ECP control (prefer friendly name match)
+                matched_roku = None
+                fallback_roku = None
                 for s in all_states:
                     eid = s.get("entity_id", "")
-                    s.get("attributes", {})
-                    if eid.startswith("media_player.") and "roku" in eid.lower():
-                        log.info(f"[announce] MA-wrapped Roku: MA={ma_player_entity}, Roku={eid}")
-                        target_player = eid
-                        initial_state = s
-                        break
+                    if not eid.startswith("media_player.") or eid == ma_player_entity:
+                        continue
+                    s_attrs = s.get("attributes", {})
+                    s_friendly = (s_attrs.get("friendly_name") or "").lower().strip()
+                    if "roku" in eid.lower() or "roku" in s_friendly:
+                        if fallback_roku is None:
+                            fallback_roku = s
+                        if ma_friendly and s_friendly and (ma_friendly in s_friendly or s_friendly in ma_friendly):
+                            matched_roku = s
+                            break
+                chosen_roku = matched_roku or fallback_roku
+                if chosen_roku is not None:
+                    eid = chosen_roku.get("entity_id", "")
+                    log.info(f"[announce] MA-wrapped Roku: MA={ma_player_entity}, Roku={eid}")
+                    target_player = eid
+                    initial_state = chosen_roku
                 else:
                     log.warning(f"[announce] No Roku entity found in all_states ({len(all_states)} entities)")
 
@@ -2001,8 +2014,6 @@ async def execute_announce(req: AnnouncementRequest):
     # 1. Power on if needed
     if was_off:
         log.info(f"[announce] Device was {initial_state.get('state') if initial_state else 'unknown'}, turning on...")
-        # Detect device type for platform-specific power-on
-        detect_tv_type = _detect_tv_type
         attrs = initial_state.get("attributes", {}) if initial_state else {}
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
         device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
@@ -2028,7 +2039,7 @@ async def execute_announce(req: AnnouncementRequest):
     if req.tts_engine == "kokoro":
         try:
             log.info(f"[announce] Generating TTS audio (engine=kokoro, storybook={req.storybook})")
-            audio_bytes = await _text_to_speech(req.message, storybook=req.storybook)
+            audio_bytes = await text_to_speech(req.message, storybook=req.storybook)
             if not audio_bytes:
                 return _fail("Kokoro returned empty audio", "announce")
 
@@ -2115,8 +2126,6 @@ async def execute_announce(req: AnnouncementRequest):
     # 4. Verify playback actually happened
     if result.get("ok") and media_url:
         log.info(f"[announce] Verifying playback on {target_player}...")
-        # Detect device type for lenient TV verification
-        detect_tv_type = _detect_tv_type
         attrs = initial_state.get("attributes", {}) if initial_state else {}
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
         device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
@@ -2146,8 +2155,6 @@ async def execute_announce(req: AnnouncementRequest):
         await asyncio.sleep(10)
 
     # 6. Restore initial state for ALL devices
-    # Detect device type for restoration policy
-    detect_tv_type = _detect_tv_type
     device_type = detect_tv_type(target_player, initial_state.get("state", "unknown") if initial_state else "unknown", initial_state.get("attributes", {}) if initial_state else {}, loaded_components)
 
     # For Roku: restore the MA player entity (where volume/source/playback state lives)
@@ -3497,7 +3504,7 @@ async def execute_audiobook_regenerate(req: AudiobookRegenerateRequest):
                 results.append({"file": text_file, "status": "FAILURE", "message": "text file is empty"})
                 all_ok = False
                 continue
-            audio_bytes = await _text_to_speech(text, voice=req.voice, storybook=req.storybook)
+            audio_bytes = await text_to_speech(text, voice=req.voice, storybook=req.storybook)
             if not audio_bytes:
                 results.append({"file": text_file, "status": "FAILURE", "message": "TTS returned empty audio"})
                 all_ok = False

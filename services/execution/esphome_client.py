@@ -323,7 +323,10 @@ async def get_device_entities_cached(device_name: str) -> list[dict]:
     return entities
 
 
-async def find_device_for_ha_entity(ha_entity_id: str) -> str | None:
+async def find_device_for_ha_entity(
+    ha_entity_id: str,
+    devices: dict[str, dict] | None = None,
+) -> str | None:
     """Map an HA entity_id to a configured ESPHome device name.
 
     Order: explicit ``ha_entity_id`` mapping in the esphome_devices
@@ -335,7 +338,8 @@ async def find_device_for_ha_entity(ha_entity_id: str) -> str | None:
     if not wanted or "." not in wanted:
         return None
     ha_domain, ha_object_id = wanted.split(".", 1)
-    devices = await get_devices()
+    if devices is None:
+        devices = await get_devices()
     for name, cfg in devices.items():
         if (cfg.get("ha_entity_id") or "").lower() == wanted:
             return name
@@ -508,6 +512,7 @@ async def trigger_device_alert(
     rtttl: str | None = None,
     script_name: str | None = None,
     flash_screen: bool = True,
+    until_button: bool = True,
 ) -> dict:
     """Trigger an alarm/timer on an ESPHome device.
 
@@ -542,10 +547,10 @@ async def trigger_device_alert(
             "tone": sound or "classic_alarm",
             "rtttl": rtttl or "alarm:d=4,o=5,b=180:c6,p,c6,p,g5,p",
             "song_str": rtttl or "alarm:d=4,o=5,b=180:c6,p,c6,p,g5,p",
-            "until_button": True,
-            "wait_for_button": True,
-            "flash": True,
-            "loop": True,
+            "until_button": bool(until_button),
+            "wait_for_button": bool(until_button),
+            "flash": bool(flash_screen),
+            "loop": bool(until_button),
             "duration": 60,
             "duration_s": 60,
             "seconds": 60,
