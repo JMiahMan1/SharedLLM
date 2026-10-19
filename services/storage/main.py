@@ -9,7 +9,7 @@ import aiohttp
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query
 
 from services.common.http import get_client
-from services.config import INTERNAL_SECRET, RAG_SVC_URL
+from services.config import INTERNAL_SECRET, RAG_SVC_URL, resolve_runtime_config
 from services.shared.info_endpoint import info_router
 from services.storage import artifacts as artifact_store
 from services.storage.artifacts_api import router as artifacts_router
@@ -50,6 +50,7 @@ async def _artifact_purge_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    await resolve_runtime_config()
     try:
         artifact_store.init_db()
     except OSError as exc:

@@ -188,6 +188,7 @@ class TestConfigSettingsMap:
             "phrasebook_path": "PHRASEBOOK_PATH",
             "announcement_blacklist": "ANNOUNCEMENT_BLACKLIST",
             "gateway_internal_url": "GATEWAY_INTERNAL_URL",
+            "artifact_local_quota_bytes": "ARTIFACT_LOCAL_QUOTA_BYTES",
         }
         for setting_key, env_var in expected.items():
             assert f'"{setting_key}": "{env_var}"' in source

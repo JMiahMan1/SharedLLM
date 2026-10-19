@@ -5,7 +5,7 @@ import base64
 from contextlib import asynccontextmanager
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from services.storage import artifacts
@@ -15,7 +15,7 @@ from services.storage.artifacts_api import router
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ARTIFACTS_ROOT", str(tmp_path / "artifacts"))
-    monkeypatch.setenv("ARTIFACT_LOCAL_QUOTA_BYTES", str(2 * 1024 * 1024))
+    monkeypatch.setattr(artifacts.config, "ARTIFACT_LOCAL_QUOTA_BYTES", 2 * 1024 * 1024)
     monkeypatch.setenv("INTERNAL_SECRET", "test-secret")
     monkeypatch.setenv("ARTIFACT_SIGNING_KEY", "signing-secret")
     artifacts.reset_for_tests()
@@ -140,6 +140,17 @@ def test_hard_delete_requires_the_exact_phrase(client):
     )
     assert good.status_code == 200
     assert client.get(f"/artifacts/{created['id']}", headers=_headers()).status_code == 404
+
+
+def test_default_quota_follows_the_identity_runtime_setting(monkeypatch):
+    monkeypatch.setattr(artifacts.config, "ARTIFACT_LOCAL_QUOTA_BYTES", 3 * 1024 * 1024)
+    assert artifacts.default_quota_bytes() == 3 * 1024 * 1024
+
+    monkeypatch.setattr(artifacts.config, "ARTIFACT_LOCAL_QUOTA_BYTES", 0)
+    with pytest.raises(HTTPException) as exc:
+        artifacts.default_quota_bytes()
+    assert exc.value.status_code == 503
+    assert "artifact_local_quota_bytes" in exc.value.detail
 
 
 def test_quota_blocks_a_second_large_artifact(client):

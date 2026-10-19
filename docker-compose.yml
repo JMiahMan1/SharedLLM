@@ -453,7 +453,6 @@ services:
       - NEXTCLOUD_PASS=${NEXTCLOUD_PASS:-}
       - STORAGE_CHECKPOINT_PATH=${STORAGE_CHECKPOINT_PATH:-/data/index_checkpoint.json}
       - ARTIFACTS_ROOT=/artifacts
-      - ARTIFACT_LOCAL_QUOTA_BYTES=${ARTIFACT_LOCAL_QUOTA_BYTES:-5368709120}
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro

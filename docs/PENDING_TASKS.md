@@ -61,9 +61,10 @@ implemented. Still open:
   dedicated video or document generator to wire; files Raven writes into a
   workspace intentionally stay in the workspace/git rather than becoming
   lifecycle-independent artifacts.
-- The local quota comes from `ARTIFACT_LOCAL_QUOTA_BYTES` and per-user rows in
-  `UserStorageQuota`; the proposed Identity `artifact_local_quota_bytes`
-  setting is not wired (storage does not read Identity settings).
+- The local quota default comes from the Identity
+  `artifact_local_quota_bytes` setting (5 GiB seed); per-user overrides live in
+  `UserStorageQuota`. There is no hardcoded fallback: if the setting is missing
+  or zero, artifact writes fail with a clear 503 configuration error.
 
 ## Raven capability gaps
 
