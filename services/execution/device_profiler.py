@@ -86,7 +86,7 @@ CONTROL_METHODS = {
         "power_off": ["ha_turn_off"],
         "play_media": ["ha_play_media", "ha_notify_toast"],
         "transport": ["ha_transport", "websocket"],
-        "ports": [3000, 3001, 7676, 9080],
+        "ports": [3000, 3001, 9080],
         "wol_supported": True,
         "description": "LG WebOS TV. Requires MAC for WOL. WebSocket API on port 3000/3001, status on 9080.",
     },
@@ -95,9 +95,9 @@ CONTROL_METHODS = {
         "power_off": ["ha_turn_off", "send_key_power"],
         "play_media": ["ha_play_media", "music_assistant", "dlna_dmr"],
         "transport": ["ha_send_key", "websocket"],
-        "ports": [8001, 8002, 55000, 9197],
+        "ports": [8001, 8002, 55000, 7676, 9197],
         "wol_supported": True,
-        "description": "Samsung TV (Tizen port 8001/8002 or Legacy Orsay port 55000).",
+        "description": "Samsung TV (Tizen port 8001/8002 or Legacy Orsay port 55000, UPnP/DLNA port 7676/9197).",
     },
     "androidtv": {
         "power_on": ["ha_turn_on", "adb_wake"],
@@ -184,7 +184,7 @@ def _detect_device_type(entity_id: str, integration: str, device_class: str,
         return "roku"
     if "webos" in entity_lower or "lg_" in entity_lower:
         return "webostv"
-    if "samsung" in entity_lower:
+    if "samsung" in entity_lower or "tizen" in entity_lower:
         return "samsungtv"
     if "android" in entity_lower or "shield" in entity_lower:
         return "androidtv"
@@ -193,24 +193,6 @@ def _detect_device_type(entity_id: str, integration: str, device_class: str,
     if "esphome" in entity_lower or "s3_box" in entity_lower or "jarvis_smart_speaker" in entity_lower:
         return "esphome"
     if "dlna" in entity_lower:
-        return "dlna"
-
-    # Fallback: open ports
-    if 8060 in open_ports:
-        return "roku"
-    if 3000 in open_ports or 3001 in open_ports or 7676 in open_ports or 9080 in open_ports:
-        return "webostv"
-    if 8001 in open_ports or 8002 in open_ports or 55000 in open_ports:
-        return "samsungtv"
-    if 6466 in open_ports or 5555 in open_ports:
-        return "androidtv"
-    if 8008 in open_ports or 8009 in open_ports:
-        return "cast"
-    if 6053 in open_ports or 80 in open_ports:
-        return "esphome"
-    if 1883 in open_ports or 8883 in open_ports:
-        return "mqtt"
-    if 9197 in open_ports or 8200 in open_ports:
         return "dlna"
 
     # Fallback: unified TV platform detector on HA attributes
@@ -231,6 +213,38 @@ def _detect_device_type(entity_id: str, integration: str, device_class: str,
                 return tv_to_profiler[tv_type]
         except Exception:
             pass
+
+    # Fallback: network discovery metadata type
+    meta_type = (metadata or {}).get("type", "").lower() if isinstance(metadata, dict) else ""
+    meta_map = {
+        "roku": "roku",
+        "webos": "webostv",
+        "samsung": "samsungtv",
+        "androidtv": "androidtv",
+        "cast": "cast",
+        "esphome": "esphome",
+        "dlna": "dlna",
+    }
+    if meta_type in meta_map:
+        return meta_map[meta_type]
+
+    # Fallback: open ports (3000/3001/9080 = LG webOS; 8001/8002/55000/7676 = Samsung)
+    if 8060 in open_ports:
+        return "roku"
+    if 3000 in open_ports or 3001 in open_ports or 9080 in open_ports:
+        return "webostv"
+    if 8001 in open_ports or 8002 in open_ports or 55000 in open_ports or 7676 in open_ports:
+        return "samsungtv"
+    if 6466 in open_ports or 5555 in open_ports:
+        return "androidtv"
+    if 8008 in open_ports or 8009 in open_ports:
+        return "cast"
+    if 6053 in open_ports or 80 in open_ports:
+        return "esphome"
+    if 1883 in open_ports or 8883 in open_ports:
+        return "mqtt"
+    if 9197 in open_ports or 8200 in open_ports:
+        return "dlna"
 
     return "unknown"
 

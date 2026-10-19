@@ -50,6 +50,45 @@ def test_detect_webos_by_sources():
     }) == "webos"
 
 
+def test_lg_webos_never_misclassified_as_samsung():
+    """LG webOS TVs must never be misclassified as Samsung TVs, even with source_list=['TV', 'HDMI'] or port 7676."""
+    from services.execution import device_discovery, device_profiler
+
+    # LG webOS with com.webos.* app_id and TV/HDMI sources
+    assert detect_tv_type("media_player.living_room_tv", "on", {
+        "device_class": "tv",
+        "supported_features": 24381,
+        "app_id": "com.webos.app.hdmi1",
+        "source_list": ["TV", "HDMI"],
+    }) == "webos"
+
+    # LG webOS with sound_output attribute (HA webostv signature) and TV/HDMI sources
+    assert detect_tv_type("media_player.living_room_tv", "on", {
+        "device_class": "tv",
+        "supported_features": 24381,
+        "sound_output": "tv_speaker",
+        "source_list": ["TV", "HDMI"],
+    }) == "webos"
+
+    # LG webOS with friendly_name containing LG or webOS
+    assert detect_tv_type("media_player.living_room_tv", "off", {
+        "device_class": "tv",
+        "supported_features": 24381,
+        "friendly_name": "LG OLED TV",
+        "source_list": ["TV", "HDMI"],
+    }) == "webos"
+
+    # Port 7676 is Samsung UPnP/DLNA, never LG webOS
+    webos_port_nums = [p for p, _ in device_discovery.DEVICE_PORTS["webos"]]
+    samsung_port_nums = [p for p, _ in device_discovery.DEVICE_PORTS["samsung"]]
+    assert 7676 not in webos_port_nums
+    assert 7676 in samsung_port_nums
+    assert 7676 not in device_profiler.CONTROL_METHODS["webostv"]["ports"]
+    assert 7676 in device_profiler.CONTROL_METHODS["samsungtv"]["ports"]
+    assert device_profiler._detect_device_type("media_player.some_tv", "", "tv", [7676], {}) == "samsungtv"
+    assert device_profiler._detect_device_type("media_player.some_tv", "", "tv", [3000], {}) == "webostv"
+
+
 def test_detect_samsung_tizen_and_legacy_by_sources():
     """Loft Samsung QLED and Master Bedroom legacy Orsay Samsung have source_list=['TV', 'HDMI']."""
     assert detect_tv_type("media_player.loft_tv", "off", {
