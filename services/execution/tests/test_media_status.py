@@ -62,6 +62,52 @@ async def test_media_status_returns_active_player():
 
 
 @pytest.mark.asyncio
+async def test_media_status_prefers_cast_metadata_over_ma_queue():
+    states = [
+        _make_state(
+            "media_player.office_tv_chrome_2",
+            "playing",
+            {
+                "friendly_name": "Office TV",
+                "source": "Music Assistant Queue",
+                "integration": "music_assistant",
+                "active_queue": "queue://ma/abc123",
+                "mass_player_type": "player",
+                "media_title": "(*Fin)",
+                "media_artist": "Anberlin",
+            },
+        ),
+        _make_state(
+            "media_player.office_tv_chrome",
+            "playing",
+            {
+                "friendly_name": "Office TV Cast",
+                "app_name": "YouTube",
+                "media_title": "Underdog Saluki 27B tested - Local LLM setup",
+                "media_artist": "Luke's Dev Lab",
+            },
+        ),
+    ]
+    with (
+        patch(
+            "services.execution.handlers.media_status.ha_client.get_states",
+            new=AsyncMock(return_value=states),
+        ),
+        patch(
+            "services.execution.handlers.media_status.ha_client.get_areas",
+            new=AsyncMock(return_value={}),
+        ),
+    ):
+        result = await handle_media_status(_make_req())
+
+    assert result.status == "SUCCESS"
+    active = result.detail.get("active") if result.detail else None
+    assert isinstance(active, dict)
+    assert active["entity_id"] == "media_player.office_tv_chrome"
+    assert active["media_title"].startswith("Underdog")
+
+
+@pytest.mark.asyncio
 async def test_media_status_returns_available_players():
     """Test that idle/standby/off players are returned in detail['available']."""
     states = [
@@ -406,8 +452,8 @@ async def test_media_status_non_ma_cast_with_metadata_is_active():
 
 
 @pytest.mark.asyncio
-async def test_media_status_prefers_ma_when_multiple_active():
-    """When both MA and cast players are active, MA wins the active slot."""
+async def test_media_status_prefers_cast_metadata_when_both_active():
+    """When both MA and cast players carry metadata, the cast metadata wins."""
     states = [
         _make_state(
             "media_player.cast_tv",
@@ -428,7 +474,7 @@ async def test_media_status_prefers_ma_when_multiple_active():
 
     active = (result.detail or {}).get("active")
     assert active is not None
-    assert active["entity_id"] == "media_player.ma_speaker"
+    assert active["entity_id"] == "media_player.cast_tv"
     all_ids = [p["entity_id"] for p in (result.detail or {}).get("all_players") or []]
     assert "media_player.cast_tv" in all_ids
 

@@ -91,4 +91,33 @@ describe('ActiveMediaWidget: which player the buttons drive', () => {
     expect(sent).toEqual([{ entity_id: 'media_player.kitchen', command: 'next' }]);
     expect(webPlayer.next).not.toHaveBeenCalled();
   });
+
+  it('falls back to the app name when the player has no title', async () => {
+    server.use(
+      http.post('/execute/media/status', () =>
+        HttpResponse.json({
+          status: 'SUCCESS',
+          detail: {
+            active: {
+              entity_id: 'media_player.office_tv_chrome',
+              friendly_name: 'Office TV Cast',
+              state: 'playing',
+              app_name: 'YouTube',
+              media_title: '',
+              media_artist: '',
+              volume_level: 0.4,
+              position: 0,
+              duration: 0,
+            },
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<ActiveMediaWidget {...props} />);
+
+    expect(await screen.findByText('Playing on YouTube')).toBeInTheDocument();
+    expect(screen.getByText('Office TV Cast')).toBeInTheDocument();
+    expect(screen.queryByText('Unknown Artist')).toBeNull();
+  });
 });
