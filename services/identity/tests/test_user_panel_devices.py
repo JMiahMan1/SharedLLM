@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
 
 import services.identity.main as main
+from services.common import notify
 from services.identity.main import app, require_api_key, require_internal
 from services.identity.models import CapabilityInventory, Device, DeviceEvent, User
 
@@ -267,6 +268,39 @@ class TestTelemetryIngest:
         )
         assert resp.json() == {"written": 1, "rejected": []}
         assert json.loads(session.exec(select(DeviceEvent)).one().extra) == reading
+
+    def test_a_low_watch_battery_notifies_the_family(self, client: TestClient, session: Session, monkeypatch):
+        login(session, "jeremiah").post(
+            "/api/user-panel/devices",
+            json={"device_key": "esphome:watch", "kind": "watch", "label": "Jarvis Watch",
+                  "owner_username": "michele"},
+        )
+        sent = []
+
+        async def send(payload, **kw):
+            sent.append(payload)
+            return True
+
+        monkeypatch.setattr(notify, "send", send)
+        resp = login(session, "michele").post(
+            "/api/user-panel/devices/telemetry",
+            json={"device_key": "esphome:watch",
+                  "events": [{"event": "battery", "extra": {"pct": 14, "usb": False}}]},
+        )
+        assert resp.status_code == 200
+        assert sorted(n["user"] for n in sent) == ["jeremiah", "kate"]
+        notice = sent[0]
+        assert notice["title"] == "Jarvis Watch is at 14%"
+        assert notice["tag"] == "watch_battery:esphome:watch"
+        assert notice["data"]["device_key"] == "esphome:watch"
+        assert notice["data"]["url"] == "/identity"
+
+        login(session, "michele").post(
+            "/api/user-panel/devices/telemetry",
+            json={"device_key": "esphome:watch",
+                  "events": [{"event": "battery", "extra": {"pct": 12, "usb": False}}]},
+        )
+        assert len(sent) == 2, "the same discharge only announces once"
 
     @pytest.mark.parametrize(
         "event", ["transcript", "message_sent", "location_update", "steps", "health_sync"]

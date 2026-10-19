@@ -5626,6 +5626,7 @@ def update_device(
 def ingest_telemetry(
     body: TelemetryIngest,
     request: Request,
+    background: BackgroundTasks,
     session: Session = Depends(get_session),
     caller: User = Depends(require_api_key),
 ):
@@ -5648,6 +5649,7 @@ def ingest_telemetry(
     rejected: list[str] = []
     now = datetime.now().isoformat()
     written = 0
+    battery_readings: list[tuple[float | None, bool | None]] = []
     for raw in body.events[:200]:
         event = str(raw.get("event", "")).strip()
         if event not in NO_OPT_IN_EVENTS:
@@ -5670,12 +5672,52 @@ def ingest_telemetry(
             )
         )
         written += 1
+        if event == "battery":
+            pct = extra.get("pct")
+            usb = extra.get("usb")
+            battery_readings.append((
+                float(pct) if isinstance(pct, (int, float)) and not isinstance(pct, bool) else None,
+                usb if isinstance(usb, bool) else None,
+            ))
 
     device.last_seen_at = now
     device.last_ip_address = _client_ip(request)
     if body.app_version:
         device.app_version = body.app_version.strip()
     session.add(device)
+
+    watch_alert = None
+    if device.kind == "watch" and battery_readings:
+        state_key = f"{battery_alerts.WATCH_STATE_PREFIX}{device.device_key}"
+        row = session.exec(select(GlobalSetting).where(GlobalSetting.key == state_key)).first()
+        try:
+            state = json.loads(row.value) if row else None
+        except (TypeError, ValueError):
+            state = None
+        if not isinstance(state, dict):
+            state = {}
+        announced_at = None
+        for pct, usb in battery_readings:
+            announce, sent = battery_alerts.step(state, pct, usb)
+            state = {**state, "battery": pct, battery_alerts.SENT_FIELD: sent}
+            if announce and announced_at is None:
+                announced_at = pct
+        encoded_state = json.dumps(state)
+        if row:
+            row.value = encoded_state
+        else:
+            session.add(GlobalSetting(
+                key=state_key,
+                value=encoded_state,
+                description=f"Low battery alert state for {device.device_key}",
+            ))
+        if announced_at is not None:
+            owner_username = device.owner_username or caller.username
+            owner = session.exec(select(User).where(User.username == owner_username)).first()
+            family = [u.username for u in session.exec(select(User)).all() if not u.is_system_default]
+            label = device.label or f"{(owner.display_name if owner else owner_username.title())}'s watch"
+            watch_alert = (device.device_key, label, announced_at, family, owner_username)
+
     if any(str(raw.get("event", "")).strip() == "battery" for raw in body.events[:200]):
         cutoff = (datetime.now() - timedelta(days=BATTERY_RETENTION_DAYS)).isoformat()
         for old in session.exec(
@@ -5684,6 +5726,8 @@ def ingest_telemetry(
         ).all():
             session.delete(old)
     session.commit()
+    if watch_alert:
+        background.add_task(battery_alerts.announce_watch, *watch_alert)
     if rejected:
         log.warning(
             "[devices] rejected %d telemetry event(s) not in NO_OPT_IN_EVENTS: %s",
