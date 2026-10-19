@@ -39,6 +39,7 @@ from services.config import (
     WORKSPACE_RUNTIME_SVC_URL,
 )
 from services.execution import voiceprint
+from services.execution.artifacts import artifact_name, create_artifact
 from services.execution.handlers.workspace import _resolve_workspace_info, resolve_safe_path
 
 log = logging.getLogger("execution.podcast")
@@ -220,6 +221,33 @@ async def handle_podcast_render(req) -> ExecutionResult:
         "bed_duck_db": (data or {}).get("bed_duck_db"),
         "warnings": warnings,
     }
+
+    # The workspace copy is the editable one; this is the durable library copy
+    # that survives deleting the workspace. A storage outage must not lose the
+    # finished episode, so failure here only omits the artifact from detail.
+    try:
+        audio = base64.b64decode(b64, validate=True)
+        artifact = await create_artifact(
+            user_context=getattr(req, "user_context", None),
+            kind="tts_audio",
+            name=artifact_name(output_path, "podcast.wav"),
+            data=audio,
+            mime_type="audio/wav",
+            workspace_id=req.workspace_id,
+            generator="podcast_render",
+            metadata={
+                "workspace_path": output_path,
+                "duration_s": detail["duration_s"],
+                "turn_count": detail["turn_count"],
+                "bed_preset": detail["bed_preset"],
+                "warnings": warnings,
+            },
+        )
+        if artifact:
+            detail["artifact"] = artifact
+    except (ValueError, TypeError) as e:
+        log.warning(f"[podcast] could not keep a library copy: {e}")
+
     suffix = f" ({len(warnings)} warning(s))" if warnings else ""
     return ExecutionResult(
         status="SUCCESS",

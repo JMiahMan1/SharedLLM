@@ -21,7 +21,6 @@ from uuid import uuid4
 import aiohttp
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
 from urllib3.exceptions import InsecureRequestWarning
 
 from services.common.http import get_client
@@ -40,6 +39,7 @@ from services.config import (
 from services.execution import device_registry, ha_client
 from services.execution import hardware_router
 from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
+from services.execution.artifacts import artifact_name, create_artifact
 from services.execution.handlers import (
     audiobookshelf,
     bible,
@@ -1810,14 +1810,32 @@ async def execute_tts(req: TTSRequest):
         if not audio_bytes:
             return _fail("TTS generation returned empty bytes", "tts")
 
+        artifact = await create_artifact(
+            user_context=req.user_context,
+            kind="tts_audio",
+            name=artifact_name(req.relative_path, "speech.wav"),
+            data=audio_bytes,
+            mime_type="audio/wav",
+            workspace_id=req.workspace_id,
+            generator="kokoro_tts",
+            metadata={
+                "text": req.text[:2000],
+                "voice": req.voice,
+                "storybook": req.storybook,
+                "workspace_path": req.relative_path,
+            },
+        )
+        detail = {
+            "audio_base64": base64.b64encode(audio_bytes).decode('utf-8'),
+            "mime_type": "audio/wav",
+            "length_bytes": len(audio_bytes)
+        }
+        if artifact:
+            detail["artifact"] = artifact
         return _ok(
             f"TTS generated successfully ({len(audio_bytes)} bytes)",
             "tts",
-            {
-                "audio_base64": base64.b64encode(audio_bytes).decode('utf-8'),
-                "mime_type": "audio/wav",
-                "length_bytes": len(audio_bytes)
-            }
+            detail,
         )
     except Exception as e:
         log.error(f"TTS endpoint error: {e}")
