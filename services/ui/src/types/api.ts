@@ -472,6 +472,9 @@ export interface TimerTargetDevice {
   ip?: string;
   has_speaker: boolean;
   has_screen: boolean;
+  device_class?: string;
+  supported_features?: number;
+  announce_capable?: boolean;
   has_microphone?: boolean;
   intercom_mode?: 'twoway' | 'oneway' | string;
   assist_satellite_entity?: string | null;

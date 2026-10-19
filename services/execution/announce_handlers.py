@@ -14,6 +14,8 @@ import logging
 import re
 from typing import Any
 
+from services.common.entity_ids import usable_entity_id
+
 log = logging.getLogger("execution.announce")
 
 # Supported feature flags (from HA media_player)
@@ -23,6 +25,7 @@ SUPPORT_TURN_ON = 128
 SUPPORT_TURN_OFF = 256
 SUPPORT_VOLUME_SET = 4
 SUPPORT_BROWSE_MEDIA = 131072
+SUPPORT_MEDIA_ANNOUNCE = 1 << 20
 
 # Exact supported_features bitmask for HA androidtv_remote media_player entities
 ANDROIDTV_REMOTE_FEATURES = 153529
@@ -1130,6 +1133,60 @@ async def stop_tv_or_media_alert(
 
 
 _CORRUPT_ENTITY_RE = re.compile(r"^media_player\.[0-9_]+$")
+_TARGET_NAME_NOISE_RE = re.compile(r"\b(remote|cast|airplay|web player)\b.*$", re.IGNORECASE)
+_TARGET_STATE_PRIORITY = {
+    "playing": 0,
+    "idle": 1,
+    "on": 2,
+    "paused": 3,
+    "buffering": 4,
+    "off": 5,
+    "standby": 6,
+}
+
+
+def _target_group_key(name: str) -> str:
+    """Group the many HA wrappers for one physical room/device.
+
+    ``Office TV``, ``Office TV Remote`` and ``Office TV Cast`` are three
+    entities for the same television. One row is enough in a picker.
+    """
+    cleaned = _TARGET_NAME_NOISE_RE.sub("", name or "")
+    cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned.lower()).strip()
+    return cleaned or (name or "").lower().strip()
+
+
+def _target_priority(device: dict[str, Any]) -> tuple:
+    """Lower is better when choosing one entity for a physical target."""
+    state = str(device.get("state") or "").lower()
+    features = device.get("supported_features") or 0
+    try:
+        features = int(features)
+    except (TypeError, ValueError):
+        features = 0
+    return (
+        0 if state not in ("unavailable", "unknown") else 1,
+        0 if device.get("announce_capable") else 1,
+        0 if (device.get("device_class") or "").lower() == "speaker" else 1,
+        0 if device.get("kind") == "speaker" else 1,
+        -features,
+        len(device.get("id") or ""),
+        str(device.get("id") or ""),
+    )
+
+
+def _dedupe_media_player_targets(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the best entity for each physical target, preserving first-seen order."""
+    best: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for device in devices:
+        key = _target_group_key(str(device.get("name") or ""))
+        if key not in best:
+            best[key] = device
+            order.append(key)
+        elif _target_priority(device) < _target_priority(best[key]):
+            best[key] = device
+    return [best[key] for key in order]
 
 
 async def classify_communication_devices(
@@ -1152,6 +1209,7 @@ async def classify_communication_devices(
     states = states or []
 
     devices: list[dict[str, Any]] = []
+    ha_devices: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
 
     # 1. Include ESPHome devices (speakers + screen-only visual flash devices)
@@ -1182,6 +1240,8 @@ async def classify_communication_devices(
         eid = st.get("entity_id", "")
         if not eid.startswith("media_player.") or eid in seen_ids:
             continue
+        if not usable_entity_id(eid):
+            continue
         # Skip corrupt numeric/browser entities like media_player.85_73
         if _CORRUPT_ENTITY_RE.match(eid):
             continue
@@ -1189,8 +1249,9 @@ async def classify_communication_devices(
         attrs = st.get("attributes") or {}
         state_val = st.get("state") or "unknown"
         friendly = (attrs.get("friendly_name") or eid).strip()
-        # Skip nameless numeric friendly names
-        if re.match(r"^[0-9.:_ -]+$", friendly):
+        # A serialized user record is not a device name, even when HA managed
+        # to slugify enough of it into an otherwise valid entity id.
+        if re.match(r"^[0-9.:_ -]+$", friendly) or friendly.startswith("{"):
             continue
 
         tv_type = detect_tv_type(eid, state_val, attrs)
@@ -1218,9 +1279,19 @@ async def classify_communication_devices(
         if not isinstance(meta, dict):
             meta = {}
 
+        device_class = str(attrs.get("device_class") or "").lower()
+        try:
+            supported_features = int(attrs.get("supported_features") or 0)
+        except (TypeError, ValueError):
+            supported_features = 0
+        # MEDIA_ANNOUNCE is the feature an alarm/TTS target actually needs.
+        # TV remotes and cast wrappers in this house carry the low-bit feature
+        # sets but not this bit, so they stop appearing as speakers.
+        announce_capable = bool(supported_features & SUPPORT_MEDIA_ANNOUNCE)
+
         is_tv = (
             tv_type in TV_PLATFORMS
-            or (attrs.get("device_class") or "").lower() == "tv"
+            or device_class == "tv"
             or (attrs.get("icon") or "") == "mdi:television"
             or "tv" in eid.lower()
             or "tv" in friendly.lower()
@@ -1264,7 +1335,7 @@ async def classify_communication_devices(
         has_mic = bool(assist_sat) or is_esphome or bool(meta.get("supports_ecs_microphone"))
 
         seen_ids.add(eid)
-        devices.append({
+        ha_devices.append({
             "id": eid,
             "entity_id": eid,
             "name": friendly,
@@ -1274,6 +1345,9 @@ async def classify_communication_devices(
             "model": meta.get("model") or "",
             "ip": (cached_dev or {}).get("ip") or "",
             "state": state_val,
+            "device_class": device_class,
+            "supported_features": supported_features,
+            "announce_capable": announce_capable,
             "has_speaker": True,
             "has_screen": is_tv,
             "has_microphone": has_mic,
@@ -1286,4 +1360,5 @@ async def classify_communication_devices(
             "communication_methods": comm_methods,
         })
 
+    devices.extend(_dedupe_media_player_targets(ha_devices))
     return devices

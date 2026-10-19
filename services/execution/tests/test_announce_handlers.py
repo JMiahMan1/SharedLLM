@@ -1,9 +1,10 @@
+import asyncio
 from types import SimpleNamespace
+
 import pytest
 
 from services.execution.announce_handlers import (
     announce_android_tv,
-    announce_roku,
     announce_samsung,
     announce_webos,
     classify_communication_devices,
@@ -409,3 +410,60 @@ async def test_intercom_start_twoway_uses_room_assist_satellite_and_falls_back_t
     assert res_lr.status == "SUCCESS"
     assert res_lr.detail["effective_mode"] == "oneway"
     assert any("media_player.living_room_tv" in targets for targets, _ in ann_calls)
+
+
+def _media_player(entity_id, name, state, device_class, features):
+    return {
+        "entity_id": entity_id,
+        "state": state,
+        "attributes": {
+            "friendly_name": name,
+            "device_class": device_class,
+            "supported_features": features,
+        },
+    }
+
+
+def test_timer_targets_drop_corrupt_and_duplicate_media_players(monkeypatch):
+    monkeypatch.setattr("services.execution.announce_handlers._get_device_registry", lambda: None)
+    poison = (
+        "media_player.id_1_username_default_display_name_shared_default_user_"
+        "is_admin_true_is_system_default_true_nextcloud_url_https_cloud_sumemail_"
+        "com_nextcloud_user_summers_ha_url_https_ha_sumemail_com_github_url_"
+        "github_user_jeremiah_sumemail_com_gitlab_url_git"
+    )
+    states = [
+        _media_player(poison, '{"username":"default"}\'s Web Player', "unavailable", "speaker", 8320575),
+        _media_player("media_player.office_tv", "Office TV Remote", "on", "tv", 153529),
+        _media_player("media_player.office_tv_3", "Office TV", "idle", "speaker", 8320959),
+        _media_player("media_player.office_tv_chrome", "Office TV Cast", "off", None, 152461),
+        _media_player("media_player.office_tv_chrome_2", "Office TV", "off", "speaker", 7796671),
+        _media_player("media_player.master_bedroom_tv", "Master Bedroom TV", "off", None, 152461),
+        _media_player("media_player.master_bedroom_tv_2", "Master Bedroom TV", "off", "speaker", 7796671),
+        _media_player("media_player.master_bedroom_tv_3", "Master Bedroom TV", "unavailable", "tv", 153529),
+        _media_player("media_player.master_bedroom_tv_4", "Master Bedroom TV", "unavailable", "speaker", 8320575),
+        _media_player("media_player.gracies_tv", "Gracies TV", "off", "speaker", 7795643),
+        _media_player("media_player.gracies_tv_2", "Gracies TV", "unavailable", "speaker", 7795643),
+        _media_player("media_player.kitchen_speaker", "Kitchen Speaker", "idle", "speaker", 7796287),
+    ]
+
+    devices = asyncio.run(classify_communication_devices("", "", all_states=states, esp_devices=[]))
+    by_id = {d["id"]: d for d in devices}
+
+    assert poison not in by_id
+    assert "media_player.office_tv" not in by_id
+    assert "media_player.office_tv_chrome" not in by_id
+    assert "media_player.office_tv_chrome_2" not in by_id
+    assert "media_player.office_tv_3" in by_id
+    assert "media_player.master_bedroom_tv_2" in by_id
+    assert "media_player.master_bedroom_tv_3" not in by_id
+    assert "media_player.master_bedroom_tv_4" not in by_id
+    assert "media_player.gracies_tv" in by_id
+    assert "media_player.gracies_tv_2" not in by_id
+    assert "media_player.kitchen_speaker" in by_id
+    assert by_id["media_player.office_tv_3"]["announce_capable"] is True
+    assert by_id["media_player.office_tv_3"]["supported_features"] == 8320959
+    names = [d["name"] for d in devices]
+    assert names.count("Office TV") == 1
+    assert names.count("Master Bedroom TV") == 1
+    assert names.count("Gracies TV") == 1

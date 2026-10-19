@@ -20,6 +20,14 @@ from services.rag.store import NumpyVecAdapter
 
 DIM = 16
 POISON_ID = "media_player." + ("id_1_username_default_display_name_" * 34)
+# Home Assistant truncates an entity id at 255 characters. The live install
+# still carries this serialized user record in that truncated form.
+TRUNCATED_POISON_ID = (
+    "media_player.id_1_username_default_display_name_shared_default_user_"
+    "is_admin_true_is_system_default_true_nextcloud_url_https_cloud_sumemail_"
+    "com_nextcloud_user_summers_ha_url_https_ha_sumemail_com_github_url_"
+    "github_user_jeremiah_sumemail_com_gitlab_url_git"
+)
 
 
 def _fake_embed(texts):
@@ -129,6 +137,8 @@ def test_the_shape_check_rejects_the_shapes_that_matter():
     assert rag_main._usable_entity_id("light.kitchen")
     assert rag_main._usable_entity_id("automation." + "b" * 200)
     assert not rag_main._usable_entity_id(POISON_ID), "length is the discriminator"
+    assert not rag_main._usable_entity_id(TRUNCATED_POISON_ID), "serialized fields are not a device id"
+    assert rag_main._usable_entity_id("media_player." + "a" * 200)
     assert not rag_main._usable_entity_id("")
     assert not rag_main._usable_entity_id(None)
     assert not rag_main._usable_entity_id("nodomain")

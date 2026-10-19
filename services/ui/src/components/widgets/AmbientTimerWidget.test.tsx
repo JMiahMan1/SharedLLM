@@ -473,7 +473,17 @@ describe('AmbientTimerWidget', () => {
           kind: 'tv',
           has_speaker: true,
           has_screen: true,
+          announce_capable: true,
           state: 'idle',
+        },
+        {
+          id: 'media_player.office_tv_remote',
+          name: 'Office TV Remote',
+          kind: 'tv',
+          has_speaker: true,
+          has_screen: true,
+          announce_capable: false,
+          state: 'on',
         },
         {
           id: 'esphome:watch',
