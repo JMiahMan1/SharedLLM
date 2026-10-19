@@ -1,7 +1,4 @@
 """Tests for the Identity service: user resolution, device assignment, settings."""
-import os
-
-
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -127,10 +124,20 @@ def test_identity_resolve_returns_decrypted_credentials(session: Session):
     assert data.is_admin
 
 
-def test_identity_resolve_empty_request_fallback(session: Session):
-    """Test that empty resolve request falls back to system user."""
-    data = resolve_identity(ResolveRequest(), session)
-    assert data.user == "default"
+def test_identity_resolve_empty_request_requires_an_identity(session: Session):
+    """An empty request must never become the default admin."""
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_identity(ResolveRequest(), session)
+    assert exc_info.value.status_code == 401
+    assert "identity required" in str(exc_info.value.detail).lower()
+
+
+def test_identity_resolve_household_is_shared_but_not_admin(session: Session):
+    """A household request gets shared services, not the admin account."""
+    data = resolve_identity(ResolveRequest(household=True), session)
+    assert data.user == "household"
+    assert not data.is_admin
+    assert data.ha_token == "default-ha-token"
 
 
 def test_identity_resolve_with_device_assignment(session: Session):

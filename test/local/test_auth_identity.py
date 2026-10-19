@@ -26,16 +26,12 @@ def client():
 @pytest.mark.skipif("LIVE_TEST_URL" not in os.environ, reason="Requires running Identity service")
 def test_identity_resolution_from_db(client):
     """
-    Test: Verify that the Identity service correctly resolves the system default user
-    and decrypts their credentials from the SQLite database.
+    Test: Verify that the Identity service resolves the household account and
+    decrypts the shared credentials from the SQLite database.
     """
-    print("\n[Test] Testing identity resolution for default user...")
+    print("\n[Test] Testing identity resolution for the household...")
 
-    payload = {
-        "rag_user": None,
-        "voice_id": None,
-        "device_id": None
-    }
+    payload = {"household": True}
 
     resp = client.post(
         f"{IDENTITY_URL}/api/resolve",
@@ -48,7 +44,8 @@ def test_identity_resolution_from_db(client):
 
     resolved_user = data.get("user")
     print(f"[Test] Resolved User: {resolved_user}")
-    assert resolved_user in (EXPECTED_USER, "default")
+    assert resolved_user == "household"
+    assert data.get("is_admin") is False
 
     # Verification of decrypted credentials
     print("[Test] Verifying decrypted HA Token...")
@@ -67,10 +64,11 @@ def test_identity_resolution_by_voice_id(client):
     """
     Test: Verify that a specific username (acting as voice_id) can be resolved.
     """
-    # Resolve the actual username first
+    # Resolve the actual username by explicit id first; an empty request no
+    # longer names anyone.
     resp_default = client.post(
         f"{IDENTITY_URL}/api/resolve",
-        json={},
+        json={"user_id": 1},
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
     assert resp_default.status_code == 200
@@ -100,10 +98,10 @@ def test_api_key_generation_resolution_revocation(client):
     """
     print("\n[Test] Running live API key lifecycle test...")
 
-    # 1. Resolve default user to get their existing main API key
+    # 1. Resolve the system default user explicitly to get their main API key
     resolve_resp = client.post(
         f"{IDENTITY_URL}/api/resolve",
-        json={},
+        json={"user_id": 1},
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
     assert resolve_resp.status_code == 200, f"Initial resolve failed: {resolve_resp.text}"

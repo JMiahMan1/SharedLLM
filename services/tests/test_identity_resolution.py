@@ -99,14 +99,23 @@ def test_api_key_generation_and_resolution(client, session):
     assert resolve_resp.status_code == 200
     assert resolve_resp.json()["user"] == "dad"
 
-    # C. Resolve with no identifiers (Fallback to default)
+    # C. An explicit household request gets shared services without admin.
+    resolve_resp = client.post(
+        "/api/resolve",
+        json={"household": True},
+        headers={"Authorization": f"Bearer {os.environ['INTERNAL_SECRET']}"}
+    )
+    assert resolve_resp.status_code == 200
+    assert resolve_resp.json()["user"] == "household"
+    assert resolve_resp.json()["is_admin"] is False
+    assert resolve_resp.json()["ha_url"] == "http://default-ha"
+
+    # D. No identifiers at all is refused, never upgraded to the administrator.
     resolve_resp = client.post(
         "/api/resolve",
         json={},
         headers={"Authorization": f"Bearer {os.environ['INTERNAL_SECRET']}"}
     )
-    assert resolve_resp.status_code == 200
-    assert resolve_resp.json()["user"] == "default"
-    assert resolve_resp.json()["ha_url"] == "http://default-ha"
+    assert resolve_resp.status_code == 401
 
-    print("\nSUCCESS: Identity resolution routing verified for UI, API Key, and Fallback.")
+    print("\nSUCCESS: Identity resolution routing verified for UI, API Key, and Household.")

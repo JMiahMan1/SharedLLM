@@ -3591,13 +3591,19 @@ async def execute_audiobook_regenerate(req: AudiobookRegenerateRequest):
 async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)):
     """Route voice command transcript to appropriate handler."""
     await _check_internal_secret(x_internal_secret)
+    from services.execution.handlers import light, media
     from services.execution.schemas import LightControlRequest, MediaPlayRequest, UserContext
 
-    from services.execution.handlers import light, media
-
     transcript = req.get("transcript", "").strip().lower()
-    user_id = req.get("user_id") or ""
-    ctx = UserContext(user=user_id)
+    # The gateway resolves the caller and forwards the full credential set.
+    # Fall back to the bare user id for direct internal callers and old tests.
+    context = req.get("user_context")
+    ctx = (
+        UserContext(**context)
+        if isinstance(context, dict) and context.get("user")
+        else UserContext(user=req.get("user_id") or "")
+    )
+    user_id = ctx.user
 
     if not transcript:
         return {"status": "FAILURE", "message": "Empty transcript"}

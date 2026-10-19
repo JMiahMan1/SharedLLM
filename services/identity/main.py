@@ -640,17 +640,28 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
 
     A request that names a user or presents a credential must resolve to that
     user. If it does not, this is a 401 -- it must never silently become the
-    system default user, who is an administrator. Only a request that presents
-    no identifier at all may use the fallback, and this endpoint itself is
-    internal-only (``require_internal``), so that case is a trusted service
-    asking for the household account.
+    system default user, who is an administrator.
+
+    A request with no identifier at all may ask for one of two explicit
+    non-person identities:
+
+    * ``anonymous`` -- no credentials at all, for an unauthenticated caller;
+    * ``household`` -- the household's shared Home Assistant, media,
+      audiobook, Nextcloud and Skylight credentials, with no administrator
+      powers and no personal accounts. This is for kiosk and voice surfaces
+      that need to control the house, not administer it.
 
     The one compatibility exception is a ``device_id`` that is genuinely
     assigned to more than one person: the device is real but cannot name a
-    single speaker, so the shared household account still answers.
+    single speaker, so the household identity still answers.
     """
+    if req.anonymous and req.household:
+        raise HTTPException(
+            status_code=400, detail="anonymous and household are mutually exclusive"
+        )
+
     user = None
-    log.debug(f"[resolve] Input: user_id={req.user_id}, api_key={'***' + req.api_key[-4:] if req.api_key and len(req.api_key) > 4 else req.api_key}, rag_user={req.rag_user}, voice_id={req.voice_id}, device_id={req.device_id}")
+    log.debug(f"[resolve] Input: user_id={req.user_id}, api_key={'***' + req.api_key[-4:] if req.api_key and len(req.api_key) > 4 else req.api_key}, rag_user={req.rag_user}, voice_id={req.voice_id}, device_id={req.device_id}, anonymous={req.anonymous}, household={req.household}")
 
     # Resolve by user ID (integer primary key)
     if req.user_id is not None:
@@ -699,6 +710,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         else:
             log.warning(f"[resolve] No active device assignment found for device_id={req.device_id}")
 
+    household = False
     if not user:
         unmatched = (
             req.user_id is not None
@@ -708,25 +720,30 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             or (req.device_id is not None and not device_known)
         )
         if unmatched:
-            log.warning("[resolve] Presented identity did not match a user; refusing system-default fallback")
+            log.warning("[resolve] Presented identity did not match a user; refusing fallback")
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
         if req.anonymous:
             return ResolvedCredentials(user="anonymous", is_admin=False)
 
-        log.warning("[resolve] No resolution path matched, falling back to system default")
-        # Fallback to system account (ID 1)
-        user = session.exec(select(User).where(User.id == 1)).first()
-        if user:
-            log.info(f"[resolve] Fallback resolved to system default (ID=1): user={user.username}")
-        else:
-            # Last resort fallback to "default" username if ID 1 somehow missing
-            user = session.exec(select(User).where(User.username == "default")).first()
-            if user:
-                log.info(f"[resolve] Fallback resolved to system default (username='default'): user={user.username}")
-            else:
-                log.error("[resolve] No system default user found in database!")
-                raise HTTPException(status_code=404, detail="No valid identity found")
+        # A real device shared by more than one person cannot name a speaker;
+        # answer as the household, never as the administrator. An explicit
+        # household request selects the same identity. Anything else is a
+        # caller that failed to say who it is: refuse rather than inherit
+        # administrator powers.
+        shared_device = req.device_id is not None and device_known
+        if not (req.household or shared_device):
+            log.warning("[resolve] No identity and no household request; refusing default admin")
+            raise HTTPException(status_code=401, detail="Identity required")
+
+        household = True
+        user = _system_default_user(session)
+        if user is None:
+            log.error("[resolve] No system default user found in database!")
+            raise HTTPException(status_code=404, detail="No valid identity found")
+        log.info(
+            f"[resolve] Resolved household credentials from system default: user={user.username}"
+        )
 
     # Per-service credential policy: the user's own credentials, else the
     # system default user's shared ones when an admin granted that service.
@@ -762,41 +779,63 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         ) else "absent"
     credential_sources["skylight"] = skylight_source
 
+    if household:
+        # These are the system default's shared accounts, not the caller's own.
+        credential_sources = {
+            service: ("shared" if any(values.values()) else "absent")
+            for service, values in service_creds.items()
+        }
+        credential_sources["skylight"] = (
+            "shared" if skylight_source in ("own", "shared") else skylight_source
+        )
+
     log.info(
         f"[resolve] Returning credentials for user={user.username}, "
         f"credential_sources={credential_sources}"
     )
 
     return ResolvedCredentials(
-        user=user.username,
-        id=user.id,
-        is_admin=user.is_admin,
-        api_key=decrypt(user.api_key_enc) if user.api_key_enc else req.api_key,
+        user="household" if household else user.username,
+        id=None if household else user.id,
+        is_admin=False if household else user.is_admin,
+        api_key=None if household else (decrypt(user.api_key_enc) if user.api_key_enc else req.api_key),
         nextcloud_url=nextcloud["nextcloud_url"],
         nextcloud_user=nextcloud["nextcloud_user"],
         nextcloud_pass=nextcloud["nextcloud_pass"],
         ha_url=ha["ha_url"],
         ha_token=ha["ha_token"],
-        github_url=user.github_url,
-        github_user=user.github_user,
-        github_token=decrypt(user.github_token_enc) if user.github_token_enc else None,
-        gitlab_url=user.gitlab_url,
-        gitlab_user=user.gitlab_user,
-        gitlab_token=decrypt(user.gitlab_token_enc) if user.gitlab_token_enc else None,
+        github_url=None if household else user.github_url,
+        github_user=None if household else user.github_user,
+        github_token=None if household else (
+            decrypt(user.github_token_enc) if user.github_token_enc else None
+        ),
+        gitlab_url=None if household else user.gitlab_url,
+        gitlab_user=None if household else user.gitlab_user,
+        gitlab_token=None if household else (
+            decrypt(user.gitlab_token_enc) if user.gitlab_token_enc else None
+        ),
         audiobookshelf_url=abs_["audiobookshelf_url"],
         audiobookshelf_user=abs_["audiobookshelf_user"],
         audiobookshelf_pass=abs_["audiobookshelf_pass"],
         audiobookshelf_api_key=abs_["audiobookshelf_api_key"],
-        mailcow_url=user.mailcow_url,
-        mailcow_api_key=decrypt(user.mailcow_api_key_enc) if user.mailcow_api_key_enc else None,
-        mail_user=user.mail_user,
-        mail_pass=decrypt(user.mail_pass_enc) if user.mail_pass_enc else None,
+        mailcow_url=None if household else user.mailcow_url,
+        mailcow_api_key=None if household else (
+            decrypt(user.mailcow_api_key_enc) if user.mailcow_api_key_enc else None
+        ),
+        mail_user=None if household else user.mail_user,
+        mail_pass=None if household else (
+            decrypt(user.mail_pass_enc) if user.mail_pass_enc else None
+        ),
         mass_url=mass["mass_url"],
         mass_token=mass["mass_token"],
-        git_url=user.git_url,
-        git_user=user.git_user,
-        git_token=decrypt(user.git_token_enc) if user.git_token_enc else None,
-        huggingface_token=decrypt(user.huggingface_token_enc) if user.huggingface_token_enc else None,
+        git_url=None if household else user.git_url,
+        git_user=None if household else user.git_user,
+        git_token=None if household else (
+            decrypt(user.git_token_enc) if user.git_token_enc else None
+        ),
+        huggingface_token=None if household else (
+            decrypt(user.huggingface_token_enc) if user.huggingface_token_enc else None
+        ),
         skylight_url=skylight_user.skylight_url if skylight_user else None,
         skylight_email=(skylight_user.skylight_email if skylight_user else None) or user.username,
         skylight_pass=(
@@ -806,9 +845,9 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         ),
         skylight_enabled=user.skylight_enabled,
         preferred_tts_voice=user.preferred_tts_voice or "af_heart",
-        calendar_settings=_load_calendar_settings(session, user.username),
+        calendar_settings={} if household else _load_calendar_settings(session, user.username),
         credential_sources=credential_sources,
-        shared_credential_owner=shared_owner,
+        shared_credential_owner=user.username if household else shared_owner,
     )
 
 

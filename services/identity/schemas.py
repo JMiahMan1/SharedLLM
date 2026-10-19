@@ -17,6 +17,10 @@ class ResolveRequest(BaseModel):
     device_id: str | None = None
     api_key: str | None = None
     anonymous: bool = False
+    # Non-admin identity for shared household surfaces (kiosk, voice) that
+    # need the household's Home Assistant and media credentials but must not
+    # inherit the system administrator's powers or personal accounts.
+    household: bool = False
 
 
 class ResolvedCredentials(BaseModel):
