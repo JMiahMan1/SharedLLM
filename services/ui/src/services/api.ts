@@ -40,7 +40,6 @@ import type {
   ExecutionResponse,
   ArcadeGamesResponse,
   TimerRecord,
-  TimerTargetDevice,
   TimerDevicesResponse,
   SmokeTestResult,
   StorageEntry,
