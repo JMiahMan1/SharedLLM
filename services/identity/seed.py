@@ -66,6 +66,14 @@ if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
 log = logging.getLogger("identity.seed")
 
 
+def _default_global_setting_value(key: str) -> str | None:
+    """The shipped default for a GlobalSetting key, if it has one."""
+    for setting in DEFAULT_GLOBAL_SETTINGS:
+        if setting["key"] == key:
+            return setting["value"]
+    return None
+
+
 def _parse_env_users() -> dict:
     """
     Replicate the legacy get_all_users() logic from app/users.py.
@@ -424,25 +432,30 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 session.add(existing)
                 log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {env_val}")
 
-    # Seed execution service paths from .env
+    # Seed execution service paths and runtime values from .env
     env_paths = {
         "TEMP_MEDIA_DIR": "temp_media_dir",
         "WORKSPACE_ROOT": "workspace_root",
+        "WORKSPACE_RUNTIME_ROOT": "workspace_runtime_root",
         "MODELS_DIR": "models_dir",
         "LOCAL_NOTES_ROOT": "local_notes_root",
         "PHRASEBOOK_PATH": "phrasebook_path",
+        "ANNOUNCEMENT_BLACKLIST": "announcement_blacklist",
+        "GATEWAY_INTERNAL_URL": "gateway_internal_url",
     }
     for env_key, global_key in env_paths.items():
         env_val = os.getenv(env_key)
         if env_val:
             existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
             if not existing:
-                session.add(GlobalSetting(key=global_key, value=env_val, description=f"Execution service path. Seeded from .env {env_key} on first startup."))
+                session.add(GlobalSetting(key=global_key, value=env_val, description=f"Runtime setting. Seeded from .env {env_key} on first startup."))
                 log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
-            elif not existing.value:
+            elif not existing.value or existing.value == _default_global_setting_value(global_key):
+                # An env value replaces the shipped default on first seed, but
+                # never overwrites a value an operator has already changed.
                 existing.value = env_val
                 session.add(existing)
-                log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {env_val}")
+                log.info(f"[seed] Backfilled {global_key} from {env_key}: {env_val}")
 
     # Seed SKYLIGHT_PASS (encrypted)
     skylight_pass = os.getenv("SKYLIGHT_PASS")
