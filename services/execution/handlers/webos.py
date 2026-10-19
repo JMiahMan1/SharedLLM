@@ -34,20 +34,12 @@ WEBOS_COMMANDS = {
 
 
 def _send_wol(mac: str, ip: str = "255.255.255.255", port: int = 9) -> bool:
-    """Send Wake-on-LAN magic packet."""
-    if len(mac) == 17:
-        mac = mac.replace(":", "").replace("-", "")
-    mac_bytes = bytes.fromhex(mac)
-    if len(mac_bytes) != 6:
-        raise ValueError(f"Invalid MAC address: {mac}")
-    packet = b"\xff" * 6 + mac_bytes * 16
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.sendto(packet, (ip, port))
-    sock.close()
-    return True
-
-_send_wol  # pyright: ignore[reportUnusedExpression]
+    """Send Wake-on-LAN magic packet via unified device_discovery.send_wol."""
+    try:
+        from services.execution import device_discovery
+    except ImportError:
+        from .. import device_discovery  # type: ignore[no-redef]
+    return device_discovery.send_wol(mac, broadcast=ip, port=port)
 
 
 async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
@@ -59,9 +51,13 @@ async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     app_id = (attrs.get("app_id") or "").lower()
     entity_id_lower = entity_id.lower()
     webos_indicators = ("com.webos.", "webos.tv", "lg.webos")
-    if any(ind in app_id for ind in webos_indicators):
+    if any(ind in app_id for ind in webos_indicators) or "webostv" in entity_id_lower:
         return True
-    return "webostv" in entity_id_lower
+    try:
+        from services.execution.announce_handlers import detect_tv_type
+    except ImportError:
+        from ..announce_handlers import detect_tv_type  # type: ignore[no-redef]
+    return detect_tv_type(entity_id, state.get("state", "unknown"), attrs) == "webos"
 
 
 async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> dict:  # pyright: ignore[reportUnusedFunction]

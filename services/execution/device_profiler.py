@@ -84,47 +84,47 @@ CONTROL_METHODS = {
     "webostv": {
         "power_on": ["ha_turn_on", "wol"],
         "power_off": ["ha_turn_off"],
-        "play_media": ["ha_play_media"],
+        "play_media": ["ha_play_media", "ha_notify_toast"],
         "transport": ["ha_transport", "websocket"],
-        "ports": [3000, 7676],
+        "ports": [3000, 3001, 7676, 9080],
         "wol_supported": True,
-        "description": "LG WebOS TV. Requires MAC for WOL. WebSocket API on port 3000.",
+        "description": "LG WebOS TV. Requires MAC for WOL. WebSocket API on port 3000/3001, status on 9080.",
     },
     "samsungtv": {
         "power_on": ["ha_turn_on", "wol"],
         "power_off": ["ha_turn_off", "send_key_power"],
-        "play_media": ["ha_play_media"],
+        "play_media": ["ha_play_media", "music_assistant", "dlna_dmr"],
         "transport": ["ha_send_key", "websocket"],
-        "ports": [8001, 8002],
+        "ports": [8001, 8002, 55000, 9197],
         "wol_supported": True,
-        "description": "Samsung Tizen TV. Requires MAC for WOL. WebSocket API on port 8001/8002.",
+        "description": "Samsung TV (Tizen port 8001/8002 or Legacy Orsay port 55000).",
     },
     "androidtv": {
         "power_on": ["ha_turn_on", "adb_wake"],
         "power_off": ["ha_turn_off", "adb_sleep"],
-        "play_media": ["ha_play_media"],
-        "transport": ["adb_command", "ha_transport"],
-        "ports": [5555],
+        "play_media": ["cast_sibling", "music_assistant", "ha_play_media"],
+        "transport": ["androidtv_remote", "adb_command", "ha_transport"],
+        "ports": [6466, 5555, 8008, 8009],
         "wol_supported": False,
-        "description": "Android TV / Google TV. ADB on port 5555 for deep control.",
+        "description": "Android TV / Google TV. Remote on port 6466, ADB on 5555, Cast on 8008/8009.",
     },
     "cast": {
         "power_on": ["ha_turn_on", "auto_wake"],
         "power_off": ["ha_turn_off"],
         "play_media": ["ha_play_media", "dial_launch"],
         "transport": ["ha_transport"],
-        "ports": [8009],
+        "ports": [8008, 8009],
         "wol_supported": False,
-        "description": "Chromecast / Cast-enabled device. DIAL protocol on port 8009.",
+        "description": "Chromecast / Cast-enabled device. DIAL/Cast protocol on port 8008/8009.",
     },
     "esphome": {
-        "power_on": ["http_api", "mqtt_topic"],
-        "power_off": ["http_api", "mqtt_topic"],
-        "play_media": ["http_stream"],
-        "transport": ["http_api", "mqtt_topic"],
-        "ports": [80, 8080],
+        "power_on": ["esphome_native", "http_api", "mqtt_topic"],
+        "power_off": ["esphome_native", "http_api", "mqtt_topic"],
+        "play_media": ["esphome_native", "http_stream"],
+        "transport": ["esphome_native", "http_api", "mqtt_topic"],
+        "ports": [6053, 80, 8080],
         "wol_supported": False,
-        "description": "ESPHome device. HTTP API on port 80, ESP32-CAM stream on 8080.",
+        "description": "ESPHome device. Native API on port 6053, HTTP API on port 80, ESP32-CAM stream on 8080.",
     },
     "mqtt": {
         "power_on": ["mqtt_publish"],
@@ -157,8 +157,9 @@ CONTROL_METHODS = {
 
 
 def _detect_device_type(entity_id: str, integration: str, device_class: str,
-                        open_ports: list[int], metadata: dict) -> str:
-    """Detect device type from entity info and open ports."""
+                        open_ports: list[int], metadata: dict,
+                        attributes: dict | None = None) -> str:
+    """Detect device type from entity info, unified TV detector, and open ports."""
     entity_lower = entity_id.lower()
     integration_lower = integration.lower()
 
@@ -168,6 +169,7 @@ def _detect_device_type(entity_id: str, integration: str, device_class: str,
         "webostv": "webostv",
         "samsungtv": "samsungtv",
         "androidtv": "androidtv",
+        "androidtv_remote": "androidtv",
         "cast": "cast",
         "esphome": "esphome",
         "mqtt": "mqtt",
@@ -180,7 +182,7 @@ def _detect_device_type(entity_id: str, integration: str, device_class: str,
     # Fallback: entity_id patterns
     if "roku" in entity_lower:
         return "roku"
-    if "webos" in entity_lower:
+    if "webos" in entity_lower or "lg_" in entity_lower:
         return "webostv"
     if "samsung" in entity_lower:
         return "samsungtv"
@@ -188,7 +190,7 @@ def _detect_device_type(entity_id: str, integration: str, device_class: str,
         return "androidtv"
     if "cast" in entity_lower or "chrome" in entity_lower:
         return "cast"
-    if "esphome" in entity_lower:
+    if "esphome" in entity_lower or "s3_box" in entity_lower or "jarvis_smart_speaker" in entity_lower:
         return "esphome"
     if "dlna" in entity_lower:
         return "dlna"
@@ -196,20 +198,39 @@ def _detect_device_type(entity_id: str, integration: str, device_class: str,
     # Fallback: open ports
     if 8060 in open_ports:
         return "roku"
-    if 3000 in open_ports or 7676 in open_ports:
+    if 3000 in open_ports or 3001 in open_ports or 7676 in open_ports or 9080 in open_ports:
         return "webostv"
-    if 8001 in open_ports or 8002 in open_ports:
+    if 8001 in open_ports or 8002 in open_ports or 55000 in open_ports:
         return "samsungtv"
-    if 5555 in open_ports:
+    if 6466 in open_ports or 5555 in open_ports:
         return "androidtv"
-    if 8009 in open_ports:
+    if 8008 in open_ports or 8009 in open_ports:
         return "cast"
-    if 80 in open_ports:
+    if 6053 in open_ports or 80 in open_ports:
         return "esphome"
     if 1883 in open_ports or 8883 in open_ports:
         return "mqtt"
     if 9197 in open_ports or 8200 in open_ports:
         return "dlna"
+
+    # Fallback: unified TV platform detector on HA attributes
+    if attributes:
+        try:
+            from services.execution.announce_handlers import detect_tv_type
+            tv_type = detect_tv_type(entity_id, "unknown", attributes)
+            tv_to_profiler = {
+                "roku": "roku",
+                "webos": "webostv",
+                "samsung": "samsungtv",
+                "android_tv": "androidtv",
+                "cast": "cast",
+                "esphome": "esphome",
+                "dlna": "dlna",
+            }
+            if tv_type in tv_to_profiler:
+                return tv_to_profiler[tv_type]
+        except Exception:
+            pass
 
     return "unknown"
 
@@ -257,14 +278,17 @@ async def profile_device(
             "recommendations": ["Use ECP for media playback", "WOL available for power-on"],
         }
     """
-    # Resolve subnet
+    try:
+        from services.execution import device_discovery
+    except ImportError:
+        import device_discovery  # type: ignore[no-redef]
     if not subnet:
-        import device_discovery
         subnet = device_discovery.DEFAULT_SUBNET
 
     # 1. Get HA entity info
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
     ha_info = {}
+    attrs = {}
     if state:
         attrs = state.get("attributes", {})
         ha_info = {
@@ -306,6 +330,7 @@ async def profile_device(
         ha_info.get("device_class", ""),
         network.get("open_ports") or [],
         net_info.get("metadata", {}) if net_info else {},
+        attributes=attrs,
     )
 
     # 5. Build control profile

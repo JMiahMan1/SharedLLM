@@ -110,14 +110,15 @@ def _is_ma_player(attrs: dict, entity_id: str = "") -> bool:
     """Detect Music Assistant player even when state is 'off' and app_id is None."""
     if not isinstance(attrs, dict):
         return False
-    if (attrs.get("app_id") or "").lower() == "music_assistant":
-        return True
-    if attrs.get("mass_player_type"):
-        return True
-    active_q = (attrs.get("active_queue") or "").lower()
-    if active_q and (active_q.startswith("up") or active_q.startswith("roku_") or active_q.startswith("media_player.")):
-        return True
-    return False
+    try:
+        from services.shared.ma_player import is_music_assistant_player
+        return is_music_assistant_player(attrs, entity_id)
+    except ImportError:
+        return bool(
+            (attrs.get("app_id") or "").lower() == "music_assistant"
+            or attrs.get("mass_player_type")
+            or attrs.get("active_queue") is not None
+        )
 
 
 def _room_slug_from_entity(entity_id: str, friendly_name: str = "") -> str:

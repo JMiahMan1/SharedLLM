@@ -39,6 +39,17 @@ async def is_android_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
         return False
     attrs = state.get("attributes", {})
 
+    # Signal 0: Centralized TV platform detection (prevents Samsung/LG/Roku TVs with device_class=tv from matching here)
+    try:
+        from services.execution.announce_handlers import detect_tv_type
+    except ImportError:
+        from ..announce_handlers import detect_tv_type  # type: ignore[no-redef]
+    tv_type = detect_tv_type(entity_id, state.get("state", "unknown"), attrs)
+    if tv_type == "android_tv":
+        return True
+    if tv_type in ("roku", "webos", "samsung", "cast", "bravia", "dlna", "esphome", "music_assistant"):
+        return False
+
     # Signal 1: app_id contains Android indicators (when device is on)
     app_id = (attrs.get("app_id") or "").lower()
     android_indicators = ("com.google.android.", "com.google.tv.", "com.android.",
