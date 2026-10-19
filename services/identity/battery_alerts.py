@@ -1,4 +1,4 @@
-"""Low phone battery: the family hears once per discharge.
+"""Low device battery: the family hears once per discharge.
 
 Every location upload carries the phone's battery percentage (and, from newer
 app builds, whether it is charging). The first reading below LOW_BATTERY_PCT
@@ -10,6 +10,11 @@ turn, must not announce again. The state rides along in the stored location
 record, so no other table is needed. On top of that each notice carries a
 ``once`` key per person per day, so nobody hears about the same phone twice in
 one day whatever the readings do.
+
+Watches use the same threshold and re-arm rule, but their state is kept in a
+``GlobalSetting`` under ``WATCH_STATE_PREFIX`` because telemetry is not tied to
+the location record. The owner is not notified about their own watch; the rest
+of the family is, just as they are for a phone.
 """
 from __future__ import annotations
 
@@ -23,6 +28,8 @@ LOW_BATTERY_PCT = int(os.environ.get("LOW_BATTERY_PCT", "15"))
 REARM_MARGIN = 5
 #: Key in the stored location record: this discharge was already announced.
 SENT_FIELD = "battery_low_sent"
+#: Prefix for a watch's discharge state in GlobalSetting.
+WATCH_STATE_PREFIX = "watch_battery:"
 
 
 def step(previous: dict | None, battery: float | None, charging: bool | None) -> tuple[bool, bool]:
@@ -50,4 +57,20 @@ async def announce(person: str, display_name: str, battery: float, family: list[
         lambda user: notify.notice(
             user, "family_safety", title, body, url=url, priority=4, tag=f"battery:{person}", once=once,
             data={"person": person, "battery": int(battery)}, actions=[notify.view_action(url, "Map")]),
+    )
+
+
+async def announce_watch(device_key: str, label: str, battery: float, family: list[str],
+                         owner: str | None, today: date | None = None) -> int:
+    """Tell the family (but not the watch's owner) that a watch is low."""
+    url = "/identity"
+    once = f"watch_battery:{device_key}:{(today or date.today()).isoformat()}"
+    title = f"{label or 'Watch'} is at {int(battery)}%"
+    body = "It is not charging, so it may switch off soon."
+    return await notify.send_many(
+        [u for u in family if u != owner],
+        lambda user: notify.notice(
+            user, "family_safety", title, body, url=url, priority=4, tag=f"watch_battery:{device_key}",
+            once=once, data={"device_key": device_key, "battery": int(battery)},
+            actions=[notify.view_action(url, "Devices")]),
     )
