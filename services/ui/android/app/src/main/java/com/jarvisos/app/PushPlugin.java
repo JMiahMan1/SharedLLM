@@ -59,6 +59,20 @@ public class PushPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void ringAlarm(PluginCall call) {
+        String title = call.getString("title", "Alarm");
+        String body = call.getString("body", "Time is up!");
+        FindPhoneService.startAlarm(getContext(), title, body);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stopAlarm(PluginCall call) {
+        FindPhoneService.stop(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
     public void setActiveConversation(PluginCall call) {
         String token = call.getString("token");
         PushNotifier.conversationOpened(getContext(), token == null || token.isEmpty() ? null : token);

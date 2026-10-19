@@ -102,8 +102,19 @@ def _next_recurrence(prev: datetime, recurrence: str) -> datetime:
         }[unit]
     elif any(w in rule for w in ("hourly", "hour")):
         step = timedelta(hours=1)
-    elif any(w in rule for w in ("weekly", "week", "biweek")):
-        # biweekly approximated weekly here; keeps the timer bounded
+    elif "weekday" in rule:
+        nxt = prev + timedelta(days=1)
+        while nxt.weekday() >= 5:
+            nxt += timedelta(days=1)
+        return nxt
+    elif "weekend" in rule:
+        nxt = prev + timedelta(days=1)
+        while nxt.weekday() < 5:
+            nxt += timedelta(days=1)
+        return nxt
+    elif "biweek" in rule:
+        step = timedelta(days=14)
+    elif any(w in rule for w in ("weekly", "week")):
         step = timedelta(days=7)
     elif any(w in rule for w in ("monthly", "month")):
         nxt = prev
@@ -127,8 +138,7 @@ def _next_recurrence(prev: datetime, recurrence: str) -> datetime:
         except Exception:
             step = timedelta(days=1)
     else:
-        # daily / every day / weekdays / unknown: advance one day.
-        # (weekday-only refinement intentionally not attempted on unknown text.)
+        # daily / every day / unknown: advance one day.
         step = timedelta(days=1)
 
     nxt = prev

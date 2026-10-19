@@ -83,14 +83,29 @@ def get_local_subnet() -> str:
 
 DEFAULT_SUBNET = get_local_subnet()
 
+
+def _get_local_self_ips() -> set[str]:
+    """Return local host IPs so port scanning never misidentifies the SharedLLM server as a TV."""
+    ips = {"127.0.0.1", "0.0.0.0"}
+    ext_host = (os.environ.get("EXECUTION_EXTERNAL_HOST") or "").strip()
+    if ext_host:
+        ips.add(ext_host)
+    with contextlib.suppress(Exception):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ips.add(s.getsockname()[0])
+        s.close()
+    return ips
+
+
 DEVICE_PORTS = {
     "roku": [(8060, "roku:ecp")],
-    "webos": [(3000, "webos"), (7676, "webos")],
-    "samsung": [(8001, "samsung"), (8002, "samsung")],
-    "androidtv": [(5555, "adb")],
-    "cast": [(8009, "cast")],
+    "webos": [(3000, "webos"), (3001, "webos-wss"), (9080, "webos-status"), (7676, "webos")],
+    "samsung": [(8001, "samsung"), (8002, "samsung-wss"), (55000, "samsung-legacy"), (7676, "samsung-dlna")],
+    "androidtv": [(6466, "androidtv-remote"), (5555, "adb"), (8008, "eureka")],
+    "cast": [(8008, "eureka"), (8009, "cast")],
     "dlna": [(9197, "dlna"), (8200, "dlna")],
-    "esphome": [(80, "esphome"), (8080, "espcam")],
+    "esphome": [(6053, "esphome-api"), (80, "esphome"), (8080, "espcam")],
     "tasmota": [(80, "tasmota")],
     "mqtt": [(1883, "mqtt"), (8883, "mqtt-tls")],
 }
@@ -805,45 +820,208 @@ async def _discover_via_network_scan(
 
 
 async def _probe_port(client, ip: str, port: int) -> dict:
-    """Probe a single IP:port and return device info if found."""
+    """Probe a single IP:port and return device info with TV OS version & communication methods."""
+    if ip in _get_local_self_ips():
+        return {}
     try:
         if port == 8060:
-            resp = await client.get(f"http://{ip}:8060/query/device-info", timeout=1)
-            if resp.status == 200 and b"roku" in resp.content.lower():
+            resp = await client.get(f"http://{ip}:8060/query/device-info", timeout=1.5)
+            raw = await resp.read() if hasattr(resp, "read") else getattr(resp, "content", b"")
+            if isinstance(raw, bytes) and resp.status == 200 and b"roku" in raw.lower():
                 import xml.etree.ElementTree as ET
                 try:
-                    root = ET.fromstring(resp.content)
+                    root = ET.fromstring(raw)
                     serial = root.findtext("serial-number", "")
                     model = root.findtext("model-name", "")
-                    return {"ip": ip, "metadata": {"serial": serial, "model": model, "type": "roku"}}
+                    model_number = root.findtext("model-number", "")
+                    vendor = root.findtext("vendor-name", "")
+                    sw_ver = root.findtext("software-version", "")
+                    sw_build = root.findtext("software-build", "")
+                    device_name = root.findtext("user-device-name", "") or root.findtext("friendly-device-name", "")
+                    power_mode = root.findtext("power-mode", "")
+                    is_tv = root.findtext("is-tv", "false") == "true"
+                    supports_mic = root.findtext("supports-ecs-microphone", "false") == "true"
+                    mac = root.findtext("wifi-mac", "") or root.findtext("ethernet-mac", "")
+                    has_media_assistant = False
+                    has_roku_media_player = False
+                    try:
+                        apps_resp = await client.get(f"http://{ip}:8060/query/apps", timeout=1.0)
+                        apps_raw = await apps_resp.read() if hasattr(apps_resp, "read") else b""
+                        if apps_resp.status == 200 and apps_raw:
+                            apps_root = ET.fromstring(apps_raw)
+                            for app_el in apps_root.findall("app"):
+                                aid = app_el.attrib.get("id", "")
+                                if aid == "782875":
+                                    has_media_assistant = True
+                                elif aid == "2213":
+                                    has_roku_media_player = True
+                    except Exception:
+                        pass
+                    comm_methods = ["ecp_keypress", "music_assistant", "ha_media_player"]
+                    if has_media_assistant:
+                        comm_methods.insert(0, "ecp_media_assistant_782875")
+                    return {
+                        "ip": ip,
+                        "metadata": {
+                            "serial": serial,
+                            "model": model,
+                            "model_number": model_number,
+                            "vendor": vendor,
+                            "device_name": device_name,
+                            "software_version": sw_ver,
+                            "os_version": f"Roku OS {sw_ver} (build {sw_build})".strip() if sw_ver else "Roku OS",
+                            "power_mode": power_mode,
+                            "is_tv": is_tv,
+                            "supports_ecs_microphone": supports_mic,
+                            "mac": mac,
+                            "has_media_assistant": has_media_assistant,
+                            "has_roku_media_player": has_roku_media_player,
+                            "communication_methods": comm_methods,
+                            "type": "roku",
+                        },
+                    }
                 except ET.ParseError:
-                    return {"ip": ip, "metadata": {"type": "roku"}}
-        elif port == 3000:
-            resp = await client.get(f"http://{ip}:3000", timeout=1)
-            if resp.status == 200:
-                return {"ip": ip, "metadata": {"type": "webos"}}
-        elif port == 8001:
-            resp = await client.get(f"http://{ip}:8001/api/v2/", timeout=1)
-            if resp.status == 200:
+                    return {"ip": ip, "metadata": {"type": "roku", "os_version": "Roku OS"}}
+        elif port in (3000, 3001, 9080):
+            if port == 9080:
+                resp = await client.get(f"http://{ip}:9080/", timeout=1.2)
+                if resp.status == 200:
+                    txt = (await resp.text()).lower()
+                    if "status=ok" in txt:
+                        return {
+                            "ip": ip,
+                            "metadata": {
+                                "type": "webos",
+                                "os_version": "LG webOS",
+                                "communication_methods": ["ha_notify_toast", "webostv_command_toast", "ha_play_media", "music_assistant"],
+                            },
+                        }
+            else:
+                resp = await client.get(f"http://{ip}:{port}", timeout=1.2)
+                if resp.status == 200:
+                    txt = (await resp.text()).lower()
+                    # Exclude standard HTML web servers (e.g. OpenWebUI on port 3000)
+                    if "<!doctype html" not in txt and "<html" not in txt and "open-webui" not in txt:
+                        return {
+                            "ip": ip,
+                            "metadata": {
+                                "type": "webos",
+                                "os_version": "LG webOS",
+                                "communication_methods": ["ha_notify_toast", "webostv_command_toast", "ha_play_media", "music_assistant"],
+                            },
+                        }
+        elif port in (8001, 8002, 55000):
+            if port == 55000:
                 try:
-                    info = await resp.json()
-                    return {"ip": ip, "metadata": {"model": info.get("device", {}).get("modelName", ""), "type": "samsung"}}
+                    _, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=1.0)
+                    writer.close()
+                    await writer.wait_closed()
+                    return {
+                        "ip": ip,
+                        "metadata": {
+                            "type": "samsung",
+                            "generation": "legacy_orsay",
+                            "os_version": "Samsung Orsay (Legacy)",
+                            "communication_methods": ["ha_samsungtv_legacy", "dlna_dmr", "room_cast_companion"],
+                        },
+                    }
                 except Exception:
-                    return {"ip": ip, "metadata": {"type": "samsung"}}
-        elif port == 8009:
+                    pass
+            else:
+                scheme = "https" if port == 8002 else "http"
+                resp = await client.get(f"{scheme}://{ip}:{port}/api/v2/", timeout=1.5)
+                if resp.status == 200:
+                    try:
+                        info = await resp.json()
+                        dev = info.get("device") if isinstance(info, dict) else None
+                        if isinstance(dev, dict) and (dev.get("modelName") or dev.get("OS") or dev.get("type")):
+                            os_name = dev.get("OS") or "Tizen"
+                            sw_ver = info.get("version") or dev.get("firmwareVersion") or ""
+                            return {
+                                "ip": ip,
+                                "metadata": {
+                                    "model": dev.get("modelName", ""),
+                                    "device_name": info.get("name") or dev.get("name", ""),
+                                    "os_version": f"Samsung {os_name} {sw_ver}".strip(),
+                                    "generation": "tizen",
+                                    "voice_support": dev.get("VoiceSupport") == "true",
+                                    "mac": dev.get("wifiMac", ""),
+                                    "supports_wol": dev.get("supportWOL") == "true" or bool(dev.get("supportWOL")),
+                                    "communication_methods": ["music_assistant", "dlna_dmr", "ha_play_media", "samsungtv_websocket"],
+                                    "type": "samsung",
+                                },
+                            }
+                    except Exception:
+                        pass
+        elif port in (8008, 8009, 6466, 5555):
+            # Probe Google Cast / Android TV eureka_info on port 8008 first
+            eureka = None
+            with contextlib.suppress(Exception):
+                resp = await client.get(
+                    f"http://{ip}:8008/setup/eureka_info?params=version,name,build_info,device_info,net,wifi,audio",
+                    timeout=1.5,
+                )
+                if resp.status == 200:
+                    data = await resp.json()
+                    if isinstance(data, dict) and (data.get("cast_build_revision") or data.get("ssdp_udn")):
+                        eureka = data
+
+            has_6466 = False
+            has_5555 = False
+            for check_p in (6466, 5555):
+                try:
+                    _, writer = await asyncio.wait_for(asyncio.open_connection(ip, check_p), timeout=0.6)
+                    writer.close()
+                    await writer.wait_closed()
+                    if check_p == 6466:
+                        has_6466 = True
+                    elif check_p == 5555:
+                        has_5555 = True
+                except Exception:
+                    pass
+
+            if eureka or has_6466 or has_5555:
+                is_android_tv = has_6466 or has_5555
+                cast_rev = (eureka or {}).get("cast_build_revision", "")
+                dev_name = (eureka or {}).get("name", "")
+                mac = (eureka or {}).get("mac_address", "")
+                udn = (eureka or {}).get("ssdp_udn", "")
+                os_label = f"Android TV (Cast {cast_rev})" if (is_android_tv and cast_rev) else (
+                    "Android TV" if is_android_tv else (f"Cast {cast_rev}" if cast_rev else "Google Cast")
+                )
+                comm = ["cast_sibling", "music_assistant", "ha_play_media"]
+                if has_6466:
+                    comm.insert(0, "androidtv_remote")
+                if has_5555:
+                    comm.append("adb")
+                return {
+                    "ip": ip,
+                    "metadata": {
+                        "device_name": dev_name,
+                        "cast_version": cast_rev,
+                        "os_version": os_label,
+                        "mac": mac,
+                        "serial": udn,
+                        "has_androidtv_remote": has_6466,
+                        "has_adb": has_5555,
+                        "communication_methods": comm,
+                        "type": "androidtv" if is_android_tv else "cast",
+                    },
+                }
+            elif port == 8009:
+                try:
+                    _, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=0.8)
+                    writer.close()
+                    await writer.wait_closed()
+                    return {"ip": ip, "metadata": {"type": "cast", "os_version": "Google Cast"}}
+                except Exception:
+                    pass
+        elif port == 6053:
             try:
-                _, writer = await asyncio.open_connection(ip, port)
+                _, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=0.8)
                 writer.close()
                 await writer.wait_closed()
-                return {"ip": ip, "metadata": {"type": "cast"}}
-            except Exception:
-                pass
-        elif port == 5555:
-            try:
-                _, writer = await asyncio.open_connection(ip, port)
-                writer.close()
-                await writer.wait_closed()
-                return {"ip": ip, "metadata": {"type": "androidtv"}}
+                return {"ip": ip, "metadata": {"type": "esphome", "os_version": "ESPHome Native API"}}
             except Exception:
                 pass
         elif port == 80:
@@ -856,13 +1034,13 @@ async def _probe_port(client, ip: str, port: int) -> dict:
                 device_name = name_match.group(1) if name_match else ""
                 if "tasmota" in content:
                     return {"ip": ip, "metadata": {"device_name": device_name, "type": "tasmota"}}
-                if "esphome" in content or "esp" in content:
+                if "esphome" in content or "<esp-app" in content or "kaufha" in content:
                     return {"ip": ip, "metadata": {"device_name": device_name, "type": "esphome"}}
         elif port == 8080:
             resp = await client.get(f"http://{ip}:8080/", timeout=1)
             if resp.status == 200:
                 content = (await resp.text()).lower()
-                if "esp" in content or "cam" in content or "stream" in content:
+                if "esphome" in content or "espcam" in content or "mjpeg" in content:
                     return {"ip": ip, "metadata": {"type": "espcam"}}
             try:
                 stream_resp = await client.get(f"http://{ip}:8080/stream", timeout=1)

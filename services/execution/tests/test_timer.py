@@ -302,3 +302,128 @@ async def test_run_history_beside_a_timer_is_not_read_as_a_timer(mocker):
     deleted = await handle_timer(TimerRequest(user_context=mock_context, action="delete", title="Pasta"))
     assert deleted.status == "SUCCESS"
     assert list(r.store) == [f"{timer_key}:history"]
+
+
+@pytest.mark.asyncio
+async def test_household_timer_requires_admin_and_is_visible_to_family(mock_redis_conn):
+    from services.execution.handlers.timer import get_active_timers
+
+    non_admin = UserContext(user="kid_user", is_admin=False)
+    admin_user = UserContext(user="admin_user", is_admin=True)
+
+    # Non-admin cannot create a household reminder
+    denied = await handle_timer(
+        TimerRequest(
+            user_context=non_admin,
+            action="add",
+            type="reminder",
+            scope="household",
+            duration_str="15m",
+            title="Chore Check",
+        )
+    )
+    assert denied.status == "FAILURE"
+    assert "admin" in denied.message.lower()
+
+    # Admin creates a household alarm across multiple devices with emoji & sound
+    created = await handle_timer(
+        TimerRequest(
+            user_context=admin_user,
+            action="add",
+            type="alarm",
+            scope="household",
+            duration_str="20m",
+            title="Family Dinner",
+            emoji="🍕",
+            sound="classic_alarm",
+            target_devices=["phone", "esphome:kitchen_display", "media_player.living_room"],
+            flash_screen=True,
+            esphome_script="flash_screen",
+        )
+    )
+    assert created.status == "SUCCESS"
+    assert "household" in created.message
+    timer_id = created.detail["timer_id"]
+
+    # Visible to both admin and non-admin family member
+    kid_timers = await get_active_timers("kid_user")
+    assert len(kid_timers) == 1
+    assert kid_timers[0]["title"] == "Family Dinner"
+    assert kid_timers[0]["scope"] == "household"
+    assert kid_timers[0]["emoji"] == "🍕"
+    assert kid_timers[0]["sound"] == "classic_alarm"
+    assert kid_timers[0]["target_devices"] == ["phone", "esphome:kitchen_display", "media_player.living_room"]
+    assert kid_timers[0]["flash_screen"] is True
+
+    # Non-admin cannot delete a household alarm
+    del_denied = await handle_timer(
+        TimerRequest(user_context=non_admin, action="delete", id=timer_id, title="Family Dinner")
+    )
+    assert del_denied.status == "FAILURE"
+
+    # Admin can reset and delete it
+    reset_res = await handle_timer(
+        TimerRequest(user_context=admin_user, action="reset", id=timer_id, title="Family Dinner")
+    )
+    assert reset_res.status == "SUCCESS"
+
+    del_ok = await handle_timer(
+        TimerRequest(user_context=admin_user, action="delete", id=timer_id, title="Family Dinner")
+    )
+    assert del_ok.status == "SUCCESS"
+    assert await get_active_timers("kid_user") == []
+
+
+@pytest.mark.asyncio
+async def test_household_timer_notification_fans_out_to_family_and_sets_ring_phone(monkeypatch):
+    from services.common import http, notify
+    from services.execution.handlers.timer import notify_timer_done
+
+    _FakeSession.calls, _FakeSession.fail = [], False
+    monkeypatch.setattr(http, "get_client", _FakeSession)
+
+    async def _fake_family():
+        return ["jeremiah", "michele"]
+
+    monkeypatch.setattr(notify, "family", _fake_family)
+
+    ok = await notify_timer_done(
+        "__household__",
+        {
+            "id": "fam-1",
+            "title": "Eggs Ready",
+            "type": "timer",
+            "scope": "household",
+            "created_by": "jeremiah",
+            "emoji": "🥚",
+            "sound": "egg_timer",
+            "target_devices": ["phone", "esphome:kitchen_display"],
+            "expires_at": "2026-10-18T18:00:00+00:00",
+        },
+    )
+    assert ok is True
+    assert len(_FakeSession.calls) == 2
+    users_notified = [body["user"] for _, body in _FakeSession.calls]
+    assert users_notified == ["jeremiah", "michele"]
+    _, body = _FakeSession.calls[0]
+    assert "🥚" in body["title"]
+    assert body["data"]["ring_phone"] is True
+    assert body["data"]["sound"] == "egg_timer"
+    assert body["data"]["emoji"] == "🥚"
+
+
+def test_synthesize_and_combine_alarm_wav_bytes():
+    from services.execution.handlers.timer import combine_wav_bytes, get_rtttl_for_timer, synthesize_alarm_wav
+
+    egg_wav = synthesize_alarm_wav(sound="egg_timer", emoji="🥚")
+    assert egg_wav[:4] == b"RIFF"
+    assert len(egg_wav) > 1000
+
+    classic_wav = synthesize_alarm_wav(sound="classic_alarm")
+    combined = combine_wav_bytes(egg_wav, classic_wav)
+    assert combined[:4] == b"RIFF"
+    assert len(combined) > len(egg_wav)
+
+    rtttl = get_rtttl_for_timer(sound="egg_timer", emoji="🥚")
+    assert "egg:" in rtttl
+

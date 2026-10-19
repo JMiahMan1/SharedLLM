@@ -1106,71 +1106,308 @@ async def execute_ai_capabilities():
 async def list_timers(user_id: str | None = None):
     return await timer.get_active_timers(user_id=user_id)
 
+
+@app.get("/execute/timers/devices")
+async def list_timer_devices(user_id: str | None = None):
+    """Return available target devices (Mobile App, ESPHome nodes, Multi-Platform TVs, HA speakers) plus sound/emoji presets."""
+    from services.execution import esphome_client
+    from services.execution.announce_handlers import classify_communication_devices
+
+    devices: list[dict[str, Any]] = [
+        {
+            "id": "phone",
+            "name": "Mobile App / Phone (ntfy)",
+            "kind": "phone",
+            "platform": "apk",
+            "source": "apk",
+            "has_speaker": True,
+            "has_screen": True,
+            "has_microphone": True,
+            "intercom_mode": "twoway",
+            "communication_methods": ["ntfy_push", "apk_stream_alarm"],
+        }
+    ]
+
+    creds: dict[str, Any] | None = None
+    if user_id:
+        with suppress(Exception):
+            creds = await resolve_internal_user(rag_user=str(user_id))
+    if not creds:
+        with suppress(Exception):
+            creds = await resolve_internal_user(user_id=1)
+    is_admin = bool((creds or {}).get("is_admin"))
+
+    # 1. Direct ESPHome devices
+    try:
+        esp_devices = await esphome_client.get_devices()
+    except Exception:
+        esp_devices = {}
+
+    for dev_key, cfg in sorted(esp_devices.items()):
+        if not isinstance(cfg, dict):
+            continue
+        owner = str(cfg.get("owner") or "").strip().lower()
+        if owner and user_id and owner != str(user_id).strip().lower() and not is_admin:
+            continue
+        kind = str(cfg.get("kind") or "esphome")
+        has_speaker = bool(
+            cfg.get(
+                "has_speaker",
+                kind not in ("watch", "display", "frame", "sensor", "screen"),
+            )
+        )
+        has_mic = bool(cfg.get("has_microphone", "s3" in dev_key.lower() or "voice" in dev_key.lower() or "speaker" in dev_key.lower()))
+        devices.append(
+            {
+                "id": f"esphome:{dev_key}",
+                "device_name": dev_key,
+                "name": cfg.get("friendly_name") or dev_key.replace("_", " ").title(),
+                "kind": kind,
+                "platform": "esphome",
+                "os_version": "ESPHome",
+                "source": "esphome",
+                "has_speaker": has_speaker,
+                "has_screen": True,
+                "has_microphone": has_mic,
+                "intercom_mode": "twoway" if has_mic else "oneway",
+                "esphome_script": cfg.get("alarm_script") or "",
+                "communication_methods": ["esphome_api", "esphome_script"],
+            }
+        )
+
+    # 2. Home Assistant TVs & Speakers classified via Unified Communication Layer
+    ha_url = (creds or {}).get("ha_url") or os.environ.get("HA_URL", "")
+    ha_token = (creds or {}).get("ha_token") or os.environ.get("HA_TOKEN", "")
+    if ha_url and ha_token:
+        try:
+            states = await ha_client.get_states(ha_url, ha_token)
+            classified = await classify_communication_devices(ha_url, ha_token, all_states=states or [])
+            for item in classified:
+                devices.append({
+                    **item,
+                    "source": "ha",
+                })
+        except Exception as exc:
+            log.debug(f"[timers/devices] Failed to load HA media_players: {exc}")
+
+    return {
+        "status": "SUCCESS",
+        "devices": devices,
+        "sounds": timer.ALARM_SOUNDS,
+        "emojis": {
+            em: {"name": meta["name"], "label": meta["label"]}
+            for em, meta in timer.EMOJI_SOUNDS.items()
+        },
+    }
+
+
 @app.post("/execute/trigger", response_model=ExecutionResult)
 async def execute_trigger(payload: dict[str, Any]):
     """Internal endpoint for Automation scheduler."""
+    from services.execution import esphome_client
+    from services.execution.announce_handlers import dispatch_announce
+
     timer_data = payload.get("timer", {})
-    user_id = payload.get("user_id") or timer_data.get("user_id")
+    user_id = payload.get("user_id") or timer_data.get("user_id") or timer_data.get("created_by")
 
     log.info(f"ALARM TRIGGERED: {timer_data.get('title')} for user {user_id}")
 
-    if not user_id:
+    if not user_id and timer_data.get("scope") != "household":
         return _ok(f"Triggered {timer_data.get('title')} (no user context)", "automation_trigger")
 
     # Resolve full credentials for the user (to get HA token)
+    creds: dict[str, Any] | None = None
     if isinstance(user_id, int):
         creds = await resolve_internal_user(user_id=user_id)
-    else:
+    elif user_id and str(user_id) != timer.HOUSEHOLD_BUCKET:
         creds = await resolve_internal_user(rag_user=str(user_id))
+    if not creds and timer_data.get("scope") == "household":
+        creds = await resolve_internal_user(user_id=1)
+
     if not creds:
         log.error(f"Trigger failed: could not resolve credentials for user {user_id}")
         return _ok(f"Triggered {timer_data.get('title')} (failed to resolve creds)", "automation_trigger")
 
-    # Always on the person's phone; on a speaker too when the timer names one.
-    await timer.notify_timer_done(creds.get("user") or str(user_id), timer_data)
+    effective_user = creds.get("user") or str(user_id or "admin")
 
-    # Execute the actual alert via Home Assistant
+    # Always notify on the person's phone (or all family members for household scope).
+    await timer.notify_timer_done(effective_user, timer_data)
+
+    # Execute the actual alert across all assigned hardware devices (ESPHome + TVs + Home Assistant Speakers)
     try:
-        target_device = timer_data.get("target_device")
+        all_targets = timer.normalize_target_devices(
+            timer_data.get("target_device"), timer_data.get("target_devices")
+        )
+        hw_targets = [
+            d for d in all_targets if d.lower() not in ("phone", "mobile", "apk", "ntfy")
+        ]
 
-        if target_device:
-            ha_url = creds.get("ha_url")
-            ha_token = creds.get("ha_token")
-            if not ha_url or not ha_token:
-                log.error(f"Trigger failed: no HA credentials for user {user_id}")
-                return _ok(f"Triggered {timer_data.get('title')} (no HA credentials)", "automation_trigger")
+        if not hw_targets:
+            return _ok(f"Triggered {timer_data.get('title')} on phone", "automation_trigger")
 
-            message = "Timer " + str(timer_data.get("title", "")) + " is done"
-            log.info(f"Dispatching TTS alert to {target_device}: '{message}'")
+        kind = str(timer_data.get("type") or "timer")
+        title = str(timer_data.get("title") or kind.title())
+        if kind == "alarm":
+            message = f"Alarm: {title}"
+        elif kind == "reminder":
+            message = f"Reminder: {title}"
+        else:
+            message = f"Timer {title} is done"
 
-            # Generate local Kokoro TTS (no cloud)
-            audio_bytes = await _text_to_speech(message)
-            if not audio_bytes:
-                log.error("Kokoro returned empty audio for timer alert")
-                return _ok(f"Triggered {timer_data.get('title')} but TTS failed", "automation_trigger")
+        sound = timer_data.get("sound")
+        emoji = timer.extract_emoji(title, timer_data.get("emoji"))
+        alarm_wav = timer.synthesize_alarm_wav(sound, emoji)
 
-            from uuid import uuid4
-            audio_key = f"tts-timer-{uuid4().hex[:8]}"
-            cache_temp_audio(audio_key, audio_bytes)
+        tts_enabled = timer_data.get("tts_enabled")
+        if tts_enabled is None:
+            tts_enabled = True
 
-            from services.config import EXECUTION_EXTERNAL_HOST
-            media_url = media_file_url(audio_key, creds.get("user") or str(user_id), EXECUTION_EXTERNAL_HOST)
+        tts_bytes = b""
+        if tts_enabled:
+            try:
+                tts_bytes = await _text_to_speech(message) or b""
+            except Exception as tts_err:
+                log.warning(f"Kokoro TTS failed during timer alert, using synthesized tone: {tts_err}")
+                tts_bytes = b""
 
-            full_entity_id = ha_client.sanitize_entity_id("media_player", target_device)
+        if sound == "tts_only" and tts_bytes:
+            audio_bytes = tts_bytes
+        elif tts_bytes:
+            audio_bytes = timer.combine_wav_bytes(alarm_wav, tts_bytes)
+        else:
+            audio_bytes = alarm_wav
 
-            state = await ha_client.get_state(ha_url, ha_token, full_entity_id)
-            if state and state.get("state") == "off":
-                await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", full_entity_id)
-                await asyncio.sleep(2)
+        audio_key = f"tts-timer-{uuid4().hex[:8]}"
+        cache_temp_audio(audio_key, audio_bytes)
 
-            result = await ha_client.call_service(
-                ha_url, ha_token, "media_player", "play_media", full_entity_id,
-                {"media_content_id": media_url, "media_content_type": "audio/wav"},
-            )
+        from services.config import EXECUTION_EXTERNAL_HOST
+        media_url = media_file_url(audio_key, effective_user, EXECUTION_EXTERNAL_HOST)
+        rtttl = timer.get_rtttl_for_timer(sound, emoji)
 
-            log.info(f"TTS result: {result}")
+        try:
+            configured_esphome = await esphome_client.get_devices()
+        except Exception:
+            configured_esphome = {}
 
-        return _ok(f"Triggered {timer_data.get('title')} on {target_device}", "automation_trigger")
+        ha_url = creds.get("ha_url")
+        ha_token = creds.get("ha_token")
+        esphome_triggered: list[str] = []
+        media_triggered: list[str] = []
+        dispatched: list[str] = []
+
+        for target in hw_targets:
+            t_clean = target.strip()
+            t_lower = t_clean.lower()
+
+            # 1. Explicit ESPHome target (esphome:<name> or configured ESPHome device key)
+            esp_name: str | None = None
+            if t_lower.startswith("esphome:"):
+                esp_name = t_lower.split(":", 1)[1].strip()
+            elif t_lower in configured_esphome and not t_lower.startswith("media_player."):
+                esp_name = t_lower
+
+            if esp_name:
+                try:
+                    await esphome_client.trigger_device_alert(
+                        esp_name,
+                        title=title,
+                        message=message,
+                        media_url=media_url,
+                        rtttl=rtttl,
+                        script_name=timer_data.get("esphome_script"),
+                        flash_screen=bool(timer_data.get("flash_screen", True)),
+                        emoji=emoji,
+                        until_button=True,
+                    )
+                    esphome_triggered.append(esp_name)
+                    dispatched.append(f"esphome:{esp_name}")
+                    continue
+                except Exception as esp_err:
+                    log.warning(f"Direct ESPHome alert failed for {esp_name}: {esp_err}")
+
+            # 2. Home Assistant TV or media_player (with optional companion ESPHome screen script/flash)
+            mapped_esp = esphome_client.find_device_for_ha_entity(t_clean, configured_esphome)
+            if mapped_esp and (timer_data.get("esphome_script") or timer_data.get("flash_screen")):
+                with suppress(Exception):
+                    await esphome_client.trigger_device_alert(
+                        mapped_esp,
+                        title=title,
+                        message=message,
+                        media_url=None,
+                        rtttl=rtttl,
+                        script_name=timer_data.get("esphome_script"),
+                        flash_screen=bool(timer_data.get("flash_screen", True)),
+                        emoji=emoji,
+                        until_button=True,
+                    )
+                    if mapped_esp not in esphome_triggered:
+                        esphome_triggered.append(mapped_esp)
+
+            if ha_url and ha_token:
+                try:
+                    full_entity_id = ha_client.sanitize_entity_id("media_player", t_clean)
+                    state_obj = await ha_client.get_state(ha_url, ha_token, full_entity_id)
+                    state_str = (state_obj or {}).get("state", "unknown")
+                    attrs = (state_obj or {}).get("attributes") or {}
+                    banner_msg = f"{emoji + ' ' if emoji else ''}{message}"
+
+                    # Dispatch via Unified TV & Device Communication Layer (Roku Media Assistant 782875,
+                    # LG WebOS Toast + Audio, Android TV Cast/MA sibling, Samsung MA/DLNA/Cast, etc.)
+                    result = await dispatch_announce(
+                        ha_url,
+                        ha_token,
+                        full_entity_id,
+                        media_url,
+                        0.7,
+                        state_str,
+                        attrs,
+                        message=banner_msg,
+                    )
+                    if not (isinstance(result, dict) and result.get("ok")):
+                        if state_str == "off":
+                            await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", full_entity_id)
+                            await asyncio.sleep(2)
+                        result = await ha_client.call_service(
+                            ha_url,
+                            ha_token,
+                            "media_player",
+                            "play_media",
+                            full_entity_id,
+                            {"media_content_id": media_url, "media_content_type": "audio/wav"},
+                        )
+                    log.info(f"HA/TV alert result on {full_entity_id}: {result}")
+                    media_triggered.append(full_entity_id)
+                    dispatched.append(full_entity_id)
+                    continue
+                except Exception as ha_err:
+                    log.warning(f"HA alert failed on {t_clean}: {ha_err}")
+
+            # 3. Fallback to direct ESPHome if HA credentials are missing or HA call failed
+            if mapped_esp and mapped_esp not in esphome_triggered:
+                with suppress(Exception):
+                    await esphome_client.trigger_device_alert(
+                        mapped_esp,
+                        title=title,
+                        message=message,
+                        media_url=media_url,
+                        rtttl=rtttl,
+                        script_name=timer_data.get("esphome_script"),
+                        flash_screen=True,
+                        emoji=emoji,
+                        until_button=True,
+                    )
+                    esphome_triggered.append(mapped_esp)
+                    dispatched.append(f"esphome:{mapped_esp}")
+
+        if esphome_triggered or media_triggered:
+            with suppress(Exception):
+                r = await timer.get_redis()
+                await timer.record_ringing_timer(
+                    r, timer_data, esphome_triggered, media_entities=media_triggered
+                )
+
+        target_summary = ", ".join(dispatched or hw_targets)
+        return _ok(f"Triggered {timer_data.get('title')} on {target_summary}", "automation_trigger")
     except Exception as e:
         log.error(f"Trigger execution error: {e}")
         return _ok(f"Triggered {timer_data.get('title')} but alert failed: {e}", "automation_trigger")
@@ -1725,12 +1962,12 @@ async def execute_announce(req: AnnouncementRequest):
             initial_state = s
             break
 
-    # Detect if this is an MA-wrapped Roku and store both entities
+    # Detect if this is an MA-wrapped Roku and store both entities (works even when state=='off' and app_id is None)
     ma_player_entity = None
     if initial_state:
         attrs = initial_state.get("attributes", {})
         log.info(f"[announce] Checking for MA-wrapped Roku: app_id={attrs.get('app_id')}, mass_player_type={attrs.get('mass_player_type')}, active_queue={attrs.get('active_queue')}")
-        if attrs.get("app_id") == "music_assistant" and attrs.get("mass_player_type") == "player":
+        if (attrs.get("app_id") == "music_assistant" or attrs.get("mass_player_type") == "player"):
             active_queue = (attrs.get("active_queue") or "").lower()
             if "roku" in active_queue:
                 # This is an MA player wrapping a Roku - store MA entity for audio
@@ -1863,12 +2100,17 @@ async def execute_announce(req: AnnouncementRequest):
             "use_pre_announce": False
         })
 
-    # Last resort: local Piper
+    # Last resort: local Piper (try tts.piper, then tts.speak with tts.piper entity)
     if not result.get("ok"):
         log.info("[announce] Falling back to HA Piper...")
         result = await ha_client.call_service(ha_url, ha_token, "tts", "piper", target_player, {
             "message": req.message
         })
+        if not result.get("ok"):
+            result = await ha_client.call_service(
+                ha_url, ha_token, "tts", "speak", "tts.piper",
+                {"media_player_entity_id": target_player, "message": req.message},
+            )
 
     # 4. Verify playback actually happened
     if result.get("ok") and media_url:
@@ -3033,6 +3275,44 @@ async def execute_intercom_broadcast(req: dict, x_internal_secret: str = Header(
     user_context = UserContext(**ctx_raw) if ctx_raw else UserContext(user="", is_admin=True)
     result = await run_broadcast(parsed, user_context, announce_fn=execute_announce)
     return result
+
+
+@app.post("/execute/intercom/start")
+async def execute_intercom_start(req: dict, x_internal_secret: str = Header(None)):
+    """Start a 1-way or 2-way intercom session across room voice satellites, TVs, and speakers."""
+    await _check_internal_secret(x_internal_secret)
+    from services.execution.handlers.intercom import handle_intercom_start
+    from services.execution.schemas import UserContext
+    from services.execution.schemas_intercom import IntercomSessionRequest
+
+    ctx_raw = req.get("user_context") or {}
+    user_context = UserContext(**ctx_raw) if ctx_raw else UserContext(user="", is_admin=True)
+    if not req.get("caller_user_id"):
+        req["caller_user_id"] = user_context.user or "admin"
+    parsed = IntercomSessionRequest(**req)
+    res = await handle_intercom_start(parsed, user_context)
+    return res.detail if (res.status == "SUCCESS" and isinstance(res.detail, dict)) else res.model_dump()
+
+
+@app.post("/execute/intercom/end")
+async def execute_intercom_end(req: dict, x_internal_secret: str = Header(None)):
+    """End an active intercom session and silence any active TV/speaker streams."""
+    await _check_internal_secret(x_internal_secret)
+    from types import SimpleNamespace
+
+    from services.execution.handlers.intercom import handle_intercom_end
+    from services.execution.schemas import UserContext
+
+    ctx_raw = req.get("user_context") or {}
+    user_context = UserContext(**ctx_raw) if ctx_raw else UserContext(user="", is_admin=True)
+    res = await handle_intercom_end(SimpleNamespace(session_id=req.get("session_id")), user_context=user_context)
+    return res.model_dump()
+
+
+@app.get("/execute/intercom/devices")
+async def execute_intercom_devices(user_id: str | None = None):
+    """Return all communication-capable devices (TVs, ESPHome satellites, HA speakers, Phone) with 1-way/2-way intercom metadata."""
+    return await list_timer_devices(user_id=user_id)
 
 
 @app.post("/execute/location")

@@ -169,4 +169,26 @@ public class PushNoticeTest {
         assertEquals(PushCategories.GENERAL, n.category);
         assertTrue(n.actions.isEmpty());
     }
+
+    @Test
+    public void alarmAndPhoneTimerNoticesRingOnTheAlarmStream() {
+        PushNotice alarm = PushNotice.parse("{\"id\":\"a1\",\"category\":\"timers\",\"kind\":\"alarm\","
+                + "\"title\":\"🌅 Alarm: Wake up\",\"body\":\"Wake up (Morning Melody)\",\"priority\":5,"
+                + "\"tag\":\"timer:a1\",\"data\":{\"url\":\"/communication\",\"ring_phone\":true,"
+                + "\"sound\":\"morning_melody\",\"emoji\":\"🌅\"}}");
+        assertTrue(alarm.isAlarmRing());
+        assertTrue(alarm.ringPhone);
+        assertEquals("morning_melody", alarm.sound);
+        assertEquals("🌅", alarm.emoji);
+
+        PushNotice quietTimer = PushNotice.parse("{\"id\":\"t1\",\"category\":\"timers\",\"kind\":\"timer\","
+                + "\"title\":\"Timer: Pasta\",\"body\":\"Pasta is done\",\"priority\":4,"
+                + "\"data\":{\"ring_phone\":false}}");
+        assertFalse(quietTimer.isAlarmRing());
+
+        PushNotice phoneTimer = PushNotice.parse("{\"id\":\"t2\",\"category\":\"timers\",\"kind\":\"timer\","
+                + "\"title\":\"🥚 Timer: Eggs\",\"body\":\"Eggs is done\",\"priority\":4,"
+                + "\"data\":{\"ring_phone\":true,\"emoji\":\"🥚\"}}");
+        assertTrue(phoneTimer.isAlarmRing());
+    }
 }

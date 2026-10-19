@@ -40,6 +40,8 @@ import type {
   ExecutionResponse,
   ArcadeGamesResponse,
   TimerRecord,
+  TimerTargetDevice,
+  TimerDevicesResponse,
   SmokeTestResult,
   StorageEntry,
   RagStats,
@@ -213,6 +215,8 @@ export type {
   ExecutionResponse,
   ArcadeGamesResponse,
   TimerRecord,
+  TimerTargetDevice,
+  TimerDevicesResponse,
   StorageEntry,
   TalkConversation,
   TalkMessage,
@@ -1738,28 +1742,40 @@ export const api = {
     return resp.data;
   },
 
+  async getTimerDevices(): Promise<TimerDevicesResponse> {
+    const resp = await apiClient.get('/api/communication/timers/devices');
+    return resp.data;
+  },
+
   async createTimer(payload: {
     title: string;
     duration_str?: string;
     time_str?: string;
-    type?: 'timer' | 'alarm';
+    type?: 'timer' | 'alarm' | 'reminder';
     recurrence?: string;
     target_device?: string;
+    target_devices?: string[];
+    scope?: 'user' | 'household' | 'family';
+    emoji?: string;
+    sound?: string;
+    tts_enabled?: boolean;
+    esphome_script?: string;
+    flash_screen?: boolean;
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/timers', payload);
     return resp.data;
   },
 
-  async deleteTimer(title: string, type: 'timer' | 'alarm' = 'timer', id?: string): Promise<ExecutionResponse> {
-    const data: { title: string; type: 'timer' | 'alarm'; id?: string } = { title, type };
+  async deleteTimer(title: string, type: 'timer' | 'alarm' | 'reminder' = 'timer', id?: string): Promise<ExecutionResponse> {
+    const data: { title: string; type: 'timer' | 'alarm' | 'reminder'; id?: string } = { title, type };
     if (id) data.id = id;
     const resp = await apiClient.delete('/api/communication/timers', { data });
     return resp.data;
   },
 
   async timerAction(
-    action: 'pause' | 'resume',
-    payload: { title: string; type?: 'timer' | 'alarm'; id?: string }
+    action: 'pause' | 'resume' | 'stop' | 'reset',
+    payload: { title: string; type?: 'timer' | 'alarm' | 'reminder'; id?: string }
   ): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/timers', { action, ...payload });
     return resp.data;

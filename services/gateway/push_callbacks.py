@@ -48,8 +48,18 @@ async def chat_reply(request: Request, params: dict, reply: str | None):
 
 # Timers (execution handlers/timer.py notify_timer_done sends these buttons)
 
-#: A snooze or an extra minute is a new timer with the same name and speaker.
-_AGAIN_FIELDS = ("title", "target_device")
+#: A snooze or an extra minute is a new timer with the same name, speakers, sound, and emoji.
+_AGAIN_FIELDS = (
+    "title",
+    "target_device",
+    "target_devices",
+    "emoji",
+    "sound",
+    "esphome_script",
+    "flash_screen",
+    "scope",
+    "tts_enabled",
+)
 
 
 async def _execute_timer(request: Request, payload: dict) -> dict:
@@ -64,9 +74,9 @@ async def _execute_timer(request: Request, payload: dict) -> dict:
 
 
 async def _again(request: Request, params: dict, duration: str) -> dict:
-    kind = "alarm" if params.get("type") == "alarm" else "timer"
+    kind = params.get("type") if params.get("type") in ("alarm", "reminder") else "timer"
     payload = {"action": "add", "type": kind, "duration_str": duration}
-    payload.update({k: params[k] for k in _AGAIN_FIELDS if params.get(k)})
+    payload.update({k: params[k] for k in _AGAIN_FIELDS if params.get(k) is not None and params.get(k) != ""})
     return await _execute_timer(request, payload)
 
 
@@ -75,6 +85,15 @@ async def timer_stop(request: Request, params: dict, reply: str | None) -> dict:
     """Stop ringing. A one-off timer is normally gone once it fires; one the
     scheduler is still retrying is deleted so it cannot ring again. A
     recurring alarm sends no id and stays scheduled."""
+    if params.get("device"):
+        return await _execute_timer(
+            request,
+            {
+                "action": "stop",
+                "id": str(params["id"]) if params.get("id") else None,
+                "target_device": str(params["device"]),
+            },
+        )
     if not params.get("id"):
         return {"status": "SUCCESS", "message": "Stopped."}
     result = await _execute_timer(request, {"action": "delete", "id": str(params["id"])})

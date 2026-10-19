@@ -9,6 +9,7 @@ and detailed device information from vendor-specific APIs.
 import asyncio
 import ipaddress
 import logging
+import os
 import socket
 
 import aiohttp
@@ -18,6 +19,9 @@ log = logging.getLogger("execution.network_scan")
 # Auto-detect subnet from host network interfaces
 def get_local_subnet() -> str:
     """Detect the local subnet from the host's network interfaces."""
+    env_subnet = os.environ.get("SCAN_SUBNET") or os.environ.get("LOCAL_SUBNET")
+    if env_subnet:
+        return env_subnet
     try:
         # Try to get the default route interface
         with open("/proc/net/route") as f:
@@ -54,6 +58,21 @@ def get_local_subnet() -> str:
         return "192.168.1.0/24"
 
 
+def _get_self_ips() -> set[str]:
+    ips = {"127.0.0.1", "0.0.0.0"}
+    ext = (os.environ.get("EXECUTION_EXTERNAL_HOST") or "").strip()
+    if ext:
+        ips.add(ext)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ips.add(s.getsockname()[0])
+        s.close()
+    except Exception:
+        pass
+    return ips
+
+
 def subprocess_run(args, timeout=5):
     """Run a subprocess and return stdout."""
     import subprocess
@@ -78,14 +97,14 @@ def get_arp_cache() -> dict:
     return arp_map
 
 
-# Device type port definitions
+# Device type port definitions across TV generations
 DEVICE_PORTS = {
     "roku": [8060],
     "webos": [3000, 3001, 9080],
-    "samsung": [8001, 8002, 9197],
+    "samsung": [8001, 8002, 55000, 9197],
     "sony_bravia": [80, 52323],
-    "chromecast": [8009],
-    "androidtv": [5555],
+    "chromecast": [8008, 8009],
+    "androidtv": [6466, 5555, 8008, 8009],
     "dlna": [9197, 8200],
     "esphome": [6053],
 }
@@ -111,7 +130,7 @@ async def scan_network(
         timeout: Connection timeout per port.
 
     Returns:
-        List of discovered devices with IP, type, and metadata.
+        List of discovered devices with IP, type, OS version, communication methods, and metadata.
     """
     if not subnet:
         subnet = get_local_subnet()
@@ -128,12 +147,14 @@ async def scan_network(
     else:
         ports = ALL_TV_PORTS
 
+    self_ips = _get_self_ips()
+
     # Generate IP list
     try:
         network = ipaddress.IPv4Network(subnet, strict=False)
         ips = [
             str(ip) for ip in network
-            if not str(ip).endswith(".0") and not str(ip).endswith(".255")
+            if not str(ip).endswith(".0") and not str(ip).endswith(".255") and str(ip) not in self_ips
         ]
     except Exception as e:
         log.error(f"[network_scan] Invalid subnet {subnet}: {e}")
@@ -163,18 +184,21 @@ async def _fast_port_scan(
     ports: list[int],
     timeout: float,
 ) -> list[tuple[str, int]]:
-    """Fast concurrent port scan returning (ip, port) pairs."""
+    """Fast concurrent port scan returning (ip, port) pairs with bounded file descriptors."""
+    sem = asyncio.Semaphore(48)
+
     async def _check(ip: str, port: int) -> tuple[str, int] | None:
-        try:
-            _, writer = await asyncio.wait_for(
-                asyncio.open_connection(ip, port),
-                timeout=timeout,
-            )
-            writer.close()
-            await writer.wait_closed()
-            return (ip, port)
-        except Exception:
-            return None
+        async with sem:
+            try:
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection(ip, port),
+                    timeout=timeout,
+                )
+                writer.close()
+                await writer.wait_closed()
+                return (ip, port)
+            except Exception:
+                return None
 
     tasks = []
     for ip in ips:
@@ -199,48 +223,48 @@ async def _enrich_devices(
     connector = aiohttp.TCPConnector(ssl=ssl_ctx)
     aio_timeout = aiohttp.ClientTimeout(total=timeout)
 
-    seen_ips = set()
+    ports_by_ip: dict[str, set[int]] = {}
+    for ip, port in responsive:
+        ports_by_ip.setdefault(ip, set()).add(port)
+
     devices = []
 
     async with aiohttp.ClientSession(connector=connector, timeout=aio_timeout) as client:
-        for ip, port in responsive:
-            if ip in seen_ips:
-                continue
-            seen_ips.add(ip)
-
+        for ip, open_ports in ports_by_ip.items():
             device = None
 
             # Roku (port 8060)
-            if port == 8060:
+            if 8060 in open_ports:
                 device = await _probe_roku(client, ip, timeout)
 
+            # Android TV / Chromecast (ports 6466, 5555, 8008, 8009)
+            if not device and (open_ports & {6466, 5555, 8008, 8009}):
+                device = await _probe_android_or_cast(client, ip, open_ports, timeout)
+
+            # Samsung (port 8001/8002/55000)
+            if not device and (open_ports & {8001, 8002, 55000}):
+                device = await _probe_samsung(client, ip, timeout, open_ports=open_ports)
+
             # webOS (port 3000/3001/9080)
-            elif port in (3000, 3001, 9080):
+            if not device and (open_ports & {3000, 3001, 9080}):
                 device = await _probe_webos(client, ip, timeout)
 
-            # Samsung (port 8001/8002)
-            elif port in (8001, 8002):
-                device = await _probe_samsung(client, ip, timeout)
-
-            # Sony Bravia (port 80)
-            elif port == 80:
+            # Sony Bravia (port 80/52323)
+            if not device and (open_ports & {80, 52323}):
                 device = await _probe_sony_bravia(client, ip, timeout)
 
-            # Chromecast (port 8009)
-            elif port == 8009:
-                device = await _probe_chromecast(ip, timeout)
-
             # DLNA (port 9197)
-            elif port == 9197:
+            if not device and 9197 in open_ports:
                 device = await _probe_dlna(client, ip, timeout)
 
             # ESPHome (port 6053)
-            elif port == 6053:
+            if not device and 6053 in open_ports:
                 device = await _probe_esphome(ip, timeout)
 
             if device:
-                # Add MAC from ARP cache
-                if arp_cache and ip in arp_cache:
+                device["open_ports"] = sorted(open_ports)
+                # Add MAC from ARP cache if not already present
+                if arp_cache and ip in arp_cache and not device.get("mac"):
                     device["mac"] = arp_cache[ip]
                 devices.append(device)
 
@@ -248,7 +272,7 @@ async def _enrich_devices(
 
 
 async def _probe_roku(client: aiohttp.ClientSession, ip: str, timeout: float) -> dict | None:
-    """Probe Roku device via ECP API."""
+    """Probe Roku device via ECP API and inspect installed channels (Media Assistant 782875)."""
     try:
         async with client.get(f"http://{ip}:8060/query/device-info", timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
             if resp.status != 200:
@@ -257,20 +281,48 @@ async def _probe_roku(client: aiohttp.ClientSession, ip: str, timeout: float) ->
             import xml.etree.ElementTree as ET
             root = ET.fromstring(await resp.read())
 
+            sw_ver = root.findtext("software-version", "")
+            sw_build = root.findtext("software-build", "")
+            has_media_assistant = False
+            has_roku_media_player = False
+            try:
+                async with client.get(f"http://{ip}:8060/query/apps", timeout=aiohttp.ClientTimeout(total=1.2)) as apps_resp:
+                    if apps_resp.status == 200:
+                        apps_root = ET.fromstring(await apps_resp.read())
+                        for app_el in apps_root.findall("app"):
+                            aid = app_el.attrib.get("id", "")
+                            if aid == "782875":
+                                has_media_assistant = True
+                            elif aid == "2213":
+                                has_roku_media_player = True
+            except Exception:
+                pass
+
+            comm_methods = ["ecp_keypress", "music_assistant", "ha_media_player"]
+            if has_media_assistant:
+                comm_methods.insert(0, "ecp_media_assistant_782875")
+
             return {
                 "ip": ip,
                 "type": "roku",
                 "friendly_name": root.findtext("user-device-name", "") or root.findtext("friendly-device-name", ""),
                 "model": root.findtext("model-name", ""),
                 "model_number": root.findtext("model-number", ""),
+                "vendor": root.findtext("vendor-name", ""),
                 "serial": root.findtext("serial-number", ""),
-                "software_version": root.findtext("software-version", ""),
+                "software_version": sw_ver,
+                "os_version": f"Roku OS {sw_ver} (build {sw_build})".strip() if sw_ver else "Roku OS",
                 "power_mode": root.findtext("power-mode", ""),
                 "screen_size": root.findtext("screen-size", ""),
                 "is_tv": root.findtext("is-tv", "false") == "true",
                 "supports_ethernet": root.findtext("supports-ethernet", "false") == "true",
+                "supports_ecs_microphone": root.findtext("supports-ecs-microphone", "false") == "true",
                 "wifi_mac": root.findtext("wifi-mac", ""),
+                "mac": root.findtext("wifi-mac", "") or root.findtext("ethernet-mac", ""),
                 "location": root.findtext("user-device-location", ""),
+                "has_media_assistant": has_media_assistant,
+                "has_roku_media_player": has_roku_media_player,
+                "communication_methods": comm_methods,
             }
     except Exception as e:
         log.debug(f"[network_scan] Roku probe failed for {ip}: {e}")
@@ -294,29 +346,38 @@ async def _probe_webos(client: aiohttp.ClientSession, ip: str, timeout: float) -
                         import json
                         data = json.loads(resp_ws)
                         if data.get("returnValue"):
+                            sw_ver = data.get("softwareVersion", "")
                             return {
                                 "ip": ip,
                                 "type": "webos",
                                 "model": data.get("modelName", ""),
-                                "software_version": data.get("softwareVersion", ""),
+                                "software_version": sw_ver,
+                                "os_version": f"LG webOS {sw_ver}".strip(),
                                 "device_id": data.get("deviceId", ""),
+                                "communication_methods": ["ha_notify_toast", "webostv_command_toast", "ha_play_media", "music_assistant"],
                             }
                 except Exception:
                     pass
 
-            # Fallback: just return basic info
-            return {
-                "ip": ip,
-                "type": "webos",
-                "friendly_name": "LG webOS TV",
-            }
+                return {
+                    "ip": ip,
+                    "type": "webos",
+                    "friendly_name": "LG webOS TV",
+                    "os_version": "LG webOS",
+                    "communication_methods": ["ha_notify_toast", "webostv_command_toast", "ha_play_media", "music_assistant"],
+                }
     except Exception as e:
         log.debug(f"[network_scan] webOS probe failed for {ip}: {e}")
     return None
 
 
-async def _probe_samsung(client: aiohttp.ClientSession, ip: str, timeout: float) -> dict | None:
-    """Probe Samsung TV via REST API."""
+async def _probe_samsung(
+    client: aiohttp.ClientSession,
+    ip: str,
+    timeout: float,
+    open_ports: set[int] | None = None,
+) -> dict | None:
+    """Probe Samsung TV via Tizen REST API (8001/8002) or legacy Orsay (55000)."""
     for port in (8001, 8002):
         try:
             scheme = "https" if port == 8002 else "http"
@@ -324,20 +385,92 @@ async def _probe_samsung(client: aiohttp.ClientSession, ip: str, timeout: float)
                 if resp.status == 200:
                     data = await resp.json()
                     device = data.get("device", {})
+                    if not isinstance(device, dict) or not (device.get("modelName") or device.get("OS")):
+                        continue
+                    os_type = device.get("OS", "Tizen")
+                    sw_ver = data.get("softwareVersion") or data.get("version") or ""
                     return {
                         "ip": ip,
                         "type": "samsung",
+                        "generation": "tizen",
                         "friendly_name": data.get("name", ""),
                         "model": device.get("modelName", ""),
                         "serial": device.get("serialNumber", ""),
-                        "software_version": data.get("softwareVersion", ""),
-                        "os_type": device.get("OS", ""),
+                        "software_version": sw_ver,
+                        "os_type": os_type,
+                        "os_version": f"Samsung {os_type} {sw_ver}".strip(),
                         "udn": device.get("udn", ""),
                         "wifi_mac": device.get("wifiMac", ""),
+                        "mac": device.get("wifiMac", ""),
                         "supports_wol": device.get("supportWOL", False),
+                        "voice_support": device.get("VoiceSupport") == "true",
+                        "communication_methods": ["music_assistant", "dlna_dmr", "ha_play_media", "samsungtv_websocket"],
                     }
         except Exception:
             continue
+    if open_ports and 55000 in open_ports:
+        return {
+            "ip": ip,
+            "type": "samsung",
+            "generation": "legacy_orsay",
+            "friendly_name": "Samsung Legacy TV",
+            "os_type": "Orsay",
+            "os_version": "Samsung Orsay (Legacy)",
+            "communication_methods": ["ha_samsungtv_legacy", "dlna_dmr", "room_cast_companion"],
+        }
+    return None
+
+
+async def _probe_android_or_cast(
+    client: aiohttp.ClientSession,
+    ip: str,
+    open_ports: set[int],
+    timeout: float,
+) -> dict | None:
+    """Probe Android TV / Chromecast via port 8008 eureka_info and remote ports 6466/5555."""
+    has_androidtv_remote = 6466 in open_ports
+    has_adb = 5555 in open_ports
+    is_android_tv = has_androidtv_remote or has_adb
+    try:
+        async with client.get(
+            f"http://{ip}:8008/setup/eureka_info?params=version,name,build_info,device_info,net,wifi,audio",
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if isinstance(data, dict) and (data.get("cast_build_revision") or data.get("ssdp_udn")):
+                    cast_rev = data.get("cast_build_revision", "")
+                    comm = ["cast_sibling", "music_assistant", "ha_play_media"]
+                    if has_androidtv_remote:
+                        comm.insert(0, "androidtv_remote")
+                    if has_adb:
+                        comm.append("adb")
+                    return {
+                        "ip": ip,
+                        "type": "androidtv" if is_android_tv else "chromecast",
+                        "friendly_name": data.get("name", ""),
+                        "software_version": cast_rev,
+                        "os_version": f"Android TV (Cast {cast_rev})" if is_android_tv else f"Google Cast {cast_rev}".strip(),
+                        "mac": data.get("mac_address", ""),
+                        "uuid": data.get("ssdp_udn", ""),
+                        "has_androidtv_remote": has_androidtv_remote,
+                        "has_adb": has_adb,
+                        "communication_methods": comm,
+                    }
+    except Exception:
+        pass
+    if is_android_tv:
+        return {
+            "ip": ip,
+            "type": "androidtv",
+            "friendly_name": "Android TV",
+            "os_version": "Android TV",
+            "has_androidtv_remote": has_androidtv_remote,
+            "has_adb": has_adb,
+            "communication_methods": ["androidtv_remote", "cast_sibling", "music_assistant", "ha_play_media"],
+        }
+    if 8009 in open_ports:
+        return await _probe_chromecast(ip, timeout)
     return None
 
 

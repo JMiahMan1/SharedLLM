@@ -50,4 +50,41 @@ describe('Communication page', () => {
     expect(await screen.findByRole('link', { name: /open family/i })).toHaveAttribute('href', '/family');
     expect(screen.queryByPlaceholderText('Send a live Nextcloud Talk message')).not.toBeInTheDocument();
   });
+
+  it('supports configuring household alarms, emoji sounds, multi-device targets, and ESPHome screen flash', async () => {
+    renderWithProviders(<Communication />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /configure alarm, sound, emoji and devices/i }));
+
+    // Select Alarm mode and Household scope
+    fireEvent.click(screen.getByRole('button', { name: /^alarm$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /personal \(my devices\)/i }));
+    expect(screen.getByRole('button', { name: /household \(family\)/i })).toBeInTheDocument();
+
+    // Select Egg Timer emoji and Classic Digital Alarm sound
+    fireEvent.click(screen.getByRole('button', { name: /🥚 egg timer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /classic digital alarm/i }));
+
+    // Select Mobile App and ESPHome Kitchen Display (Screen Only)
+    fireEvent.click(await screen.findByRole('button', { name: /mobile app \(phone alarm\)/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /kitchen display \(esphome\)/i }));
+
+    // Enable Flash Screen and set custom ESPHome script
+    fireEvent.click(screen.getByRole('button', { name: /auto flash speakerless screens/i }));
+    fireEvent.change(screen.getByLabelText('ESPHome script'), {
+      target: { value: 'flash_screen' },
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('Timer name'), {
+      target: { value: 'Family Dinner Alarm' },
+    });
+    fireEvent.change(screen.getByLabelText('Duration or time'), {
+      target: { value: '6:00pm' },
+    });
+    fireEvent.click(screen.getByText('Add Timer'));
+
+    expect(await screen.findByText('Family Dinner Alarm')).toBeInTheDocument();
+    expect(screen.getByText('Household')).toBeInTheDocument();
+  });
 });
+
