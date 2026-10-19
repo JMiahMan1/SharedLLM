@@ -104,9 +104,18 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         else:
             available_players.append(player)
 
-    # Prefer Music Assistant when multiple players are active so the header
-    # matches the usual send-target; otherwise keep HA order.
-    active_players.sort(key=lambda p: (not p.get("is_ma"),))
+    def _active_rank(player: dict) -> tuple[bool, bool, bool]:
+        has_metadata = bool(
+            player.get("media_title")
+            or player.get("media_artist")
+            or player.get("media_album")
+            or player.get("entity_picture")
+        )
+        non_ma = not player.get("is_ma")
+        preferred_app = non_ma and (has_metadata or bool(player.get("app_name")))
+        return (not preferred_app, not has_metadata, not non_ma)
+
+    active_players.sort(key=_active_rank)
 
     # Filter by area if requested
     if req.area:

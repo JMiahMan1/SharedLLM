@@ -66,11 +66,12 @@ const ActiveMediaWidget = ({ userSettings, onMediaStop, settingsButton }: IActiv
         };
         if (resp.status === 'SUCCESS' && resp.detail?.active) {
           const active = resp.detail.active;
+          const appName = (active as { app_name?: string }).app_name?.trim();
           setMedia({
             entity_id: active.entity_id || '',
             device_name: active.friendly_name || active.entity_id || '',
-            title: active.media_title || 'Unknown',
-            artist: active.media_artist || 'Unknown Artist',
+            title: active.media_title || (appName ? `Playing on ${appName}` : 'Playing something'),
+            artist: active.media_artist || '',
             album: active.media_album || '',
             state: active.state || 'idle',
           });
@@ -256,8 +257,10 @@ const ActiveMediaWidget = ({ userSettings, onMediaStop, settingsButton }: IActiv
               <Music size={20} className="text-purple-400" />
             </div>
             <div className="min-w-0">
-              <p className="font-bold text-white truncate">{media.title || 'Unknown'}</p>
-              <p className="text-sm text-slate-400 truncate">{media.artist || 'Unknown Artist'}</p>
+              <p className="font-bold text-white truncate">{media.title || 'Playing something'}</p>
+              {media.artist && (
+                <p className="text-sm text-slate-400 truncate">{media.artist}</p>
+              )}
               <p className="text-xs text-slate-500 truncate">{media.device_name}</p>
             </div>
           </div>
