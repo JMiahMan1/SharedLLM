@@ -870,12 +870,15 @@ async def global_exception_handler(request: Request, exc: Exception):
 # --- Global Health & Readiness ---
 @app.delete("/api/history")
 async def clear_history_endpoint(request: Request):
-    """Clears conversation history for the current user."""
-    try:
-        body = await request.json()
-        creds_data = await resolve_identity(body)
-        user_id = creds_data.get("user") or ""
+    """Clears conversation history for the authenticated caller.
 
+    The request credential decides whose history is cleared. A body ``user_id``
+    used to decide that instead, which let any caller erase somebody else's
+    conversation history.
+    """
+    creds_data = await _require_identity_from_request(request)
+    user_id = creds_data.get("user") or ""
+    try:
         from services.gateway.history import _get_history_key, _redis
         key = _get_history_key(user_id)
         if _redis is not None:
@@ -2013,11 +2016,24 @@ async def decompose_command_query(query: str) -> list[str]:
 async def resolve_identity(body: dict) -> Any:
     from services.gateway.cache import get_cached_identity
 
+    # No caller gets the administrator just by saying nothing. Callers that
+    # mean the shared household account must ask for it explicitly; everyone
+    # else resolves as anonymous unless they present a real identifier.
+    payload = dict(body)
+    if (
+        "anonymous" not in payload
+        and "household" not in payload
+        # A named device resolves to its user, or to the household when it is
+        # genuinely shared. Identity refuses an unknown device.
+        and payload.get("device_id") is None
+    ):
+        payload["anonymous"] = True
+
     async def _do_resolve() -> Any:
         client = get_http_client()
         resp = await client.post(
             f"{IDENTITY_SVC}/api/resolve",
-            json=body,
+            json=payload,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(300.0, connect=30.0)
         )
@@ -2033,7 +2049,7 @@ async def resolve_identity(body: dict) -> Any:
 
     try:
         return await get_cached_identity(
-            body,
+            payload,
             lambda: retry_http_request(_do_resolve, "Identity resolution", max_retries=2, base_delay=0.1),
         )
     except aiohttp.ClientError as e:
@@ -2113,16 +2129,32 @@ async def _resolve_identity_allow_anonymous(
     request: Request,
     body: dict | None = None,
     *,
-    allow_system_fallback: bool = False,
+    household: bool = False,
 ) -> Any:
     """Resolve an identity for a route that may genuinely have no credential.
 
-    Anonymous requests receive a non-admin synthetic identity. Trusted internal
-    system callers pass ``allow_system_fallback=True`` to preserve the system
-    account used by kiosk, voice, and intercom paths.
+    A caller with a proven API key is resolved as that key's owner. A caller
+    that presents no identifier at all gets ``anonymous`` by default: no
+    credentials and no administrator powers. Trusted household surfaces
+    (kiosk, voice, intercom) pass ``household=True`` to borrow the household's
+    shared services while still remaining non-admin.
     """
-    payload = _auth_body_from_request(request, body)
-    payload["anonymous"] = not allow_system_fallback
+    api_key = _presented_api_key(request)
+    if api_key:
+        # The key is authoritative. A body or query parameter must not be able
+        # to name a different user than the key that was just validated.
+        payload: dict = {"api_key": api_key}
+    else:
+        payload = _auth_body_from_request(request, body)
+        payload.pop("anonymous", None)
+        payload.pop("household", None)
+
+    has_identifier = any(
+        payload.get(field) is not None
+        for field in ("user_id", "rag_user", "voice_id", "device_id", "api_key")
+    )
+    if not has_identifier:
+        payload["household" if household else "anonymous"] = True
     return await resolve_identity(payload)
 
 
@@ -2139,15 +2171,15 @@ def _presented_api_key(request: Request) -> str:
 async def _require_identity_from_request(request: Request, body: dict | None = None) -> Any:
     """Identity for a route that serves real family data. 401 unless proven.
 
-    ``_resolve_identity_from_request`` accepts requests with no identifier on
-    purpose: Identity's ``POST /api/resolve`` falls back to the system default
-    user -- an admin -- for those, which is what lets a media player, a voice
-    request or a stream URL resolve without an API key at all.
+    Internal service-to-service callers may authenticate with the internal
+    secret instead of a user's API key. They receive the non-admin household
+    identity: the shared Home Assistant and media credentials, but neither the
+    administrator bit nor anybody's personal accounts. A route that needs more
+    than that must name a real user.
 
-    That fallback is exactly wrong for a route that reads somebody's chores,
-    books or playlists. Used there, it hands the whole family's data to any
-    anonymous caller, and to any caller with a made-up key. Verified live before
-    this helper existed::
+    Handing an unproven caller the system default was exactly wrong for a route
+    that reads somebody's chores, books or playlists. Verified live before this
+    helper existed::
 
         GET /api/integrations/skylight/chores          (no auth)      -> 200, 55 chores
         GET /api/integrations/skylight/chores          (bogus key)   -> 200, 55 chores
@@ -2161,11 +2193,12 @@ async def _require_identity_from_request(request: Request, body: dict | None = N
     if not api_key:
         # Service-to-service callers (the automation and agent loops, another
         # container on the bridge network) authenticate with the internal secret
-        # rather than a user's API key. They are already inside the trust
-        # boundary, so they keep Identity's own resolution rules.
+        # rather than a user's API key. They are trusted, but trust is not the
+        # same as being the administrator: a credential-less internal call acts
+        # as the household, not as the system default user.
         if secret_matches(request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET):
             return await _resolve_identity_allow_anonymous(
-                request, body, allow_system_fallback=True
+                request, body, household=True
             )
         raise HTTPException(
             status_code=401,
@@ -2551,9 +2584,18 @@ async def fetch_device_history(creds: dict, entity_id: str, days: int = 1) -> li
 
 @app.post("/api/discovery/sync")
 async def discovery_sync(request: Request):
-    """Orchestrates HA entity discovery and RAG sync."""
-    body = await request.json()
-    creds = await resolve_identity(body)
+    """Orchestrates HA entity discovery and RAG sync.
+
+    A user runs this with their own API key. The execution service's internal
+    scheduled call runs as the non-admin household, which owns the shared Home
+    Assistant credentials. A body ``user_id`` is never consulted.
+    """
+    if not _presented_api_key(request) and secret_matches(
+        request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET
+    ):
+        creds = await _resolve_identity_allow_anonymous(request, household=True)
+    else:
+        creds = await _require_identity_from_request(request)
     entities = await fetch_ha_entities(creds)
     return {"status": "SUCCESS", "entities_count": len(entities)}
 
@@ -2965,15 +3007,26 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(err_msg, "unknown", "model_config_error")
         return _make_ollama_response(err_msg, "unknown", "model_config_error")
 
-    # A voice satellite's request names nobody; if the speech-to-text proxy
-    # recognised who said these words, answer as them. A client never names a
-    # voice itself: that would let any caller claim to be anyone.
+    # Identity is proven by an API key, by a device assignment, or by the
+    # speech-to-text proxy's speaker recognition. A client never names itself:
+    # accepting body `user_id`/`rag_user` let any caller claim to be anyone,
+    # and accepting `anonymous`/`household` let them choose their own powers.
     body.pop("voice_id", None)
+    body.pop("user_id", None)
+    body.pop("rag_user", None)
+    body.pop("anonymous", None)
+    body.pop("household", None)
     voice_speaker_name = None
-    if not any(body.get(k) for k in ("api_key", "user_id", "rag_user")):
+    if not body.get("api_key"):
         voice_speaker_name = await _recognised_speaker(query)
         if voice_speaker_name:
             body["voice_id"] = voice_speaker_name
+
+    # A kiosk or voice satellite has no personal API key. It may act as the
+    # non-admin household, with the shared home credentials, but only when it
+    # named no other identity at all.
+    if not any(body.get(k) for k in ("api_key", "voice_id", "device_id")):
+        body["household"] = True
 
     try:
         creds_data = await resolve_identity(body)
@@ -11675,8 +11728,18 @@ async def transcribe_audio(request: Request):
 
 @app.post("/api/voice/command")
 async def execute_voice_command(request: Request):
-    """Route voice command to execution service."""
+    """Route voice command to execution service as the authenticated caller.
+
+    The old proxy forwarded whatever ``user_id`` the body named and no
+    credentials at all, so a client could act as anybody and the execution
+    handlers had no Home Assistant token to use.
+    """
+    creds = await _require_identity_from_request(request)
     body = await request.json()
+    if not isinstance(body, dict):
+        body = {}
+    body["user_id"] = creds.get("user") or ""
+    body["user_context"] = creds
     async with shared_http_client() as client:
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/voice/command",

@@ -25,10 +25,20 @@ OpenAI-compatible surface at `/v1/chat/completions`. Base URL:
 - **Local media streaming** (`HTMLAudioElement` cannot set headers) may pass the
   same key as `?token=`; it is validated exactly like the bearer key.
 - **Service-to-service** calls use `X-Internal-Secret` (from `.env`; never
-  sent by clients).
+  sent by clients). A credential-less internal call resolves as the
+  **household**, not the system administrator: it gets the shared Home
+  Assistant, media, audiobook, Nextcloud and Skylight credentials, but
+  `is_admin` is false and personal accounts are removed. A caller that needs a
+  person must name that user or present their key.
 - **Chat surfaces** (`/api/chat`, `/v1/chat/completions`) accept the bearer
-  key, and voice/device clients may identify with `voice_id` / `device_id`
-  instead (resolved by Identity's anonymous-capable path).
+  key. A device may identify itself with `device_id`; a person's `voice_id` is
+  set only by the speech-to-text proxy after it recognises the speaker, never
+  by the client. A request that names nobody is answered by the non-admin
+  household.
+- **Identity resolution** (`POST /api/resolve`, internal only) has no silent
+  default. A presented identifier that does not match is a 401; a request with
+  no identifier must explicitly ask for `anonymous` (no credentials) or
+  `household` (shared services, no admin).
 - **Media streams/SSE** may use a short-lived signed media token `?mt=`
   (`POST /api/media/token`).
 
@@ -48,8 +58,7 @@ Example request:
     }
   ],
   "model": "qwen3:latest",
-  "stream": false,
-  "voice_id": "admin"
+  "stream": false
 }
 ```
 

@@ -6,9 +6,9 @@ unassigned device therefore resolved to the admin account. These tests pin the
 replacement contract:
 
 * an identifier or credential that is presented but does not match is a 401;
-* only a request with no identifier at all may use the system-default
-  fallback, and ``/api/resolve`` is internal-only, so that is a trusted
-  service-to-service caller;
+* a request with no identifier gets no identity unless it explicitly asks to
+  be ``anonymous`` (nothing) or ``household`` (shared home services, no admin
+  powers and no personal accounts);
 * a real credential still resolves to its owner.
 """
 import pytest
@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
 
 import services.identity.main as identity_main
+from services.identity.crypto import encrypt
 from services.identity.main import app, get_session, require_internal
 from services.identity.models import DeviceAssignment, User
 
@@ -33,6 +34,10 @@ def session_fixture():
                 is_admin=True,
                 is_system_default=True,
                 api_key="key-default",
+                ha_url="http://home-assistant.local",
+                ha_token_enc=encrypt("household-ha-token"),
+                github_user="default-gh",
+                github_token_enc=encrypt("default-personal-github-token"),
             )
         )
         session.add(User(username="alice", is_admin=False, api_key="key-alice"))
@@ -120,7 +125,10 @@ def test_a_shared_device_still_uses_the_household_account(
 
     resp = _resolve(client, {"device_id": "shared-tablet"})
     assert resp.status_code == 200
-    assert resp.json()["user"] == "default"
+    body = resp.json()
+    assert body["user"] == "household"
+    assert body["is_admin"] is False
+    assert body["ha_token"] == "household-ha-token"
 
 
 def test_a_device_with_a_single_user_resolves_to_that_user(
@@ -134,11 +142,36 @@ def test_a_device_with_a_single_user_resolves_to_that_user(
     assert resp.json()["user"] == "alice"
 
 
-def test_no_identifier_at_all_uses_the_trusted_internal_fallback(client: TestClient):
-    """Service-to-service callers with no user context still get the household."""
+def test_no_identifier_at_all_is_refused_not_upgraded_to_admin(client: TestClient):
+    """Trust alone is not an identity; a credential-less caller must say what it wants."""
     resp = _resolve(client, {})
+    assert resp.status_code == 401
+    assert resp.json() == {"detail": "Identity required"}
+    assert "default" not in resp.text
+    assert "is_admin" not in resp.text
+
+
+def test_household_gets_shared_services_but_no_admin_or_personal_accounts(
+    client: TestClient,
+):
+    resp = _resolve(client, {"household": True})
     assert resp.status_code == 200
-    assert resp.json()["user"] == "default"
+    body = resp.json()
+    assert body["user"] == "household"
+    assert body["id"] is None
+    assert body["is_admin"] is False
+    assert body["api_key"] is None
+    assert body["ha_url"] == "http://home-assistant.local"
+    assert body["ha_token"] == "household-ha-token"
+    assert body["github_user"] is None
+    assert body["github_token"] is None
+    assert body["shared_credential_owner"] == "default"
+
+
+def test_anonymous_and_household_are_mutually_exclusive(client: TestClient):
+    resp = _resolve(client, {"anonymous": True, "household": True})
+    assert resp.status_code == 400
+    assert "mutually exclusive" in resp.text
 
 
 def test_resolve_without_the_internal_secret_never_returns_the_admin(session: Session):

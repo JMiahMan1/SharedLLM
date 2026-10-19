@@ -22,9 +22,13 @@ it does not recognise is answered as before, by the household account.
    gateway looks them up once and resolves the request as that person
    (`_recognised_speaker` in `services/gateway/main.py`).
 
-The audio is never stored. A request that names its own user (an API key,
-`rag_user`) is never changed, and a client can no longer name a `voice_id`
-itself: only the proxy's match sets it.
+The audio is never stored. A request that presents a real API key is never
+changed, and a client can no longer name a `voice_id` itself: only the proxy's
+match sets it. A satellite request that names nobody is answered by the
+**non-admin household** identity, which has the shared Home Assistant, media,
+audiobook, Nextcloud and Skylight credentials but no administrator powers and
+no personal accounts. An unrecognised speaker therefore cannot administer the
+system, even though they can still ask the house to do ordinary things.
 
 ## Enrolling
 
