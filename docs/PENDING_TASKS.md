@@ -98,7 +98,6 @@ implemented. Still open:
 
 - Calls: media (audio/video in-app) needs a Talk client library or LiveKit,
   and a reachable STUN/TURN server off the LAN.
-- Drawing: multi-user live drawing on one board.
 - Arcade: phases 2-5 of `docs/ARCADE_INTEGRATION.md`.
 
 ## Tests

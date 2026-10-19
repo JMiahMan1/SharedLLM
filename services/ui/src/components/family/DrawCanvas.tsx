@@ -1,36 +1,86 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, Eraser, Loader2, Undo2, Wand2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Eraser, Loader2, Undo2, Users, Wand2 } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
+import { storageGetSync } from '../../lib/storage';
+import {
+  drawingBaseUrl,
+  drawingIdentity,
+  drawingSocketUrl,
+  isDrawingSegment,
+  type DrawingSegment,
+} from '../../lib/drawingSocket';
 import SendToChat from '../chat/SendToChat';
 import { canvasPoint, type Point } from './canvasPoint';
 
 const COLORS = ['#1e293b', '#dc2626', '#2563eb', '#16a34a', '#9333ea', '#ea580c'];
 const WIDTHS = [3, 6, 12];
+const BOARD_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const CANVAS_WIDTH = 640;
+const CANVAS_HEIGHT = 416;
+
+let segmentCounter = 0;
+
+function nextSegmentId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  segmentCounter += 1;
+  return `s${Date.now().toString(36)}${segmentCounter.toString(36)}`;
+}
+
+function paintSegment(context: CanvasRenderingContext2D, segment: DrawingSegment): void {
+  context.strokeStyle = segment.color;
+  context.lineWidth = segment.width;
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  context.beginPath();
+  context.moveTo(segment.x1, segment.y1);
+  context.lineTo(segment.x2, segment.y2);
+  context.stroke();
+}
 
 /**
- * Family drawing canvas with a "make it way better" pass.
+ * Family drawing canvas with a live shared board and a "make it way better"
+ * pass.
  *
- * Deliberately dependency-free: pointer events, a PNG export and the existing
- * image-edit proxy. No new build-time dependency means no bundle risk on a
- * device that already has to download an APK, and the same component can be
- * swapped for Excalidraw later without changing who calls it.
+ * Deliberately dependency-free: pointer events, a PNG export, a tiny gateway
+ * WebSocket relay and the existing image-edit proxy. No new build-time
+ * dependency means no bundle risk on a device that already has to download an
+ * APK, and the same component can be swapped for Excalidraw later without
+ * changing who calls it.
  */
 export default function DrawCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawing = useRef(false);
   const last = useRef<Point | null>(null);
-  const snapshot = useRef<string | null>(null);
+  const touched = useRef(false);
+  const segments = useRef<DrawingSegment[]>([]);
+  const socket = useRef<WebSocket | null>(null);
+  const identity = useMemo(() => drawingIdentity(), []);
 
   const [color, setColor] = useState(COLORS[0]);
   const [width, setWidth] = useState(WIDTHS[1]);
   const [improving, setImproving] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const touched = useRef(false);
+  const [board, setBoard] = useState('family');
+  const [live, setLive] = useState(false);
+  const [status, setStatus] = useState<'off' | 'connecting' | 'live' | 'offline'>('off');
+  const [drawers, setDrawers] = useState(0);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const improvingRequest = useRef<AbortController | null>(null);
 
   const ctx = useCallback(() => canvasRef.current?.getContext('2d') ?? null, []);
+
+  const redraw = useCallback(() => {
+    const context = ctx();
+    const canvas = canvasRef.current;
+    if (!context || !canvas) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    segments.current.forEach((segment) => paintSegment(context, segment));
+    touched.current = segments.current.length > 0;
+  }, [ctx]);
 
   const pos = (event: React.PointerEvent<HTMLCanvasElement>): Point =>
     canvasPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), event.currentTarget);
@@ -57,14 +107,22 @@ export default function DrawCanvas() {
     if (!context || !drawing.current || !last.current) return;
     event.preventDefault();
     const point = pos(event);
-    context.strokeStyle = color;
-    context.lineWidth = width;
-    context.lineCap = 'round';
-    context.lineJoin = 'round';
-    context.beginPath();
-    context.moveTo(last.current.x, last.current.y);
-    context.lineTo(point.x, point.y);
-    context.stroke();
+    const segment: DrawingSegment = {
+      id: nextSegmentId(),
+      x1: last.current.x,
+      y1: last.current.y,
+      x2: point.x,
+      y2: point.y,
+      color,
+      width,
+      user: identity.username,
+      name: identity.name,
+    };
+    segments.current.push(segment);
+    paintSegment(context, segment);
+    if (socket.current?.readyState === WebSocket.OPEN) {
+      socket.current.send(JSON.stringify({ type: 'segment', segment }));
+    }
     last.current = point;
   };
 
@@ -78,34 +136,34 @@ export default function DrawCanvas() {
     const canvas = canvasRef.current;
     if (!context || !canvas) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
+    segments.current = [];
     touched.current = false;
     setError(null);
+    if (socket.current?.readyState === WebSocket.OPEN) {
+      socket.current.send(JSON.stringify({ type: 'clear' }));
+    }
   };
 
   const undo = () => {
-    if (!snapshot.current) return;
-    const image = new Image();
-    image.onload = () => {
-      const context = ctx();
-      if (context) context.drawImage(image, 0, 0);
-    };
-    image.src = snapshot.current;
+    const own = [...segments.current].reverse().find((segment) => !segment.user || segment.user === identity.username);
+    if (!own) return;
+    segments.current = segments.current.filter((segment) => segment.id !== own.id);
+    redraw();
+    if (socket.current?.readyState === WebSocket.OPEN) {
+      socket.current.send(JSON.stringify({ type: 'undo', id: own.id }));
+    }
   };
 
-  // Keep the previous frame so a single undo is always available.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || snapshot.current) return;
-    try {
-      snapshot.current = canvas.toDataURL('image/png');
-    } catch {
-      snapshot.current = null;
-    }
-  }, []);
-
-  // Leaving the Create tab must stop the job poll, not keep it running and
-  // then set state on an unmounted component.
-  useEffect(() => () => improvingRequest.current?.abort(), []);
+  // Leaving the Create tab must stop the job poll and close the live board,
+  // not keep either running against an unmounted component.
+  useEffect(
+    () => () => {
+      improvingRequest.current?.abort();
+      socket.current?.close();
+      socket.current = null;
+    },
+    [],
+  );
 
   const toPng = (): string => {
     try {
@@ -121,6 +179,102 @@ export default function DrawCanvas() {
   // click is both expensive and unreliable on some canvas implementations, so
   // the stroke count is the source of truth.
   const isBlank = (): boolean => !touched.current;
+
+  const connect = () => {
+    const room = board.trim();
+    if (!BOARD_RE.test(room)) {
+      setLiveError('Board codes use letters, numbers, dashes and underscores.');
+      return;
+    }
+    const token = storageGetSync('jarvis_api_key');
+    if (!token) {
+      setLiveError('Sign in to draw together.');
+      return;
+    }
+    if (touched.current && !window.confirm('Joining the shared board replaces this canvas with the board drawing. Continue?')) {
+      return;
+    }
+
+    socket.current?.close();
+    setLive(true);
+    setStatus('connecting');
+    setLiveError(null);
+
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(drawingSocketUrl(drawingBaseUrl(), token, room));
+    } catch {
+      setLive(false);
+      setStatus('offline');
+      setLiveError('The shared board could not connect.');
+      return;
+    }
+    socket.current = ws;
+
+    ws.onmessage = (event) => {
+      let message: Record<string, unknown>;
+      try {
+        message = JSON.parse(String(event.data)) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      const type = message.type;
+      if (type === 'welcome') {
+        const incoming = Array.isArray(message.segments)
+          ? message.segments.filter(isDrawingSegment).slice(0, 5000)
+          : [];
+        segments.current = incoming;
+        redraw();
+        setDrawers(Array.isArray(message.participants) ? message.participants.length : 1);
+        setStatus('live');
+      } else if (type === 'segment' && isDrawingSegment(message.segment)) {
+        const segment = message.segment;
+        if (!segments.current.some((existing) => existing.id === segment.id)) {
+          segments.current.push(segment);
+          const context = ctx();
+          if (context) paintSegment(context, segment);
+          touched.current = true;
+        }
+      } else if (type === 'undo' && typeof message.id === 'string') {
+        segments.current = segments.current.filter((segment) => segment.id !== message.id);
+        redraw();
+      } else if (type === 'clear') {
+        segments.current = [];
+        const context = ctx();
+        const canvas = canvasRef.current;
+        if (context && canvas) context.clearRect(0, 0, canvas.width, canvas.height);
+        touched.current = false;
+      } else if (type === 'participant-joined') {
+        setDrawers((count) => count + 1);
+      } else if (type === 'participant-left') {
+        setDrawers((count) => Math.max(0, count - 1));
+      } else if (type === 'error') {
+        setLiveError(typeof message.message === 'string' ? message.message : 'The shared board refused that.');
+      }
+    };
+
+    ws.onerror = () => {
+      setLiveError('The shared board could not connect.');
+    };
+
+    ws.onclose = () => {
+      if (socket.current !== ws) return;
+      socket.current = null;
+      setLive(false);
+      setStatus('offline');
+      setDrawers(0);
+    };
+  };
+
+  const disconnect = () => {
+    const ws = socket.current;
+    socket.current = null;
+    ws?.close();
+    setLive(false);
+    setStatus('off');
+    setDrawers(0);
+    setLiveError(null);
+  };
 
   const improve = async () => {
     if (isBlank()) {
@@ -214,12 +368,48 @@ export default function DrawCanvas() {
         </button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2" data-testid="drawing-live-controls">
+        <button
+          type="button"
+          onClick={live ? disconnect : connect}
+          aria-pressed={live}
+          className={`glass-button min-h-11 px-3 py-2 text-sm ${live ? 'border-purple-400/50' : ''}`}
+        >
+          {status === 'connecting' ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />}
+          {live ? 'Leave shared board' : 'Draw together'}
+        </button>
+        {!live && (
+          <label className="flex min-h-11 items-center gap-2 text-xs text-slate-400">
+            Board
+            <input
+              aria-label="Drawing board code"
+              value={board}
+              maxLength={64}
+              onChange={(event) => setBoard(event.target.value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64))}
+              className="glass-input w-28 px-2 py-1.5 text-sm"
+            />
+          </label>
+        )}
+        {status === 'live' && (
+          <span className="text-xs text-emerald-300" data-testid="drawing-live-status">
+            Live · {drawers} {drawers === 1 ? 'person' : 'people'}
+          </span>
+        )}
+        {status === 'connecting' && <span className="text-xs text-slate-400">Connecting…</span>}
+        {status === 'offline' && <span className="text-xs text-amber-300">Shared board disconnected</span>}
+        {liveError && (
+          <span className="text-xs text-rose-300" role="alert">
+            {liveError}
+          </span>
+        )}
+      </div>
+
       <canvas
         ref={canvasRef}
-        width={640}
+        width={CANVAS_WIDTH}
         // Both sides are multiples of 32: image edit models work on 16 or 32
         // pixel blocks and some refuse other sizes.
-        height={416}
+        height={CANVAS_HEIGHT}
         data-testid="draw-surface"
         onPointerDown={start}
         onPointerMove={move}
