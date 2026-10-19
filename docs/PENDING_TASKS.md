@@ -56,8 +56,11 @@ Storage page, and the workspace-deletion 409 prompt (delete or orphan) are
 implemented. Still open:
 
 - TTS outputs now create artifacts: `/execute/tts`, Nextcloud
-  `storage_text_to_audio`, and podcast renders. Image, video and document
-  generators still need wiring.
+  `storage_text_to_audio`, and podcast renders. Image generation from the
+  agent loop (`ImageGenerationRequest`) also creates one. There is still no
+  dedicated video or document generator to wire; files Raven writes into a
+  workspace intentionally stay in the workspace/git rather than becoming
+  lifecycle-independent artifacts.
 - The local quota comes from `ARTIFACT_LOCAL_QUOTA_BYTES` and per-user rows in
   `UserStorageQuota`; the proposed Identity `artifact_local_quota_bytes`
   setting is not wired (storage does not read Identity settings).
