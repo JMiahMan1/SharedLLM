@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avatarMarkerHtml } from './avatarMarker';
+import { avatarClusterMarkerHtml, avatarMarkerHtml } from './avatarMarker';
 
 describe('avatarMarkerHtml', () => {
   const base = { label: 'Michele', ringColor: '#22c55e', size: 34 };
@@ -14,6 +14,7 @@ describe('avatarMarkerHtml', () => {
   it('draws a built-in character without a network fetch', () => {
     const html = avatarMarkerHtml({ ...base, avatar: 'preset:jonahs-whale' });
     expect(html).toContain('data-avatar-kind="preset"');
+    expect(html).toContain('<svg');
     expect(html).toContain('🐋');
   });
 
@@ -30,4 +31,18 @@ describe('avatarMarkerHtml', () => {
     expect(html).not.toContain('<img src=x');
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
   });
+  it('draws every person when a location is shared', () => {
+    const html = avatarClusterMarkerHtml({
+      people: [
+        { label: 'Jeremiah', ringColor: '#22c55e', avatar: 'preset:jonahs-whale' },
+        { label: 'Michele', ringColor: '#38bdf8' },
+      ],
+    });
+    expect(html).toContain('data-testid="map-avatar-cluster"');
+    expect(html).toContain('data-avatar-count="2"');
+    expect((html.match(/data-testid="map-avatar-marker"/g) ?? [])).toHaveLength(2);
+    expect(html).toContain('Jeremiah');
+    expect(html).toContain('Michele');
+  });
+
 });

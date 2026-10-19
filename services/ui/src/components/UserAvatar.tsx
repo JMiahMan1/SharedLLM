@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { avatarTint, initials } from './chat/chatModel';
-import { presetFor } from '../lib/avatarPresets';
+import { presetFor, presetSvgHtml } from '../lib/avatarPresets';
 
 interface UserAvatarProps {
   username: string;
@@ -51,16 +51,8 @@ export default function UserAvatar({ username, avatar, name, size = 40, classNam
         style={{ ...box, background: `linear-gradient(135deg, ${preset.from}, ${preset.to})` }}
         className={base}
         data-testid="user-avatar-preset"
-      >
-        <span style={{ fontSize: size * 0.55, lineHeight: 1 }}>{preset.emoji}</span>
-        <span
-          aria-hidden
-          style={{ fontSize: size * 0.3, lineHeight: 1, right: size * 0.02, bottom: size * 0.02 }}
-          className="absolute"
-        >
-          {preset.badge}
-        </span>
-      </span>
+        dangerouslySetInnerHTML={{ __html: presetSvgHtml(preset) }}
+      />
     );
   }
   // White, not text-white: light themes remap text-white to dark ink, and the

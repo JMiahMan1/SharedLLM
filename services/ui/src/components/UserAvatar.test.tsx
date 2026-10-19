@@ -22,9 +22,13 @@ const wrap = (ui: React.ReactNode) =>
 beforeEach(() => vi.clearAllMocks());
 
 describe('profile pictures', () => {
-  it('has a good handful of distinct Bible characters', () => {
-    expect(AVATAR_PRESETS.length).toBeGreaterThanOrEqual(20);
+  it('has a good handful of distinct Bible characters with custom SVG artwork', () => {
+    expect(AVATAR_PRESETS.length).toBeGreaterThanOrEqual(26);
     expect(new Set(AVATAR_PRESETS.map((p) => p.id)).size).toBe(AVATAR_PRESETS.length);
+    expect(new Set(AVATAR_PRESETS.map((p) => p.svg.trim())).size).toBe(AVATAR_PRESETS.length);
+    for (const preset of AVATAR_PRESETS) {
+      expect(preset.svg.trim().length).toBeGreaterThan(100);
+    }
     expect(presetFor('preset:balaams-donkey')?.emoji).toBe('🫏');
     expect(presetFor('upload:1')).toBeNull();
   });
@@ -40,7 +44,9 @@ describe('profile pictures', () => {
         <UserAvatar username="ben" avatar="upload:123" />
       </>,
     );
-    expect(screen.getByTestId('user-avatar-preset')).toHaveAccessibleName("mia: Jonah's Whale");
+    const presetAvatar = screen.getByTestId('user-avatar-preset');
+    expect(presetAvatar).toHaveAccessibleName("mia: Jonah's Whale");
+    expect(presetAvatar.querySelector('svg')).not.toBeNull();
     expect(screen.getByRole('img', { name: 'Sam Summers' })).toHaveTextContent('SS');
     expect(await screen.findByTestId('user-avatar-photo')).toHaveAttribute('src', 'blob:photo');
     expect(apiMock.getAvatarImage).toHaveBeenCalledWith('ben');
