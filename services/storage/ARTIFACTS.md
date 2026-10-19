@@ -1,8 +1,10 @@
 # Artifact Framework: Design & Architecture
 
-> Status: Backend, library UI, admin storage page, workspace-deletion prompt and
-> TTS artifact generation implemented 2026-10-19; image/video/document generator
-> integration remains. Implementation tracked in `ARTIFACT_IMPLEMENTATION_PLAN.md`.
+> Status: Backend, library UI, admin storage page, workspace-deletion prompt,
+> TTS artifact generation and agent-loop image generation implemented 2026-10-19.
+> No dedicated video/document generator exists to wire; workspace/git files stay
+> in the workspace by design.
+> Implementation tracked in `ARTIFACT_IMPLEMENTATION_PLAN.md`.
 > Scope: Managed, lifecycle-independent artifacts produced by workspaces (TTS audio,
 > generated images, video, exported docs) that must survive workspace deletion and be
 > browsable/manageable by their owner. Git-tracked outputs stay in the workspace repo

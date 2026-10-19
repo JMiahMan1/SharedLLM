@@ -3,6 +3,7 @@ import base64
 import contextlib
 import json
 import logging
+import mimetypes
 import re
 import shlex
 import time
@@ -14,6 +15,7 @@ from typing import Any, cast
 import aiohttp
 import redis.asyncio as redis
 
+from services.gateway.artifacts import create_artifact as create_artifact_record
 from services.gateway.config import (
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
@@ -4240,6 +4242,27 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 async with shared_http_client() as _c2:
                                     _img_r = await _c2.get(_items[0]["url"])
                                     _b64 = base64.b64encode(await _img_r.read()).decode()
+                            _img_artifact = None
+                            if _b64:
+                                try:
+                                    _img_bytes = base64.b64decode(_b64)
+                                    _img_name = _img_path or "generated-image.png"
+                                    _img_artifact = await create_artifact_record(
+                                        user_context=_uc,
+                                        kind="image",
+                                        name=_img_name,
+                                        data=_img_bytes,
+                                        mime_type=mimetypes.guess_type(_img_name)[0] or "image/png",
+                                        workspace_id=_img_ws,
+                                        generator="alpaca_sd",
+                                        metadata={
+                                            "prompt": str(_img_prompt)[:2000],
+                                            "model": _img_model,
+                                            "size": _img_size,
+                                        },
+                                    )
+                                except Exception as _artifact_error:
+                                    log.warning(f"[AgentLoop] image artifact upload failed: {_artifact_error!r}")
                             if not _b64:
                                 exec_data = {"status": "ERROR", "message": f"Image generation returned no image: {_sd_data}"}
                             elif _img_ws and _img_path:
@@ -4247,10 +4270,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                     _img_ws, _img_path, _b64, _uc
                                 )
                                 if _img_status == 200:
+                                    _img_detail = dict(_img_save_data)
+                                    if _img_artifact:
+                                        _img_detail["artifact"] = _img_artifact
                                     exec_data = {
                                         "status": "SUCCESS",
                                         "message": f"Generated image saved to {_img_path} ({len(_b64)} base64 bytes).",
-                                        "detail": _img_save_data,
+                                        "detail": _img_detail,
                                     }
                                 else:
                                     exec_data = {
@@ -4261,7 +4287,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 exec_data = {
                                     "status": "SUCCESS",
                                     "message": f"Image generated ({len(_b64)} base64 bytes). Provide workspace_id + relative_path to save it to the workspace.",
-                                    "detail": {"b64_len": len(_b64)},
+                                    "detail": {
+                                        "b64_len": len(_b64),
+                                        **({"artifact": _img_artifact} if _img_artifact else {}),
+                                    },
                                 }
                         except Exception as _e:
                             exec_data = {"status": "ERROR", "message": f"Image generation failed: {_e}"}
