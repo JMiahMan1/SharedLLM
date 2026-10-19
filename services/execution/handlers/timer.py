@@ -202,6 +202,21 @@ EMOJI_SOUNDS: dict[str, dict] = {
     },
 }
 
+
+def emoji_options() -> list[dict[str, str]]:
+    """The emoji choices the timer UI can render.
+
+    Older payloads used a mapping keyed by emoji and expected a ``name`` field;
+    the entries only carry a ``label``. Building the list here keeps that shape
+    in one place and makes a missing field harmless.
+    """
+    return [
+        {"emoji": em, "label": str(meta.get("label") or meta.get("name") or em)}
+        for em, meta in EMOJI_SOUNDS.items()
+        if isinstance(meta, dict)
+    ]
+
+
 # Selectable alarm songs and noises
 ALARM_SOUNDS: dict[str, dict] = {
     "classic_alarm": {

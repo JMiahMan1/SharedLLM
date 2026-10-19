@@ -13,6 +13,7 @@ earlier sync is removed as an orphan on the next one.
 
 import asyncio
 
+from services.common.entity_ids import ENTITY_ID_MAX_LENGTH
 from services.rag import db
 from services.rag import main as rag_main
 from services.rag.store import NumpyVecAdapter
@@ -97,7 +98,7 @@ def test_a_previously_stored_poisoned_row_is_removed_as_an_orphan(tmp_path):
 def test_a_long_but_legitimate_entity_id_is_kept(tmp_path):
     conn = _install(tmp_path)
     long_id = "sensor." + "a" * 190
-    assert len(long_id) <= rag_main._ENTITY_ID_MAX_LENGTH
+    assert len(long_id) <= ENTITY_ID_MAX_LENGTH
 
     result = _sync({"entities": [{"entity_id": long_id, "attributes": {}}]})
 

@@ -60,6 +60,8 @@ describe('AmbientTimerWidget', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setInterval'] });
     vi.clearAllMocks();
+    (api.getTimerDevices as ReturnType<typeof vi.fn>).mockResolvedValue({ devices: [] });
+    (api.getEntities as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -458,8 +460,62 @@ describe('AmbientTimerWidget', () => {
     const select = screen.getByRole('combobox') as HTMLSelectElement;
     expect(select.options.length).toBe(3);
     expect(select.options[0].text).toBe('No alert (silent)');
-    expect(select.options[1].text).toMatch(/^Kitchen Speaker\s*$/);
-    expect(select.options[2].text).toBe('Living Room (idle)');
+    expect(select.options[1].text).toBe('Kitchen Speaker');
+    expect(select.options[2].text).toBe('Living Room');
+  });
+
+  it('uses the classified timer devices instead of raw media players', async () => {
+    (api.getTimerDevices as ReturnType<typeof vi.fn>).mockResolvedValue({
+      devices: [
+        {
+          id: 'media_player.office_tv',
+          name: 'Office TV',
+          kind: 'tv',
+          has_speaker: true,
+          has_screen: true,
+          state: 'idle',
+        },
+        {
+          id: 'esphome:watch',
+          name: 'Jarvis Watch',
+          kind: 'watch',
+          has_speaker: false,
+          has_screen: true,
+        },
+      ],
+    });
+    (api.getEntities as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        entity_id: 'media_player.' + ('id_1_username_default_display_name_'.repeat(34)),
+        friendly_name: '{"id":1,"username":"default"}',
+        state: 'unavailable',
+        domain: 'media_player',
+      },
+      { entity_id: 'media_player.office_tv_cast', friendly_name: 'Office TV Cast', state: 'idle', domain: 'media_player' },
+    ]);
+    (api.getTimers as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    renderWithProviders(
+      <AmbientTimerWidget
+        userSettings={mockWidgetSettings}
+        onTogglePin={vi.fn()}
+        settingsButton={null}
+      />
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
+    }, { timeout: 3000 });
+
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    expect(Array.from(select.options, (option) => option.text)).toEqual([
+      'No alert (silent)',
+      'Office TV',
+    ]);
   });
 
   it('passes target_device when creating timer with device selected', async () => {

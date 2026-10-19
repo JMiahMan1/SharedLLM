@@ -196,20 +196,40 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
     for (const dev of availableDevices) {
       map.set(dev.id, dev);
     }
-    for (const mp of mediaPlayers) {
-      if (!map.has(mp.entity_id)) {
-        map.set(mp.entity_id, {
-          id: mp.entity_id,
-          name: mp.friendly_name,
-          kind: 'ha_media_player',
-          has_speaker: true,
-          has_screen: false,
-          state: mp.state,
-        });
+    // The timer-devices endpoint already classifies and de-duplicates HA
+    // players. Only fall back to the raw entity list when it returned nothing
+    // (for example while the execution service is unavailable); otherwise the
+    // dropdown would show wrapper entities, unavailable devices and duplicates
+    // the classifier deliberately removed.
+    if (availableDevices.length === 0) {
+      for (const mp of mediaPlayers) {
+        if (!map.has(mp.entity_id)) {
+          map.set(mp.entity_id, {
+            id: mp.entity_id,
+            name: mp.friendly_name,
+            kind: 'ha_media_player',
+            has_speaker: true,
+            has_screen: false,
+            state: mp.state,
+          });
+        }
       }
     }
     return Array.from(map.values());
   }, [availableDevices, mediaPlayers]);
+
+  const alertTargets = useMemo(
+    () => allTargets.filter((dev) => {
+      const state = (dev.state || '').toLowerCase();
+      // The phone rings through the app alarm, not this speaker dropdown; it
+      // stays available in the multi-select above.
+      return dev.id !== 'phone'
+        && dev.has_speaker
+        && state !== 'unavailable'
+        && state !== 'unknown';
+    }),
+    [allTargets],
+  );
 
   const fetchTimers = useCallback(async () => {
     try {
@@ -942,7 +962,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
           </button>
         </div>
 
-        {mediaPlayers.length > 0 && (
+        {alertTargets.length > 0 && (
           <div className="flex items-center gap-2">
             {selectedDevice ? <Bell size={14} className="text-purple-400 shrink-0" /> : <BellOff size={14} className="text-slate-500 shrink-0" />}
             <span className="text-xs text-slate-400">Alert via</span>
@@ -955,9 +975,9 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
               className="glass-input flex-1 px-3 py-2 text-sm min-w-0"
             >
               <option value="">No alert (silent)</option>
-              {mediaPlayers.map((p) => (
-                <option key={p.entity_id} value={p.entity_id}>
-                  {p.friendly_name} {p.state !== 'playing' ? `(${p.state})` : ''}
+              {alertTargets.map((dev) => (
+                <option key={dev.id} value={dev.id}>
+                  {dev.name}
                 </option>
               ))}
             </select>

@@ -24,16 +24,17 @@ import logging
 import os
 import time
 import traceback
-import urllib.request
 import urllib.error
-import redis
+import urllib.request
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
+import redis
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from services.common.entity_ids import usable_entity_id as _usable_entity_id
 from services.config import INTERNAL_SECRET
 from services.rag import db
 from services.rag.schemas import IngestRequest, SearchRequest, SearchResponse, SearchResultItem
@@ -2153,36 +2154,6 @@ async def maintenance_endpoint(payload: dict):
 
 
 # Home Assistant sync
-
-_ENTITY_ID_MAX_LENGTH = 255
-
-
-def _usable_entity_id(entity_id: object) -> bool:
-    """Whether an id still has the ``domain.object_id`` shape HA guarantees.
-
-    The live index carried two entries whose id was a serialized user record
-    roughly 1,100 characters long (display name, URLs, e-mail addresses):
-    Home Assistant accepted it because anything can be registered, and this
-    service indexed it verbatim. Those entries also set the padded batch
-    length for every text they travelled with, which is what drove a single
-    embed call from 1,905 MiB to 5,654 MiB and OOM-killed the container. A
-    malformed id is therefore refused at the boundary rather than stored, and
-    length is the discriminator that needs no charset opinion: real ids are
-    well under this bound, while the offending entries were two orders of
-    magnitude over it.
-    """
-    if not isinstance(entity_id, str):
-        return False
-    if not 0 < len(entity_id) <= _ENTITY_ID_MAX_LENGTH:
-        return False
-    if entity_id.count(".") != 1:
-        return False
-    domain, dot, object_id = entity_id.partition(".")
-    if not dot or not domain or not object_id:
-        return False
-    if " " in entity_id:
-        return False
-    return domain.islower() and domain.replace("_", "").isalnum()
 
 
 def _ha_item_id(user_id: str, entity_id: str) -> str:
