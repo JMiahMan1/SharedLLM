@@ -11,9 +11,6 @@ Re-checked 2026-10-15 and still present. About 80 medium/low findings from
 that review were not re-checked one by one; the full list is in git history
 (`docs/code_review_2026-08-22.md`, removed in the 2026-10-15 cleanup).
 
-- **Tracebacks to clients**: the gateway's global exception handler returns
-  `detail` and the full `traceback` in the 500 body
-  (`services/gateway/main.py`, `global_exception_handler`).
 - **Workspace tests**: the Docker reachability test is marked `local_only`
   and skips when no daemon is available; CI does not require the host socket
   (W1).
@@ -47,24 +44,6 @@ operator has changed.
 `services/logging/main.py` resolves runtime configuration at startup and
 assigns `LOG_RETENTION_DAYS` / `LOG_MAX_ENTRIES` from the resolved settings.
 The retention and max entry settings now take effect.
-
-## Artifact framework (`services/storage`): generator wiring remains
-
-The local provider, artifact/quota database, API, signed range streaming,
-24-hour soft delete, purge loop, gateway proxies, Artifact library, admin
-Storage page, and the workspace-deletion 409 prompt (delete or orphan) are
-implemented. Still open:
-
-- TTS outputs now create artifacts: `/execute/tts`, Nextcloud
-  `storage_text_to_audio`, and podcast renders. Image generation from the
-  agent loop (`ImageGenerationRequest`) also creates one. There is still no
-  dedicated video or document generator to wire; files Raven writes into a
-  workspace intentionally stay in the workspace/git rather than becoming
-  lifecycle-independent artifacts.
-- The local quota default comes from the Identity
-  `artifact_local_quota_bytes` setting (5 GiB seed); per-user overrides live in
-  `UserStorageQuota`. There is no hardcoded fallback: if the setting is missing
-  or zero, artifact writes fail with a clear 503 configuration error.
 
 ## Raven capability gaps
 
