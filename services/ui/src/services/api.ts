@@ -2399,6 +2399,20 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * Run a Music Assistant JSON-RPC command for a remote speaker.
+   *
+   * Remote `ma:<id>` players go through the gateway so the browser's Sendspin
+   * player stays stopped; only "This device" playback uses it.
+   */
+  async mediaMaCommand(payload: {
+    command: string;
+    args?: Record<string, unknown>;
+  }): Promise<{ status: string; result?: unknown; message?: string }> {
+    const resp = await apiClient.post('/api/media/ma-command', payload);
+    return resp.data;
+  },
+
   async mediaStatus(): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/execute/media/status', {});
     return resp.data;

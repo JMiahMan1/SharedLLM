@@ -8,6 +8,7 @@ import { renderWithProviders } from './render';
 // audiobook play path goes through it, so the stubs are the assertion surface.
 const maCommand = vi.fn().mockResolvedValue(undefined);
 const webPlay = vi.fn().mockResolvedValue(undefined);
+const connect = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../context/MediaPlayerContext', () => ({
   useSharedMAWebPlayer: () => ({
@@ -18,7 +19,7 @@ vi.mock('../context/MediaPlayerContext', () => ({
     mediaUri: null,
     mediaFavorite: false,
     position: 0,
-    connect: vi.fn().mockResolvedValue(undefined),
+    connect,
     reconnect: vi.fn(),
     play: webPlay,
     pause: vi.fn().mockResolvedValue(undefined),
@@ -59,6 +60,8 @@ const IDLE = {
 
 /** Capture what the browser asks the gateway to resolve. */
 let resolveCalls: Array<{ abs_item_id: string; title: string }> = [];
+/** Commands the page sends to the remote MA speaker through the gateway. */
+let remoteCalls: Array<{ command: string; args: Record<string, unknown> }> = [];
 
 /**
  * Select a device, then click the audiobook's play button.
@@ -80,7 +83,9 @@ beforeEach(async () => {
   userEvent = (await import('@testing-library/user-event')).default;
   maCommand.mockClear();
   webPlay.mockClear();
+  connect.mockClear();
   resolveCalls = [];
+  remoteCalls = [];
   server.use(
     http.post('/execute/media/status', () => HttpResponse.json(IDLE)),
     http.get('/api/entities', () => HttpResponse.json({ entities: [] })),
@@ -101,6 +106,10 @@ beforeEach(async () => {
       HttpResponse.json({ status: 'SUCCESS', playlists: [] })
     ),
     http.get('/api/admin/logs', () => HttpResponse.json([])),
+    http.post('/api/media/ma-command', async ({ request }) => {
+      remoteCalls.push((await request.json()) as { command: string; args: Record<string, unknown> });
+      return HttpResponse.json({ status: 'SUCCESS', result: [] });
+    }),
     http.post('/api/media/ma-library-uri', async ({ request }) => {
       const body = (await request.json()) as { abs_item_id: string; title: string };
       resolveCalls.push(body);
@@ -119,8 +128,8 @@ describe('Media page: playing an audiobook on a Music Assistant player', () => {
     renderWithProviders(<Media />);
     await playOnMaPlayer('Narnia');
 
-    await waitFor(() => expect(maCommand).toHaveBeenCalled());
-    const [command, args] = maCommand.mock.calls[0];
+    await waitFor(() => expect(remoteCalls).toHaveLength(1));
+    const [{ command, args }] = remoteCalls;
     expect(command).toBe('player_queues/play_media');
 
     // The original bug: MA was handed `audiobookshelf://<uuid>`, which it has no
@@ -128,6 +137,9 @@ describe('Media page: playing an audiobook on a Music Assistant player', () => {
     const sent = JSON.stringify(args);
     expect(sent).not.toContain('audiobookshelf://');
     expect(sent).toContain('library://audiobook/260');
+    // A remote speaker is not this browser: no Sendspin player.
+    expect(connect).not.toHaveBeenCalled();
+    expect(maCommand).not.toHaveBeenCalled();
   });
 
   it('asks for the bare Audiobookshelf item id, with the title to search by', async () => {
@@ -144,8 +156,8 @@ describe('Media page: playing an audiobook on a Music Assistant player', () => {
     renderWithProviders(<Media />);
     await playOnMaPlayer('Narnia');
 
-    await waitFor(() => expect(maCommand).toHaveBeenCalled());
-    const args = maCommand.mock.calls[0][1];
+    await waitFor(() => expect(remoteCalls).toHaveLength(1));
+    const { args } = remoteCalls[0];
     expect(Array.isArray(args.media)).toBe(true);
     expect(args.media).toEqual(['library://audiobook/260']);
   });
@@ -167,7 +179,9 @@ describe('Media page: playing an audiobook on a Music Assistant player', () => {
 
     // Nothing is sent to MA; a fallback URI would reproduce the original bug.
     await waitFor(() => expect(resolveCalls).toHaveLength(1));
+    expect(remoteCalls).toHaveLength(0);
     expect(maCommand).not.toHaveBeenCalled();
+    expect(connect).not.toHaveBeenCalled();
     expect(webPlay).not.toHaveBeenCalled();
   });
 });
