@@ -363,6 +363,11 @@ const Workspaces = () => {
   const isAdmin = user?.is_admin ?? false;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingWs, setEditingWs] = useState<Workspace | null>(null);
+  const [deleteArtifactPrompt, setDeleteArtifactPrompt] = useState<{
+    id: string;
+    name: string;
+    count: number;
+  } | null>(null);
   const [ideWs, setIdeWs] = useState<Workspace | null>(null);
   const [ideInitialPath, setIdeInitialPath] = useState<string | null>(null);
   const [ideSession, setIdeSession] = useState<WorkspaceSession | null>(null);
@@ -464,12 +469,27 @@ const Workspaces = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.deleteWorkspace(id),
+    mutationFn: ({ id, deleteArtifacts }: { id: string; deleteArtifacts?: boolean }) =>
+      api.deleteWorkspace(id, deleteArtifacts),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workspaces'] });
       toast.success('Workspace deleted');
     },
-    onError: (err: Error) => toast.error(err.message || 'Failed to delete workspace'),
+    onError: (err: Error, variables) => {
+      const response = (err as Error & {
+        response?: { data?: { needs_confirmation?: boolean; artifact_count?: number } };
+      }).response?.data;
+      if (response?.needs_confirmation) {
+        const ws = workspaces.find((item) => item.id === variables.id);
+        setDeleteArtifactPrompt({
+          id: variables.id,
+          name: ws?.display_name || variables.id,
+          count: Number(response.artifact_count || 0),
+        });
+        return;
+      }
+      toast.error(err.message || 'Failed to delete workspace');
+    },
   });
 
   const pullMutation = useMutation({
@@ -744,7 +764,7 @@ const Workspaces = () => {
                           <button
                             onClick={() => {
                               if (confirm(`Delete ${ws.display_name}? Its registration and sandbox are removed.`)) {
-                                deleteMutation.mutate(ws.id);
+                                deleteMutation.mutate({ id: ws.id });
                               }
                             }}
                             className={`${ICON_BUTTON} text-slate-500 hover:text-red-400 hover:bg-red-500/10`}
@@ -1313,6 +1333,49 @@ const Workspaces = () => {
               className="glass-button flex-1 py-3 bg-indigo-600/30 border-indigo-500/30 text-indigo-300 font-bold"
             >
               {saveMutation.isPending ? 'Saving...' : 'Save Workspace'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(deleteArtifactPrompt)}
+        onClose={() => setDeleteArtifactPrompt(null)}
+        title="Workspace has saved artifacts"
+        size="md"
+      >
+        <div className="space-y-5">
+          <p className="text-sm text-slate-300">
+            {deleteArtifactPrompt?.name} has {deleteArtifactPrompt?.count ?? 0} saved artifact
+            {deleteArtifactPrompt?.count === 1 ? '' : 's'}. Deleting the workspace does not have to
+            delete them.
+          </p>
+          <div className="space-y-2">
+            <button
+              onClick={() => {
+                const prompt = deleteArtifactPrompt;
+                setDeleteArtifactPrompt(null);
+                if (prompt) deleteMutation.mutate({ id: prompt.id, deleteArtifacts: true });
+              }}
+              className="glass-button w-full py-3 border-red-500/30 bg-red-500/10 text-red-300 font-bold"
+            >
+              Delete workspace and artifacts
+            </button>
+            <button
+              onClick={() => {
+                const prompt = deleteArtifactPrompt;
+                setDeleteArtifactPrompt(null);
+                if (prompt) deleteMutation.mutate({ id: prompt.id, deleteArtifacts: false });
+              }}
+              className="glass-button w-full py-3"
+            >
+              Delete workspace, keep artifacts in library
+            </button>
+            <button
+              onClick={() => setDeleteArtifactPrompt(null)}
+              className="glass-button w-full py-3"
+            >
+              Cancel
             </button>
           </div>
         </div>

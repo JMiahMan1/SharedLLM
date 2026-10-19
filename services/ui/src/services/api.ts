@@ -1626,8 +1626,10 @@ export const api = {
     return resp.data.workspace;
   },
 
-  async deleteWorkspace(id: string): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.delete(`/api/workspaces/${id}`);
+  async deleteWorkspace(id: string, deleteArtifacts?: boolean): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.delete(`/api/workspaces/${id}`, {
+      data: deleteArtifacts === undefined ? undefined : { delete_artifacts: deleteArtifacts },
+    });
     return resp.data;
   },
 

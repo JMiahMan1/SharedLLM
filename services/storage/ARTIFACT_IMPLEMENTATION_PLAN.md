@@ -4,9 +4,9 @@ Phased, actionable plan for the Artifact Framework (extends the `storage` servic
 Design spec: `ARTIFACTS.md`. Branch: `microservices`. CI must pass before deploy.
 
 > **Status (2026-10-19):** the local provider, artifact/quota database, API,
-> signed-range streaming, purge loop, gateway proxies, user Artifact library
-> and admin Storage page are implemented. Remaining work is generator wiring
-> (TTS/image/video/document) and the workspace-deletion artifact prompt.
+> signed-range streaming, purge loop, gateway proxies, user Artifact library,
+> admin Storage page and the workspace-deletion artifact prompt are implemented.
+> Remaining work is generator wiring (TTS/image/video/document).
 > All implementation tasks are tracked in [docs/PENDING_TASKS.md](../../docs/PENDING_TASKS.md).
 > They were consolidated there so this file stays a lightweight index.
 

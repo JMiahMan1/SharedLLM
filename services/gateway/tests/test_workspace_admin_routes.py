@@ -36,6 +36,18 @@ def _client_as(monkeypatch, ident):
     return TestClient(app, headers=headers, raise_server_exceptions=False)
 
 
+@pytest.fixture(autouse=True)
+def workspace_artifact_actions(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    async def _action(workspace_id: str, action: str) -> dict:
+        calls.append((workspace_id, action))
+        return {"action": action, "artifact_count": 0, "deleted": 0, "orphaned": 0}
+
+    monkeypatch.setattr(gateway_main, "_artifact_workspace_action", _action)
+    return calls
+
+
 @pytest.mark.parametrize("verb,path,body", WRITES, ids=[f"{v} {p}" for v, p, _ in WRITES])
 def test_anonymous_callers_cannot_change_workspaces(monkeypatch, runtime_upstream, verb, path, body):
     resp = _call(_client_as(monkeypatch, None), verb, path, body)
@@ -117,3 +129,31 @@ def test_services_with_the_internal_secret_may_clean_up(monkeypatch, runtime_ups
     client = _client_as(monkeypatch, None)
     resp = client.delete("/api/workspaces/w1", headers={"X-Internal-Secret": gateway_main.INTERNAL_SECRET})
     assert resp.status_code == 200, resp.text
+
+
+def test_deleting_a_workspace_with_artifacts_asks_what_to_do(
+    monkeypatch, runtime_upstream, workspace_artifact_actions
+):
+    async def _counted(workspace_id: str, action: str) -> dict:
+        workspace_artifact_actions.append((workspace_id, action))
+        if action == "count":
+            return {"action": "count", "artifact_count": 2}
+        return {"action": action, "deleted": 2, "orphaned": 2}
+
+    monkeypatch.setattr(gateway_main, "_artifact_workspace_action", _counted)
+    client = _client_as(monkeypatch, {"user": "root", "is_admin": True})
+
+    needs_choice = client.delete("/api/workspaces/w1")
+    assert needs_choice.status_code == 409
+    assert needs_choice.json()["needs_confirmation"] is True
+    assert needs_choice.json()["artifact_count"] == 2
+    assert "url" not in runtime_upstream, "the workspace was deleted before the user chose"
+    assert workspace_artifact_actions == [("w1", "count")]
+
+    keep = client.request("DELETE", "/api/workspaces/w1", json={"delete_artifacts": False})
+    assert keep.status_code == 200, keep.text
+    assert workspace_artifact_actions[-1] == ("w1", "orphan")
+
+    remove = client.request("DELETE", "/api/workspaces/w1", json={"delete_artifacts": True})
+    assert remove.status_code == 200, remove.text
+    assert workspace_artifact_actions[-1] == ("w1", "delete")

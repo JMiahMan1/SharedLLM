@@ -35,6 +35,10 @@ class HardDeleteRequest(BaseModel):
     confirm_phrase: str = ""
 
 
+class WorkspaceArtifactRequest(BaseModel):
+    action: str
+
+
 def require_internal_secret(
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
 ) -> None:
@@ -135,6 +139,28 @@ def list_artifacts(
         limit=limit,
         offset=offset,
     )
+
+
+@router.post("/artifacts/workspace/{workspace_id}")
+def workspace_artifacts(
+    workspace_id: str,
+    request: WorkspaceArtifactRequest,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+) -> dict:
+    """Count, delete, or orphan a workspace's artifacts during deletion.
+
+    Only the gateway calls this, after it has checked that the caller may
+    administer the workspace.
+    """
+    require_internal_secret(x_internal_secret)
+    action = (request.action or "").strip().lower()
+    if action == "count":
+        return {"action": "count", "artifact_count": store.workspace_artifact_count(workspace_id)}
+    if action == "delete":
+        return {"action": "delete", "deleted": store.delete_workspace_artifacts(workspace_id)}
+    if action == "orphan":
+        return {"action": "orphan", "orphaned": store.orphan_workspace_artifacts(workspace_id)}
+    raise HTTPException(status_code=400, detail=f"Unsupported workspace artifact action: {request.action}")
 
 
 @router.get("/artifacts/{artifact_id}")

@@ -5632,9 +5632,53 @@ async def update_workspace_proxy(workspace_id: str, request: Request):
     await _require_workspace_admin(request)
     return await _proxy_workspace_runtime_json("PATCH", f"/workspaces/{workspace_id}", request)
 
+async def _artifact_workspace_action(workspace_id: str, action: str) -> dict:
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{STORAGE_SVC}/artifacts/workspace/{workspace_id}",
+            json={"action": action},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=30.0),
+        )
+        data = await resp.json()
+        if resp.status != 200:
+            detail = data.get("detail") if isinstance(data, dict) else None
+            raise HTTPException(status_code=resp.status, detail=detail or "Storage service error")
+        return data
+
+
 @app.delete("/api/workspaces/{workspace_id}")
 async def delete_workspace_proxy(workspace_id: str, request: Request):
     await _require_workspace_admin(request)
+    raw = await request.body()
+    try:
+        body = json.loads(raw) if raw else {}
+    except ValueError:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    delete_artifacts = body.get("delete_artifacts")
+    if delete_artifacts is None:
+        count = int((await _artifact_workspace_action(workspace_id, "count")).get("artifact_count") or 0)
+        if count:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "status": "ERROR",
+                    "detail": (
+                        f"This workspace has {count} artifact{'s' if count != 1 else ''}. "
+                        "Choose whether to delete them or keep them in the artifact library."
+                    ),
+                    "artifact_count": count,
+                    "needs_confirmation": True,
+                },
+            )
+    elif delete_artifacts:
+        await _artifact_workspace_action(workspace_id, "delete")
+    else:
+        await _artifact_workspace_action(workspace_id, "orphan")
+
     return await _proxy_workspace_runtime_json("DELETE", f"/workspaces/{workspace_id}")
 
 @app.post("/api/workspaces/files/read")

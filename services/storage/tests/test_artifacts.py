@@ -185,3 +185,58 @@ def test_signed_stream_rejects_a_tampered_or_expired_token(client):
     tampered = token_url[:-1] + ("0" if token_url[-1] != "0" else "1")
     assert client.get(tampered).status_code == 403
     assert client.get(f"/artifacts/{created['id']}/stream").status_code == 403
+
+
+def test_workspace_artifacts_can_be_counted_orphaned_and_deleted(client):
+    def create(name: str, workspace_id: str) -> dict:
+        response = client.post(
+            "/artifacts",
+            headers=_headers(),
+            json={
+                "name": name,
+                "kind": "document",
+                "workspace_id": workspace_id,
+                "content_b64": base64.b64encode(name.encode()).decode(),
+            },
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    kept_a = create("a.txt", "ws-keep")
+    kept_b = create("b.txt", "ws-keep")
+    gone_a = create("c.txt", "ws-gone")
+    gone_b = create("d.txt", "ws-gone")
+
+    counted = client.post(
+        "/artifacts/workspace/ws-keep",
+        headers=_headers(),
+        json={"action": "count"},
+    )
+    assert counted.status_code == 200
+    assert counted.json()["artifact_count"] == 2
+
+    orphaned = client.post(
+        "/artifacts/workspace/ws-keep",
+        headers=_headers(),
+        json={"action": "orphan"},
+    )
+    assert orphaned.status_code == 200
+    assert orphaned.json()["orphaned"] == 2
+    assert client.get(f"/artifacts/{kept_a['id']}", headers=_headers()).json()["is_attached"] is False
+    assert client.get(f"/artifacts/{kept_b['id']}", headers=_headers()).json()["is_attached"] is False
+    assert client.post(
+        "/artifacts/workspace/ws-keep",
+        headers=_headers(),
+        json={"action": "count"},
+    ).json()["artifact_count"] == 0
+
+    deleted = client.post(
+        "/artifacts/workspace/ws-gone",
+        headers=_headers(),
+        json={"action": "delete"},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] == 2
+    assert client.get(f"/artifacts/{gone_a['id']}", headers=_headers()).status_code == 404
+    assert client.get(f"/artifacts/{gone_b['id']}", headers=_headers()).status_code == 404
+    assert client.get(f"/artifacts/{kept_a['id']}", headers=_headers()).status_code == 200
