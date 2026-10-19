@@ -158,3 +158,19 @@ def test_resolve_without_the_internal_secret_never_returns_the_admin(session: Se
     for resp in (missing, wrong):
         assert "default" not in resp.text
         assert "is_admin" not in resp.text
+
+
+def test_anonymous_request_returns_a_non_admin_identity(client: TestClient):
+    resp = _resolve(client, {"anonymous": True})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["user"] == "anonymous"
+    assert body["is_admin"] is False
+    assert body["api_key"] is None
+    assert body["ha_token"] is None
+
+
+def test_anonymous_flag_does_not_hide_an_unknown_credential(client: TestClient):
+    resp = _resolve(client, {"anonymous": True, "api_key": "totally-bogus-key"})
+    assert resp.status_code == 401
+    assert resp.json() == {"detail": "Invalid credentials"}

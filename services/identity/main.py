@@ -711,6 +711,9 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             log.warning("[resolve] Presented identity did not match a user; refusing system-default fallback")
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
+        if req.anonymous:
+            return ResolvedCredentials(user="anonymous", is_admin=False)
+
         log.warning("[resolve] No resolution path matched, falling back to system default")
         # Fallback to system account (ID 1)
         user = session.exec(select(User).where(User.id == 1)).first()
