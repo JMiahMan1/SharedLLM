@@ -1,32 +1,37 @@
-import os
-import sys
-from unittest.mock import MagicMock
+import json
 
-# Mock Redis before importing anything that uses it
-_mock_redis_async = MagicMock()
-_mock_redis = MagicMock()
-_mock_redis.asyncio = _mock_redis_async
-sys.modules['redis'] = _mock_redis
-sys.modules['redis.asyncio'] = _mock_redis_async
+from fastapi.testclient import TestClient
 
-
-import json  # noqa: E402
-
-from fastapi.testclient import TestClient  # noqa: E402
-
-from services.gateway.main import app  # noqa: E402
+from services.gateway.main import app
 
 client = TestClient(app)
-
-# Use a mutable object to capture the request body across respx callbacks
 _capture = {"body": None}
+
 
 def test_gateway_extracts_bearer_token(monkeypatch):
     """
     Test that the Gateway extracts the Bearer token from the Authorization header
     and passes it to the Identity service's /api/resolve endpoint.
     """
-    from services.gateway import main
+    from services.gateway import cache as gateway_cache, history as gateway_history, main
+
+    class FakeRedis:
+        def getdel(self, key): return None
+        def lrange(self, key, start, end): return []
+        def rpush(self, key, *values): return len(values)
+        def ltrim(self, key, start, end): return True
+        def expire(self, key, seconds): return True
+        def get(self, key): return None
+        def setex(self, key, ttl, value): return True
+        def delete(self, key): return 0
+        def hgetall(self, key): return {}
+        def hset(self, *args, **kwargs): return 1
+        def ping(self): return True
+
+    fake = FakeRedis()
+    monkeypatch.setattr(gateway_cache, "get_redis", lambda: fake)
+    monkeypatch.setattr(gateway_history, "get_redis", lambda: fake)
+
     class MockIdentityResp:
         def __init__(self, payload, status=200):
             self._payload = payload
