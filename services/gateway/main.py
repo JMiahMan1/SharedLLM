@@ -108,6 +108,7 @@ from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, S
 from services.gateway.skylight_scope import ChoreScopeError, resolve_chore_scope
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas, tool_catalog
 from services.gateway.external_agent import run_external_agent
+from services.common.entity_ids import usable_entity_id
 from services.common.relay import until_either_ends
 from services.gateway import calls, drawing, family_safety, network_routes, notices, push_routes
 from services.shared import ma_library
@@ -2626,7 +2627,13 @@ async def get_entities(request: Request):
         if resp.status != 200:
             return {"entities": []}
         data = await resp.json()
-        entities = data.get("entities", [])
+        # Home Assistant accepts almost anything as an entity id. One install
+        # carried a media_player whose id was a serialized user record; it
+        # should never reach a dropdown (or a caller's log).
+        entities = [
+            e for e in data.get("entities", [])
+            if usable_entity_id(e.get("entity_id"))
+        ]
         # Return lightweight format for UI dropdown
         return {
             "entities": [

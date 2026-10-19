@@ -1194,10 +1194,7 @@ async def list_timer_devices(user_id: str | None = None):
         "status": "SUCCESS",
         "devices": devices,
         "sounds": timer.ALARM_SOUNDS,
-        "emojis": {
-            em: {"name": meta["name"], "label": meta["label"]}
-            for em, meta in timer.EMOJI_SOUNDS.items()
-        },
+        "emojis": timer.emoji_options(),
     }
 
 

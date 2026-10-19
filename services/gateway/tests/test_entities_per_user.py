@@ -6,7 +6,7 @@ credentials at all, so the execution service fell back to the system default
 Assistant. The caller must now be authenticated, their own credentials must be
 forwarded, and an unconfigured user must get a loud failure naming them.
 """
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from services.gateway import main as gateway_main
 
@@ -63,6 +63,24 @@ def test_entities_forward_the_callers_home_assistant(client, fake_identity):
     assert params == {"ha_url": fake_identity["ha_url"], "ha_token": fake_identity["ha_token"]}
 
 
+def test_malformed_entity_ids_never_reach_a_dropdown(client):
+    poison = "media_player." + ("id_1_username_default_display_name_" * 34)
+    fake_client = _Client(data={"entities": [
+        {"entity_id": "media_player.kitchen", "state": "idle", "attributes": {}},
+        {"entity_id": poison, "state": "unavailable", "attributes": {}},
+        {"entity_id": "light.kitchen", "state": "on", "attributes": {}},
+    ]})
+
+    with patch.object(gateway_main, "get_http_client", return_value=fake_client):
+        resp = client.get("/api/entities")
+
+    assert resp.status_code == 200
+    assert [e["entity_id"] for e in resp.json()["entities"]] == [
+        "media_player.kitchen",
+        "light.kitchen",
+    ]
+
+
 def test_entities_fail_loudly_for_a_user_without_home_assistant(client, monkeypatch):
     async def _resolve(body):
         return {"user": "casey", "username": "casey", "is_admin": False, "ha_url": None, "ha_token": None}
@@ -82,7 +100,7 @@ def test_entities_fail_loudly_for_a_user_without_home_assistant(client, monkeypa
 
 
 def test_entities_require_authentication(client, monkeypatch):
-    from fastapi import HTTPException  # noqa: F401  (documents the raised type)
+    from fastapi import HTTPException
 
     async def _deny(request):
         raise HTTPException(status_code=401, detail="Authentication required")
