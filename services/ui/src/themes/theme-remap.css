@@ -84,6 +84,7 @@
 [data-site-theme-active] .hover\:bg-indigo-600\/50:hover { background-color: color-mix(in srgb, var(--site-accent) 50%, transparent) !important; }
 [data-site-theme-active] .hover\:bg-purple-500:hover { background-color: var(--site-accent) !important; }
 [data-site-theme-active] .hover\:bg-purple-500\/10:hover { background-color: color-mix(in srgb, var(--site-accent) 10%, transparent) !important; }
+[data-site-theme-active] .hover\:bg-purple-500\/15:hover { background-color: color-mix(in srgb, var(--site-accent) 15%, transparent) !important; }
 [data-site-theme-active] .hover\:bg-purple-500\/20:hover { background-color: color-mix(in srgb, var(--site-accent) 20%, transparent) !important; }
 [data-site-theme-active] .hover\:bg-purple-500\/25:hover { background-color: color-mix(in srgb, var(--site-accent) 25%, transparent) !important; }
 [data-site-theme-active] .hover\:bg-purple-500\/30:hover { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
@@ -269,6 +270,7 @@
 [data-theme-scheme="light"] .hover\:text-blue-300:hover { color: oklch(48.8% 0.243 264.376) !important; }
 [data-theme-scheme="light"] .hover\:text-blue-400:hover { color: oklch(48.8% 0.243 264.376) !important; }
 [data-theme-scheme="light"] .hover\:text-cyan-200:hover { color: oklch(52% 0.105 223.128) !important; }
+[data-theme-scheme="light"] .hover\:text-cyan-300:hover { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .hover\:text-cyan-400:hover { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .hover\:text-emerald-300:hover { color: oklch(50.8% 0.118 165.612) !important; }
 [data-theme-scheme="light"] .hover\:text-emerald-400:hover { color: oklch(50.8% 0.118 165.612) !important; }
@@ -301,6 +303,7 @@
 [data-theme-scheme="light"] .text-amber-500\/80 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-blue-300 { color: oklch(48.8% 0.243 264.376) !important; }
 [data-theme-scheme="light"] .text-blue-400 { color: oklch(48.8% 0.243 264.376) !important; }
+[data-theme-scheme="light"] .text-cyan-200 { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .text-cyan-300 { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .text-cyan-400 { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .text-emerald-100 { color: oklch(50.8% 0.118 165.612) !important; }
