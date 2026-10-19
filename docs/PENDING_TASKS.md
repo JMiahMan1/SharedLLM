@@ -89,8 +89,8 @@ TTS/image/video wiring, and the Storage / Artifacts UI pages.
 
 ## Media player
 
-- The device picker highlights "Web Player" from `!selectedTarget` rather than
-  `localMode`.
+- The web player picker uses the empty target for this device; no separate
+  `localMode` state is needed.
 - Background playback stops when the app is swiped away from recents (the
   WebView is destroyed). Surviving that needs a native audio player.
 - The remaining phases of `docs/MEDIA_OVERHAUL.md`.
