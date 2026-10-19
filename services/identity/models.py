@@ -486,7 +486,11 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "system_log_level", "value": "INFO", "description": "Global log level for all Jarvis OS services"},
     {"key": "system_name", "value": "Jarvis OS", "description": "The displayed name of this system"},
     {"key": "rag_sync_interval", "value": "3600", "description": "Frequency in seconds for RAG background re-indexing"},
-    {"key": "workspace_runtime_root", "value": "/workspaces", "description": "Root folder where workspaces and files will be saved"},
+    {"key": "workspace_root", "value": "", "description": "Root folder where the execution service reads and writes workspaces. Seeded from .env WORKSPACE_ROOT. Normally the same host directory as workspace_runtime_root."},
+    {"key": "workspace_runtime_root", "value": "/workspaces", "description": "Root folder where the workspace runtime service reads and writes workspaces (git, terminal, files). Kept separate from workspace_root because each service has its own mount; both normally point at the same host directory."},
+    {"key": "models_dir", "value": "", "description": "Directory for downloaded models, including Kokoro TTS. Seeded from .env MODELS_DIR."},
+    {"key": "announcement_blacklist", "value": "", "description": "Comma-separated announcement names or phrases that must not be spoken. Seeded from .env ANNOUNCEMENT_BLACKLIST."},
+    {"key": "gateway_internal_url", "value": "", "description": "Internal URL of the gateway for service-to-service calls. Seeded from .env GATEWAY_INTERNAL_URL; empty leaves each service's own fallback in place."},
 
     # --- LLM CONFIGURATION (UI MANAGED) ---
     {"key": "active_llm_provider", "value": "ollama", "description": "Active LLM Compute Engine (ollama, openrouter, openai)"},
@@ -562,7 +566,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "timezone", "value": "America/Phoenix", "description": "System timezone"},
     {"key": "embedding_model", "value": "nomic-ai/nomic-embed-text-v1.5", "description": "Embedding model for RAG"},
     {"key": "rag_retention_days", "value": "{\"telemetry_alerts\": 30, \"conversation_memory\": 90}", "description": "Retention in days per time-bound RAG collection (JSON). Blank keeps everything; only collections named here are ever expired by the maintenance purge."},
-    {"key": "phrasebook_path", "value": "", "description": "Path to phrasebook file"},
+    {"key": "phrasebook_path", "value": "", "description": "Path to the phrasebook JSON file used by semantic intent routing. Seeded from .env PHRASEBOOK_PATH."},
     {"key": "huggingface_token", "value": "", "description": "Hugging Face Hub API Token (read-access, for private models and fast downloads)"},
     {"key": "bible_svc_url", "value": "http://bible:8010", "description": "Bible service URL (reading app, verse of the day, devotionals)"},
     {"key": "blb_base_url", "value": "", "description": "Blue Letter Bible base URL for study-tool deep links and devotionals. Left blank on purpose: unset, the reader says which setting to fix rather than guessing a host."},

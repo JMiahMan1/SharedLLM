@@ -85,6 +85,12 @@ class TestRuntimeConfigResolution:
                 {"key": "assistant_model", "value": "llama3"},
                 {"key": "fast_path_threshold", "value": "0.9"},
                 {"key": "raven_error_threshold", "value": "3"},
+                {"key": "workspace_root", "value": "/srv/workspaces"},
+                {"key": "workspace_runtime_root", "value": "/srv/runtime-workspaces"},
+                {"key": "models_dir", "value": "/srv/models"},
+                {"key": "phrasebook_path", "value": "/srv/phrasebook.json"},
+                {"key": "announcement_blacklist", "value": "doorbell"},
+                {"key": "gateway_internal_url", "value": "http://gateway.internal:11435"},
             ]
         )
 
@@ -96,6 +102,12 @@ class TestRuntimeConfigResolution:
         assert config.ASSISTANT_MODEL == "llama3"
         assert config.FAST_PATH_THRESHOLD == 0.9
         assert config.RAVEN_ERROR_THRESHOLD == 3
+        assert config.WORKSPACE_ROOT == "/srv/workspaces"
+        assert config.WORKSPACE_RUNTIME_ROOT == "/srv/runtime-workspaces"
+        assert config.MODELS_DIR == "/srv/models"
+        assert config.PHRASEBOOK_PATH == "/srv/phrasebook.json"
+        assert config.ANNOUNCEMENT_BLACKLIST == "doorbell"
+        assert config.GATEWAY_INTERNAL_URL == "http://gateway.internal:11435"
 
     @pytest.mark.local_only
     @pytest.mark.asyncio
@@ -155,7 +167,27 @@ class TestConfigSettingsMap:
             "EMBEDDING_MODEL", "FAST_PATH_THRESHOLD",
             "EXECUTION_EXTERNAL_HOST",
             "AUDIOBOOKSHELF_URL", "AUDIOBOOKSHELF_USER", "AUDIOBOOKSHELF_PASS",
+            "ANNOUNCEMENT_BLACKLIST", "MODELS_DIR", "PHRASEBOOK_PATH",
+            "GATEWAY_INTERNAL_URL",
         ]
 
         for var in runtime_vars:
             assert var in source, f"{var} should be in resolve_runtime_config settings_map"
+
+    def test_runtime_settings_map_has_the_identity_keys(self):
+        """The runtime map must use the same key names Identity seeds."""
+        import inspect
+
+        from services import config as config_module
+
+        source = inspect.getsource(config_module.resolve_runtime_config)
+        expected = {
+            "workspace_root": "WORKSPACE_ROOT",
+            "workspace_runtime_root": "WORKSPACE_RUNTIME_ROOT",
+            "models_dir": "MODELS_DIR",
+            "phrasebook_path": "PHRASEBOOK_PATH",
+            "announcement_blacklist": "ANNOUNCEMENT_BLACKLIST",
+            "gateway_internal_url": "GATEWAY_INTERNAL_URL",
+        }
+        for setting_key, env_var in expected.items():
+            assert f'"{setting_key}": "{env_var}"' in source

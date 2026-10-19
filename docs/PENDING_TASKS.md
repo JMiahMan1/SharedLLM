@@ -54,16 +54,20 @@ that review were not re-checked one by one; the full list is in git history
 
 ## Identity config DB: seeding and runtime integration
 
-Source: `services/identity/seed.py`, `services/identity/models.py`, `services/config.py`.
+Fixed 2026-10-18. Runtime settings now come from Identity under these keys:
 
-- Seed the `.env` runtime keys that still have no GlobalSetting row, among them
-  `ANNOUNCEMENT_BLACKLIST` and `GATEWAY_INTERNAL_URL`.
-- Complete `resolve_runtime_config()`'s settings map for the keys it still
-  ignores, and fix the name mismatches between `seed.py` and the map
-  (`WORKSPACE_ROOT`/`workspace_root`, `MODELS_DIR`/`models_dir`,
-  `PHRASEBOOK_PATH`/`phrasebook_path`).
-- Keep first-run seeding non-destructive and test resolution against a live
-  container.
+- `workspace_root` and `workspace_runtime_root`: roots for the execution
+  service and the workspace runtime service. Each service has its own mount,
+  so the keys stay separate; they normally name the same host directory.
+  They are seeded from `WORKSPACE_ROOT` and `WORKSPACE_RUNTIME_ROOT`.
+- `models_dir`: seeded from `MODELS_DIR`.
+- `phrasebook_path`: seeded from `PHRASEBOOK_PATH`.
+- `announcement_blacklist`: seeded from `ANNOUNCEMENT_BLACKLIST`.
+- `gateway_internal_url`: seeded from `GATEWAY_INTERNAL_URL`.
+
+`resolve_runtime_config()` maps all of them, and first-run seeding fills an
+empty value or replaces the shipped default without overwriting a value an
+operator has changed.
 
 ## Logging settings are ignored
 
