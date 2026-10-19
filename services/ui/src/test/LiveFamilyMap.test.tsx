@@ -268,4 +268,26 @@ describe('LiveFamilyMap', () => {
       );
     });
   });
+  it('shows both people when they share a location', async () => {
+    server.use(
+      http.get('/api/users/location/all', () => HttpResponse.json({
+        jeremiah: { latitude: 33.4484, longitude: -112.074, accuracy: 15, updated_at: nowSec - 20 },
+        michele: { latitude: 33.4484, longitude: -112.074, accuracy: 12, updated_at: nowSec - 30 },
+      })),
+      http.get('/api/users/family-directory', () => HttpResponse.json([
+        { username: 'jeremiah', display_name: 'Jeremiah', nextcloud_user: 'jeremiah', avatar: 'preset:jonahs-whale' },
+        { username: 'michele', display_name: 'Michele', nextcloud_user: 'michele', avatar: '' },
+      ])),
+    );
+    renderMap();
+    const cluster = await waitFor(() => {
+      const found = document.querySelector('[data-testid="map-avatar-cluster"]');
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(cluster.getAttribute('data-avatar-count')).toBe('2');
+    expect(cluster.querySelectorAll('[data-testid="map-avatar-marker"]')).toHaveLength(2);
+    expect(screen.getByTestId('live-map-count').textContent).toContain('2 sharing location');
+  });
+
 });
