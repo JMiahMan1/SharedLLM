@@ -65,9 +65,16 @@ def test_entities_forward_the_callers_home_assistant(client, fake_identity):
 
 def test_malformed_entity_ids_never_reach_a_dropdown(client):
     poison = "media_player." + ("id_1_username_default_display_name_" * 34)
+    truncated_poison = (
+        "media_player.id_1_username_default_display_name_shared_default_user_"
+        "is_admin_true_is_system_default_true_nextcloud_url_https_cloud_sumemail_"
+        "com_nextcloud_user_summers_ha_url_https_ha_sumemail_com_github_url_"
+        "github_user_jeremiah_sumemail_com_gitlab_url_git"
+    )
     fake_client = _Client(data={"entities": [
         {"entity_id": "media_player.kitchen", "state": "idle", "attributes": {}},
         {"entity_id": poison, "state": "unavailable", "attributes": {}},
+        {"entity_id": truncated_poison, "state": "unavailable", "attributes": {}},
         {"entity_id": "light.kitchen", "state": "on", "attributes": {}},
     ]})
 

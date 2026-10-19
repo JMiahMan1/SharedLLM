@@ -224,7 +224,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
       // The phone rings through the app alarm, not this speaker dropdown; it
       // stays available in the multi-select above.
       return dev.id !== 'phone'
-        && dev.has_speaker
+        && (dev.announce_capable ?? dev.has_speaker)
         && state !== 'unavailable'
         && state !== 'unknown';
     }),
