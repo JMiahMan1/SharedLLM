@@ -48,13 +48,18 @@ operator has changed.
 assigns `LOG_RETENTION_DAYS` / `LOG_MAX_ENTRIES` from the resolved settings.
 The retention and max entry settings now take effect.
 
-## Artifact framework (`services/storage`): not started
+## Artifact framework (`services/storage`): generator wiring remains
 
-Design: `services/storage/ARTIFACTS.md`; build plan:
-`services/storage/ARTIFACT_IMPLEMENTATION_PLAN.md`. None of it exists in
-`services/storage/main.py` yet: artifact models and database, local provider,
-signed URLs with range streaming, usage/quota endpoints and gateway proxies,
-TTS/image/video wiring, and the Storage / Artifacts UI pages.
+The local provider, artifact/quota database, API, signed range streaming,
+24-hour soft delete, purge loop, gateway proxies, Artifact library and admin
+Storage page are implemented. Still open:
+
+- Wire TTS, image, video and document generators through `create_artifact`.
+- Prompt before workspace deletion when artifacts exist: 409 with
+  `artifact_count` / `needs_confirmation`, then delete or orphan.
+- The local quota comes from `ARTIFACT_LOCAL_QUOTA_BYTES` and per-user rows in
+  `UserStorageQuota`; the proposed Identity `artifact_local_quota_bytes`
+  setting is not wired (storage does not read Identity settings).
 
 ## Raven capability gaps
 

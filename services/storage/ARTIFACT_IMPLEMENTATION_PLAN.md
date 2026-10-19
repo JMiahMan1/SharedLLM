@@ -3,10 +3,12 @@
 Phased, actionable plan for the Artifact Framework (extends the `storage` service).
 Design spec: `ARTIFACTS.md`. Branch: `microservices`. CI must pass before deploy.
 
-> **All implementation tasks are tracked in [docs/PENDING_TASKS.md](../../docs/PENDING_TASKS.md).**
+> **Status (2026-10-19):** the local provider, artifact/quota database, API,
+> signed-range streaming, purge loop, gateway proxies, user Artifact library
+> and admin Storage page are implemented. Remaining work is generator wiring
+> (TTS/image/video/document) and the workspace-deletion artifact prompt.
+> All implementation tasks are tracked in [docs/PENDING_TASKS.md](../../docs/PENDING_TASKS.md).
 > They were consolidated there so this file stays a lightweight index.
-> Verified 2026-07-11: the framework is **not yet implemented**
-> (`services/storage/artifacts.py` does not exist; 0 artifact references in `storage/main.py`).
 
 ## Open constants (configurable via env / settings)
 - `ARTIFACT_LOCAL_QUOTA_BYTES` = 5 GiB (global default; per-user override from day one)

@@ -6999,6 +6999,167 @@ async def purge_storage_collection(collection_name: str, request: Request):
     }
 
 
+def _artifact_headers(creds: dict) -> dict[str, str]:
+    return {
+        "X-Internal-Secret": INTERNAL_SECRET,
+        "X-User": creds.get("user") or "",
+        "X-Admin": "true" if creds.get("is_admin") else "false",
+    }
+
+
+async def _artifact_proxy(method: str, path: str, request: Request, creds: dict, *, body=None):
+    async with shared_http_client() as client:
+        resp = await client.request(
+            method,
+            f"{STORAGE_SVC}{path}",
+            json=body,
+            params=dict(request.query_params) if method == "GET" else None,
+            headers=_artifact_headers(creds),
+            timeout=aiohttp.ClientTimeout(total=60.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.post("/api/artifacts/check-fit")
+async def check_artifact_fit(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    body = await request.json()
+    return await _artifact_proxy("POST", "/artifacts/check-fit", request, creds, body=body)
+
+
+@app.post("/api/artifacts")
+async def create_artifact(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    body = await request.json()
+    return await _artifact_proxy("POST", "/artifacts", request, creds, body=body)
+
+
+@app.get("/api/artifacts")
+async def list_artifacts(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    return await _artifact_proxy("GET", "/artifacts", request, creds)
+
+
+@app.get("/api/artifacts/{artifact_id}/download")
+async def download_artifact(artifact_id: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{STORAGE_SVC}/artifacts/{artifact_id}/download",
+            headers=_artifact_headers(creds),
+            timeout=aiohttp.ClientTimeout(total=15.0),
+        )
+        if resp.status != 200:
+            return await _proxy_json_response(resp)
+        data = await resp.json()
+    token_url = data.get("url") or ""
+    if token_url.startswith("/artifacts/"):
+        data["url"] = "/api" + token_url
+    return JSONResponse(content=data)
+
+
+@app.get("/api/artifacts/{artifact_id}/stream")
+async def stream_artifact(artifact_id: str, request: Request):
+    """Proxy a signed storage URL. The token, not a gateway login, is the key."""
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    if request.headers.get("range"):
+        headers["Range"] = request.headers["range"]
+    client = get_http_client()
+    resp = await client.get(
+        f"{STORAGE_SVC}/artifacts/{artifact_id}/stream",
+        params={"token": request.query_params.get("token", "")},
+        headers=headers,
+        timeout=aiohttp.ClientTimeout(total=120.0),
+    )
+    passthrough = {
+        key: resp.headers[key]
+        for key in (
+            "Content-Type",
+            "Content-Length",
+            "Content-Range",
+            "Accept-Ranges",
+            "Content-Disposition",
+            "Cache-Control",
+        )
+        if key in resp.headers
+    }
+
+    async def body():
+        # Stream ranges instead of buffering a whole video in gateway memory.
+        try:
+            async for chunk in resp.content.iter_chunked(64 * 1024):
+                yield chunk
+        finally:
+            resp.release()
+
+    return StreamingResponse(body(), status_code=resp.status, headers=passthrough)
+
+
+@app.get("/api/artifacts/{artifact_id}")
+async def get_artifact(artifact_id: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    return await _artifact_proxy("GET", f"/artifacts/{artifact_id}", request, creds)
+
+
+@app.patch("/api/artifacts/{artifact_id}")
+async def patch_artifact(artifact_id: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    body = await request.json()
+    return await _artifact_proxy("PATCH", f"/artifacts/{artifact_id}", request, creds, body=body)
+
+
+@app.delete("/api/artifacts/{artifact_id}")
+async def delete_artifact(artifact_id: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    raw = await request.body()
+    async with shared_http_client() as client:
+        resp = await client.delete(
+            f"{STORAGE_SVC}/artifacts/{artifact_id}",
+            params=dict(request.query_params),
+            data=raw or None,
+            headers={**_artifact_headers(creds), "Content-Type": "application/json"},
+            timeout=aiohttp.ClientTimeout(total=30.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.post("/api/artifacts/{artifact_id}/restore")
+async def restore_artifact(artifact_id: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    return await _artifact_proxy("POST", f"/artifacts/{artifact_id}/restore", request, creds)
+
+
+@app.get("/api/storage/usage")
+async def get_storage_usage(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    return await _artifact_proxy("GET", "/storage/usage", request, creds)
+
+
+@app.get("/api/storage/usage/system")
+async def get_system_storage_usage(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    return await _artifact_proxy("GET", "/storage/usage/system", request, creds)
+
+
+@app.get("/api/storage/usage/{username}")
+async def get_user_storage_usage(username: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if username != (creds.get("user") or "") and not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    return await _artifact_proxy("GET", f"/storage/usage/{username}", request, creds)
+
+
+@app.put("/api/storage/quota/{username}")
+async def set_user_storage_quota(username: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    body = await request.json()
+    return await _artifact_proxy("PUT", f"/storage/quota/{username}", request, creds, body=body)
+
+
 @app.post("/api/storage/maintenance")
 async def rag_maintenance(request: Request):
     """Report or remove duplicate/expired/invalid rows for the caller.

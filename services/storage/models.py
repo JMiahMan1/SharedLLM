@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-ProviderKind = Literal["nextcloud", "calibre"]
+ProviderKind = Literal["nextcloud", "calibre", "local"]
 
 
 class ProviderConfig(BaseModel):

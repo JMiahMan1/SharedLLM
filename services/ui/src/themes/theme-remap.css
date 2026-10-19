@@ -89,6 +89,7 @@
 [data-site-theme-active] .hover\:bg-purple-500\/25:hover { background-color: color-mix(in srgb, var(--site-accent) 25%, transparent) !important; }
 [data-site-theme-active] .hover\:bg-purple-500\/30:hover { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .hover\:bg-purple-500\/40:hover { background-color: color-mix(in srgb, var(--site-accent) 40%, transparent) !important; }
+[data-site-theme-active] .hover\:bg-purple-600:hover { background-color: var(--site-accent) !important; }
 [data-site-theme-active] .hover\:bg-purple-600\/30:hover { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .hover\:border-indigo-500\/30:hover { border-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .hover\:border-indigo-500\/50:hover { border-color: color-mix(in srgb, var(--site-accent) 50%, transparent) !important; }

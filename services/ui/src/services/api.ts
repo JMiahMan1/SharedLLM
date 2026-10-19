@@ -45,6 +45,11 @@ import type {
   StorageEntry,
   RagStats,
   StorageStatus,
+  Artifact,
+  ArtifactListResponse,
+  ArtifactFit,
+  StorageUsage,
+  SystemStorageUsage,
   RavenMission,
   WorkspaceAskMode,
   WorkspaceChat,
@@ -2097,6 +2102,73 @@ export const api = {
 
   async getStorageStatus(): Promise<StorageStatus> {
     const resp = await apiClient.get('/api/storage/status');
+    return resp.data;
+  },
+
+  async listArtifacts(params: {
+    kind?: string;
+    workspace_id?: string;
+    attached?: boolean;
+    search?: string;
+    include_deleted?: boolean;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<ArtifactListResponse> {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== '') query.set(key, String(value));
+    }
+    const suffix = query.toString();
+    const resp = await apiClient.get(`/api/artifacts${suffix ? `?${suffix}` : ''}`);
+    return resp.data;
+  },
+
+  async getArtifact(id: string): Promise<Artifact> {
+    const resp = await apiClient.get(`/api/artifacts/${encodeURIComponent(id)}`);
+    return resp.data;
+  },
+
+  /** A short-lived signed URL; no login header is needed to fetch it. */
+  async getArtifactDownloadUrl(id: string): Promise<{ url: string; expires_in: number; name: string }> {
+    const resp = await apiClient.get(`/api/artifacts/${encodeURIComponent(id)}/download`);
+    return resp.data;
+  },
+
+  async patchArtifact(id: string, payload: { name?: string; metadata?: Record<string, unknown>; is_attached?: boolean }): Promise<Artifact> {
+    const resp = await apiClient.patch(`/api/artifacts/${encodeURIComponent(id)}`, payload);
+    return resp.data;
+  },
+
+  async deleteArtifact(id: string, options: { hard?: boolean; confirmPhrase?: string } = {}): Promise<Artifact & { hard: boolean; restored?: boolean }> {
+    const suffix = options.hard ? '?hard=true' : '';
+    const resp = await apiClient.delete(`/api/artifacts/${encodeURIComponent(id)}${suffix}`, {
+      data: options.hard ? { confirm_phrase: options.confirmPhrase ?? '' } : undefined,
+    });
+    return resp.data;
+  },
+
+  async restoreArtifact(id: string): Promise<Artifact> {
+    const resp = await apiClient.post(`/api/artifacts/${encodeURIComponent(id)}/restore`);
+    return resp.data;
+  },
+
+  async checkArtifactFit(size: number): Promise<ArtifactFit> {
+    const resp = await apiClient.post('/api/artifacts/check-fit', { size });
+    return resp.data;
+  },
+
+  async getStorageUsage(): Promise<StorageUsage> {
+    const resp = await apiClient.get('/api/storage/usage');
+    return resp.data;
+  },
+
+  async getSystemStorageUsage(): Promise<SystemStorageUsage> {
+    const resp = await apiClient.get('/api/storage/usage/system');
+    return resp.data;
+  },
+
+  async setStorageQuota(username: string, quotaBytes: number): Promise<{ username: string; quota_bytes: number }> {
+    const resp = await apiClient.put(`/api/storage/quota/${encodeURIComponent(username)}`, { quota_bytes: quotaBytes });
     return resp.data;
   },
 
