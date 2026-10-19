@@ -266,7 +266,7 @@ def test_audiobook_regenerate_full_pipeline(mocker, tmp_path):
         wav = bytes("RIFF" + text[:8], "utf-8")
         return wav
 
-    mocker.patch("services.execution.main._text_to_speech", side_effect=fake_tts)
+    mocker.patch("services.execution.main.text_to_speech", side_effect=fake_tts)
 
     # Fake ffmpeg via subprocess.run: touch the output MP3 instead of encoding.
     def fake_run(cmd, **kwargs):
@@ -368,7 +368,7 @@ def test_audiobook_regenerate_accepts_pdf_source(mocker, tmp_path):
     async def fake_tts(text, voice=None, storybook=False):
         return bytes("RIFF" + text[:8], "utf-8")
 
-    mocker.patch("services.execution.main._text_to_speech", side_effect=fake_tts)
+    mocker.patch("services.execution.main.text_to_speech", side_effect=fake_tts)
 
     def fake_run(cmd, **kwargs):
         mp3_target = cmd[-1]
