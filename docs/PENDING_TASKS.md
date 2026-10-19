@@ -5,34 +5,12 @@ on 2026-10-18. When something here ships, delete it; history lives in git.
 
 ## Security
 
-### Identity's anonymous fallback still resolves to the admin account
-
-`POST /api/resolve` (`services/identity/main.py`, the `if not user:` block
-after the device lookup) tries `user_id` → `api_key` → `rag_user` →
-`voice_id` → `device_id` and, when nothing matches, returns the system
-default user, who is an admin.
-
-The gateway no longer relies on it for family data: every route that reads
-or writes family data goes through `_resolve_identity_from_request`, which is
-strict (a missing or unknown key is a 401), and `/execute/*` forwarding uses
-it via `_resolve_user_context`. What remains is the deliberate anonymous path
-(`_resolve_identity_allow_anonymous`, used by voice, registered devices and
-media stream URLs), which still gets an admin identity.
-
-Proposed fix: when a credential was **presented but did not match**, return
-401; keep the fallback only when no credential was presented, and resolve
-anonymous callers to a non-admin identity. `/api/resolve` is shared by kiosks,
-voice and intercom, so ship it alone with a LAN repro as its test. Validate
-gateway auth with identity's strict `GET /api/internal/validate-api-key`, not
-`resolve_identity`.
-
 ### Other open findings from the 2026-08-22 code review
 
 Re-checked 2026-10-15 and still present. About 80 medium/low findings from
 that review were not re-checked one by one; the full list is in git history
 (`docs/code_review_2026-08-22.md`, removed in the 2026-10-15 cleanup).
 
-- **CORS `*`** on identity (`services/identity/main.py`, `allow_origins=["*"]`).
 - **Tracebacks to clients**: the gateway's global exception handler returns
   `detail` and the full `traceback` in the 500 body
   (`services/gateway/main.py`, `global_exception_handler`).

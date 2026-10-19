@@ -2109,20 +2109,21 @@ async def _resolve_identity_from_request(request: Request, body: dict | None = N
     return await _require_identity_from_request(request, body)
 
 
-async def _resolve_identity_allow_anonymous(request: Request, body: dict | None = None) -> Any:
-    """Identity with Identity's own fallback rules, including anonymous.
+async def _resolve_identity_allow_anonymous(
+    request: Request,
+    body: dict | None = None,
+    *,
+    allow_system_fallback: bool = False,
+) -> Any:
+    """Resolve an identity for a route that may genuinely have no credential.
 
-    Identity's ``POST /api/resolve`` tries user_id -> api_key -> rag_user ->
-    voice_id -> device_id. A presented credential that matches nobody is a 401;
-    a request with no identifier at all **falls back to the system default
-    user, which is an administrator**. That is what lets a voice request, a
-    registered device or a stream URL resolve with no API key at all -- which is
-    also why it must never guard a route that reads real family data (see
-    ``_require_identity_from_request``).
-
-    Only use this where "who is calling" is genuinely not the question.
+    Anonymous requests receive a non-admin synthetic identity. Trusted internal
+    system callers pass ``allow_system_fallback=True`` to preserve the system
+    account used by kiosk, voice, and intercom paths.
     """
-    return await resolve_identity(_auth_body_from_request(request, body))
+    payload = _auth_body_from_request(request, body)
+    payload["anonymous"] = not allow_system_fallback
+    return await resolve_identity(payload)
 
 
 def _presented_api_key(request: Request) -> str:
@@ -2163,7 +2164,9 @@ async def _require_identity_from_request(request: Request, body: dict | None = N
         # rather than a user's API key. They are already inside the trust
         # boundary, so they keep Identity's own resolution rules.
         if secret_matches(request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET):
-            return await _resolve_identity_allow_anonymous(request, body)
+            return await _resolve_identity_allow_anonymous(
+                request, body, allow_system_fallback=True
+            )
         raise HTTPException(
             status_code=401,
             detail="Missing API Key. Sign in and send 'Authorization: Bearer <api_key>'.",

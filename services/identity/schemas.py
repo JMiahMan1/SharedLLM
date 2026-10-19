@@ -16,6 +16,7 @@ class ResolveRequest(BaseModel):
     voice_id: str | None = None
     device_id: str | None = None
     api_key: str | None = None
+    anonymous: bool = False
 
 
 class ResolvedCredentials(BaseModel):
