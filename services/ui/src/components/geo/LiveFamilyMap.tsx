@@ -4,7 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api } from '../../services/api';
 import { userLocationsQuery } from '../../lib/wanderQueries';
-import { avatarMarkerHtml } from '../../lib/avatarMarker';
+import { avatarClusterMarkerHtml, avatarClusterMarkerLayout, avatarMarkerHtml, escapeHtml } from '../../lib/avatarMarker';
 import { findFamilyMember, useFamilyDirectory, type FamilyLookup } from '../chat/familyDirectory';
 import {
   FRESHNESS_STYLE,
@@ -189,38 +189,48 @@ export default function LiveFamilyMap({
         }).addTo(layer);
       }
 
-      const person = personByUser.get(member.userId);
-      const label = person?.display_name || member.userId;
-      const avatar = person?.avatar ?? null;
-      const imageUrl = person && avatar?.startsWith('upload:')
-        ? avatarUrls.get(`${person.username}:${avatar}`) ?? null
-        : null;
-      // Same centre and click target as the old dot, with room for a face.
-      const markerSize = member.freshness === 'stale' ? 30 : 34;
+      const uniqueMembers = [...new Map(cluster.members.map((m) => [m.userId, m])).values()];
+      const people = uniqueMembers.map((m) => {
+        const person = personByUser.get(m.userId);
+        const label = person?.display_name || m.userId;
+        const avatar = person?.avatar ?? null;
+        const imageUrl = person && avatar?.startsWith('upload:')
+          ? avatarUrls.get(`${person.username}:${avatar}`) ?? null
+          : null;
+        const size = m.freshness === 'stale' ? 30 : 34;
+        return {
+          label,
+          avatar: avatar ?? undefined,
+          imageUrl: imageUrl ?? undefined,
+          ringColor: FRESHNESS_STYLE[m.freshness].color,
+          size,
+          opacity: m.freshness === 'stale' ? 0.7 : 1,
+        };
+      });
+      const isCluster = people.length > 1;
+      const layout = isCluster
+        ? avatarClusterMarkerLayout(people)
+        : { width: people[0]?.size ?? 34, height: people[0]?.size ?? 34 };
+      const title = people.map((person) => person.label).join(', ');
       const icon = L.divIcon({
         className: '',
-        html: avatarMarkerHtml({
-          label,
-          avatar,
-          imageUrl,
-          ringColor: style.color,
-          size: markerSize,
-          opacity: member.freshness === 'stale' ? 0.7 : 1,
-        }),
-        iconSize: [markerSize, markerSize],
-        iconAnchor: [markerSize / 2, markerSize / 2],
-        popupAnchor: [0, -markerSize / 2],
+        html: isCluster ? avatarClusterMarkerHtml({ people }) : avatarMarkerHtml(people[0]!),
+        iconSize: [layout.width, layout.height],
+        iconAnchor: [layout.width / 2, layout.height / 2],
+        popupAnchor: [0, -layout.height / 2],
       });
 
-      const others = cluster.members.filter((m) => m.userId !== member.userId).map((m) => m.userId);
-      const age = ageLabel(member.ageMs);
-      const ageText = member.freshness === 'stale' ? `last seen ${age}` : age;
-      L.marker(latlng, { icon, keyboard: true, title: label, alt: label, riseOnHover: true })
-        .bindPopup(
-          `<strong>${member.userId}</strong><br/>${ageText}` +
-            (member.accuracy ? `<br/>±${Math.round(member.accuracy)} m` : '') +
-            (others.length ? `<br/><span style="opacity:.7">also here: ${others.join(', ')}</span>` : '')
-        )
+      const popup = uniqueMembers
+        .map((m) => {
+          const person = personByUser.get(m.userId);
+          const label = person?.display_name || m.userId;
+          const age = ageLabel(m.ageMs);
+          const ageText = m.freshness === 'stale' ? `last seen ${age}` : age;
+          return `<strong>${escapeHtml(label)}</strong><br/>${ageText}` + (m.accuracy ? `<br/>±${Math.round(m.accuracy)} m` : '');
+        })
+        .join('<hr style="border-color:rgba(255,255,255,.12);margin:6px 0" />');
+      L.marker(latlng, { icon, keyboard: true, title, alt: title, riseOnHover: true })
+        .bindPopup(popup)
         .addTo(layer);
     }
 
