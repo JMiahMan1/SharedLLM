@@ -5,7 +5,9 @@ import { Loader2, LogOut, Pin, PinOff, Trash2, UserMinus, UserPlus } from 'lucid
 import { api } from '../../services/api';
 import PeoplePicker from './PeoplePicker';
 import Sheet from './Sheet';
-import { avatarTint, detailList, initials, type TalkConversation, type TalkParticipant, type TalkPerson } from './chatModel';
+import UserAvatar from '../UserAvatar';
+import { findFamilyMember, useFamilyDirectory } from './familyDirectory';
+import { detailList, type TalkConversation, type TalkParticipant, type TalkPerson } from './chatModel';
 import { errorText } from '../../lib/errorText';
 
 /**
@@ -29,6 +31,7 @@ export default function ConversationInfo({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const people = useFamilyDirectory();
   const token = conversation.token;
   const group = conversation.type !== 1;
   const canModerate = Boolean(conversation.can_moderate);
@@ -110,35 +113,37 @@ export default function ConversationInfo({
         <Loader2 size={16} className="animate-spin text-slate-500" />
       ) : (
         <ul className="mb-4 space-y-1" aria-label="Members">
-          {members.map((m) => (
-            <li key={m.attendee_id} className="flex min-h-12 items-center gap-3 rounded-xl px-2">
-              <span
-                aria-hidden
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                style={{ background: avatarTint(m.display_name) }}
-              >
-                {initials(m.display_name)}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm text-slate-100">
-                  {m.display_name}
-                  {isMe(m) ? ' (you)' : ''}
+          {members.map((m) => {
+            const person = findFamilyMember(people, m.actor_id, m.display_name);
+            return (
+              <li key={m.attendee_id} className="flex min-h-12 items-center gap-3 rounded-xl px-2">
+                <UserAvatar
+                  username={person?.username ?? m.actor_id}
+                  avatar={person?.avatar}
+                  name={person?.display_name ?? m.display_name}
+                  size={36}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-slate-100">
+                    {m.display_name}
+                    {isMe(m) ? ' (you)' : ''}
+                  </span>
+                  {m.is_moderator && <span className="block text-[11px] text-slate-500">Admin</span>}
                 </span>
-                {m.is_moderator && <span className="block text-[11px] text-slate-500">Admin</span>}
-              </span>
-              {group && canModerate && !isMe(m) && m.actor_type === 'users' && (
-                <button
-                  type="button"
-                  onClick={() => remove.mutate(m)}
-                  disabled={remove.isPending}
-                  aria-label={`Remove ${m.display_name}`}
-                  className="min-h-10 min-w-10 flex items-center justify-center rounded-xl text-slate-500 hover:text-rose-300"
-                >
-                  <UserMinus size={15} />
-                </button>
-              )}
-            </li>
-          ))}
+                {group && canModerate && !isMe(m) && m.actor_type === 'users' && (
+                  <button
+                    type="button"
+                    onClick={() => remove.mutate(m)}
+                    disabled={remove.isPending}
+                    aria-label={`Remove ${m.display_name}`}
+                    className="min-h-10 min-w-10 flex items-center justify-center rounded-xl text-slate-500 hover:text-rose-300"
+                  >
+                    <UserMinus size={15} />
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

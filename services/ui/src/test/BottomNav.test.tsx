@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from './render';
 import BottomNav from '../components/layout/BottomNav';
+import { MOBILE_NAV_STORAGE_KEY, writeMobileNavPaths } from '../lib/mobileNav';
 
 describe('BottomNav', () => {
   beforeEach(() => {
@@ -43,5 +44,36 @@ describe('BottomNav reach', () => {
     for (const label of [/knowledge/i, /workspaces/i, /docs/i, /bible/i]) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
     }
+  });
+});
+
+describe('BottomNav custom layout', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('follows a saved order and moves displaced pages into More', async () => {
+    localStorage.setItem(
+      MOBILE_NAV_STORAGE_KEY,
+      JSON.stringify(['/notes', '/', '/family', '/media', '/fitness']),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<BottomNav />);
+
+    expect(screen.getByRole('link', { name: 'Notes' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Wander' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /more pages/i }));
+    expect(screen.getByRole('link', { name: 'Wander' })).toBeInTheDocument();
+  });
+
+  it('updates immediately when the layout changes', async () => {
+    renderWithProviders(<BottomNav />);
+
+    writeMobileNavPaths(['/notes', '/calendar'], true);
+
+    expect(await screen.findByRole('link', { name: 'Notes' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Calendar' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Wander' })).not.toBeInTheDocument();
   });
 });

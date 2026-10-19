@@ -34,7 +34,7 @@ export interface NavPage {
   adminOnly?: boolean;
   /** Label in the phone bottom bar, when it differs ("Home"). */
   mobileLabel?: string;
-  /** Slot (1-5) among the tabs pinned to the phone bottom bar. */
+  /** Default slot (1-5) among the tabs pinned to the phone bottom bar. */
   pinnedOnMobile?: number;
 }
 

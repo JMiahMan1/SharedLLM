@@ -3,7 +3,7 @@ import { ArrowDown, Check, CheckCheck, Copy, CornerUpLeft, Pencil, RotateCcw, Sm
 import toast from 'react-hot-toast';
 import EnvelopeBody from './EnvelopeBody';
 import UserAvatar from '../UserAvatar';
-import { nameColour, type FamilyLookup } from './familyDirectory';
+import { findFamilyMember, nameColour, type FamilyLookup } from './familyDirectory';
 import {
   dayLabel,
   groupIntoRuns,
@@ -333,6 +333,7 @@ function Run({
 }: RunProps) {
   const { mine } = run;
   const jarvis = run.authorId === JARVIS_ID;
+  const person = people ? findFamilyMember(people, run.authorId, run.author) : undefined;
   const showName = !mine && (isGroup || jarvis);
   const lastIndex = run.messages.length - 1;
   const last = run.messages[lastIndex];
@@ -346,9 +347,9 @@ function Run({
         ) : (
           <span className="mb-5 shrink-0">
             <UserAvatar
-              username={people?.(run.authorId)?.username ?? run.authorId ?? run.author}
-              avatar={people?.(run.authorId)?.avatar}
-              name={run.author}
+              username={person?.username ?? run.authorId ?? run.author}
+              avatar={person?.avatar}
+              name={person?.display_name ?? run.author}
               size={32}
             />
           </span>

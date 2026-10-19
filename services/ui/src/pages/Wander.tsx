@@ -7,6 +7,8 @@ import { api } from '../services/api';
 import type { Trip, TripLocation, TripUpdatePayload, TripLocationsResponse, TripLocationSuggestion, RoutePoint, TripsResponse } from '../types/api';
 import Modal from '../components/ui/Modal';
 import LiveFamilyMap from '../components/geo/LiveFamilyMap';
+import UserAvatar from '../components/UserAvatar';
+import { findFamilyMember, useFamilyDirectory, type FamilyMember } from '../components/chat/familyDirectory';
 import TripLocationsMap from '../components/geo/TripLocationsMap';
 import RoutePreview from '../components/geo/RoutePreview';
 import SensorStatusBanner from '../components/location/SensorStatusBanner';
@@ -176,6 +178,7 @@ const Wander = () => {
     queryFn: () => api.getGeoZones(),
     ...houseConfigQueryOptions,
   });
+  const peopleDirectory = useFamilyDirectory();
 
   const trips = useMemo(() => tripsQuery.data?.trips ?? [], [tripsQuery.data]);
   const vehicles = useMemo(
@@ -232,6 +235,14 @@ const Wander = () => {
       locationsQuery.dataUpdatedAt || peopleQuery.dataUpdatedAt,
     );
   }, [peopleQuery.data, peopleQuery.dataUpdatedAt, locationsQuery.data, locationsQuery.dataUpdatedAt, places]);
+  /** Map each card (HA entity id or app user key) to their directory entry. */
+  const memberPeople = useMemo(() => {
+    const byMember = new Map<string, FamilyMember | undefined>();
+    for (const member of familyMembers) {
+      byMember.set(member.id, findFamilyMember(peopleDirectory, member.id, member.name));
+    }
+    return byMember;
+  }, [familyMembers, peopleDirectory]);
   // A notice about someone opens Wander as ?person=<username>, focused on them
   // until another card is tapped.
   const personParam = searchParams.get('person')?.toLowerCase();
@@ -811,6 +822,7 @@ const Wander = () => {
           height={320}
           focusUserId={familyMembers.find((m) => m.id === focusMember)?.name.toLowerCase() ?? null}
           zones={places}
+          people={peopleDirectory}
         />
 
         {familyMembers.length === 0 ? (
@@ -821,7 +833,9 @@ const Wander = () => {
         ) : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {familyMembers.map((member) => (
+            {familyMembers.map((member) => {
+              const person = memberPeople.get(member.id);
+              return (
               <div
                 key={member.id}
                 role="button"
@@ -835,9 +849,13 @@ const Wander = () => {
               >
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center font-bold text-white shadow-md">
-                      {member.name.charAt(0).toUpperCase()}
-                    </div>
+                    <UserAvatar
+                      username={person?.username ?? member.id.replace(/^(person|user)\./, '')}
+                      avatar={person?.avatar}
+                      name={person?.display_name ?? member.name}
+                      size={40}
+                      className="shadow-md"
+                    />
                     <div>
                       <h3 className="font-semibold text-slate-100 flex items-center gap-2">
                         {member.name}
@@ -898,7 +916,8 @@ const Wander = () => {
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
             </div>
           </>
         )}

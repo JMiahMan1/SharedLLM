@@ -149,6 +149,24 @@ describe('Wander page', () => {
     expect(card.textContent).not.toContain('Home');
   });
 
+  it("shows each person's profile picture on their family card", async () => {
+    const fresh = Date.now() / 1000 - 30;
+    server.use(
+      http.get('/api/users/location/all', () =>
+        HttpResponse.json({ michele: { latitude: 33.3001, longitude: -111.9001, accuracy: 12, timestamp: fresh, updated_at: fresh } }),
+      ),
+      http.get('/api/users/family-directory', () =>
+        HttpResponse.json([
+          { username: 'michele', display_name: 'Michele', nextcloud_user: 'michele', avatar: 'preset:jonahs-whale' },
+        ]),
+      ),
+    );
+    renderWithProviders(<Wander />);
+    const name = await screen.findAllByText('Michele');
+    const card = (name[0].closest('[role="button"]') ?? name[0].parentElement!.parentElement!) as HTMLElement;
+    expect(await within(card).findByTestId('user-avatar-preset')).toHaveAccessibleName("Michele: Jonah's Whale");
+  });
+
   it('lists the five most recent trips, then each period on its own tab', async () => {
     const day = 86_400;
     const now = new Date();
