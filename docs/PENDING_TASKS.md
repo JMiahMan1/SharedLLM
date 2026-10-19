@@ -64,12 +64,11 @@ Fixed 2026-10-18. Runtime settings now come from Identity under these keys:
 empty value or replaces the shipped default without overwriting a value an
 operator has changed.
 
-## Logging settings are ignored
+## Logging settings
 
-`services/logging/main.py` imports `LOG_RETENTION_DAYS` / `LOG_MAX_ENTRIES` by
-value before `resolve_runtime_config()` runs, so the `log_retention_days` /
-`log_max_entries` settings never take effect (defaults 30 days / 10000 always
-apply). Read them from `services.config` at use time.
+`services/logging/main.py` resolves runtime configuration at startup and
+assigns `LOG_RETENTION_DAYS` / `LOG_MAX_ENTRIES` from the resolved settings.
+The retention and max entry settings now take effect.
 
 ## Artifact framework (`services/storage`): not started
 
@@ -98,15 +97,13 @@ TTS/image/video wiring, and the Storage / Artifacts UI pages.
 
 ## Voice
 
-- `POST /execute/voice/command` (`services/execution/main.py`) returns `null`
-  when a transcript matches neither the light nor the media keywords, instead
-  of a FAILURE result.
+- `POST /execute/voice/command` returns a FAILURE result for transcripts that
+  match no supported command. Covered by `test_voice_command.py`.
 
 ## Mobile app
 
-- `services/ui/android/app/src/main/assets/public/bundle.zip` ships a full
-  copy of the web bundle inside the APK. Harmless, but it roughly doubles the
-  APK; exclude it from `npx cap sync`.
+- The Android build removes `android/app/src/main/assets/public/bundle.zip`
+  after `npx cap sync`, so the OTA bundle is no longer packaged into the APK.
 - Health: no background step sync yet (`docs/HEALTH_STEPS.md`).
 
 ## Family hub
