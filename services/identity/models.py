@@ -491,6 +491,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "models_dir", "value": "", "description": "Directory for downloaded models, including Kokoro TTS. Seeded from .env MODELS_DIR."},
     {"key": "announcement_blacklist", "value": "", "description": "Comma-separated announcement names or phrases that must not be spoken. Seeded from .env ANNOUNCEMENT_BLACKLIST."},
     {"key": "gateway_internal_url", "value": "", "description": "Internal URL of the gateway for service-to-service calls. Seeded from .env GATEWAY_INTERNAL_URL; empty leaves each service's own fallback in place."},
+    {"key": "artifact_local_quota_bytes", "value": "5368709120", "description": "Default local storage quota per user for generated artifacts, in bytes. Per-user overrides are stored by the storage service."},
 
     # --- LLM CONFIGURATION (UI MANAGED) ---
     {"key": "active_llm_provider", "value": "ollama", "description": "Active LLM Compute Engine (ollama, openrouter, openai)"},

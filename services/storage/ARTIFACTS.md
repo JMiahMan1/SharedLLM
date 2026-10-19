@@ -93,7 +93,7 @@ Global default lives in the Identity `DEFAULT_GLOBAL_SETTINGS` key
 `check_fit(owner_user, needed_bytes) -> FitResult`:
 ```
 free  = shutil.disk_usage(ARTIFACTS_ROOT).free
-quota = user_quota(owner_user) or ARTIFACT_LOCAL_QUOTA_BYTES   # per-user else global
+quota = user_quota(owner_user) or artifact_local_quota_bytes   # per-user else Identity setting
 used  = Σ Artifact.size WHERE owner_user = owner AND deleted_at IS NULL
 fits  = (used + needed) <= min(quota, free)
 warn  = (used / quota) >= ARTIFACT_WARN_PCT                    # default 0.90
@@ -194,10 +194,11 @@ Git commits remain in the repo (no artifact created).
 ## 10. Deployment
 
 - `docker-compose.yml` storage service (~line 328): add a named volume
-  `storage_artifacts:/artifacts`, env `ARTIFACTS_ROOT=/artifacts` and
-  `ARTIFACT_LOCAL_QUOTA_BYTES=5368709120`. The CI storage build job already exists.
+  `storage_artifacts:/artifacts` and env `ARTIFACTS_ROOT=/artifacts`. The CI
+  storage build job already exists.
 - Seed `artifact_local_quota_bytes` in `services/identity/models.py`
-  `DEFAULT_GLOBAL_SETTINGS`.
+  `DEFAULT_GLOBAL_SETTINGS` (5 GiB). Storage reads it at startup; there is no
+  hardcoded fallback if it is missing.
 - No data migration (greenfield tables).
 - `services/storage/requirements.txt`: add `sqlmodel`, `python-multipart`.
 

@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
+from services import config
 from services.common.secrets import secret_matches
 from services.config import INTERNAL_SECRET
 from services.storage.providers_impl.local import LocalStorageProvider
@@ -35,7 +36,6 @@ from services.storage.providers_impl.local import LocalStorageProvider
 ArtifactKind = Literal["tts_audio", "image", "video", "document", "other"]
 ARTIFACT_KINDS: tuple[str, ...] = ("tts_audio", "image", "video", "document", "other")
 
-DEFAULT_QUOTA_BYTES = 5 * 1024 * 1024 * 1024
 SIGNED_URL_TTL_SECONDS = 15 * 60
 PURGE_INTERVAL_SECONDS = 5 * 60
 
@@ -59,7 +59,18 @@ def database_url() -> str:
 
 
 def default_quota_bytes() -> int:
-    return _env_int("ARTIFACT_LOCAL_QUOTA_BYTES", DEFAULT_QUOTA_BYTES)
+    """Return the global default loaded from Identity.
+
+    There is deliberately no fallback: a missing setting is a configuration
+    error, not an invitation to invent a quota.
+    """
+    quota = int(getattr(config, "ARTIFACT_LOCAL_QUOTA_BYTES", 0) or 0)
+    if quota <= 0:
+        raise HTTPException(
+            status_code=503,
+            detail="Artifact storage quota is not configured; set artifact_local_quota_bytes in Identity.",
+        )
+    return quota
 
 
 def warn_pct() -> float:

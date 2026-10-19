@@ -12,6 +12,7 @@ _RUNTIME_DEFAULTS = {
     "phrasebook_path": "",
     "announcement_blacklist": "",
     "gateway_internal_url": "",
+    "artifact_local_quota_bytes": "5368709120",
 }
 
 _RUNTIME_ENV = {

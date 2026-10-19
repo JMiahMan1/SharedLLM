@@ -100,6 +100,11 @@ REDIS_URL = os.getenv(f"{NETWORK_MODE.upper()}_REDIS_URL") or os.getenv("REDIS_U
 #: typed in other Talk apps, skips claimed messages so nobody gets two answers.
 JARVIS_TALK_CLAIM_KEY = "jarvis:talk:answered:{token}:{message_id}"
 LOG_RETENTION_DAYS = 30
+#: Default per-user quota for generated artifacts, in bytes. Filled from the
+#: Identity ``artifact_local_quota_bytes`` setting at startup. Deliberately no
+#: hardcoded fallback: an unset value blocks artifact creation with a clear
+#: configuration error instead of silently applying a made-up limit.
+ARTIFACT_LOCAL_QUOTA_BYTES = 0
 # Per-collection retention for time-bound RAG collections, as JSON days
 # ({"telemetry_alerts": 30}). Deliberately no code default: a retention
 # policy is an operator decision, and blank means keep everything -- the
@@ -307,6 +312,7 @@ async def resolve_runtime_config():
         # redis_url is infrastructure-dependent (Docker vs host networking), so read it from env only
         "log_retention_days": "LOG_RETENTION_DAYS",
         "log_max_entries": "LOG_MAX_ENTRIES",
+        "artifact_local_quota_bytes": "ARTIFACT_LOCAL_QUOTA_BYTES",
         "rag_retention_days": "RAG_RETENTION_DAYS",
         "raven_max_total_seconds": "RAVEN_MAX_TOTAL_SECONDS",
         "raven_iteration_timeout": "RAVEN_ITERATION_TIMEOUT",
@@ -361,7 +367,7 @@ async def resolve_runtime_config():
                     if settings.get(setting_key):
                         value = settings[setting_key]
                         # Type coercion for known numeric settings
-                        if var_name in ("LOG_RETENTION_DAYS", "LOG_MAX_ENTRIES", "RAVEN_MAX_TOTAL_SECONDS",
+                        if var_name in ("LOG_RETENTION_DAYS", "LOG_MAX_ENTRIES", "ARTIFACT_LOCAL_QUOTA_BYTES", "RAVEN_MAX_TOTAL_SECONDS",
                                         "RAVEN_ITERATION_TIMEOUT", "RAVEN_HEARTBEAT_INTERVAL",
                                         "RAVEN_HUNG_THRESHOLD", "RAVEN_ERROR_THRESHOLD", "RAVEN_CHECK_INTERVAL",
                                         "DNS_POLL_INTERVAL", "WORKSPACE_RUNTIME_FILE_READ_LIMIT",

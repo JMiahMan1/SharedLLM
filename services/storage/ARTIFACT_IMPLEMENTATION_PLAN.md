@@ -14,7 +14,7 @@ Design spec: `ARTIFACTS.md`. Branch: `microservices`. CI must pass before deploy
 > They were consolidated there so this file stays a lightweight index.
 
 ## Open constants (configurable via env / settings)
-- `ARTIFACT_LOCAL_QUOTA_BYTES` = 5 GiB (global default; per-user override from day one)
+- `artifact_local_quota_bytes` (Identity setting) = 5 GiB seed; per-user override from day one
 - `ARTIFACT_WARN_PCT` = 0.90
 - `ARTIFACT_UNDO_WINDOW_HOURS` = 24
 - signed-URL TTL = 15 min
