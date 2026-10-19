@@ -6,6 +6,8 @@ model window. These tests pin the hard cap that keeps the prompt inside
 the loaded context.
 """
 
+from unittest.mock import AsyncMock
+
 from services.gateway import orchestrator
 
 _MARKER = "\n\n[Retrieved context truncated to fit the model window.]"
@@ -46,6 +48,7 @@ async def test_chat_orchestration_can_skip_the_curriculum(monkeypatch):
 
     monkeypatch.setattr(orchestrator, "_fetch_rag_context", fake_fetch)
     monkeypatch.setattr(orchestrator, "_single_turn_inference", fake_inference)
+    monkeypatch.setattr(orchestrator, "get_history", AsyncMock(return_value=[]))
 
     answer = await orchestrator.process_full_orchestration(
         {

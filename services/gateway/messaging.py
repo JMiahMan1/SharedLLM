@@ -12,6 +12,8 @@ log = logging.getLogger("gateway.messaging")
 # Tiered Inference Concurrency Control
 # - TIER2_SEMAPHORE: Allows up to 3 concurrent non-autonomous (Librarian) jobs
 # - TIER3_LOCK: Exclusive lock for autonomous (Raven) jobs (only one at a time)
+# The worker's dispatcher claims jobs sequentially and runs each claimed job in
+# its own task, so these primitives actually gate concurrent inference.
 TIER2_SEMAPHORE = asyncio.Semaphore(3)
 TIER3_LOCK = asyncio.Lock()
 
@@ -23,8 +25,9 @@ class JobStatus:
 
 class InferenceJobQueue:
     """
-    Strict FIFO Job Queue for Singleton Inference.
-    Ensures only one LLM task is processed at a time.
+    Strict FIFO Job Queue for inference work.
+    Claiming stays sequential; the worker decides how many claimed jobs run at
+    once, and the tier locks cap actual inference concurrency.
     """
     def __init__(self, redis_url: str):
         self.redis_url = redis_url

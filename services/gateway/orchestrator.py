@@ -21,6 +21,7 @@ from services.gateway.config import (
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
+from services.gateway.history import get_history
 from services.gateway.intent_engine import is_raven_intent
 from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider, get_provider
 from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
@@ -498,8 +499,32 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
 
     log.info(f"[Orchestrator] Starting orchestration for query: {query[:50]}...")
 
+    # Hardened intent: only flag a Raven mission when the prompt explicitly
+    # invokes Raven AND issues a command. Bare action verbs (e.g. "fix the
+    # app") without the Raven keyword no longer auto-route to the autonomous
+    # queue / AgentLoop.
+    #
+    # BUT: a job carrying a `_mission_id` was explicitly submitted through the
+    # Raven mission pipeline (POST /api/raven/missions). Such jobs MUST run the
+    # autonomous AgentLoop regardless of the query prose; otherwise an
+    # open-ended mission whose text lacks the literal "raven" keyword is
+    # misrouted to the single-turn Librarian path, which cannot create
+    # workspaces (observed: WorkspaceCreateRequest "not supported in the
+    # standard path" -> 502/404 workspace-not-found).
+    is_autonomous = bool(job_payload.get("_mission_id")) or is_raven_intent(query)
+
     # 1. Retrieve Memory
-    short_term: list = [] # Placeholder
+    # A queued chat turn has no request transcript to carry: the worker
+    # attaches the recent turns to the payload. Jobs dispatched directly, and
+    # jobs queued before the worker started attaching history, fall back to the
+    # per-user history store. Missions and Nextcloud Talk turns are not part of
+    # the chat transcript, so they keep an empty short-term history.
+    if is_autonomous or job_payload.get("_talk_token"):
+        short_term = []
+    elif "history" in job_payload:
+        short_term = job_payload.get("history") or []
+    else:
+        short_term = await get_history(user_id)
 
     # 2. Context Injection (RAG + live HA state + workspace memory)
     workspace_id = job_payload.get("workspace_id")
@@ -518,20 +543,6 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     prefetched = (job_payload.get("rag_context") or "").strip()
     if prefetched:
         rag_context = f"{prefetched}\n\n{rag_context}".strip() if rag_context else prefetched
-
-    # Hardened intent: only flag a Raven mission when the prompt explicitly
-    # invokes Raven AND issues a command. Bare action verbs (e.g. "fix the
-    # app") without the Raven keyword no longer auto-route to the autonomous
-    # queue / AgentLoop.
-    #
-    # BUT: a job carrying a `_mission_id` was explicitly submitted through the
-    # Raven mission pipeline (POST /api/raven/missions). Such jobs MUST run the
-    # autonomous AgentLoop regardless of the query prose; otherwise an
-    # open-ended mission whose text lacks the literal "raven" keyword is
-    # misrouted to the single-turn Librarian path, which cannot create
-    # workspaces (observed: WorkspaceCreateRequest "not supported in the
-    # standard path" -> 502/404 workspace-not-found).
-    is_autonomous = bool(job_payload.get("_mission_id")) or is_raven_intent(query)
 
     # 4. Final Inference
     full_system = job_payload.get("system", "")

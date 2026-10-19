@@ -2,7 +2,8 @@
 """
 Jarvis Background Worker: the "heartbeat" and "brain" of the autonomous Raven agent.
 1. Health Monitoring: Periodically scrapes logs and triggers self-repair.
-2. Singleton Inference: Processes the FIFO job queue for Tier 2 (Librarian) and Tier 3 (Raven) tasks.
+2. Tiered Inference: Claims the FIFO job queue and runs Tier 2 (Librarian) jobs
+   concurrently while Tier 3 (Raven) jobs stay serialized.
 """
 import asyncio
 import json
@@ -45,6 +46,7 @@ async def _shared_http_client():
     from services.gateway.main import get_http_client
 
     yield get_http_client()
+from services.gateway.history import get_history, update_history  # noqa: E402
 from services.gateway.messaging import TIER2_SEMAPHORE, TIER3_LOCK, InferenceJobQueue  # noqa: E402
 from services.gateway.orchestrator import process_full_orchestration  # noqa: E402
 
@@ -93,6 +95,12 @@ def _mission_owner(payload: dict[str, Any]) -> str:
 GATEWAY_SVC = "http://localhost:11435"
 # Longest the cleanup loop waits for one user's Home Assistant sync into RAG.
 HA_SYNC_TIMEOUT_SECONDS = int(os.getenv("HA_SYNC_TIMEOUT_SECONDS", "1800"))
+
+#: Most jobs the worker holds claimed at once. Tier 2 inference itself is
+#: capped by TIER2_SEMAPHORE; the extra slots keep a running or queued Raven
+#: job from occupying the whole queue and let short chat jobs wait briefly for
+#: a free Tier 2 slot without blocking claims.
+MAX_INFLIGHT_INFERENCE_JOBS = 8
 
 
 #: Tasks started and not awaited (notices, follow-ups); the loop holds only a
@@ -153,6 +161,10 @@ class RavenWorker:
         # a mission it should have pushed.
         self.__init_self_repair_state()
         self.job_queue = InferenceJobQueue(REDIS_URL)
+        #: Inference jobs claimed and not finished yet. The loop keeps claiming
+        #: while this set has room, so one long Raven mission cannot stop Tier 2
+        #: work from starting.
+        self._inference_jobs: set[asyncio.Task] = set()
     def _is_autonomous_job(self, payload: dict[str, Any], user_id: str) -> bool:
         """Determine if a job requires Tier-3 (Raven) exclusive lock."""
         # A job carrying a `_mission_id` was submitted through the Raven mission
@@ -247,6 +259,11 @@ class RavenWorker:
                   self._chat_notify_task, self._cleanup_task, self._admin_alerts_task, self._songs_task):
             if t is not None:
                 t.cancel()
+        # The inference loop cancels and awaits its in-flight jobs in its own
+        # finally block; wait for that before closing the queue underneath them.
+        if self._inference_task is not None:
+            with suppress(asyncio.CancelledError):
+                await self._inference_task
         await self.job_queue.close()
         # Stop the worker's own event loop so its thread can exit.
         self._loop.stop()
@@ -315,33 +332,79 @@ class RavenWorker:
                 await asyncio.sleep(300)
 
     async def _inference_loop(self):
-        """The Singleton Inference Worker. Processes jobs one by one."""
+        """Claim jobs continuously and run each one in its own task.
+
+        Claiming and processing used to be the same await, so only one job was
+        ever in flight and TIER2_SEMAPHORE never had anything to cap: a long
+        Raven mission blocked every chat job behind it. Each claimed job now
+        runs in a task and acquires TIER3_LOCK or TIER2_SEMAPHORE itself, so
+        Tier 3 stays exclusive while Tier 2 fills its pool. Claims remain
+        sequential, which is what keeps the queue safe.
+        """
         log.info("Inference worker listening for jobs...")
-        while self.is_running:
-            try:
-                reclaimed = await self.job_queue.reclaim_expired_jobs()
-                if reclaimed:
-                    log.warning("Recovered %s expired Raven job(s) back into the queue.", reclaimed)
+        try:
+            while self.is_running:
+                try:
+                    reclaimed = await self.job_queue.reclaim_expired_jobs()
+                    if reclaimed:
+                        log.warning("Recovered %s expired Raven job(s) back into the queue.", reclaimed)
 
-                # Periodically reap orphaned queued/executing missions (no backing
-                # Redis job) so they cannot linger forever after a worker crash.
-                now = time.time()
-                if now - getattr(self, "_last_reap", 0) > 60:
-                    self._last_reap = now
-                    try:
-                        await self._reap_orphaned_missions()
-                    except Exception as e:
-                        log.warning(f"[RavenWorker] Orphan reaper failed (non-critical): {e}")
+                    # Periodically reap orphaned queued/executing missions (no backing
+                    # Redis job) so they cannot linger forever after a worker crash.
+                    now = time.time()
+                    if now - getattr(self, "_last_reap", 0) > 60:
+                        self._last_reap = now
+                        try:
+                            await self._reap_orphaned_missions()
+                        except Exception as e:
+                            log.warning(f"[RavenWorker] Orphan reaper failed (non-critical): {e}")
 
-                job = await self.job_queue.claim_job()
-                if job:
-                    log.info(f"Processing job {job['job_id']} for {job['user_id']}")
-                    await self._process_inference_job(job)
-                else:
-                    await asyncio.sleep(1.0) # Wait for jobs
-            except Exception as e:
-                log.error(f"Error in Inference loop: {e}")
-                await asyncio.sleep(5.0)
+                    if len(self._inference_jobs) >= MAX_INFLIGHT_INFERENCE_JOBS:
+                        await asyncio.wait(
+                            self._inference_jobs,
+                            timeout=1.0,
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        continue
+
+                    job = await self.job_queue.claim_job()
+                    if job:
+                        log.info(f"Processing job {job['job_id']} for {job['user_id']}")
+                        task = asyncio.create_task(self._process_inference_job(job))
+                        self._inference_jobs.add(task)
+                        task.add_done_callback(self._inference_job_done)
+                    else:
+                        await asyncio.sleep(1.0) # Wait for jobs
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    log.error(f"Error in Inference loop: {e}")
+                    await asyncio.sleep(5.0)
+        finally:
+            await self._cancel_inference_jobs()
+
+    def _inference_job_done(self, task: asyncio.Task) -> None:
+        """Forget a finished job and surface exceptions the job could not log."""
+        self._inference_jobs.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            log.error(f"[RavenWorker] Inference job task failed: {exc}")
+
+    async def _cancel_inference_jobs(self) -> None:
+        """Cancel in-flight jobs and wait for them, leaving leases to expire.
+
+        A cancelled job cannot safely be completed on a queue that is closing.
+        Its lease expires and reclaim_expired_jobs requeues it on the next
+        start, which is the same recovery path a crashed worker uses.
+        """
+        jobs = list(self._inference_jobs)
+        self._inference_jobs.clear()
+        for task in jobs:
+            task.cancel()
+        if jobs:
+            await asyncio.gather(*jobs, return_exceptions=True)
 
     async def _reap_orphaned_missions(self):
         """Cancel queued/executing Raven missions that have no backing Redis job.
@@ -650,6 +713,14 @@ class RavenWorker:
         # Determine job tier (2 = Librarian, 3 = Raven) for concurrency control
         is_autonomous = self._is_autonomous_job(payload, user_id)
 
+        # The queued chat path in main.py does not pass the request transcript,
+        # and it writes no history itself. The Tier 2 branch below attaches the
+        # user's recent turns when the job starts executing, so a job waiting
+        # for a semaphore slot sees turns completed while it waited. Missions
+        # are autonomous and Talk turns have their own identity, so neither
+        # uses the chat transcript.
+        uses_chat_history = not is_autonomous and not payload.get("_talk_token")
+
         # Retry configuration for infrastructure failures (alpaca restarts, connection drops)
         INFRA_RETRIES = 3
         INFRA_RETRY_DELAY = 10  # seconds
@@ -730,6 +801,14 @@ class RavenWorker:
                                 log.error(f"[Worker] Mission {mission_id} passed its time limit; stopped.")
                                 ans = "Mission stopped: it ran past its time limit."
                             except asyncio.CancelledError:
+                                # A mission kill cancels the inner orchestration
+                                # task, not this job task. If this task is the
+                                # one being cancelled the worker is shutting
+                                # down, so let the cancellation end the job
+                                # instead of completing it during shutdown.
+                                task = asyncio.current_task()
+                                if task is not None and task.cancelling():
+                                    raise
                                 log.warning(f"[Worker] Orchestration for mission {mission_id} was CANCELLED.")
                                 ans = "Mission aborted by user."
                             finally:
@@ -747,6 +826,13 @@ class RavenWorker:
             else:
                 log.info(f"[Worker] Acquiring TIER2 (Librarian) semaphore for job {job_id}")
                 async with TIER2_SEMAPHORE:
+                    if uses_chat_history and "history" not in payload:
+                        try:
+                            payload["history"] = await get_history(user_id)
+                        except Exception as e:
+                            log.warning(f"[Worker] Could not read chat history for {user_id}: {e}")
+                            payload["history"] = []
+
                     started_ts = time.time()
                     started_iso = datetime.now(UTC).isoformat()
                     mission_id = payload.get("_mission_id")
@@ -788,6 +874,17 @@ class RavenWorker:
                                 raise
 
             await self.job_queue.complete_job(job_id, ans)
+
+            # Persist the turn for the next queued request. Only chat jobs are
+            # part of the transcript: Raven missions are autonomous and Talk
+            # turns belong to their room, not the user's chat history.
+            if uses_chat_history:
+                try:
+                    query = str(payload.get("query") or "")
+                    await update_history(user_id, "user", query)
+                    await update_history(user_id, "assistant", str(ans))
+                except Exception as e:
+                    log.warning(f"[Worker] Could not store chat history for {user_id}: {e}")
 
             # --- TALK CALLBACK ---
             talk_token = payload.get("_talk_token")
