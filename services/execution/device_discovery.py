@@ -849,9 +849,10 @@ async def _probe_port(client, ip: str, port: int) -> dict:
         elif port == 80:
             resp = await client.get(f"http://{ip}/", timeout=1)
             if resp.status == 200:
-                content = resp.text.lower()
+                html = await resp.text()
+                content = html.lower()
                 import re
-                name_match = re.search(r"<title>(.*?)</title>", resp.text, re.IGNORECASE)
+                name_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE)
                 device_name = name_match.group(1) if name_match else ""
                 if "tasmota" in content:
                     return {"ip": ip, "metadata": {"device_name": device_name, "type": "tasmota"}}
@@ -860,7 +861,7 @@ async def _probe_port(client, ip: str, port: int) -> dict:
         elif port == 8080:
             resp = await client.get(f"http://{ip}:8080/", timeout=1)
             if resp.status == 200:
-                content = resp.text.lower()
+                content = (await resp.text()).lower()
                 if "esp" in content or "cam" in content or "stream" in content:
                     return {"ip": ip, "metadata": {"type": "espcam"}}
             try:
