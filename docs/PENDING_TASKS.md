@@ -36,18 +36,17 @@ that review were not re-checked one by one; the full list is in git history
 - **Tracebacks to clients**: the gateway's global exception handler returns
   `detail` and the full `traceback` in the 500 body
   (`services/gateway/main.py`, `global_exception_handler`).
-- **Workspace tests run on the host**: workspace_runtime runs pytest/lint with
-  `subprocess.run(cwd=workspace)` in the container that holds the Docker
-  socket, executing repo code outside the sandbox (W1).
-- **Bare imports in execution** (`from announce_handlers import …`,
-  `from schemas import …` inside `services/execution/main.py` and some
-  handlers) that only work because of `sys.path` side effects (E3).
-- **Discovery probes inert**: `device_discovery.py` calls `.lower()` /
-  `ET.fromstring` on a `StreamReader` and an un-awaited `resp.text`; the
-  blanket `except` hides it (E4).
-- **Terminal context menu** closes ~300 ms after opening
-  (`TerminalPane.tsx`, inverted `menuLeaveRef` check) (U1).
-
+- **Workspace tests**: the Docker reachability test is marked `local_only`
+  and skips when no daemon is available; CI does not require the host socket
+  (W1).
+- **Bare imports in execution**: the announcement and storage paths now
+  import `services.execution.announce_handlers` and
+  `services.execution.schemas`; a broader import audit remains (E3).
+- **Discovery probes**: the port 80 and 8080 branches await `resp.text()`
+  before reading it; other probes use `resp.content` bytes. The blanket
+  exception remains as a safety net (E4).
+- **Terminal context menu**: fixed; the menu no longer closes after opening
+  (U1).
 ## Identity config DB: seeding and runtime integration
 
 Fixed 2026-10-18. Runtime settings now come from Identity under these keys:
