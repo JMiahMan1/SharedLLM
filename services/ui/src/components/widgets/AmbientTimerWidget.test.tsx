@@ -17,6 +17,7 @@ vi.mock('../../services/api', async (importOriginal) => {
     api: {
       ...(actual.api as Record<string, unknown>),
       getTimers: vi.fn().mockResolvedValue([]),
+      getTimerDevices: vi.fn().mockResolvedValue({ devices: [] }),
       createTimer: vi.fn().mockResolvedValue({ status: 'ACCEPTED', message: 'Timer created' }),
       deleteTimer: vi.fn().mockResolvedValue({ status: 'ACCEPTED', message: 'Timer deleted' }),
       getEntities: vi.fn().mockResolvedValue([]),
@@ -184,12 +185,9 @@ describe('AmbientTimerWidget', () => {
       expect(screen.queryByText('Loading timers...')).not.toBeInTheDocument();
     });
 
-    const buttons = screen.getAllByRole('button');
-    const deleteButton = buttons.find(btn => btn.querySelector('svg[data-lucide="x"]'));
-    if (deleteButton) {
-      fireEvent.click(deleteButton);
-      expect(api.deleteTimer).toHaveBeenCalledWith('1');
-    }
+    const deleteButton = screen.getByRole('button', { name: 'Delete Test Timer' });
+    fireEvent.click(deleteButton);
+    expect(api.deleteTimer).toHaveBeenCalledWith('Test Timer', 'timer', '1');
   });
 
   it('creates a timer when add button is clicked', async () => {
@@ -517,4 +515,55 @@ describe('AmbientTimerWidget', () => {
       target_device: 'media_player.kitchen',
     });
   });
+
+  it('supports emoji sounds, household scope, multi-device targets, and ESPHome screen flash', async () => {
+    vi.useRealTimers();
+    (api.getEntities as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { entity_id: 'media_player.kitchen', friendly_name: 'Kitchen Speaker', state: 'idle', domain: 'media_player' },
+    ]);
+    (api.getTimers as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (api.createTimer as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: 'SUCCESS',
+      message: 'Timer created.',
+      service: 'timer_add',
+      detail: { timer_id: 'egg-1' },
+    });
+
+    renderWithProviders(
+      <AmbientTimerWidget
+        userSettings={mockWidgetSettings}
+        onTogglePin={vi.fn()}
+        settingsButton={null}
+      />
+    );
+
+    const optionsBtn = await screen.findByRole('button', { name: 'Timer & alarm options' });
+    fireEvent.click(optionsBtn);
+
+    // Pick 3m Egg preset
+    fireEvent.click(screen.getByRole('button', { name: /3m 🥚/i }));
+    // Toggle Household scope
+    fireEvent.click(screen.getByRole('button', { name: /Personal/i }));
+    // Select alarm melody
+    fireEvent.click(screen.getByRole('button', { name: 'Kitchen Egg Timer' }));
+    // Select both Mobile App and Kitchen Speaker
+    fireEvent.click(screen.getByRole('button', { name: /Mobile App/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Kitchen Speaker/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add timer' }));
+
+    await waitFor(() => {
+      expect(api.createTimer).toHaveBeenCalledWith({
+        title: 'Soft Boiled Egg',
+        duration_str: '180s',
+        type: 'timer',
+        target_device: 'phone',
+        target_devices: ['phone', 'media_player.kitchen'],
+        scope: 'household',
+        emoji: '🥚',
+        sound: 'egg_timer',
+      });
+    });
+  });
 });
+

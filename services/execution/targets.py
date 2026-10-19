@@ -99,6 +99,7 @@ async def _speakers_for_rooms(
             unresolved.append(room)
 
     if unresolved and ha_url and ha_token:
+        target_room_keys = {room_key(r) for r in unresolved}
         try:
             areas = await ha_client.get_areas(ha_url, ha_token)
             # areas: entity_id -> area_name
@@ -106,10 +107,25 @@ async def _speakers_for_rooms(
                 if not eid.startswith("media_player."):
                     continue
                 area_key = room_key(area or "")
-                if area_key in {room_key(r) for r in unresolved}:
+                if area_key in target_room_keys:
                     ids.append(eid)
         except Exception as e:
             log.warning(f"[targets] HA area fallback failed: {e}")
+
+        if not ids:
+            try:
+                from services.execution.announce_handlers import _room_slug_from_entity
+                states = await ha_client.get_states(ha_url, ha_token)
+                for st in states or []:
+                    eid = str(st.get("entity_id") or "")
+                    if not eid.startswith("media_player."):
+                        continue
+                    attrs = st.get("attributes") or {}
+                    slug = _room_slug_from_entity(eid, str(attrs.get("friendly_name") or ""))
+                    if slug in target_room_keys or any(rk in eid.lower() for rk in target_room_keys):
+                        ids.append(eid)
+            except Exception as e:
+                log.warning(f"[targets] HA live state room match failed: {e}")
 
     return _dedupe(ids)
 

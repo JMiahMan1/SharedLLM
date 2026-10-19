@@ -202,11 +202,11 @@ async def _with_connection(cfg: dict, coro_factory):
 
 
 async def list_entities(device_name: str) -> dict:
-    """Return device info plus a summary of every exposed entity."""
+    """Return device info plus a summary of every exposed entity and service."""
     cfg = await get_device(device_name)
 
     async def op(client):
-        info, entities, _services = await client.device_info_and_list_entities()
+        info, entities, services = await client.device_info_and_list_entities()
         out = []
         for entity in entities:
             domain = _entity_domain(entity)
@@ -218,15 +218,93 @@ async def list_entities(device_name: str) -> dict:
                     "key": entity.key,
                 }
             )
+        svc_out = [
+            {
+                "name": getattr(s, "name", ""),
+                "args": [getattr(a, "name", "") for a in (getattr(s, "args", None) or [])],
+            }
+            for s in (services or [])
+        ]
         device = {
             "name": info.friendly_name or info.name,
             "esphome_version": info.esphome_version,
             "model": info.model,
         }
-        return device, out
+        return device, out, svc_out
 
-    device, entities = await _with_connection(cfg, op)
-    return {"device": device, "entities": entities}
+    device, entities, services = await _with_connection(cfg, op)
+    has_speaker = any(e.get("domain") in ("media_player", "siren") for e in entities)
+    return {
+        "device": device,
+        "entities": entities,
+        "services": services,
+        "has_speaker": has_speaker,
+    }
+
+
+def _match_service(services: list, wanted: str):
+    """Match an ESPHome UserService by name (tolerating script./service. prefixes)."""
+    target = wanted.strip().lower()
+    for prefix in ("script.", "service.", "esphome."):
+        if target.startswith(prefix):
+            target = target[len(prefix):]
+    for svc in services or []:
+        name = str(getattr(svc, "name", "") or "").lower()
+        if name == target or name.endswith(f"_{target}"):
+            return svc
+    return None
+
+
+def _coerce_service_args(service, raw_params: dict | None) -> dict:
+    """Build the argument dict required by aioesphomeapi.execute_service for `service`."""
+    params = dict(raw_params or {})
+    out: dict = {}
+    arg_type_cls = getattr(aioesphomeapi, "UserServiceArgType", None)
+    for arg_desc in getattr(service, "args", None) or []:
+        aname = getattr(arg_desc, "name", "")
+        atype = getattr(arg_desc, "type", None)
+        if aname in params and params[aname] is not None:
+            val = params[aname]
+        else:
+            # Sensible defaults so execute_service never raises KeyError
+            if arg_type_cls is not None:
+                if atype == getattr(arg_type_cls, "BOOL", -1):
+                    val = False
+                elif atype == getattr(arg_type_cls, "INT", -1):
+                    val = 0
+                elif atype == getattr(arg_type_cls, "FLOAT", -1):
+                    val = 0.0
+                elif atype in (
+                    getattr(arg_type_cls, "BOOL_ARRAY", -1),
+                    getattr(arg_type_cls, "INT_ARRAY", -1),
+                    getattr(arg_type_cls, "FLOAT_ARRAY", -1),
+                    getattr(arg_type_cls, "STRING_ARRAY", -1),
+                ):
+                    val = []
+                else:
+                    val = ""
+            else:
+                val = ""
+        if arg_type_cls is not None:
+            if atype == getattr(arg_type_cls, "BOOL", -1):
+                val = bool(val)
+            elif atype == getattr(arg_type_cls, "INT", -1):
+                val = int(val)
+            elif atype == getattr(arg_type_cls, "FLOAT", -1):
+                val = float(val)
+            elif atype == getattr(arg_type_cls, "STRING", -1):
+                val = str(val)
+        out[aname] = val
+    return out
+
+
+async def _execute_user_service(client, service, raw_params: dict | None = None):
+    """Execute an ESPHome UserService/action, safely handling response flags."""
+    args_data = _coerce_service_args(service, raw_params)
+    supports_resp = getattr(service, "supports_response", None)
+    none_type = getattr(getattr(aioesphomeapi, "SupportsResponseType", None), "NONE", None)
+    want_resp = True if (supports_resp and supports_resp != none_type) else None
+    return await client.execute_service(service, args_data, return_response=want_resp)
 
 
 async def get_device_entities_cached(device_name: str) -> list[dict]:
@@ -297,18 +375,22 @@ def _media_command(value: str):
 
 
 async def call_entity(device_name: str, entity_name: str, params: dict | None = None) -> dict:
-    """Send a command to one entity on a device; returns a result summary."""
+    """Send a command to one entity or script/service on a device; returns a result summary."""
     cfg = await get_device(device_name)
     params = params or {}
 
     def build_op():
         async def op(client):
-            _info, entities, _services = await client.device_info_and_list_entities()
+            _info, entities, services = await client.device_info_and_list_entities()
             entity = _match_entity(entities, entity_name)
             if entity is None:
+                svc = _match_service(services, entity_name)
+                if svc is not None:
+                    await _execute_user_service(client, svc, params)
+                    return {"domain": "service", "name": getattr(svc, "name", entity_name), "params": params}
                 available = [
                     f"{_entity_domain(e)}/{getattr(e, 'object_id', '')}" for e in entities
-                ]
+                ] + [f"service/{getattr(s, 'name', '')}" for s in (services or [])]
                 raise ValueError(
                     f"Entity '{entity_name}' not found on '{device_name}'. "
                     f"Available: {available}"
@@ -390,6 +472,202 @@ async def call_entity(device_name: str, entity_name: str, params: dict | None = 
 
     result = await _with_connection(cfg, build_op())
     return result
+
+
+# Standard ESPHome onscreen / script actions checked when a timer or alarm fires
+SCREEN_ALERT_SERVICES = (
+    "flash_screen",
+    "alarm_flash",
+    "screen_flash",
+    "alarm_trigger",
+    "timer_alert",
+    "show_alarm",
+    "trigger_alarm",
+    "notify_screen",
+    "play_rtttl",
+    "set_glance",
+)
+
+STOP_ALERT_SERVICES = (
+    "stop_flash",
+    "alarm_stop",
+    "stop_alarm",
+    "clear_alarm",
+    "dismiss_alarm",
+)
+
+
+async def trigger_device_alert(
+    device_name: str,
+    *,
+    title: str,
+    message: str,
+    media_url: str | None = None,
+    emoji: str | None = None,
+    sound: str | None = None,
+    rtttl: str | None = None,
+    script_name: str | None = None,
+    flash_screen: bool = True,
+) -> dict:
+    """Trigger an alarm/timer on an ESPHome device.
+
+    - If the device has a speaker (`media_player` or `siren`), plays `media_url`
+      or triggers the siren.
+    - If `script_name` is specified, OR if the device has NO speaker (or
+      `flash_screen` is requested), triggers the device's onscreen flash /
+      alarm script (until a button is pressed) or falls back to a flash
+      button/switch/light entity on the device.
+    """
+    cfg = await get_device(device_name)
+
+    async def op(client):
+        _info, entities, services = await client.device_info_and_list_entities()
+        services = services or []
+        triggered: list[str] = []
+        has_speaker = False
+
+        display_emoji = emoji or "⏰"
+        glance_text = f"{display_emoji} {title}"[:60]
+        service_payload = {
+            "title": title,
+            "name": title,
+            "label": title,
+            "message": message,
+            "text": message,
+            "body": message,
+            "line": glance_text,
+            "emoji": display_emoji,
+            "icon": display_emoji,
+            "sound": sound or "classic_alarm",
+            "tone": sound or "classic_alarm",
+            "rtttl": rtttl or "alarm:d=4,o=5,b=180:c6,p,c6,p,g5,p",
+            "song_str": rtttl or "alarm:d=4,o=5,b=180:c6,p,c6,p,g5,p",
+            "until_button": True,
+            "wait_for_button": True,
+            "flash": True,
+            "loop": True,
+            "duration": 60,
+            "duration_s": 60,
+            "seconds": 60,
+        }
+
+        # 1. Explicit script/service or entity requested
+        if script_name:
+            svc = _match_service(services, script_name)
+            if svc is not None:
+                await _execute_user_service(client, svc, service_payload)
+                triggered.append(f"service:{svc.name}")
+            else:
+                ent = _match_entity(entities, script_name)
+                if ent is not None:
+                    dom = _entity_domain(ent)
+                    if dom == "button":
+                        client.button_command(ent.key)
+                        triggered.append(f"button:{getattr(ent, 'object_id', script_name)}")
+                    elif dom == "switch":
+                        client.switch_command(ent.key, state=True)
+                        triggered.append(f"switch:{getattr(ent, 'object_id', script_name)}")
+                    elif dom == "light":
+                        client.light_command(ent.key, state=True, brightness=1.0)
+                        triggered.append(f"light:{getattr(ent, 'object_id', script_name)}")
+
+        # 2. Speaker playback (media_player / siren) if present on the device
+        for ent in entities:
+            dom = _entity_domain(ent)
+            if dom == "media_player" and media_url:
+                has_speaker = True
+                client.media_player_command(ent.key, media_url=media_url, announcement=True)
+                triggered.append(f"media_player:{getattr(ent, 'object_id', 'speaker')}")
+            elif dom == "siren":
+                has_speaker = True
+                if sound:
+                    client.siren_command(ent.key, tone=str(sound), state=True)
+                else:
+                    client.siren_command(ent.key, state=True)
+                triggered.append(f"siren:{getattr(ent, 'object_id', 'siren')}")
+
+        # 3. If no speaker (or flash_screen requested), trigger onscreen flash / script
+        if not has_speaker or flash_screen:
+            for candidate in SCREEN_ALERT_SERVICES:
+                svc = _match_service(services, candidate)
+                if svc is not None and f"service:{svc.name}" not in triggered:
+                    await _execute_user_service(client, svc, service_payload)
+                    triggered.append(f"service:{svc.name}")
+                    # Stop after the first primary screen-alert service (unless it's play_rtttl, which can pair with a screen flash)
+                    if candidate != "play_rtttl":
+                        break
+
+        # 4. Fallback for speakerless devices with no matching service: check buttons/switches/lights
+        if not triggered:
+            for ent in entities:
+                dom = _entity_domain(ent)
+                oid = str(getattr(ent, "object_id", "") or getattr(ent, "name", "")).lower()
+                if dom == "button" and any(k in oid for k in ("flash", "alarm", "alert", "screen", "buzzer", "ring")):
+                    client.button_command(ent.key)
+                    triggered.append(f"button:{oid}")
+                    break
+                if dom == "switch" and any(k in oid for k in ("flash", "alarm", "alert", "screen", "buzzer", "ring")):
+                    client.switch_command(ent.key, state=True)
+                    triggered.append(f"switch:{oid}")
+                    break
+            if not triggered:
+                for ent in entities:
+                    if _entity_domain(ent) == "light":
+                        client.light_command(ent.key, state=True, brightness=1.0)
+                        triggered.append(f"light:{getattr(ent, 'object_id', 'light')}")
+                        break
+
+        return {
+            "device": device_name,
+            "has_speaker": has_speaker,
+            "triggered": triggered,
+        }
+
+    return await _with_connection(cfg, op)
+
+
+async def stop_device_alert(device_name: str) -> dict:
+    """Stop any active alarm/screen flash on an ESPHome device."""
+    cfg = await get_device(device_name)
+
+    async def op(client):
+        _info, entities, services = await client.device_info_and_list_entities()
+        services = services or []
+        stopped: list[str] = []
+
+        for candidate in STOP_ALERT_SERVICES:
+            svc = _match_service(services, candidate)
+            if svc is not None:
+                await _execute_user_service(client, svc, {})
+                stopped.append(f"service:{svc.name}")
+
+        # Also clear glance line if the device uses set_glance
+        glance_svc = _match_service(services, "set_glance")
+        if glance_svc is not None:
+            await _execute_user_service(client, glance_svc, {"line": ""})
+            stopped.append("service:set_glance")
+
+        for ent in entities:
+            dom = _entity_domain(ent)
+            oid = str(getattr(ent, "object_id", "") or getattr(ent, "name", "")).lower()
+            if dom == "media_player":
+                with contextlib.suppress(Exception):
+                    client.media_player_command(ent.key, command=_media_command("STOP"))
+                    stopped.append(f"media_player:{oid}")
+            elif dom == "siren":
+                client.siren_command(ent.key, state=False)
+                stopped.append(f"siren:{oid}")
+            elif dom == "switch" and any(k in oid for k in ("flash", "alarm", "alert", "screen", "buzzer", "ring")):
+                client.switch_command(ent.key, state=False)
+                stopped.append(f"switch:{oid}")
+            elif dom == "button" and any(k in oid for k in ("stop", "dismiss", "ack", "clear")):
+                client.button_command(ent.key)
+                stopped.append(f"button:{oid}")
+
+        return {"device": device_name, "stopped": stopped}
+
+    return await _with_connection(cfg, op)
+
 
 
 # Handing a device Jarvis's own endpoint

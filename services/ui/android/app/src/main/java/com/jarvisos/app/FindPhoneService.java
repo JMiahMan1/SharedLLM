@@ -36,6 +36,8 @@ import androidx.core.app.NotificationCompat;
 public class FindPhoneService extends Service {
     private static final String TAG = "FindPhone";
     private static final String ACTION_STOP = "stop";
+    private static final String EXTRA_TITLE = "alarm_title";
+    private static final String EXTRA_BODY = "alarm_body";
     private static final int NOTIFICATION_ID = 0x10E1;
     private static final long RING_MS = 60_000L;
 
@@ -54,9 +56,17 @@ public class FindPhoneService extends Service {
     private PowerManager.WakeLock wakeLock;
     private AudioManager audio;
     private int previousAlarmVolume = -1;
+    private String customTitle = null;
+    private String customBody = null;
 
     static void start(Context context) {
+        startAlarm(context, null, null);
+    }
+
+    static void startAlarm(Context context, String title, String body) {
         Intent intent = new Intent(context, FindPhoneService.class);
+        if (title != null && !title.isEmpty()) intent.putExtra(EXTRA_TITLE, title);
+        if (body != null && !body.isEmpty()) intent.putExtra(EXTRA_BODY, body);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent);
@@ -91,6 +101,10 @@ public class FindPhoneService extends Service {
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
+        }
+        if (intent != null) {
+            customTitle = intent.getStringExtra(EXTRA_TITLE);
+            customBody = intent.getStringExtra(EXTRA_BODY);
         }
         startForegroundCompat();
         startRinging();
@@ -201,13 +215,16 @@ public class FindPhoneService extends Service {
 
     private Notification buildNotification() {
         PendingIntent stop = stopIntent();
+        String title = (customTitle != null && !customTitle.isEmpty()) ? customTitle : "Find my phone";
+        String body = (customBody != null && !customBody.isEmpty()) ? customBody : "Your phone is ringing.";
+        String category = (customTitle != null && !customTitle.isEmpty()) ? "timers" : "family_safety";
         return new NotificationCompat.Builder(
-                this, PushCategories.channelId("family_safety", 5))
-                .setSmallIcon(PushCategories.icon("family_safety", 5))
-                .setContentTitle("Find my phone")
-                .setContentText("Your phone is ringing.")
+                this, PushCategories.channelId(category, 5))
+                .setSmallIcon(PushCategories.icon(category, 5))
+                .setContentTitle(title)
+                .setContentText(body)
                 .setStyle(new NotificationCompat.BigTextStyle()
-                        .bigText("Your phone is ringing. Tap Stop to silence it."))
+                        .bigText(body + " Tap Stop to silence it."))
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -216,7 +233,7 @@ public class FindPhoneService extends Service {
                 .setOnlyAlertOnce(true)
                 .setSilent(true)
                 .setShowWhen(false)
-                .setContentIntent(PushNotifier.openIntent(this, "/", NOTIFICATION_ID))
+                .setContentIntent(PushNotifier.openIntent(this, "/communication", NOTIFICATION_ID))
                 .setDeleteIntent(stop)
                 .addAction(new NotificationCompat.Action.Builder(0, "Stop", stop).build())
                 .build();

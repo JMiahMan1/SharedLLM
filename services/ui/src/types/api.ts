@@ -447,9 +447,44 @@ export interface TimerRecord {
   title: string;
   expires_at: string;
   active: boolean;
+  paused_at?: string | null;
   recurrence?: string | null;
   target_device?: string | null;
+  target_devices?: string[];
   duration_sec?: number;
+  scope?: 'user' | 'household' | 'family';
+  created_by?: string;
+  user_id?: string;
+  emoji?: string | null;
+  sound?: string | null;
+  tts_enabled?: boolean;
+  esphome_script?: string | null;
+  flash_screen?: boolean;
+}
+
+export interface TimerTargetDevice {
+  id: string;
+  name: string;
+  kind: 'mobile' | 'phone' | 'tv' | 'esphome' | 'speaker' | 'ha_media_player' | string;
+  platform?: string;
+  os_version?: string;
+  model?: string;
+  ip?: string;
+  has_speaker: boolean;
+  has_screen: boolean;
+  has_microphone?: boolean;
+  intercom_mode?: 'twoway' | 'oneway' | string;
+  assist_satellite_entity?: string | null;
+  communication_methods?: string[];
+  esphome_script?: string | null;
+  services?: Array<{ name: string; args?: unknown[] }>;
+  state?: string;
+}
+
+export interface TimerDevicesResponse {
+  devices: TimerTargetDevice[];
+  sounds?: Array<{ id: string; label: string; description: string }>;
+  emojis?: Array<{ emoji: string; label: string }>;
 }
 
 export interface TalkConversation {

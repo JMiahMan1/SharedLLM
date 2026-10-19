@@ -4628,6 +4628,11 @@ async def proxy_list_timers(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/timers", method="GET")
 
 
+@app.get("/api/communication/timers/devices")
+async def proxy_list_timer_devices(request: Request):
+    return await _proxy_execution_with_identity(request, "/execute/timers/devices", method="GET")
+
+
 @app.post("/api/communication/timers")
 async def proxy_add_timer(request: Request):
     body = await request.json()
@@ -4640,8 +4645,18 @@ async def proxy_add_timer(request: Request):
         "recurrence": body.get("recurrence"),
         "target_device": body.get("target_device"),
     }
-    if body.get("id") is not None:
-        payload["id"] = body.get("id")
+    for optional_key in (
+        "id",
+        "target_devices",
+        "scope",
+        "emoji",
+        "sound",
+        "tts_enabled",
+        "esphome_script",
+        "flash_screen",
+    ):
+        if body.get(optional_key) is not None:
+            payload[optional_key] = body.get(optional_key)
     return await _proxy_execution_with_identity(request, "/execute/timer", payload)
 
 
@@ -4654,8 +4669,9 @@ async def proxy_delete_timer(request: Request):
         "title": body.get("title"),
         "query": body.get("query"),
     }
-    if body.get("id") is not None:
-        payload["id"] = body.get("id")
+    for optional_key in ("id", "scope", "target_device", "target_devices"):
+        if body.get(optional_key) is not None:
+            payload[optional_key] = body.get(optional_key)
     return await _proxy_execution_with_identity(request, "/execute/timer", payload)
 
 
@@ -7263,22 +7279,31 @@ async def get_intercom_config(request: Request):
 
 @app.api_route("/api/intercom/sessions", methods=["GET", "POST"])
 async def proxy_intercom_sessions(request: Request):
-    """Proxy intercom session list/create to Identity service."""
+    """Proxy intercom session list to Identity and session creation to Execution (1-way / 2-way dispatch)."""
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
-    body = None
     if request.method == "POST":
         try:
             body = await request.json()
         except Exception:
-            body = None
+            body = {}
+        try:
+            return await _proxy_execution_with_identity(request, "/execute/intercom/start", body or {})
+        except Exception:
+            pass
+        async with borrow_http_client() as client:
+            resp = await client.post(
+                f"{IDENTITY_SVC}/api/intercom/sessions",
+                json=body,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            return await _proxy_json_response(resp)
     async with borrow_http_client() as client:
-        resp = await client.request(
-            request.method,
+        resp = await client.get(
             f"{IDENTITY_SVC}/api/intercom/sessions",
-            json=body,
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=10.0),
         )
@@ -7287,10 +7312,14 @@ async def proxy_intercom_sessions(request: Request):
 
 @app.delete("/api/intercom/sessions/{session_id}")
 async def proxy_delete_intercom_session(session_id: str, request: Request):
-    """Proxy intercom session deletion to Identity service."""
+    """Proxy intercom session deletion to Execution (silences TVs/speakers and marks ended in Identity)."""
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
+    try:
+        return await _proxy_execution_with_identity(request, "/execute/intercom/end", {"session_id": session_id})
+    except Exception:
+        pass
     async with borrow_http_client() as client:
         resp = await client.delete(
             f"{IDENTITY_SVC}/api/intercom/sessions/{session_id}",

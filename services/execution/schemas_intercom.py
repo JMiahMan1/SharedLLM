@@ -7,12 +7,14 @@ from pydantic import BaseModel, Field
 
 
 class IntercomSessionRequest(BaseModel):
-    """Start a two-way intercom session."""
-    caller_user_id: str
+    """Start a one-way or two-way intercom session."""
+    caller_user_id: str = ""
     target_user_id: str | None = None
     target_room: str | None = None
     target_entity_ids: list[str] | None = None
-    session_type: str = "twoway"  # "twoway", "broadcast", "announcement"
+    session_type: str = "twoway"  # "twoway", "oneway", "broadcast", "announcement"
+    message: str | None = None
+    volume: float | None = None
 
 
 class IntercomBroadcastRequest(BaseModel):

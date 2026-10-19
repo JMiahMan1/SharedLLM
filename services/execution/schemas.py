@@ -411,11 +411,11 @@ class NoteRequest(BaseRequest):
     previews: bool = False # list: also return the text of the newest notes
 
 
-# Timers / Alarms
+# Timers / Alarms / Household Reminders
 class TimerRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["add", "list", "delete", "pause", "resume"]
-    type: Literal["timer", "alarm"] = "timer"
+    action: Literal["add", "list", "delete", "pause", "resume", "stop", "reset"]
+    type: Literal["timer", "alarm", "reminder"] = "timer"
     id: str | None = None
     query: str | None = None
     title: str | None = None
@@ -423,6 +423,13 @@ class TimerRequest(BaseRequest):
     time_str: str | None = None
     recurrence: str | None = None
     target_device: str | None = None
+    target_devices: list[str] | None = None
+    scope: Literal["user", "household", "family"] | None = None
+    emoji: str | None = None
+    sound: str | None = None
+    tts_enabled: bool | None = None
+    esphome_script: str | None = None
+    flash_screen: bool | None = None
 
 
 class TalkFileRequest(BaseModel):

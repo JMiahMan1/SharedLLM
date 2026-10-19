@@ -336,6 +336,9 @@ public class PushService extends Service {
                 FindPhoneService.start(this);
                 return;
             }
+            if (notice.isAlarmRing()) {
+                FindPhoneService.startAlarm(this, notice.title, notice.body);
+            }
             PushNotifier.show(this, notice);
         } catch (Exception e) {
             // One bad notice must not end the stream or the poll.

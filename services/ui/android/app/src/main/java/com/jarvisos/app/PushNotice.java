@@ -67,10 +67,14 @@ final class PushNotice {
     /** The in-app page the notice is about, already checked by {@link #safePath}. */
     final String path;
     final String dataToken;
+    final boolean ringPhone;
+    final String sound;
+    final String emoji;
     final List<Action> actions;
 
     private PushNotice(String id, String category, String kind, String title, String body,
-                       int priority, String tag, String path, String dataToken, List<Action> actions) {
+                       int priority, String tag, String path, String dataToken,
+                       boolean ringPhone, String sound, String emoji, List<Action> actions) {
         this.id = id;
         this.category = category;
         this.kind = kind;
@@ -80,6 +84,9 @@ final class PushNotice {
         this.tag = tag;
         this.path = path;
         this.dataToken = dataToken;
+        this.ringPhone = ringPhone;
+        this.sound = sound;
+        this.emoji = emoji;
         this.actions = actions;
     }
 
@@ -100,6 +107,9 @@ final class PushNotice {
         JSONObject data = o.optJSONObject("data");
         String url = data != null ? str(data, "url") : "";
         String token = data != null ? str(data, "token") : "";
+        boolean ringPhone = data != null && data.optBoolean("ring_phone", false);
+        String sound = data != null ? str(data, "sound") : "";
+        String emoji = data != null ? str(data, "emoji") : "";
         String category = str(o, "category");
         return new PushNotice(
                 str(o, "id"),
@@ -111,6 +121,9 @@ final class PushNotice {
                 str(o, "tag"),
                 safePath(url),
                 token,
+                ringPhone,
+                sound,
+                emoji,
                 actions(o.optJSONArray("actions")));
     }
 
@@ -118,7 +131,7 @@ final class PushNotice {
     static PushNotice plain(String id, String title, String body) {
         return new PushNotice(id == null ? "" : id, PushCategories.GENERAL, "",
                 title == null || title.isEmpty() ? "Jarvis" : title, body == null ? "" : body,
-                3, "", "", "", Collections.<Action>emptyList());
+                3, "", "", "", false, "", "", Collections.<Action>emptyList());
     }
 
     private static List<Action> actions(JSONArray list) {
@@ -151,6 +164,11 @@ final class PushNotice {
     /** The watch asked for this phone to ring (see {@link FindPhoneService}). */
     boolean isFindPhone() {
         return "find_phone".equals(kind) || "find_phone".equals(tag);
+    }
+
+    /** An alarm or phone-targeted timer that should ring on the Android alarm stream. */
+    boolean isAlarmRing() {
+        return "timers".equals(category) && ("alarm".equals(kind) || ringPhone || priority >= 5);
     }
 
     /**

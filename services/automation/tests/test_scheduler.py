@@ -293,6 +293,25 @@ def test_monthly_and_yearly_recurrence_supported():
     assert yearly.year == 2027
 
 
+def test_weekdays_weekends_and_biweekly_recurrence():
+    # Friday 2026-10-16 -> next weekday is Monday 2026-10-19
+    friday = datetime(2026, 10, 16, 7, 30, tzinfo=UTC)
+    next_weekday = automation._next_recurrence(friday, "weekdays")
+    assert next_weekday.weekday() == 0
+    assert (next_weekday.year, next_weekday.month, next_weekday.day) == (2026, 10, 19)
+
+    # Wednesday 2026-10-14 -> next weekend day is Saturday 2026-10-17
+    wednesday = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
+    next_weekend = automation._next_recurrence(wednesday, "weekends")
+    assert next_weekend.weekday() == 5
+    assert (next_weekend.year, next_weekend.month, next_weekend.day) == (2026, 10, 17)
+
+    # Biweekly advances by 14 days, not 7
+    biweekly = automation._next_recurrence(friday, "biweekly")
+    assert (biweekly - friday).days == 14
+
+
+
 async def test_collect_status_counts_due_and_failed(rc, timer):
     now = datetime.now(UTC)
     due = dict(timer)

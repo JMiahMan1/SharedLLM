@@ -571,21 +571,49 @@ export const server = setupServer(
     return HttpResponse.json({ success: true });
   }),
   http.get('/api/communication/timers', () => HttpResponse.json(timers)),
+  http.get('/api/communication/timers/devices', () => HttpResponse.json({
+    devices: [
+      { id: 'phone', name: 'Mobile App (Phone Alarm)', kind: 'mobile', has_speaker: true, has_screen: true },
+      { id: 'esphome:kitchen_display', name: 'Kitchen Display (ESPHome)', kind: 'esphome', has_speaker: false, has_screen: true, esphome_script: 'flash_screen' },
+      { id: 'media_player.kitchen_speaker', name: 'Kitchen Speaker', kind: 'ha_media_player', has_speaker: true, has_screen: false },
+    ],
+  })),
   http.post('/api/communication/timers', async ({ request }) => {
     const body = await request.json() as Record<string, unknown>;
+    if (body.action && body.action !== 'add') {
+      if (body.action === 'pause') {
+        timers = timers.map((t) => (t.id === body.id || t.title === body.title ? { ...t, active: false, paused_at: '2026-05-06T18:55:00' } : t));
+      } else if (body.action === 'resume' || body.action === 'reset') {
+        timers = timers.map((t) => (t.id === body.id || t.title === body.title ? { ...t, active: true, paused_at: undefined } : t));
+      }
+      return HttpResponse.json({ status: 'SUCCESS', message: `Timer action ${String(body.action)} completed.`, service: `timer_${String(body.action)}` });
+    }
     const timer = {
       id: `timer-${timers.length + 1}`,
-      type: body.type || 'timer',
-      title: body.title || 'Untitled',
+      type: (body.type as string) || 'timer',
+      title: (body.title as string) || 'Untitled',
       expires_at: '2026-05-06T19:00:00',
       active: true,
+      scope: body.scope as string | undefined,
+      emoji: body.emoji as string | undefined,
+      sound: body.sound as string | undefined,
+      target_device: body.target_device as string | undefined,
+      target_devices: body.target_devices as string[] | undefined,
+      flash_screen: body.flash_screen as boolean | undefined,
+      esphome_script: body.esphome_script as string | undefined,
+      recurrence: body.recurrence as string | undefined,
     };
     timers = [...timers, timer];
-    return HttpResponse.json({ status: 'SUCCESS', message: `Set timer '${timer.title}'.`, service: 'timer_add' });
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      message: `Set timer '${timer.title}'.`,
+      service: 'timer_add',
+      detail: { timer_id: timer.id, expires_at: timer.expires_at },
+    });
   }),
   http.delete('/api/communication/timers', async ({ request }) => {
     const body = await request.json() as Record<string, unknown>;
-    timers = timers.filter((timer) => timer.title !== body.title);
+    timers = timers.filter((timer) => (body.id ? timer.id !== body.id && timer.title !== body.title : timer.title !== body.title));
     return HttpResponse.json({ status: 'SUCCESS', message: 'Deleted timer.', service: 'timer_delete' });
   }),
   http.get('/api/communication/calendar/calendars', () => HttpResponse.json({

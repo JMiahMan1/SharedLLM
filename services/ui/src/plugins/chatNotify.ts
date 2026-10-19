@@ -20,6 +20,10 @@ export interface ChatNotifyPluginInterface {
    * told, the gateway forgets it). `removed` is 0 when none was made here.
    */
   removeApp(options: { app: string; token?: string }): Promise<{ removed: number }>;
+  /** Ring the phone on the alarm stream (STREAM_ALARM + vibration) until stopped. */
+  ringAlarm(options?: { title?: string; body?: string }): Promise<{ ringing: boolean }>;
+  /** Stop an active phone alarm ring. */
+  stopAlarm(): Promise<{ ringing: boolean }>;
   /** A notification was tapped; `path` is the page to open. */
   addListener(event: 'open', cb: (data: { path: string }) => void): Promise<PluginListenerHandle>;
 }

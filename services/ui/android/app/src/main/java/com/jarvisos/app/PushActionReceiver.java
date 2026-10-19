@@ -58,6 +58,9 @@ public class PushActionReceiver extends BroadcastReceiver {
         final String reply = typed == null ? "" : typed.toString().trim();
         final String params = intent.getStringExtra(EXTRA_PARAMS);
         final Context app = context.getApplicationContext();
+        if (callback.startsWith("timer_")) {
+            FindPhoneService.stop(app);
+        }
         final PendingResult pending = goAsync();
         new Thread(() -> {
             boolean ok = false;

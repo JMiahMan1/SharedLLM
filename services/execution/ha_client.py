@@ -478,3 +478,21 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
     # Name match dominates; capability bonuses only break ties.
     candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return candidates[0][2]
+
+
+async def get_services(ha_url: str, ha_token: str) -> list[dict]:
+    """Fetch available Home Assistant service domains and services from /api/services."""
+    if not ha_url or not ha_token:
+        return []
+    headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
+    url = f"{ha_url.rstrip('/')}/api/services"
+    async with _ha_session(ha_url) as client:
+        try:
+            async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data if isinstance(data, list) else []
+        except Exception as e:
+            log.debug(f"[ha_client] get_services failed: {e}")
+    return []
+
