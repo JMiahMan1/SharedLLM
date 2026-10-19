@@ -3,6 +3,7 @@ import logging
 
 from services.execution.schemas import ExecutionResult, StorageFileReadRequest, StorageFileWriteRequest, StorageTextToAudioRequest
 
+from ..artifacts import artifact_name, create_artifact
 from ..http_client import request as http_request
 from ..nextcloud_client import resolve_credentials, webdav_url
 from ..tts import text_to_speech
@@ -94,7 +95,25 @@ async def handle_storage_tts(req: StorageTextToAudioRequest) -> ExecutionResult:
         put_resp = await http_request("PUT", output_url, auth=(user, pw), data=audio_bytes, timeout=60, verify=False)
 
         if put_resp["status_code"] in (200, 201, 204):
-            return _ok(f"Successfully converted {req.input_path} to audio at {out_path}", {"path": out_path, "size": len(audio_bytes)})
+            detail = {"path": out_path, "size": len(audio_bytes)}
+            artifact = await create_artifact(
+                user_context=req.user_context,
+                kind="tts_audio",
+                name=artifact_name(out_path, "audio.wav"),
+                data=audio_bytes,
+                mime_type="audio/wav",
+                workspace_id=req.workspace_id,
+                generator="storage_tts",
+                metadata={
+                    "input_path": req.input_path,
+                    "output_path": out_path,
+                    "voice": req.voice,
+                    "storybook": req.storybook,
+                },
+            )
+            if artifact:
+                detail["artifact"] = artifact
+            return _ok(f"Successfully converted {req.input_path} to audio at {out_path}", detail)
         else:
             return _fail(f"Failed to write output audio ({put_resp['status_code']}): {put_resp['text'][:200]}")
 

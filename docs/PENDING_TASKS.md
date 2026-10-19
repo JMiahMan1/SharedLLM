@@ -55,7 +55,9 @@ The local provider, artifact/quota database, API, signed range streaming,
 Storage page, and the workspace-deletion 409 prompt (delete or orphan) are
 implemented. Still open:
 
-- Wire TTS, image, video and document generators through `create_artifact`.
+- TTS outputs now create artifacts: `/execute/tts`, Nextcloud
+  `storage_text_to_audio`, and podcast renders. Image, video and document
+  generators still need wiring.
 - The local quota comes from `ARTIFACT_LOCAL_QUOTA_BYTES` and per-user rows in
   `UserStorageQuota`; the proposed Identity `artifact_local_quota_bytes`
   setting is not wired (storage does not read Identity settings).
