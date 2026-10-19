@@ -91,7 +91,11 @@ const Communication = () => {
       message: announcementMessage,
       volume: announcementVolume,
     }),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      if (res?.status && res.status !== 'SUCCESS') {
+        toast.error(res.message || 'Announcement failed');
+        return;
+      }
       toast.success('Announcement sent');
       setAnnouncementMessage('');
     },

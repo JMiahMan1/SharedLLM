@@ -1835,12 +1835,12 @@ async def execute_announce(req: AnnouncementRequest):
 
             # Dispatch to TV-specific handler
             log.info(f"[announce] Dispatching: target={target_player}, state={initial_state_str}, attrs_keys={list(attrs.keys())}, _ma_player={attrs.get('_ma_player_entity')}")
-            from announce_handlers import dispatch_announce
+            from services.execution.announce_handlers import dispatch_announce
             result = await dispatch_announce(ha_url, ha_token, target_player, media_url, req.volume or 0.5, initial_state_str, attrs, loaded_components, message=req.message)
             log.info(f"[announce] Dispatch result: {result}")
 
             if req.save_path:
-                from schemas import StorageFileWriteRequest
+                from services.execution.schemas import StorageFileWriteRequest
 
                 from services.execution.handlers import storage as storage_handler
                 await storage_handler.handle_storage_write(StorageFileWriteRequest(
