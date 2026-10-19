@@ -2390,15 +2390,22 @@ async def execute_ha_service(req: HAServiceRequest):
     )
 
 def _detect_media_platform(entity_id: str, attrs: dict) -> str:
-    """Detect the TV/media platform type from entity attributes."""
+    """Detect the TV/media platform type from entity attributes via unified detect_tv_type."""
+    if entity_id.lower().startswith("media_player."):
+        tv_type = detect_tv_type(entity_id, "unknown", attrs or {})
+        if tv_type == "cast":
+            return "chromecast"
+        if tv_type not in ("unknown", "generic_tv", "speaker"):
+            return tv_type
+
     eid_lower = entity_id.lower()
     app_id = (attrs.get("app_id") or "").lower()
     source_list = [s.lower() for s in (attrs.get("source_list") or [])]
 
     platform_map = {
         "roku": ["roku", "tcl", "sharp"],
-        "webos": ["webos", "lg_", "lg.webos"],
-        "samsung": ["samsung", "samsungtv", "tizen"],
+        "webos": ["webos", "lg_", "lg.webos", "com.webos.", "com.lge."],
+        "samsung": ["samsung", "samsungtv", "tizen", "org.tizen."],
         "android_tv": ["androidtv", "android_tv", "com.google.android", "com.google.tv"],
         "chromecast": ["chrome", "_cast", "backdrop"],
         "bravia": ["bravia", "sony"],

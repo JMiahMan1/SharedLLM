@@ -100,7 +100,7 @@ def _get_local_self_ips() -> set[str]:
 
 DEVICE_PORTS = {
     "roku": [(8060, "roku:ecp")],
-    "webos": [(3000, "webos"), (3001, "webos-wss"), (9080, "webos-status"), (7676, "webos")],
+    "webos": [(3000, "webos"), (3001, "webos-wss"), (9080, "webos-status")],
     "samsung": [(8001, "samsung"), (8002, "samsung-wss"), (55000, "samsung-legacy"), (7676, "samsung-dlna")],
     "androidtv": [(6466, "androidtv-remote"), (5555, "adb"), (8008, "eureka")],
     "cast": [(8008, "eureka"), (8009, "cast")],
@@ -460,8 +460,9 @@ async def _discover_via_arp(
         if not arp_ips:
             return None
 
-        # Probe ARP IPs for WebOS ports
-        webos_ports = [3000, 7676, 1300, 8080]
+        # Probe ARP IPs for LG WebOS ports (never Samsung port 7676)
+        webos_ports = [3000, 3001, 9080]
+        is_lg_entity = any(k in f"{friendly} {entity_base}" for k in ("lg", "webos", "webostv"))
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2), connector=aiohttp.TCPConnector(ssl=False)) as client:
             for ip, mac in arp_ips:
                 for port in webos_ports:
@@ -471,9 +472,11 @@ async def _discover_via_arp(
                             # Check if device info matches entity
                             body = (await resp.text()).lower()
                             searchable = f"{body} {ip} {mac}".lower()
-                            if any(word in searchable for word in friendly.split() if len(word) > 2) or \
-                               any(word in searchable for word in entity_base.split() if len(word) > 2) or \
-                               "lg" in searchable or "webos" in searchable or "living" in searchable:
+                            if (
+                                any(word in searchable for word in friendly.split() if len(word) > 2)
+                                or any(word in searchable for word in entity_base.split() if len(word) > 2)
+                                or (is_lg_entity and ("lg" in searchable or "webos" in searchable))
+                            ):
                                 await device_registry.set_device(
                                     entity_id,
                                     ip=ip,
@@ -542,8 +545,9 @@ async def _discover_via_arp_scan(
         if not found_devices:
             return None
 
-        # Probe found IPs for WebOS ports
-        webos_ports = [3000, 7676, 1300, 8080]
+        # Probe found IPs for LG WebOS ports (never Samsung port 7676)
+        webos_ports = [3000, 3001, 9080]
+        is_lg_entity = any(k in f"{friendly} {entity_base}" for k in ("lg", "webos", "webostv"))
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2), connector=aiohttp.TCPConnector(ssl=False)) as client:
             for ip, mac, vendor in found_devices:
                 for port in webos_ports:
@@ -552,9 +556,11 @@ async def _discover_via_arp_scan(
                         if resp.status == 200:
                             body = (await resp.text()).lower()
                             searchable = f"{body} {ip} {mac} {vendor}".lower()
-                            if any(word in searchable for word in friendly.split() if len(word) > 2) or \
-                               any(word in searchable for word in entity_base.split() if len(word) > 2) or \
-                               "lg" in searchable or "webos" in searchable or "living" in searchable:
+                            if (
+                                any(word in searchable for word in friendly.split() if len(word) > 2)
+                                or any(word in searchable for word in entity_base.split() if len(word) > 2)
+                                or (is_lg_entity and ("lg" in searchable or "webos" in searchable))
+                            ):
                                 await device_registry.set_device(
                                     entity_id,
                                     ip=ip,
@@ -1146,6 +1152,8 @@ async def bulk_scan(
                 type_aliases = {
                     "cast": ["cast", "chrome"],
                     "androidtv": ["android", "adb"],
+                    "webos": ["webos", "web_os", "lg_", "webostv"],
+                    "samsung": ["samsung", "tizen", "orsay", "samsungtv"],
                 }
                 match_terms = type_aliases.get(dev_type, [dev_type])
                 if any(t in entity_lower for t in match_terms) or dev_type == integration.lower():

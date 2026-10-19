@@ -46,14 +46,24 @@ MEDIA_VERIFY_INTERVAL = 2
 
 
 async def is_samsung_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
-    """Check if a media_player entity is a Samsung TV (Tizen or Legacy Orsay)."""
+    """Check if a media_player entity is a Samsung TV (Tizen or Legacy Orsay, never LG webOS)."""
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
     if not state:
         return False
     attrs = state.get("attributes", {})
     app_id = (attrs.get("app_id") or "").lower()
     entity_id_lower = entity_id.lower()
-    samsung_indicators = ("org.tizen.", "samsung.tv", "tizen.tv")
+    friendly_lower = (attrs.get("friendly_name") or "").lower()
+    webos_indicators = ("com.webos.", "com.lge.", "com.palm.", "webos.tv", "lg.webos")
+    if (
+        any(ind in app_id for ind in webos_indicators)
+        or "webos" in entity_id_lower
+        or "lg_" in entity_id_lower
+        or "webos" in friendly_lower
+        or "sound_output" in attrs
+    ):
+        return False
+    samsung_indicators = ("org.tizen.", "samsung.tv", "tizen.tv", "com.samsung.")
     if any(ind in app_id for ind in samsung_indicators) or "samsungtv" in entity_id_lower:
         return True
     try:

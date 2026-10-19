@@ -174,27 +174,50 @@ def detect_tv_type(
     if "roku" in eid or "roku" in friendly_lower or has_roku_sources or has_many_streaming or is_ma_roku:
         return "roku"
 
-    # 3. webOS (LG): entity/friendly_name contains 'lg'/'webos', or source_list has LG webOS portals
+    # 3. webOS (LG Electronics): entity/friendly_name/app_id/attributes/sources indicate LG webOS
+    #    Note: webOS is LG's TV OS (never Samsung). HA webostv exposes `sound_output` and `com.webos.*` / `com.lge.*` app_ids.
     has_webos_sources = bool(WEBOS_SOURCES & source_set)
+    is_webos_app = any(
+        ind in app_id for ind in ("com.webos.", "com.lge.", "com.palm.", "webos.tv", "lg.webos")
+    )
+    integration_lower = (attrs.get("integration") or "").lower()
+    manufacturer_lower = (attrs.get("manufacturer") or "").lower()
+    has_lg_word = bool(re.search(r"\blg\b", friendly_lower)) or bool(re.search(r"(^|[._])lg([._]|$)", eid))
     if (
-        "lg_" in eid
+        has_lg_word
         or "webos" in eid
         or "web_os" in eid
-        or "lg webos" in friendly_lower
+        or "webostv" in eid
+        or "webos" in friendly_lower
+        or "web os" in friendly_lower
+        or is_webos_app
+        or "sound_output" in attrs
+        or integration_lower == "webostv"
+        or manufacturer_lower in ("lg", "lg electronics", "lge")
         or has_webos_sources
     ):
         return "webos"
 
-    # 4. Samsung (Tizen & Legacy Orsay): entity contains 'samsung'/'tizen', Samsung sources,
-    #    or HA samsungtv signature (source_list == ['tv', 'hdmi'] with TV class/features)
+    # 4. Samsung (Tizen & Legacy Orsay): entity/friendly_name/app_id/attributes/sources indicate Samsung
+    #    or HA samsungtv signature (source_list == ['tv', 'hdmi'] with TV class/features and no LG sound_output)
     has_samsung_sources = bool(SAMSUNG_SOURCES & source_set)
-    is_samsung_tv_sources = source_list == ["tv", "hdmi"] and (
-        device_class == "tv" or supported_features == TV_STANDARD_FEATURES
+    is_samsung_app = any(
+        ind in app_id for ind in ("org.tizen.", "samsung.tv", "tizen.tv", "com.samsung.")
+    )
+    is_samsung_tv_sources = (
+        source_list == ["tv", "hdmi"]
+        and "sound_output" not in attrs
+        and (device_class == "tv" or supported_features == TV_STANDARD_FEATURES)
     )
     if (
         "samsung" in eid
         or "tizen" in eid
+        or "orsay" in eid
         or "samsung" in friendly_lower
+        or "tizen" in friendly_lower
+        or is_samsung_app
+        or integration_lower == "samsungtv"
+        or "samsung" in manufacturer_lower
         or has_samsung_sources
         or is_samsung_tv_sources
     ):
@@ -240,13 +263,15 @@ def detect_tv_type(
     if device_class == "speaker":
         return "speaker"
 
-    # 13. Use loaded components as additional signal
+    # 13. Use loaded components as additional signal (only when unambiguous)
     if loaded_components:
         if "cast.media_player" in loaded_components and supported_features & SUPPORT_PLAY_MEDIA:
             return "cast"
-        if "samsungtv.media_player" in loaded_components:
+        has_samsung_comp = "samsungtv.media_player" in loaded_components
+        has_webos_comp = "webostv.media_player" in loaded_components
+        if has_samsung_comp and not has_webos_comp:
             return "samsung"
-        if "webostv.media_player" in loaded_components:
+        if has_webos_comp and not has_samsung_comp:
             return "webos"
         if "androidtv_remote.media_player" in loaded_components:
             return "android_tv"

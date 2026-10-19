@@ -43,14 +43,23 @@ def _send_wol(mac: str, ip: str = "255.255.255.255", port: int = 9) -> bool:
 
 
 async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
-    """Check if a media_player entity is an LG WebOS TV."""
+    """Check if a media_player entity is an LG WebOS TV (never Samsung)."""
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
     if not state:
         return False
     attrs = state.get("attributes", {})
     app_id = (attrs.get("app_id") or "").lower()
     entity_id_lower = entity_id.lower()
-    webos_indicators = ("com.webos.", "webos.tv", "lg.webos")
+    friendly_lower = (attrs.get("friendly_name") or "").lower()
+    samsung_indicators = ("org.tizen.", "samsung.tv", "tizen.tv", "com.samsung.")
+    if (
+        any(ind in app_id for ind in samsung_indicators)
+        or "samsung" in entity_id_lower
+        or "tizen" in entity_id_lower
+        or "samsung" in friendly_lower
+    ):
+        return False
+    webos_indicators = ("com.webos.", "com.lge.", "com.palm.", "webos.tv", "lg.webos")
     if any(ind in app_id for ind in webos_indicators) or "webostv" in entity_id_lower:
         return True
     try:
