@@ -1,8 +1,11 @@
-import { useEffect, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef } from 'react';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { api } from '../../services/api';
 import { userLocationsQuery } from '../../lib/wanderQueries';
+import { avatarMarkerHtml } from '../../lib/avatarMarker';
+import { findFamilyMember, useFamilyDirectory, type FamilyLookup } from '../chat/familyDirectory';
 import {
   FRESHNESS_STYLE,
   STALE_MAX_AGE_MS,
@@ -32,6 +35,8 @@ interface LiveFamilyMapProps {
   focusUserId?: string | null;
   /** HA zones rendered as "Places" geofences. */
   zones?: MapPlace[];
+  /** The family directory, so markers can draw real profile pictures. */
+  people?: FamilyLookup;
 }
 
 /**
@@ -46,6 +51,7 @@ export default function LiveFamilyMap({
   maxAgeMs = STALE_MAX_AGE_MS,
   focusUserId = null,
   zones = [],
+  people,
 }: LiveFamilyMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -59,6 +65,50 @@ export default function LiveFamilyMap({
     ...userLocationsQuery,
     select: (raw) => buildLiveMembers(raw, Date.now(), maxAgeMs),
   });
+
+  // Wander already has the directory; the fallback keeps the map self-contained
+  // for any other caller. Same query key, so this never fetches twice.
+  const fallbackPeople = useFamilyDirectory();
+  const directory = people ?? fallbackPeople;
+
+  /** Each live location key to its household account, when we know one. */
+  const personByUser = useMemo(() => {
+    const byUser = new Map<string, ReturnType<typeof findFamilyMember>>();
+    for (const member of members) {
+      byUser.set(member.userId, findFamilyMember(directory, member.userId, member.userId));
+    }
+    return byUser;
+  }, [members, directory]);
+
+  /** Uploaded photos only: presets are drawn from code and need no fetch. */
+  const avatarTargets = useMemo(() => {
+    const seen = new Set<string>();
+    const targets: Array<{ key: string; username: string; version: string }> = [];
+    for (const person of personByUser.values()) {
+      if (!person?.avatar?.startsWith('upload:')) continue;
+      const key = `${person.username}:${person.avatar}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push({ key, username: person.username, version: person.avatar });
+    }
+    return targets;
+  }, [personByUser]);
+
+  // Same query keys as UserAvatar, so chat and the map share one cached blob
+  // per picture instead of downloading it again for every marker.
+  const avatarResults = useQueries({
+    queries: avatarTargets.map((target) => ({
+      queryKey: ['avatar-image', target.username, target.version],
+      queryFn: () => api.getAvatarImage(target.username),
+      staleTime: Infinity,
+      retry: false,
+    })),
+  });
+  const avatarResultsRef = useRef(avatarResults);
+  const avatarDataKey = avatarResults.map((result) => result.dataUpdatedAt || 0).join('|');
+  useEffect(() => {
+    avatarResultsRef.current = avatarResults;
+  }, [avatarResults]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -100,6 +150,14 @@ export default function LiveFamilyMap({
     if (!map || !layer) return;
     layer.clearLayers();
 
+    // One object URL per uploaded picture for this render of the markers; the
+    // blobs themselves come from the query cache UserAvatar already uses.
+    const avatarUrls = new Map<string, string>();
+    avatarTargets.forEach((target, index) => {
+      const blob = avatarResultsRef.current[index]?.data;
+      if (blob) avatarUrls.set(target.key, URL.createObjectURL(blob));
+    });
+
     // Places (HA zones) first so member pins always sit on top.
     for (const place of zones) {
       L.circle([place.lat, place.lon], {
@@ -131,16 +189,33 @@ export default function LiveFamilyMap({
         }).addTo(layer);
       }
 
+      const person = personByUser.get(member.userId);
+      const label = person?.display_name || member.userId;
+      const avatar = person?.avatar ?? null;
+      const imageUrl = person && avatar?.startsWith('upload:')
+        ? avatarUrls.get(`${person.username}:${avatar}`) ?? null
+        : null;
+      // Same centre and click target as the old dot, with room for a face.
+      const markerSize = member.freshness === 'stale' ? 30 : 34;
+      const icon = L.divIcon({
+        className: '',
+        html: avatarMarkerHtml({
+          label,
+          avatar,
+          imageUrl,
+          ringColor: style.color,
+          size: markerSize,
+          opacity: member.freshness === 'stale' ? 0.7 : 1,
+        }),
+        iconSize: [markerSize, markerSize],
+        iconAnchor: [markerSize / 2, markerSize / 2],
+        popupAnchor: [0, -markerSize / 2],
+      });
+
       const others = cluster.members.filter((m) => m.userId !== member.userId).map((m) => m.userId);
       const age = ageLabel(member.ageMs);
       const ageText = member.freshness === 'stale' ? `last seen ${age}` : age;
-      L.circleMarker(latlng, {
-        radius: member.freshness === 'live' ? 8 : 6,
-        color: style.color,
-        fillColor: style.fill,
-        fillOpacity: style.opacity,
-        weight: 2,
-      })
+      L.marker(latlng, { icon, keyboard: true, title: label, alt: label, riseOnHover: true })
         .bindPopup(
           `<strong>${member.userId}</strong><br/>${ageText}` +
             (member.accuracy ? `<br/>±${Math.round(member.accuracy)} m` : '') +
@@ -179,7 +254,12 @@ export default function LiveFamilyMap({
       // No one is sharing yet, but we know where home is: start there.
       map.setView([zones[0].lat, zones[0].lon], 13);
     }
-  }, [members, zones]);
+
+    return () => {
+      layer.clearLayers();
+      for (const url of avatarUrls.values()) URL.revokeObjectURL(url);
+    };
+  }, [members, zones, personByUser, avatarTargets, avatarDataKey]);
 
   // "Show on map" from a family card.
   useEffect(() => {

@@ -8,6 +8,8 @@ import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock
 import { useNavigate } from 'react-router-dom';
 import LocationPanel from '../components/location/LocationPanel';
 import ActivitySharingPanel from '../components/settings/ActivitySharingPanel';
+import AppCleanupPanel from '../components/settings/AppCleanupPanel';
+import MobileMenuPanel from '../components/settings/MobileMenuPanel';
 import NotificationPreferencesPanel from '../components/settings/NotificationPreferencesPanel';
 import PushAppsPanel from '../components/settings/PushAppsPanel';
 import SiteThemePanel from '../components/settings/SiteThemePanel';
@@ -88,6 +90,8 @@ const Settings = () => {
       <NotificationPreferencesPanel />
       {native && <PushAppsPanel />}
 
+      <MobileMenuPanel />
+
       <SiteThemePanel />
 
       <ActivitySharingPanel />
@@ -99,6 +103,8 @@ const Settings = () => {
       <FamilyDropInSection />
 
       <AppUpdatesSection />
+
+      <AppCleanupPanel />
 
       <div className="glass-panel rounded-2xl p-4 space-y-1">
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider px-3 pt-1 mb-2">Location & Presence</h2>

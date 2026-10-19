@@ -152,7 +152,17 @@ describe('LiveFamilyMap', () => {
           jeremiah: { latitude: 33.4484, longitude: -112.074, accuracy: 15, updated_at: nowSec - 20 },
           work: { latitude: 33.5, longitude: -112.1, accuracy: 40, updated_at: nowSec - 300 },
         })
-      )
+      ),
+      http.get('/api/users/family-directory', () =>
+        HttpResponse.json([
+          {
+            username: 'jeremiah',
+            display_name: 'Jeremiah',
+            nextcloud_user: 'jeremiah',
+            avatar: 'preset:jonahs-whale',
+          },
+        ])
+      ),
     );
   });
 
@@ -166,6 +176,26 @@ describe('LiveFamilyMap', () => {
     await waitFor(() => {
       expect(screen.getByTestId('live-map-count')).toHaveTextContent('2 sharing location');
     });
+  });
+
+  it("draws the member's picture inside the pin, with initials for anyone else", async () => {
+    renderMap();
+    await waitFor(() => {
+      expect(screen.getByTestId('live-map-count')).toHaveTextContent('2 sharing location');
+    });
+
+    const pins = await waitFor(() => {
+      const found = [...document.querySelectorAll('[data-testid="map-avatar-marker"]')];
+      expect(found).toHaveLength(2);
+      expect(found.some((pin) => pin.getAttribute('data-avatar-kind') === 'preset')).toBe(true);
+      return found;
+    });
+    const kinds = pins.map((pin) => pin.getAttribute('data-avatar-kind'));
+    expect(kinds).toContain('preset');
+    expect(kinds).toContain('initials');
+    const picture = pins.find((pin) => pin.getAttribute('data-avatar-kind') === 'preset');
+    expect(picture).toHaveAttribute('aria-label', 'Jeremiah');
+    expect(picture?.textContent).toContain('🐋');
   });
 
   it('explains when nobody is sharing location', async () => {

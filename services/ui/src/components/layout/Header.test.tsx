@@ -37,7 +37,7 @@ vi.mock('../../services/api', async (importOriginal) => {
   };
 });
 
-let mockUser: { username: string; is_admin: boolean } | null = null;
+let mockUser: { username: string; is_admin: boolean; avatar?: string | null; full_name?: string } | null = null;
 
 function renderHeader() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -66,6 +66,23 @@ describe('Header profile menu', () => {
     fireEvent.click(screen.getByLabelText('Account menu'));
     expect(screen.getByTestId('profile-menu')).toBeTruthy();
     expect(logout).not.toHaveBeenCalled();
+  });
+
+  it('shows the signed-in user\u2019s picture in the account button and menu', () => {
+    mockUser = { username: 'jeremiah', is_admin: true, avatar: 'preset:jonahs-whale', full_name: 'Jeremiah' };
+    renderHeader();
+
+    const button = screen.getByLabelText('Account menu');
+    expect(button).toContainElement(screen.getByTestId('user-avatar-preset'));
+    expect(screen.getByTestId('user-avatar-preset')).toHaveAccessibleName("Jeremiah: Jonah's Whale");
+
+    fireEvent.click(button);
+    expect(screen.getAllByTestId('user-avatar-preset')).toHaveLength(2);
+  });
+
+  it('falls back to initials when the account has no picture', () => {
+    renderHeader();
+    expect(screen.getByLabelText('Account menu')).toContainElement(screen.getByTestId('user-avatar-initials'));
   });
 
   it('offers profile settings and navigates there', async () => {

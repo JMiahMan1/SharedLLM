@@ -19,6 +19,9 @@ export default function AvatarPicker({ user, onClose }: { user: UserProfile; onC
   const [preparing, setPreparing] = useState(false);
   const saved = (profile: UserProfile) => {
     queryClient.setQueryData(['me'], profile);
+    // Chat and Wander read the directory, which holds everyone's avatar
+    // version. Without this a new photo would not reach them for five minutes.
+    void queryClient.invalidateQueries({ queryKey: ['family-directory'] });
     void queryClient.invalidateQueries({ queryKey: ['me'] });
   };
   const choose = useMutation({ mutationFn: (id: string) => api.chooseAvatar(id), onSuccess: saved, onError: (e) => toast.error(errorText(e, 'That did not work')) });

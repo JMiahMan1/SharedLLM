@@ -4,29 +4,49 @@ import { X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useAuth } from '../../context/AuthContext';
 import { cn } from '../../lib/utils';
-import { navPagesFor } from './navItems';
+import { navPagesFor, type NavPage } from './navItems';
 import { usePublishBottomBarHeight } from '../../lib/bottomBar';
+import { readMobileNavPaths, subscribeMobileNav } from '../../lib/mobileNav';
+
+/** `/` only matches the dashboard; other paths also match their child routes. */
+function pathMatches(pathname: string, path: string): boolean {
+  if (path === '/') return pathname === '/';
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
 
 const BottomNav = () => {
   const { trigger } = useHaptics();
   const { user } = useAuth();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [pinnedPaths, setPinnedPaths] = useState(() => readMobileNavPaths(user?.is_admin ?? false));
   const navRef = useRef<HTMLElement>(null);
   usePublishBottomBarHeight(navRef);
 
   const isAdmin = user?.is_admin ?? false;
 
-  // Five pinned tabs; every other page the user may open goes in "More", so
-  // nothing reachable on desktop is missing on a phone (Admin included: the
-  // control panel is where user management lives).
-  const pages = navPagesFor(isAdmin);
-  const pinnedItems = pages
-    .filter((item) => item.pinnedOnMobile)
-    .sort((a, b) => (a.pinnedOnMobile ?? 0) - (b.pinnedOnMobile ?? 0));
-  const moreItems = pages.filter((item) => !item.pinnedOnMobile);
+  // The user's saved order for this device, filtered against the pages this
+  // role may open. Every other page goes in "More", so nothing reachable on
+  // desktop is missing on a phone (Admin included: the control panel is where
+  // user management lives).
+  useEffect(() => {
+    const sync = () => setPinnedPaths(readMobileNavPaths(isAdmin));
+    // Re-read on mount and whenever the account/role changes, then follow
+    // same-tab edits and other tabs' storage events.
+    sync();
+    return subscribeMobileNav(sync);
+  }, [isAdmin]);
 
-  const moreActive = moreItems.some((item) => location.pathname.startsWith(item.path));
+  const pages = navPagesFor(isAdmin);
+  const pageByPath = new Map(pages.map((page) => [page.path, page]));
+  const pinnedItems = pinnedPaths.flatMap((path): NavPage[] => {
+    const page = pageByPath.get(path);
+    return page ? [page] : [];
+  });
+  const pinnedSet = new Set(pinnedItems.map((page) => page.path));
+  const moreItems = pages.filter((item) => !pinnedSet.has(item.path));
+
+  const moreActive = moreItems.some((item) => pathMatches(location.pathname, item.path));
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -74,6 +94,7 @@ const BottomNav = () => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end={item.path === '/'}
                   onClick={() => {
                     handleTap();
                     setMoreOpen(false);
@@ -81,7 +102,7 @@ const BottomNav = () => {
                   className={({ isActive }) =>
                     cn(
                       'flex items-center gap-3 min-h-11 px-3 py-2.5 rounded-xl border transition-colors',
-                      isActive || location.pathname.startsWith(item.path)
+                      isActive || pathMatches(location.pathname, item.path)
                         ? 'bg-purple-500/15 border-purple-500/40 text-purple-300'
                         : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
                     )

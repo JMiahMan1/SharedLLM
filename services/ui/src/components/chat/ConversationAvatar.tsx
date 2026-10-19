@@ -1,7 +1,7 @@
 import { Sparkles, Users } from 'lucide-react';
 import UserAvatar from '../UserAvatar';
 import type { FamilyLookup } from './familyDirectory';
-import { nameColour } from './familyDirectory';
+import { findFamilyMember, nameColour } from './familyDirectory';
 import type { TalkConversation } from './chatModel';
 
 /**
@@ -30,7 +30,9 @@ export default function ConversationAvatar({
     );
   }
   if (conversation.type === 1) {
-    const person = people(conversation.name);
+    // Talk sometimes gives a one-to-one room only the other person's display
+    // name, not their account id; the directory is indexed by both.
+    const person = findFamilyMember(people, conversation.name, conversation.display_name);
     return <UserAvatar username={person?.username ?? conversation.name ?? name} avatar={person?.avatar} name={person?.display_name ?? name} size={size} />;
   }
   const colour = nameColour(name);

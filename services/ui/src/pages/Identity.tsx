@@ -620,9 +620,12 @@ const Identity = () => {
           <p className="text-slate-400 mt-2 max-w-md">Your profile, the services Jarvis signs in to for you, your voice, devices and API keys.</p>
         </div>
         <div className="flex items-center gap-4 bg-white/5 p-3 rounded-2xl border border-white/5">
-           <div className="w-12 h-12 rounded-xl bg-purple-600 flex items-center justify-center text-xl font-black text-white shadow-lg shadow-purple-500/20">
-              {user?.username?.[0]?.toUpperCase()}
-           </div>
+           <UserAvatar
+             username={user?.username || 'guest'}
+             avatar={fullUser?.avatar ?? user?.avatar}
+             name={fullUser?.full_name || user?.full_name || user?.username || 'Guest'}
+             size={48}
+           />
            <div>
               <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Signed in as</p>
               <p className="text-white font-mono font-bold text-sm">@{user?.username}</p>

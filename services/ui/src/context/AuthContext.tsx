@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
@@ -23,6 +24,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,6 +45,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             const profile = await api.getMe();
             setToken(storedToken);
             setUser(profile);
+            queryClient.setQueryData(['me'], profile);
             await storageSet('jarvis_user', JSON.stringify(profile));
             // Register here too, not only on an explicit login. Registering
             // only in login() meant a user who installed an update and simply
@@ -70,15 +73,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     };
     initAuth();
-  }, []);
+  }, [queryClient]);
 
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
+    queryClient.removeQueries({ queryKey: ['me'] });
     storageRemove('jarvis_api_key');
     storageRemove('jarvis_user');
     window.location.href = '/login';
-  }, []);
+  }, [queryClient]);
 
   const tokenRef = useRef(token);
   useEffect(() => {
@@ -91,13 +95,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       const profile = await api.getMe();
       setUser(profile);
+      queryClient.setQueryData(['me'], profile);
       await storageSet('jarvis_user', JSON.stringify(profile));
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 401) {
         logout();
       }
     }
-  }, [logout]);
+  }, [logout, queryClient]);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -118,6 +123,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const profile = await api.getMe();
       console.log('Login profile response:', JSON.stringify(profile));
       setUser(profile);
+      queryClient.setQueryData(['me'], profile);
       await storageSet('jarvis_user', JSON.stringify(profile));
       
       const displayName = profile.full_name || profile.username || credentials.username;
@@ -143,7 +149,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
       throw error;
     }
-  }, []);
+  }, [queryClient]);
 
   const role = useMemo(() => user?.role || (user?.is_admin ? 'admin' : 'user'), [user]);
   const can = useCallback(

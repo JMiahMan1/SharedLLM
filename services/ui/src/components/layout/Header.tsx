@@ -10,6 +10,7 @@ import { useSystemHealth } from '../../hooks/useSystemHealth';
 import { relativeTime } from '../../lib/wanderTrips';
 import { useClearedAt, useDismissed, newerThan } from '../../lib/clearedAt';
 import SwipeToDismiss from '../ui/SwipeToDismiss';
+import UserAvatar from '../UserAvatar';
 import { navPagesFor } from './navItems';
 
 // Navigation search index: the header box is a *command-palette* style finder
@@ -33,6 +34,17 @@ const Header = () => {
   const { user, logout } = useAuth();
   const { isTracking } = useLocation();
   const navigate = useNavigate();
+  // The same ['me'] cache AvatarPicker and Identity write to, so a new photo
+  // reaches the header without a reload. AuthContext's profile seeds the cache
+  // on first paint, so this does not add a duplicate /users/me request.
+  const { data: accountProfile } = useQuery({
+    queryKey: ['me'],
+    queryFn: () => api.getMe(),
+    initialData: user ?? undefined,
+    enabled: Boolean(user),
+    staleTime: 5 * 60 * 1000,
+  });
+  const account = accountProfile ?? user;
   const [navQuery, setNavQuery] = useState('');
   const [navOpen, setNavOpen] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
@@ -255,8 +267,8 @@ const Header = () => {
 
         <div className="flex items-center gap-3">
           <div className="text-right hidden sm:block">
-            <p className="text-sm font-semibold text-white">{user?.username || 'Guest'}</p>
-            <p className="text-xs text-slate-500">{user?.is_admin ? 'Admin' : 'Family Member'}</p>
+            <p className="text-sm font-semibold text-white">{account?.username || 'Guest'}</p>
+            <p className="text-xs text-slate-500">{account?.is_admin ? 'Admin' : 'Family Member'}</p>
           </div>
           <div className="relative" ref={profileRef} data-testid="profile-menu-root">
             <button
@@ -264,9 +276,15 @@ const Header = () => {
               aria-haspopup="menu"
               aria-expanded={profileOpen}
               aria-label="Account menu"
-              className="w-11 h-11 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold border border-white/20 hover:scale-110 transition-transform group relative"
+              className="w-11 h-11 rounded-full hover:scale-110 transition-transform group relative"
             >
-              {user?.username?.[0].toUpperCase() || 'G'}
+              <UserAvatar
+                username={account?.username || 'guest'}
+                avatar={account?.avatar}
+                name={account?.full_name || account?.username || 'Guest'}
+                size={44}
+                className="border border-white/20"
+              />
               <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-slate-950 border border-white/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                 <ChevronUp size={10} />
               </div>
@@ -279,11 +297,19 @@ const Header = () => {
                 data-testid="profile-menu"
                 className="absolute right-0 mt-2 w-60 glass-menu p-1.5 rounded-2xl z-50"
               >
-                <div className="px-3 py-2.5 border-b border-white/5 mb-1">
-                  <p className="text-sm font-semibold text-white truncate">{user?.username || 'Guest'}</p>
-                  <p className="text-[11px] text-slate-500">
-                    {user?.is_admin ? 'Admin' : 'Family Member'}
-                  </p>
+                <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-white/5 mb-1">
+                  <UserAvatar
+                    username={account?.username || 'guest'}
+                    avatar={account?.avatar}
+                    name={account?.full_name || account?.username || 'Guest'}
+                    size={32}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-white truncate">{account?.username || 'Guest'}</p>
+                    <p className="text-[11px] text-slate-500">
+                      {account?.is_admin ? 'Admin' : 'Family Member'}
+                    </p>
+                  </div>
                 </div>
 
                 <button

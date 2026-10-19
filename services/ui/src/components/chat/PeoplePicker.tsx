@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Loader2, Search } from 'lucide-react';
 import { api } from '../../services/api';
-import { avatarTint, detailList, initials, type TalkPerson } from './chatModel';
+import UserAvatar from '../UserAvatar';
+import { findFamilyMember, useFamilyDirectory } from './familyDirectory';
+import { detailList, type TalkPerson } from './chatModel';
 
 /**
  * Find family members by name. Used to start a chat, to make a group and to
@@ -24,6 +26,7 @@ export default function PeoplePicker({
 }) {
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
+  const directory = useFamilyDirectory();
   useEffect(() => {
     const timer = window.setTimeout(() => setDebounced(query.trim()), 250);
     return () => window.clearTimeout(timer);
@@ -56,6 +59,7 @@ export default function PeoplePicker({
       <ul className="max-h-64 overflow-y-auto" aria-label="People">
         {people.map((person) => {
           const on = chosen.has(person.id);
+          const member = findFamilyMember(directory, person.id, person.label);
           return (
             <li key={person.id}>
               <button
@@ -64,13 +68,12 @@ export default function PeoplePicker({
                 aria-pressed={on}
                 className="flex w-full min-h-12 items-center gap-3 rounded-xl px-2 text-left hover:bg-white/5"
               >
-                <span
-                  aria-hidden
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                  style={{ background: avatarTint(person.label) }}
-                >
-                  {initials(person.label)}
-                </span>
+                <UserAvatar
+                  username={member?.username ?? person.id}
+                  avatar={member?.avatar}
+                  name={member?.display_name ?? person.label}
+                  size={36}
+                />
                 <span className="min-w-0 flex-1 truncate text-sm text-slate-100">{person.label}</span>
                 <span
                   className={`flex h-6 w-6 items-center justify-center rounded-full border ${on ? 'border-purple-400 bg-purple-500 text-white' : 'border-white/20'}`}
