@@ -1,6 +1,7 @@
 # Artifact Framework: Design & Architecture
 
-> Status: Designed (approved). Implementation tracked in `ARTIFACT_IMPLEMENTATION_PLAN.md`.
+> Status: Backend and library UI implemented 2026-10-19; generator integration
+> and the workspace-deletion prompt remain. Implementation tracked in `ARTIFACT_IMPLEMENTATION_PLAN.md`.
 > Scope: Managed, lifecycle-independent artifacts produced by workspaces (TTS audio,
 > generated images, video, exported docs) that must survive workspace deletion and be
 > browsable/manageable by their owner. Git-tracked outputs stay in the workspace repo

@@ -1,26 +1,72 @@
 # services/storage/main.py
+import asyncio
 import base64
 import logging
 import re
+from contextlib import asynccontextmanager
 
 import aiohttp
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query
-from pydantic import BaseModel
 
 from services.common.http import get_client
 from services.config import INTERNAL_SECRET, RAG_SVC_URL
 from services.shared.info_endpoint import info_router
-from services.storage.indexer import CheckpointManager, build_content_index, crawl_begin, crawl_end, crawl_phase, crawl_snapshot, extract_and_chunk_contents, is_indexer_paused, set_indexer_pause
-from services.storage.models import ProviderFetchRequest, ProviderMirrorRequest, ProviderWriteRequest
-from services.storage.models import IndexScanRequest
-from services.storage.providers import ProviderConfig, build_provider
+from services.storage import artifacts as artifact_store
+from services.storage.artifacts_api import router as artifacts_router
+from services.storage.indexer import (
+    CheckpointManager,
+    build_content_index,
+    crawl_begin,
+    crawl_end,
+    crawl_phase,
+    crawl_snapshot,
+    extract_and_chunk_contents,
+    is_indexer_paused,
+    set_indexer_pause,
+)
+from services.storage.models import (
+    IndexScanRequest,
+    ProviderFetchRequest,
+    ProviderMirrorRequest,
+    ProviderWriteRequest,
+)
+from services.storage.providers import build_provider
 
 log = logging.getLogger("storage")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-app = FastAPI(title="Librarian Storage Service")
+
+async def _artifact_purge_loop() -> None:
+    """Hard-delete artifacts whose 24-hour undo window has expired."""
+    while True:
+        await asyncio.sleep(artifact_store.PURGE_INTERVAL_SECONDS)
+        try:
+            removed = await asyncio.to_thread(artifact_store.purge_expired)
+            if removed:
+                log.info("Purged %s expired artifact(s)", removed)
+        except Exception as exc:
+            log.warning("Artifact purge failed: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        artifact_store.init_db()
+    except OSError as exc:
+        # The service still serves indexing/health when the artifacts volume is
+        # not mounted; artifact endpoints will report the real failure.
+        log.warning("Artifact storage is unavailable: %s", exc)
+    purge_task = asyncio.create_task(_artifact_purge_loop())
+    try:
+        yield
+    finally:
+        purge_task.cancel()
+
+
+app = FastAPI(title="Librarian Storage Service", lifespan=lifespan)
 
 app.include_router(info_router)
+app.include_router(artifacts_router)
 
 RAG_SVC = RAG_SVC_URL
 

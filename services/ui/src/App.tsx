@@ -22,6 +22,7 @@ import Calendar from './pages/Calendar';
 import JarvisLab, { JarvisLabAdmin } from './pages/JarvisLab';
 import KnowledgeHub from './pages/KnowledgeHub';
 import Workspaces from './pages/Workspaces';
+import Artifacts from './pages/Artifacts';
 import Docs from './pages/Docs';
 import Login from './pages/Login';
 import Media from './pages/Media';
@@ -142,6 +143,7 @@ function App() {
             <Route path="/settings" element={<ProtectedRoute isMobile={isMobile}><Settings /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute isMobile={isMobile}><KnowledgeHub /></ProtectedRoute>} />
             <Route path="/workspaces" element={<ProtectedRoute isMobile={isMobile}><Workspaces /></ProtectedRoute>} />
+            <Route path="/artifacts" element={<ProtectedRoute isMobile={isMobile}><Artifacts /></ProtectedRoute>} />
             <Route path="/docs" element={<ProtectedRoute isMobile={isMobile}><Docs /></ProtectedRoute>} />
 
             {/* Jarvis Lab: user view (admin-only access) and admin view */}

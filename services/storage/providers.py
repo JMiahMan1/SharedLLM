@@ -95,9 +95,14 @@ def build_provider(config: ProviderConfig) -> StorageProvider:
             from providers_impl.calibre import CalibreStorageProvider
         return CalibreStorageProvider(settings)
 
-    # Example for future local provider:
-    # if config.kind == "local":
-    #     from .providers_impl.local import LocalStorageProvider
-    #     return LocalStorageProvider(config.settings)
+    if config.kind == "local":
+        try:
+            from .providers_impl.local import LocalStorageProvider
+        except ImportError:
+            from providers_impl.local import LocalStorageProvider
+        root = config.settings.get("root")
+        if not root:
+            raise ValueError("Local provider requires a 'root' setting")
+        return LocalStorageProvider(root)
 
     raise ValueError(f"Unsupported storage provider: {config.kind}")

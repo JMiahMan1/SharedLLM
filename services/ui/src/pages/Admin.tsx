@@ -18,6 +18,7 @@ import {
   ShieldAlert,
   Code2,
   BarChart3,
+  HardDrive,
   Layers,
   Lightbulb,
   Play,
@@ -70,14 +71,16 @@ import TelemetryAdminPanel from '../components/settings/TelemetryAdminPanel';
 import StarBalance from '../components/wander/StarBalance';
 import BibleAdminPanel from '../components/admin/BibleAdminPanel';
 import NetworkPanel from '../components/admin/NetworkPanel';
+import SystemStoragePanel from '../components/admin/SystemStoragePanel';
 
-type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'network' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
+type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'storage' | 'network' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
 
 const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string }[] = [
   { id: 'users', label: 'Users & Devices', icon: Shield, path: '/admin/users' },
   { id: 'groups', label: 'Device Groups', icon: Layers, path: '/admin/groups' },
   { id: 'hardware', label: 'Hardware', icon: Cpu, path: '/admin/hardware' },
   { id: 'telemetry', label: 'Telemetry', icon: Activity, path: '/admin/monitor' },
+  { id: 'storage', label: 'Storage', icon: HardDrive, path: '/admin/storage' },
   { id: 'network', label: 'Network', icon: Wifi, path: '/admin/network' },
   { id: 'intercom', label: 'Intercom', icon: Phone, path: '/admin/intercom' },
   { id: 'raven', label: 'Raven Ops', icon: ShieldAlert, path: '/admin/ops' },
@@ -92,6 +95,7 @@ const adminTabFromPathname = (pathname: string): AdminTab => {
   if (pathname.startsWith('/admin/groups')) return 'groups';
   if (pathname.startsWith('/admin/hardware')) return 'hardware';
   if (pathname.startsWith('/admin/monitor')) return 'telemetry';
+  if (pathname.startsWith('/admin/storage')) return 'storage';
   if (pathname.startsWith('/admin/network')) return 'network';
   if (pathname.startsWith('/admin/integrations')) return 'settings';
   if (pathname.startsWith('/admin/sounds')) return 'database';
@@ -1293,6 +1297,7 @@ const Admin = () => {
       )}
 
       {activeTab === 'telemetry' && <TelemetryAdminPanel />}
+      {activeTab === 'storage' && <SystemStoragePanel />}
       {activeTab === 'network' && <NetworkPanel />}
 
       {activeTab === 'intercom' && (

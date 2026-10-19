@@ -591,6 +591,64 @@ export interface StorageStatus {
   rag_index?: Record<string, unknown>;
 }
 
+export type ArtifactKind = 'tts_audio' | 'image' | 'video' | 'document' | 'other';
+
+/** A managed file that survives the workspace that produced it. */
+export interface Artifact {
+  id: string;
+  owner_user: string;
+  workspace_id?: string | null;
+  kind: ArtifactKind;
+  name: string;
+  mime_type?: string | null;
+  size: number;
+  storage_backend: string;
+  sha256?: string | null;
+  generator?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string | null;
+  is_attached: boolean;
+  download_url?: string | null;
+}
+
+export interface ArtifactListResponse {
+  artifacts: Artifact[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ArtifactFit {
+  fits: boolean;
+  needed: number;
+  used: number;
+  quota: number;
+  free: number;
+  headroom: number;
+  warn: boolean;
+  message: string;
+}
+
+export interface StorageUsage {
+  user: string;
+  used: number;
+  quota: number;
+  free: number;
+  count: number;
+  by_kind: Record<string, number>;
+  warn: boolean;
+}
+
+export interface SystemStorageUsage {
+  users: StorageUsage[];
+  total: number;
+  free: number;
+  quota: number;
+  used: number;
+}
+
 /**
  * Which of the three workspace-composer jobs to run.
  *
