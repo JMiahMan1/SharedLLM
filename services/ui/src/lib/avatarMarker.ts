@@ -1,5 +1,5 @@
 import { avatarTint, initials } from '../components/chat/chatModel';
-import { presetFor } from './avatarPresets';
+import { presetFor, presetSvgHtml } from './avatarPresets';
 
 export interface AvatarMarkerOptions {
   /** Person's display name; also the accessible label. */
@@ -14,7 +14,7 @@ export interface AvatarMarkerOptions {
   opacity?: number;
 }
 
-const escapeHtml = (value: string): string =>
+export const escapeHtml = (value: string): string =>
   value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -51,9 +51,7 @@ export function avatarMarkerHtml({
   } else if (preset) {
     kind = 'preset';
     background = `linear-gradient(135deg, ${preset.from}, ${preset.to})`;
-    inner =
-      `<span aria-hidden="true" style="font-size:${Math.round(size * 0.48)}px;line-height:1">${preset.emoji}</span>` +
-      `<span aria-hidden="true" style="position:absolute;right:1px;bottom:0;font-size:${Math.round(size * 0.28)}px;line-height:1">${preset.badge}</span>`;
+    inner = presetSvgHtml(preset);
   } else {
     kind = 'initials';
     background = avatarTint(label);
@@ -65,3 +63,38 @@ export function avatarMarkerHtml({
     `style="${shell}${box}background:${background}">${inner}</span>`
   );
 }
+
+export interface AvatarClusterMarkerOptions {
+  people: AvatarMarkerOptions[];
+  overlap?: number;
+}
+
+export function avatarClusterMarkerLayout(
+  people: AvatarMarkerOptions[],
+  overlap = 12,
+): { width: number; height: number } {
+  if (people.length === 0) return { width: 0, height: 0 };
+  const sizes = people.map((person) => person.size ?? 34);
+  return {
+    width: sizes.reduce((total, size, index) => total + (index === 0 ? size : size - overlap), 0),
+    height: Math.max(...sizes),
+  };
+}
+
+export function avatarClusterMarkerHtml({
+  people,
+  overlap = 12,
+}: AvatarClusterMarkerOptions): string {
+  if (people.length === 0) return '';
+  const label = people.map((person) => person.label).join(', ');
+  const { width, height } = avatarClusterMarkerLayout(people, overlap);
+  const avatars = people
+    .map((person, index) => {
+      const size = person.size ?? 34;
+      return `<span style="display:inline-flex;flex:0 0 auto;position:relative;z-index:${people.length - index};margin-left:${index === 0 ? 0 : -overlap}px">${avatarMarkerHtml({ ...person, size })}</span>`;
+    })
+    .join('');
+  const safeLabel = escapeHtml(label);
+  return `<span role="group" aria-label="${safeLabel}" title="${safeLabel}" data-testid="map-avatar-cluster" data-avatar-count="${people.length}" style="display:inline-flex;align-items:center;height:${height}px;width:${width}px">${avatars}</span>`;
+}
+
