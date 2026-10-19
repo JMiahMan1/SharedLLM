@@ -3591,7 +3591,7 @@ async def execute_audiobook_regenerate(req: AudiobookRegenerateRequest):
 async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)):
     """Route voice command transcript to appropriate handler."""
     await _check_internal_secret(x_internal_secret)
-    from schemas import LightControlRequest, MediaPlayRequest, UserContext
+    from services.execution.schemas import LightControlRequest, MediaPlayRequest, UserContext
 
     from services.execution.handlers import light, media
 
