@@ -215,7 +215,12 @@ Deliberately dependency-free (pointer events, `toDataURL`, the `/api/images/edit
 proxy we already had). On a family device that has to download an APK to get a
 change, a new build-time dependency is a real cost, and the component's
 interface is small enough that dropping in Excalidraw later is a swap rather
-than a rewrite. Multi-user live drawing on one board is in `docs/PENDING_TASKS.md`.
+than a rewrite. Multi-user live drawing is shipped through a small gateway
+WebSocket (`services/gateway/drawing.py`): the board relays brush segments,
+replays them to a late joiner, and holds them in memory for the gateway's
+lifetime. Toggle **Draw together**, enter a board code (default `family`), and
+everyone on that code draws on the same canvas; **Leave shared board** returns
+to the private canvas.
 
 Handling notes worth keeping: pointer capture and PNG export are feature-
 detected, and "has anyone drawn yet" tracks the first stroke rather than

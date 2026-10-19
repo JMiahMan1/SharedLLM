@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import DrawCanvas from './DrawCanvas';
 import { api } from '../../services/api';
+import { FakeWebSocket } from '../../test/fakes/FakeWebSocket';
 
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -23,6 +24,12 @@ function draw(pointerId = 1) {
 describe('DrawCanvas', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
   });
 
   it('renders the surface and the tools', () => {
@@ -131,5 +138,54 @@ describe('DrawCanvas', () => {
     fireEvent.click(screen.getByRole('button', { name: /send to chat/i }));
     // Nothing drawn yet: no conversation picker opens.
     expect(screen.queryByTestId('send-to-chat')).toBeNull();
+  });
+
+  it('joins a shared board and shows the people already drawing', async () => {
+    localStorage.setItem('jarvis_api_key', 'mom-key');
+    localStorage.setItem('jarvis_user', JSON.stringify({ username: 'mom', full_name: 'Mom' }));
+    const sockets: FakeWebSocket[] = [];
+    class Socket extends FakeWebSocket {
+      constructor(url: string) {
+        super(url);
+        sockets.push(this);
+      }
+    }
+    vi.stubGlobal('WebSocket', Socket);
+
+    render(<DrawCanvas />);
+    fireEvent.click(screen.getByRole('button', { name: /draw together/i }));
+
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = sockets[0];
+    expect(socket.url).toContain('/api/family/drawing/ws');
+    expect(socket.url).toContain('room=family');
+    expect(socket.url).toContain('token=mom-key');
+
+    socket.emitServerMessage(
+      JSON.stringify({
+        type: 'welcome',
+        self: { id: 'me', username: 'mom', name: 'Mom' },
+        participants: [
+          { id: 'me', username: 'mom', name: 'Mom' },
+          { id: 'kid', username: 'kid', name: 'Kid' },
+        ],
+        segments: [],
+        room: 'family',
+      }),
+    );
+
+    await waitFor(() => expect(screen.getByTestId('drawing-live-status').textContent).toContain('2 people'));
+
+    socket.emitServerMessage(
+      JSON.stringify({
+        type: 'segment',
+        segment: { id: 'kid-1', x1: 1, y1: 2, x2: 3, y2: 4, color: '#dc2626', width: 3, user: 'kid' },
+      }),
+    );
+    expect(screen.getByTestId('drawing-live-status').textContent).toContain('2 people');
+
+    fireEvent.click(screen.getByRole('button', { name: /leave shared board/i }));
+    expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(screen.getByRole('button', { name: /draw together/i })).toBeTruthy();
   });
 });
