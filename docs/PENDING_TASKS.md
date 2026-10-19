@@ -123,6 +123,8 @@ TTS/image/video wiring, and the Storage / Artifacts UI pages.
 
 ## Tests
 
-- `test/unit/test_gateway_auth.py::test_gateway_extracts_bearer_token` passes
-  alone but fails in a whole-suite run: several gateway tests inject a mocked
-  `intent_engine` into `sys.modules` at module scope and never restore it.
+- `test/unit/test_gateway_auth.py::test_gateway_extracts_bearer_token` is
+  isolated: the test no longer replaces `sys.modules['redis']` globally; it
+  patches `services.gateway.cache.get_redis` and `history.get_redis` with a
+  local fake. `voice_speaker.decode` also ignores non-string Redis records.
+  The combined gateway/auth suite passes.

@@ -36,11 +36,13 @@ def encode(username: str, score: float | None) -> str:
     return json.dumps({"username": username, "score": score, "at": time.time()})
 
 
-def decode(raw: str | None) -> str | None:
+def decode(raw: str | bytes | bytearray | None) -> str | None:
     """The recognised username in a stored record, if it is one."""
+    if not isinstance(raw, (str, bytes, bytearray)):
+        return None
     try:
         found = json.loads(raw) if raw else None
-    except ValueError:
+    except (ValueError, TypeError):
         return None
     name = found.get("username") if isinstance(found, dict) else None
     return name if isinstance(name, str) and name else None
