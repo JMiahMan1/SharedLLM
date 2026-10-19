@@ -345,6 +345,73 @@ def test_favorites_merges_all_media_types(client, ma):
         assert args["favorite"] is True
 
 
+def test_ma_command_relays_an_allowlisted_player_command(client, ma):
+    ma["responses"]["players/cmd/pause"] = {"ok": True}
+
+    resp = client.post(
+        "/api/media/ma-command",
+        json={"command": "players/cmd/pause", "args": {"player_id": "kitchen"}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"status": "SUCCESS", "result": {"ok": True}}
+    assert ma["calls"] == [("players/cmd/pause", {"player_id": "kitchen"})]
+
+
+def test_ma_command_rejects_a_command_outside_the_allowlist(client, ma):
+    resp = client.post(
+        "/api/media/ma-command",
+        json={"command": "config/save", "args": {}},
+    )
+
+    assert resp.status_code == 403
+    assert "not allowed" in resp.json()["detail"].lower()
+    assert ma["calls"] == []
+
+
+def test_ma_command_refuses_a_player_outside_the_callers_scope(client, ma, monkeypatch):
+    async def deny(_raw, *, user, is_admin):
+        return '{"error_code": "forbidden"}'
+
+    monkeypatch.setattr(gateway_main, "check_ma_frame_scope", deny)
+
+    resp = client.post(
+        "/api/media/ma-command",
+        json={"command": "players/cmd/play", "args": {"player_id": "someone-else"}},
+    )
+
+    assert resp.status_code == 403
+    assert "not available" in resp.json()["detail"].lower()
+    assert ma["calls"] == []
+
+
+def test_ma_command_reports_an_unreachable_upstream(client, ma):
+    ma["responses"]["players/cmd/play"] = aiohttp.ClientConnectionError("boom")
+
+    resp = client.post(
+        "/api/media/ma-command",
+        json={"command": "players/cmd/play", "args": {"player_id": "kitchen"}},
+    )
+
+    assert resp.status_code == 502
+    assert "unreachable" in resp.json()["detail"].lower()
+
+
+def test_ma_command_surfaces_an_ma_error_frame(client, ma):
+    ma["responses"]["players/cmd/play"] = {
+        "error_code": 400,
+        "error": "Player is unavailable",
+    }
+
+    resp = client.post(
+        "/api/media/ma-command",
+        json={"command": "players/cmd/play", "args": {"player_id": "kitchen"}},
+    )
+
+    assert resp.status_code == 502
+    assert "Player is unavailable" in resp.json()["detail"]
+
+
 def test_abs_progress_forwards_the_update(client, monkeypatch):
     recorded: dict = {}
 

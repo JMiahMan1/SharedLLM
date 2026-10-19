@@ -95,10 +95,6 @@ TTS/image/video wiring, and the Storage / Artifacts UI pages.
 
 ## Media player
 
-- Selecting a remote Music Assistant speaker (`ma:` target) still calls
-  `maPlayer.connect()`, starting the in-browser Sendspin player just to send a
-  JSON-RPC command. Remote speakers should be driven without the browser
-  becoming a player, through `services/execution/handlers/mass_client.py`.
 - The device picker highlights "Web Player" from `!selectedTarget` rather than
   `localMode`.
 - Background playback stops when the app is swiped away from recents (the

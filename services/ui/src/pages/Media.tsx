@@ -10,6 +10,7 @@ import { getServerOrigin } from '../lib/serverUrl';
 import { errorText } from '../lib/errorText';
 import { formatDeviceLabel } from '../lib/deviceLabels';
 import type { MaPlayerListEntry } from '../lib/deviceLabels';
+import { listRemoteMaPlayers, sendMaRemoteCommand } from '../lib/maRemotePlayer';
 import { DeviceSelector } from '../components/media/DeviceSelector';
 import { NowPlayingCard, type NowPlayingView } from '../components/media/NowPlayingCard';
 import { MediaExplorer } from '../components/media/MediaExplorer';
@@ -175,16 +176,17 @@ const Media = () => {
     return () => clearInterval(id);
   }, [refreshStatus]);
 
-  // Music Assistant players that Home Assistant does not also expose. Needs the
-  // web player's control socket, so it fills in once that is connected.
+  // Music Assistant players that Home Assistant does not also expose. Use the
+  // web player's control socket when it is already connected; otherwise ask the
+  // gateway, so a remote speaker never requires this browser to become a player.
   const { isConnected: maConnected, listMaPlayers } = maPlayer;
   const isMaTarget = selectedTarget.startsWith('ma:');
   useEffect(() => {
-    if (!maConnected) return;
     let cancelled = false;
-    const load = () => listMaPlayers().then((list) => {
+    const load = async () => {
+      const list = maConnected ? await listMaPlayers() : await listRemoteMaPlayers();
       if (!cancelled) setMaPlayers((prev) => (JSON.stringify(prev) === JSON.stringify(list) ? prev : list));
-    });
+    };
     void load();
     // A selected MA player's state only comes from here, so keep it fresh.
     const id = isMaTarget ? window.setInterval(() => { if (!document.hidden) void load(); }, STATUS_POLL_MS * 2) : null;
@@ -321,8 +323,7 @@ const Media = () => {
       } else if (target.startsWith('ma:')) {
         const pid = target.slice(3);
         const media = await maUri();
-        await maPlayer.connect();
-        await maPlayer.maCommand('player_queues/play_media', { queue_id: pid, media: [media], option: 'replace' });
+        await sendMaRemoteCommand('player_queues/play_media', { queue_id: pid, media: [media], option: 'replace' });
       } else {
         const resp = req.kind === 'abs'
           ? await api.playAudiobook({ book_id: req.id, entity_id: target, resume: true })
@@ -351,9 +352,13 @@ const Media = () => {
           play: 'players/cmd/play', resume: 'players/cmd/play', pause: 'players/cmd/pause',
           next: 'player_queues/next', previous: 'player_queues/previous', stop: 'players/cmd/stop',
         }[command];
-        await maPlayer.connect();
-        await maPlayer.maCommand(maCmd, maCmd.startsWith('player_queues/') ? { queue_id: pid } : { player_id: pid });
-        setMaPlayers(await maPlayer.listMaPlayers());
+        await sendMaRemoteCommand(maCmd, maCmd.startsWith('player_queues/') ? { queue_id: pid } : { player_id: pid });
+        // Keep the card in step until the next poll; the poll remains the
+        // authority, so a command MA accepted but could not act on self-corrects.
+        const nextState = command === 'pause' ? 'paused' : command === 'stop' ? 'idle' : command === 'play' || command === 'resume' ? 'playing' : null;
+        if (nextState) {
+          setMaPlayers((prev) => prev.map((p) => (p.player_id === pid ? { ...p, state: nextState } : p)));
+        }
       } else {
         const resp = await api.mediaTransport({ entity_id: target, command });
         if (resp.status === 'FAILURE') throw new Error(resp.message || 'Command failed');
@@ -364,7 +369,7 @@ const Media = () => {
     } finally {
       setBusy(null);
     }
-  }, [maPlayer, refreshStatus, trigger]);
+  }, [refreshStatus, trigger]);
 
   const runWeb = useCallback(async (command: string, fn: () => Promise<unknown>) => {
     void trigger('light');
@@ -387,11 +392,11 @@ const Media = () => {
     if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current);
     volumeTimerRef.current = window.setTimeout(() => {
       const send = target.startsWith('ma:')
-        ? maPlayer.maCommand('players/cmd/volume_set', { player_id: target.slice(3), volume_level: v })
+        ? sendMaRemoteCommand('players/cmd/volume_set', { player_id: target.slice(3), volume_level: v })
         : api.mediaTransport({ entity_id: target, command: 'volume_set', volume_level: v / 100 });
       void Promise.resolve(send).catch(() => toast.error('Could not change the volume'));
     }, 200);
-  }, [maPlayer]);
+  }, []);
 
   const toggleRemoteMute = useCallback(() => {
     const target = selectedRef.current;
@@ -400,13 +405,13 @@ const Media = () => {
     lastVolumeChangeRef.current = Date.now();
     setMuted(next);
     const send = target.startsWith('ma:')
-      ? maPlayer.maCommand('players/cmd/volume_mute', { player_id: target.slice(3), muted: next })
+      ? sendMaRemoteCommand('players/cmd/volume_mute', { player_id: target.slice(3), muted: next })
       : api.mediaTransport({ entity_id: target, command: 'volume_mute', muted: next });
     void Promise.resolve(send).catch(() => {
       setMuted(!next);
       toast.error('Could not mute that player');
     });
-  }, [muted, maPlayer]);
+  }, [muted]);
 
   const handleRemoteSeek = useCallback(async (seconds: number) => {
     const target = selectedRef.current;
@@ -414,7 +419,7 @@ const Media = () => {
     setRemoteTime(seconds);
     try {
       if (target.startsWith('ma:')) {
-        await maPlayer.maCommand('player_queues/seek', { queue_id: target.slice(3), position: Math.round(seconds) });
+        await sendMaRemoteCommand('player_queues/seek', { queue_id: target.slice(3), position: Math.round(seconds) });
       } else {
         const resp = await api.mediaTransport({ entity_id: target, command: 'seek', position: seconds });
         if (resp.status === 'FAILURE') throw new Error(resp.message);
@@ -423,7 +428,7 @@ const Media = () => {
       // The optimistic position snaps back on the next poll; say why.
       toast.error('Could not seek on that player');
     }
-  }, [maPlayer]);
+  }, []);
 
   const selectDevice = useCallback((id: string) => {
     void trigger('light');

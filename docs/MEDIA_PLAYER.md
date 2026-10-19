@@ -347,7 +347,10 @@ without importing the engine), `components/widgets/ActiveMediaWidget.tsx`
   coalesced; LIVE bar when `duration <= 0`), previous / play-pause / next /
   stop, volume + mute, favourite heart for MA items. Web player: resume uses
   `players/cmd/play` (it never re-sends the URI, which restarted the track).
-  Remote speaker: `/execute/media/transport` (HA) or MA commands (`ma:` ids).
+  Remote speaker: `/execute/media/transport` (HA) or `POST /api/media/ma-command`
+  (`ma:<player_id>`). Remote MA commands use the gateway's MA JSON-RPC helper,
+  so choosing or controlling a speaker never starts the browser's Sendspin
+  player; that player is only used for "This device".
 * **Jump back in**: Audiobookshelf books in progress (finished books are
   skipped) merged with MA recently played, newest first, six at most.
 * **Playlists**, **Browse all media** (a dialog: MA search/playlists/recent;

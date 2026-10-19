@@ -18,7 +18,10 @@
 > Remote page sends real d-pad/power/mute commands to the TV's actual
 > companion `remote.*` entity. The dashboard `ActiveMediaWidget` drives the
 > in-app web player directly (through `context/webPlayerContext.ts`) instead of
-> sending transport commands that only changed the server's record. Ledger rows
+> sending transport commands that only changed the server's record. Remote
+> Music Assistant speakers (`ma:<id>`) now send play, transport, volume, mute
+> and seek through `POST /api/media/ma-command` (gateway `_ma_rpc`), so the
+> browser's Sendspin player only starts for "This device". Ledger rows
 > below are marked. What follows is
 > the plan for the remaining phases 3-9.
 

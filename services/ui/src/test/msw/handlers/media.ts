@@ -25,6 +25,8 @@ export const mediaHandlers = [
   http.post('/execute/media/status', () => HttpResponse.json(mediaStatusFixture)),
   http.post('/execute/media/transport', () => HttpResponse.json(transportFixture)),
   http.post('/execute/media/play', () => HttpResponse.json(playFixture)),
+  // Remote MA speakers are listed and controlled through the gateway.
+  http.post('/api/media/ma-command', () => HttpResponse.json({ status: 'SUCCESS', result: [] })),
   // The app-wide web player reports what it plays (context/MediaPlayerContext).
   http.post('/execute/media/state/sync', () =>
     HttpResponse.json({ status: 'SUCCESS', message: 'Local playback state synced.' })

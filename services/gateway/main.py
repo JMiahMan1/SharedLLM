@@ -70,6 +70,7 @@ from services.gateway.llm_providers import (
 )
 from services.gateway.ma_ws_client import MAWebSocketClient
 from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
+from services.gateway.ma_allowlist import MA_COMMAND_ALLOWLIST
 from services.gateway.ma_scope import check_ma_frame_scope, record_web_player_id
 from services.gateway.media_events import acquire_media_hub, stop_all_media_hubs
 from services.gateway.media_models import (
@@ -14218,6 +14219,60 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
         {"library_item_id": item_id, "media_type": media_type},
     )
     return {"status": "SUCCESS", "favorite": False}
+
+
+class MediaMaCommandRequest(BaseModel):
+    """One Music Assistant JSON-RPC command for a remote player."""
+
+    command: str
+    args: dict[str, Any] | None = None
+
+
+@app.post("/api/media/ma-command")
+async def media_ma_command(req: MediaMaCommandRequest, request: Request):
+    """Run one allowlisted Music Assistant command for the caller.
+
+    The Media page's remote ``ma:<id>`` targets are speakers, not this browser.
+    Sending their play/pause/seek commands here keeps the Sendspin player
+    stopped unless the person chose "This device"; it also keeps the shared MA
+    token and the player-scope check on the gateway instead of in the UI.
+    """
+    command = (req.command or "").strip()
+    if command not in MA_COMMAND_ALLOWLIST:
+        raise HTTPException(status_code=403, detail="Music Assistant command not allowed")
+
+    creds = await _resolve_identity_from_request(request)
+    creds_dict = creds if isinstance(creds, dict) else _identity_cred_dict(creds)
+    mass_url = creds_dict.get("mass_url") or ""
+    mass_token = creds_dict.get("mass_token") or ""
+    if not mass_url or not mass_token:
+        raise HTTPException(status_code=400, detail="Music Assistant is not configured")
+
+    args = req.args or {}
+    frame = json.dumps({"message_id": uuid.uuid4().hex, "command": command, "args": args})
+    scope_error = await check_ma_frame_scope(
+        frame,
+        user=str(creds_dict.get("user") or ""),
+        is_admin=bool(creds_dict.get("is_admin")),
+    )
+    if scope_error is not None:
+        raise HTTPException(status_code=403, detail="Music Assistant player is not available to this user")
+
+    try:
+        result = await _ma_rpc(mass_url, mass_token, command, args)
+    except HTTPException as e:
+        raise HTTPException(status_code=502, detail=str(e.detail)) from e
+    except (TimeoutError, aiohttp.ClientError) as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Music Assistant is unreachable: {type(e).__name__}",
+        ) from e
+    if isinstance(result, dict) and result.get("error_code"):
+        # MA answers command failures with HTTP 200 and an error frame; without
+        # this the UI would mark a rejected command as successful.
+        detail = result.get("error") or result.get("details") or f"error {result['error_code']}"
+        raise HTTPException(status_code=502, detail=f"Music Assistant: {detail}")
+    return {"status": "SUCCESS", "result": result}
 
 
 @app.post("/api/media/token")
