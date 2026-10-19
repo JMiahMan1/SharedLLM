@@ -838,12 +838,32 @@ app.include_router(calls.router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    """Answer with a generic 500 and an error id; keep the traceback server-side.
+
+    Exception text routinely contains credentials, upstream URLs and internal
+    paths, and the old body returned ``detail`` plus the formatted traceback to
+    the client. The full traceback is still logged, tagged with the same id the
+    caller can quote when reporting the failure.
+    """
+    error_id = uuid.uuid4().hex[:12]
     tb = traceback.format_exc()
-    err_msg = f"Gateway Error: {type(exc).__name__}: {exc!s}"
-    log.error(f"{err_msg}\n{tb}")
+    log.error(
+        "[error_id=%s] Unhandled gateway exception: %s %s: %s: %s\n%s",
+        error_id,
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+        exc,
+        tb,
+    )
     return JSONResponse(
-      status_code=500,
-      content={"status": "ERROR", "message": "Internal Gateway Error", "detail": str(exc), "traceback": tb.splitlines()}
+        status_code=500,
+        content={
+            "status": "ERROR",
+            "message": "Internal Gateway Error",
+            "error_id": error_id,
+        },
+        headers={"X-Error-Id": error_id},
     )
 
 # --- Global Health & Readiness ---
@@ -2063,8 +2083,9 @@ async def _resolve_identity_from_request(request: Request, body: dict | None = N
     """The identity behind a request that must present a real API key.
 
     Strict by default. Every route that reads or writes family data goes through
-    here, and Identity's resolver upgrades *anything* it does not recognise to
-    the system default user -- an administrator. Verified live before this was
+    here. Identity's resolver used to upgrade *anything* it did not recognise to
+    the system default user -- an administrator -- and this helper now rejects a
+    missing key before Identity is asked. Verified live before this was
     tightened, all with no credentials at all:
 
         GET /api/integrations/skylight/chores   -> 200, 55 family chores
@@ -2076,9 +2097,9 @@ async def _resolve_identity_from_request(request: Request, body: dict | None = N
         GET /api/ma-jsonrpc/debug/players       -> 200, every speaker's state
         GET /api/entities                       -> 200, every HA entity
 
-    Those routes check ``is_admin`` afterwards, which the fallback makes
-    unconditionally true, so the check was decoration. Now a missing or unknown
-    key is a 401 and nothing is served.
+    Those routes check ``is_admin`` afterwards, which the fallback made
+    unconditionally true, so the check was decoration. A missing or unknown key
+    is a 401 and nothing is served.
 
     A route that genuinely has no API key -- a voice request, a registered
     device, a media stream URL -- must say so by calling
@@ -2091,10 +2112,11 @@ async def _resolve_identity_allow_anonymous(request: Request, body: dict | None 
     """Identity with Identity's own fallback rules, including anonymous.
 
     Identity's ``POST /api/resolve`` tries user_id -> api_key -> rag_user ->
-    voice_id -> device_id and then **falls back to the system default user,
-    which is an administrator**. That is what lets a voice request, a registered
-    device or a stream URL resolve with no API key at all -- which is also why it
-    must never guard a route that reads real family data (see
+    voice_id -> device_id. A presented credential that matches nobody is a 401;
+    a request with no identifier at all **falls back to the system default
+    user, which is an administrator**. That is what lets a voice request, a
+    registered device or a stream URL resolve with no API key at all -- which is
+    also why it must never guard a route that reads real family data (see
     ``_require_identity_from_request``).
 
     Only use this where "who is calling" is genuinely not the question.
@@ -2115,10 +2137,10 @@ def _presented_api_key(request: Request) -> str:
 async def _require_identity_from_request(request: Request, body: dict | None = None) -> Any:
     """Identity for a route that serves real family data. 401 unless proven.
 
-    ``_resolve_identity_from_request`` is permissive on purpose: Identity's
-    ``POST /api/resolve`` falls back to the system default user -- an admin --
-    when nothing matches, which is what lets a media player, a voice request or
-    a stream URL resolve without an API key at all.
+    ``_resolve_identity_from_request`` accepts requests with no identifier on
+    purpose: Identity's ``POST /api/resolve`` falls back to the system default
+    user -- an admin -- for those, which is what lets a media player, a voice
+    request or a stream URL resolve without an API key at all.
 
     That fallback is exactly wrong for a route that reads somebody's chores,
     books or playlists. Used there, it hands the whole family's data to any
@@ -2178,17 +2200,17 @@ async def _resolve_identity_from_media_token(request: Request) -> Any | None:
 async def _resolve_strict_identity(api_key: str) -> dict | None:
     """Resolve an API key to its real owner, with NO default-user fallback.
 
-    ``resolve_identity`` (``POST /api/resolve``) tries user_id -> api_key ->
-    rag_user -> voice_id -> device_id and then **falls back to the system
-    default user, which is an admin**. That makes it useless for deciding *who
-    is calling*: every junk string "resolves" successfully and comes back as the
-    administrator. Verified directly::
+    ``resolve_identity`` (``POST /api/resolve``) historically fell back to the
+    system default user -- an admin -- for any unmatched credential::
 
         POST /api/resolve {"api_key": "totally-bogus-key"}
         -> {"user": "default", "is_admin": true, "api_key": "bf7ca7c0..."}
 
-    ``GET /api/internal/validate-api-key`` is the strict variant: no fallback at
-    all, so a miss is a 401.
+    Identity now rejects a presented-but-unmatched credential with a 401, but
+    this helper still uses ``GET /api/internal/validate-api-key``: it is the
+    narrowest possible question ("did this exact key authenticate?") and does
+    not return a credential payload. Keeping it means a future resolver change
+    cannot silently turn an authentication gate back into a fallback.
 
     Returns ``None`` when the key is not a real user's key, or when Identity
     cannot be reached. Callers must deny in that case rather than assume an
@@ -2627,11 +2649,23 @@ async def secure_logging_middleware(request: Request, call_next):
             content={"status": "ERROR", "message": str(e.detail)}
         )
     except Exception as e:
-        log.error(f"Middleware error: {type(e).__name__}: {e}", exc_info=True)
-        _ = asyncio.create_task(emit_log("ERROR", f"RESPONSE {request.method} {request.url.path} -> 500 ({type(e).__name__})", {}))
+        error_id = uuid.uuid4().hex[:12]
+        log.error(
+            "[error_id=%s] Middleware error: %s: %s",
+            error_id,
+            type(e).__name__,
+            e,
+            exc_info=True,
+        )
+        _ = asyncio.create_task(emit_log("ERROR", f"RESPONSE {request.method} {request.url.path} -> 500 ({type(e).__name__}) [error_id={error_id}]", {}))
         return JSONResponse(
             status_code=500,
-            content={"status": "ERROR", "message": "Internal Gateway Error"}
+            content={
+                "status": "ERROR",
+                "message": "Internal Gateway Error",
+                "error_id": error_id,
+            },
+            headers={"X-Error-Id": error_id},
         )
 
     status_code = getattr(response, 'status_code', None) or getattr(response, 'status', 'N/A')
@@ -14120,9 +14154,9 @@ async def resolve_ma_library_uri(req: MALibraryURIRequest, request: Request):
     abs_item_id = (req.abs_item_id or "").strip()
     if not abs_item_id:
         raise HTTPException(status_code=422, detail="abs_item_id is required")
-    # Authenticate strictly before touching MA. `_resolve_ma_credentials` goes
-    # through `resolve_identity`, which falls back to the system default user for
-    # *any* string. Measured: an anonymous request and `Bearer sk-not-a-real-key`
+    # Authenticate strictly before touching MA. `_resolve_ma_credentials` used
+    # to accept a missing or made-up key through Identity's system-default
+    # fallback: measured, an anonymous request and `Bearer sk-not-a-real-key`
     # both got a 200 here, i.e. an open MA lookup. This endpoint reaches MA's
     # library index, so an unauthenticated caller must be refused outright.
     await _require_authenticated(request)

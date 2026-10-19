@@ -111,10 +111,12 @@ def test_identity_resolve_by_api_key(session: Session):
     assert data.ha_token == "alice-ha-token"
 
 
-def test_identity_resolve_fallback_to_first_user(session: Session):
-    """Test that unresolved queries fall back to first user."""
-    data = resolve_identity(ResolveRequest(rag_user="nonexistent"), session)
-    assert data.user == "default"
+def test_identity_resolve_unknown_user_is_rejected(session: Session):
+    """A named user that does not exist must never become the default admin."""
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_identity(ResolveRequest(rag_user="nonexistent"), session)
+    assert exc_info.value.status_code == 401
+    assert "default" not in str(exc_info.value.detail).lower()
 
 
 def test_identity_resolve_returns_decrypted_credentials(session: Session):
@@ -170,8 +172,8 @@ def test_identity_resolve_audiobookshelf_credentials(session: Session):
     assert data.audiobookshelf_pass == "bob-abs-pass"
 
 
-def test_identity_resolve_missing_user_raises(session: Session):
-    """Test that resolving a non-existent user without fallback raises 404."""
+def test_identity_resolve_missing_user_raises_401_not_404(session: Session):
+    """Unknown credentials are an authentication failure, not a lookup miss."""
     # Temporarily remove default user
     default_user = session.exec(select(User).where(User.username == "default")).first()
     if default_user:
@@ -180,7 +182,7 @@ def test_identity_resolve_missing_user_raises(session: Session):
 
     with pytest.raises(HTTPException) as exc_info:
         resolve_identity(ResolveRequest(rag_user="nonexistent"), session)
-    assert exc_info.value.status_code == 404
+    assert exc_info.value.status_code == 401
 
 
 def test_resolve_request_schema_optional_fields():
