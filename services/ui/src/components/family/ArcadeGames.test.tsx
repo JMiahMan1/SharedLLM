@@ -63,7 +63,7 @@ const shelf: ArcadeGamesResponse = {
       rating: { count: 3, average: 4.67 },
       featured: true,
     },
-    { slug: 'breakout', title: 'Breakout', category: 'classic', kind: 'playable', plays: 0, rating: { count: 0, average: 0 } },
+    { slug: 'breakout', title: 'Breakout', category: 'classic', kind: 'code', plays: 0, rating: { count: 0, average: 0 } },
   ],
   count: 2,
 };
@@ -147,6 +147,7 @@ describe('ArcadeGames', () => {
     expect(screen.getAllByTestId('arcade-rating-space-invaders')[0].textContent).toContain('4.7 (3)');
     expect(screen.getByTestId('arcade-rating-breakout').textContent).toContain('No votes');
     expect(screen.getByText(/No plays yet/)).toBeTruthy();
+    expect(screen.getByText('Desktop')).toBeTruthy();
 
     const links = screen.getAllByRole('link', { name: /play/i });
     expect(links.length).toBeGreaterThan(0);
