@@ -96,7 +96,11 @@ play, item 3's automatic score bridge, item 4's desktop-sandbox streaming,
 item 5 (family ratings), sorting, the high score table, per-user scores and
 OODA curation are **shipped**. Desktop code games launch a noVNC sandbox from
 the Family player (`/api/arcade/games/{slug}/launch` and `/stop`) and are
-shown with a **Desktop** badge.
+shown with a **Desktop** badge. Every launch gets its own `alpaca-arcade-*`
+container and random noVNC/audio ports, so several people can play different
+desktop games at once. A background reaper removes only containers that have
+already exited (or were created but never started) after a five-minute grace;
+it never touches a running, paused or restarting game.
 
 1. **Admin curation.** Admin-only setting `arcade_featured_games`, stored as a
    plain JSON array of slugs (no labels).
