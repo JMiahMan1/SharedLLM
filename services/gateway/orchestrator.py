@@ -10,6 +10,7 @@ import uuid
 
 import aiohttp
 
+from services.common.circuit_breaker import CircuitOpenError, get_breaker
 from services.gateway.location_query import parse_location_query
 from services.gateway.config import (
     CONTROL_PLANE_URL,
@@ -626,17 +627,39 @@ async def _fetch_rag_context(
         skip_curriculum = not include_curriculum
 
         from services.gateway.main import shared_http_client
+        # RAG is a soft dependency: when it is down, a plain answer without
+        # retrieved context is better than making every turn wait out the
+        # timeout. Three consecutive failures open the breaker and the rest of
+        # the collections are skipped until the reset window passes.
+        breaker = get_breaker("rag", fail_max=3, reset_timeout=30.0)
         async with shared_http_client() as client:
             for coll in collections:
                 if total_hits >= MAX_TOTAL_HITS or total_chars >= TOTAL_CHARS_LIMIT:
                     break
 
-                resp = await client.post(
-                    f"{rag_svc}/rag/search",
-                    json={"collection_name": coll, "query": query, "user_id": user_id, "k": MAX_HITS_PER_COLL},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=aiohttp.ClientTimeout(total=10.0),
-                )
+                try:
+                    resp = await breaker.call(
+                        lambda: client.post(
+                            f"{rag_svc}/rag/search",
+                            json={
+                                "collection_name": coll,
+                                "query": query,
+                                "user_id": user_id,
+                                "k": MAX_HITS_PER_COLL,
+                            },
+                            headers={"X-Internal-Secret": INTERNAL_SECRET},
+                            timeout=aiohttp.ClientTimeout(total=10.0),
+                        ),
+                        is_failure=lambda response: response.status >= 500,
+                    )
+                except CircuitOpenError:
+                    log.warning(
+                        "RAG circuit is open; continuing without retrieved context"
+                    )
+                    break
+                except Exception as exc:  # noqa: BLE001 - RAG is optional context
+                    log.warning("RAG search failed; continuing without context: %s", exc)
+                    break
                 if resp.status == 200:
                     hits = (await resp.json()).get("results", [])
                     if hits:
