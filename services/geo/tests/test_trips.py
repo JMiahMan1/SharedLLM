@@ -213,7 +213,7 @@ def test_phantom_zero_duration_trips_are_not_listed(client, fake_redis):
     phantom.update({
         "end_time": phantom["start_time"],
         "duration_seconds": 60,
-        "distance_miles": 0.42,
+        "distance_miles": 2.15,
         "start_location": {"name": "East Riggs Road", "latitude": 33.2195743, "longitude": -111.6486112},
         "end_location": {"name": "East Riggs Road", "latitude": 33.2195743, "longitude": -111.6486112},
     })

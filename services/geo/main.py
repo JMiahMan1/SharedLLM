@@ -2614,18 +2614,17 @@ MAX_TRIPS_PER_REQUEST = 1000
 
 
 def _is_phantom_trip(trip: dict) -> bool:
-    """A completed "trip" with no moving time and under a mile is a fix that
-    started a record and immediately stopped. Older versions stored these;
-    hide them from every list without deleting the history."""
+    """A completed record with no moving time is a fix that started a trip and
+    immediately stopped. Older versions stored these (sometimes with a road
+    distance attached); hide them from every list without deleting history."""
     if trip.get("status") != "completed":
         return False
     try:
         start = float(trip.get("start_time") or 0)
         end = float(trip.get("end_time") or 0)
-        distance = float(trip.get("distance_miles") or 0)
     except (TypeError, ValueError):
         return False
-    return end <= start + 1.0 and distance < 1.0
+    return end <= start + 1.0
 
 
 @app.get("/trips")
