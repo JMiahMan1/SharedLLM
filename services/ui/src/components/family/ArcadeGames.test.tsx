@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ArcadeGames from './ArcadeGames';
 import { api } from '../../services/api';
@@ -12,11 +12,13 @@ vi.mock('../../services/api', async (importOriginal) => {
     api: {
       ...(actual.api as Record<string, unknown>),
       getArcadeGames: vi.fn(),
+      rateArcadeGame: vi.fn(),
     },
   };
 });
 
 const mockedGetArcadeGames = vi.mocked(api.getArcadeGames);
+const mockedRateArcadeGame = vi.mocked(api.rateArcadeGame);
 
 function renderShelf() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -59,7 +61,10 @@ const shelf: ArcadeGamesResponse = {
 };
 
 describe('ArcadeGames', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedRateArcadeGame.mockResolvedValue({ success: true, rating: { count: 4, average: 4.5 } });
+  });
 
   it('renders featured picks, ratings and play links', async () => {
     mockedGetArcadeGames.mockResolvedValue(shelf);
@@ -118,5 +123,17 @@ describe('ArcadeGames', () => {
     renderShelf();
 
     await waitFor(() => expect(screen.getByTestId('arcade-empty')).toBeTruthy());
+  });
+
+  it('rates a game as the signed-in family member', async () => {
+    mockedGetArcadeGames.mockResolvedValue(shelf);
+    renderShelf();
+
+    await waitFor(() => expect(screen.getByTestId('arcade-shelf')).toBeTruthy());
+    const stars = screen.getAllByRole('button', { name: 'Rate Space Invaders 4 stars' });
+    fireEvent.click(stars[0]);
+
+    await waitFor(() => expect(mockedRateArcadeGame).toHaveBeenCalledWith('space-invaders', 4));
+    await waitFor(() => expect(screen.getAllByText('Thanks!').length).toBeGreaterThan(0));
   });
 });

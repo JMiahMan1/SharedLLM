@@ -1,7 +1,9 @@
 import sys
-from unittest.mock import MagicMock
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 
 # Mock dependencies before importing main (same preamble as test_calendar_proxy).
@@ -97,3 +99,62 @@ async def test_arcade_games_reports_offline(monkeypatch):
     assert "connect timeout" in payload["error"]
     assert payload["games"] == []
     assert payload["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_arcade_rate_uses_the_signed_in_username_initials(monkeypatch):
+    from services.gateway import main
+
+    seen = {}
+
+    class _Resp:
+        status = 200
+
+        async def json(self):
+            return {"success": True, "rating": {"count": 4, "average": 4.5}}
+
+        async def text(self):
+            return ""
+
+    class _Client:
+        async def post(self, url, **kwargs):
+            seen["url"] = url
+            seen["json"] = kwargs.get("json")
+            return _Resp()
+
+    @asynccontextmanager
+    async def fake_client():
+        yield _Client()
+
+    monkeypatch.setattr(main, "shared_http_client", fake_client)
+    monkeypatch.setattr(
+        main,
+        "_require_identity_from_request",
+        AsyncMock(return_value={"user": "jeremiah"}),
+    )
+    request = MagicMock()
+    request.json = AsyncMock(return_value={"stars": 4})
+
+    response = await main.proxy_arcade_rate("space-invaders", request)
+
+    assert seen["url"] == f"{main.ALPACA_ARCADE_URL}/api/games/space-invaders/rate"
+    assert seen["json"] == {"stars": 4, "initials": "JER"}
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_arcade_rate_rejects_an_out_of_range_vote(monkeypatch):
+    from services.gateway import main
+
+    monkeypatch.setattr(
+        main,
+        "_require_identity_from_request",
+        AsyncMock(return_value={"user": "jeremiah"}),
+    )
+    request = MagicMock()
+    request.json = AsyncMock(return_value={"stars": 6})
+
+    with pytest.raises(HTTPException) as exc:
+        await main.proxy_arcade_rate("space-invaders", request)
+
+    assert exc.value.status_code == 422

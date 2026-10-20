@@ -2943,6 +2943,30 @@ async def _handle_voice_learning(
     return _make_ollama_response(message, selected_model, "voice_learning")
 
 
+def _chat_system_prompt(body: dict) -> str | None:
+    """The caller's OpenAI-style system prompt, if one was supplied.
+
+    Clients such as the Bible study service send their instructions as the
+    first ``messages`` entry. The gateway used to read only the last message,
+    so a carefully grounded study persona was silently replaced by the
+    generic router prompt.
+    """
+    system = body.get("system")
+    if isinstance(system, str) and system.strip():
+        return system
+    messages = body.get("messages")
+    if isinstance(messages, list):
+        for message in messages:
+            if (
+                isinstance(message, dict)
+                and message.get("role") == "system"
+                and isinstance(message.get("content"), str)
+                and message["content"].strip()
+            ):
+                return message["content"]
+    return None
+
+
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks=None):
@@ -2986,6 +3010,14 @@ async def chat_handler(request: Request, background_tasks=None):
 
     if not query:
         return JSONResponse({"status": "ERROR", "message": "No query provided."}, status_code=400)
+
+    # A grounded caller (the Bible study service) supplies the complete
+    # passage + notes + question prompt and must not receive unrelated
+    # household RAG hits or the generic router persona.
+    grounded = body.pop("grounded", False) is True
+    system_prompt = _chat_system_prompt(body)
+    if system_prompt:
+        body["system"] = system_prompt
 
     # Model selection: an explicit model wins. Otherwise route by query semantics
     # through the canonical selector (code/autonomous -> coding/35B gatekeeper,
@@ -3276,13 +3308,19 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_ollama_response(ans, selected_model, intent)
 
     # 5. Retrieve Tiered Memory
-    short_term = await get_history(user_id)
-    long_term = await get_long_term_memory(user_id, query)
+    if grounded:
+        short_term = []
+        long_term = ""
+    else:
+        short_term = await get_history(user_id)
+        long_term = await get_long_term_memory(user_id, query)
 
     # 6. Context Injection (RAG)
     rag_context = ""
     # MISSION LOCK: Disable RAG to prevent architectural hallucinations
-    if "MISSION LOCK" in query:
+    if grounded:
+        log.info("[RAG] Grounded study request; skipping all collections.")
+    elif "MISSION LOCK" in query:
         log.info("[RAG] MISSION LOCK detected; bypassing all collections to ensure focus.")
     else:
         try:
@@ -3309,10 +3347,10 @@ async def chat_handler(request: Request, background_tasks=None):
     # 7. Slow Path Execution (LLM Pipeline)
     shadow_context = ""
     complex_signals = ["complex", "bug", "refactor", "design", "how to", "fix", "error", "traceback", "implement", "logic"]
-    if any(k in query.lower() for k in complex_signals):
+    if not grounded and any(k in query.lower() for k in complex_signals):
         shadow_context = await perform_shadow_execution(query, creds, short_term, rag_context)
 
-    system_instruction = select_system_instruction_for_query(query, selected_model)
+    system_instruction = (body.get("system") or "") if grounded else select_system_instruction_for_query(query, selected_model)
 
     # Detection of autonomous agent engagement
     is_autonomous = False
@@ -3321,7 +3359,7 @@ async def chat_handler(request: Request, background_tasks=None):
     # Bare action words (e.g. "scan", "build", "check") and colon-prefixed
     # phrasing (e.g. "Note: ...", "Q: ...") no longer auto-route ordinary
     # requests to the Raven mission queue.
-    if is_raven_intent(query):
+    if not grounded and is_raven_intent(query):
         log.info("[ShadowExecution] AUTONOMOUS MISSION DETECTED via Raven keyword + command")
         is_autonomous = True
         system_instruction = await load_prompt(get_http_client(), "raven_autonomous_protocol")
@@ -3329,11 +3367,14 @@ async def chat_handler(request: Request, background_tasks=None):
     admin_tag = " (ADMIN)" if creds.is_admin else ""
     user_info = f"Current User: {user_id}{admin_tag}"
 
-    protocols = await fetch_autonomous_protocols()
-    full_system = f"{system_instruction}\n\n{protocols}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
+    if grounded:
+        full_system = system_instruction
+    else:
+        protocols = await fetch_autonomous_protocols()
+        full_system = f"{system_instruction}\n\n{protocols}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
 
     final_query = query
-    if any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
+    if not grounded and any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
         full_system += (
             "\n\n[SYSTEM OVERRIDE: CRITICAL DIRECTIVE: You have full permission to access the storage system. "
             "You ARE fully capable of executing this storage action. "
@@ -3342,7 +3383,7 @@ async def chat_handler(request: Request, background_tasks=None):
             "or `StorageIndexRequest` to index them. Output the correct JSON block now.]"
         )
 
-    if any(k in query.lower() for k in ["log", "logs", "docker", "output", "error"]):
+    if not grounded and any(k in query.lower() for k in ["log", "logs", "docker", "output", "error"]):
         final_query += (
             "\n\n[SYSTEM OVERRIDE: You ARE authorized and REQUIRED to print diagnostic log snippets to the user. "
             "If you fetch logs via `DockerLogsRequest`, you MUST parse the output and display relevant snippets "
@@ -3480,7 +3521,7 @@ async def chat_handler(request: Request, background_tasks=None):
 
     # Build job_payload for the FIFO queue
     default_sys = select_system_instruction_for_query(query, selected_model)
-    if any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
+    if not grounded and any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
         default_sys += (
             "\n\n[SYSTEM OVERRIDE: CRITICAL DIRECTIVE: You have full permission to access the storage system. "
             "You ARE fully capable of executing this storage action. "
@@ -3497,6 +3538,7 @@ async def chat_handler(request: Request, background_tasks=None):
         "source": body.get("source"),
         "device_id": body.get("device_id"),
         "rag_user": body.get("rag_user"),
+        "grounded": grounded,
         "show_thinking": show_thinking,
         "is_openai": is_openai,
     }
@@ -4238,6 +4280,37 @@ async def proxy_arcade_featured(request: Request):
             timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return await _proxy_json_response(resp)
+
+
+@app.post("/api/arcade/games/{slug}/rate")
+async def proxy_arcade_rate(slug: str, request: Request):
+    """Rate an arcade game as the signed-in family member.
+
+    The arcade has its own public rating endpoint, but it is not exposed to
+    the internet. Keep it behind Jarvis auth and use the authenticated
+    username's initials instead of trusting a client-supplied voter name.
+    """
+    creds = await _require_identity_from_request(request)
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", slug):
+        raise HTTPException(status_code=422, detail="Invalid game slug")
+
+    body = await request.json()
+    stars = body.get("stars") if isinstance(body, dict) else None
+    if isinstance(stars, bool) or not isinstance(stars, int) or not 1 <= stars <= 5:
+        raise HTTPException(status_code=422, detail="stars must be an integer from 1 to 5")
+
+    user = str((creds or {}).get("user") or "")
+    initials = re.sub(r"[^A-Za-z0-9]", "", user)[:3].upper() or "YOU"
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{ALPACA_ARCADE_URL}/api/games/{slug}/rate",
+                json={"stars": stars, "initials": initials},
+                timeout=aiohttp.ClientTimeout(total=8.0),
+            )
+            return await _proxy_json_response(resp)
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
 
 
 @app.get("/api/widgets/settings")

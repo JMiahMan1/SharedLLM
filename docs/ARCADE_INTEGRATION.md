@@ -49,10 +49,10 @@ re-implement.
 
 ## Design
 
-Status: item 1 (curation + list) and the Games-tab display are **shipped**
-(slice 1 above). Items 2's launch/stop passthrough, 4 (in-app play) and 5
-(score bridge) are **not built**; there is no `/api/arcade/games/{slug}/launch`
-or `/stop` route yet.
+Status: item 1 (curation + list), the Games-tab display, and item 5 (family
+ratings) are **shipped**. Item 2's launch/stop passthrough, item 3 (score
+bridge) and item 4 (in-app play) are **not built**; there is no
+`/api/arcade/games/{slug}/launch` or `/stop` route yet.
 
 1. **Admin curation.** Admin-only setting `arcade_featured_games`, stored as a
    plain JSON array of slugs (no labels).
@@ -93,7 +93,9 @@ or `/stop` route yet.
 3. Score bridge → points ledger → Talk message ("X scored N on Y").
 4. Desktop-game streaming from the Family page.
 5. Ratings from the family: let Jarvis users vote 1-5 stars, written back to
-   `ratings.json` (same endpoint the arcade already uses).
+   `ratings.json` (same endpoint the arcade already uses). **Shipped**: the
+   signed-in user's initials are sent through the authenticated gateway route,
+   so a client cannot vote as someone else.
 
 ## Open questions for the arcade side
 
