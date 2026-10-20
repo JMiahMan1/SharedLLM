@@ -75,8 +75,9 @@ describe('DrawCanvas', () => {
     await waitFor(() => expect(screen.getByTestId('draw-result')).toBeTruthy());
     expect(editImage).toHaveBeenCalledWith(
       {
-        prompt: 'Make this drawing much better',
+        prompt: expect.stringContaining("child's drawing"),
         image: expect.any(String),
+        purpose: 'family_drawing',
       },
       { signal: expect.any(AbortSignal) },
     );

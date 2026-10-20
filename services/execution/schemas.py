@@ -1139,8 +1139,9 @@ class ImageEditInlineRequest(BaseRequest):
     image: str = Field(..., description="The source picture as a data: URL or bare base64 (PNG, JPEG or WebP)")
     prompt: str = Field(..., description="Editing instruction")
     size: str | None = Field(None, description="Output size as WxH (default: source image size, max 2048x2048)")
-    model: str | None = Field(None, description="Override image edit model name (default: image_edit_model setting)")
+    model: str | None = Field(None, description="Override image edit model name (default: the purpose's setting, else image_edit_model)")
     proxy_url: str | None = Field(None, description="Override LLM proxy URL (default: llm_local_url setting)")
+    purpose: str | None = Field(None, description="Purpose such as 'family_drawing'; selects family_drawing_edit_model when no model override is given")
 
 
 class PodcastRenderRequest(BaseRequest):

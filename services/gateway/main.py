@@ -6235,7 +6235,7 @@ def _image_edit_payload(body: dict) -> tuple[dict | None, str | None]:
     """Validate a drawing request and keep only the fields execution accepts."""
     if not str(body.get("image") or "").strip() or not str(body.get("prompt") or "").strip():
         return None, "image and prompt are required."
-    return {key: body.get(key) for key in ("image", "prompt", "size", "model")}, None
+    return {key: body.get(key) for key in ("image", "prompt", "size", "model", "purpose")}, None
 
 
 async def _execute_image_edit(payload: dict) -> tuple[int, dict]:
@@ -6246,7 +6246,7 @@ async def _execute_image_edit(payload: dict) -> tuple[int, dict]:
                 f"{EXECUTION_SVC}/execute/image_edit_inline",
                 json=payload,
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=620.0),
+                timeout=aiohttp.ClientTimeout(total=1200.0),
             )
             try:
                 result = await resp.json()
@@ -6453,7 +6453,7 @@ async def workspace_image_edit_proxy(workspace_id: str, request: Request):
                 f"{EXECUTION_SVC}/execute/image_edit",
                 json=payload,
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=620.0),
+                timeout=aiohttp.ClientTimeout(total=1200.0),
             )
             try:
                 data = await resp.json()

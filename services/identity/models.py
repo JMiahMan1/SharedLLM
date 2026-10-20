@@ -509,6 +509,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "vision_ocr_model", "value": "", "description": "Vision model for OCR/text extraction from images, screenshots, and documents (PDF pages). Default: qwen2.5-vl:7b"},
     {"key": "vision_ocr_proxy_url", "value": "", "description": "Proxy URL for Vision OCR service (Qwen2.5-VL, or any /v1/chat/completions-compatible vision endpoint). Set in Settings > AI & Compute > Endpoints."},
     {"key": "image_edit_model", "value": "", "description": "Image editing model for editing existing images (qwen-image-edit via the LLM proxy /v1/images/edits). Default: qwen-image-edit-rapid-aio:q4_k"},
+    {"key": "family_drawing_edit_model", "value": "qwen-image-edit-2511:q3_k_s", "description": "Image editing model for the Family drawing 'Make it way better' button. Default: qwen-image-edit-2511:q3_k_s, the newest Qwen edit model that runs on an 8 GB card. Change it in Settings > AI & Compute."},
     {"key": "image_edit_steps", "value": "", "description": "Sampling steps for image edits (1-100). Empty uses the model default (20). The rapid edit models are made for about 4 to 8 steps."},
 
     # --- ANTI-REFUSAL & AGENT PROTOCOLS ---
