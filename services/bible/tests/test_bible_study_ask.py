@@ -440,8 +440,12 @@ def test_the_route_needs_a_question(loaded_client: TestClient):
 
 def test_the_depth_changes_the_words_not_the_rules():
     child = study_ask.system_prompt("child")
+    adult = study_ask.system_prompt("adult")
     assert "child" in child and "Do not invent verse text" in child
-    assert study_ask.system_prompt("adult") == study_ask.SYSTEM_PROMPT
+    assert "three or four sentences" in child
+    assert "adult" in adult and "Do not invent verse text" in adult
+    assert "one or two short paragraphs" in adult
+    assert "three or four sentences" not in adult
     with pytest.raises(study_ask.StudyAskError):
         study_ask.system_prompt("toddler")
 
