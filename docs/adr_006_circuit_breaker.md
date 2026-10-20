@@ -2,9 +2,18 @@
 
 ## Status
 
-Proposed, not implemented (reviewed 2026-10-15). `aiobreaker` is not in any
-requirements file, no service wraps its outbound calls in a breaker, and no
-`/metrics` breaker gauges exist.
+Partially implemented 2026-10-19. `services/common/circuit_breaker.py` is a
+dependency-free breaker with closed/open/half-open states, a single half-open
+trial, failure classification for raised exceptions and HTTP 5xx responses, and
+snapshots for health checks. The gateway wraps RAG searches in a three-failure
+breaker because RAG is a soft dependency; an open breaker skips retrieval
+instead of making a turn wait out the timeout. `GET
+/api/health/circuit-breakers` (admin only) returns the states.
+
+Still open: wrapping Execution, WorkspaceRuntime and Storage calls, and adding
+Prometheus-style counters. The original `aiobreaker` dependency and `/metrics`
+gauges described below were not adopted; the local module keeps the policy in
+one place without adding a runtime dependency.
 
 ## Context
 

@@ -61,3 +61,38 @@ async def test_chat_orchestration_can_skip_the_curriculum(monkeypatch):
 
     assert answer == "answer"
     assert seen["include_curriculum"] is False
+
+
+async def test_repeated_rag_failures_skip_further_searches(monkeypatch):
+    """RAG is optional: three failures open the breaker, not thirty timeouts."""
+    from contextlib import asynccontextmanager
+
+    import aiohttp
+
+    from services.common.circuit_breaker import reset_breakers
+    from services.gateway import main as gateway_main
+
+    reset_breakers()
+    calls = 0
+
+    class Client:
+        async def post(self, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise aiohttp.ClientError("rag is down")
+
+    @asynccontextmanager
+    async def fake_client():
+        yield Client()
+
+    async def fake_settings():
+        return {"rag_svc_url": "http://rag"}
+
+    monkeypatch.setattr(orchestrator, "get_all_settings", fake_settings)
+    monkeypatch.setattr(orchestrator, "_collections_for_query", lambda *a, **k: ["system_learnings"])
+    monkeypatch.setattr(gateway_main, "shared_http_client", fake_client)
+
+    for _ in range(4):
+        assert await orchestrator._fetch_rag_context("hello", "u") == ""
+
+    assert calls == 3
