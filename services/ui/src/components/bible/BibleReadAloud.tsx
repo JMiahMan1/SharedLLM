@@ -30,6 +30,7 @@ interface SpokenPiece {
  */
 const spoken = new Map<string, SpokenPiece>();
 const SPOKEN_LIMIT = 120;
+const RATES = [0.75, 1, 1.25, 1.5] as const;
 
 function remember(key: string, piece: SpokenPiece) {
   if (spoken.size >= SPOKEN_LIMIT) spoken.clear();
@@ -63,6 +64,7 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
   const [message, setMessage] = useState('');
   const [cachedAll, setCachedAll] = useState(false);
   const [progress, setProgress] = useState({ played: 0, total: 0 });
+  const [rate, setRate] = useState<number>(1);
 
   const voices = useQuery({
     queryKey: ['bible-voices'],
@@ -137,6 +139,7 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
     const url = URL.createObjectURL(new Blob([piece.bytes as Uint8Array<ArrayBuffer>], { type: piece.mime }));
     urlRef.current = url;
     element.src = url;
+    element.playbackRate = rate;
     await element.play();
   }
 
@@ -294,6 +297,27 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
             </select>
           </>
         ) : null}
+
+        <label htmlFor="bible-read-aloud-rate" className="sr-only">
+          Playback speed
+        </label>
+        <select
+          id="bible-read-aloud-rate"
+          data-testid="bible-read-aloud-rate"
+          value={rate}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            setRate(next);
+            if (audioRef.current) audioRef.current.playbackRate = next;
+          }}
+          className="min-h-11 rounded-xl bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-200"
+        >
+          {RATES.map((value) => (
+            <option key={value} value={value}>
+              {value}x
+            </option>
+          ))}
+        </select>
       </div>
 
       <audio ref={audioRef} preload="none" className="hidden" data-testid="bible-read-aloud-audio" />

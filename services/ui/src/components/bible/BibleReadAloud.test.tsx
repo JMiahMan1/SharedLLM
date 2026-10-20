@@ -230,4 +230,14 @@ describe('BibleReadAloud', () => {
     expect(element.play).toHaveBeenCalledTimes(1);
     expect(apiMock.getBibleNarrationPlan).toHaveBeenCalledTimes(1);
   });
+
+  it('lets the reader speed up the narration', async () => {
+    renderPanel();
+    await userEvent.click(screen.getByTestId('bible-read-aloud-play'));
+    await waitFor(() => expect(audioElement().src).toBe('blob:verse-1'));
+
+    await userEvent.selectOptions(screen.getByTestId('bible-read-aloud-rate'), '1.25');
+
+    expect(audioElement().playbackRate).toBe(1.25);
+  });
 });
