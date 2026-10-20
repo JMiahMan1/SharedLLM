@@ -40,9 +40,14 @@ function GameCard({ game, playBase, onPlay }: { game: ArcadeGameCard; playBase: 
   const highlighted = hovered || selected;
 
   return (
-    <div className={`glass-panel p-4 rounded-2xl border border-white/5 flex-col gap-2 ${game.kind === 'code' ? 'hidden sm:flex' : 'flex'}`} data-testid={`arcade-game-${game.slug}`}>
+    <div className="glass-panel p-4 rounded-2xl border border-white/5 flex flex-col gap-2" data-testid={`arcade-game-${game.slug}`}>
       <div className="flex items-start gap-2">
         <span className="font-semibold text-slate-100 leading-tight">{game.title}</span>
+        {game.kind === 'code' && (
+          <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-sky-200">
+            Desktop
+          </span>
+        )}
         {game.featured && (
           <span className="ml-auto shrink-0 rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-amber-200">
             Featured
@@ -206,7 +211,8 @@ export default function ArcadeGames() {
           </span>
         </div>
         <p className="text-xs text-slate-400 mt-1">
-          Games the family made in Alpaca. {sourceLabel ? `${sourceLabel}.` : ''}
+          Games the family made in Alpaca. {sourceLabel ? `${sourceLabel}.` : ''} Desktop games open in the live
+          sandbox and can be played here too.
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-1" role="group" aria-label="Sort games">
           {SORTS.map((option) => (
