@@ -25,6 +25,7 @@ public class MainActivity extends BridgeActivity {
         // the bridge already exists, so late plugins are dropped and JS gets
         // "plugin is not implemented on android".
         registerPlugin(StepCounterPlugin.class);
+        registerPlugin(StepSyncPlugin.class);
         registerPlugin(TokenBridgePlugin.class);
         registerPlugin(ApkInstallPlugin.class);
         registerPlugin(LocationTrackingPlugin.class);

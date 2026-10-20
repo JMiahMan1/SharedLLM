@@ -18,6 +18,7 @@ import {
 import { hasDayRolledOver, localDayKey } from '../lib/stepDay';
 import { isInsideGeofence, shouldUploadFix, classifyFix, derivedSpeedMps, GOOD_FIX_M, COARSE_FIX_M } from '../lib/locationSync';
 import { startBackgroundTracking, stopBackgroundTracking } from '../lib/locationTracking';
+import { startBackgroundSteps, stopBackgroundSteps } from '../lib/stepSync';
 
 export type SensorId = 'location' | 'steps';
 type NoticeOwner = 'service' | 'read';
@@ -828,6 +829,11 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       const user = await resolveSyncUsername();
       if (user) {
         const state = await startBackgroundTracking(user, { steps: sensorsRef.current.steps.enabled });
+        if (state.serviceRunning) {
+          // The location service already carries step readings; running both
+          // would double-post the same day.
+          await stopBackgroundSteps();
+        }
         if (!state.supported) {
           logSensor('location', 'background tracking unavailable on this build', null);
         }
@@ -841,6 +847,14 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     // turning tracking off has to stop it explicitly -- otherwise it keeps
     // uploading for a user who just opted out.
     void stopBackgroundTracking();
+    // Steps are independent of location consent. If the Steps switch is on,
+    // hand the pedometer to its own service instead of leaving it with the
+    // location service that was just stopped.
+    if (sensorsRef.current.steps.enabled) {
+      void resolveSyncUsername().then((user) => {
+        if (user) void startBackgroundSteps(user);
+      });
+    }
     if (watchIdRef.current !== null) {
       if (typeof watchIdRef.current === 'number') {
         navigator.geolocation.clearWatch(watchIdRef.current);
@@ -854,17 +868,32 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       stationarySyncTimerRef.current = null;
     }
     setState((s) => ({ ...s, isTracking: false }));
-  }, []);
+  }, [resolveSyncUsername]);
 
   /**
-   * The native service reads the pedometer with the app closed only while
-   * Steps is on; tell a running service when that switch changes.
+   * Steps have their own native service so location consent is not a
+   * prerequisite. While location tracking is running its service carries the
+   * reading, so the step-only service is stopped to avoid duplicate posts.
    */
   const syncBackgroundSteps = useCallback(async () => {
-    if (!sensorsRef.current.location.enabled || watchIdRef.current === null) return;
+    const steps = sensorsRef.current.steps.enabled;
+    const location = sensorsRef.current.location.enabled && watchIdRef.current !== null;
     const user = await resolveSyncUsername();
-    if (user) await startBackgroundTracking(user, { steps: sensorsRef.current.steps.enabled });
+    if (location) {
+      await stopBackgroundSteps();
+      if (user) await startBackgroundTracking(user, { steps });
+      return;
+    }
+    if (steps && user) {
+      await startBackgroundSteps(user);
+    } else {
+      await stopBackgroundSteps();
+    }
   }, [resolveSyncUsername]);
+
+  useEffect(() => {
+    void syncBackgroundSteps();
+  }, [sensors.steps.enabled, sensors.location.enabled, syncBackgroundSteps]);
 
   const enableSensor = useCallback(async (id: SensorId): Promise<boolean> => {
     if (id === 'steps') {
