@@ -204,6 +204,41 @@ def test_get_trips_seed_and_filter(client, fake_redis):
         assert t["user_id"] == "michele"
 
 
+def test_phantom_zero_duration_trips_are_not_listed(client, fake_redis):
+    """Older phantom records (a fast fix, then a stop) stay in Redis but must
+    not appear as 60-second trips in Wander."""
+    now = time.time()
+    real = _sample_trip("t_real", "jeremiah", "Jeremiah", now - 3600)
+    phantom = _sample_trip("t_phantom", "jeremiah", "Jeremiah", now - 1800)
+    phantom.update({
+        "end_time": phantom["start_time"],
+        "duration_seconds": 60,
+        "distance_miles": 0.42,
+        "start_location": {"name": "East Riggs Road", "latitude": 33.2195743, "longitude": -111.6486112},
+        "end_location": {"name": "East Riggs Road", "latitude": 33.2195743, "longitude": -111.6486112},
+    })
+    _insert_trip(fake_redis, real)
+    _insert_trip(fake_redis, phantom)
+    r = client.get("/trips", params={"user_id": "jeremiah", "viewer": "jeremiah"})
+    assert r.status_code == 200
+    assert [t["id"] for t in r.json()["trips"]] == ["t_real"]
+
+
+def test_a_slice_of_a_longer_drive_is_not_listed_twice(client, fake_redis):
+    """A second active trip started mid-drive used to survive as a short
+    overlapping record; Wander should show the drive once."""
+    now = time.time()
+    long = _sample_trip("t_long", "jeremiah", "Jeremiah", now - 3600)
+    long.update({"end_time": long["start_time"] + 2517, "duration_seconds": 2517, "distance_miles": 30.55})
+    slice_ = _sample_trip("t_slice", "jeremiah", "Jeremiah", now - 3600 + 2019)
+    slice_.update({"end_time": slice_["start_time"] + 179, "duration_seconds": 179, "distance_miles": 1.91})
+    _insert_trip(fake_redis, long)
+    _insert_trip(fake_redis, slice_)
+    r = client.get("/trips", params={"user_id": "jeremiah", "viewer": "jeremiah"})
+    assert r.status_code == 200
+    assert [t["id"] for t in r.json()["trips"]] == ["t_long"]
+
+
 def test_trips_all_bucket_is_not_open_to_everyone(client, fake_redis):
     """Omitting user_id must NOT hand back everyone's trips.
 
@@ -701,6 +736,40 @@ async def test_a_late_fix_does_not_move_a_trip_backwards(fake_redis):
     assert after["last_lat"] == before["last_lat"]
 
 
+@pytest.mark.asyncio
+async def test_a_short_stop_does_not_break_a_drive_in_two(fake_redis):
+    """A six-minute stop used to finalise the trip at five minutes and start
+    a second one when the car moved again."""
+    now = time.time()
+    await geo.process_trip_point(user_id="jeremiah", lat=33.1667, lon=-111.5646, speed_mps=15.0, timestamp=now)
+    await geo.process_trip_point(user_id="jeremiah", lat=33.1700, lon=-111.5646, speed_mps=15.0, timestamp=now + 30)
+    before = json.loads(await fake_redis.get("geo:active_trip:jeremiah"))
+    await geo.process_trip_point(user_id="jeremiah", lat=33.1701, lon=-111.5646, speed_mps=2.0, timestamp=now + 390)
+    after = json.loads(await fake_redis.get("geo:active_trip:jeremiah"))
+    assert after["id"] == before["id"]
+    assert after["last_moving_time"] == before["last_moving_time"]
+    assert after["last_point_time"] == now + 390
+    assert after["end_location"]["latitude"] == 33.1701
+
+
+@pytest.mark.asyncio
+async def test_a_single_fast_fix_is_not_a_completed_trip(fake_redis, monkeypatch):
+    """A 10 MPH sample followed immediately by a stop used to become a
+    60-second trip whose distance came from a later breadcrumb."""
+    now = time.time()
+    trip = _active_trip(now, miles=0.6)
+    trip["start_time"] = now
+    trip["last_moving_time"] = now
+    trip["last_point_time"] = now + 30
+
+    async def road(points, url):
+        return {"matched": True, "coordinates": [[33.1, -111.5]], "distance_m": 676.0,
+                "confidence": 0.98, "used": 1}
+    monkeypatch.setattr(geo.map_match, "match", road)
+    assert await geo._finalize_active_trip(fake_redis, "jeremiah", trip, now + 60) is None
+    assert await fake_redis.get("geo:trip:trip_jeremiah_1") is None
+
+
 # ---------------------------------------------------------------------------
 # Road network checks on trips (OSRM): road distance, phantoms, jumps
 # ---------------------------------------------------------------------------
@@ -974,7 +1043,7 @@ async def test_a_parked_phone_that_goes_quiet_still_ends_its_trip(fake_redis, mo
     now = time.time()
     active = {
         "id": "trip_michele_1", "user_id": "michele", "start_time": now - 1500,
-        "last_moving_time": now - 400, "last_point_time": now - 400,
+        "last_moving_time": now - 1000, "last_point_time": now - 1000,
         "distance_miles": 4.2, "start_location": {"name": "Home"}, "end_location": {"name": "Store"},
         "status": "in_progress",
     }

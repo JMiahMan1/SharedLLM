@@ -2179,8 +2179,17 @@ async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -
     if it was too short to keep (< 0.2 mi). Always clears the active-trip key
     when the caller asks via the returned dict semantics (the caller deletes it)."""
     dist = float(trip.get("distance_miles", 0.0))
+    start_t = float(trip.get("start_time", now_ts))
     end_t = float(trip.get("last_moving_time", now_ts))
-    dur = max(60, int(end_t - float(trip.get("start_time", now_ts))))
+    # A single fast fix is not a drive. Without this guard a 10 MPH sample
+    # followed by a stop finalised as a 60-second "trip" whose only distance
+    # came from a later breadcrumb inside the road-match window.
+    if end_t <= start_t + 1.0:
+        return None
+    dur = max(60, int(end_t - start_t))
+    # Low-speed fixes while the car is stopped still tell us where it stopped;
+    # they extend the breadcrumb window without extending the driving time.
+    route_end = max(end_t, float(trip.get("last_point_time", end_t)))
 
     # The road path, when OSRM can match the trail: its length is the trip's
     # distance (breadcrumbs joined by straight lines cut every corner), and a
@@ -2189,7 +2198,7 @@ async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -
     road = None
     try:
         crumbs = [json.loads(p) for p in await r.zrangebyscore(
-            f"geo:history:{clean_user}", float(trip.get("start_time", now_ts)) - 30, end_t + 30)]
+            f"geo:history:{clean_user}", start_t - 30, route_end + 30)]
         road = await map_match.match(crumbs, OSRM_URL)
     except Exception as e:
         log.warning(f"[Geo] Road match failed for {trip.get('id')}: {e}")
@@ -2246,8 +2255,11 @@ async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -
     return completed
 
 
-#: A drive is over once its phone has not moved for this long.
-TRIP_IDLE_S = 300
+#: A drive is over once its phone has not moved for this long. Five minutes
+#: split ordinary stops (a light, a school pickup, a phone in Doze) into
+#: separate trips; a quarter of an hour keeps the drive whole while still
+#: ending it before the next errand.
+TRIP_IDLE_S = 900
 #: How often the background sweeper looks for drives that have ended.
 TRIP_SWEEP_S = 60
 
@@ -2517,9 +2529,103 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
             except Exception as e:
                 log.warning(f"[Geo] Error updating active trip: {e}")
 
+    # 2. A stop is not the end of the drive. Record where the phone is while
+    #    it is slow so the destination and the road-match window reach the
+    #    place the car actually stopped; the driving clock stays on the last
+    #    moving fix, so a long stop still becomes idle and finishes the trip.
+    elif active_raw:
+        try:
+            trip = json.loads(active_raw)
+            trip["last_point_time"] = ts
+            last_lat = float(trip.get("last_lat", lat))
+            last_lon = float(trip.get("last_lon", lon))
+            if _haversine_distance(last_lat, last_lon, lat, lon) <= 250.0:
+                prev_end = trip.get("end_location") or {}
+                moved = 0.0
+                if prev_end.get("latitude") is not None and prev_end.get("longitude") is not None:
+                    moved = _haversine_distance(
+                        float(prev_end["latitude"]), float(prev_end["longitude"]), lat, lon
+                    )
+                if moved >= 50.0 or _is_street_only_name(prev_end.get("name")):
+                    end_details = await _resolve_place_details_cached(lat, lon)
+                    trip["end_location"] = {
+                        "name": end_details["name"],
+                        "latitude": lat,
+                        "longitude": lon,
+                    }
+                    if end_details.get("address"):
+                        trip["end_location"]["address"] = end_details["address"]
+                else:
+                    end_loc = {
+                        "name": prev_end.get("name"),
+                        "latitude": lat,
+                        "longitude": lon,
+                    }
+                    if prev_end.get("address"):
+                        end_loc["address"] = prev_end["address"]
+                    trip["end_location"] = end_loc
+                await r.set(active_key, json.dumps(trip), ex=86400)
+        except Exception as e:
+            log.warning(f"[Geo] Error recording a stopped trip point: {e}")
+
+
+
+def _drop_contained_trips(trips: list[dict]) -> list[dict]:
+    """Hide a completed record whose whole drive is inside a longer one.
+
+    Concurrent location requests used to start a second active trip while the
+    first was still running; both were persisted, so Wander showed a 3-minute
+    slice of a 42-minute drive as its own trip. The longer record is the one
+    that represents the drive.
+    """
+    completed: dict[str, list[dict]] = {}
+    for trip in trips:
+        if trip.get("status") != "completed":
+            continue
+        try:
+            start = float(trip.get("start_time") or 0)
+            end = float(trip.get("end_time") or 0)
+        except (TypeError, ValueError):
+            continue
+        completed.setdefault(str(trip.get("user_id") or ""), []).append(trip)
+        trip["_span"] = (start, end)
+    hidden: set[int] = set()
+    for group in completed.values():
+        for trip in group:
+            start, end = trip["_span"]
+            for other in group:
+                if other is trip:
+                    continue
+                other_start, other_end = other["_span"]
+                if (
+                    other_start <= start
+                    and other_end >= end
+                    and other_end - other_start > end - start
+                    and float(other.get("distance_miles") or 0) > float(trip.get("distance_miles") or 0)
+                ):
+                    hidden.add(id(trip))
+                    break
+    for trip in trips:
+        trip.pop("_span", None)
+    return [trip for trip in trips if id(trip) not in hidden]
 
 
 MAX_TRIPS_PER_REQUEST = 1000
+
+
+def _is_phantom_trip(trip: dict) -> bool:
+    """A completed "trip" with no moving time and under a mile is a fix that
+    started a record and immediately stopped. Older versions stored these;
+    hide them from every list without deleting the history."""
+    if trip.get("status") != "completed":
+        return False
+    try:
+        start = float(trip.get("start_time") or 0)
+        end = float(trip.get("end_time") or 0)
+        distance = float(trip.get("distance_miles") or 0)
+    except (TypeError, ValueError):
+        return False
+    return end <= start + 1.0 and distance < 1.0
 
 
 @app.get("/trips")
@@ -2576,9 +2682,11 @@ async def get_trips(
             raw = await r.get(f"geo:trip:{tid}")
             if raw:
                 with contextlib.suppress(ValueError):
-                    trips.append(json.loads(raw))
+                    trip = json.loads(raw)
+                    if not _is_phantom_trip(trip):
+                        trips.append(trip)
     trips.sort(key=lambda t: float(t.get("start_time") or 0), reverse=True)
-    trips = trips[:limit]
+    trips = _drop_contained_trips(trips)[:limit]
 
     # Upgrade street-only stored labels (e.g. "North Green Trail") to the
     # closest HA zone or business so the card Destination is useful.

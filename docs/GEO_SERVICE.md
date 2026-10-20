@@ -69,13 +69,17 @@ jump checked against OSRM) goes through `process_trip_point`:
 
 - **Start / advance** at ≥ 10 mph. Speed is the fix's own, else derived from
   the previous breadcrumb **only when the two are ≤ 120 s apart**.
-- **Finish** after 5 min without moving (`TRIP_IDLE_S`). A background
+- **Finish** after 15 min without moving (`TRIP_IDLE_S`). A background
   sweeper (`_idle_trip_sweeper`, every 60 s) finishes idle drives on the
-  server's clock; reads of `/trips` do too. Before the sweeper a drive ended
-  only on that phone's next fix, and a phone that went quiet lost it.
+  server's clock; reads of `/trips` do too. The longer idle window keeps a
+  traffic light, a school pickup or a phone in Doze from splitting one drive
+  into several. While a trip is active, low-speed fixes extend its
+  breadcrumb trail and destination without extending its driving time.
 - On finish the trail is map-matched (OSRM): road distance wins; a trail that
   fits no road, or matches below the confidence floor, is discarded as a
-  phantom; anything under 0.2 mi is dropped.
+  phantom; anything under 0.2 mi is dropped. A trip with no moving time is
+  never stored, and older zero-duration records plus short records wholly
+  inside a longer drive are hidden from `/trips`.
 
 So trip detection needs a phone that reports every ~30 s while moving. A
 phone that only sends its 5-10 minute heartbeat (no "Allow all the time",
