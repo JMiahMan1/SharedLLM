@@ -35,7 +35,7 @@ function useGeoHandlers() {
         steps_goal: 10000,
         daily_steps: {},
         steps_avg: 7000,
-        steps_best: null,
+        steps_best: { date: '2026-10-17', steps: 12400 },
         workout_count: 2,
         workouts_by_type: { walk: 2 },
         workout_distance_miles: 3.2,
@@ -100,6 +100,9 @@ describe('Health health/fitness analysis is opt-in', () => {
       screen.getByText(/Your pace is steady/i)
     ).toBeInTheDocument();
     expect(screen.getByText('7,000')).toBeInTheDocument();
+    expect(screen.getByText('Best Day')).toBeInTheDocument();
+    expect(screen.getByText('12,400')).toBeInTheDocument();
+    expect(screen.queryByText('Drive Cost')).not.toBeInTheDocument();
   });
 
   it('supports re-running analysis from the panel action', async () => {
