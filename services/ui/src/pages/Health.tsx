@@ -743,7 +743,12 @@ function TrendsPanel({ currentUsername }: { currentUsername?: string }) {
                 label="Workout Miles"
                 value={(trends.workout_distance_miles || 0).toFixed(1)}
               />
-              <Stat label="Drive Cost" value={`$${(trends.drive_cost_usd || 0).toFixed(2)}`} />
+              <Stat
+                label="Best Day"
+                value={
+                  trends.steps_best ? formatCount(trends.steps_best.steps) : 'No data'
+                }
+              />
             </div>
           )}
 
