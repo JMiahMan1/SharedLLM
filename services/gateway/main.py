@@ -4205,8 +4205,15 @@ def _arcade_sort_key(game: dict) -> tuple:
     )
 
 
-def _rank_arcade_games(games: list, featured_slugs: list) -> dict:
-    """Order the shelf: admin picks first, then best-rated; never hide a game."""
+ARCADE_SORTS = {"benchmark", "family", "plays", "title"}
+
+
+def _rank_arcade_games(games: list, featured_slugs: list, sort: str | None = None) -> dict:
+    """Order the shelf: admin picks first, then best-rated; never hide a game.
+
+    A backend sort (benchmark/family/plays/title) keeps Alpaca's order so the
+    shelf and the public arcade agree; otherwise family rating wins.
+    """
     by_slug = {g.get("slug"): g for g in games}
     featured: list = []
     seen: set = set()
@@ -4225,14 +4232,16 @@ def _rank_arcade_games(games: list, featured_slugs: list) -> dict:
     return {
         "featured": featured,
         "featured_source": source if featured else "none",
-        "games": sorted(games, key=_arcade_sort_key),
+        "games": games if sort in ARCADE_SORTS else sorted(games, key=_arcade_sort_key),
     }
 
 
-async def _fetch_arcade_games() -> list:
+async def _fetch_arcade_games(sort: str | None = None) -> list:
     async with shared_http_client() as client:
+        params = {"sort": sort} if sort in ARCADE_SORTS else None
         resp = await client.get(
             f"{ALPACA_ARCADE_URL}/api/games",
+            params=params,
             timeout=aiohttp.ClientTimeout(total=8.0),
         )
         data = await _safe_json(resp)
@@ -4294,6 +4303,7 @@ async def proxy_arcade_scoreboard(request: Request):
                 try:
                     resp = await client.get(
                         f"{ALPACA_ARCADE_URL}/api/players/{initials}",
+                        params={"player_id": username},
                         timeout=aiohttp.ClientTimeout(total=8.0),
                     )
                     if resp.status == 200:
@@ -4335,12 +4345,13 @@ async def proxy_arcade_score(slug: str, request: Request):
     score = body.get("score") if isinstance(body, dict) else None
     if isinstance(score, bool) or not isinstance(score, int) or score < 0 or score > 1_000_000_000:
         raise HTTPException(status_code=422, detail="score must be a non-negative integer")
-    initials = _arcade_initials(str((creds or {}).get("user") or ""))
+    user = str((creds or {}).get("user") or "")
+    initials = _arcade_initials(user)
     try:
         async with shared_http_client() as client:
             resp = await client.post(
                 f"{ALPACA_ARCADE_URL}/api/games/{slug}/scores",
-                json={"initials": initials, "score": score},
+                json={"initials": initials, "score": score, "player_id": user},
                 timeout=aiohttp.ClientTimeout(total=8.0),
             )
             return await _proxy_json_response(resp)
@@ -4348,8 +4359,50 @@ async def proxy_arcade_score(slug: str, request: Request):
         raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
 
 
+@app.get("/api/arcade/highscores")
+async def proxy_arcade_highscores(request: Request):
+    """Overall family standings plus each game's top five, from Alpaca.
+
+    `player_id` is the stable household username, so a display-name/initials
+    change does not split a player's history.
+    """
+    creds = await _require_identity_from_request(request)
+    me = str((creds or {}).get("user") or "")
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(
+                f"{ALPACA_ARCADE_URL}/api/highscores",
+                timeout=aiohttp.ClientTimeout(total=8.0),
+            )
+            if resp.status != 200:
+                raise ValueError(f"arcade responded {resp.status}")
+            payload = await resp.json()
+        players = payload.get("players") or []
+        for player in players:
+            if isinstance(player, dict):
+                player["you"] = bool(me) and (
+                    str(player.get("player_id") or "") == me
+                    or str(player.get("initials") or "") == _arcade_initials(me)
+                )
+        return {
+            "success": True,
+            "arcade_available": True,
+            "players": players,
+            "games": payload.get("games") or [],
+        }
+    except (aiohttp.ClientError, ValueError, asyncio.TimeoutError) as exc:
+        log.warning("arcade: highscores fetch failed: %s", exc)
+        return {
+            "success": False,
+            "arcade_available": False,
+            "players": [],
+            "games": [],
+            "error": str(exc),
+        }
+
+
 @app.get("/api/arcade/games")
-async def proxy_arcade_games():
+async def proxy_arcade_games(request: Request = None):
     """Featured + full game shelf from the alpaca Arcade service.
 
     Always 200 with `arcade_available` so the Games tab can render an honest
@@ -4357,10 +4410,13 @@ async def proxy_arcade_games():
     where to open a game.
     """
     payload = {"play_base": ALPACA_ARCADE_PUBLIC_URL}
+    sort = (request.query_params.get("sort") or "").strip().lower() if request is not None else ""
+    if sort not in ARCADE_SORTS:
+        sort = None
     try:
-        games = await _fetch_arcade_games()
+        games = await _fetch_arcade_games(sort)
         featured_slugs = await _get_arcade_featured_slugs()
-        ranked = _rank_arcade_games(games, featured_slugs)
+        ranked = _rank_arcade_games(games, featured_slugs, sort)
         return {"success": True, "arcade_available": True, **payload, **ranked, "count": len(games)}
     except Exception as exc:  # noqa: BLE001 - report the failure, never swallow it
         log.warning("arcade: games fetch failed: %s", exc)

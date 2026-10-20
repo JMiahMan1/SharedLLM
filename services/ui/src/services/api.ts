@@ -40,6 +40,8 @@ import type {
   ExecutionResponse,
   ArcadeGamesResponse,
   ArcadeScoreboardResponse,
+  ArcadeSort,
+  ArcadeHighscoresResponse,
   TimerRecord,
   TimerDevicesResponse,
   SmokeTestResult,
@@ -2047,8 +2049,8 @@ export const api = {
     return resp.data;
   },
 
-  async getArcadeGames(): Promise<ArcadeGamesResponse> {
-    const resp = await apiClient.get('/api/arcade/games');
+  async getArcadeGames(sort?: ArcadeSort): Promise<ArcadeGamesResponse> {
+    const resp = await apiClient.get('/api/arcade/games', { params: sort ? { sort } : undefined });
     return resp.data;
   },
 
@@ -2064,6 +2066,11 @@ export const api = {
 
   async getArcadeScoreboard(): Promise<ArcadeScoreboardResponse> {
     const resp = await apiClient.get('/api/arcade/scoreboard');
+    return resp.data;
+  },
+
+  async getArcadeHighscores(): Promise<ArcadeHighscoresResponse> {
+    const resp = await apiClient.get('/api/arcade/highscores');
     return resp.data;
   },
 

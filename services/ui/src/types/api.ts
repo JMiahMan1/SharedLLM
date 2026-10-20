@@ -452,6 +452,8 @@ export interface ArcadeScoreboardResponse {
   error?: string;
 }
 
+export type ArcadeSort = 'benchmark' | 'family' | 'plays' | 'title';
+
 export interface ArcadeGamesResponse {
   success: boolean;
   arcade_available: boolean;
@@ -461,6 +463,39 @@ export interface ArcadeGamesResponse {
   featured: ArcadeGameCard[];
   games: ArcadeGameCard[];
   count: number;
+}
+
+export interface ArcadeHighscorePlayer {
+  player_id?: string | null;
+  initials: string;
+  best_score: number;
+  total_games: number;
+  games_scored: number;
+  submits: number;
+  crowns: number;
+  podiums: number;
+  you?: boolean;
+}
+
+export interface ArcadeHighscoreEntry {
+  initials: string;
+  score: number;
+  at?: string;
+  player_id?: string | null;
+}
+
+export interface ArcadeHighscoreGame {
+  slug: string;
+  title: string;
+  scores: ArcadeHighscoreEntry[];
+}
+
+export interface ArcadeHighscoresResponse {
+  success: boolean;
+  arcade_available: boolean;
+  players: ArcadeHighscorePlayer[];
+  games: ArcadeHighscoreGame[];
+  error?: string;
 }
 
 export interface TimerRecord {

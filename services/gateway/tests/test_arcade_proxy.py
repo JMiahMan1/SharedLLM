@@ -64,7 +64,7 @@ def test_rank_ignores_unknown_admin_slugs():
 async def test_arcade_games_returns_shelf(monkeypatch):
     from services.gateway import main
 
-    async def fake_fetch():
+    async def fake_fetch(sort=None):
         return [_game("invaders", "Invaders", average=5.0, votes=1)]
 
     async def no_curation():
@@ -87,7 +87,7 @@ async def test_arcade_games_returns_shelf(monkeypatch):
 async def test_arcade_games_reports_offline(monkeypatch):
     from services.gateway import main
 
-    async def boom():
+    async def boom(sort=None):
         raise ValueError("connect timeout")
 
     monkeypatch.setattr(main, "_fetch_arcade_games", boom)
@@ -253,5 +253,70 @@ async def test_arcade_score_is_saved_under_the_signed_in_member(monkeypatch):
     response = await main.proxy_arcade_score("space-invaders", request)
 
     assert seen["url"] == f"{main.ALPACA_ARCADE_URL}/api/games/space-invaders/scores"
-    assert seen["json"] == {"initials": "MIC", "score": 1234}
+    assert seen["json"] == {"initials": "MIC", "score": 1234, "player_id": "michele"}
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_arcade_games_forwards_the_requested_sort(monkeypatch):
+    from services.gateway import main
+
+    seen = {}
+
+    async def fake_fetch(sort=None):
+        seen["sort"] = sort
+        return [_game("b", "B", average=0, votes=0), _game("a", "A", average=0, votes=0)]
+
+    async def no_curation():
+        return []
+
+    monkeypatch.setattr(main, "_fetch_arcade_games", fake_fetch)
+    monkeypatch.setattr(main, "_get_arcade_featured_slugs", no_curation)
+    request = MagicMock()
+    request.query_params = {"sort": "plays"}
+
+    payload = await main.proxy_arcade_games(request)
+
+    assert seen["sort"] == "plays"
+    assert [g["slug"] for g in payload["games"]] == ["b", "a"]
+
+
+@pytest.mark.asyncio
+async def test_arcade_highscores_marks_the_signed_in_player(monkeypatch):
+    from services.gateway import main
+
+    class _Resp:
+        status = 200
+
+        async def json(self):
+            return {
+                "success": True,
+                "players": [
+                    {"player_id": "jeremiah", "initials": "JER", "best_score": 62960},
+                    {"player_id": "michele", "initials": "MIC", "best_score": 0},
+                ],
+                "games": [{"slug": "space-invaders", "title": "Space Invaders", "scores": []}],
+            }
+
+    class _Client:
+        async def get(self, url, **kwargs):
+            assert url.endswith("/api/highscores")
+            return _Resp()
+
+    @asynccontextmanager
+    async def fake_client():
+        yield _Client()
+
+    monkeypatch.setattr(main, "shared_http_client", fake_client)
+    monkeypatch.setattr(
+        main,
+        "_require_identity_from_request",
+        AsyncMock(return_value={"user": "jeremiah"}),
+    )
+
+    payload = await main.proxy_arcade_highscores(MagicMock())
+
+    assert payload["arcade_available"] is True
+    assert payload["players"][0]["you"] is True
+    assert payload["players"][1]["you"] is False
+    assert payload["games"][0]["slug"] == "space-invaders"

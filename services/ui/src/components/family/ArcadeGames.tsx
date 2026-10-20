@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Gamepad2, Play, Star, Trophy } from 'lucide-react';
 import Modal from '../ui/Modal';
+import ArcadeHighscores from './ArcadeHighscores';
 import ArcadeScoreboard from './ArcadeScoreboard';
 import { api } from '../../services/api';
-import type { ArcadeGameCard, ArcadeGamesResponse } from '../../types/api';
+import type { ArcadeGameCard, ArcadeGamesResponse, ArcadeSort } from '../../types/api';
 
 const SOURCE_LABEL: Record<ArcadeGamesResponse['featured_source'], string> = {
   admin: 'Picks from the family admins',
@@ -12,6 +13,12 @@ const SOURCE_LABEL: Record<ArcadeGamesResponse['featured_source'], string> = {
   benchmark: 'Newest benchmark winners',
   none: '',
 };
+
+const SORTS: Array<{ id: ArcadeSort; label: string }> = [
+  { id: 'benchmark', label: 'Alpaca score' },
+  { id: 'family', label: 'Family rating' },
+  { id: 'plays', label: 'Most played' },
+];
 
 function playsLabel(n: number | undefined): string {
   if (!n) return 'No plays yet';
@@ -108,10 +115,11 @@ function GameCard({ game, playBase, onPlay }: { game: ArcadeGameCard; playBase: 
 export default function ArcadeGames() {
   const [playing, setPlaying] = useState<ArcadeGameCard | null>(null);
   const [scoreInput, setScoreInput] = useState('');
+  const [sort, setSort] = useState<ArcadeSort>('benchmark');
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery<ArcadeGamesResponse>({
-    queryKey: ['arcade-games'],
-    queryFn: () => api.getArcadeGames(),
+    queryKey: ['arcade-games', sort],
+    queryFn: () => api.getArcadeGames(sort),
     staleTime: 60_000,
     refetchInterval: 120_000,
   });
@@ -135,6 +143,28 @@ export default function ArcadeGames() {
     setScoreInput('');
     submitScore.reset();
   };
+
+  // The embedded arcade page scans the game's own score storage and posts the
+  // result here. Prefill the save box instead of sending it silently: the
+  // player still confirms the score that belongs to their family account.
+  useEffect(() => {
+    if (!playing || !data?.play_base) return;
+    let origin: string;
+    try {
+      origin = new URL(data.play_base).origin;
+    } catch {
+      return;
+    }
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== origin) return;
+      const message = event.data as { source?: string; slug?: string; score?: unknown } | null;
+      if (message?.source !== 'arcade-score' || message.slug !== playing.slug) return;
+      if (typeof message.score !== 'number' || !Number.isFinite(message.score)) return;
+      setScoreInput(String(Math.max(0, Math.trunc(message.score))));
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [playing, data?.play_base]);
 
   if (isLoading) {
     return (
@@ -178,9 +208,27 @@ export default function ArcadeGames() {
         <p className="text-xs text-slate-400 mt-1">
           Games the family made in Alpaca. {sourceLabel ? `${sourceLabel}.` : ''}
         </p>
+        <div className="mt-3 flex flex-wrap items-center gap-1" role="group" aria-label="Sort games">
+          {SORTS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={sort === option.id}
+              onClick={() => setSort(option.id)}
+              className={`min-h-9 rounded-lg border px-2.5 text-[11px] transition ${
+                sort === option.id
+                  ? 'border-purple-400/50 bg-purple-500/15 text-purple-100'
+                  : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <ArcadeScoreboard />
+      <ArcadeHighscores />
 
       {data.count === 0 ? (
         <div className="glass-panel p-4 rounded-2xl border border-white/5" data-testid="arcade-empty">
@@ -236,7 +284,7 @@ export default function ArcadeGames() {
               </a>
             </div>
             <iframe
-              src={`${data.play_base}/play/${playing.slug}?embed=1`}
+              src={`${data.play_base}/play/${playing.slug}?embed=1&player=${encodeURIComponent(me?.initials ?? 'YOU')}`}
               title={`${playing.title} game`}
               data-testid="arcade-player-frame"
               className="min-h-0 w-full flex-1 rounded-none border-0 bg-black sm:rounded-xl"
@@ -265,6 +313,9 @@ export default function ArcadeGames() {
               >
                 Save score
               </button>
+              {scoreInput && !submitScore.isSuccess && (
+                <span className="text-[10px] text-slate-500">Check the score, then save it to the family board.</span>
+              )}
               {submitScore.isSuccess && <span className="text-[10px] text-emerald-300">Saved to the family board</span>}
               {submitScore.isError && <span className="text-[10px] text-rose-300">Could not save</span>}
             </div>
