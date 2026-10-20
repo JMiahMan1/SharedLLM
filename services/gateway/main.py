@@ -4274,6 +4274,11 @@ async def proxy_arcade_scoreboard(request: Request):
             if members_resp.status != 200:
                 raise ValueError(f"identity responded {members_resp.status}")
             members = await members_resp.json()
+            members = [
+                m
+                for m in members
+                if m.get("username") and str(m["username"]).lower() not in {"default", "anonymous", "household"}
+            ]
 
             async def one(member: dict) -> dict:
                 username = str(member.get("username") or "")
