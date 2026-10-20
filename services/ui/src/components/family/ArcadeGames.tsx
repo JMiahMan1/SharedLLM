@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Gamepad2, Play, Star, Trophy } from 'lucide-react';
 import { api } from '../../services/api';
 import type { ArcadeGameCard, ArcadeGamesResponse } from '../../types/api';
@@ -17,6 +18,18 @@ function playsLabel(n: number | undefined): string {
 
 function GameCard({ game, playBase }: { game: ArcadeGameCard; playBase: string }) {
   const rating = game.rating ?? { count: 0, average: 0 };
+  const queryClient = useQueryClient();
+  const [hovered, setHovered] = useState(0);
+  const [selected, setSelected] = useState(0);
+  const rate = useMutation({
+    mutationFn: (stars: number) => api.rateArcadeGame(game.slug, stars),
+    onSuccess: (_data, stars) => {
+      setSelected(stars);
+      void queryClient.invalidateQueries({ queryKey: ['arcade-games'] });
+    },
+  });
+  const highlighted = hovered || selected;
+
   return (
     <div className="glass-panel p-4 rounded-2xl border border-white/5 flex flex-col gap-2" data-testid={`arcade-game-${game.slug}`}>
       <div className="flex items-start gap-2">
@@ -41,6 +54,33 @@ function GameCard({ game, playBase }: { game: ArcadeGameCard; playBase: string }
             <Trophy size={11} className="text-slate-400" /> best {game.top_score}
           </span>
         )}
+      </div>
+      <div
+        className="flex items-center gap-1"
+        data-testid={`arcade-rate-${game.slug}`}
+        onMouseLeave={() => setHovered(0)}
+      >
+        {[1, 2, 3, 4, 5].map((stars) => (
+          <button
+            key={stars}
+            type="button"
+            aria-label={`Rate ${game.title} ${stars} stars`}
+            title={`${stars} ${stars === 1 ? 'star' : 'stars'}`}
+            disabled={rate.isPending}
+            onMouseEnter={() => setHovered(stars)}
+            onFocus={() => setHovered(stars)}
+            onClick={() => rate.mutate(stars)}
+            className="rounded p-0.5 transition-colors hover:bg-white/10 disabled:opacity-50"
+          >
+            <Star
+              size={13}
+              className={stars <= highlighted ? 'text-amber-300' : 'text-slate-500'}
+              fill={stars <= highlighted ? 'currentColor' : 'none'}
+            />
+          </button>
+        ))}
+        {rate.isSuccess && <span className="ml-1 text-[10px] text-emerald-300">Thanks!</span>}
+        {rate.isError && <span className="ml-1 text-[10px] text-rose-300">Could not save</span>}
       </div>
       <a
         href={`${playBase}/play/${game.slug}`}

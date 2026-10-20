@@ -232,7 +232,8 @@ async def test_the_question_goes_to_the_gateway_with_thinking_turned_off(monkeyp
     url, body, headers = session.calls[0]
     assert url == "http://gateway:11435/v1/chat/completions"
     assert body["model"] == "assistant"
-    assert body["rag_user"] == "jeremiah"
+    assert body["grounded"] is True
+    assert "rag_user" not in body
     assert body["think"] is False
     assert body["enable_thinking"] is False
     assert body["messages"][0]["role"] == "system"

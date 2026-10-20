@@ -2055,6 +2055,11 @@ export const api = {
     return resp.data;
   },
 
+  async rateArcadeGame(slug: string, stars: number): Promise<{ success: boolean; rating?: { count: number; average: number } }> {
+    const resp = await apiClient.post(`/api/arcade/games/${encodeURIComponent(slug)}/rate`, { stars });
+    return resp.data;
+  },
+
   async runSmokeTest(): Promise<SmokeTestResult> {
     const resp = await apiClient.post('/api/admin/tests/smoke');
     return resp.data;

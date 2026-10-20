@@ -233,7 +233,7 @@ def _request(
             {"role": "system", "content": system or system_prompt(depth)},
             {"role": "user", "content": prompt},
         ],
-        "rag_user": user,
+        "grounded": True,
         # Reasoning models blend their thinking into `content` unless the
         # caller opts out, and a thinking trace is not an answer to show a
         # reader. Same opt-out the Wander insight card uses.

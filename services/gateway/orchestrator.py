@@ -488,6 +488,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     creds = ResolvedCredentials(**job_payload["creds"])
     model = job_payload["model"]
     show_thinking = job_payload.get("show_thinking", False)
+    grounded = bool(job_payload.get("grounded"))
 
     log.info(f"[Orchestrator] Job model from payload: '{model}'")
 
@@ -511,7 +512,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     # misrouted to the single-turn Librarian path, which cannot create
     # workspaces (observed: WorkspaceCreateRequest "not supported in the
     # standard path" -> 502/404 workspace-not-found).
-    is_autonomous = bool(job_payload.get("_mission_id")) or is_raven_intent(query)
+    is_autonomous = not grounded and (bool(job_payload.get("_mission_id")) or is_raven_intent(query))
 
     # 1. Retrieve Memory
     # A queued chat turn has no request transcript to carry: the worker
@@ -519,7 +520,9 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     # jobs queued before the worker started attaching history, fall back to the
     # per-user history store. Missions and Nextcloud Talk turns are not part of
     # the chat transcript, so they keep an empty short-term history.
-    if is_autonomous or job_payload.get("_talk_token"):
+    if grounded:
+        short_term = []
+    elif is_autonomous or job_payload.get("_talk_token"):
         short_term = []
     elif "history" in job_payload:
         short_term = job_payload.get("history") or []
@@ -529,9 +532,15 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     # 2. Context Injection (RAG + live HA state + workspace memory)
     workspace_id = job_payload.get("workspace_id")
     include_curriculum = job_payload.get("include_curriculum", True)
-    rag_context = await _fetch_rag_context(
-        query, user_id, creds, workspace_id=workspace_id, include_curriculum=include_curriculum
-    )
+    if grounded:
+        # The caller already supplied the complete, authoritative passages;
+        # unrelated household/workspace hits are what made Bible study answers
+        # cite the wrong material.
+        rag_context = ""
+    else:
+        rag_context = await _fetch_rag_context(
+            query, user_id, creds, workspace_id=workspace_id, include_curriculum=include_curriculum
+        )
 
     # A Raven mission may arrive with context already retrieved at dispatch
     # time, so that the mission brief can carry the sources it was launched
@@ -541,7 +550,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     # both. The prefetched block was already trimmed to the retrieval budget
     # when it was built.
     prefetched = (job_payload.get("rag_context") or "").strip()
-    if prefetched:
+    if prefetched and not grounded:
         rag_context = f"{prefetched}\n\n{rag_context}".strip() if rag_context else prefetched
 
     # 4. Final Inference
@@ -556,7 +565,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     else:
         # Librarian handles standard single-turn inference
         try:
-            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking)
+            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded)
         except InferenceUnavailable as exc:
             # A mission and the voice assistant have no status code to report
             # on: the answer field is the only channel they have, so the old
@@ -1574,7 +1583,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     rag_context = _truncate_rag_context(rag_context)
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
     single_turn_guide = load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE)
-    if grounded and rag_context.strip():
+    if grounded:
         single_turn_guide = _grounded_tool_guide(single_turn_guide)
         log.info("[_single_turn_inference] grounded turn: retrieval tools omitted from the tool guide")
     system = f"{system_prompt.strip()}\n\nCurrent Date/Time: {now}\n\nSystem Capability Context:\n{single_turn_guide}"
