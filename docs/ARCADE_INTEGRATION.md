@@ -46,8 +46,19 @@ re-implement.
   `services/ui/src/components/family/ArcadeGames.test.tsx`.
 - **In-app play**: Play opens the arcade launcher in a full-screen embedded
   player (`/play/<slug>?embed=1`) so a game can be played on a phone without
-  leaving the Family hub. The "Open in a new tab" link remains for
-  troubleshooting. Desktop streaming and the score bridge remain open.
+  leaving the Family hub. Desktop-only code games are hidden on narrow
+  screens; the "Open in a new tab" link remains for troubleshooting.
+- **Curation**: Alpaca decides which published games appear. The arcade keeps
+  a `data/arcade/curated.json` list; publishing a game adds it, hiding it
+  removes it without deleting the game or its player scores. The bulk
+  publish-all action is gone. The Family shelf therefore only shows the
+  chosen, highest-rated mobile-friendly games (plus chosen desktop games).
+- **High scores**: `GET /api/arcade/scoreboard` maps each household account
+  to its three-letter arcade callsign and reads `/api/players/{initials}`.
+  The Family Games tab shows each member's best score, games scored, podiums
+  and crowns. `POST /api/arcade/games/{slug}/scores` records a score under the
+  authenticated member's callsign, so one member cannot submit as another.
+  Desktop streaming and the score bridge remain open.
 
 ## Design
 
