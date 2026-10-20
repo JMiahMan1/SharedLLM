@@ -35,6 +35,17 @@ ha_client = _ha_client_mod
 
 log = logging.getLogger("execution.discovery")
 
+#: A port probe only needs enough of a banner to identify the device. Reading
+#: the whole body of a web page (or a video stream) is wasted memory, and
+#: ``text()`` also refuses bytes that are not valid UTF-8.
+PROBE_BODY_LIMIT = 64 * 1024
+
+
+async def _probe_text(resp, limit: int = PROBE_BODY_LIMIT) -> str:
+    """Read a bounded, decoded prefix of a probe response."""
+    raw = await resp.content.read(limit)
+    return raw.decode("utf-8", "replace")
+
 
 def get_local_subnet() -> str:
     """Auto-detect the local subnet from host network interfaces."""
@@ -1033,7 +1044,7 @@ async def _probe_port(client, ip: str, port: int) -> dict:
         elif port == 80:
             resp = await client.get(f"http://{ip}/", timeout=1)
             if resp.status == 200:
-                html = await resp.text()
+                html = await _probe_text(resp)
                 content = html.lower()
                 import re
                 name_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE)
@@ -1045,7 +1056,7 @@ async def _probe_port(client, ip: str, port: int) -> dict:
         elif port == 8080:
             resp = await client.get(f"http://{ip}:8080/", timeout=1)
             if resp.status == 200:
-                content = (await resp.text()).lower()
+                content = (await _probe_text(resp)).lower()
                 if "esphome" in content or "espcam" in content or "mjpeg" in content:
                     return {"ip": ip, "metadata": {"type": "espcam"}}
             try:

@@ -17,9 +17,6 @@ that review were not re-checked one by one; the full list is in git history
 - **Bare imports in execution**: execution imports are package-safe; the
   remaining bare imports are intentional fallback imports inside
   try/except blocks (E3).
-- **Discovery probes**: the port 80 and 8080 branches await `resp.text()`
-  before reading it; other probes use `resp.content` bytes. The blanket
-  exception remains as a safety net (E4).
 - **Terminal context menu**: fixed; the menu no longer closes after opening
   (U1).
 ## Identity config DB: seeding and runtime integration
