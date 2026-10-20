@@ -35,8 +35,12 @@ TELEMETRY_SVC = os.getenv("TELEMETRY_SVC_URL", "http://telemetry:11438").rstrip(
 
 # alpaca Arcade game shelf (JSON cards + playable HTML games, port 5001).
 ALPACA_ARCADE_URL = os.getenv("ALPACA_ARCADE_URL", "http://jeremiah-home-desktop.local:5001").rstrip("/")
-# URL the browser uses to open a game (defaults to the internal URL for LAN installs).
-ALPACA_ARCADE_PUBLIC_URL = os.getenv("ALPACA_ARCADE_PUBLIC_URL", ALPACA_ARCADE_URL).rstrip("/")
+# URL the browser uses to open a game. This is deliberately the public host,
+# not the LAN address: phones and the native app cannot reach the desktop's
+# local name, and an http iframe inside the https app is mixed content.
+ALPACA_ARCADE_PUBLIC_URL = os.getenv(
+    "ALPACA_ARCADE_PUBLIC_URL", "https://games.sumemail.com"
+).rstrip("/")
 
 # alpaca audio server (TTS + music generation). No default on purpose: an unset
 # value fails with a clear message instead of probing a guessed host.

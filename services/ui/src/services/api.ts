@@ -39,6 +39,7 @@ import type {
   PairDeviceRequest,
   ExecutionResponse,
   ArcadeGamesResponse,
+  ArcadeScoreboardResponse,
   TimerRecord,
   TimerDevicesResponse,
   SmokeTestResult,
@@ -218,6 +219,7 @@ export type {
   TelemetryEnrollment,
   ExecutionResponse,
   ArcadeGamesResponse,
+  ArcadeScoreboardResponse,
   TimerRecord,
   TimerTargetDevice,
   TimerDevicesResponse,
@@ -2057,6 +2059,16 @@ export const api = {
 
   async rateArcadeGame(slug: string, stars: number): Promise<{ success: boolean; rating?: { count: number; average: number } }> {
     const resp = await apiClient.post(`/api/arcade/games/${encodeURIComponent(slug)}/rate`, { stars });
+    return resp.data;
+  },
+
+  async getArcadeScoreboard(): Promise<ArcadeScoreboardResponse> {
+    const resp = await apiClient.get('/api/arcade/scoreboard');
+    return resp.data;
+  },
+
+  async submitArcadeScore(slug: string, score: number): Promise<{ success: boolean; score?: number; rank?: number }> {
+    const resp = await apiClient.post(`/api/arcade/games/${encodeURIComponent(slug)}/scores`, { score });
     return resp.data;
   },
 

@@ -38,6 +38,17 @@ describe('Modal', () => {
     expect(dialog.className).toContain('safe-area-bottom');
   });
 
+  it('can fill the viewport for a game', () => {
+    render(
+      <Modal isOpen onClose={vi.fn()} title="Game Breakout" fullScreen>
+        body
+      </Modal>,
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toContain('h-[100dvh]');
+    expect(dialog.className).not.toContain('rounded-t-2xl');
+  });
+
   it('closes on Escape', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

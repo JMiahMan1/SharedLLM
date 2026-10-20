@@ -158,3 +158,100 @@ async def test_arcade_rate_rejects_an_out_of_range_vote(monkeypatch):
         await main.proxy_arcade_rate("space-invaders", request)
 
     assert exc.value.status_code == 422
+
+
+def test_arcade_callsign_is_the_first_three_letters_of_the_account():
+    from services.gateway import main
+
+    assert main._arcade_initials("jeremiah") == "JER"
+    assert main._arcade_initials("Michele") == "MIC"
+    assert main._arcade_initials("kate.summers") == "KAT"
+    assert main._arcade_initials("") == "YOU"
+
+
+@pytest.mark.asyncio
+async def test_arcade_scoreboard_reads_each_family_member(monkeypatch):
+    from services.gateway import main
+
+    class _Resp:
+        def __init__(self, status, payload):
+            self.status = status
+            self._payload = payload
+
+        async def json(self):
+            return self._payload
+
+    class _Client:
+        async def get(self, url, **kwargs):
+            if url.endswith("/api/users/family-directory"):
+                return _Resp(200, [
+                    {"username": "jeremiah", "display_name": "Jeremiah"},
+                    {"username": "michele", "display_name": "Michele"},
+                ])
+            if url.endswith("/api/players/JER"):
+                return _Resp(200, {"player": {"best_score": 62960, "games_scored": 9, "crowns": 9, "podiums": 9, "submits": 15, "total_games": 20}})
+            return _Resp(404, {})
+
+    @asynccontextmanager
+    async def fake_client():
+        yield _Client()
+
+    monkeypatch.setattr(main, "shared_http_client", fake_client)
+    monkeypatch.setattr(
+        main,
+        "_require_identity_from_request",
+        AsyncMock(return_value={"user": "jeremiah"}),
+    )
+    request = MagicMock()
+    request.headers = {"Authorization": "Bearer test-key"}
+
+    payload = await main.proxy_arcade_scoreboard(request)
+
+    assert payload["arcade_available"] is True
+    assert [p["username"] for p in payload["players"]] == ["jeremiah", "michele"]
+    assert payload["players"][0]["initials"] == "JER"
+    assert payload["players"][0]["best_score"] == 62960
+    assert payload["players"][0]["you"] is True
+    assert payload["players"][1]["best_score"] == 0
+    assert payload["players"][1]["you"] is False
+
+
+@pytest.mark.asyncio
+async def test_arcade_score_is_saved_under_the_signed_in_member(monkeypatch):
+    from services.gateway import main
+
+    seen = {}
+
+    class _Resp:
+        status = 200
+
+        async def json(self):
+            return {"success": True, "score": 1234}
+
+        async def text(self):
+            return ""
+
+    class _Client:
+        async def post(self, url, **kwargs):
+            seen["url"] = url
+            seen["json"] = kwargs.get("json")
+            return _Resp()
+
+    @asynccontextmanager
+    async def fake_client():
+        yield _Client()
+
+    monkeypatch.setattr(main, "shared_http_client", fake_client)
+    monkeypatch.setattr(
+        main,
+        "_require_identity_from_request",
+        AsyncMock(return_value={"user": "michele"}),
+    )
+    request = MagicMock()
+    request.json = AsyncMock(return_value={"score": 1234})
+
+    response = await main.proxy_arcade_score("space-invaders", request)
+
+    assert seen["url"] == f"{main.ALPACA_ARCADE_URL}/api/games/space-invaders/scores"
+    assert seen["json"] == {"initials": "MIC", "score": 1234}
+    assert response.status_code == 200

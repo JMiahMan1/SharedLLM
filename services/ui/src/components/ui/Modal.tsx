@@ -8,6 +8,8 @@ interface ModalProps {
   title?: string;
   children: ReactNode;
   size?: string;
+  /** Fill the viewport instead of the phone bottom sheet/desktop dialog. */
+  fullScreen?: boolean;
 }
 
 const SIZE_MAP: Record<string, string> = {
@@ -35,7 +37,7 @@ const SIZE_MAP: Record<string, string> = {
  * lacked: Escape is an expected affordance on desktop, and without a scroll lock
  * the page behind scrolls under an open dialog.
  */
-const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children, size }) => {
+const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children, size, fullScreen = false }) => {
   const maxWClass = SIZE_MAP[size || ''] || 'max-w-2xl';
 
   useEffect(() => {
@@ -56,7 +58,7 @@ const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children, size }) => {
     <AnimatePresence>
       {isOpen && (
         // `items-end` + `p-0` on phones, centred with padding from `sm` up.
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center sm:p-4">
+        <div className={`fixed inset-0 z-50 flex ${fullScreen ? '' : 'items-end sm:items-center sm:justify-center sm:p-4'}`}>
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -71,9 +73,13 @@ const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children, size }) => {
             initial={{ opacity: 0, y: 24, scale: 1 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 24 }}
-            className={`glass-panel w-full ${maxWClass} max-h-[90vh] sm:max-h-[90vh] overflow-hidden flex flex-col relative z-10 shadow-2xl shadow-black/50 rounded-t-2xl sm:rounded-2xl safe-area-bottom`}
+            className={
+              fullScreen
+                ? 'glass-panel relative z-10 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none shadow-2xl shadow-black/50'
+                : `glass-panel w-full ${maxWClass} max-h-[90vh] sm:max-h-[90vh] overflow-hidden flex flex-col relative z-10 shadow-2xl shadow-black/50 rounded-t-2xl sm:rounded-2xl safe-area-bottom`
+            }
           >
-            <div className="p-4 sm:p-6 border-b border-white/5 flex items-center justify-between bg-white/5">
+            <div className={`border-b border-white/5 flex items-center justify-between bg-white/5 ${fullScreen ? 'px-3 py-2' : 'p-4 sm:p-6'}`}>
               <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight">{title}</h3>
               <button
                 onClick={onClose}
@@ -83,7 +89,9 @@ const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children, size }) => {
                 <X size={22} />
               </button>
             </div>
-            <div className="p-4 sm:p-6 overflow-y-auto flex-1">{children}</div>
+            <div className={fullScreen ? 'flex min-h-0 flex-1 flex-col overflow-hidden p-0 sm:p-2' : 'p-4 sm:p-6 overflow-y-auto flex-1'}>
+              {children}
+            </div>
           </motion.div>
         </div>
       )}
