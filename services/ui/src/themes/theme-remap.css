@@ -101,6 +101,7 @@
 [data-site-theme-active] .hover\:text-indigo-200:hover { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .hover\:text-indigo-300:hover { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .hover\:text-indigo-400:hover { color: var(--site-accent-text) !important; }
+[data-site-theme-active] .hover\:text-purple-100:hover { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .hover\:text-purple-200:hover { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .hover\:text-purple-300:hover { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .hover\:text-purple-400:hover { color: var(--site-accent-text) !important; }

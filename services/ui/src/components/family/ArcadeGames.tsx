@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Gamepad2, Play, Star, Trophy } from 'lucide-react';
+import { ExternalLink, Gamepad2, Play, Star, Trophy } from 'lucide-react';
+import Modal from '../ui/Modal';
 import { api } from '../../services/api';
 import type { ArcadeGameCard, ArcadeGamesResponse } from '../../types/api';
 
@@ -16,7 +17,7 @@ function playsLabel(n: number | undefined): string {
   return n === 1 ? '1 play' : `${n} plays`;
 }
 
-function GameCard({ game, playBase }: { game: ArcadeGameCard; playBase: string }) {
+function GameCard({ game, playBase, onPlay }: { game: ArcadeGameCard; playBase: string; onPlay: () => void }) {
   const rating = game.rating ?? { count: 0, average: 0 };
   const queryClient = useQueryClient();
   const [hovered, setHovered] = useState(0);
@@ -86,6 +87,10 @@ function GameCard({ game, playBase }: { game: ArcadeGameCard; playBase: string }
         href={`${playBase}/play/${game.slug}`}
         target="_blank"
         rel="noopener noreferrer"
+        onClick={(event) => {
+          event.preventDefault();
+          onPlay();
+        }}
         className="glass-button mt-auto min-h-11 px-3 text-sm justify-center text-purple-200 border-purple-400/40"
       >
         <Play size={14} /> Play
@@ -100,6 +105,7 @@ function GameCard({ game, playBase }: { game: ArcadeGameCard; playBase: string }
  * unreachable arcade renders an honest offline card instead of an error.
  */
 export default function ArcadeGames() {
+  const [playing, setPlaying] = useState<ArcadeGameCard | null>(null);
   const { data, isLoading } = useQuery<ArcadeGamesResponse>({
     queryKey: ['arcade-games'],
     queryFn: () => api.getArcadeGames(),
@@ -162,7 +168,12 @@ export default function ArcadeGames() {
               <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">Featured</h3>
               <div className="grid gap-3 sm:grid-cols-2" data-testid="arcade-featured">
                 {data.featured.map((game) => (
-                  <GameCard key={`featured-${game.slug}`} game={game} playBase={data.play_base} />
+                  <GameCard
+                    key={`featured-${game.slug}`}
+                    game={game}
+                    playBase={data.play_base}
+                    onPlay={() => setPlaying(game)}
+                  />
                 ))}
               </div>
             </div>
@@ -172,13 +183,44 @@ export default function ArcadeGames() {
               <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">All games</h3>
               <div className="grid gap-3 sm:grid-cols-2">
                 {data.games.map((game) => (
-                  <GameCard key={game.slug} game={game} playBase={data.play_base} />
+                  <GameCard
+                    key={game.slug}
+                    game={game}
+                    playBase={data.play_base}
+                    onPlay={() => setPlaying(game)}
+                  />
                 ))}
               </div>
             </div>
           )}
         </>
       )}
+
+      <Modal isOpen={playing !== null} onClose={() => setPlaying(null)} title={playing?.title} size="6xl">
+        {playing && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-slate-400">Play right here. The game runs on the arcade host.</p>
+              <a
+                href={`${data.play_base}/play/${playing.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 items-center gap-1 text-xs text-purple-200 hover:text-purple-100"
+              >
+                <ExternalLink size={13} /> Open in a new tab
+              </a>
+            </div>
+            <iframe
+              src={`${data.play_base}/play/${playing.slug}?embed=1`}
+              title={`${playing.title} game`}
+              data-testid="arcade-player-frame"
+              className="h-[70vh] min-h-[420px] w-full rounded-xl border border-white/10 bg-black"
+              allow="autoplay; fullscreen; gamepad"
+              allowFullScreen
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

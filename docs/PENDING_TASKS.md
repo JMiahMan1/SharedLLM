@@ -77,8 +77,8 @@ The retention and max entry settings now take effect.
 
 - Calls: media (audio/video in-app) needs a Talk client library or LiveKit,
   and a reachable STUN/TURN server off the LAN.
-- Arcade: phases 2-4 of `docs/ARCADE_INTEGRATION.md` (family ratings, phase 5,
-  are shipped).
+- Arcade: phases 3-4 of `docs/ARCADE_INTEGRATION.md` (family ratings and
+  in-app web play are shipped).
 
 ## Tests
 
