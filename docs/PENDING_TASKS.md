@@ -69,8 +69,6 @@ The retention and max entry settings now take effect.
 
 ## Mobile app
 
-- The Android build removes `android/app/src/main/assets/public/bundle.zip`
-  after `npx cap sync`, so the OTA bundle is no longer packaged into the APK.
 - Health: background step sync runs in `StepSyncService`, independent of
   location sharing (`docs/HEALTH_STEPS.md`).
 
