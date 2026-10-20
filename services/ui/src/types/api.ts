@@ -422,12 +422,34 @@ export interface ArcadeGameCard {
   slug: string;
   title: string;
   category?: string;
+  kind?: 'code' | 'playable' | string;
   plays?: number;
   top_score?: number | null;
   score_count?: number;
   benchmark_score?: number | null;
   rating?: { count: number; average: number };
   featured?: boolean;
+}
+
+export interface ArcadeScoreboardPlayer {
+  username: string;
+  display_name: string;
+  initials: string;
+  player_url: string;
+  you: boolean;
+  best_score: number;
+  total_games: number;
+  games_scored: number;
+  submits: number;
+  podiums: number;
+  crowns: number;
+}
+
+export interface ArcadeScoreboardResponse {
+  success: boolean;
+  arcade_available: boolean;
+  players: ArcadeScoreboardPlayer[];
+  error?: string;
 }
 
 export interface ArcadeGamesResponse {

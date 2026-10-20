@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ArcadeGames from './ArcadeGames';
 import { api } from '../../services/api';
-import type { ArcadeGamesResponse } from '../../types/api';
+import type { ArcadeGamesResponse, ArcadeScoreboardResponse } from '../../types/api';
 
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -13,12 +13,16 @@ vi.mock('../../services/api', async (importOriginal) => {
       ...(actual.api as Record<string, unknown>),
       getArcadeGames: vi.fn(),
       rateArcadeGame: vi.fn(),
+      getArcadeScoreboard: vi.fn(),
+      submitArcadeScore: vi.fn(),
     },
   };
 });
 
 const mockedGetArcadeGames = vi.mocked(api.getArcadeGames);
 const mockedRateArcadeGame = vi.mocked(api.rateArcadeGame);
+const mockedGetArcadeScoreboard = vi.mocked(api.getArcadeScoreboard);
+const mockedSubmitArcadeScore = vi.mocked(api.submitArcadeScore);
 
 function renderShelf() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -32,13 +36,14 @@ function renderShelf() {
 const shelf: ArcadeGamesResponse = {
   success: true,
   arcade_available: true,
-  play_base: 'http://arcade.local:5001',
+  play_base: 'https://games.sumemail.com',
   featured_source: 'admin',
   featured: [
     {
       slug: 'space-invaders',
       title: 'Space Invaders',
       category: 'arcade',
+      kind: 'playable',
       plays: 12,
       top_score: 900,
       rating: { count: 3, average: 4.67 },
@@ -50,20 +55,56 @@ const shelf: ArcadeGamesResponse = {
       slug: 'space-invaders',
       title: 'Space Invaders',
       category: 'arcade',
+      kind: 'playable',
       plays: 12,
       top_score: 900,
       rating: { count: 3, average: 4.67 },
       featured: true,
     },
-    { slug: 'breakout', title: 'Breakout', category: 'classic', plays: 0, rating: { count: 0, average: 0 } },
+    { slug: 'breakout', title: 'Breakout', category: 'classic', kind: 'playable', plays: 0, rating: { count: 0, average: 0 } },
   ],
   count: 2,
+};
+
+const scoreboard: ArcadeScoreboardResponse = {
+  success: true,
+  arcade_available: true,
+  players: [
+    {
+      username: 'jeremiah',
+      display_name: 'Jeremiah',
+      initials: 'JER',
+      player_url: 'https://games.sumemail.com/player/JER',
+      you: true,
+      best_score: 62960,
+      total_games: 20,
+      games_scored: 9,
+      submits: 15,
+      podiums: 9,
+      crowns: 9,
+    },
+    {
+      username: 'michele',
+      display_name: 'Michele',
+      initials: 'MIC',
+      player_url: 'https://games.sumemail.com/player/MIC',
+      you: false,
+      best_score: 0,
+      total_games: 20,
+      games_scored: 0,
+      submits: 0,
+      podiums: 0,
+      crowns: 0,
+    },
+  ],
 };
 
 describe('ArcadeGames', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedRateArcadeGame.mockResolvedValue({ success: true, rating: { count: 4, average: 4.5 } });
+    mockedGetArcadeScoreboard.mockResolvedValue(scoreboard);
+    mockedSubmitArcadeScore.mockResolvedValue({ success: true, score: 1234, rank: 1 });
   });
 
   it('renders featured picks, ratings and play links', async () => {
@@ -78,7 +119,7 @@ describe('ArcadeGames', () => {
 
     const links = screen.getAllByRole('link', { name: /play/i });
     expect(links.length).toBeGreaterThan(0);
-    expect(links[0].getAttribute('href')).toBe('http://arcade.local:5001/play/space-invaders');
+    expect(links[0].getAttribute('href')).toBe('https://games.sumemail.com/play/space-invaders');
   });
 
   it('plays a game inside the family hub', async () => {
@@ -89,10 +130,28 @@ describe('ArcadeGames', () => {
     fireEvent.click(screen.getAllByRole('link', { name: /play/i })[0]);
 
     const frame = await screen.findByTestId('arcade-player-frame');
-    expect(frame.getAttribute('src')).toBe('http://arcade.local:5001/play/space-invaders?embed=1');
+    expect(frame.getAttribute('src')).toBe('https://games.sumemail.com/play/space-invaders?embed=1');
 
     fireEvent.click(screen.getByLabelText('Close dialog'));
     await waitFor(() => expect(screen.queryByTestId('arcade-player-frame')).toBeNull());
+  });
+
+  it('shows the family scoreboard and saves a score as the signed-in member', async () => {
+    mockedGetArcadeGames.mockResolvedValue(shelf);
+    renderShelf();
+
+    await waitFor(() => expect(screen.getByTestId('arcade-scoreboard')).toBeTruthy());
+    expect(screen.getByText('Family high scores')).toBeTruthy();
+    expect(screen.getByText('62,960')).toBeTruthy();
+    expect(screen.getByText('You')).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole('link', { name: /play/i })[0]);
+    await screen.findByTestId('arcade-player-frame');
+    fireEvent.change(screen.getByLabelText('Your score'), { target: { value: '1234' } });
+    fireEvent.click(screen.getByRole('button', { name: /save score/i }));
+
+    await waitFor(() => expect(mockedSubmitArcadeScore).toHaveBeenCalledWith('space-invaders', 1234));
+    await waitFor(() => expect(screen.getByText(/Saved to the family board/)).toBeTruthy());
   });
 
   it('relabels the shelf when admins have not curated picks', async () => {

@@ -4244,6 +4244,105 @@ async def _fetch_arcade_games() -> list:
     return games
 
 
+def _arcade_initials(username: str) -> str:
+    """The arcade callsign for a signed-in family member."""
+    return re.sub(r"[^A-Za-z0-9]", "", username or "")[:3].upper() or "YOU"
+
+
+@app.get("/api/arcade/scoreboard")
+async def proxy_arcade_scoreboard(request: Request):
+    """Family high scores, read from the arcade's per-callsign player cards.
+
+    The arcade keeps the durable scores; Jarvis only maps each household
+    account to its initials and presents the result. Nothing is stored here,
+    so a score submitted anywhere (the embedded game or the arcade site)
+    appears in the same scoreboard.
+    """
+    creds = await _require_identity_from_request(request)
+    me = str((creds or {}).get("user") or "")
+    headers = {}
+    auth = request.headers.get("Authorization")
+    if auth:
+        headers["Authorization"] = auth
+    try:
+        async with shared_http_client() as client:
+            members_resp = await client.get(
+                f"{IDENTITY_SVC}/api/users/family-directory",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=8.0),
+            )
+            if members_resp.status != 200:
+                raise ValueError(f"identity responded {members_resp.status}")
+            members = await members_resp.json()
+
+            async def one(member: dict) -> dict:
+                username = str(member.get("username") or "")
+                initials = _arcade_initials(username)
+                stats = {
+                    "best_score": 0,
+                    "total_games": 0,
+                    "games_scored": 0,
+                    "submits": 0,
+                    "podiums": 0,
+                    "crowns": 0,
+                }
+                try:
+                    resp = await client.get(
+                        f"{ALPACA_ARCADE_URL}/api/players/{initials}",
+                        timeout=aiohttp.ClientTimeout(total=8.0),
+                    )
+                    if resp.status == 200:
+                        payload = await resp.json()
+                        player = payload.get("player") or payload
+                        for key in stats:
+                            stats[key] = int(player.get(key) or 0)
+                except (aiohttp.ClientError, ValueError, TypeError):
+                    pass
+                return {
+                    "username": username,
+                    "display_name": member.get("display_name") or username,
+                    "initials": initials,
+                    "player_url": f"{ALPACA_ARCADE_PUBLIC_URL}/player/{initials}",
+                    "you": username == me,
+                    **stats,
+                }
+
+            players = await asyncio.gather(*(one(m) for m in members if m.get("username")))
+        players.sort(key=lambda p: (-p["best_score"], p["display_name"].lower()))
+        return {"success": True, "arcade_available": True, "players": players}
+    except (aiohttp.ClientError, ValueError, asyncio.TimeoutError) as exc:
+        log.warning("arcade: scoreboard fetch failed: %s", exc)
+        return {"success": False, "arcade_available": False, "players": [], "error": str(exc)}
+
+
+@app.post("/api/arcade/games/{slug}/scores")
+async def proxy_arcade_score(slug: str, request: Request):
+    """Record a score for the signed-in family member.
+
+    The arcade's public form accepts any callsign. This route keeps the
+    callsign tied to the authenticated account, so one member cannot submit
+    a score as another.
+    """
+    creds = await _require_identity_from_request(request)
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", slug):
+        raise HTTPException(status_code=422, detail="Invalid game slug")
+    body = await request.json()
+    score = body.get("score") if isinstance(body, dict) else None
+    if isinstance(score, bool) or not isinstance(score, int) or score < 0 or score > 1_000_000_000:
+        raise HTTPException(status_code=422, detail="score must be a non-negative integer")
+    initials = _arcade_initials(str((creds or {}).get("user") or ""))
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{ALPACA_ARCADE_URL}/api/games/{slug}/scores",
+                json={"initials": initials, "score": score},
+                timeout=aiohttp.ClientTimeout(total=8.0),
+            )
+            return await _proxy_json_response(resp)
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
+
+
 @app.get("/api/arcade/games")
 async def proxy_arcade_games():
     """Featured + full game shelf from the alpaca Arcade service.
@@ -4313,7 +4412,7 @@ async def proxy_arcade_rate(slug: str, request: Request):
         raise HTTPException(status_code=422, detail="stars must be an integer from 1 to 5")
 
     user = str((creds or {}).get("user") or "")
-    initials = re.sub(r"[^A-Za-z0-9]", "", user)[:3].upper() or "YOU"
+    initials = _arcade_initials(user)
     try:
         async with shared_http_client() as client:
             resp = await client.post(

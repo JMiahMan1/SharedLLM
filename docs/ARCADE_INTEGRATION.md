@@ -38,14 +38,16 @@ re-implement.
 - **UI**: `services/ui/src/components/family/ArcadeGames.tsx` on the Family →
   Games tab: featured shelf, full list, star ratings, plays, play links.
 - **Config**: `ALPACA_ARCADE_URL` (default `http://jeremiah-home-desktop.local:5001`)
-  and `ALPACA_ARCADE_PUBLIC_URL` (default = the internal URL) decide fetch and
-  play targets.
+  is the gateway's server-side fetch target; `ALPACA_ARCADE_PUBLIC_URL`
+  (default `https://games.sumemail.com`) is the browser-facing play host. The
+  public URL must be reachable from phones and the native app, and must be
+  HTTPS when the app is served over HTTPS.
 - **Tests**: `services/gateway/tests/test_arcade_proxy.py`,
   `services/ui/src/components/family/ArcadeGames.test.tsx`.
-- **In-app play**: Play opens the arcade launcher in an embedded modal
-  (`/play/<slug>?embed=1`) so a game can be played without leaving the Family
-  hub. The "Open in a new tab" link remains for fullscreen or troubleshooting.
-  Desktop streaming and the score bridge remain open.
+- **In-app play**: Play opens the arcade launcher in a full-screen embedded
+  player (`/play/<slug>?embed=1`) so a game can be played on a phone without
+  leaving the Family hub. The "Open in a new tab" link remains for
+  troubleshooting. Desktop streaming and the score bridge remain open.
 
 ## Design
 
