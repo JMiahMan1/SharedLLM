@@ -168,7 +168,7 @@ describe('ArcadeGames', () => {
     await waitFor(() => expect(screen.queryByTestId('arcade-player-frame')).toBeNull());
   });
 
-  it('shows the family scoreboard and saves a score as the signed-in member', async () => {
+  it('shows the family scoreboard and saves an auto-captured score as the signed-in member', async () => {
     mockedGetArcadeGames.mockResolvedValue(shelf);
     renderShelf();
 
@@ -179,10 +179,21 @@ describe('ArcadeGames', () => {
 
     fireEvent.click(screen.getAllByRole('link', { name: /play/i })[0]);
     await screen.findByTestId('arcade-player-frame');
-    fireEvent.change(screen.getByLabelText('Your score'), { target: { value: '1234' } });
-    fireEvent.click(screen.getByRole('button', { name: /save score/i }));
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: 'https://games.sumemail.com',
+        data: {
+          source: 'arcade-score',
+          slug: 'space-invaders',
+          score: 4321,
+          capture_id: 'capture-1',
+        },
+      }),
+    );
 
-    await waitFor(() => expect(mockedSubmitArcadeScore).toHaveBeenCalledWith('space-invaders', 1234));
+    await waitFor(() =>
+      expect(mockedSubmitArcadeScore).toHaveBeenCalledWith('space-invaders', 4321, 'capture-1'),
+    );
     await waitFor(() => expect(screen.getByText(/Saved to the family board/)).toBeTruthy());
   });
 
@@ -198,7 +209,7 @@ describe('ArcadeGames', () => {
     await waitFor(() => expect(mockedGetArcadeGames).toHaveBeenCalledWith('plays'));
   });
 
-  it('prefills a score captured by the embedded arcade', async () => {
+  it('does not accept a score that was not captured by the game', async () => {
     mockedGetArcadeGames.mockResolvedValue(shelf);
     renderShelf();
     await waitFor(() => expect(screen.getByTestId('arcade-shelf')).toBeTruthy());
@@ -212,7 +223,8 @@ describe('ArcadeGames', () => {
       }),
     );
 
-    await waitFor(() => expect((screen.getByLabelText('Your score') as HTMLInputElement).value).toBe('4321'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockedSubmitArcadeScore).not.toHaveBeenCalled();
   });
 
   it('relabels the shelf when admins have not curated picks', async () => {

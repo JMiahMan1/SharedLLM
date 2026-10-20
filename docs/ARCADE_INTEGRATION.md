@@ -58,7 +58,12 @@ re-implement.
   The Family Games tab shows each member's best score, games scored, podiums
   and crowns. `POST /api/arcade/games/{slug}/scores` records a score under the
   authenticated member's callsign, so one member cannot submit as another.
-  Desktop streaming remains open.
+- **Automatic scores**: there is no score entry box. Playable games are read
+  from their own storage in the same-origin frame; desktop games are read from
+  `/tmp/alpaca_score.json` in the sandbox. The embedded arcade posts
+  `{source: 'arcade-score', slug, score, capture_id}` to the Family page,
+  which saves it automatically under the signed-in member. A family score
+  without a capture id is rejected by Alpaca.
 - **Sorting**: the shelf can be ordered by **Alpaca score** (benchmark),
   **Family rating** (stars) or **Most played**. The gateway forwards `?sort=`
   and Alpaca owns the ordering; nothing is hardcoded in the UI.
@@ -73,8 +78,10 @@ re-implement.
   controls default on for coarse pointers, and the embedded player fills the
   screen.
 - **Score bridge**: when the embedded player detects a finished run it posts
-  `{source: 'arcade-score', slug, score}` to the Family page, which prefills
-  the score box for the member to confirm and save. No silent submission.
+  `{source: 'arcade-score', slug, score, capture_id}` to the Family page,
+  which saves it automatically under the authenticated member. Public arcade
+  pages store their own score; embedded pages leave storage to the parent so
+  the family `player_id` is attached.
 - **Dynamic curation (OODA)**: Alpaca observes benchmark results, orients by
   benchmark score, mobile readiness, duplicate titles, family rating and
   plays, decides the best mobile-ready game per title, and acts by publishing
@@ -85,10 +92,11 @@ re-implement.
 ## Design
 
 Status: item 1 (curation + list), the Games-tab display, item 2's embedded web
-play, item 3's score bridge (embedded auto-detect plus confirmed save), item 5
-(family ratings), sorting, the high score table, per-user scores and OODA
-curation are **shipped**. Item 4 (desktop-game streaming) is **not built**;
-there is no `/api/arcade/games/{slug}/launch` or `/stop` route yet.
+play, item 3's automatic score bridge, item 4's desktop-sandbox streaming,
+item 5 (family ratings), sorting, the high score table, per-user scores and
+OODA curation are **shipped**. Desktop code games launch a noVNC sandbox from
+the Family player (`/api/arcade/games/{slug}/launch` and `/stop`) and are
+shown with a **Desktop** badge.
 
 1. **Admin curation.** Admin-only setting `arcade_featured_games`, stored as a
    plain JSON array of slugs (no labels).
@@ -128,8 +136,9 @@ there is no `/api/arcade/games/{slug}/launch` or `/stop` route yet.
 2. Embed play for web games (mobile-first sizing). **Shipped**: the Play link
    opens `/play/<slug>?embed=1` in a modal inside the Family hub.
 3. Score bridge → points ledger → Talk message ("X scored N on Y").
-   **Shipped** for playable games: the embedded arcade posts the detected
-   score to the Family page, which saves it under the signed-in member.
+   **Shipped** for playable and desktop games: the embedded arcade posts the
+   detected score and capture id to the Family page, which saves it under the
+   signed-in member.
 4. Desktop-game streaming from the Family page.
 5. Ratings from the family: let Jarvis users vote 1-5 stars, written back to
    `ratings.json` (same endpoint the arcade already uses). **Shipped**: the

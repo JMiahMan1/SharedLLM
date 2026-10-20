@@ -248,13 +248,36 @@ async def test_arcade_score_is_saved_under_the_signed_in_member(monkeypatch):
         AsyncMock(return_value={"user": "michele"}),
     )
     request = MagicMock()
-    request.json = AsyncMock(return_value={"score": 1234})
+    request.json = AsyncMock(return_value={"score": 1234, "capture_id": "capture-1"})
 
     response = await main.proxy_arcade_score("space-invaders", request)
 
     assert seen["url"] == f"{main.ALPACA_ARCADE_URL}/api/games/space-invaders/scores"
-    assert seen["json"] == {"initials": "MIC", "score": 1234, "player_id": "michele"}
+    assert seen["json"] == {
+        "initials": "MIC",
+        "score": 1234,
+        "player_id": "michele",
+        "capture_id": "capture-1",
+    }
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_arcade_score_requires_a_captured_score(monkeypatch):
+    from services.gateway import main
+
+    monkeypatch.setattr(
+        main,
+        "_require_identity_from_request",
+        AsyncMock(return_value={"user": "michele"}),
+    )
+    request = MagicMock()
+    request.json = AsyncMock(return_value={"score": 1234})
+
+    with pytest.raises(main.HTTPException) as exc:
+        await main.proxy_arcade_score("space-invaders", request)
+    assert exc.value.status_code == 422
+    assert "captured" in exc.value.detail
 
 
 @pytest.mark.asyncio

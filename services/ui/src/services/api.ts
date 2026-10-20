@@ -2074,8 +2074,11 @@ export const api = {
     return resp.data;
   },
 
-  async submitArcadeScore(slug: string, score: number): Promise<{ success: boolean; score?: number; rank?: number }> {
-    const resp = await apiClient.post(`/api/arcade/games/${encodeURIComponent(slug)}/scores`, { score });
+  async submitArcadeScore(slug: string, score: number, captureId: string): Promise<{ success: boolean; score?: number; rank?: number }> {
+    const resp = await apiClient.post(`/api/arcade/games/${encodeURIComponent(slug)}/scores`, {
+      score,
+      capture_id: captureId,
+    });
     return resp.data;
   },
 

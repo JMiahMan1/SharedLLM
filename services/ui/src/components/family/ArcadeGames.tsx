@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Gamepad2, Play, Star, Trophy } from 'lucide-react';
 import Modal from '../ui/Modal';
@@ -119,8 +119,8 @@ function GameCard({ game, playBase, onPlay }: { game: ArcadeGameCard; playBase: 
  */
 export default function ArcadeGames() {
   const [playing, setPlaying] = useState<ArcadeGameCard | null>(null);
-  const [scoreInput, setScoreInput] = useState('');
   const [sort, setSort] = useState<ArcadeSort>('benchmark');
+  const submittedCaptures = useRef(new Set<string>());
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery<ArcadeGamesResponse>({
     queryKey: ['arcade-games', sort],
@@ -136,22 +136,24 @@ export default function ArcadeGames() {
   });
   const me = scoreboard?.players.find((player) => player.you);
   const submitScore = useMutation({
-    mutationFn: ({ slug, score }: { slug: string; score: number }) => api.submitArcadeScore(slug, score),
+    mutationFn: ({ slug, score, captureId }: { slug: string; score: number; captureId: string }) =>
+      api.submitArcadeScore(slug, score, captureId),
     onSuccess: () => {
-      setScoreInput('');
       void queryClient.invalidateQueries({ queryKey: ['arcade-scoreboard'] });
       void queryClient.invalidateQueries({ queryKey: ['arcade-games'] });
+      void queryClient.invalidateQueries({ queryKey: ['arcade-highscores'] });
     },
   });
   const closePlayer = () => {
     setPlaying(null);
-    setScoreInput('');
+    submittedCaptures.current.clear();
     submitScore.reset();
   };
 
-  // The embedded arcade page scans the game's own score storage and posts the
-  // result here. Prefill the save box instead of sending it silently: the
-  // player still confirms the score that belongs to their family account.
+  // The embedded arcade page captures the score from the game itself and posts
+  // it here with a one-time capture id. Submit it through the authenticated
+  // gateway so the score belongs to the signed-in family member, not a typed
+  // callsign or a score the player invented.
   useEffect(() => {
     if (!playing || !data?.play_base) return;
     let origin: string;
@@ -162,14 +164,23 @@ export default function ArcadeGames() {
     }
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== origin) return;
-      const message = event.data as { source?: string; slug?: string; score?: unknown } | null;
+      const message = event.data as {
+        source?: string;
+        slug?: string;
+        score?: unknown;
+        capture_id?: unknown;
+      } | null;
       if (message?.source !== 'arcade-score' || message.slug !== playing.slug) return;
       if (typeof message.score !== 'number' || !Number.isFinite(message.score)) return;
-      setScoreInput(String(Math.max(0, Math.trunc(message.score))));
+      if (typeof message.capture_id !== 'string' || !message.capture_id) return;
+      const score = Math.max(0, Math.trunc(message.score));
+      if (submittedCaptures.current.has(message.capture_id)) return;
+      submittedCaptures.current.add(message.capture_id);
+      submitScore.mutate({ slug: playing.slug, score, captureId: message.capture_id });
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [playing, data?.play_base]);
+  }, [playing, data?.play_base, submitScore]);
 
   if (isLoading) {
     return (
@@ -301,29 +312,18 @@ export default function ArcadeGames() {
               <span className="text-[11px] text-slate-400">
                 Playing as <b className="font-mono text-slate-200">{me?.initials ?? 'YOU'}</b>
               </span>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                value={scoreInput}
-                onChange={(event) => setScoreInput(event.target.value)}
-                placeholder="Your score"
-                aria-label="Your score"
-                className="w-28 rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
-              />
-              <button
-                type="button"
-                disabled={!scoreInput || submitScore.isPending}
-                onClick={() => submitScore.mutate({ slug: playing.slug, score: Number(scoreInput) })}
-                className="glass-button min-h-9 px-3 text-xs text-purple-200 border-purple-400/40 disabled:opacity-50"
-              >
-                Save score
-              </button>
-              {scoreInput && !submitScore.isSuccess && (
-                <span className="text-[10px] text-slate-500">Check the score, then save it to the family board.</span>
+              <span className="text-[10px] text-slate-500">
+                Scores save automatically when you finish.
+              </span>
+              {submitScore.isPending && (
+                <span className="text-[10px] text-sky-300">Saving captured score…</span>
               )}
-              {submitScore.isSuccess && <span className="text-[10px] text-emerald-300">Saved to the family board</span>}
-              {submitScore.isError && <span className="text-[10px] text-rose-300">Could not save</span>}
+              {submitScore.isSuccess && (
+                <span className="text-[10px] text-emerald-300">
+                  Saved to the family board{typeof submitScore.data?.rank === 'number' ? ` (#${submitScore.data.rank})` : ''}
+                </span>
+              )}
+              {submitScore.isError && <span className="text-[10px] text-rose-300">Could not save the captured score</span>}
             </div>
           </div>
         )}

@@ -4345,13 +4345,22 @@ async def proxy_arcade_score(slug: str, request: Request):
     score = body.get("score") if isinstance(body, dict) else None
     if isinstance(score, bool) or not isinstance(score, int) or score < 0 or score > 1_000_000_000:
         raise HTTPException(status_code=422, detail="score must be a non-negative integer")
+    capture_id = body.get("capture_id") if isinstance(body, dict) else None
+    if not isinstance(capture_id, str) or not capture_id.strip() or len(capture_id) > 200:
+        raise HTTPException(status_code=422, detail="a captured score is required")
+    capture_id = capture_id.strip()
     user = str((creds or {}).get("user") or "")
     initials = _arcade_initials(user)
     try:
         async with shared_http_client() as client:
             resp = await client.post(
                 f"{ALPACA_ARCADE_URL}/api/games/{slug}/scores",
-                json={"initials": initials, "score": score, "player_id": user},
+                json={
+                    "initials": initials,
+                    "score": score,
+                    "player_id": user,
+                    "capture_id": capture_id,
+                },
                 timeout=aiohttp.ClientTimeout(total=8.0),
             )
             return await _proxy_json_response(resp)
