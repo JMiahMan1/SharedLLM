@@ -130,13 +130,17 @@ def test_a_drawing_edit_runs_through_the_execution_service(client, monkeypatch):
         {},
     )
 
-    resp = client.post("/api/images/edit", json={"prompt": "Make this drawing much better", "image": _PNG_URL})
+    resp = client.post(
+        "/api/images/edit",
+        json={"prompt": "Make this drawing much better", "image": _PNG_URL, "purpose": "family_drawing"},
+    )
 
     assert resp.status_code == 200
     assert resp.json() == {"status": "SUCCESS", "data": [{"b64_json": "AAAA"}], "model": "qwen-image-edit"}
     assert captured["url"].endswith("/execute/image_edit_inline")
     assert captured["json"]["image"] == _PNG_URL
     assert captured["json"]["prompt"] == "Make this drawing much better"
+    assert captured["json"]["purpose"] == "family_drawing"
     assert "X-Internal-Secret" in captured["headers"]
 
 

@@ -12,6 +12,7 @@ import {
   Clock,
   Eye,
   Wand2,
+  Palette,
   Activity,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -226,7 +227,8 @@ const LLMSettings: React.FC = () => {
                   // Health & power reports (telemetry service); blank falls back to Librarian.
                   { label: 'Reports', key: 'telemetry_model', icon: Activity },
                   { label: 'Vision OCR', key: 'vision_ocr_model', icon: Eye },
-                  { label: 'Image Edit', key: 'image_edit_model', icon: Wand2 }
+                  { label: 'Image Edit', key: 'image_edit_model', icon: Wand2 },
+                  { label: 'Family Drawing', key: 'family_drawing_edit_model', icon: Palette }
                 ].map(role => (
                   <div key={role.key} className="glass-card p-4 bg-white/5">
                     <div className="flex items-center gap-2 mb-3">

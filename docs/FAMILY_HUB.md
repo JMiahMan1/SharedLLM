@@ -188,14 +188,22 @@ How the improve pass runs: the PNG goes as a data URL to
 hands the edit to execution's `/execute/image_edit_inline` in the background,
 and the app polls `GET /api/images/edit/jobs/{id}` every few seconds until the
 picture or a refusal is ready. Execution sends the image as multipart to the
-`llm_local_url` proxy's `/v1/images/edits` with the `image_edit_model` setting,
-the same model, proxy and error wording as the workspace image edit
-(`handlers/image_edit.py`). The finished job answers `{"status": "SUCCESS",
-"data": [{"b64_json": ...}]}` or a `FAILURE` naming the cause (no model set,
-proxy down, backend refused). The canvas is 640x416 because edit models work in
-16 or 32 pixel blocks.
+`llm_local_url` proxy's `/v1/images/edits` using the
+**`family_drawing_edit_model`** setting, falling back to `image_edit_model` if
+that setting is blank. The seeded default is
+`qwen-image-edit-2511:q3_k_s`, the newest Qwen edit model that runs on an 8 GB
+card; it can be changed from **Settings → AI & Compute → Family Drawing**. The
+prompt asks the model to keep the child's subject, characters, colours and
+playful style while cleaning the lines and adding gentle detail, rather than
+replacing the drawing. The same proxy and error wording are used as the
+workspace image edit (`handlers/image_edit.py`). The finished job answers
+`{"status": "SUCCESS", "data": [{"b64_json": ...}]}` or a `FAILURE` naming the
+cause (no model set, proxy down, backend refused). The canvas is 640x416
+because edit models work in 16 or 32 pixel blocks.
 
-The job route exists because an edit on a CPU-offloaded model takes minutes.
+The job route exists because an edit on a CPU-offloaded model takes minutes;
+the UI waits up to 25 minutes and the backend up to 20 minutes for the slower
+8 GB-friendly model.
 Holding one HTTP request open that long failed as soon as a proxy had a shorter
 timeout: the public nginx used its 60s default, answered 504, and the old app
 retried the POST as a fresh edit. Jobs also carry an optional `request_id`, so a

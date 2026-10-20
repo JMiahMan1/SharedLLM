@@ -18,6 +18,10 @@ const WIDTHS = [3, 6, 12];
 const BOARD_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const CANVAS_WIDTH = 640;
 const CANVAS_HEIGHT = 416;
+const IMPROVE_PROMPT =
+  "Improve this child's drawing into a polished picture. Keep the same subject, characters, colours, " +
+  "shapes and playful style. Clean up the lines, add gentle shading and background detail, but do not " +
+  'replace the drawing or add unrelated objects.';
 
 let segmentCounter = 0;
 
@@ -288,7 +292,7 @@ export default function DrawCanvas() {
     setError(null);
     try {
       const edited = await api.editImage(
-        { prompt: 'Make this drawing much better', image: toPng() },
+        { prompt: IMPROVE_PROMPT, image: toPng(), purpose: 'family_drawing' },
         { signal: controller.signal },
       );
       if (controller.signal.aborted) return;

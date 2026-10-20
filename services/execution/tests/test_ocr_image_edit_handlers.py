@@ -292,6 +292,25 @@ async def test_inline_edit_returns_the_picture_without_a_workspace(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_inline_family_drawing_uses_its_own_model(monkeypatch):
+    monkeypatch.setattr(image_edit_mod, "get_image_edit_model", _async("photo-edit-model"))
+    monkeypatch.setattr(
+        image_edit_mod, "get_family_drawing_edit_model", _async("qwen-image-edit-2511:q3_k_s")
+    )
+
+    def route(url, kwargs):
+        return _FakeResponse(200, json_data={"data": [{"b64_json": "RURJVEVE"}]})
+
+    _patch_aiohttp(monkeypatch, route)
+    result = await image_edit_mod.handle_image_edit_inline(
+        _inline_req(proxy_url="http://proxy:11434", purpose="family_drawing")
+    )
+
+    assert result.status == "SUCCESS"
+    assert result.detail["model"] == "qwen-image-edit-2511:q3_k_s"
+
+
+@pytest.mark.asyncio
 async def test_inline_edit_without_a_model_names_the_setting(monkeypatch):
     monkeypatch.setattr(image_edit_mod, "get_image_edit_model", _async(None))
 

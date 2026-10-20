@@ -472,7 +472,7 @@ export async function waitForImageEdit(
     now?: () => number;
   } = {},
 ): Promise<ImageEditResult> {
-  const timeoutMs = options.timeoutMs ?? 700_000;
+  const timeoutMs = options.timeoutMs ?? 1_500_000;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const now = options.now ?? (() => Date.now());
   const maxDelayMs = options.maxDelayMs ?? 10_000;
@@ -3092,7 +3092,7 @@ export const api = {
   // staying open across every proxy. Older gateways answer 404 for the job
   // route, in which case the original synchronous call is still available.
   async editImage(
-    payload: { prompt: string; image: string; model?: string },
+    payload: { prompt: string; image: string; model?: string; purpose?: string },
     options: { signal?: AbortSignal } = {},
   ): Promise<ImageEditResult> {
     let started: ImageEditResult;
@@ -3106,7 +3106,7 @@ export const api = {
     } catch (error) {
       if (!isNotFound(error)) throw error;
       const resp = await apiClient.post('/api/images/edit', payload, {
-        timeout: 640_000,
+        timeout: 1_200_000,
         signal: options.signal,
       });
       return resp.data;

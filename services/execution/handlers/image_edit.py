@@ -142,6 +142,11 @@ async def get_image_edit_model() -> str | None:
     return await _identity_setting("image_edit_model")
 
 
+async def get_family_drawing_edit_model() -> str | None:
+    """Model for the Family drawing improve button ('family_drawing_edit_model')."""
+    return await _identity_setting("family_drawing_edit_model")
+
+
 async def get_image_edit_steps() -> int | None:
     """Sampling steps for edits ('image_edit_steps'), or None for the model's default.
 
@@ -190,18 +195,27 @@ def _default_output_path(image_path: str) -> str:
 
 
 async def _resolve_model_and_proxy(
-    model_override: str | None, proxy_override: str | None
+    model_override: str | None, proxy_override: str | None, purpose: str | None = None
 ) -> tuple[str, str, str | None]:
     """The edit model and LLM proxy URL: the request's override, else Settings.
 
-    No silent defaults. The third value names the missing setting and how to
-    set it, and is None when both are known.
+    A family drawing uses its own setting so the child-friendly model can be
+    changed without changing photo edits. No silent defaults: the third value
+    names the missing setting and how to set it, and is None when both are known.
     """
-    model = (model_override or "").strip() or (await get_image_edit_model() or "")
+    model = (model_override or "").strip()
+    if not model and (purpose or "").strip() == "family_drawing":
+        model = (await get_family_drawing_edit_model() or "").strip()
     if not model:
+        model = (await get_image_edit_model() or "").strip()
+    if not model:
+        setting = (
+            "family_drawing_edit_model or image_edit_model"
+            if purpose == "family_drawing"
+            else "image_edit_model"
+        )
         return "", "", (
-            "no image_edit_model configured. Set image_edit_model in Settings > "
-            "AI & Compute (e.g. qwen-image-edit-rapid-aio:q4_k)."
+            f"no {setting} configured. Set it in Settings > AI & Compute."
         )
     proxy_url = (proxy_override or "").strip() or (await vision_ocr.get_ollama_url() or "")
     if not proxy_url:
@@ -244,7 +258,7 @@ async def _request_edit(
         resp = await client.post(
             f"{proxy_url}/v1/images/edits",
             data=form,
-            timeout=aiohttp.ClientTimeout(total=590.0),
+            timeout=aiohttp.ClientTimeout(total=1200.0),
         )
         if resp.status != 200:
             return resp.status, None, (await resp.text())[:500]
@@ -303,7 +317,7 @@ async def handle_image_edit_inline(req) -> ExecutionResult:
     except Exception as e:  # noqa: BLE001 - bad input is reported to the caller
         return ExecutionResult(status="FAILURE", message=f"Image edit failed: {e}", service="image_edit")
 
-    model, proxy_url, missing = await _resolve_model_and_proxy(req.model, req.proxy_url)
+    model, proxy_url, missing = await _resolve_model_and_proxy(req.model, req.proxy_url, req.purpose)
     if missing:
         return ExecutionResult(status="FAILURE", message=f"Image edit failed: {missing}", service="image_edit")
 
