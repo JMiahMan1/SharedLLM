@@ -42,16 +42,16 @@ re-implement.
   play targets.
 - **Tests**: `services/gateway/tests/test_arcade_proxy.py`,
   `services/ui/src/components/family/ArcadeGames.test.tsx`.
-- **Still open**: in-app play. Games are opened on the arcade host directly for
-  now; embedding the play screen needs the gateway to also own the game pages'
-  own `/api/games/...` calls (score bridge), which is the phase-2 transport
-  question below.
+- **In-app play**: Play opens the arcade launcher in an embedded modal
+  (`/play/<slug>?embed=1`) so a game can be played without leaving the Family
+  hub. The "Open in a new tab" link remains for fullscreen or troubleshooting.
+  Desktop streaming and the score bridge remain open.
 
 ## Design
 
-Status: item 1 (curation + list), the Games-tab display, and item 5 (family
-ratings) are **shipped**. Item 2's launch/stop passthrough, item 3 (score
-bridge) and item 4 (in-app play) are **not built**; there is no
+Status: item 1 (curation + list), the Games-tab display, item 2's embedded web
+play, and item 5 (family ratings) are **shipped**. Item 3 (score bridge) and
+item 4 (desktop-game streaming) are **not built**; there is no
 `/api/arcade/games/{slug}/launch` or `/stop` route yet.
 
 1. **Admin curation.** Admin-only setting `arcade_featured_games`, stored as a
@@ -89,7 +89,8 @@ bridge) and item 4 (in-app play) are **not built**; there is no
 ## Phases
 
 1. Read-only arcade list + admin curation setting + Games tab display.
-2. Embed play for web games (mobile-first sizing).
+2. Embed play for web games (mobile-first sizing). **Shipped**: the Play link
+   opens `/play/<slug>?embed=1` in a modal inside the Family hub.
 3. Score bridge → points ledger → Talk message ("X scored N on Y").
 4. Desktop-game streaming from the Family page.
 5. Ratings from the family: let Jarvis users vote 1-5 stars, written back to

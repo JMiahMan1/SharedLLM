@@ -81,6 +81,20 @@ describe('ArcadeGames', () => {
     expect(links[0].getAttribute('href')).toBe('http://arcade.local:5001/play/space-invaders');
   });
 
+  it('plays a game inside the family hub', async () => {
+    mockedGetArcadeGames.mockResolvedValue(shelf);
+    renderShelf();
+
+    await waitFor(() => expect(screen.getByTestId('arcade-shelf')).toBeTruthy());
+    fireEvent.click(screen.getAllByRole('link', { name: /play/i })[0]);
+
+    const frame = await screen.findByTestId('arcade-player-frame');
+    expect(frame.getAttribute('src')).toBe('http://arcade.local:5001/play/space-invaders?embed=1');
+
+    fireEvent.click(screen.getByLabelText('Close dialog'));
+    await waitFor(() => expect(screen.queryByTestId('arcade-player-frame')).toBeNull());
+  });
+
   it('relabels the shelf when admins have not curated picks', async () => {
     mockedGetArcadeGames.mockResolvedValue({
       ...shelf,
