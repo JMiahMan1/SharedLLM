@@ -47,8 +47,8 @@ jobs:
     - name: Sync Capacitor
       run: npx cap sync android
 
-    - name: Remove OTA bundle from APK assets
-      run: rm -f android/app/src/main/assets/public/bundle.zip
+    - name: Verify the OTA bundle is packaged
+      run: test -f android/app/src/main/assets/public/bundle.zip
 
     - name: Accept Android licenses and install platform tools
       run: |
