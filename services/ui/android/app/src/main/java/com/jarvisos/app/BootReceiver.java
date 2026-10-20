@@ -33,6 +33,7 @@ public class BootReceiver extends BroadcastReceiver {
         WidgetAlarm.schedule(app);
         try {
             LocationTrackingService.resumeIfEnabled(app);
+            StepSyncService.resumeIfEnabled(app);
             PushService.start(app);
         } catch (Exception e) {
             Log.w(TAG, "could not resume background work after " + a, e);

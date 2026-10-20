@@ -18,6 +18,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
@@ -270,6 +271,15 @@
             android:name=".LocationTrackingService"
             android:exported="false"
             android:foregroundServiceType="location"
+            android:stopWithTask="false" />
+
+        <!-- Keeps the pedometer ledger current while the app is closed, even
+             when location sharing is off. It posts to /api/geo/steps and owns
+             no location permission. -->
+        <service
+            android:name=".StepSyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
             android:stopWithTask="false" />
 
     </application>

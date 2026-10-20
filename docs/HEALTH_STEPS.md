@@ -96,15 +96,14 @@ selection, backdrop tap or Escape.
 
 ## Known gaps
 
-- **Background step sync rides on location sharing.** With Steps on, the
-  app starts `LocationTrackingService` with `steps: true`; on start and on
-  every heartbeat (5 min, about 10 min in Doze) it takes one pedometer reading
-  through `StepCounterPlugin.recordReading` (same ledger and day/hour rules
-  as the app) and sends the day's count as `daily_steps` with its location
-  uploads, only when the reading and the fix are from the same local day.
-  Steps keep syncing with the app closed, and the regular readings keep the
-  midnight credit window satisfied. With location sharing off, steps still
-  sync only while the app runs.
+- **Background step sync runs in its own service.** With Steps on,
+  `StepSyncService` reads the pedometer every 15 minutes through
+  `StepCounterPlugin.recordReading` (same ledger and day/hour rules as the
+  app) and posts the day's count to `/api/geo/steps`. It is independent of
+  location consent, so turning location sharing off no longer stops steps.
+  While location tracking is running, `LocationTrackingService` carries the
+  reading instead and the step-only service is stopped to avoid duplicate
+  posts. Boot restarts the step service when it was on.
 - Distance is an estimate from stride length, not GPS.
 - Health Connect is not integrated yet (`health_connect` is only reserved as a
   step source name).
