@@ -2,6 +2,7 @@
 import { StrictMode, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
+import type { PluginListenerHandle } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import './index.css';
 import './themes/theme-remap.css';
@@ -20,9 +21,11 @@ function BackgroundTaskManager() {
     if (!Capacitor.isNativePlatform()) return;
 
     let bgTaskId: string | null = null;
+    let disposed = false;
+    const handles: PluginListenerHandle[] = [];
 
     const setupListeners = async () => {
-      CapacitorApp.addListener('appStateChange', async ({ isActive }) => {
+      const stateHandle = await CapacitorApp.addListener('appStateChange', async ({ isActive }) => {
         if (!isActive) {
           bgTaskId = await startBackgroundTask();
         } else {
@@ -32,18 +35,29 @@ function BackgroundTaskManager() {
           }
         }
       });
+      if (disposed) {
+        void stateHandle.remove();
+        return;
+      }
+      handles.push(stateHandle);
 
-      CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      const backHandle = await CapacitorApp.addListener('backButton', ({ canGoBack }) => {
         if (!canGoBack) {
           window.history.back();
         }
       });
+      if (disposed) {
+        void backHandle.remove();
+        return;
+      }
+      handles.push(backHandle);
     };
 
-    setupListeners();
+    void setupListeners();
 
     return () => {
-      CapacitorApp.removeAllListeners();
+      disposed = true;
+      for (const handle of handles) void handle.remove();
     };
   }, []);
 
