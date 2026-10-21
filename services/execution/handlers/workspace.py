@@ -161,6 +161,37 @@ def _ok(message: str, detail: dict | None = None) -> ExecutionResult:
 def _fail(message: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="FAILURE", message=message, service="workspace", detail=detail)
 
+
+_PY_MODULE_RE = re.compile(r"No module named ['\"]([^'\"]+)['\"]")
+_NODE_MODULE_RE = re.compile(r"Cannot find module ['\"]([^'\"]+)['\"]")
+_MISSING_COMMAND_RE = re.compile(
+    r"(?:command not found|not found):?\s*([A-Za-z0-9_.+-]+)|([A-Za-z0-9_.+-]+):\s*not found"
+)
+
+
+def dependency_install_hint(stdout: str, stderr: str) -> str:
+    """Name the install command when a failure is a missing dependency.
+
+    Raven used to learn that a package was missing only by failing the same
+    command again. The hint is deliberately narrow: it reacts to the three
+    errors Python, Node and a shell actually emit, and says nothing when the
+    failure was a compile error or a genuine bug.
+    """
+    output = f"{stdout or ''}\n{stderr or ''}"
+    match = _PY_MODULE_RE.search(output)
+    if match:
+        package = match.group(1).split(".")[0]
+        return f"Missing Python package '{package}'. Install it with `pip install {package}` and run the command again."
+    match = _NODE_MODULE_RE.search(output)
+    if match:
+        package = match.group(1)
+        return f"Missing Node package '{package}'. Install it with `npm install {package}` and run the command again."
+    match = _MISSING_COMMAND_RE.search(output)
+    if match:
+        command = match.group(1) or match.group(2)
+        return f"The command '{command}' is not installed in the sandbox. Install it with the workspace's package manager before retrying."
+    return ""
+
 async def _resolve_workspace_info(workspace_id: str | None, user_context: dict | None = None) -> tuple[str, dict]:
     """Resolves workspace path and details from workspace_runtime service.
 
@@ -881,7 +912,13 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
             return _ok(f"Command executed successfully: {cmd_prefix}...", detail)
         else:
             log.error(f"[WORKSPACE SHELL FAIL] command='{final_cmd}' rc={rc} cwd={abs_cwd}\nstdout: {stdout}\nstderr: {stderr}")
-            return _fail(f"Command failed with exit code {rc}", detail)
+            hint = dependency_install_hint(stdout, stderr)
+            if hint:
+                detail["install_hint"] = hint
+            message = f"Command failed with exit code {rc}"
+            if hint:
+                message = f"{message}. {hint}"
+            return _fail(message, detail)
 
     except HTTPException:
         raise
