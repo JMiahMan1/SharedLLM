@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpenCheck, Loader2, Plus, Search, Trash2 } from 'lucide-react';
+import { BookOpenCheck, Download, Loader2, Plus, Search, Trash2 } from 'lucide-react';
 
 import { api } from '../../services/api';
 import type { BibleStudySession } from '../../types/api';
@@ -33,6 +33,29 @@ function turnFromSession(turn: NonNullable<BibleStudySession['turns']>[number]) 
   };
 }
 
+function studyMarkdown(session: BibleStudySession): string {
+  const lines = [
+    `# ${session.title || session.reference}`,
+    '',
+    `- Reference: ${session.reference}`,
+    `- Translation: ${session.version || 'default'}`,
+    ...(session.edition ? [`- Study edition: ${session.edition}`] : []),
+    '',
+  ];
+  for (const turn of session.turns ?? []) {
+    let references: string[] = [];
+    try {
+      const parsed = JSON.parse(turn.references || '[]');
+      if (Array.isArray(parsed)) references = parsed.map(String);
+    } catch {
+      // Keep the exported study readable even if a row was hand-edited.
+    }
+    lines.push(`## ${turn.question}`, '', turn.answer, '');
+    if (references.length) lines.push(`References: ${references.join(', ')}`, '');
+  }
+  return lines.join('\n');
+}
+
 /**
  * Several Bible studies at once.
  *
@@ -44,6 +67,8 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
   const client = useQueryClient();
   const [openId, setOpenId] = useState<number | null>(null);
   const [memoryQuery, setMemoryQuery] = useState('');
+  const [exportWorkspace, setExportWorkspace] = useState('');
+  const [exportMessage, setExportMessage] = useState('');
   const [error, setError] = useState('');
 
   const sessions = useQuery({
@@ -56,6 +81,13 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
     queryKey: ['bible-study-memory', memoryQuery.trim()],
     queryFn: () => api.searchBibleStudyMemory(memoryQuery.trim()),
     enabled: memoryQuery.trim().length >= 2,
+    retry: false,
+  });
+
+  const workspaces = useQuery({
+    queryKey: ['workspaces'],
+    queryFn: () => api.getWorkspaces(),
+    enabled: openId !== null,
     retry: false,
   });
 
@@ -101,6 +133,30 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
   });
 
   const open = detail.data?.session;
+
+  async function exportStudy() {
+    if (!open) return;
+    const workspaceId = exportWorkspace || workspaces.data?.[0]?.id || '';
+    if (!workspaceId) {
+      setExportMessage('No workspace is available to export into.');
+      return;
+    }
+    setExportMessage('Exporting…');
+    const safeRef = (open.reference || `study-${open.id}`)
+      .replace(/[^a-z0-9._-]+/gi, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60);
+    try {
+      await api.writeWorkspaceFile(
+        workspaceId,
+        `bible-studies/${safeRef || 'study'}-${open.id}.md`,
+        studyMarkdown(open),
+      );
+      setExportMessage('Study exported to the workspace.');
+    } catch (err) {
+      setExportMessage(errorText(err, 'Could not export that study.'));
+    }
+  }
 
   return (
     <section className="space-y-3" data-testid="bible-study-sessions">
@@ -204,6 +260,43 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
         <p className="text-xs text-slate-500 flex items-center gap-2">
           <Loader2 size={13} className="animate-spin" /> Opening study…
         </p>
+      ) : null}
+
+      {openId !== null && open ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/5 bg-white/[0.02] p-3">
+            <label htmlFor="bible-study-export-workspace" className="sr-only">
+              Export study to workspace
+            </label>
+            <select
+              id="bible-study-export-workspace"
+              value={exportWorkspace}
+              onChange={(event) => setExportWorkspace(event.target.value)}
+              className="min-h-10 min-w-0 flex-1 rounded-lg bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-200"
+            >
+              <option value="">Choose a workspace…</option>
+              {(workspaces.data ?? []).map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.display_name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => void exportStudy()}
+              disabled={!(exportWorkspace || workspaces.data?.length)}
+              className="min-h-10 rounded-lg bg-sky-500/20 px-3 text-xs font-medium text-sky-200 disabled:opacity-50 inline-flex items-center gap-1.5"
+            >
+              <Download size={13} />
+              Export to workspace
+            </button>
+          </div>
+          {exportMessage ? (
+            <p className="text-xs text-slate-400" data-testid="bible-study-export-message">
+              {exportMessage}
+            </p>
+          ) : null}
+        </>
       ) : null}
 
       {openId !== null && open ? (
