@@ -670,7 +670,7 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "payload fields: query, urls, output_file."),
     ("BrowserAutomationRequest", SVC_EXECUTION, "POST", "/execute/browser", False,
      "Open a real page, click/type through it, and return visible text plus a screenshot.",
-     "payload fields: url, actions (list of {type, selector, text, wait_ms}), screenshot, full_page, timeout_ms."),
+     "payload fields: url, actions, screenshot, full_page, timeout_ms."),
 )
 
 

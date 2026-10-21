@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ArcadeGames from './ArcadeGames';
 import { api } from '../../services/api';
@@ -174,7 +174,7 @@ describe('ArcadeGames', () => {
 
     await waitFor(() => expect(screen.getByTestId('arcade-scoreboard')).toBeTruthy());
     expect(screen.getByText('Family high scores')).toBeTruthy();
-    expect(screen.getByText('62,960')).toBeTruthy();
+    expect(within(screen.getByTestId('arcade-scoreboard')).getByText('62,960')).toBeTruthy();
     expect(screen.getByText('You')).toBeTruthy();
 
     fireEvent.click(screen.getAllByRole('link', { name: /play/i })[0]);
