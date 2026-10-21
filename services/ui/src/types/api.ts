@@ -1348,6 +1348,8 @@ export interface Workout {
    * filed into history -- there is no `active` value, which is what made the
    * old client-side scan for one impossible to match.
    */
+  /** True when geo inferred this from the breadcrumb trail rather than a manual start/stop. */
+  auto_detected?: boolean;
   status: 'in_progress' | 'completed';
 }
 

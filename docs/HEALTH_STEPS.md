@@ -33,10 +33,12 @@
 | `GET /api/geo/steps/ranges?range=D\|W\|M\|3M\|Y` | pre-aggregated history for longer ranges |
 | `GET /api/geo/steps/goal` | per-user daily goal |
 | `PUT /api/geo/steps/goal` | set the goal (1000-100000) |
-| `GET /api/geo/workouts`, `POST /workouts/start`, `GET /workouts/active`, `POST /workouts/stop`, `GET /workouts/{id}/route` | workout sessions and routes |
+| `GET /api/geo/workouts`, `POST /workouts/start`, `GET /workouts/active`, `POST /workouts/stop`, `POST /workouts/{id}/dismiss`, `GET /workouts/{id}/route` | workout sessions, auto-detected candidates and routes |
 | `GET /api/geo/activity/summary?window=today\|week\|month\|all` | your own activity totals for a window |
 | `GET /api/geo/activity/feed?window=…` | opt-in activity of people who share with you |
 | `GET/PUT /api/users/me/activity-sharing` | private-by-default sharing settings (audience + scopes) |
+
+A background sweep turns recent walking, running and cycling breadcrumbs into pending workouts. It looks back 12 hours every five minutes, ignores anyone with an active workout or drive, and skips candidates that overlap an existing workout or trip. Auto-detected workouts are marked **Auto-detected** in Health and can be removed with **Not a workout**; that dismissal is remembered so the same walk is not suggested again. Only GPS speeds are used (no heart-rate or terrain), so mountain biking, dirt biking and horseback riding still require a manual start.
 
 The goal is stored as `geo:steps_goal:{user}`; the default remains 10,000.
 

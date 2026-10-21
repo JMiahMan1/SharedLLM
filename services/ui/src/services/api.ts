@@ -1373,6 +1373,11 @@ export const api = {
     return resp.data;
   },
 
+  async dismissWorkout(workoutId: string): Promise<{ status: string; id: string }> {
+    const resp = await apiClient.post(`/api/geo/workouts/${encodeURIComponent(workoutId)}/dismiss`);
+    return resp.data;
+  },
+
   // Daily steps (hardware pedometer)
   async getDailySteps(userId?: string, days = 7): Promise<StepsResponse> {
     const query = new URLSearchParams({ days: String(days) });
