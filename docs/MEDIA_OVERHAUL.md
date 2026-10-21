@@ -669,7 +669,7 @@ player scope, the unified endpoints and the schema contract test. Details:
 - P8-T1 ~~`MediaPlaybackService` + session plugin + manifest~~: done as `MediaPlaybackService` + `JarvisMediaPlugin` (`dd9e8df2`).
 - P8-T2 ~~JS bridge~~: done as `src/plugins/jarvisMedia.ts`, driven by `MediaPlayerContext`. Remaining: a native audio player so playback survives the app being swiped away.
 - P8-T3 BUG-55 (widget parsing) + move the widget to signed media tokens.
-- P8-T4 BUG-67.
+- P8-T4 BUG-67: done (the background-task manager now removes only its own listener handles).
 - P8-T5 Build: `cd services/ui && npm run build && npx cap sync android && cd android && ./gradlew assembleDebug`. **Done when** the build succeeds and the §9.4 device checklist passes.
 
 ### Phase 9: Cleanup and release
