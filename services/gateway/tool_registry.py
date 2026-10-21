@@ -668,6 +668,9 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("WebScraperRequest", SVC_EXECUTION, "POST", "/execute/web_scraper", False,
      "Scrape product or page data from websites with a real browser.",
      "payload fields: query, urls, output_file."),
+    ("BrowserAutomationRequest", SVC_EXECUTION, "POST", "/execute/browser", False,
+     "Open a real page, click/type through it, and return visible text plus a screenshot.",
+     "payload fields: url, actions (list of {type, selector, text, wait_ms}), screenshot, full_page, timeout_ms."),
 )
 
 

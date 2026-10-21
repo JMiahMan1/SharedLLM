@@ -741,6 +741,24 @@ class WebReadRequest(BaseRequest):
     use_current_user_auth: bool = False
 
 
+class BrowserAction(BaseModel):
+    """One step a browser automation request should perform on the page."""
+    type: str = Field(description="click, type, wait, or press")
+    selector: str | None = Field(None, description="CSS selector for click/type/press")
+    text: str | None = Field(None, description="Text to type, or key to press")
+    wait_ms: int = Field(0, ge=0, le=60000, description="Milliseconds to wait for a wait step")
+
+
+class BrowserAutomationRequest(BaseRequest):
+    """Open a real page, perform a short action list, and return text plus a screenshot."""
+    user_context: UserContext
+    url: str = Field(description="Page to open")
+    actions: list[BrowserAction] = Field(default_factory=list, description="Actions to perform after navigation")
+    screenshot: bool = Field(True, description="Capture a screenshot after the actions finish")
+    full_page: bool = Field(False, description="Capture the whole page instead of the viewport")
+    timeout_ms: int = Field(30000, ge=1000, le=120000, description="Navigation and action timeout")
+
+
 class WebScraperRequest(BaseRequest):
     """Scrapes product prices from e-commerce sites using Playwright or Camoufox + Vision OCR."""
     user_context: UserContext

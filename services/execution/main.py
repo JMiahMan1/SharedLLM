@@ -76,6 +76,7 @@ from services.execution.schemas import (
     AudiobookshelfRequest,
     CalendarRequest,
     BibleRequest,
+    BrowserAutomationRequest,
     CalibreRequest,
     DeploymentRequest,
     DiagnosticRequest,
@@ -1018,6 +1019,11 @@ async def execute_web_read(req: WebReadRequest):
 async def execute_web_scraper(req: WebScraperRequest):
     from services.execution.handlers import webscraper
     return await webscraper.handle_web_scraper(req)
+
+@app.post("/execute/browser", response_model=ExecutionResult)
+async def execute_browser_automation(req: BrowserAutomationRequest):
+    from services.execution.handlers import browser_automation
+    return await browser_automation.handle_browser_automation(req)
 
 @app.post("/execute/ocr", response_model=ExecutionResult)
 async def execute_ocr(req: OcrRequest):

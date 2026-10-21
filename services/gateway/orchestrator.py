@@ -456,6 +456,7 @@ _SLOW_TOOL_TIMEOUTS = {
     "ttsrequest": 300.0,
     "ocrrequest": 180.0,
     "webscraperrequest": 180.0,
+    "browserautomationrequest": 180.0,
 }
 
 
