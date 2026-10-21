@@ -237,6 +237,7 @@ export default function WorkspaceIDE({
   const [tabs, setTabs] = useState<OpenTab[]>([]);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [showSecrets, setShowSecrets] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [gitStatus, setGitStatus] = useState<GitStatusResponse | null>(null);
@@ -1563,6 +1564,14 @@ export default function WorkspaceIDE({
       </div>
 
       <div className="flex-1 min-h-0 flex">
+        {mobileSidebarOpen && (
+          <button
+            type="button"
+            aria-label="Close workspace sidebar"
+            onClick={() => setMobileSidebarOpen(false)}
+            className="md:hidden fixed inset-0 z-30 bg-black/60"
+          />
+        )}
         {/* Activity Bar */}
         {showSecrets && (
           <WorkspaceSecrets workspace={workspace} onClose={() => setShowSecrets(false)} />
@@ -1584,10 +1593,11 @@ export default function WorkspaceIDE({
                     }
                   } else {
                     setActiveView(a.id);
+                    setMobileSidebarOpen(true);
                   }
                 }}
                 className={cn(
-                  'relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors',
+                  'relative w-10 h-10 pointer-coarse:min-h-11 pointer-coarse:min-w-11 flex items-center justify-center rounded-lg transition-colors',
                   isActive ? 'text-white bg-white/10' : 'text-slate-500 hover:text-slate-200',
                 )}
               >
@@ -1599,7 +1609,25 @@ export default function WorkspaceIDE({
         </div>
 
         {/* Primary Side Bar (switches by view) */}
-        <div className="w-80 max-w-[78vw] shrink-0 border-r border-white/10 bg-[#0c1120] flex flex-col min-h-0">
+        <div
+          className={cn(
+            'w-80 max-w-[78vw] shrink-0 border-r border-white/10 bg-[#0c1120] flex-col min-h-0',
+            mobileSidebarOpen
+              ? 'fixed inset-y-0 left-12 z-40 flex shadow-2xl'
+              : 'hidden md:flex'
+          )}
+        >
+          <div className="md:hidden flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
+            <span className="text-xs font-black uppercase tracking-widest text-slate-400">{activeView}</span>
+            <button
+              type="button"
+              onClick={() => setMobileSidebarOpen(false)}
+              aria-label="Close workspace sidebar"
+              className="pointer-coarse:min-h-11 pointer-coarse:min-w-11 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-white/10"
+            >
+              <X size={18} />
+            </button>
+          </div>
           {activeView === 'explorer' && (
             <>
               <div className="flex items-center gap-1 px-2 py-1.5 text-xs text-slate-400 border-b border-white/5 overflow-x-auto whitespace-nowrap custom-scrollbar">
