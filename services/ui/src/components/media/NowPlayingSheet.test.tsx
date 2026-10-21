@@ -141,6 +141,12 @@ describe('NowPlayingSheet', () => {
     );
   });
 
+  it('opens the queue sheet from the bottom row', async () => {
+    renderSheet(player());
+    await userEvent.click(screen.getByRole('button', { name: 'Open queue' }));
+    expect(await screen.findByRole('dialog', { name: 'Queue' })).toBeTruthy();
+  });
+
   it('closes on Escape', () => {
     const onClose = vi.fn();
     renderSheet(player(), { onClose });

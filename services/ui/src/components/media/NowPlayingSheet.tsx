@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import {
-  ChevronDown, ChevronUp, Cast, Heart, Music, Pause, Play, Repeat, Repeat1, RotateCcw, RotateCw,
+  ChevronDown, ChevronUp, Cast, Heart, ListMusic, Music, Pause, Play, Repeat, Repeat1, RotateCcw, RotateCw,
   Shuffle, SkipBack, SkipForward, Timer, Volume1, Volume2, VolumeX,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -13,6 +13,7 @@ import { useHaptics } from '../../hooks/useHaptics';
 import { api } from '../../services/api';
 import { formatClock } from '../../lib/utils';
 import OutputSheet from './OutputSheet';
+import QueueSheet from './QueueSheet';
 
 type RepeatMode = 'off' | 'all' | 'one';
 
@@ -60,10 +61,12 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
   const [sleepLabel, setSleepLabel] = useState('Sleep timer');
   const [sleepMenu, setSleepMenu] = useState(false);
   const [outputOpen, setOutputOpen] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const close = useCallback(() => {
     setOutputOpen(false);
+    setQueueOpen(false);
     onClose();
   }, [onClose]);
 
@@ -481,7 +484,18 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
                   className="flex min-h-11 min-w-0 items-center gap-1.5 rounded-xl px-2 text-xs text-slate-400 hover:bg-white/10 hover:text-white"
                 >
                   <Cast size={15} aria-hidden />
-                  <span className="truncate">This device</span>
+                  <span className="hidden truncate sm:inline">This device</span>
+                  <ChevronUp size={13} aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQueueOpen(true)}
+                  aria-label="Open queue"
+                  aria-haspopup="dialog"
+                  className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-xs text-slate-400 hover:bg-white/10 hover:text-white"
+                >
+                  <ListMusic size={15} aria-hidden />
+                  <span>Queue</span>
                   <ChevronUp size={13} aria-hidden />
                 </button>
                 <button
@@ -492,13 +506,16 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
                   className={`flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-xs ${sleepAt !== null ? 'bg-cyan-500/15 text-cyan-200' : 'text-slate-300 hover:bg-white/10'}`}
                 >
                   <Timer size={16} aria-hidden />
-                  {sleepAt !== null ? `${sleepLabel} · ${formatClock(sleepLeft)}` : 'Sleep timer'}
+                  <span className="max-w-[38vw] truncate">
+                    {sleepAt !== null ? `${sleepLabel} · ${formatClock(sleepLeft)}` : 'Sleep timer'}
+                  </span>
                 </button>
               </div>
             </div>
           </motion.div>
 
           <OutputSheet open={open && outputOpen} onClose={() => setOutputOpen(false)} onTransferred={close} />
+          <QueueSheet open={open && queueOpen} onClose={() => setQueueOpen(false)} />
         </motion.div>
       )}
     </AnimatePresence>

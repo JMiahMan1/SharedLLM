@@ -20,6 +20,7 @@ import type { ConnectionState } from './wsManager';
 import { getServerOrigin, getWsProtocolFor } from './serverUrl';
 import { storageGetSync } from './storage';
 import { parseMaPlayerList, type MaPlayerListEntry } from './deviceLabels';
+import { extractMaImage } from './maImage';
 
 /**
  * UI-level playback state. Deliberately distinct from Sendspin's own
@@ -81,39 +82,6 @@ function ensurePlayerId(): string {
 /** Backoff before reconnect attempt `n` (1-based): 1 s, 2 s, 4 s … capped at 30 s. */
 export function reconnectDelayMs(attempt: number): number {
   return Math.min(30_000, 1000 * 2 ** Math.max(0, attempt - 1));
-}
-
-// Extract a usable image reference from a Music Assistant image payload.
-// MA sends several shapes and we must handle ALL of them, otherwise the
-// web player silently falls back to the gradient + music-note icon:
-//  - a full URL string (e.g. http://<ma-host>:8095/imageproxy/...)
-//  - a PlayerMedia `image_url` string (current_media on player_updated)
-//  - a QueueItem `image` string (current_item on queue_updated)
-//  - a MediaItemImage OBJECT: { type, path, provider, remote_url, ... }
-//  - an array of any of the above (MA returns lists of images)
-//  - a nested { image: <any> } wrapper
-// We return whatever the gateway's /api/media/imageproxy can resolve.
-function extractMaImage(img: unknown): string | null {
-  if (!img) return null;
-  if (typeof img === 'string') return img.trim() || null;
-  if (Array.isArray(img)) {
-    for (const item of img) {
-      const r = extractMaImage(item);
-      if (r) return r;
-    }
-    return null;
-  }
-  if (typeof img === 'object') {
-    const i = img as Record<string, unknown>;
-    // `remote_url` carries the absolute upstream URL; `path`/`uri` are
-    // relative and resolved by the gateway imageproxy against the MA host.
-    for (const key of ['image_url', 'remote_url', 'uri', 'path', 'url']) {
-      const v = i[key];
-      if (typeof v === 'string' && v.trim()) return v.trim();
-    }
-    if (i.image) return extractMaImage(i.image);
-  }
-  return null;
 }
 
 /* The gateway WebSocket for `path`. On the Capacitor app the bundled page is

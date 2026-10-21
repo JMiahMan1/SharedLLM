@@ -5,13 +5,12 @@ import { BookOpen, Library, List, Loader2, Music, Play, RefreshCw } from 'lucide
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
-import { storageGetSync } from '../lib/storage';
 import { useSharedMAWebPlayer } from '../context/MediaPlayerContext';
-import { getServerOrigin } from '../lib/serverUrl';
 import { errorText } from '../lib/errorText';
 import { formatDeviceLabel } from '../lib/deviceLabels';
 import type { MaPlayerListEntry } from '../lib/deviceLabels';
 import { listRemoteMaPlayers, sendMaRemoteCommand } from '../lib/maRemotePlayer';
+import { proxiedImage } from '../lib/mediaImage';
 import { DeviceSelector } from '../components/media/DeviceSelector';
 import { NowPlayingCard, type NowPlayingView } from '../components/media/NowPlayingCard';
 import { MediaExplorer } from '../components/media/MediaExplorer';
@@ -22,14 +21,6 @@ import type { DeviceOption, MediaStatus, PlayRequest } from '../components/media
 const STATUS_POLL_MS = 3000;
 /** After the user moves a volume slider, ignore polled volumes this long. */
 const VOLUME_GRACE_MS = 4000;
-
-/** Cover art through the gateway's per-user image proxy. */
-function proxiedImage(raw?: string | null): string | null {
-  if (!raw) return null;
-  const apiToken = storageGetSync('jarvis_api_key') ?? '';
-  const base = getServerOrigin().replace(/\/+$/, '');
-  return `${base}/api/media/imageproxy?path=${encodeURIComponent(raw)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
-}
 
 // Normalize `last_played` (epoch s, epoch ms or ISO string) to epoch ms.
 const normalizePlayedAt = (value: unknown): number | undefined => {
