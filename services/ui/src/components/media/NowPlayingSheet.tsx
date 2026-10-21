@@ -13,7 +13,6 @@ import { useHaptics } from '../../hooks/useHaptics';
 import { api } from '../../services/api';
 import { formatClock } from '../../lib/utils';
 import OutputSheet from './OutputSheet';
-import QueueSheet from './QueueSheet';
 
 type RepeatMode = 'off' | 'all' | 'one';
 
@@ -47,7 +46,15 @@ function isBook(uri: string | null): boolean {
  * here reads from the one shared player above the router, so the sheet never
  * owns playback state or fights the Media page over it.
  */
-export default function NowPlayingSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function NowPlayingSheet({
+  open,
+  onClose,
+  onOpenQueue,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onOpenQueue?: () => void;
+}) {
   const player = useOptionalWebPlayer();
   const reduceMotion = useReducedMotion();
   const { trigger } = useHaptics();
@@ -61,12 +68,10 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
   const [sleepLabel, setSleepLabel] = useState('Sleep timer');
   const [sleepMenu, setSleepMenu] = useState(false);
   const [outputOpen, setOutputOpen] = useState(false);
-  const [queueOpen, setQueueOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const close = useCallback(() => {
     setOutputOpen(false);
-    setQueueOpen(false);
     onClose();
   }, [onClose]);
 
@@ -489,7 +494,7 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
                 </button>
                 <button
                   type="button"
-                  onClick={() => setQueueOpen(true)}
+                  onClick={() => onOpenQueue?.()}
                   aria-label="Open queue"
                   aria-haspopup="dialog"
                   className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-xs text-slate-400 hover:bg-white/10 hover:text-white"
@@ -515,7 +520,6 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
           </motion.div>
 
           <OutputSheet open={open && outputOpen} onClose={() => setOutputOpen(false)} onTransferred={close} />
-          <QueueSheet open={open && queueOpen} onClose={() => setQueueOpen(false)} />
         </motion.div>
       )}
     </AnimatePresence>

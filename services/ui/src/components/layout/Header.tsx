@@ -164,6 +164,7 @@ const Header = () => {
             }
           }}
           placeholder="Search pages, tabs & settings…"
+          data-global-search
           className="w-full glass-input pl-12 h-12 text-lg"
           aria-label="Search pages, tabs and settings"
         />

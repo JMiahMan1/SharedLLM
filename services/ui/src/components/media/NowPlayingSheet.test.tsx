@@ -39,11 +39,18 @@ function player(over: Partial<SharedPlayer> = {}): SharedPlayer {
   } as unknown as SharedPlayer;
 }
 
-function renderSheet(value: SharedPlayer | null, props: Partial<{ open: boolean; onClose: () => void }> = {}) {
+function renderSheet(
+  value: SharedPlayer | null,
+  props: Partial<{ open: boolean; onClose: () => void; onOpenQueue: () => void }> = {},
+) {
   return render(
     <MemoryRouter>
       <MediaPlayerContext.Provider value={value}>
-        <NowPlayingSheet open={props.open ?? true} onClose={props.onClose ?? (() => {})} />
+        <NowPlayingSheet
+          open={props.open ?? true}
+          onClose={props.onClose ?? (() => {})}
+          onOpenQueue={props.onOpenQueue}
+        />
       </MediaPlayerContext.Provider>
     </MemoryRouter>,
   );
@@ -141,10 +148,11 @@ describe('NowPlayingSheet', () => {
     );
   });
 
-  it('opens the queue sheet from the bottom row', async () => {
-    renderSheet(player());
+  it('opens the queue from the bottom row', async () => {
+    const onOpenQueue = vi.fn();
+    renderSheet(player(), { onOpenQueue });
     await userEvent.click(screen.getByRole('button', { name: 'Open queue' }));
-    expect(await screen.findByRole('dialog', { name: 'Queue' })).toBeTruthy();
+    expect(onOpenQueue).toHaveBeenCalled();
   });
 
   it('closes on Escape', () => {
