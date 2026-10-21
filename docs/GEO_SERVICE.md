@@ -101,6 +101,18 @@ accepts `start_name` / `end_name` / `start_address` / `end_address`, so a user
 can rename a pin (or pick a nearby store/zone from `/locations/suggestions`).
 User-picked names win on read (`source: "stored"`).
 
+## Fuel prices
+
+Each vehicle can store a `fuel_price_location` (ZIP code or city) when it is
+created. Once a day geo's `_fuel_price_sweeper` asks AAA for that place's
+prices (home zone when no ZIP was saved) and updates the vehicle's
+`cost_per_gallon`: diesel vehicles use the diesel average, gasoline and
+hybrid use regular, and electric vehicles are left alone. A failed lookup
+keeps the previous price rather than guessing. The sweep is checked hourly
+but runs once per local date; `POST /fuel-prices/refresh` forces it
+service-to-service. New trips snapshot the refreshed price, so past trip
+costs do not change when gas moves.
+
 ## Configuration
 
 | Setting | Source | What |

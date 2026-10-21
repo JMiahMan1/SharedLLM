@@ -1107,12 +1107,12 @@ export const api = {
   },
 
   // Life360 & Vehicle Telemetry
-  async getVehicles(): Promise<{ vehicles: Array<{ id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type: string }> }> {
+  async getVehicles(): Promise<{ vehicles: Array<{ id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type: string; fuel_price_location?: string; fuel_price_source?: string; fuel_price_updated_at?: string }> }> {
     const resp = await apiClient.get('/api/geo/vehicles');
     return resp.data;
   },
 
-  async saveVehicle(vehicle: { id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type?: string }): Promise<{ status: string; vehicle: Record<string, unknown> }> {
+  async saveVehicle(vehicle: { id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type?: string; fuel_price_location?: string }): Promise<{ status: string; vehicle: Record<string, unknown> }> {
     const resp = await apiClient.post('/api/geo/vehicles', vehicle);
     return resp.data;
   },

@@ -216,7 +216,8 @@ const LocationPanel = () => {
         name: newVehicleName.trim(),
         mpg: mpgNum,
         cost_per_gallon: costNum,
-        fuel_type: newVehicleFuelType
+        fuel_type: newVehicleFuelType,
+        fuel_price_location: fuelPriceZip.trim() || undefined,
       });
 
       toast.success(`Added ${newVehicleName.trim()}`);
@@ -886,6 +887,9 @@ const LocationPanel = () => {
                       Auto-filled from {fuelPriceSource}
                     </p>
                   )}
+                  <p className="text-[10px] text-slate-500">
+                    Gas and diesel prices refresh automatically once a day for this vehicle.
+                  </p>
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-1">
