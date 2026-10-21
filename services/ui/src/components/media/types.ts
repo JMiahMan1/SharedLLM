@@ -35,6 +35,8 @@ export interface MediaStatus {
   ma_player_id?: string | null;
   icon_kind?: string | null;
   app_name?: string | null;
+  /** Players grouped with this one (HA entity ids or MA player ids). */
+  group_members?: string[];
 }
 
 /** Shared row styling: full-width, at least 44 px tall for touch. */
