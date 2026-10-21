@@ -190,6 +190,7 @@ import type {
   BibleImportedBooksResponse,
   BibleDevotionalWork,
   BibleStudySession,
+  BibleStudyMemoryResponse,
 } from '../types/api';
 
 // Re-export domain types so consumers can import them from the api module.
@@ -3802,6 +3803,13 @@ export const api = {
 
   async listBibleStudySessions(): Promise<{ sessions: BibleStudySession[]; count: number }> {
     const resp = await apiClient.get('/api/bible/study/sessions');
+    return resp.data;
+  },
+
+  async searchBibleStudyMemory(query: string): Promise<BibleStudyMemoryResponse> {
+    const resp = await apiClient.get('/api/bible/study/sessions/search', {
+      params: { q: query },
+    });
     return resp.data;
   },
 
