@@ -133,6 +133,7 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
   });
 
   const open = detail.data?.session;
+  const hasSessions = (sessions.data?.sessions ?? []).length > 0;
 
   async function exportStudy() {
     if (!open) return;
@@ -183,7 +184,8 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
 
       {error ? <p className="text-xs text-rose-300">{error}</p> : null}
 
-      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3" data-testid="bible-study-memory">
+      {hasSessions ? (
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3" data-testid="bible-study-memory">
         <label htmlFor="bible-study-memory-search" className="sr-only">
           Search your study memory
         </label>
@@ -223,13 +225,12 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
             </ul>
           )
         ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {sessions.isLoading ? (
         <p className="text-xs text-slate-500">Loading studies…</p>
-      ) : (sessions.data?.sessions ?? []).length === 0 ? (
-        <p className="text-xs text-slate-500">No studies yet. Start one from the passage you are reading.</p>
-      ) : (
+      ) : (sessions.data?.sessions ?? []).length === 0 ? null : (
         <ul className="grid gap-2 sm:grid-cols-2">
           {(sessions.data?.sessions ?? []).map((session) => (
             <li
