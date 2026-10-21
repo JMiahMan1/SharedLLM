@@ -33,7 +33,7 @@
 | `GET /api/geo/steps/ranges?range=D\|W\|M\|3M\|Y` | pre-aggregated history for longer ranges |
 | `GET /api/geo/steps/goal` | per-user daily goal |
 | `PUT /api/geo/steps/goal` | set the goal (1000-100000) |
-| `GET /api/geo/workouts`, `POST /workouts/start`, `GET /workouts/active`, `POST /workouts/stop`, `POST /workouts/{id}/dismiss`, `GET /workouts/{id}/route` | workout sessions, auto-detected candidates and routes |
+| `GET /api/geo/workouts`, `POST /api/geo/workouts/start`, `GET /api/geo/workouts/active`, `POST /api/geo/workouts/stop`, `POST /api/geo/workouts/{id}/dismiss`, `GET /api/geo/workouts/{id}/route` | workout sessions, auto-detected candidates and routes |
 | `GET /api/geo/activity/summary?window=today\|week\|month\|all` | your own activity totals for a window |
 | `GET /api/geo/activity/feed?window=…` | opt-in activity of people who share with you |
 | `GET/PUT /api/users/me/activity-sharing` | private-by-default sharing settings (audience + scopes) |
