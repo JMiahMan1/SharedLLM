@@ -10941,12 +10941,46 @@ async def proxy_bible_study_session(request: Request, session_id: int):
     )
 
 
+async def _ingest_study_turn(username: str, session_id: int, turn: dict) -> None:
+    """Put a saved study answer into RAG with a stable, citable id."""
+    question = str(turn.get("question") or "").strip()
+    answer = str(turn.get("answer") or "").strip()
+    if not question or not answer:
+        return
+    try:
+        references = turn.get("references") or []
+        if isinstance(references, str):
+            references = [references]
+        content = f"Bible study question: {question}\nAnswer: {answer}"
+        if references:
+            content += f"\nReferences: {', '.join(str(r) for r in references)}"
+        async with shared_http_client() as client:
+            await client.post(
+                f"{RAG_SVC}/rag/ingest",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                json={
+                    "user_id": username,
+                    "content": content,
+                    "collection_name": "bible_study",
+                    "metadata": {
+                        "id": f"bible-turn-{session_id}-{turn.get('id')}",
+                        "kind": "bible_study",
+                        "session_id": session_id,
+                        "username": username,
+                    },
+                },
+                timeout=aiohttp.ClientTimeout(total=15.0),
+            )
+    except Exception as exc:  # study saving must not fail because RAG is down
+        log.warning("bible study RAG ingest failed for session %s: %s", session_id, exc)
+
+
 @app.post("/api/bible/study/sessions/{session_id}/turn")
 async def proxy_bible_study_turn(request: Request, session_id: int):
     username = await _bible_caller(request)
     body = await request.json()
     payload = body if isinstance(body, dict) else {}
-    return await _bible_json(
+    result = await _bible_json(
         "POST",
         f"/study/sessions/{session_id}/turn",
         label="Could not save that study turn",
@@ -10957,6 +10991,10 @@ async def proxy_bible_study_turn(request: Request, session_id: int):
             "references": list(payload.get("references") or []),
         },
     )
+    turn = result.get("turn") if isinstance(result, dict) else None
+    if isinstance(turn, dict):
+        await _ingest_study_turn(username, session_id, turn)
+    return result
 
 
 @app.delete("/api/bible/study/sessions/{session_id}")
