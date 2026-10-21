@@ -91,3 +91,36 @@ def test_an_epub_book_imports_as_chapters(tmp_path):
         entry = book_import.devotional_for_day(session, book.id, 1)
         assert entry is not None
         assert entry["work"] == f"book:{book.id}"
+
+
+def test_an_uploaded_book_decodes_its_filename_and_keeps_the_whole_title(tmp_path, client, monkeypatch):
+    """A percent-encoded picker name must not become the book's title.
+
+    The Android picker and some browsers send ``Walk%20With%20Jesus.pdf``. That
+    name used to be accepted verbatim, saved under a generated
+    ``book-<timestamp>-`` prefix, and the prefix plus ``%20`` ended up in the
+    title the reader saw.
+    """
+    from services.bible import main as bible_main
+
+    monkeypatch.setattr(bible_main, "_import_dir", lambda: tmp_path)
+    response = client.post(
+        "/admin/books/upload",
+        files={
+            "file": (
+                "Walk%20With%20Jesus%20PDF%20-%201st%20Edition.pdf",
+                _pdf("Week 1: Introduction to Walk With Jesus."),
+                "application/pdf",
+            )
+        },
+        data={"kind": "study"},
+    )
+    assert response.status_code == 200, response.text
+    book = response.json()["book"]
+    assert book["title"] == "Walk With Jesus PDF - 1st Edition"
+    assert book["author"] == ""
+    assert book["chapter_count"] == 1
+    saved = [path for path in tmp_path.iterdir() if path.suffix == ".pdf"]
+    assert len(saved) == 1
+    assert saved[0].name.endswith("-Walk With Jesus PDF - 1st Edition.pdf")
+    assert "%20" not in saved[0].name

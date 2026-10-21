@@ -153,8 +153,12 @@ def import_book(
         )
     resolved_kind = kind if kind in BOOK_KINDS else "study"
     fallback_title, fallback_author = split_title_author(path.name)
+    supplied_title = bool(title.strip())
     title = (title or fallback_title).strip() or path.stem
-    author = (author or fallback_author).strip()
+    # "Title - Author.pdf" is a useful guess only when nobody supplied a
+    # title. An upload that already has a (decoded) filename title must not
+    # gain an author from an edition suffix such as "- 1st Edition".
+    author = (author or ("" if supplied_title else fallback_author)).strip()
     sections = extract_sections(path)
 
     existing = None

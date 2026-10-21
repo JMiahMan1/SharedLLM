@@ -54,6 +54,8 @@ export default function BibleBooksPanel() {
   const refresh = () => {
     void client.invalidateQueries({ queryKey: ['bible-admin-books'] });
     void client.invalidateQueries({ queryKey: ['bible-admin-books-browse'] });
+    void client.invalidateQueries({ queryKey: ['bible-imported-books'] });
+    void client.invalidateQueries({ queryKey: ['bible-imported-book'] });
     void client.invalidateQueries({ queryKey: ['bible-books'] });
   };
 

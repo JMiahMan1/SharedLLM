@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from urllib.parse import unquote
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
@@ -174,13 +175,13 @@ async def admin_book_import(payload: BookImportRequest):
     )
 
 
-def _book_upload_run(destination: Path, title: str, author: str, kind: str) -> dict:
+def _book_upload_run(destination: Path, title: str, author: str, kind: str, fallback_title: str = "") -> dict:
     with Session(_db()) as session:
         try:
             book = book_import.import_book(
                 session,
                 path=destination,
-                title=title,
+                title=title or fallback_title,
                 author=author,
                 kind=kind,
                 source="upload",
@@ -199,7 +200,11 @@ async def admin_book_upload(
     kind: str = Form(default="study"),
 ):
     directory = _import_dir()
-    filename = Path(str(file.filename or "")).name or "book"
+    # Browsers and the Android picker may percent-encode the name (a space
+    # arrives as "%20"), and the saved copy is named after the original file.
+    # Decode before both saving and deriving the fallback title, otherwise the
+    # book is listed as "book-1792617556-Walk%20With%20Jesus...".
+    filename = Path(unquote(str(file.filename or ""))).name or "book"
     suffix = Path(filename).suffix.lower()
     if suffix not in book_import.SUPPORTED_SUFFIXES:
         raise HTTPException(
@@ -207,6 +212,7 @@ async def admin_book_upload(
             detail=f"{filename} is not a book this service can read. Supported: PDF, EPUB.",
         )
     destination = directory / f"book-{int(time.time())}-{filename}"
+    fallback_title = Path(filename).stem.strip() or "Book"
     written = 0
     try:
         with destination.open("wb") as handle:
@@ -226,7 +232,7 @@ async def admin_book_upload(
         raise HTTPException(status_code=503, detail=f"Could not write {destination}: {exc}") from exc
     import asyncio
 
-    result = await asyncio.to_thread(_book_upload_run, destination, title, author, kind)
+    result = await asyncio.to_thread(_book_upload_run, destination, title, author, kind, fallback_title)
     result["bytes"] = written
     return result
 
