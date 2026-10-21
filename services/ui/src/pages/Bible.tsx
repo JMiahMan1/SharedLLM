@@ -110,6 +110,7 @@ function BibleReaderPane({
   const [input, setInput] = useState(requestedRef ?? chapterRef(position));
   const [searchTerm, setSearchTerm] = useState<string | null>(null);
   const [activeVerse, setActiveVerse] = useState<BibleVerse | null>(null);
+  const [speakingVerses, setSpeakingVerses] = useState<{ start: number; end: number } | null>(null);
   const [focusing, setFocusing] = useState(false);
   // A new requested passage (a link, a search hit, a cross-reference, a turned
   // page) replaces the search and fills the passage box. Adjusted during render
@@ -370,6 +371,7 @@ function BibleReaderPane({
               studiedVerses={studiedVerses}
               compareVerses={compareData?.verses}
               compareName={compareName}
+              speakingVerses={speakingVerses}
               fontScale={preferences.font_scale}
               lineHeight={preferences.line_height}
               theme={preferences.theme}
@@ -401,6 +403,8 @@ function BibleReaderPane({
           version={version}
           voice={preferences.read_aloud_voice}
           onVoiceChange={(read_aloud_voice) => onPreferences({ read_aloud_voice })}
+          text={passage.verses.map((verse) => verse.text).join(' ')}
+          onVersesChange={setSpeakingVerses}
         />
       ) : null}
 

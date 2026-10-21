@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Pause, Play, Volume2 } from 'lucide-react';
+import { Loader2, Pause, Play, Speaker, Volume2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 
 import { api } from '../../services/api';
@@ -12,6 +12,10 @@ interface Props {
   version: string;
   voice: string;
   onVoiceChange: (voice: string) => void;
+  /** Plain passage text, used when sending the reading to a speaker. */
+  text?: string;
+  /** Tells the reader which verses are currently being spoken. */
+  onVersesChange?: (range: { start: number; end: number } | null) => void;
 }
 
 type State = 'idle' | 'loading' | 'playing' | 'paused';
@@ -51,7 +55,7 @@ function remember(key: string, piece: SpokenPiece) {
  * Kokoro voice file or a passage too long to narrate comes back as its own
  * sentence and is shown verbatim rather than becoming a silent no-op.
  */
-export default function BibleReadAloud({ reference, version, voice, onVoiceChange }: Props) {
+export default function BibleReadAloud({ reference, version, voice, onVoiceChange, text = '', onVersesChange }: Props) {
   const { trigger } = useHaptics();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const urlRef = useRef('');
@@ -65,12 +69,22 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
   const [cachedAll, setCachedAll] = useState(false);
   const [progress, setProgress] = useState({ played: 0, total: 0 });
   const [rate, setRate] = useState<number>(1);
+  const [speaker, setSpeaker] = useState('');
+  const [announcing, setAnnouncing] = useState(false);
+  const [announceMessage, setAnnounceMessage] = useState('');
 
   const voices = useQuery({
     queryKey: ['bible-voices'],
     queryFn: () => api.getBibleVoices(),
     retry: false,
     staleTime: 60 * 60 * 1000,
+  });
+
+  const speakerDevices = useQuery({
+    queryKey: ['bible-speakers'],
+    queryFn: () => api.getTimerDevices(),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
   });
 
   // A new passage, translation or voice ends what is being read: the pieces
@@ -132,7 +146,7 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
     return piece;
   }
 
-  async function playPiece(piece: SpokenPiece) {
+  async function playPiece(piece: SpokenPiece, range?: { verse_start: number; verse_end: number }) {
     const element = audioRef.current;
     if (!element) return;
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -141,6 +155,9 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
     element.src = url;
     element.playbackRate = rate;
     await element.play();
+    if (range && range.verse_start > 0) {
+      onVersesChange?.({ start: range.verse_start, end: range.verse_end });
+    }
   }
 
   /** Fetch the pieces after the one playing, so the next is ready before it is needed. */
@@ -166,16 +183,18 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
     }
     if (nextRef.current >= plan.count) {
       setState('idle');
+      onVersesChange?.(null);
       return;
     }
     const index = nextRef.current;
     nextRef.current = index + 1;
     try {
       const piece = await pieceFor(index);
-      await playPiece(piece);
+      await playPiece(piece, plan.chunks[index]);
       setProgress({ played: nextRef.current, total: plan.count });
     } catch (error) {
       setState('idle');
+      onVersesChange?.(null);
       setMessage(messageOf(error));
     }
   }
@@ -204,7 +223,7 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
       nextRef.current = 1;
       const first = await pieceFor(0);
       if (runRef.current !== run) return;
-      await playPiece(first);
+      await playPiece(first, plan.chunks[0]);
       setState('playing');
       void trigger('success');
       void prefetch(run, plan.count);
@@ -241,11 +260,38 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
     planRef.current = null;
     setState('idle');
     setProgress({ played: 0, total: 0 });
+    onVersesChange?.(null);
+  }
+
+  async function playOnSpeaker() {
+    if (!speaker || !text.trim()) return;
+    setAnnouncing(true);
+    setAnnounceMessage('');
+    try {
+      const response = await api.sendAnnouncement({
+        entity_id: speaker,
+        message: `${reference}. ${text.trim()}`,
+        volume: 0.6,
+      });
+      setAnnounceMessage(
+        response.status === 'SUCCESS' ? 'Reading sent to the speaker.' : response.message || 'The speaker did not accept the reading.'
+      );
+    } catch (error) {
+      setAnnounceMessage(error instanceof Error ? error.message : 'Could not send the reading to that speaker.');
+    } finally {
+      setAnnouncing(false);
+    }
   }
 
   const working = state === 'loading';
   const voicesError = voices.error instanceof Error ? voices.error.message : '';
   const options = voices.data?.voices ?? [];
+  const speakerOptions = (speakerDevices.data?.devices ?? []).filter(
+    (device) =>
+      device.has_speaker &&
+      device.id !== 'phone' &&
+      !['unavailable', 'unknown'].includes((device.state || '').toLowerCase())
+  );
   const listening = state === 'playing' || state === 'paused';
 
   return (
@@ -318,6 +364,38 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
             </option>
           ))}
         </select>
+
+        {text && speakerOptions.length > 0 ? (
+          <>
+            <label htmlFor="bible-read-aloud-speaker" className="sr-only">
+              Speaker
+            </label>
+            <select
+              id="bible-read-aloud-speaker"
+              data-testid="bible-read-aloud-speaker"
+              value={speaker}
+              onChange={(event) => setSpeaker(event.target.value)}
+              className="min-h-11 rounded-xl bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-200"
+            >
+              <option value="">Speaker…</option>
+              {speakerOptions.map((device) => (
+                <option key={device.id} value={device.id}>
+                  {device.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => void playOnSpeaker()}
+              disabled={!speaker || announcing}
+              data-testid="bible-read-aloud-speaker-play"
+              className="min-h-11 px-3 rounded-xl text-xs font-medium bg-slate-700/70 text-slate-200 hover:bg-slate-600/70 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {announcing ? <Loader2 size={14} className="animate-spin" /> : <Speaker size={14} />}
+              Play on speaker
+            </button>
+          </>
+        ) : null}
       </div>
 
       <audio ref={audioRef} preload="none" className="hidden" data-testid="bible-read-aloud-audio" />
@@ -334,6 +412,12 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
         <p className="mt-2 text-xs text-slate-500" data-testid="bible-read-aloud-progress">
           {progress.total > 1 ? `Part ${Math.min(progress.played, progress.total)} of ${progress.total}` : 'Playing'}
           {cachedAll ? ' · from the narration cache' : ''}
+        </p>
+      ) : null}
+
+      {announceMessage ? (
+        <p className="mt-2 text-xs text-slate-400" data-testid="bible-read-aloud-speaker-message">
+          {announceMessage}
         </p>
       ) : null}
     </div>

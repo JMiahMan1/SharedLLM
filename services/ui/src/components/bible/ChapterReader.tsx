@@ -22,6 +22,8 @@ interface ChapterReaderProps {
   compareVerses?: BibleVerse[];
   /** The comparison's own name, shown so the second column is never anonymous. */
   compareName?: string;
+  /** Verses currently being read aloud, so the reader can follow the voice. */
+  speakingVerses?: { start: number; end: number } | null;
   fontScale: number;
   lineHeight: number;
   theme: 'serif' | 'sans';
@@ -54,6 +56,7 @@ export default function ChapterReader({
   studiedVerses,
   compareVerses,
   compareName,
+  speakingVerses,
   fontScale,
   lineHeight,
   theme,
@@ -125,6 +128,11 @@ export default function ChapterReader({
         const noted = own.some((m) => m.kind === 'note' && Boolean(m.note_path));
         const bookmarked = own.some((m) => m.kind === 'bookmark');
         const compareText = comparing ? byVerse.get(verse.verse) : undefined;
+        const speaking = Boolean(
+          speakingVerses &&
+            verse.verse >= speakingVerses.start &&
+            verse.verse <= speakingVerses.end
+        );
         return (
           <button
             key={`${verse.osis}-${verse.chapter}-${verse.verse}`}
@@ -137,7 +145,10 @@ export default function ChapterReader({
               noted ? '. Has your note.' : ''
             }${bookmarked ? '. Bookmarked.' : ''}${comparing && !compareText ? '. Not in the compared translation.' : ''}`}
             data-testid={`bible-verse-${verse.chapter}-${verse.verse}`}
-            className="w-full text-left rounded-lg px-2 py-1 min-h-11 pointer-coarse:min-h-11 border-l-2 border-transparent hover:bg-[var(--page-hover)] transition-colors"
+            data-speaking={speaking || undefined}
+            className={`w-full text-left rounded-lg px-2 py-1 min-h-11 pointer-coarse:min-h-11 border-l-2 border-transparent hover:bg-[var(--page-hover)] transition-colors ${
+              speaking ? 'bg-sky-500/10 ring-1 ring-inset ring-sky-400/50' : ''
+            }`}
             style={mark ? { backgroundColor: MARK_WASH[color], borderLeftColor: MARK_EDGE[color] } : undefined}
           >
             <span className={`flex gap-2 items-baseline ${comparing ? 'sm:grid sm:grid-cols-2 sm:gap-4' : ''}`}>

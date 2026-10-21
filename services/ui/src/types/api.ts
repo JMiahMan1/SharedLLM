@@ -2377,6 +2377,10 @@ export interface BibleNarrationPlanChunk {
   characters: number;
   /** True when this piece is already spoken and will come back immediately. */
   cached: boolean;
+  /** First verse spoken in this piece (0 is the passage heading). */
+  verse_start: number;
+  /** Last verse spoken in this piece. */
+  verse_end: number;
 }
 
 /**
@@ -2405,6 +2409,8 @@ export interface BibleNarrationChunk {
   count: number;
   characters: number;
   cached: boolean;
+  verse_start: number;
+  verse_end: number;
   mime_type: string;
   length_bytes: number;
   /** Base64 audio for this piece only. */
