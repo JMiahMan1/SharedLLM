@@ -121,3 +121,39 @@ describe('Health health/fitness analysis is opt-in', () => {
     });
   });
 });
+
+describe('auto-detected workouts', () => {
+  it('lets the person dismiss a workout they did not do', async () => {
+    const user = userEvent.setup();
+    useGeoHandlers();
+    let dismissed = false;
+    server.use(
+      http.get('/api/geo/workouts', () => HttpResponse.json({
+        workouts: [{
+          id: 'auto_workout_jeremiah_1',
+          user_id: 'jeremiah',
+          activity_type: 'walking',
+          start_time: 1_760_000_000,
+          end_time: 1_760_000_900,
+          duration_seconds: 900,
+          distance_miles: 0.8,
+          steps: 1600,
+          steps_source: 'gps_estimate',
+          status: 'completed',
+          auto_detected: true,
+        }],
+        total: 1,
+      })),
+      http.post('/api/geo/workouts/auto_workout_jeremiah_1/dismiss', () => {
+        dismissed = true;
+        return HttpResponse.json({ status: 'dismissed', id: 'auto_workout_jeremiah_1' });
+      }),
+    );
+
+    renderWithProviders(<Health />);
+
+    expect(await screen.findByText('Auto-detected')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /not a workout/i }));
+    await waitFor(() => expect(dismissed).toBe(true));
+  });
+});

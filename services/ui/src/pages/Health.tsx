@@ -29,6 +29,7 @@ import {
   Sparkles,
   Square,
   TrendingUp,
+  X,
 } from 'lucide-react';
 import {
   ACTIVITY_ICONS,
@@ -808,6 +809,15 @@ function Stat({ label, value }: { label: string; value: string }) {
 function WorkoutCard({ workout }: { workout: Workout }) {
   const Icon = ACTIVITY_ICONS[workout.activity_type] || Footprints;
   const pace = paceLabel(workout.distance_miles, workout.duration_seconds);
+  const queryClient = useQueryClient();
+  const dismiss = useMutation({
+    mutationFn: () => api.dismissWorkout(workout.id),
+    onSuccess: () => {
+      toast.success('Workout removed');
+      void queryClient.invalidateQueries({ queryKey: ['workouts'] });
+    },
+    onError: (err: unknown) => toast.error(serverDetail(err) ?? 'Could not dismiss workout.'),
+  });
   return (
     <article className="glass-card p-4 rounded-2xl">
       <div className="flex items-start justify-between gap-2 mb-3">
@@ -816,9 +826,16 @@ function WorkoutCard({ workout }: { workout: Workout }) {
             <Icon size={16} className="text-purple-400" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-white truncate">
-              {ACTIVITY_LABELS[workout.activity_type] || workout.activity_type}
-            </p>
+            <div className="flex items-center gap-2 min-w-0">
+              <p className="text-sm font-semibold text-white truncate">
+                {ACTIVITY_LABELS[workout.activity_type] || workout.activity_type}
+              </p>
+              {workout.auto_detected && (
+                <span className="shrink-0 rounded-full border border-sky-400/30 bg-sky-400/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-sky-200">
+                  Auto-detected
+                </span>
+              )}
+            </div>
             <p className="text-[11px] text-slate-500 flex items-center gap-1">
               <CalendarIcon size={10} />
               {formatTimeRange(workout.start_time, workout.end_time || workout.start_time)}
@@ -854,6 +871,18 @@ function WorkoutCard({ workout }: { workout: Workout }) {
           <p className="text-xs font-bold text-white">{pace ? `${pace} /mi` : 'No data'}</p>
         </div>
       </div>
+
+      {workout.auto_detected && (
+        <button
+          type="button"
+          onClick={() => dismiss.mutate()}
+          disabled={dismiss.isPending}
+          className="mt-2 inline-flex min-h-9 items-center gap-1 rounded-lg border border-white/10 px-2.5 text-[11px] text-slate-400 hover:bg-white/5 hover:text-slate-200 disabled:opacity-50"
+        >
+          <X size={11} />
+          Not a workout
+        </button>
+      )}
 
       {workout.notes && (
         <p className="text-[11px] text-slate-400 mt-2 italic">{workout.notes}</p>

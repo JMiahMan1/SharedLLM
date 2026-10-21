@@ -448,3 +448,23 @@ def test_closest_and_routes_forward_the_viewer(anon_client, make_client, monkeyp
         assert anon_client.get(path).status_code == 401
         assert make_client(user="kate").get(path).status_code == 200
         assert captured["calls"][-1]["params"]["viewer"] == "kate"
+
+
+def test_dismissing_an_auto_workout_is_scoped_to_the_caller(make_client, anon_client, monkeypatch):
+    captured = _patch_geo(monkeypatch, payload={"status": "dismissed", "id": "w1"})
+
+    denied = make_client(user="michele").post(
+        "/api/geo/workouts/w1/dismiss", json={"user_id": "jeremiah"}
+    )
+    assert denied.status_code == 403
+
+    assert anon_client.post("/api/geo/workouts/w1/dismiss").status_code == 401
+
+    resp = make_client(user="michele").post("/api/geo/workouts/w1/dismiss", json={})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "dismissed"
+    call = captured["calls"][-1]
+    assert call["verb"] == "post"
+    assert call["url"].endswith("/workouts/w1/dismiss")
+    assert call["headers"]["X-User-Id"] == "michele"
+    assert call["headers"]["X-Internal-Secret"]

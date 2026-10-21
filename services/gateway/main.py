@@ -10176,6 +10176,34 @@ async def stop_geo_workout(request: Request):
     await _raise_scoped_failure(resp, "Failed to stop workout")
 
 
+@app.post("/api/geo/workouts/{workout_id}/dismiss")
+async def dismiss_geo_workout(request: Request, workout_id: str):
+    """Hide an auto-detected workout the person says was not a workout."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    claimed = str(body.get("user_id") or "").strip().lower()
+    if claimed and claimed != ident["user"].lower() and not ident.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Cannot dismiss another user's workout")
+    target = claimed or ident["user"]
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{GEO_SVC}/workouts/{workout_id}/dismiss",
+            headers={
+                "X-Internal-Secret": INTERNAL_SECRET,
+                "X-User-Id": target,
+            },
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    await _raise_scoped_failure(resp, "Failed to dismiss workout")
+
+
 @app.get("/api/geo/workouts/{workout_id}/route")
 async def get_geo_workout_route(request: Request, workout_id: str):
     # The owner's sharing consent applies, as for their location: geo checks

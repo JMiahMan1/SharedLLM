@@ -74,6 +74,9 @@ class FakeRedis:
         hi_val = hi if isinstance(hi, (int, float)) else float(hi)
         self.zsets[zname] = [x for x in items if not (lo_val <= x[1] <= hi_val)]
 
+    async def zrem(self, zname, member):
+        self.zsets[zname] = [x for x in self.zsets.get(zname, []) if x[0] != member]
+
     async def hgetall(self, hname):
         return dict(self.hashes.get(hname, {}))
 

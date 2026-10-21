@@ -31,6 +31,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from services.geo import achievements, event_feed, metric_history, step_history
+from services.geo.auto_workouts import detect_auto_workouts
 from pydantic import BaseModel
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -92,10 +93,12 @@ async def lifespan(app: FastAPI):
     sweeper = asyncio.create_task(_idle_trip_sweeper())
     notices = asyncio.create_task(_notice_sweeper())
     fuel_prices = asyncio.create_task(_fuel_price_sweeper())
+    auto_workouts = asyncio.create_task(_auto_workout_sweeper())
     yield
     sweeper.cancel()
     notices.cancel()
     fuel_prices.cancel()
+    auto_workouts.cancel()
     global _redis
     if _redis is not None:
         try:
@@ -3211,6 +3214,143 @@ def _activity_speed_range(activity_type: str) -> tuple[float, float]:
     return ranges.get(activity_type, (0.5, 70.0))
 
 
+#: How often the background detector looks at recent breadcrumbs, and how far
+#: back it looks. A 12-hour window catches a workout completed while the phone
+#: was out of signal, without rescanning a month of history every five minutes.
+AUTO_WORKOUT_SWEEP_S = 300
+AUTO_WORKOUT_LOOKBACK_S = 12 * 3600
+AUTO_WORKOUT_DISMISSED_KEY = "geo:auto_workout_dismissed"
+
+
+async def _auto_workout_users(r) -> list[str]:
+    try:
+        keys = await r.keys("geo:history:*")
+    except Exception:
+        return []
+    users: set[str] = set()
+    for key in keys:
+        raw = str(key).split("geo:history:", 1)[-1]
+        user = raw.split(".")[-1].lower()
+        if user and not user.startswith("_"):
+            users.add(user)
+    return sorted(users)
+
+
+async def _auto_workout_sweep(r=None, *, now: float | None = None) -> dict:
+    """Turn recent walking/running/cycling breadcrumbs into pending workouts.
+
+    Detection is intentionally separate from the manual buttons: nothing is
+    written while a drive or a manual workout is active, and a candidate that
+    overlaps any existing workout or trip is ignored.
+    """
+    r = r or await get_redis()
+    if not r:
+        return {"users": 0, "created": 0, "skipped": 0, "errors": ["redis unavailable"]}
+    now = now or time.time()
+    summary = {"users": 0, "created": 0, "skipped": 0, "errors": []}
+    for user in await _auto_workout_users(r):
+        summary["users"] += 1
+        try:
+            if await r.get(f"geo:active_workout:{user}") or await r.get(f"geo:active_trip:{user}"):
+                summary["skipped"] += 1
+                continue
+
+            raw_points = await r.zrangebyscore(
+                f"geo:history:{user}", now - AUTO_WORKOUT_LOOKBACK_S, now
+            )
+            points = []
+            for raw in raw_points or []:
+                try:
+                    point = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if point.get("lat") is not None and point.get("lon") is not None:
+                    points.append(point)
+            if len(points) < 2:
+                continue
+
+            workouts = []
+            for workout_id in await r.zrevrange(f"geo:workouts:user:{user}", 0, 49):
+                raw = await r.get(f"geo:workout:{workout_id}")
+                if raw:
+                    with contextlib.suppress(ValueError, TypeError):
+                        workouts.append(json.loads(raw))
+            trips = []
+            for trip_id in await r.zrevrange(f"geo:trips:user:{user}", 0, 49):
+                raw = await r.get(f"geo:trip:{trip_id}")
+                if raw:
+                    with contextlib.suppress(ValueError, TypeError):
+                        trips.append(json.loads(raw))
+            dismissed = await r.zrangebyscore(
+                f"{AUTO_WORKOUT_DISMISSED_KEY}:{user}", now - 30 * 86400, now
+            )
+
+            for candidate in detect_auto_workouts(
+                points,
+                existing_workouts=workouts,
+                recent_trips=trips,
+                dismissed_starts=dismissed,
+            ):
+                workout_id = f"auto_workout_{user}_{int(candidate['start_time'])}"
+                if await r.get(f"geo:workout:{workout_id}"):
+                    continue
+                start_t = float(candidate["start_time"])
+                end_t = float(candidate["end_time"])
+                activity = candidate["activity_type"]
+                route_points = [p for p in points if start_t - 5 <= p.get("t", 0) <= end_t + 5]
+                steps = _estimate_steps_from_gps(activity, route_points)
+                workout = {
+                    "id": workout_id,
+                    "user_id": user,
+                    "user_name": user.title(),
+                    "activity_type": activity,
+                    "start_time": start_t,
+                    "end_time": end_t,
+                    "duration_seconds": candidate["duration_seconds"],
+                    "distance_miles": candidate["distance_miles"],
+                    "top_speed_mph": candidate["top_speed_mph"],
+                    "avg_speed_mph": candidate["avg_speed_mph"],
+                    "steps": steps,
+                    "steps_source": "gps_estimate" if steps is not None else None,
+                    "elevation_gain_ft": 0,
+                    "calories_burned": None,
+                    "notes": "Detected automatically from your location history",
+                    "status": "completed",
+                    "auto_detected": True,
+                    "confirmed": False,
+                    "source": "auto_gps",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                await r.set(f"geo:workout:{workout_id}", json.dumps(workout))
+                await r.zadd(f"geo:workouts:user:{user}", {workout_id: start_t})
+                await r.zadd("geo:workouts:all", {workout_id: start_t})
+                summary["created"] += 1
+                log.info(
+                    f"[Geo] Auto-detected {activity} workout {workout_id}: "
+                    f"{candidate['distance_miles']} mi in {candidate['duration_seconds']}s"
+                )
+        except Exception as e:
+            log.warning(f"[Geo] Auto workout sweep failed for {user}: {e}")
+            summary["errors"].append(f"{user}: {str(e)[:120]}")
+    return summary
+
+
+async def _auto_workout_sweeper() -> None:
+    # Let the trip sweeper settle first; no need to scan during startup.
+    await asyncio.sleep(120)
+    while True:
+        try:
+            result = await _auto_workout_sweep()
+            if result.get("created"):
+                log.info(f"[Geo] Auto workouts: {result['created']} new")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning(f"[Geo] Auto workout sweeper error: {e}")
+        await asyncio.sleep(AUTO_WORKOUT_SWEEP_S)
+
+
 # Stride-length model for the GPS-estimated pedometer (step counts for activities
 # without a hardware step counter). Cadence-aware: stride lengthens with speed
 # following real biomechanics (walking ~0.65-0.85 m, running ~0.9-1.6 m).
@@ -4384,6 +4524,46 @@ async def stop_workout(
     await r.delete(f"geo:active_workout:{user}")
     log.info(f"[Geo] Completed {activity} workout {workout['id']}: {distance_miles} mi in {duration}s")
     return {"status": "ok", "workout": workout}
+
+
+@app.post("/workouts/{workout_id}/dismiss")
+async def dismiss_workout(
+    workout_id: str,
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Hide an automatically detected workout the person says they did not do."""
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    user = (x_user_id or "").split(".")[-1].lower()
+    if not user:
+        raise HTTPException(status_code=400, detail="X-User-Id header required")
+
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    raw = await r.get(f"geo:workout:{workout_id}")
+    if not raw:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    try:
+        workout = json.loads(raw)
+    except ValueError:
+        raise HTTPException(status_code=500, detail="Workout is unreadable")
+    if workout.get("user_id") != user:
+        raise HTTPException(status_code=403, detail="You can only dismiss your own workout")
+    if not workout.get("auto_detected"):
+        raise HTTPException(status_code=400, detail="Only automatically detected workouts can be dismissed")
+
+    start_t = float(workout.get("start_time") or 0)
+    dismissed_key = f"{AUTO_WORKOUT_DISMISSED_KEY}:{user}"
+    await r.zadd(dismissed_key, {str(start_t): start_t})
+    await r.zremrangebyscore(dismissed_key, 0, time.time() - 30 * 86400)
+    await r.zrem(f"geo:workouts:user:{user}", workout_id)
+    await r.zrem("geo:workouts:all", workout_id)
+    await r.delete(f"geo:workout:{workout_id}")
+    log.info(f"[Geo] Dismissed auto workout {workout_id} for {user}")
+    return {"status": "dismissed", "id": workout_id}
 
 
 @app.get("/workouts/{workout_id}/route")
