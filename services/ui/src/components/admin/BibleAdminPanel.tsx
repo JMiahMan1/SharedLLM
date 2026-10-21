@@ -25,6 +25,7 @@ import type {
   BibleLibraryListing,} from '../../types/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import InterlinearAdminSection from './InterlinearAdminSection';
+import BibleBooksPanel from './BibleBooksPanel';
 
 const KIND_LABELS: Record<BibleImportKind, string> = {
   json: 'Plain text (JSON)',
@@ -213,6 +214,8 @@ export default function BibleAdminPanel() {
         knownCodes={knownCodes}
         onInstall={(payload) => runImport.mutate(payload)}
       />
+
+      <BibleBooksPanel />
 
       <InterlinearAdminSection />
 

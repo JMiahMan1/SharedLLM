@@ -205,6 +205,7 @@ BIBLE_DEVOTIONAL_DIR = os.getenv("BIBLE_DEVOTIONAL_DIR")
 # the admin import page refuses to accept a file until an operator says where
 # they want it kept, rather than scattering copies across the container.
 BIBLE_IMPORT_DIR = os.getenv("BIBLE_IMPORT_DIR")
+BIBLE_BOOKS_PATH = os.getenv("BIBLE_BOOKS_PATH")
 # Key for the online translation providers declared in corpus_manifest.json.
 # Deliberately no default: without it the provider reports that it is
 # unconfigured and the admin page says which setting to set.
@@ -297,6 +298,7 @@ async def resolve_runtime_config():
         "blb_base_url": "BLB_BASE_URL",
         "bible_devotional_dir": "BIBLE_DEVOTIONAL_DIR",
         "bible_import_dir": "BIBLE_IMPORT_DIR",
+        "bible_books_path": "BIBLE_BOOKS_PATH",
         "bible_provider_cache": "BIBLE_PROVIDER_CACHE",
         "bible_provider_call_budget": "BIBLE_PROVIDER_CALL_BUDGET",
         "control_plane_url": "CONTROL_PLANE_URL",

@@ -464,3 +464,68 @@ class VerseContext(SQLModel, table=True):
     verses_used: int = Field(default=0)
     notes_used: int = Field(default=0)
     generated_at: datetime = Field(default_factory=utcnow)
+
+
+class ImportedBook(SQLModel, table=True):
+    """A PDF or EPUB the family added for devotionals or study.
+
+    These are *books*, not translations. A daily devotional is usually a
+    chapter per day; a study book is read alongside Scripture. Keeping them in
+    their own table means importing a 365-day devotional can never make the
+    Bible importer think a translation is missing 65 books.
+    """
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    title: str = Field(index=True)
+    author: str = Field(default="")
+    kind: str = Field(default="study", index=True)  # devotional | study
+    source: str = Field(default="upload")  # nextcloud | calibre | upload
+    source_path: str = Field(default="")
+    chapter_count: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class ImportedBookChapter(SQLModel, table=True):
+    """One readable section of an imported book, in reading order."""
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    ordinal: int = Field(index=True)
+    label: str = Field(default="")
+    text: str = Field(default="")
+    #: JSON array of questions found at the end of the section.
+    questions: str = Field(default="")
+
+
+class StudySession(SQLModel, table=True):
+    """One open Bible study, so a reader can keep several passages going.
+
+    The panel used to be a single overlay: opening another passage replaced the
+    first conversation. A session is deliberately small (reference, translation
+    and a title); its turns live in ``StudySessionTurn`` and the actual answer
+    still comes from the grounded ``/study/ask`` path.
+    """
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    title: str = Field(default="")
+    reference: str = Field(default="")
+    version: str = Field(default="")
+    edition: str = Field(default="")
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class StudySessionTurn(SQLModel, table=True):
+    """A question and grounded answer kept inside one study session."""
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    session_id: int = Field(index=True)
+    question: str = Field(default="")
+    answer: str = Field(default="")
+    references: str = Field(default="")
+    created_at: datetime = Field(default_factory=utcnow)

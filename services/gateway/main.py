@@ -10892,6 +10892,73 @@ async def proxy_bible_devotional_sources(request: Request):
     )
 
 
+@app.get("/api/bible/study/sessions")
+async def proxy_bible_study_sessions(request: Request):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/study/sessions", label="Could not read study sessions", params={"username": username}
+    )
+
+
+@app.post("/api/bible/study/sessions")
+async def proxy_bible_study_session_create(request: Request):
+    username = await _bible_caller(request)
+    body = await request.json()
+    payload = body if isinstance(body, dict) else {}
+    return await _bible_json(
+        "POST",
+        "/study/sessions",
+        label="Could not start that study",
+        json={
+            "username": username,
+            "reference": str(payload.get("reference") or ""),
+            "version": str(payload.get("version") or ""),
+            "edition": str(payload.get("edition") or ""),
+            "title": str(payload.get("title") or ""),
+        },
+    )
+
+
+@app.get("/api/bible/study/sessions/{session_id}")
+async def proxy_bible_study_session(request: Request, session_id: int):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        f"/study/sessions/{session_id}",
+        label="Could not read that study",
+        params={"username": username},
+    )
+
+
+@app.post("/api/bible/study/sessions/{session_id}/turn")
+async def proxy_bible_study_turn(request: Request, session_id: int):
+    username = await _bible_caller(request)
+    body = await request.json()
+    payload = body if isinstance(body, dict) else {}
+    return await _bible_json(
+        "POST",
+        f"/study/sessions/{session_id}/turn",
+        label="Could not save that study turn",
+        params={"username": username},
+        json={
+            "question": str(payload.get("question") or ""),
+            "answer": str(payload.get("answer") or ""),
+            "references": list(payload.get("references") or []),
+        },
+    )
+
+
+@app.delete("/api/bible/study/sessions/{session_id}")
+async def proxy_bible_study_session_delete(request: Request, session_id: int):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "DELETE",
+        f"/study/sessions/{session_id}",
+        label="Could not close that study",
+        params={"username": username},
+    )
+
+
 @app.get("/api/bible/daily")
 async def proxy_bible_daily(request: Request):
     """One call for the dashboard widget and the Android home screen.
@@ -11637,6 +11704,138 @@ async def proxy_bible_admin_import_upload(request: Request):
             timeout=_BIBLE_IMPORT_TIMEOUT,
         )
         return await _bible_import_response(resp)
+
+
+@app.get("/api/bible/admin/books")
+async def proxy_bible_admin_books(request: Request):
+    """Imported devotional/study books and the two shelf roots."""
+    await _require_admin(request)
+    return await _bible_json("GET", "/admin/books", label="Failed to read imported books")
+
+
+@app.get("/api/bible/admin/books/browse")
+async def proxy_bible_admin_books_browse(request: Request, source: str = "nextcloud", path: str = ""):
+    """Browse Nextcloud Books or the Calibre shelf for PDF/EPUB files."""
+    await _require_admin(request)
+    return await _bible_json(
+        "GET",
+        "/admin/books/browse",
+        label="Could not read that book shelf",
+        params={"source": source, "path": path},
+        timeout=_BIBLE_IMPORT_TIMEOUT,
+    )
+
+
+@app.post("/api/bible/admin/books/import")
+async def proxy_bible_admin_book_import(request: Request):
+    """Import one PDF/EPUB from a shelf as a devotional or study book."""
+    await _require_admin(request)
+    body = await request.json()
+    payload = body if isinstance(body, dict) else {}
+    return await _bible_json(
+        "POST",
+        "/admin/books/import",
+        label="The book could not be imported",
+        json={
+            "source": str(payload.get("source") or "nextcloud"),
+            "path": str(payload.get("path") or ""),
+            "title": str(payload.get("title") or ""),
+            "author": str(payload.get("author") or ""),
+            "kind": str(payload.get("kind") or "study"),
+        },
+        timeout=_BIBLE_IMPORT_TIMEOUT,
+    )
+
+
+@app.post("/api/bible/admin/books/upload")
+async def proxy_bible_admin_book_upload(request: Request):
+    """Import a PDF/EPUB the admin picked from their desktop."""
+    await _require_admin(request)
+    form = await request.form()
+    uploaded = form.get("file")
+    if not isinstance(uploaded, UploadFile) or not uploaded.filename:
+        raise HTTPException(status_code=400, detail="A PDF or EPUB is required")
+    upload = aiohttp.FormData()
+    for field in ("title", "author", "kind"):
+        value = form.get(field)
+        if value not in (None, ""):
+            upload.add_field(field, str(value))
+    upload.add_field(
+        "file",
+        uploaded.file,
+        filename=uploaded.filename,
+        content_type=uploaded.content_type or "application/octet-stream",
+    )
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{BIBLE_SVC}/admin/books/upload",
+            data=upload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=_BIBLE_IMPORT_TIMEOUT,
+        )
+        return await _bible_import_response(resp)
+
+
+@app.delete("/api/bible/admin/books/{book_id}")
+async def proxy_bible_admin_book_delete(request: Request, book_id: int):
+    await _require_admin(request)
+    return await _bible_json(
+        "DELETE", f"/admin/books/{book_id}", label="Could not delete that book"
+    )
+
+
+@app.get("/api/bible/imported-books")
+async def proxy_bible_imported_books(request: Request, kind: str | None = None):
+    """Imported devotional/study books available to readers."""
+    await _require_identity_from_request(request)
+    return await _bible_json(
+        "GET", "/books", label="Failed to read the imported book library", params={"kind": kind}
+    )
+
+
+@app.get("/api/bible/imported-books/{book_id}")
+async def proxy_bible_imported_book(request: Request, book_id: int):
+    await _require_identity_from_request(request)
+    return await _bible_json("GET", f"/books/{book_id}", label="Failed to read that book")
+
+
+@app.get("/api/bible/imported-books/{book_id}/chapters/{ordinal}")
+async def proxy_bible_imported_book_chapter(request: Request, book_id: int, ordinal: int):
+    await _require_identity_from_request(request)
+    return await _bible_json(
+        "GET", f"/books/{book_id}/chapters/{ordinal}", label="Failed to read that chapter"
+    )
+
+
+@app.post("/api/bible/imported-books/{book_id}/chapters/{ordinal}/ask")
+async def proxy_bible_imported_book_question(request: Request, book_id: int, ordinal: int):
+    username = await _bible_caller(request)
+    body = await request.json()
+    payload = body if isinstance(body, dict) else {}
+    return await _bible_json(
+        "POST",
+        f"/books/{book_id}/chapters/{ordinal}/ask",
+        label="Could not answer from that chapter",
+        json={"username": username, "question": str(payload.get("question") or "")},
+        timeout=_BIBLE_STUDY_TIMEOUT,
+    )
+
+
+@app.get("/api/bible/devotional/works")
+async def proxy_bible_devotional_works(request: Request):
+    await _require_identity_from_request(request)
+    return await _bible_json("GET", "/devotional/works", label="Failed to read devotional books")
+
+
+@app.get("/api/bible/devotional/book/{book_id}")
+async def proxy_bible_devotional_book(request: Request, book_id: int, day: str | None = None):
+    await _require_identity_from_request(request)
+    return await _bible_json(
+        "GET",
+        f"/devotional/book/{book_id}",
+        label="Failed to read that devotional",
+        params={"day": day},
+    )
 
 
 # --- Scheduled telemetry reports (health/fitness + power) --------------------

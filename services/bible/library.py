@@ -212,7 +212,9 @@ class LibraryClient:
             )
         return self.storage_url
 
-    async def browse(self, *, root: str, path: str) -> LibraryListing:
+    async def browse(
+        self, *, root: str, path: str, provider: str = "nextcloud", recursive: bool = False
+    ) -> LibraryListing:
         """List one folder of the shelf.
 
         An empty path means the shelf root, because that is what the admin page
@@ -240,9 +242,9 @@ class LibraryClient:
                 async with session.post(
                     url,
                     json={
-                        "provider": {"kind": "nextcloud", "settings": {}},
+                        "provider": {"kind": provider, "settings": {}},
                         "path": wanted,
-                        "recursive": False,
+                        "recursive": recursive,
                     },
                     headers={"X-Internal-Secret": self.internal_secret},
                 ) as response:
@@ -261,7 +263,9 @@ class LibraryClient:
             )
         return describe(raw, path=wanted, root=base)
 
-    async def fetch(self, *, root: str, path: str, destination: Path) -> Path:
+    async def fetch(
+        self, *, root: str, path: str, destination: Path, provider: str = "nextcloud"
+    ) -> Path:
         """Download one file into ``destination`` and return the path written."""
         wanted = normalise_path(path)
         base = normalise_path(root)
@@ -282,7 +286,7 @@ class LibraryClient:
                 async with session.post(
                     url,
                     json={
-                        "provider": {"kind": "nextcloud", "settings": {}},
+                        "provider": {"kind": provider, "settings": {}},
                         "path": wanted,
                     },
                     headers={"X-Internal-Secret": self.internal_secret},
