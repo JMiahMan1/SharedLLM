@@ -277,6 +277,8 @@ class Chunk:
 
     index: int
     text: str
+    verse_start: int = 0
+    verse_end: int = 0
 
     @property
     def characters(self) -> int:
@@ -292,22 +294,42 @@ def split_script(script: Script) -> list[Chunk]:
     Pieces are cut at paragraph and sentence boundaries so no chunk ends
     mid-word, and the first is short so sound starts while the rest is still
     being rendered.
+
+    Each piece carries the verse range it speaks, so the reader can tint the
+    verse being heard without guessing from character offsets.
     """
-    pieces = [part.strip() for part in _SPLIT.split(script.text) if part.strip()]
+    # The heading is not a verse; verse numbers start at 1 for the body lines.
+    pieces: list[tuple[int, str]] = [(0, script.reference)]
+    for verse_no, line in enumerate(script.body.split("\n"), start=1):
+        for part in _SPLIT.split(line.strip()):
+            part = part.strip()
+            if part:
+                pieces.append((verse_no, part))
+
     chunks: list[Chunk] = []
-    current: list[str] = []
+    current: list[tuple[int, str]] = []
     size = 0
     limit = FIRST_CHUNK_CHARACTERS
-    for piece in pieces:
+    for verse_no, piece in pieces:
         if current and size + len(piece) + 1 > limit:
-            chunks.append(Chunk(index=len(chunks), text=" ".join(current)))
+            chunks.append(_chunk(len(chunks), current))
             current, size = [], 0
             limit = TARGET_CHUNK_CHARACTERS
-        current.append(piece)
+        current.append((verse_no, piece))
         size += len(piece) + 1
     if current:
-        chunks.append(Chunk(index=len(chunks), text=" ".join(current)))
+        chunks.append(_chunk(len(chunks), current))
     return chunks
+
+
+def _chunk(index: int, pieces: list[tuple[int, str]]) -> Chunk:
+    verses = [verse for verse, _ in pieces if verse > 0]
+    return Chunk(
+        index=index,
+        text=" ".join(text for _, text in pieces),
+        verse_start=min(verses) if verses else 0,
+        verse_end=max(verses) if verses else 0,
+    )
 
 
 def chunk_key(version: str, reference: str, voice: str, chunk: Chunk) -> str:
@@ -366,6 +388,8 @@ def plan(
                 "index": chunk.index,
                 "characters": chunk.characters,
                 "cached": keys[chunk.index] in spoken,
+                "verse_start": chunk.verse_start,
+                "verse_end": chunk.verse_end,
             }
             for chunk in chunks
         ],
@@ -487,6 +511,8 @@ def _chunk_payload(
         "count": count,
         "characters": chunk.characters,
         "cached": cached,
+        "verse_start": chunk.verse_start,
+        "verse_end": chunk.verse_end,
         "mime_type": mime_type,
         "length_bytes": len(audio),
         "audio_base64": base64.b64encode(audio).decode("utf-8"),

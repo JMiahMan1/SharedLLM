@@ -10,6 +10,8 @@ const apiMock = vi.hoisted(() => ({
   getBibleVoices: vi.fn(),
   getBibleNarrationPlan: vi.fn(),
   getBibleNarrationChunk: vi.fn(),
+  getTimerDevices: vi.fn(),
+  sendAnnouncement: vi.fn(),
 }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -35,6 +37,8 @@ function plan(over: Record<string, unknown> = {}) {
       index,
       characters: 300,
       cached: false,
+      verse_start: index + 1,
+      verse_end: index + 1,
     })),
     ...over,
   };
@@ -49,6 +53,8 @@ function chunk(over: Record<string, unknown> = {}) {
     count: 3,
     characters: 300,
     cached: false,
+    verse_start: 1,
+    verse_end: 1,
     mime_type: 'audio/wav',
     length_bytes: 4,
     audio_base64: 'AAAA',
@@ -56,7 +62,12 @@ function chunk(over: Record<string, unknown> = {}) {
   };
 }
 
-function renderPanel(voice = '', reference = 'John 3') {
+function renderPanel(
+  voice = '',
+  reference = 'John 3',
+  text = '',
+  onVersesChange?: (range: { start: number; end: number } | null) => void,
+) {
   const onVoiceChange = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
@@ -66,6 +77,8 @@ function renderPanel(voice = '', reference = 'John 3') {
         version="nkjv"
         voice={voice}
         onVoiceChange={onVoiceChange}
+        text={text}
+        onVersesChange={onVersesChange}
       />
     </QueryClientProvider>,
   );
@@ -82,6 +95,12 @@ describe('BibleReadAloud', () => {
     apiMock.getBibleNarrationChunk.mockImplementation(async (_ref: string, index: number) =>
       chunk({ index }),
     );
+    apiMock.getTimerDevices.mockResolvedValue({
+      devices: [
+        { id: 'media_player.kitchen', name: 'Kitchen Speaker', has_speaker: true, state: 'idle' },
+      ],
+    });
+    apiMock.sendAnnouncement.mockResolvedValue({ status: 'SUCCESS', message: 'sent' });
     URL.createObjectURL = vi.fn(() => {
       blobUrls += 1;
       return `blob:verse-${blobUrls}`;
@@ -97,6 +116,13 @@ describe('BibleReadAloud', () => {
     expect(screen.getByTestId('bible-read-aloud-play').textContent).toContain('Read this passage');
     expect(apiMock.getBibleNarrationPlan).not.toHaveBeenCalled();
     expect(apiMock.getBibleNarrationChunk).not.toHaveBeenCalled();
+  });
+
+  it('tells the reader which verse is being spoken', async () => {
+    const onVersesChange = vi.fn();
+    renderPanel('', 'John 3', '', onVersesChange);
+    await userEvent.click(screen.getByTestId('bible-read-aloud-play'));
+    await waitFor(() => expect(onVersesChange).toHaveBeenCalledWith({ start: 1, end: 1 }));
   });
 
   it('asks how the passage is spoken, then plays the first piece', async () => {
@@ -145,7 +171,7 @@ describe('BibleReadAloud', () => {
         count: 1,
         all_cached: true,
         cached_count: 1,
-        chunks: [{ index: 0, characters: 300, cached: true }],
+        chunks: [{ index: 0, characters: 300, cached: true, verse_start: 1, verse_end: 1 }],
       }),
     );
     renderPanel('', 'Ps 23');
@@ -239,5 +265,23 @@ describe('BibleReadAloud', () => {
     await userEvent.selectOptions(screen.getByTestId('bible-read-aloud-rate'), '1.25');
 
     expect(audioElement().playbackRate).toBe(1.25);
+  });
+
+  it('sends the passage to a speaker from the same panel', async () => {
+    renderPanel('', 'John 3', 'For God so loved the world.');
+    const speaker = (await screen.findByTestId('bible-read-aloud-speaker')) as HTMLSelectElement;
+    await userEvent.selectOptions(speaker, 'media_player.kitchen');
+    await userEvent.click(screen.getByTestId('bible-read-aloud-speaker-play'));
+
+    await waitFor(() =>
+      expect(apiMock.sendAnnouncement).toHaveBeenCalledWith({
+        entity_id: 'media_player.kitchen',
+        message: 'John 3. For God so loved the world.',
+        volume: 0.6,
+      }),
+    );
+    expect(await screen.findByTestId('bible-read-aloud-speaker-message')).toHaveTextContent(
+      'Reading sent to the speaker.',
+    );
   });
 });

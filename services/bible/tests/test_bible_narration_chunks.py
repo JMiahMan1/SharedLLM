@@ -132,6 +132,14 @@ def test_the_pieces_join_back_together():
     assert rejoined == " ".join(script.text.split())
 
 
+def test_each_piece_carries_the_verse_range_it_speaks():
+    script = narration.Script(reference="Test 1", body="One.\nTwo.\nThree.")
+    chunks = narration.split_script(script)
+    assert chunks[0].verse_start == 1
+    assert chunks[-1].verse_end == 3
+    assert all(chunk.verse_start <= chunk.verse_end for chunk in chunks)
+
+
 def test_a_piece_ends_where_a_sentence_ends():
     chunks = narration.split_script(_script())
     for chunk in chunks[:-1]:
