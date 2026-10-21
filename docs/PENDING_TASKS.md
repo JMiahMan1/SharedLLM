@@ -3,34 +3,18 @@
 The one backlog for work that is **not done yet**. Verified against the code
 on 2026-10-20. When something here ships, delete it; history lives in git.
 
-## Security
-
-### Other open findings from the 2026-08-22 code review
-
-Re-checked 2026-10-15 and still present. About 80 medium/low findings from
-that review were not re-checked one by one; the full list is in git history
-(`docs/code_review_2026-08-22.md`, removed in the 2026-10-15 cleanup).
-
-- **Workspace tests**: the Docker reachability test is marked `local_only`
-  and skips when no daemon is available; CI does not require the host socket
-  (W1).
-
-## Raven capability gaps
-
-- No browser automation and no screenshot feedback, so Raven cannot test UIs.
-- No multi-agent delegation; one model instance does all the work.
-- CI generation depends on GitHub credentials being present.
-- No dependency-install awareness; missing packages are found by failing.
-- Loop detection escalates but does not diagnose.
-- No shared library/template reuse across workspaces.
-
 ## Media player
 
 - Background playback stops when the app is swiped away from recents (the
   WebView is destroyed). Surviving that needs a native audio player.
 - The remaining phases of `docs/MEDIA_OVERHAUL.md`.
 
-## Family hub
+## Bible study
 
-- Calls: media (audio/video in-app) needs a Talk client library or LiveKit,
-  and a reachable STUN/TURN server off the LAN.
+- Study-memory search: ingest promoted notes and study threads into RAG with
+  stable citable ids, then answer "where did we discuss this?" from them.
+- Workspace export: write the study journal, memory sets and quiz results to an
+  opt-in workspace.
+- In-chat Bible trivia: the Talk game API exists, but `FAMILY_GAMES_ENABLED` is
+  off and the question source is the generic trivia set, not the Bible corpus.
+- Synced-scroll comparison and the reference-chip popover remain.
