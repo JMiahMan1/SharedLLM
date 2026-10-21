@@ -91,9 +91,11 @@ async def lifespan(app: FastAPI):
     await get_redis()
     sweeper = asyncio.create_task(_idle_trip_sweeper())
     notices = asyncio.create_task(_notice_sweeper())
+    fuel_prices = asyncio.create_task(_fuel_price_sweeper())
     yield
     sweeper.cancel()
     notices.cancel()
+    fuel_prices.cancel()
     global _redis
     if _redis is not None:
         try:
@@ -1606,6 +1608,9 @@ class VehiclePayload(BaseModel):
     mpg: float
     cost_per_gallon: float
     fuel_type: str = "regular"
+    # ZIP code or city used for the daily AAA price refresh. Empty means the
+    # home zone is used.
+    fuel_price_location: str = ""
 
 
 class VehicleAssignPayload(BaseModel):
@@ -5096,14 +5101,17 @@ async def _fetch_aaa_prices(state_code: str) -> dict:
     return {"state_prices": state_prices, "metros": metros}
 
 
-@app.get("/fuel-prices")
-async def get_fuel_prices(location: str = Query(..., min_length=1)):
-    """Look up current fuel prices by ZIP code, city/state, or lat,lon."""
-    cache_key = f"geo:fuel_prices:{location.strip().lower()}"
+async def _fuel_prices_for_location(location: str, *, use_cache: bool = True) -> dict:
+    """Resolve a location and return AAA state/metro prices.
+
+    ``use_cache=False`` is for the daily vehicle refresh: it must ask AAA
+    once a day even when a browser looked up the same ZIP hours earlier.
+    """
+    location = location.strip()
+    cache_key = f"geo:fuel_prices:{location.lower()}"
     r = await get_redis()
 
-    # Check cache first
-    if r:
+    if use_cache and r:
         try:
             cached = await r.get(cache_key)
             if cached:
@@ -5131,7 +5139,6 @@ async def get_fuel_prices(location: str = Query(..., min_length=1)):
         raise HTTPException(status_code=502, detail="Unable to fetch fuel prices from upstream source")
 
     # 3. Match metro
-    matched_metro = None
     matched_prices = aaa.get("state_prices", {})
     source_label = f"{_ABBR_TO_NAME.get(state_code, state_code)} state average"
 
@@ -5140,7 +5147,6 @@ async def get_fuel_prices(location: str = Query(..., min_length=1)):
         for metro_name, metro_prices in aaa.get("metros", {}).items():
             metro_lower = metro_name.lower()
             if city_lower in metro_lower or metro_lower.split("-")[0].strip() in city_lower:
-                matched_metro = metro_name
                 matched_prices = metro_prices
                 source_label = f"{metro_name} metro daily average"
                 break
@@ -5151,14 +5157,150 @@ async def get_fuel_prices(location: str = Query(..., min_length=1)):
         "prices": matched_prices,
     }
 
-    # Cache
-    if r:
+    if use_cache and r:
         try:
             await r.set(cache_key, json.dumps(result), ex=_FUEL_PRICE_CACHE_TTL)
         except Exception:
             pass
 
     return result
+
+
+@app.get("/fuel-prices")
+async def get_fuel_prices(location: str = Query(..., min_length=1)):
+    """Look up current fuel prices by ZIP code, city/state, or lat,lon."""
+    return await _fuel_prices_for_location(location)
+
+
+_FUEL_PRICE_DAILY_KEY = "geo:fuel_prices:daily"
+_FUEL_PRICE_CHECK_S = 3600
+
+
+def _vehicle_fuel_key(fuel_type: str | None) -> str | None:
+    """AAA only publishes gasoline grades and diesel; electric is skipped."""
+    kind = (fuel_type or "gasoline").lower()
+    if "electric" in kind:
+        return None
+    if "diesel" in kind:
+        return "diesel"
+    return "regular"
+
+
+async def _home_fuel_location() -> str:
+    """Home zone coordinates, used when a vehicle has no saved ZIP."""
+    try:
+        zones = await _zones_cached()
+        home = next((z for z in zones if z.get("entity_id") == "zone.home"), None)
+        if home:
+            return f"{home['latitude']},{home['longitude']}"
+    except Exception as exc:
+        log.debug(f"[fuel-prices] Home zone unavailable: {exc}")
+    return ""
+
+
+async def _refresh_fuel_prices(r=None, *, now=None, force: bool = False) -> dict:
+    """Refresh every vehicle's cost_per_gallon from AAA once per day.
+
+    A vehicle with ``fuel_price_location`` (ZIP or city) refreshes from that
+    place; otherwise it uses the home zone. A failed upstream lookup leaves
+    the existing price untouched rather than replacing it with a guess.
+    """
+    r = r or await get_redis()
+    stamp = (now or datetime.now()).date().isoformat()
+    if not r:
+        return {"date": stamp, "updated": 0, "skipped": 0, "errors": ["Redis unavailable"]}
+
+    if not force:
+        try:
+            if await r.get(_FUEL_PRICE_DAILY_KEY) == stamp:
+                return {"date": stamp, "updated": 0, "skipped": 0, "errors": [], "already_ran": True}
+        except Exception:
+            pass
+
+    try:
+        raw_vehicles = await r.hgetall("geo:vehicles")
+    except Exception as exc:
+        return {"date": stamp, "updated": 0, "skipped": 0, "errors": [str(exc)]}
+
+    if not raw_vehicles:
+        try:
+            await r.set(_FUEL_PRICE_DAILY_KEY, stamp)
+        except Exception:
+            pass
+        return {"date": stamp, "updated": 0, "skipped": 0, "errors": []}
+
+    home_location = ""
+    lookups: dict[str, dict] = {}
+    updated = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for vehicle_id, raw in raw_vehicles.items():
+        try:
+            vehicle = json.loads(raw)
+        except (TypeError, ValueError):
+            skipped += 1
+            continue
+        price_key = _vehicle_fuel_key(vehicle.get("fuel_type"))
+        if price_key is None:
+            skipped += 1
+            continue
+        location = str(vehicle.get("fuel_price_location") or "").strip()
+        if not location:
+            if not home_location:
+                home_location = await _home_fuel_location()
+            location = home_location
+        if not location:
+            skipped += 1
+            continue
+        try:
+            if location not in lookups:
+                lookups[location] = await _fuel_prices_for_location(location, use_cache=False)
+            result = lookups[location]
+            price = (result.get("prices") or {}).get(price_key)
+            if price is None:
+                errors.append(f"{vehicle_id}: no {price_key} price")
+                skipped += 1
+                continue
+            vehicle["cost_per_gallon"] = round(float(price), 2)
+            vehicle["fuel_price_source"] = result.get("source") or ""
+            vehicle["fuel_price_updated_at"] = (now or datetime.now()).isoformat(timespec="seconds")
+            await r.hset("geo:vehicles", vehicle_id, json.dumps(vehicle))
+            updated += 1
+        except Exception as exc:
+            errors.append(f"{vehicle_id}: {exc}")
+            skipped += 1
+
+    if updated:
+        try:
+            await r.set(_FUEL_PRICE_DAILY_KEY, stamp)
+        except Exception:
+            pass
+        log.info(f"[fuel-prices] Daily refresh updated {updated} vehicle(s), skipped {skipped}")
+
+    return {"date": stamp, "updated": updated, "skipped": skipped, "errors": errors}
+
+
+@app.post("/fuel-prices/refresh")
+async def refresh_fuel_prices(
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Force the daily vehicle price refresh (service-to-service)."""
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return await _refresh_fuel_prices(force=True)
+
+
+async def _fuel_price_sweeper() -> None:
+    """Refresh vehicle gas prices once per day, checked hourly."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            await _refresh_fuel_prices()
+        except Exception as exc:
+            log.warning(f"[fuel-prices] Daily refresh failed: {exc}")
+        await asyncio.sleep(_FUEL_PRICE_CHECK_S)
 
 
 # ---------------------------------------------------------------------------
