@@ -42,12 +42,38 @@ def split_title_author(filename: str) -> tuple[str, str]:
     return stem.strip(), ""
 
 
+_QUESTION_LABEL = re.compile(
+    r"\b(questions?|discussion|reflection|study questions|for reflection|ponder)\b",
+    re.IGNORECASE,
+)
+
+
+def _merge_question_sections(sections: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Keep a chapter's question list with the chapter it belongs to.
+
+    Many EPUB devotionals use an ``h2`` for "Questions" under the day's ``h1``.
+    The spine extractor correctly treats both as sections, but a reading app
+    must not show the questions as the next day's devotional. Merging the
+    question heading back into the preceding section also lets the question
+    detector see the lines it is meant to collect.
+    """
+    merged: list[tuple[str, str]] = []
+    for label, text in sections:
+        if merged and _QUESTION_LABEL.search(label or ""):
+            previous_label, previous_text = merged[-1]
+            merged[-1] = (previous_label, previous_text.rstrip() + "\n\n" + text.strip())
+        else:
+            merged.append((label, text))
+    return merged
+
+
 def _epub_sections(path: Path) -> list[tuple[str, str]]:
     try:
         chapters = read_chapters(path.read_bytes())
     except EpubTextError as exc:
         raise BookImportError(f"{path.name} could not be read as an EPUB: {exc}") from exc
-    return [(chapter.label, chapter.text) for chapter in chapters if chapter.text.strip()]
+    sections = [(chapter.label, chapter.text) for chapter in chapters if chapter.text.strip()]
+    return _merge_question_sections(sections)
 
 
 def _pdf_sections(path: Path) -> list[tuple[str, str]]:
