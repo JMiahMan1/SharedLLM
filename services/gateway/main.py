@@ -10960,7 +10960,7 @@ async def proxy_bible_study_session_delete(request: Request, session_id: int):
 
 
 @app.get("/api/bible/daily")
-async def proxy_bible_daily(request: Request):
+async def proxy_bible_daily(request: Request, work: str | None = None):
     """One call for the dashboard widget and the Android home screen.
 
     The Android widget can only issue a bearer-authenticated GET, so this route
@@ -10968,7 +10968,10 @@ async def proxy_bible_daily(request: Request):
     """
     username = await _bible_caller(request)
     return await _bible_json(
-        "GET", "/daily", label="Daily Bible unavailable", params={"username": username}
+        "GET",
+        "/daily",
+        label="Daily Bible unavailable",
+        params={"username": username, "work": work},
     )
 
 
