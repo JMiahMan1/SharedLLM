@@ -8,6 +8,8 @@ ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
+COPY services/bible/requirements.txt /tmp/bible-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/bible-requirements.txt
 COPY . .
 EXPOSE 8010
 ENV PYTHONUNBUFFERED=1
