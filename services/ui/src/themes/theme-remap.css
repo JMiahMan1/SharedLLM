@@ -144,6 +144,7 @@
 
 /* Dark themes: text too dim to read on a dark surface. */
 [data-theme-scheme="dark"] .text-amber-200\/70 { color: color-mix(in srgb, oklch(92.4% 0.12 95.746) 85%, transparent) !important; }
+[data-theme-scheme="dark"] .text-amber-300\/70 { color: color-mix(in srgb, oklch(87.9% 0.169 91.605) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-amber-400\/70 { color: color-mix(in srgb, oklch(82.8% 0.189 84.429) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-amber-500\/40 { color: color-mix(in srgb, oklch(76.9% 0.188 70.08) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-emerald-400\/70 { color: color-mix(in srgb, oklch(76.5% 0.177 163.223) 85%, transparent) !important; }
@@ -297,6 +298,7 @@
 [data-theme-scheme="light"] .text-amber-200\/80 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-200\/90 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-300 { color: oklch(55.5% 0.163 48.998) !important; }
+[data-theme-scheme="light"] .text-amber-300\/70 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 70%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-300\/80 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-300\/90 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-400 { color: oklch(55.5% 0.163 48.998) !important; }
@@ -344,6 +346,7 @@
 [data-theme-scheme="light"] .text-rose-200 { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .text-rose-200\/80 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-300 { color: oklch(51.4% 0.222 16.935) !important; }
+[data-theme-scheme="light"] .text-rose-300\/80 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-400 { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .text-rose-500 { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .text-sky-100 { color: oklch(50% 0.134 242.749) !important; }
