@@ -333,7 +333,7 @@ def _encode_envelope(text: str, card: dict) -> str:
 
 
 GAME_COMMANDS = ("start", "answer", "flip", "stop")
-GAME_KINDS = ("trivia", "memory")
+GAME_KINDS = ("trivia", "bible", "memory")
 
 
 async def _bank_game_stars(user: str, total_stars: int, reason: str) -> None:
@@ -454,8 +454,13 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
                 message=f"game_kind must be one of: {', '.join(GAME_KINDS)}",
                 service="talk_game",
             )
-        state = games.registry.start_trivia(req.token) if kind == "trivia" else games.registry.start_memory(req.token)
-        await say(games.trivia_prompt(state) if kind == "trivia" else games.memory_prompt(state))
+        if kind == "memory":
+            state = games.registry.start_memory(req.token)
+            await say(games.memory_prompt(state))
+        else:
+            pool = games.BIBLE_TRIVIA_QUESTIONS if kind == "bible" else games.TRIVIA_QUESTIONS
+            state = games.registry.start_trivia(req.token, questions=pool)
+            await say(games.trivia_prompt(state))
         return ExecutionResult(
             status="SUCCESS",
             message=f"Started a {kind} game.",
