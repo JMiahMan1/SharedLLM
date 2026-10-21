@@ -39,9 +39,16 @@ interface BibleTodayProps {
  */
 export default function BibleToday({ onOpenRef, page, reminderTime = '', onReminderTime }: BibleTodayProps) {
   const { trigger } = useHaptics();
+  const [devotionalWork, setDevotionalWork] = useState('');
+  const works = useQuery({
+    queryKey: ['bible-devotional-works'],
+    queryFn: () => api.getBibleDevotionalWorks(),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
   const { data, isLoading, error } = useQuery({
-    queryKey: ['bible-daily'],
-    queryFn: () => api.getBibleDaily(),
+    queryKey: ['bible-daily', devotionalWork],
+    queryFn: () => api.getBibleDaily(devotionalWork || undefined),
     staleTime: 30 * 60 * 1000,
     retry: 1,
   });
@@ -261,6 +268,22 @@ export default function BibleToday({ onOpenRef, page, reminderTime = '', onRemin
         <div className="flex items-center gap-2 mb-3">
           <Sparkles size={16} className="text-purple-300" />
           <h2 className="text-sm font-bold text-white">Today's devotional</h2>
+          {(works.data?.works ?? []).length > 0 ? (
+            <select
+              value={devotionalWork}
+              onChange={(event) => setDevotionalWork(event.target.value)}
+              aria-label="Devotional book"
+              data-testid="bible-devotional-work"
+              className="ml-auto min-h-9 max-w-[10rem] rounded-lg bg-slate-800/80 border border-white/10 px-2 text-[11px] text-slate-200"
+            >
+              <option value="">Default sources</option>
+              {(works.data?.works ?? []).map((work) => (
+                <option key={work.id} value={`book:${work.id}`}>
+                  {work.title}
+                </option>
+              ))}
+            </select>
+          ) : null}
         </div>
 
         {isLoading ? (

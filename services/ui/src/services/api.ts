@@ -3354,8 +3354,8 @@ export const api = {
   // their position or be silently ignored -- neither is worth the API surface.
   // The one cross-user read, `getBibleActivitySummary`, is consent-gated
   // server-side and exists so the family view can ask.
-  async getBibleDaily(): Promise<BibleDailyResponse> {
-    const resp = await apiClient.get('/api/bible/daily');
+  async getBibleDaily(work?: string): Promise<BibleDailyResponse> {
+    const resp = await apiClient.get('/api/bible/daily', { params: work ? { work } : undefined });
     return resp.data;
   },
 
