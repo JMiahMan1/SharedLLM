@@ -575,6 +575,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "bible_devotional_dir", "value": "", "description": "Folder of local devotionals (<dir>/<work>/NNNN.md, one file per day of the year). Blank = run without local devotionals; the reader says so."},
     {"key": "bible_api_key", "value": "", "description": "api.bible API key. Blank keeps the reader on the vendored public-domain translations; set it to unlock licensed ones. The API host is api.scripture.api.bible -- api.bible itself is the marketing site."},
     {"key": "bible_import_dir", "value": "", "description": "Writable folder for uploaded Bible files and staged extractions. Admin > Bible says so when this is blank instead of importing quietly into a path nobody chose."},
+    {"key": "bible_books_path", "value": "/Books", "description": "Nextcloud folder holding PDF and EPUB books for Daily Devotions and Bible study. Admin > Bible browses this shelf and imports one book at a time. Change it if your books live elsewhere."},
     {"key": "bible_provider_cache", "value": "", "description": "Long-term per-chapter provider cache. Kept beside the text it feeds so it survives a wiped database. Blank derives it from BIBLE_DATABASE_URL; set it to make the location explicit."},
     {"key": "bible_provider_call_budget", "value": "", "description": "Most NEW provider requests one import may make. Blank = no ceiling. Only chapters that are not already cached count, so a warm cache costs nothing. A whole Bible is about 1,189 requests."},
 

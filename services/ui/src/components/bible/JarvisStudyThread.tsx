@@ -43,6 +43,10 @@ interface JarvisStudyThreadProps {
   onClose: () => void;
   /** Open a reference the answer names in the reader. */
   onOpenRef?: (ref: string) => void;
+  /** Turns already stored in this study session, oldest first. */
+  initialTurns?: Turn[];
+  /** Called once an answer finishes, so the session can keep it. */
+  onTurnSaved?: (turn: Turn) => void;
 }
 
 const STARTERS = [
@@ -60,10 +64,12 @@ export default function JarvisStudyThread({
   crossVersion = false,
   onClose,
   onOpenRef,
+  initialTurns,
+  onTurnSaved,
 }: JarvisStudyThreadProps) {
   const { trigger } = useHaptics();
   const [question, setQuestion] = useState('');
-  const [turns, setTurns] = useState<Turn[]>([]);
+  const [turns, setTurns] = useState<Turn[]>(initialTurns ?? []);
   const [asking, setAsking] = useState(false);
   const [depth, setDepth] = useState<BibleStudyDepth>('adult');
   // Closing the panel ends the answer being written, so a dismissed question
@@ -95,8 +101,18 @@ export default function JarvisStudyThread({
         else if (event.type === 'text') {
           written += event.text;
           updateLast({ text: written });
-        } else if (event.type === 'done') updateLast({ text: event.answer, references: event.references, streaming: false });
-        else if (event.type === 'error') {
+        } else if (event.type === 'done') {
+          updateLast({ text: event.answer, references: event.references, streaming: false });
+          onTurnSaved?.({
+            question: wanted,
+            text: event.answer,
+            failed: false,
+            verses: 0,
+            notes: 0,
+            references: event.references,
+            streaming: false,
+          });
+        } else if (event.type === 'error') {
           updateLast({ text: event.detail, failed: true, streaming: false });
           setQuestion(wanted);
         }

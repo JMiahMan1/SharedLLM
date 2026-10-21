@@ -26,11 +26,11 @@ import os
 import time
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 import aiohttp
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
@@ -39,7 +39,6 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from services.config import (
     BIBLE_DATABASE_URL,
     BIBLE_DEVOTIONAL_DIR,
-    BIBLE_IMPORT_DIR,
     BLB_BASE_URL,
     EXECUTION_SVC_URL,
     GATEWAY_INTERNAL_URL,
@@ -52,6 +51,7 @@ from services.bible import achievements as ach
 from services.bible import books as book_table
 from services.bible import (
     blb_links,
+    book_import,
     corpus,
     games,
     importer,
@@ -75,9 +75,6 @@ from services.bible.devotionals import registry as devotional_registry
 from services.bible.models import (
     utcnow,
     AchievementEarned,
-    BibleBook,
-    BibleVerse,
-    BibleVersion,
     Devotional,
     GameScore,
     ImportRun,
@@ -889,6 +886,14 @@ def devotional(
     ``skipped`` with the setting to fix -- never a silent blank.
     """
     when = _parse_day(day)
+    if work and work.startswith("book:"):
+        try:
+            book_id = int(work.split(":", 1)[1])
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Book work ids look like book:12")
+        entry = book_import.devotional_for_day(session, book_id, _doy(when or date.today()))
+        if entry:
+            return {"source": "library", "entry": entry, "stored": True}
     stored = _stored_devotional(session, when or date.today(), work)
     if stored:
         return {"source": "library", "entry": stored, "stored": True}
@@ -2351,14 +2356,32 @@ async def admin_interlinear_upload(file: UploadFile = File(...)) -> JSONResponse
 
 
 @app.get("/daily")
-def daily(username: str | None = Query(default=None), session: Session = Depends(get_session)):
+def daily(
+    username: str | None = Query(default=None),
+    work: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+):
     """One call that fills the home screen: verse, devotional, streaks, badges.
 
     The dashboard widget and the Android home screen both read this so neither
     has to make four round trips to paint one card.
     """
     verse = _verse_of_day(session)
-    devotional_entry = devotional_registry.daily()
+    if work and work.startswith("book:"):
+        try:
+            book_id = int(work.split(":", 1)[1])
+            entry = book_import.devotional_for_day(session, book_id, _doy(date.today()))
+        except ValueError:
+            entry = None
+        devotional_entry = {
+            "day": date.today().isoformat(),
+            "day_of_year": _doy(date.today()),
+            "entry": entry,
+            "source": "library" if entry else None,
+            "skipped": [] if entry else [{"source": "book", "reason": "No reading for this day."}],
+        }
+    else:
+        devotional_entry = devotional_registry.daily(work=work)
     payload: dict = {
         "day": date.today().isoformat(),
         "verse_of_day": verse,
@@ -2860,3 +2883,11 @@ async def admin_import_upload(
     )
     label = f"Uploaded {filename} to {destination} ({written} bytes)."
     return await run_in_threadpool(_admin_import_upload_run, plan, str(directory), label)
+
+
+# Imported PDF/EPUB books live in their own router; importing it here, after
+# the shared session/import helpers exist, avoids a circular import while still
+# keeping the book contract in its own module.
+from services.bible import book_routes  # noqa: E402
+
+app.include_router(book_routes.router)

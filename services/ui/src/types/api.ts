@@ -2507,6 +2507,78 @@ export interface BibleLibraryListing {
   installable: number;
 }
 
+export type BibleBookKind = 'devotional' | 'study';
+
+export interface BibleImportedBook {
+  id: number;
+  title: string;
+  author: string;
+  kind: BibleBookKind;
+  source: 'nextcloud' | 'calibre' | 'upload' | string;
+  source_path: string;
+  chapter_count: number;
+  created_at: string | null;
+}
+
+export interface BibleImportedBooksResponse {
+  books: BibleImportedBook[];
+  count: number;
+  kinds: BibleBookKind[];
+  sources?: { nextcloud: string; calibre: string };
+}
+
+export interface BibleBookListing {
+  source: 'nextcloud' | 'calibre';
+  root: string;
+  setting: string;
+  path: string;
+  parent: string;
+  entries: BibleLibraryEntry[];
+  count: number;
+  installable: number;
+}
+
+export interface BibleImportedBookDetail {
+  book: BibleImportedBook;
+  chapters: Array<{ ordinal: number; label: string; characters: number }>;
+}
+
+export interface BibleBookChapter {
+  book_id: number;
+  ordinal: number;
+  label: string;
+  text: string;
+  questions: string[];
+}
+
+export interface BibleDevotionalWork {
+  id: number;
+  title: string;
+  author: string;
+  kind: BibleBookKind;
+  chapter_count: number;
+}
+
+export interface BibleStudySessionTurn {
+  id: number;
+  question: string;
+  answer: string;
+  references: string;
+  created_at: string | null;
+}
+
+export interface BibleStudySession {
+  id: number;
+  username: string;
+  title: string;
+  reference: string;
+  version: string;
+  edition: string;
+  created_at: string | null;
+  updated_at: string | null;
+  turns?: BibleStudySessionTurn[];
+}
+
 /** What installing a translation online would cost, asked before spending anything. */
 export interface BibleProviderEstimate {
   translation_id: string;

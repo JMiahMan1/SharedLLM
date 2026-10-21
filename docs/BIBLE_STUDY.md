@@ -1284,6 +1284,33 @@ The two halves of that are deliberate: **`.env` seeds the host**, the
   `api.scripture.api.bible` (the `api.bible` host 404s every `/v1/*` path).
 - All share cards render our own text (no third-party artwork).
 
+## Books, study sessions and chapter questions
+
+Ordinary PDF/EPUB books are imported separately from Bible translations:
+
+- **Admin › Bible › Devotionals and study books** browses two shelves through
+  the storage service: the Nextcloud books folder (`bible_books_path`, seeded
+  `/Books`) and the Calibre library (`calibre_library_path`, read as raw
+  files). A file can also be uploaded from the admin's computer, which covers
+  a folder such as `~/Desktop/Bible Study`.
+- A book is stored as `ImportedBook` plus ordered `ImportedBookChapter` rows;
+  it is never checked against the 66-book canon. EPUB uses the spine-aware
+  extractor; PDF uses one page per section because a scanned or typeset page
+  is the natural reading unit.
+- Books marked **Daily Devotions** become a `book:<id>` work; `/devotional`
+  and `/daily` map the day of the year onto a chapter and cycle a shorter
+  book rather than going blank in February.
+- Books marked **Bible study** are readable under Bible › Studies. Lines that
+  end in a question in the last third of a chapter are stored as its
+  end-of-chapter questions. "Answer from this chapter" calls the model with
+  that chapter as the only source and keeps the answer in the study session.
+- **Studies** is a first-class tab. `StudySession` rows keep several passages
+  open at once; `StudySessionTurn` stores each grounded answer. Opening a new
+  passage no longer replaces the previous conversation.
+- The Notes page remains the Google Keep-style surface over Nextcloud
+  markdown: pins, colours, checklists, search, and the shared editor. Bible
+  note marks still point at those notes rather than creating a second store.
+
 ## Phased implementation
 
 Reading is the gate. Phase 1 is not "a slice of the Bible feature", it is

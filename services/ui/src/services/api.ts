@@ -183,7 +183,14 @@ import type {
   BibleImportProviderInfo,
   BibleRemoteTranslation,
   BibleProviderEstimate,
-  BibleLibraryListing,} from '../types/api';
+  BibleLibraryListing,
+  BibleBookListing,
+  BibleBookChapter,
+  BibleImportedBookDetail,
+  BibleImportedBooksResponse,
+  BibleDevotionalWork,
+  BibleStudySession,
+} from '../types/api';
 
 // Re-export domain types so consumers can import them from the api module.
 export type {
@@ -3707,6 +3714,122 @@ export const api = {
     const resp = await apiClient.post('/api/bible/admin/imports/upload', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
+    return resp.data;
+  },
+
+  /** Imported devotional and study books (admin). */
+  async getBibleAdminBooks(): Promise<BibleImportedBooksResponse> {
+    const resp = await apiClient.get('/api/bible/admin/books');
+    return resp.data;
+  },
+
+  /** Browse Nextcloud Books or the Calibre shelf for PDF/EPUB books. */
+  async browseBibleBooks(source: 'nextcloud' | 'calibre', path = ''): Promise<BibleBookListing> {
+    const resp = await apiClient.get('/api/bible/admin/books/browse', {
+      params: { source, path },
+      timeout: 90_000,
+    });
+    return resp.data;
+  },
+
+  async importBibleBook(payload: {
+    source: 'nextcloud' | 'calibre';
+    path: string;
+    title?: string;
+    author?: string;
+    kind: 'devotional' | 'study';
+  }): Promise<{ status: string; book: BibleImportedBookDetail['book']; bytes?: number }> {
+    const resp = await apiClient.post('/api/bible/admin/books/import', payload, { timeout: 180_000 });
+    return resp.data;
+  },
+
+  async uploadBibleBook(form: FormData): Promise<{ status: string; book: BibleImportedBookDetail['book']; bytes?: number }> {
+    const resp = await apiClient.post('/api/bible/admin/books/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 180_000,
+    });
+    return resp.data;
+  },
+
+  async deleteBibleBook(bookId: number): Promise<{ status: string; id: number }> {
+    const resp = await apiClient.delete(`/api/bible/admin/books/${bookId}`);
+    return resp.data;
+  },
+
+  /** Books available to readers. */
+  async getBibleImportedBooks(kind?: 'devotional' | 'study'): Promise<BibleImportedBooksResponse> {
+    const resp = await apiClient.get('/api/bible/imported-books', { params: kind ? { kind } : undefined });
+    return resp.data;
+  },
+
+  async getBibleImportedBook(bookId: number): Promise<BibleImportedBookDetail> {
+    const resp = await apiClient.get(`/api/bible/imported-books/${bookId}`);
+    return resp.data;
+  },
+
+  async getBibleImportedBookChapter(bookId: number, ordinal: number): Promise<BibleBookChapter> {
+    const resp = await apiClient.get(`/api/bible/imported-books/${bookId}/chapters/${ordinal}`);
+    return resp.data;
+  },
+
+  async askBibleBookQuestion(
+    bookId: number,
+    ordinal: number,
+    question: string,
+  ): Promise<{ answer: string; book_id: number; ordinal: number; question: string }> {
+    const resp = await apiClient.post(
+      `/api/bible/imported-books/${bookId}/chapters/${ordinal}/ask`,
+      { question },
+      { timeout: 300_000 },
+    );
+    return resp.data;
+  },
+
+  async getBibleDevotionalWorks(): Promise<{ works: BibleDevotionalWork[] }> {
+    const resp = await apiClient.get('/api/bible/devotional/works');
+    return resp.data;
+  },
+
+  async getBibleDevotionalBook(
+    bookId: number,
+    day?: string,
+  ): Promise<{ day: string; entry: Record<string, unknown> }> {
+    const resp = await apiClient.get(`/api/bible/devotional/book/${bookId}`, {
+      params: day ? { day } : undefined,
+    });
+    return resp.data;
+  },
+
+  async listBibleStudySessions(): Promise<{ sessions: BibleStudySession[]; count: number }> {
+    const resp = await apiClient.get('/api/bible/study/sessions');
+    return resp.data;
+  },
+
+  async createBibleStudySession(payload: {
+    reference: string;
+    version?: string;
+    edition?: string;
+    title?: string;
+  }): Promise<{ session: BibleStudySession }> {
+    const resp = await apiClient.post('/api/bible/study/sessions', payload);
+    return resp.data;
+  },
+
+  async getBibleStudySession(sessionId: number): Promise<{ session: BibleStudySession }> {
+    const resp = await apiClient.get(`/api/bible/study/sessions/${sessionId}`);
+    return resp.data;
+  },
+
+  async addBibleStudyTurn(
+    sessionId: number,
+    payload: { question: string; answer: string; references: string[] },
+  ): Promise<{ turn: Record<string, unknown> }> {
+    const resp = await apiClient.post(`/api/bible/study/sessions/${sessionId}/turn`, payload);
+    return resp.data;
+  },
+
+  async deleteBibleStudySession(sessionId: number): Promise<{ status: string; id: number }> {
+    const resp = await apiClient.delete(`/api/bible/study/sessions/${sessionId}`);
     return resp.data;
   },
 

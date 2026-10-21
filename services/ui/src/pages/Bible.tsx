@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { BookOpen, Brain, Gamepad2, Maximize2, Search, Sparkles, Trophy, X } from 'lucide-react';
+import { BookMarked, BookOpen, Brain, Gamepad2, Maximize2, Search, Sparkles, Trophy, X } from 'lucide-react';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import type {
@@ -26,18 +26,21 @@ import BibleToday from '../components/bible/BibleToday';
 import BibleProgress from '../components/bible/BibleProgress';
 import BibleGames from '../components/bible/BibleGames';
 import BibleMemorize from '../components/bible/BibleMemorize';
+import BibleStudySessions from '../components/bible/BibleStudySessions';
+import BibleStudyBooks from '../components/bible/BibleStudyBooks';
 import { marksOnVerse } from '../components/bible/verseMarks';
 import { errorText } from '../lib/errorText';
 
-type Tab = 'read' | 'today' | 'play' | 'memorize' | 'progress';
+type Tab = 'read' | 'today' | 'play' | 'memorize' | 'studies' | 'progress';
 
-const TAB_IDS: Tab[] = ['read', 'today', 'play', 'memorize', 'progress'];
+const TAB_IDS: Tab[] = ['read', 'today', 'play', 'memorize', 'studies', 'progress'];
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof BookOpen }> = [
   { id: 'read', label: 'Read', icon: BookOpen },
   { id: 'today', label: 'Today', icon: Sparkles },
   { id: 'play', label: 'Play', icon: Gamepad2 },
   { id: 'memorize', label: 'Memorize', icon: Brain },
+  { id: 'studies', label: 'Studies', icon: BookMarked },
   { id: 'progress', label: 'Progress', icon: Trophy },
 ];
 
@@ -677,6 +680,17 @@ export default function Bible() {
       {tab === 'play' && <BibleGames page={effectivePreferences.page} />}
 
       {tab === 'memorize' && <BibleMemorize page={effectivePreferences.page} />}
+
+      {tab === 'studies' && (
+        <div className="space-y-6">
+          <BibleStudySessions
+            reference={requestedRef ?? 'Reading'}
+            version={version}
+            onOpenRef={openRef}
+          />
+          <BibleStudyBooks />
+        </div>
+      )}
 
       {tab === 'progress' && (
         <BibleProgress

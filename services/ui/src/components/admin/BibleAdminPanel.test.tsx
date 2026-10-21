@@ -14,6 +14,11 @@ const apiMock = vi.hoisted(() => ({
   runBibleImport: vi.fn(),
   uploadBibleImport: vi.fn(),
   getBibleLibrary: vi.fn(),
+  getBibleAdminBooks: vi.fn(),
+  browseBibleBooks: vi.fn(),
+  importBibleBook: vi.fn(),
+  uploadBibleBook: vi.fn(),
+  deleteBibleBook: vi.fn(),
 }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -113,6 +118,8 @@ describe('BibleAdminPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMock.getBibleImports.mockResolvedValue(catalogue());
+    apiMock.getBibleAdminBooks.mockResolvedValue({ books: [], count: 0, kinds: ['devotional', 'study'], sources: { nextcloud: '/Books', calibre: '' } });
+    apiMock.browseBibleBooks.mockResolvedValue({ source: 'nextcloud', root: '/Books', setting: 'bible_books_path', path: '/Books', parent: '', entries: [], count: 0, installable: 0 });
     apiMock.runBibleImport.mockResolvedValue({
       source: '/data/bible/esv.pdf',
       kind: 'pdf',
@@ -436,6 +443,8 @@ describe('prefilled install fields', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMock.getBibleImports.mockResolvedValue(catalogue());
+    apiMock.getBibleAdminBooks.mockResolvedValue({ books: [], count: 0, kinds: ['devotional', 'study'], sources: { nextcloud: '/Books', calibre: '' } });
+    apiMock.browseBibleBooks.mockResolvedValue({ source: 'nextcloud', root: '/Books', setting: 'bible_books_path', path: '/Books', parent: '', entries: [], count: 0, installable: 0 });
     apiMock.runBibleImport.mockResolvedValue({
       source: 'x.epub',
       kind: 'epub',
