@@ -622,7 +622,7 @@ player scope, the unified endpoints and the schema contract test. Details:
 - P4-T1 `AppShell` layout route (§6.4). E2E: navigate across 5 routes, and assert via a `data-testid="app-shell"` element identity check (`page.evaluate` storing a marker on it) that the shell did not remount.
 - P4-T2 ~~Mount the player above the routes; remove the `destroyWebPlayer()` unmount~~: done via `MediaPlayerContext` (`dd9e8df2`); fold it into `MediaEngineProvider` when that exists.
 - P4-T3 `components/ui/Sheet.tsx` + a11y tests (BUG-61).
-- P4-T4 `MiniPlayer` (mobile floating + desktop dock) with the bottom padding vars and z-index scale.
+- P4-T4 `MiniPlayer` (mobile floating + desktop dock) with the bottom padding vars and z-index scale. **Done 2026-10-21:** `components/media/MiniPlayer.tsx` (global, above routes, hidden on `/media`, title/artist, previous/play/pause/next, progress line, touches `/media`); live at `d22d1c75`.
 - P4-T5 `NowPlayingSheet` (shared art transition, dynamic accent, all controls in §4.2, reduced motion).
 - P4-T6 `OutputSheet` (dedupe BUG-65, group, transfer, per-row volume).
 - P4-T7 `QueueSheet` (dnd-kit reorder, remove, clear, virtualized).
