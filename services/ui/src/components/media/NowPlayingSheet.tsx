@@ -261,19 +261,19 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
               </Link>
             </header>
 
-            <div className="flex min-h-0 flex-1 flex-col justify-center gap-6 py-2">
+            <div className="flex min-h-0 flex-1 flex-col justify-start gap-4 overflow-y-auto py-1 sm:justify-center sm:gap-6">
               <div className="flex justify-center">
                 {player.mediaImage ? (
                   <motion.img
                     layoutId="np-art"
                     src={player.mediaImage}
                     alt=""
-                    className="aspect-square w-[min(78vw,42dvh)] max-w-[380px] rounded-2xl object-cover shadow-2xl shadow-black/60"
+                    className="aspect-square w-[min(74vw,36dvh)] max-w-[380px] rounded-2xl object-cover shadow-2xl shadow-black/60"
                   />
                 ) : (
                   <motion.div
                     layoutId="np-art"
-                    className="flex aspect-square w-[min(78vw,42dvh)] max-w-[380px] items-center justify-center rounded-2xl shadow-2xl shadow-black/60"
+                    className="flex aspect-square w-[min(74vw,36dvh)] max-w-[380px] items-center justify-center rounded-2xl shadow-2xl shadow-black/60"
                     style={{ background: `linear-gradient(145deg, ${accent}55, rgba(15,23,42,0.9))` }}
                   >
                     <Music size={64} className="text-white/60" aria-hidden />
@@ -283,8 +283,8 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
 
               <div className="flex items-center gap-3">
                 <div className="min-w-0 flex-1">
-                  <h2 className="truncate text-2xl font-bold text-white sm:text-3xl">{player.mediaTitle}</h2>
-                  {player.mediaArtist ? <p className="mt-1 truncate text-base text-slate-300">{player.mediaArtist}</p> : null}
+                  <h2 className="truncate text-xl font-bold text-white sm:text-3xl">{player.mediaTitle}</h2>
+                  {player.mediaArtist ? <p className="mt-1 truncate text-sm text-slate-300 sm:text-base">{player.mediaArtist}</p> : null}
                 </div>
                 {favoriteUri ? (
                   <button
