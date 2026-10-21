@@ -410,6 +410,58 @@ def create_study_session(payload: StudySessionCreate):
         return {"session": _session_dict(row)}
 
 
+@router.get("/study/sessions/search")
+def search_study_memory(
+    username: str = Query(...),
+    q: str = Query(..., min_length=2, max_length=200),
+    limit: int = Query(20, ge=1, le=50),
+):
+    """Search the reader's saved study turns and session titles.
+
+    This is the retrieval side of study memory: the answer is built from the
+    reader's own notes and prior questions, not from the open web. Results keep
+    their session id so the panel can reopen the conversation they came from.
+    """
+    from sqlalchemy import or_
+
+    needle = q.strip()
+    with Session(_db()) as session:
+        rows = session.exec(
+            select(StudySessionTurn, StudySession)
+            .where(StudySessionTurn.session_id == StudySession.id)
+            .where(StudySession.username == username)
+            .where(
+                or_(
+                    StudySessionTurn.question.contains(needle),
+                    StudySessionTurn.answer.contains(needle),
+                    StudySession.title.contains(needle),
+                    StudySession.reference.contains(needle),
+                )
+            )
+            .order_by(StudySessionTurn.created_at.desc())
+            .limit(limit)
+        ).all()
+        results = []
+        for turn, study in rows:
+            try:
+                references = json.loads(turn.references or "[]")
+            except (TypeError, ValueError):
+                references = []
+            results.append(
+                {
+                    "session_id": turn.session_id,
+                    "title": study.title or study.reference,
+                    "reference": study.reference,
+                    "version": study.version,
+                    "question": turn.question,
+                    "answer": turn.answer,
+                    "references": references if isinstance(references, list) else [],
+                    "created_at": turn.created_at.isoformat() if turn.created_at else None,
+                }
+            )
+        return {"results": results, "count": len(results)}
+
+
 @router.get("/study/sessions/{session_id}")
 def get_study_session(session_id: int, username: str = Query(...)):
     with Session(_db()) as session:

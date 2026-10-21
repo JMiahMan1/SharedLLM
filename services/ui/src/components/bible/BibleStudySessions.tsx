@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpenCheck, Loader2, Plus, Trash2 } from 'lucide-react';
+import { BookOpenCheck, Loader2, Plus, Search, Trash2 } from 'lucide-react';
 
 import { api } from '../../services/api';
 import type { BibleStudySession } from '../../types/api';
@@ -43,11 +43,19 @@ function turnFromSession(turn: NonNullable<BibleStudySession['turns']>[number]) 
 export default function BibleStudySessions({ reference, version, edition, onOpenRef }: Props) {
   const client = useQueryClient();
   const [openId, setOpenId] = useState<number | null>(null);
+  const [memoryQuery, setMemoryQuery] = useState('');
   const [error, setError] = useState('');
 
   const sessions = useQuery({
     queryKey: ['bible-study-sessions'],
     queryFn: () => api.listBibleStudySessions(),
+    retry: false,
+  });
+
+  const memory = useQuery({
+    queryKey: ['bible-study-memory', memoryQuery.trim()],
+    queryFn: () => api.searchBibleStudyMemory(memoryQuery.trim()),
+    enabled: memoryQuery.trim().length >= 2,
     retry: false,
   });
 
@@ -118,6 +126,48 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
       </header>
 
       {error ? <p className="text-xs text-rose-300">{error}</p> : null}
+
+      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3" data-testid="bible-study-memory">
+        <label htmlFor="bible-study-memory-search" className="sr-only">
+          Search your study memory
+        </label>
+        <div className="flex items-center gap-2">
+          <Search size={14} className="text-slate-500 shrink-0" />
+          <input
+            id="bible-study-memory-search"
+            type="search"
+            value={memoryQuery}
+            onChange={(event) => setMemoryQuery(event.target.value)}
+            placeholder="Search past studies and answers…"
+            className="min-h-10 min-w-0 flex-1 bg-transparent text-xs text-slate-200 outline-none placeholder:text-slate-500"
+          />
+        </div>
+        {memoryQuery.trim().length >= 2 ? (
+          memory.isLoading ? (
+            <p className="mt-2 text-[11px] text-slate-500">Searching…</p>
+          ) : (memory.data?.results ?? []).length === 0 ? (
+            <p className="mt-2 text-[11px] text-slate-500">No saved study matches that yet.</p>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {(memory.data?.results ?? []).map((result) => (
+                <li key={`${result.session_id}-${result.created_at}-${result.question.slice(0, 24)}`}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenId(result.session_id)}
+                    className="w-full rounded-lg border border-white/5 bg-black/20 p-2 text-left hover:border-sky-400/30"
+                  >
+                    <span className="block text-[10px] uppercase tracking-wider text-sky-300/80">
+                      {result.title || result.reference}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-slate-200 line-clamp-2">{result.question}</span>
+                    <span className="mt-0.5 block text-[11px] text-slate-500 line-clamp-2">{result.answer}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : null}
+      </div>
 
       {sessions.isLoading ? (
         <p className="text-xs text-slate-500">Loading studies…</p>

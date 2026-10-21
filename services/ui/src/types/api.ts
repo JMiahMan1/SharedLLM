@@ -2579,6 +2579,22 @@ export interface BibleStudySession {
   turns?: BibleStudySessionTurn[];
 }
 
+export interface BibleStudyMemoryResult {
+  session_id: number;
+  title: string;
+  reference: string;
+  version: string;
+  question: string;
+  answer: string;
+  references: string[];
+  created_at: string | null;
+}
+
+export interface BibleStudyMemoryResponse {
+  results: BibleStudyMemoryResult[];
+  count: number;
+}
+
 /** What installing a translation online would cost, asked before spending anything. */
 export interface BibleProviderEstimate {
   translation_id: string;

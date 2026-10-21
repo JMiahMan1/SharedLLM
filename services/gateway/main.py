@@ -10919,6 +10919,17 @@ async def proxy_bible_study_session_create(request: Request):
     )
 
 
+@app.get("/api/bible/study/sessions/search")
+async def proxy_bible_study_memory(request: Request, q: str, limit: int = 20):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        "/study/sessions/search",
+        label="Could not search your study memory",
+        params={"username": username, "q": q, "limit": max(1, min(limit, 50))},
+    )
+
+
 @app.get("/api/bible/study/sessions/{session_id}")
 async def proxy_bible_study_session(request: Request, session_id: int):
     username = await _bible_caller(request)
