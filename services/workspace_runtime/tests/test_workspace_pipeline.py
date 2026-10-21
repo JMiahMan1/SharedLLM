@@ -12,8 +12,9 @@ deliberately falls back to a host subprocess when the workspace is not under
 the sandbox mount root, which is the case for every temporary directory, and
 that fallback is what CI and dev machines use anyway.
 
-Tests that need something CI does not have (a Docker daemon, a linter actually
-installed) are marked `local_only`.
+Tests that need something CI does not have (a linter actually installed) are
+marked `local_only`. The Docker reachability test is skipped only when no
+daemon is available locally; on CI it is required.
 """
 
 from __future__ import annotations
@@ -305,7 +306,6 @@ def test_the_pytest_binary_is_the_one_running_the_tests():
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.local_only
 def test_docker_is_reachable_for_the_workspace_sandbox():
     """run_workspace_cmd only reaches a real container when the workspace lives
     under the mount root. That is a deployment-only path; when it breaks it
@@ -314,4 +314,6 @@ def test_docker_is_reachable_for_the_workspace_sandbox():
         client = sandbox._docker_client()
         assert client.ping() is True
     except Exception as exc:  # pragma: no cover - diagnostic only
+        if os.environ.get("CI"):
+            pytest.fail(f"Docker daemon is required in CI: {exc}")
         pytest.skip(f"no Docker daemon: {exc}")
