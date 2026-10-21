@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { CallProvider } from './context/CallContext';
 import { LocationProvider } from './context/LocationContext';
 import { MediaPlayerProvider } from './context/MediaPlayerContext';
+import MiniPlayer from './components/media/MiniPlayer';
 import NativeBridge from './components/NativeBridge';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
@@ -150,6 +151,7 @@ function App() {
             <Route path="/lab" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLab /></AdminElevation></ProtectedRoute>} />
             <Route path="/lab/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLabAdmin /></AdminElevation></ProtectedRoute>} />
           </Routes>
+          <MiniPlayer />
         </Router>
         </MediaPlayerProvider>
       </LocationProvider>
