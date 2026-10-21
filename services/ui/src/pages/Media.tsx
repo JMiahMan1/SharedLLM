@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { BookOpen, Library, List, Loader2, Music, Play, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -117,7 +118,9 @@ const Media = () => {
   const maPlayer = useSharedMAWebPlayer();
 
   /** '' = this device's web player, `ma:<id>` = an MA-only player, else an HA entity. */
-  const [selectedTarget, setSelectedTarget] = useState('');
+  const [searchParams] = useSearchParams();
+  const requestedOutput = searchParams.get('output') ?? '';
+  const [selectedTarget, setSelectedTarget] = useState(requestedOutput);
   const isWebPlayer = !selectedTarget;
   const selectedRef = useRef(selectedTarget);
   useEffect(() => {
@@ -125,8 +128,9 @@ const Media = () => {
   }, [selectedTarget]);
   // Once the person picks a device the page stops second-guessing them; until
   // then, a speaker that is already playing is followed automatically so the
-  // page never shows an empty card over live music.
-  const userPickedRef = useRef(false);
+  // page never shows an empty card over live music. Arriving from the output
+  // picker's "Control" action counts as a choice.
+  const userPickedRef = useRef(Boolean(requestedOutput));
 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

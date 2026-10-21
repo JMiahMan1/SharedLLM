@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import {
-  ChevronDown, Heart, Music, Pause, Play, Repeat, Repeat1, RotateCcw, RotateCw,
+  ChevronDown, ChevronUp, Cast, Heart, Music, Pause, Play, Repeat, Repeat1, RotateCcw, RotateCw,
   Shuffle, SkipBack, SkipForward, Timer, Volume1, Volume2, VolumeX,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -12,6 +12,7 @@ import { useAccentColor } from '../../hooks/useAccentColor';
 import { useHaptics } from '../../hooks/useHaptics';
 import { api } from '../../services/api';
 import { formatClock } from '../../lib/utils';
+import OutputSheet from './OutputSheet';
 
 type RepeatMode = 'off' | 'all' | 'one';
 
@@ -58,7 +59,13 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
   const [sleepAt, setSleepAt] = useState<number | null>(null);
   const [sleepLabel, setSleepLabel] = useState('Sleep timer');
   const [sleepMenu, setSleepMenu] = useState(false);
+  const [outputOpen, setOutputOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+
+  const close = useCallback(() => {
+    setOutputOpen(false);
+    onClose();
+  }, [onClose]);
 
   const trackKey = player?.mediaUri || player?.mediaTitle || '';
   const duration = player?.duration ?? 0;
@@ -98,7 +105,7 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') close();
     };
     document.addEventListener('keydown', onKey);
     const previousOverflow = document.body.style.overflow;
@@ -107,7 +114,7 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = previousOverflow;
     };
-  }, [open, onClose]);
+  }, [open, close]);
 
   const pauseRef = useRef(player?.pause);
   useEffect(() => {
@@ -244,7 +251,7 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0.02, bottom: 0.4 }}
             onDragEnd={(_, info) => {
-              if (info.offset.y > 120 || info.velocity.y > 600) onClose();
+              if (info.offset.y > 120 || info.velocity.y > 600) close();
             }}
             initial={{ y: reduceMotion ? 0 : 40 }}
             animate={{ y: 0 }}
@@ -252,11 +259,11 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
             transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 40 }}
           >
             <header className="flex items-center justify-between py-1">
-              <button type="button" onClick={onClose} aria-label="Close now playing" className={iconButton}>
+              <button type="button" onClick={close} aria-label="Close now playing" className={iconButton}>
                 <ChevronDown size={24} />
               </button>
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Playing here</p>
-              <Link to="/media" onClick={onClose} aria-label="Open the Media page" className={iconButton}>
+              <Link to="/media" onClick={close} aria-label="Open the Media page" className={iconButton}>
                 <Music size={19} />
               </Link>
             </header>
@@ -466,10 +473,17 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
               ) : null}
 
               <div className="flex items-center justify-between gap-2 border-t border-white/10 pt-2">
-                <span className="flex min-w-0 items-center gap-1.5 text-xs text-slate-400">
-                  <Volume2 size={14} aria-hidden />
+                <button
+                  type="button"
+                  onClick={() => setOutputOpen(true)}
+                  aria-label="Choose output"
+                  aria-haspopup="dialog"
+                  className="flex min-h-11 min-w-0 items-center gap-1.5 rounded-xl px-2 text-xs text-slate-400 hover:bg-white/10 hover:text-white"
+                >
+                  <Cast size={15} aria-hidden />
                   <span className="truncate">This device</span>
-                </span>
+                  <ChevronUp size={13} aria-hidden />
+                </button>
                 <button
                   type="button"
                   onClick={() => setSleepMenu((value) => !value)}
@@ -483,6 +497,8 @@ export default function NowPlayingSheet({ open, onClose }: { open: boolean; onCl
               </div>
             </div>
           </motion.div>
+
+          <OutputSheet open={open && outputOpen} onClose={() => setOutputOpen(false)} onTransferred={close} />
         </motion.div>
       )}
     </AnimatePresence>
