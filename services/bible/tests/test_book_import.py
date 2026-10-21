@@ -51,10 +51,11 @@ def test_an_epub_book_imports_as_chapters(tmp_path):
         assert isinstance(book, ImportedBook)
         assert book.title == "My Devotional"
         assert book.author == "A Writer"
-        assert book.chapter_count >= 1
+        assert book.chapter_count == 1
         chapters = book_import.chapters_for(session, book.id)
-        assert any(chapter.label == "Day One" for chapter in chapters)
-        assert any("Rest in the Lord" in chapter.text for chapter in chapters)
+        assert chapters[0].label == "Day One"
+        assert "Rest in the Lord" in chapters[0].text
+        assert "What does rest mean here?" in chapters[0].questions
         entry = book_import.devotional_for_day(session, book.id, 1)
         assert entry is not None
         assert entry["work"] == f"book:{book.id}"
