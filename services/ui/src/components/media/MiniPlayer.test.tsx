@@ -22,11 +22,11 @@ function player(over: Partial<SharedPlayer> = {}): SharedPlayer {
   } as unknown as SharedPlayer;
 }
 
-function renderAt(path: string, value: SharedPlayer | null) {
+function renderAt(path: string, value: SharedPlayer | null, onOpen?: () => void) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <MediaPlayerContext.Provider value={value}>
-        <MiniPlayer />
+        <MiniPlayer onOpen={onOpen} />
       </MediaPlayerContext.Provider>
     </MemoryRouter>
   );
@@ -54,6 +54,13 @@ describe('MiniPlayer', () => {
   it('stays out of the way on the Media page', () => {
     renderAt('/media', player());
     expect(screen.queryByTestId('mini-player')).toBeNull();
+  });
+
+  it('opens the full now-playing sheet when tapped', async () => {
+    const onOpen = vi.fn();
+    renderAt('/bible', player(), onOpen);
+    await userEvent.click(screen.getByRole('button', { name: 'Open now playing' }));
+    expect(onOpen).toHaveBeenCalled();
   });
 
   it('renders nothing when the player is idle', () => {

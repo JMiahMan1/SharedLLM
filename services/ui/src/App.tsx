@@ -7,6 +7,7 @@ import { CallProvider } from './context/CallContext';
 import { LocationProvider } from './context/LocationContext';
 import { MediaPlayerProvider } from './context/MediaPlayerContext';
 import MiniPlayer from './components/media/MiniPlayer';
+import NowPlayingSheet from './components/media/NowPlayingSheet';
 import NativeBridge from './components/NativeBridge';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
@@ -78,6 +79,7 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
 };
 
 function App() {
+  const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => {
     if (Capacitor.isNativePlatform()) return true;
     if (typeof window !== 'undefined') {
@@ -151,7 +153,8 @@ function App() {
             <Route path="/lab" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLab /></AdminElevation></ProtectedRoute>} />
             <Route path="/lab/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLabAdmin /></AdminElevation></ProtectedRoute>} />
           </Routes>
-          <MiniPlayer />
+          <MiniPlayer onOpen={() => setNowPlayingOpen(true)} />
+          <NowPlayingSheet open={nowPlayingOpen} onClose={() => setNowPlayingOpen(false)} />
         </Router>
         </MediaPlayerProvider>
       </LocationProvider>
