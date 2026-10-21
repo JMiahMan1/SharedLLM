@@ -8,6 +8,8 @@ import { LocationProvider } from './context/LocationContext';
 import { MediaPlayerProvider } from './context/MediaPlayerContext';
 import MiniPlayer from './components/media/MiniPlayer';
 import NowPlayingSheet from './components/media/NowPlayingSheet';
+import QueueSheet from './components/media/QueueSheet';
+import MediaShortcuts from './components/media/MediaShortcuts';
 import NativeBridge from './components/NativeBridge';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
@@ -80,6 +82,7 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
 
 function App() {
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => {
     if (Capacitor.isNativePlatform()) return true;
     if (typeof window !== 'undefined') {
@@ -154,7 +157,16 @@ function App() {
             <Route path="/lab/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLabAdmin /></AdminElevation></ProtectedRoute>} />
           </Routes>
           <MiniPlayer onOpen={() => setNowPlayingOpen(true)} />
-          <NowPlayingSheet open={nowPlayingOpen} onClose={() => setNowPlayingOpen(false)} />
+          <NowPlayingSheet
+            open={nowPlayingOpen}
+            onClose={() => setNowPlayingOpen(false)}
+            onOpenQueue={() => setQueueOpen(true)}
+          />
+          <QueueSheet open={queueOpen} onClose={() => setQueueOpen(false)} />
+          <MediaShortcuts
+            onOpenNowPlaying={() => setNowPlayingOpen(true)}
+            onOpenQueue={() => setQueueOpen(true)}
+          />
         </Router>
         </MediaPlayerProvider>
       </LocationProvider>
