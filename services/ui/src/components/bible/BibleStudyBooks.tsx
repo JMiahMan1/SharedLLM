@@ -21,14 +21,12 @@ export default function BibleStudyBooks() {
     retry: false,
   });
 
-  // The reader shelf is a curated list, not an import report. Books whose
-  // metadata never named an author used to fill it with "Unknown author"
-  // entries, which made the real study books impossible to find. Admin › Bible
-  // still lists every imported row so they can be deleted there.
-  const studyBooks = (books.data?.books ?? []).filter((item) => {
-    const author = (item.author || '').trim().toLowerCase();
-    return Boolean(author) && author !== 'unknown author';
-  });
+  // Show every imported study book that has readable sections. Hiding books
+  // without author metadata made a perfectly good PDF look as if the import
+  // had failed; the author is optional, the book is not. Admin › Bible still
+  // owns deletion, so a bad import is removed there rather than silently
+  // disappearing from the shelf.
+  const studyBooks = (books.data?.books ?? []).filter((item) => item.chapter_count > 0);
 
   const detail = useQuery({
     queryKey: ['bible-imported-book', book?.id],
@@ -74,7 +72,8 @@ export default function BibleStudyBooks() {
                 >
                   <span className="block truncate text-xs text-slate-200">{item.title}</span>
                   <span className="block truncate text-[10px] text-slate-500">
-                    {item.author || 'Unknown author'} · {item.chapter_count} sections
+                    {item.author.trim() ? `${item.author.trim()} · ` : ''}
+                    {item.chapter_count} sections
                   </span>
                 </button>
               </li>
@@ -99,7 +98,7 @@ export default function BibleStudyBooks() {
         ← All study books
       </button>
       <h2 className="text-sm font-bold text-white">{book.title}</h2>
-      <p className="text-[11px] text-slate-500">{book.author || 'Unknown author'}</p>
+      {book.author.trim() ? <p className="text-[11px] text-slate-500">{book.author.trim()}</p> : null}
 
       {detail.isLoading ? <p className="text-xs text-slate-500">Loading chapters…</p> : null}
       {detail.data ? (
