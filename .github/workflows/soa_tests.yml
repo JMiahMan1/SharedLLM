@@ -54,6 +54,7 @@ jobs:
         pip install -r services/execution/requirements.txt
         pip install -r services/gateway/requirements.txt
         pip install -r services/storage/requirements.txt
+        pip install -r services/bible/requirements.txt
         pip install -r services/automation/requirements.txt
         pip install -r services/telemetry/requirements.txt
         # RAG has huge deps (Torch), so we mock it for CI unit tests
