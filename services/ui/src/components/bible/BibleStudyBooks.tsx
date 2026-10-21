@@ -21,6 +21,15 @@ export default function BibleStudyBooks() {
     retry: false,
   });
 
+  // The reader shelf is a curated list, not an import report. Books whose
+  // metadata never named an author used to fill it with "Unknown author"
+  // entries, which made the real study books impossible to find. Admin › Bible
+  // still lists every imported row so they can be deleted there.
+  const studyBooks = (books.data?.books ?? []).filter((item) => {
+    const author = (item.author || '').trim().toLowerCase();
+    return Boolean(author) && author !== 'unknown author';
+  });
+
   const detail = useQuery({
     queryKey: ['bible-imported-book', book?.id],
     queryFn: () => api.getBibleImportedBook(book!.id),
@@ -49,11 +58,11 @@ export default function BibleStudyBooks() {
         </h2>
         {books.isLoading ? (
           <p className="text-xs text-slate-500">Loading…</p>
-        ) : (books.data?.books ?? []).length === 0 ? (
+        ) : studyBooks.length === 0 ? (
           <p className="text-xs text-slate-500">No study books yet. Import one in Admin › Bible.</p>
         ) : (
           <ul className="grid gap-2 sm:grid-cols-2">
-            {(books.data?.books ?? []).map((item) => (
+            {studyBooks.map((item) => (
               <li key={item.id}>
                 <button
                   type="button"
