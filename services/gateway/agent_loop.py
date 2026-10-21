@@ -576,6 +576,10 @@ ALLOWED_TOOLS = {
     # network was being rewritten into a workspace file search, and the
     # storage TTS row into a bare text-to-TextRequest call.
     "networkdevicescanrequest", "storagetexttoaudiorequest",
+    # Browser automation: an unknown name here is fuzzy-matched into a web
+    # search, which would silently turn "click the login button" into a text
+    # query instead of driving the page.
+    "browserautomationrequest",
     "ghrequest",
     "ravenrecallrequest",
     "workspaceportexposerequest", "workspace_expose_port", "expose_port", "port_expose",
@@ -4003,6 +4007,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
                 "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
                 "webscraperrequest": (EXECUTION_SVC, "/execute/web_scraper"),
+                "browserautomationrequest": (EXECUTION_SVC, "/execute/browser"),
                 "codesearchrequest": (EXECUTION_SVC, "/execute/code_search"),
                 "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
                 "dockercomposerequest": (EXECUTION_SVC, "/execute/docker"),
