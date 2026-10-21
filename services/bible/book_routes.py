@@ -107,12 +107,18 @@ async def admin_books_browse(
     except library.LibraryUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     data = listing.as_dict()
+    for entry in data["entries"]:
+        if entry["is_dir"]:
+            continue
+        if entry["kind"] not in {"pdf", "epub"}:
+            entry["installable"] = False
+            entry["note"] = "Not a PDF or EPUB book"
     if source == "calibre":
         data["entries"] = [
-            entry for entry in data["entries"] if entry["is_dir"] or entry["kind"]
+            entry for entry in data["entries"] if entry["is_dir"] or entry["installable"]
         ]
-        data["count"] = len(data["entries"])
-        data["installable"] = sum(1 for entry in data["entries"] if entry["installable"])
+    data["count"] = len(data["entries"])
+    data["installable"] = sum(1 for entry in data["entries"] if entry["installable"])
     return {"source": source, "root": root, "setting": "bible_books_path" if source == "nextcloud" else library.LIBRARY_SETTING, **data}
 
 
