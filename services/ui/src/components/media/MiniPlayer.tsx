@@ -1,19 +1,25 @@
 import { Link, useLocation } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { Music, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { useOptionalWebPlayer } from '../../context/webPlayerContext';
 
 /**
  * The web player above the page, so music does not disappear when the reader
- * opens Calendar, Bible or Family. It is deliberately small: the full transport
- * and queue live on /media, and this bar only needs to get back there or pause
- * what is already playing.
+ * opens Calendar, Bible or Family. Tapping it opens the full Now Playing sheet;
+ * the controls here are only the ones worth reaching without leaving the page.
  */
-export default function MiniPlayer() {
+export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
   const player = useOptionalWebPlayer();
   const location = useLocation();
   if (!player || !player.mediaTitle || location.pathname.startsWith('/media')) return null;
 
   const pct = player.duration > 0 ? Math.min(100, Math.max(0, (player.position / player.duration) * 100)) : 0;
+  const summary = (
+    <>
+      <p className="truncate text-sm font-medium text-white">{player.mediaTitle}</p>
+      {player.mediaArtist ? <p className="truncate text-[11px] text-slate-400">{player.mediaArtist}</p> : null}
+    </>
+  );
 
   return (
     <div
@@ -25,13 +31,35 @@ export default function MiniPlayer() {
           <div className="h-full bg-cyan-400 transition-[width] duration-500" style={{ width: `${pct}%` }} />
         </div>
         <div className="flex items-center gap-2 p-2 pl-3">
-          <Music size={16} className="shrink-0 text-cyan-300" aria-hidden />
-          <Link to="/media" className="min-w-0 flex-1 rounded-lg px-1 py-1.5 hover:bg-white/5">
-            <p className="truncate text-sm font-medium text-white">{player.mediaTitle}</p>
-            {player.mediaArtist ? (
-              <p className="truncate text-[11px] text-slate-400">{player.mediaArtist}</p>
-            ) : null}
-          </Link>
+          {player.mediaImage ? (
+            <motion.img
+              layoutId="np-art"
+              src={player.mediaImage}
+              alt=""
+              className="h-11 w-11 shrink-0 rounded-lg object-cover"
+            />
+          ) : (
+            <motion.div
+              layoutId="np-art"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/10"
+            >
+              <Music size={17} className="text-cyan-300" aria-hidden />
+            </motion.div>
+          )}
+          {onOpen ? (
+            <button
+              type="button"
+              onClick={onOpen}
+              aria-label="Open now playing"
+              className="min-w-0 flex-1 rounded-lg px-1 py-1.5 text-left hover:bg-white/5"
+            >
+              {summary}
+            </button>
+          ) : (
+            <Link to="/media" className="min-w-0 flex-1 rounded-lg px-1 py-1.5 hover:bg-white/5">
+              {summary}
+            </Link>
+          )}
           <button
             type="button"
             aria-label="Previous track"

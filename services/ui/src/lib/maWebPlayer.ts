@@ -41,6 +41,8 @@ export interface MAWebPlayerState {
   mediaFavorite?: boolean | null;
   position: number;
   duration: number;
+  /** Audiobook/podcast playback speed (1 = normal). */
+  playbackRate: number;
   connectionState: ConnectionState;
   reconnectAttempts: number;
   maxReconnectAttempts: number;
@@ -186,6 +188,7 @@ export function useMAWebPlayer() {
     mediaFavorite: null,
     position: 0,
     duration: 0,
+    playbackRate: 1,
     connectionState: 'DISCONNECTED',
     reconnectAttempts: 0,
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
@@ -194,6 +197,11 @@ export function useMAWebPlayer() {
   useEffect(() => {
     volumeRef.current = { volume: state.volume, muted: state.muted };
   }, [state.volume, state.muted]);
+  const playbackRateRef = useRef(state.playbackRate);
+  useEffect(() => {
+    playbackRateRef.current = state.playbackRate;
+    if (audioRef.current) audioRef.current.playbackRate = state.playbackRate;
+  }, [state.playbackRate]);
 
   /** Browsers only start audio from a user gesture: resume the element and
    *  Sendspin's AudioContext while we are inside one. */
@@ -415,6 +423,7 @@ export function useMAWebPlayer() {
     let sendspinWs: WebSocket = new WebSocket(gatewaySocketUrl('/api/sendspin', apiToken));
     const audio = new Audio();
     audio.crossOrigin = 'anonymous';
+    audio.playbackRate = playbackRateRef.current;
     document.body.appendChild(audio);
     audioRef.current = audio;
     audio.onerror = () => setError('Audio element error. Check browser audio permissions');
@@ -718,6 +727,13 @@ export function useMAWebPlayer() {
     }
   }, [setError]);
 
+  /** Playback speed for books and podcasts; the audio element keeps it across tracks. */
+  const setPlaybackRate = useCallback((rate: number) => {
+    const next = Math.min(3, Math.max(0.5, rate));
+    if (audioRef.current) audioRef.current.playbackRate = next;
+    setStateLocal(s => (s.playbackRate === next ? s : { ...s, playbackRate: next }));
+  }, []);
+
   /** Connect now (no-op when connected). Never throws; failures land in `error`. */
   const connect = useCallback(async () => {
     try {
@@ -797,6 +813,7 @@ export function useMAWebPlayer() {
     previous,
     setVolume,
     setMuted,
+    setPlaybackRate,
     maCommand,
     listMaPlayers,
   };
