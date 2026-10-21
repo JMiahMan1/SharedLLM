@@ -170,6 +170,16 @@ describe('MediaShortcuts', () => {
     expect(screen.queryByTestId('shortcut-help')).toBeNull();
   });
 
+  it('leaves transport alone when nothing is playing', () => {
+    const value = player({ mediaTitle: null });
+    renderShortcuts(value);
+    fireEvent.keyDown(document, { key: ' ' });
+    fireEvent.keyDown(document, { key: 'm' });
+    expect(value.play).not.toHaveBeenCalled();
+    expect(value.pause).not.toHaveBeenCalled();
+    expect(value.setMuted).not.toHaveBeenCalled();
+  });
+
   it('still searches and shows help without a player', async () => {
     renderShortcuts(null);
     const search = screen.getByRole('textbox', { name: 'Global search' });

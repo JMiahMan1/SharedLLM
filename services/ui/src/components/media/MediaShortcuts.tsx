@@ -197,7 +197,9 @@ export default function MediaShortcuts({
       const isSpace = event.key === ' ' || event.code === 'Space';
       if (isSpace && isActivatableTarget(event.target)) return;
 
-      if (!active) return;
+      // No current item means there is nothing to control. Without this guard
+      // Space on any page would wake the web player and resume its old queue.
+      if (!active?.mediaTitle) return;
 
       const run = (action: () => void) => {
         event.preventDefault();
