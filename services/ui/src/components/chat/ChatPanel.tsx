@@ -149,7 +149,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   });
 
   const limit = historyLimit[activeToken] ?? PAGE;
-  const { data: fetched = EMPTY_ARRAY, isFetching: fetchingMessages } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
+  const { data: fetched = EMPTY_ARRAY, isFetching: fetchingMessages, refetch: refetchMessages } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
     queryKey: ['talk-messages', activeToken, limit],
     queryFn: () => api.getTalkMessages(activeToken, limit),
     enabled: Boolean(activeToken),
@@ -676,6 +676,23 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
                     else toast.error("Today's verse is not available");
                   })
                   .catch(() => toast.error("Today's verse is not available")),
+            },
+            {
+              key: 'bible-trivia',
+              label: 'Bible trivia',
+              icon: <BookOpen size={14} className="text-amber-300" />,
+              onSelect: () =>
+                void api
+                  .startTalkBibleTrivia(activeToken)
+                  .then((response) => {
+                    if (response.status === 'SUCCESS') {
+                      toast.success('Bible trivia started');
+                      void refetchMessages();
+                    } else {
+                      toast.error(response.message || 'Could not start Bible trivia');
+                    }
+                  })
+                  .catch(() => toast.error('Could not start Bible trivia')),
             },
             ...(onOpenTab
               ? [

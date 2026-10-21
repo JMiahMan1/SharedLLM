@@ -78,6 +78,59 @@ TRIVIA_QUESTIONS: list[dict[str, Any]] = [
     },
 ]
 
+BIBLE_TRIVIA_QUESTIONS: list[dict[str, Any]] = [
+    {
+        "question": "Who built the ark?",
+        "answers": ["Noah", "noah"],
+        "hint": "He also sent out a dove.",
+    },
+    {
+        "question": "What sea did Moses lead the Israelites across?",
+        "answers": ["Red Sea", "the red sea", "red"],
+        "hint": "Its name is a colour.",
+    },
+    {
+        "question": "How many disciples did Jesus choose?",
+        "answers": ["12", "twelve"],
+        "hint": "The same number as the tribes of Israel.",
+    },
+    {
+        "question": "What is the first book of the New Testament?",
+        "answers": ["Matthew", "matthew"],
+        "hint": "It opens with a genealogy of Jesus.",
+    },
+    {
+        "question": "Who was swallowed by a great fish?",
+        "answers": ["Jonah", "jonah"],
+        "hint": "He ran from Nineveh.",
+    },
+    {
+        "question": "In which town was Jesus born?",
+        "answers": ["Bethlehem", "bethlehem"],
+        "hint": "The city of David.",
+    },
+    {
+        "question": "Which disciple betrayed Jesus?",
+        "answers": ["Judas", "judas", "Judas Iscariot"],
+        "hint": "His surname was Iscariot.",
+    },
+    {
+        "question": "What did David use to face Goliath?",
+        "answers": ["sling", "a sling", "sling and stone", "sling and a stone", "stone"],
+        "hint": "A shepherd's weapon.",
+    },
+    {
+        "question": "What is the longest book of the Bible?",
+        "answers": ["Psalms", "psalms", "Psalm"],
+        "hint": "It is a book of songs and prayers.",
+    },
+    {
+        "question": "Who was the first man?",
+        "answers": ["Adam", "adam"],
+        "hint": "Eve was made from his rib.",
+    },
+]
+
 MEMORY_WORDS = [
     "spaceship", "pancake", "rainbow", "treasure", "dinosaur", "moonwalk",
     "cupcake", "volcano", "penguin", "telescope", "blanket", "garden",
@@ -144,8 +197,14 @@ class GameRegistry:
     def get(self, token: str) -> GameState | None:
         return self._games.get(token)
 
-    def start_trivia(self, token: str, question: dict[str, Any] | None = None) -> GameState:
-        picked = question or random.choice(TRIVIA_QUESTIONS)  # noqa: S311 - game content, not security
+    def start_trivia(
+        self,
+        token: str,
+        question: dict[str, Any] | None = None,
+        questions: list[dict[str, Any]] | None = None,
+    ) -> GameState:
+        pool = questions or TRIVIA_QUESTIONS
+        picked = question or random.choice(pool)  # noqa: S311 - game content, not security
         state = GameState(
             kind="trivia",
             token=token,

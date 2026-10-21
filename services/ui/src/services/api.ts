@@ -1910,6 +1910,15 @@ export const api = {
     return resp.data;
   },
 
+  async startTalkBibleTrivia(token: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/game', {
+      token,
+      game_command: 'start',
+      game_kind: 'bible',
+    });
+    return resp.data;
+  },
+
   async getTalkConversations(): Promise<ExecutionResponse> {
     // Talk can take 20s+ on a cold Nextcloud worker. The global 15s client
     // timeout used to abort the request, leaving the Family chat list empty.

@@ -63,6 +63,20 @@ def test_trivia_starts_and_answers(talk, monkeypatch):
     assert right.detail is not None or right.message
 
 
+def test_bible_trivia_uses_bible_questions(talk, monkeypatch):
+    monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+    from services.execution.handlers import family_games as games
+
+    start = asyncio.run(
+        talk.handle_talk(_request(game_command="start", game_kind="bible"))
+    )
+    assert start.status == "SUCCESS"
+    state = games.registry.get("room-1")
+    assert state is not None
+    assert state.question in {q["question"] for q in games.BIBLE_TRIVIA_QUESTIONS}
+    assert any("Trivia time" in p["message"] for p in talk.posted)
+
+
 def test_memory_flip_posts_a_card(talk, monkeypatch):
     monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
     from services.execution.handlers import family_games as games

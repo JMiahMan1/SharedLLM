@@ -159,6 +159,7 @@ services:
       - TEMP_MEDIA_DIR=/workspaces
       - MODELS_DIR=/workspaces/models
       - TZ=America/Phoenix
+      - FAMILY_GAMES_ENABLED=${FAMILY_GAMES_ENABLED:-1}
       - HOME=/home/sharedllm
       - WORKSPACE_ROOT=/workspaces
       # Host path that /workspaces maps to, so the sandbox can mount the real
