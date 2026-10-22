@@ -10,6 +10,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.widget.RemoteViews;
 import com.jarvisos.app.MainActivity;
+import com.jarvisos.app.PushNotifier;
 import com.jarvisos.app.R;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -40,6 +41,7 @@ public final class WidgetUpdater {
         request(context, ActionButtonWidget.class);
         request(context, HealthWidget.class);
         request(context, VerseWidget.class);
+        request(context, NotesWidget.class);
     }
 
     public static void request(Context context, Class<?> cls) {
@@ -81,6 +83,29 @@ public final class WidgetUpdater {
         i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         i.setData(Uri.parse("jarvis://home"));
         return PendingIntent.getActivity(context, 3001, i,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    /**
+     * Open one note from the home screen.
+     *
+     * The tap starts MainActivity with the web path the SPA already handles
+     * (`/notes?note=…`), so the widget never grows its own navigation stack.
+     */
+    public static PendingIntent openNotePendingIntent(Context context, String path, int row) {
+        Intent i = new Intent(context, MainActivity.class);
+        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        i.putExtra(PushNotifier.EXTRA_OPEN_PATH, "/notes?note=" + Uri.encode(path));
+        return PendingIntent.getActivity(context, 6010 + row, i,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    /** Open the app on a blank note, the widget's quick-add button. */
+    public static PendingIntent composeNotePendingIntent(Context context) {
+        Intent i = new Intent(context, MainActivity.class);
+        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        i.putExtra(PushNotifier.EXTRA_OPEN_PATH, "/notes?new=1");
+        return PendingIntent.getActivity(context, 6001, i,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
@@ -195,6 +220,19 @@ public final class WidgetUpdater {
         if (ids == null || ids.length == 0) return;
         onBackground(() -> {
             RemoteViews views = VerseWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
+    /** Recent notes, with each row deep-linking into the Notes page. */
+    public static void pushNotes(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, NotesWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = NotesWidget.build(context);
             onMain(() -> {
                 for (int id : ids) mgr.updateAppWidget(id, views);
             });

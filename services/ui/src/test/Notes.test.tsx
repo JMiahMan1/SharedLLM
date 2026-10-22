@@ -177,6 +177,15 @@ describe('Notes (Keep-style)', () => {
     expect(notesReadCalls).toEqual([expect.objectContaining({ path: 'Notes/Trip ideas.md' })]);
   });
 
+  it('starts a new note from the Android widget quick add link', async () => {
+    renderWithProviders(<Notes />, { route: '/notes?new=1' });
+
+    const title = await screen.findByLabelText('Note title');
+    expect((title as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Note content') as HTMLTextAreaElement).value).toBe('');
+    expect(notesReadCalls).toEqual([]);
+  });
+
   it('does not open an empty editor when the note cannot be read', async () => {
     const user = userEvent.setup();
     server.use(
