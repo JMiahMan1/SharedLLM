@@ -332,7 +332,7 @@ export default function HealthCycle() {
         </h3>
         <p className="mt-2 text-xs text-slate-400">
           Off by default and private. Log period dates and symptoms to see an estimated phase and
-          next period. This is a calendar estimate, not contraception or medical advice.
+          next period. This is a calendar estimate.
         </p>
         {data.is_minor && (
           <p className="mt-1.5 text-[11px] text-slate-500">

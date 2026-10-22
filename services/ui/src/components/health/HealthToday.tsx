@@ -565,9 +565,6 @@ export default function HealthToday({ onNavigate }: Props) {
                           <li key={tip}>{tip}</li>
                         ))}
                       </ul>
-                      <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
-                        {cycle.support.disclaimer}
-                      </p>
                     </div>
                   )}
                 </div>

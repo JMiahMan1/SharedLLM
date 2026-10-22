@@ -76,7 +76,7 @@ describe('HealthCycle', () => {
     renderWithClient(<HealthCycle />);
 
     expect(await screen.findByText('Cycle tracking')).toBeInTheDocument();
-    expect(screen.getByText(/not contraception or medical advice/i)).toBeInTheDocument();
+    expect(screen.getByText(/calendar estimate/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /turn on cycle tracking/i }));
     await waitFor(() =>
       expect(updateHealthCycleSettings).toHaveBeenCalledWith({ enabled: true }),
@@ -103,7 +103,7 @@ describe('HealthCycle', () => {
           variation_days: 1,
           confidence: 'medium',
           detail: 'Cycle day 5 of an estimated 28-day cycle.',
-          disclaimer: 'Estimates only, based on logged dates. Not contraception or medical advice.',
+          disclaimer: 'Estimates only, based on logged dates.',
         },
         periods: [
           {
@@ -124,7 +124,7 @@ describe('HealthCycle', () => {
     expect(await screen.findByText('Follicular')).toBeInTheDocument();
     expect(screen.getByText('Cycle day 5')).toBeInTheDocument();
     expect(screen.getByText(/next period in 24 days/i)).toBeInTheDocument();
-    expect(screen.getByText(/not contraception or medical advice/i)).toBeInTheDocument();
+    expect(screen.getByText(/estimates only/i)).toBeInTheDocument();
     expect(screen.queryByText(/fertile/i)).not.toBeInTheDocument();
   });
 
