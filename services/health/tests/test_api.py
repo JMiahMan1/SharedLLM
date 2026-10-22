@@ -64,6 +64,12 @@ class TestProfile:
         response = client.put("/profile", json={"activity_level": "olympian"})
         assert response.status_code == 422
 
+    def test_other_sex_is_rejected(self, client):
+        response = client.put("/profile", json={"sex": "other"})
+        assert response.status_code == 422
+        for value in ("female", "male", "unspecified"):
+            assert client.put("/profile", json={"sex": value}).status_code == 200
+
 
 class TestMetrics:
     def test_weight_in_pounds_is_stored_in_kilograms(self, client):

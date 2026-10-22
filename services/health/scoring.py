@@ -361,7 +361,7 @@ ACTIVITY_FACTORS = {
 
 #: Floors used by mainstream guidance. They are a safety rail, not a target:
 #: an adult's deficit range is never allowed below these.
-CALORIE_FLOOR = {"female": 1200.0, "male": 1500.0, "other": 1200.0}
+CALORIE_FLOOR = {"female": 1200.0, "male": 1500.0}
 
 
 @dataclass
@@ -416,7 +416,7 @@ def calorie_target(
         missing.append("height")
     if not weight_kg:
         missing.append("weight")
-    if sex not in ("female", "male", "other"):
+    if sex not in ("female", "male"):
         missing.append("sex")
 
     age = today.year - birth_year if birth_year else None

@@ -38,7 +38,7 @@ class HealthProfile(SQLModel, table=True):  # type: ignore
     display_name: str = Field(default="")
     birth_year: int | None = None
     height_cm: float | None = None
-    sex: str | None = None  # female | male | other | unspecified
+    sex: str | None = None  # female | male | unspecified
     activity_level: str = Field(default="moderate")
     goal: str = Field(default="maintain")  # lose | maintain | gain | balance
     units: str = Field(default="imperial")  # imperial | metric

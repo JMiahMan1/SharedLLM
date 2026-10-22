@@ -100,6 +100,16 @@ def _engine():
 async def lifespan(app: FastAPI):
     engine = _db()
     SQLModel.metadata.create_all(engine)
+    # Sex is male or female; a profile stored under the removed "other" option
+    # is reset to "not set" so its owner picks one instead of keeping a value
+    # the UI can no longer show.
+    with Session(engine) as session:
+        legacy = session.exec(select(HealthProfile).where(HealthProfile.sex == "other")).all()
+        for profile in legacy:
+            profile.sex = None
+        if legacy:
+            session.commit()
+            log.info("[Health] reset %d profile(s) from sex=other to not set", len(legacy))
     log.info("[Health] ready db=%s", _database_url())
     yield
 
@@ -359,8 +369,8 @@ class ProfileUpdate(BaseModel):
     def _sex(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        if value not in ("female", "male", "other", "unspecified"):
-            raise ValueError("sex must be female, male, other or unspecified")
+        if value not in ("female", "male", "unspecified"):
+            raise ValueError("sex must be female, male or unspecified")
         return value
 
     @field_validator("activity_level")
