@@ -120,6 +120,9 @@ export default function HealthProfilePanel() {
     void queryClient.invalidateQueries({ queryKey: ['health-summary'] });
     void queryClient.invalidateQueries({ queryKey: ['health-nutrition'] });
     void queryClient.invalidateQueries({ queryKey: ['health-family'] });
+    // Sex decides whether the cycle panel exists at all, so a profile save
+    // must re-evaluate it in place.
+    void queryClient.invalidateQueries({ queryKey: ['health-cycle'] });
   };
 
   const saveProfile = useMutation({
