@@ -34,17 +34,22 @@ import {
   TRASH_PREFIX,
   archivedPathFor,
   clearLegacyMeta,
+  extractTags,
   forgetIndexEntry,
+  hasTag,
   indexEntry,
   isArchivedPath,
   isTrashedPath,
+  matchesNoteQuery,
   mergeLegacyMeta,
   noteBody,
   notePreview,
   parseChecklist,
+  parseNoteQuery,
   parseNotesIndex,
   setIndexEntry,
   sortNotesByIndex,
+  topTags,
   type NoteColor,
   type NotesIndex,
 } from '../lib/notesMeta';
@@ -103,6 +108,7 @@ function categoryFor(folder: string): string {
  */
 export default function Notes() {
   const [search, setSearch] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
   const [view, setView] = useState<NotesView>('notes');
   /** The open editor: `draft` is null while the note is being read. */
   const [editing, setEditing] = useState<{ draft: DraftState | null; title: string } | null>(null);
@@ -188,17 +194,18 @@ export default function Notes() {
     await refetch();
   }, [refetch]);
 
+  const parsedQuery = useMemo(() => parseNoteQuery(search), [search]);
+  const tagChips = useMemo(() => topTags(mainNotes, contents), [mainNotes, contents]);
+
   const visible = useMemo(() => {
     const source = view === 'archive' ? archivedNotes : view === 'trash' ? trashedNotes : mainNotes;
-    const query = search.trim().toLowerCase();
-    const filtered = query
-      ? source.filter((n) => {
-          const body = contents[n.path]?.toLowerCase() ?? '';
-          return n.title.toLowerCase().includes(query) || body.includes(query);
-        })
-      : source;
+    const filtered = source.filter((note) => {
+      const body = contents[note.path];
+      if (tagFilter && !hasTag(body, tagFilter)) return false;
+      return matchesNoteQuery(note, body, parsedQuery, indexEntry(index, note.path).color);
+    });
     return sortNotesByIndex(filtered, index);
-  }, [view, mainNotes, archivedNotes, trashedNotes, search, contents, index]);
+  }, [view, mainNotes, archivedNotes, trashedNotes, tagFilter, parsedQuery, contents, index]);
 
   const closeEditor = useCallback(() => setEditing(null), []);
 
@@ -470,7 +477,7 @@ export default function Notes() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search notes"
+              placeholder="Search notes (tag:…)"
               aria-label="Search notes"
               className="glass-input min-h-11 pl-8 pr-3 py-2 text-base sm:text-sm w-full sm:w-56"
             />
@@ -532,6 +539,35 @@ export default function Notes() {
         )}
       </div>
 
+      {/* Labels: inline #tags, which Nextcloud Notes reads as tags too. */}
+      {view === 'notes' && tagChips.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2" aria-label="Filter by label">
+          <button
+            type="button"
+            aria-pressed={!tagFilter}
+            onClick={() => setTagFilter('')}
+            className={`min-h-9 rounded-full px-3 py-1 text-[11px] transition-colors ${
+              tagFilter ? 'text-slate-400 hover:bg-white/5' : 'bg-white/10 text-slate-100'
+            }`}
+          >
+            All labels
+          </button>
+          {tagChips.map(({ tag, count }) => (
+            <button
+              key={tag}
+              type="button"
+              aria-pressed={tagFilter === tag}
+              onClick={() => setTagFilter(tagFilter === tag ? '' : tag)}
+              className={`min-h-9 rounded-full px-3 py-1 text-[11px] transition-colors ${
+                tagFilter === tag ? 'bg-purple-500/20 text-purple-100' : 'text-slate-400 hover:bg-white/5'
+              }`}
+            >
+              #{tag} <span className="text-slate-500">{count}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Grid */}
       {isLoading && notes.length === 0 ? (
         <div className="flex items-center justify-center py-16 text-slate-500 text-sm gap-2">
@@ -558,6 +594,7 @@ export default function Notes() {
             const meta = indexEntry(index, note.path);
             const color = (meta.color ?? 'default') as NoteColor;
             const checklist = body ? parseChecklist(body) : [];
+            const tags = extractTags(body);
             return (
               <article
                 key={note.path}
@@ -613,6 +650,25 @@ export default function Notes() {
                   <p className="mt-2 text-xs text-slate-400 whitespace-pre-wrap">
                     {body !== undefined ? notePreview(body) : `${Math.max(1, Math.round(note.size / 1024))} KB`}
                   </p>
+                )}
+
+                {tags.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {tags.slice(0, 3).map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        className="rounded-full bg-white/5 px-1.5 py-0.5 text-[10px] text-purple-200 hover:bg-white/10"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setTagFilter(tag);
+                        }}
+                      >
+                        #{tag}
+                      </button>
+                    ))}
+                    {tags.length > 3 && <span className="text-[10px] text-slate-500">+{tags.length - 3}</span>}
+                  </div>
                 )}
 
                 <div className="mt-3 flex items-center justify-between text-[10px] text-slate-500">
@@ -762,6 +818,7 @@ function NoteEditor({
   onTrash?: () => void;
 }) {
   const [draft, setDraft] = useState<DraftState>(initial);
+  const [labelDraft, setLabelDraft] = useState('');
   return (
     <div className="space-y-3">
       <input
@@ -774,7 +831,7 @@ function NoteEditor({
       <textarea
         value={draft.content}
         onChange={(e) => setDraft({ ...draft, content: e.target.value })}
-        placeholder="Write something…  Use - [ ] for a checklist item"
+        placeholder="Write something…  Use - [ ] for a checklist item and #label to tag it"
         aria-label="Note content"
         rows={12}
         className="glass-input w-full text-base sm:text-sm font-mono resize-y"
@@ -799,6 +856,29 @@ function NoteEditor({
             className="glass-input min-h-11 px-2 py-1 text-base sm:text-xs w-32"
           />
         </label>
+        <div className="flex items-center gap-2">
+          <input
+            value={labelDraft}
+            onChange={(e) => setLabelDraft(e.target.value)}
+            placeholder="Label"
+            aria-label="Note label"
+            className="glass-input min-h-11 px-2 py-1 text-base sm:text-xs w-28"
+          />
+          <button
+            type="button"
+            className="glass-button min-h-11 px-3 py-1.5 text-xs"
+            onClick={() => {
+              const tag = labelDraft.trim().replace(/^#+/, '').replace(/\s+/g, '-');
+              if (!tag) return;
+              // Nextcloud Notes reads #labels straight out of the markdown.
+              const needsBreak = draft.content.length > 0 && !draft.content.endsWith('\n');
+              setDraft({ ...draft, content: `${draft.content}${needsBreak ? '\n' : ''}#${tag} ` });
+              setLabelDraft('');
+            }}
+          >
+            Add label
+          </button>
+        </div>
         <button
           type="button"
           className={`glass-button min-h-11 px-3 py-1.5 text-xs ${draft.pinned ? 'text-amber-300' : ''}`}

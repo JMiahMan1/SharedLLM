@@ -7,6 +7,7 @@ import {
   notesCheckOffCalls,
   notesDuplicateCalls,
   notesEmptyTrashCalls,
+  notesFixtures,
   notesMetaWrites,
   notesMoveCalls,
   notesReadCalls,
@@ -282,5 +283,43 @@ describe('Notes (Keep-style)', () => {
 
     await waitFor(() => expect(notesEmptyTrashCalls.length).toBe(1));
     vi.unstubAllGlobals();
+  });
+
+  it('shows inline #labels and filters the shelf by one', async () => {
+    const user = userEvent.setup();
+    notesFixtures.push({ title: 'Weekend plans', path: 'Notes/Weekend plans.md', size: 40, modified: '2026-05-11T12:00:00.000Z' });
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    // The card carries its label; the shelf filter carries the same one.
+    const cardChip = await screen.findByRole('button', { name: '#outdoors' });
+    await user.click(cardChip);
+
+    await waitFor(() => expect(screen.queryByText('Trip ideas')).not.toBeInTheDocument());
+    expect(screen.getByText('Weekend plans')).toBeInTheDocument();
+  });
+
+  it('understands a tag: search', async () => {
+    const user = userEvent.setup();
+    notesFixtures.push({ title: 'Weekend plans', path: 'Notes/Weekend plans.md', size: 40, modified: '2026-05-11T12:00:00.000Z' });
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    await user.type(screen.getByLabelText('Search notes'), 'tag:outdoors');
+
+    await waitFor(() => expect(screen.queryByText('Trip ideas')).not.toBeInTheDocument());
+    expect(screen.getByText('Weekend plans')).toBeInTheDocument();
+  });
+
+  it('adds a #label from the editor', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByTestId('quick-capture'));
+    await user.type(await screen.findByLabelText('Note label'), 'friends');
+    await user.click(screen.getByRole('button', { name: 'Add label' }));
+
+    expect((screen.getByLabelText('Note content') as HTMLTextAreaElement).value).toContain('#friends');
   });
 });

@@ -118,14 +118,15 @@ that, every save of an opened note stacked another header on top.
 ## Keep parity
 
 Shipped: pin and colour in the shared index, archive, trash with restore and
-empty trash, duplicate, move without copy, checklists, search, dashboard and
+empty trash, duplicate, move without copy, checklists, search, labels as inline
+`#tags` (with per-label chips, a label filter, an editor "Add label" button and
+`tag:`/`label:`, `colour:`/`color:` and `type:` search operators), dashboard and
 home-screen capture.
 
-Still open: labels as inline `#tags`, reminders (time and place),
-attachments/images/drawings/audio, Nextcloud sharing, bulk multi-select,
-list/grid toggle, search filters (`label:`, `colour:`, `type:`), autosave and
-drafts, markdown preview and a formatting toolbar, keyboard shortcuts,
-per-item checklist editing and reordering, undo toasts, versions, offline.
+Still open: reminders (time and place), attachments/images/drawings/audio,
+Nextcloud sharing, bulk multi-select, list/grid toggle, autosave and drafts,
+markdown preview and a formatting toolbar, keyboard shortcuts, per-item
+checklist editing and reordering, undo toasts, versions, offline.
 
 ## Tests
 
