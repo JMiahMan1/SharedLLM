@@ -1305,6 +1305,11 @@ Ordinary PDF/EPUB books are imported separately from Bible translations:
   end in a question in the last third of a chapter are stored as its
   end-of-chapter questions. "Answer from this chapter" calls the model with
   that chapter as the only source and keeps the answer in the study session.
+- A Bible study book opens in a focused reader rather than a wall of page
+  buttons: one page at a time, a contents sheet, progress remembered per book,
+  and the Scripture reader's text size, spacing, tone and serif/sans settings.
+  Each page can be handed to Jarvis (grounded on that page), saved to Notes as
+  a `Bible` note, or shared to a family chat.
 - **Studies** is a first-class tab. `StudySession` rows keep several passages
   open at once; `StudySessionTurn` stores each grounded answer. Opening a new
   passage no longer replaces the previous conversation.

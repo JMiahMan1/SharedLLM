@@ -688,7 +688,15 @@ export default function Bible() {
             version={version}
             onOpenRef={openRef}
           />
-          <BibleStudyBooks />
+          <BibleStudyBooks
+            preferences={{
+              page: effectivePreferences.page,
+              font_scale: effectivePreferences.font_scale,
+              line_height: effectivePreferences.line_height,
+              theme: effectivePreferences.theme,
+            }}
+            onPreferences={applyPreferences}
+          />
         </div>
       )}
 
