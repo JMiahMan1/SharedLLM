@@ -173,18 +173,22 @@ async def _answers(client: aiohttp.ClientSession, url: str) -> bool:
 
 
 def media_targets(settings: dict[str, Any]) -> dict[str, str]:
-    """Service -> liveness URL for the self-hosted media backends.
+    """Service -> liveness URL for the self-hosted backends.
 
     Audiobookshelf has an explicit ``/ping``; Music Assistant answers on its
-    bare origin, so the root is its liveness check. Unset URLs are skipped.
+    bare origin, so the root is its liveness check; Nextcloud exposes
+    ``/status.php``. Unset URLs are skipped.
     """
     abs_url = str(settings.get("audiobookshelf_url") or settings.get("abs_url") or "").strip().rstrip("/")
     ma_url = str(settings.get("mass_url") or settings.get("ma_url") or "").strip().rstrip("/")
+    nextcloud_url = str(settings.get("nextcloud_url") or "").strip().rstrip("/")
     targets: dict[str, str] = {}
     if abs_url:
         targets["audiobookshelf"] = f"{abs_url}/ping"
     if ma_url:
         targets["music_assistant"] = ma_url
+    if nextcloud_url:
+        targets["nextcloud"] = f"{nextcloud_url}/status.php"
     return targets
 
 

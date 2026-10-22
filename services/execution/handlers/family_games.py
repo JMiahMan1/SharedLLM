@@ -243,7 +243,15 @@ registry = GameRegistry()
 def trivia_prompt(state: GameState, hint: bool = False) -> str:
     lines = ["🧠 Trivia time", state.question]
     if hint:
-        lines.append(f"(hint: {next((q['hint'] for q in TRIVIA_QUESTIONS if q['question'] == state.question), 'think!')})")
+        hint_text = next(
+            (
+                q["hint"]
+                for q in (*TRIVIA_QUESTIONS, *BIBLE_TRIVIA_QUESTIONS)
+                if q["question"] == state.question
+            ),
+            "think!",
+        )
+        lines.append(f"(hint: {hint_text})")
     lines.append("Reply with your answer. Everyone plays at once.")
     return "\n".join(lines)
 

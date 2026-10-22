@@ -283,7 +283,7 @@ export default function NowPlayingSheet({
           <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-slate-950/50 via-slate-950/75 to-slate-950" />
 
           <motion.div
-            className="relative mx-auto flex h-[100dvh] w-full max-w-3xl flex-col px-5 pb-5 pt-2 safe-area-bottom"
+            className="relative mx-auto flex h-[100dvh] w-full max-w-3xl flex-col px-5 pt-[calc(env(safe-area-inset-top,0px)+0.5rem)] pb-[calc(env(safe-area-inset-bottom,0px)+1.25rem)]"
             drag="y"
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0.02, bottom: 0.4 }}

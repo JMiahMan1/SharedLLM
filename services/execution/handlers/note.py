@@ -133,10 +133,23 @@ async def _read_meta(provider) -> dict | None:
 
     from ..http_client import request as http_request
 
-    resp = await http_request(
-        "GET", _meta_url(provider),
-        auth=(provider.username, provider.password), verify=False,
-    )
+    # Nextcloud connects stall in bursts; one quick retry keeps a single
+    # stalled connect from blanking the whole index (pins, colours, archive).
+    resp: dict | None = None
+    for attempt in range(2):
+        try:
+            resp = await http_request(
+                "GET", _meta_url(provider),
+                auth=(provider.username, provider.password), verify=False,
+            )
+            break
+        except Exception as e:  # noqa: BLE001 - retry once, then report
+            if attempt == 0:
+                log.info("Notes index read failed; retrying: %s", str(e) or type(e).__name__)
+                await asyncio.sleep(0.4)
+                continue
+            raise
+    assert resp is not None
     if resp["status_code"] == 404:
         return _default_meta()
     if resp["status_code"] != 200:

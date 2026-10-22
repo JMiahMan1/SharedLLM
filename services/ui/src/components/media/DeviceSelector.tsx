@@ -3,7 +3,7 @@ import { Cast, Headphones } from 'lucide-react';
 import type { DeviceOption } from './types';
 
 const chipClass = (active: boolean, online: boolean) =>
-  `flex items-center gap-2.5 px-3.5 py-2.5 min-h-11 rounded-xl border shrink-0 transition-all text-left min-w-[150px] max-w-[220px] relative overflow-hidden ${
+  `flex items-center gap-2.5 px-3.5 py-2.5 min-h-11 rounded-xl border shrink-0 transition-all text-left min-w-[150px] max-w-[220px] sm:min-w-0 sm:max-w-none relative overflow-hidden ${
     active
       ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
       : online
@@ -43,7 +43,10 @@ export function DeviceSelector({
         </h2>
         <span className="text-[11px] text-slate-500">{online} speaker{online === 1 ? '' : 's'} online</span>
       </div>
-      <div ref={stripRef} className="flex gap-2 overflow-x-auto sm:flex-wrap sm:overflow-visible custom-scrollbar pb-1">
+      <div
+        ref={stripRef}
+        className="flex gap-2 overflow-x-auto custom-scrollbar pb-1 sm:grid sm:grid-cols-2 sm:gap-2.5 sm:overflow-visible lg:grid-cols-3"
+      >
         <button type="button" onClick={() => onSelect('')} aria-pressed={!selectedTarget} className={chipClass(!selectedTarget, true)}>
           <Headphones size={16} className="text-cyan-400 shrink-0" />
           <span className="min-w-0 flex-1">
