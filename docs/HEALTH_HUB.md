@@ -29,14 +29,16 @@ Built in this pass:
 - **Nutrition**: OpenFoodFacts search, barcode lookup, manual entry, per-meal
   day view, per-serving macros, density guides, calorie range from Mifflin-St
   Jeor, and guidance-only ranges for minors (never a deficit).
-- **Opt-in cycle tracking**: private by default and hidden entirely for a
-  profile whose sex is `male`. Period dates, flow, symptoms, mood/energy, BBT
+- **Opt-in cycle tracking**: private by default and shown only for a profile
+  whose sex is `female`. Period dates, flow, symptoms, mood/energy, BBT
   and ovulation-test logs are stored per person; phase, cycle day, next-period
   estimate and confidence are computed from logged dates (explicit averages or
   observed 15–90 day gaps). Irregular cycles are described, not diagnosed.
   Fertile windows are deliberately not predicted: every surface says estimates
   only, not contraception or medical advice. The family projection shares at
-  most phase/next-period, never flow, symptoms, notes or periods.
+  most phase/next-period, never flow, symptoms, notes or periods. An adult can
+  share with a spouse, who also sees short phase-aware suggestions for being
+  supportive, labelled as general ideas rather than medical advice.
 - **Family roles and sharing**: `father`, `mother`, `child`, `teen`,
   `adult_child`, `other` on the Identity account, with `family.manage` for a
   Home manager/mother. Minors keep circle activity sharing on (locked in the
@@ -233,6 +235,6 @@ MyFitnessPal, plus UX award winners and published case studies.
 - [ ] A planned dinner logs with one tap and shows calories, macros and portions.
 - [ ] Barcode lookup works; photo and voice logging are not built.
 - [x] Sleep and readiness show from manual data now and are device-ready; check-ins cover the no-wearable case.
-- [x] Cycle tracking is opt-in, private, hidden for a male profile, and minors can share it only with their linked mother account.
+- [x] Cycle tracking is opt-in, private, shown only when the profile is female, and minors can share it only with their linked mother account. An adult can share with a spouse, who also sees phase-aware support suggestions clearly labelled as general ideas.
 - [ ] A family challenge is visible, joinable and shared in chat. Only opt-in scope sharing exists.
 - [x] Kid accounts never see calorie deficits or weight-loss framing.

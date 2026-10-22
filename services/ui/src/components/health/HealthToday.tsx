@@ -522,18 +522,57 @@ export default function HealthToday({ onNavigate }: Props) {
             Shared with you
           </h3>
           <div className="mt-2 space-y-2">
-            {familyQuery.data?.people.map((person) => (
-              <div key={person.user_id} className="flex items-center justify-between gap-3 text-xs">
-                <span className="capitalize text-slate-300">{person.user_id}</span>
-                <span className="text-slate-500">
-                  {person.sleep?.logged && person.sleep.score !== null
-                    ? `Sleep ${person.sleep.score}/100`
-                    : person.nutrition?.logged
-                      ? `${Math.round(person.nutrition.calories)} kcal`
-                      : 'Nothing shared yet'}
-                </span>
-              </div>
-            ))}
+            {familyQuery.data?.people.map((person) => {
+              const cycle = person.cycle;
+              const cycleLine =
+                cycle?.enabled && cycle.phase_label
+                  ? [
+                      `Cycle: ${cycle.phase_label}`,
+                      cycle.cycle_day !== null ? `day ${cycle.cycle_day}` : null,
+                      cycle.days_until_next_period !== null
+                        ? cycle.days_until_next_period >= 0
+                          ? `next period in ${cycle.days_until_next_period} day${cycle.days_until_next_period === 1 ? '' : 's'}`
+                          : 'period expected'
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  : null;
+              return (
+                <div key={person.user_id} className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="capitalize text-slate-300">{person.user_id}</span>
+                    <span className="text-slate-500">
+                      {person.sleep?.logged && person.sleep.score !== null
+                        ? `Sleep ${person.sleep.score}/100`
+                        : person.nutrition?.logged
+                          ? `${Math.round(person.nutrition.calories)} kcal`
+                          : cycle?.enabled
+                            ? 'Cycle shared'
+                            : 'Nothing shared yet'}
+                    </span>
+                  </div>
+                  {cycle?.enabled && cycleLine && (
+                    <p className="text-[11px] text-slate-400">{cycleLine}</p>
+                  )}
+                  {cycle?.enabled && cycle.support && cycle.support.tips.length > 0 && (
+                    <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3">
+                      <p className="text-[11px] font-semibold text-slate-300">
+                        {cycle.support.title}
+                      </p>
+                      <ul className="mt-1.5 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-slate-400">
+                        {cycle.support.tips.map((tip) => (
+                          <li key={tip}>{tip}</li>
+                        ))}
+                      </ul>
+                      <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
+                        {cycle.support.disclaimer}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
       )}

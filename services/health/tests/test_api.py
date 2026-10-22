@@ -431,11 +431,36 @@ class TestCycleApi:
         assert client.post("/cycle/periods", json={"start_day": TODAY}).status_code == 422
         assert client.put(f"/cycle/logs/{TODAY}", json={"symptoms": []}).status_code == 422
 
-    def test_a_missing_sex_still_offers_the_opt_in(self, client):
+    def test_a_missing_sex_hides_the_tracker_until_female_is_chosen(self, client):
         client.put("/profile", json={"birth_year": 1990})
         body = client.get("/cycle").json()
-        assert body["applicable"] is True
+        assert body["applicable"] is False
         assert body["enabled"] is False
+        assert "Female" in body["reason"]
+        assert client.put("/cycle/settings", json={"enabled": True}).status_code == 422
+
+        client.put("/profile", json={"sex": "female"})
+        assert client.get("/cycle").json()["applicable"] is True
+
+    def test_switching_away_from_female_hides_but_keeps_cycle_data(self, client):
+        _cycle_profile(client)
+        _enable_cycle(client)
+        assert client.post(
+            "/cycle/periods",
+            json={"start_day": (date.today() - timedelta(days=4)).isoformat()},
+        ).status_code == 200
+
+        client.put("/profile", json={"sex": "unspecified"})
+        hidden = client.get("/cycle").json()
+        assert hidden["applicable"] is False
+        assert hidden["summary"] is None
+        assert hidden["periods"] == []
+
+        client.put("/profile", json={"sex": "female"})
+        restored = client.get("/cycle").json()
+        assert restored["applicable"] is True
+        assert restored["enabled"] is True
+        assert len(restored["periods"]) == 1
 
     def test_opt_in_logs_periods_and_learns_the_gap(self, client):
         _cycle_profile(client)
@@ -527,6 +552,7 @@ class TestCycleApi:
 
         family = client.get("/family", headers={"X-User-Id": "mom"}).json()
         assert family["people"][0]["cycle"]["phase"] == "menstrual"
+        assert family["people"][0]["cycle"]["support"] is None
         assert "symptoms" not in family["people"][0]["cycle"]
         assert "periods" not in family["people"][0]
 
@@ -534,13 +560,25 @@ class TestCycleApi:
         assert client.put("/cycle/settings", json={"guardian_username": "grandma"}).status_code == 200
         assert client.get("/family", headers={"X-User-Id": "mom"}).json()["people"] == []
 
-    def test_an_unknown_birth_year_is_treated_as_a_minor_for_sharing(self, client):
-        _cycle_profile(client, birth_year=None)
+    def test_a_mother_without_a_birth_year_can_share_with_the_father(self, client):
+        # The mother's account is adult by family role in the app; her health
+        # profile simply has no birth year yet. kid_mode is the minor signal,
+        # so she can choose her husband as a viewer.
+        _cycle_profile(client, birth_year=None, kid_mode=False)
         _enable_cycle(client)
         client.post("/cycle/periods", json={"start_day": TODAY})
-        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 422
-        assert client.put("/cycle/settings", json={"guardian_username": "michele"}).status_code == 200
-        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 200
+        assert client.put("/shares", json={"viewer": "dad", "scope": "cycle"}).status_code == 200
+        family = client.get("/family", headers={"X-User-Id": "dad"}).json()
+        entry = family["people"][0]["cycle"]
+        assert entry["enabled"] is True
+        assert entry["phase"] == "menstrual"
+        assert entry["support"]["tips"]
+
+    def test_unknown_birth_year_in_kid_mode_stays_guardian_only(self, client):
+        _cycle_profile(client, birth_year=None, kid_mode=True)
+        # Enabling is refused outright: there is not enough information to
+        # know this is a teen rather than a child.
+        assert client.put("/cycle/settings", json={"enabled": True}).status_code == 422
 
     def test_an_adult_can_share_a_minimal_cycle_summary(self, client):
         _cycle_profile(client)
@@ -551,6 +589,11 @@ class TestCycleApi:
         cycle_entry = family["people"][0]["cycle"]
         assert cycle_entry["enabled"] is True
         assert cycle_entry["phase"] == "menstrual"
+        support = cycle_entry["support"]
+        assert support["phase"] == "menstrual"
+        assert support["title"]
+        assert len(support["tips"]) == 3
+        assert "not medical advice" in support["disclaimer"]
         for private_field in ("flow", "symptoms", "bbt_c", "note", "periods", "logs"):
             assert private_field not in cycle_entry
             assert private_field not in family["people"][0]

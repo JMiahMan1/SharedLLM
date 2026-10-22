@@ -139,3 +139,23 @@ class TestIrregular:
         )
         # The 260-day gap is discarded; the 30-day gap remains.
         assert result["cycle_length_used"] == 30
+
+
+class TestPartnerSupport:
+    """Support ideas are general, short and never medical advice."""
+
+    def test_every_phase_has_a_title_and_three_tips(self):
+        for phase in cycle.PHASE_LABELS:
+            support = cycle.partner_support(phase)
+            assert support["phase"] == phase
+            assert support["title"]
+            assert len(support["tips"]) == 3
+            assert all(tip.strip() for tip in support["tips"])
+            assert "not medical advice" in support["disclaimer"]
+
+    def test_unknown_phase_falls_back_to_the_neutral_advice(self):
+        for value in (None, "", "nonsense"):
+            support = cycle.partner_support(value)
+            assert support["phase"] == "unknown"
+            assert support["title"]
+            assert len(support["tips"]) == 3

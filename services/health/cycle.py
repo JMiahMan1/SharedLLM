@@ -21,6 +21,80 @@ PHASE_LABELS = {
     "unknown": "Not enough data",
 }
 
+#: Phase-aware ideas for a partner who was trusted with the phase summary.
+#: They are deliberately practical and non-clinical, and never tell a partner
+#: to explain someone's feelings as hormones or to act as a clinician.
+SUPPORT_DISCLAIMER = (
+    "Every person and cycle is different. These are general ideas, not medical "
+    "advice — ask what actually helps."
+)
+PARTNER_SUPPORT: dict[str, tuple[str, tuple[str, ...]]] = {
+    "menstrual": (
+        "During the period",
+        (
+            "Offer practical help without waiting to be asked: a meal, a chore, the school run.",
+            "Keep the day low-pressure and let rest win; warmth and a hot drink often help.",
+            "Feelings can ride the hormones. Listen first, don't take it personally, and don't rush to fix it.",
+        ),
+    ),
+    "follicular": (
+        "After the period",
+        (
+            "Energy is often rising: a good window for plans, outings or moving together.",
+            "Back the goals your partner chooses instead of choosing them; ask how you can help.",
+            "Small shared wins land well this week.",
+        ),
+    ),
+    "ovulation": (
+        "Around estimated ovulation",
+        (
+            "Many people feel most social and energetic now; make room for connection.",
+            "Some notice twinges or discomfort. A gentler plan and a check-in go a long way.",
+            "Keep affection warm and pressure-free.",
+        ),
+    ),
+    "luteal": (
+        "Before the next period",
+        (
+            "Energy and patience often dip. Take the lower-effort option and share the load.",
+            "Protect wind-down time; sleep and routine matter more this week.",
+            "If PMS shows up, be patient and ask what helps. Advice lands better when it is asked for.",
+        ),
+    ),
+    "late": (
+        "The period is later than usual",
+        (
+            "Don't comment on the calendar; your partner has probably noticed.",
+            "Offer quiet support and room for however they feel. Uncertainty is tiring.",
+            "If they are worried, or cycles stay irregular, encourage a clinician visit. The app does not diagnose.",
+        ),
+    ),
+    "unknown": (
+        "Being supportive",
+        (
+            "Ask what helps today; it can change through the month.",
+            "Help with the practical load, not just advice.",
+            "Keep this private to the people your partner chose to share it with.",
+        ),
+    ),
+}
+
+
+def partner_support(phase: str | None) -> dict:
+    """Practical ideas for a trusted partner, keyed by the current phase.
+
+    Unknown or missing phases fall back to general support rather than
+    guessing; the returned ``phase`` always names which ideas are in use.
+    """
+    key = phase if phase in PARTNER_SUPPORT else "unknown"
+    title, tips = PARTNER_SUPPORT[key]
+    return {
+        "phase": key,
+        "title": title,
+        "tips": list(tips),
+        "disclaimer": SUPPORT_DISCLAIMER,
+    }
+
 
 @dataclass(frozen=True)
 class Period:

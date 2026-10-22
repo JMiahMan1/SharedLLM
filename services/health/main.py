@@ -617,24 +617,35 @@ def _age_years(profile: HealthProfile | None) -> int | None:
 
 
 def _cycle_applicable(profile: HealthProfile | None) -> bool:
-    """Cycle controls are not shown for a profile explicitly marked male.
+    """Cycle controls are shown only for a profile explicitly marked female.
 
-    A missing or unspecified sex is **not** treated as male: people who have
-    not filled that in still see the opt-in. Existing data is never deleted
+    Male, unspecified and not-yet-set profiles all get ``applicable: false``:
+    the tracker appears once Female is chosen. Existing data is never deleted
     just because the profile changed; it is simply not surfaced.
     """
-    return profile is None or profile.sex != "male"
+    return profile is not None and profile.sex == "female"
+
+
+def _cycle_hidden_reason(profile: HealthProfile | None) -> str:
+    """Why the cycle panel is absent, in language the person can act on."""
+    if profile is not None and profile.sex == "male":
+        return "Cycle tracking is not shown for a male profile."
+    return "Choose Female in your profile to use cycle tracking."
 
 
 def _cycle_is_minor(profile: HealthProfile | None) -> bool:
-    """Conservative minor check for cycle sharing.
+    """Minor check for cycle sharing.
 
-    An unknown birth year stays guardian-only. That is deliberately stricter
-    than the calorie maths, which can simply decline to calculate: this is
-    about who may see another person's cycle data.
+    A known birth year decides it. When the birth year is missing, ``kid_mode``
+    is the signal: the family app marks children and teens there, so a person
+    who is not in kid mode is treated as an adult and may choose who sees the
+    phase summary (a wife sharing with her husband, for example). If neither
+    signal exists, the person stays guardian-only.
     """
     age = _age_years(profile)
-    return age is None or age < 18
+    if age is not None:
+        return age < 18
+    return bool(profile.kid_mode) if profile is not None else True
 
 
 def _cycle_settings(session: Session, user: str) -> CycleSettings | None:
@@ -725,8 +736,8 @@ def get_cycle(
 ):
     """The cycle panel in one call: settings, current estimate, recent logs.
 
-    A male profile gets ``applicable: false`` and no cycle data at all. The
-    route still exists so the UI can make a clean decision without a 404.
+    A non-female profile gets ``applicable: false`` and no cycle data at all.
+    The route still exists so the UI can make a clean decision without a 404.
     """
     user = _user(request)
     day = _day(day or date.today().isoformat())
@@ -742,7 +753,7 @@ def get_cycle(
             "summary": None,
             "periods": [],
             "logs": [],
-            "reason": "Cycle tracking is not shown for a male profile.",
+            "reason": _cycle_hidden_reason(profile),
         }
     settings = _cycle_settings(session, user)
     enabled = bool(settings and settings.enabled)
@@ -785,7 +796,7 @@ def put_cycle_settings(
     if enabling and not _cycle_applicable(profile):
         raise HTTPException(
             status_code=422,
-            detail="Cycle tracking is not available for a male profile.",
+            detail=_cycle_hidden_reason(profile),
         )
 
     age = _age_years(profile)
@@ -831,7 +842,7 @@ def add_cycle_period(
     user = _user(request)
     profile = session.get(HealthProfile, user)
     if not _cycle_applicable(profile):
-        raise HTTPException(status_code=422, detail="Cycle tracking is not available for a male profile.")
+        raise HTTPException(status_code=422, detail=_cycle_hidden_reason(profile))
     settings = _cycle_settings(session, user)
     if settings is None or not settings.enabled:
         raise HTTPException(status_code=422, detail="Enable cycle tracking before logging a period.")
@@ -940,7 +951,7 @@ def put_cycle_log(
         raise HTTPException(status_code=422, detail="You cannot log symptoms for a future day")
     profile = session.get(HealthProfile, user)
     if not _cycle_applicable(profile):
-        raise HTTPException(status_code=422, detail="Cycle tracking is not available for a male profile.")
+        raise HTTPException(status_code=422, detail=_cycle_hidden_reason(profile))
     settings = _cycle_settings(session, user)
     if settings is None or not settings.enabled:
         raise HTTPException(status_code=422, detail="Enable cycle tracking before logging symptoms.")
@@ -1521,7 +1532,7 @@ def put_share(body: ShareIn, request: Request, session: Session = Depends(get_se
     if body.scope == "cycle" and body.enabled:
         profile = session.get(HealthProfile, user)
         if not _cycle_applicable(profile):
-            raise HTTPException(status_code=422, detail="Cycle tracking is not available for a male profile.")
+            raise HTTPException(status_code=422, detail=_cycle_hidden_reason(profile))
         settings = _cycle_settings(session, user)
         if settings is None or not settings.enabled:
             raise HTTPException(status_code=422, detail="Enable cycle tracking before sharing it.")
@@ -1599,6 +1610,14 @@ def family_summary(
         if "cycle" in scopes:
             owner_profile = session.get(HealthProfile, owner)
             shared = _cycle_summary(session, owner, day)
+            # Partner ideas come only with an adult's own choice to share.
+            # A minor sharing with their mother gets the phase, not a
+            # partner role-play guide.
+            support = (
+                cycle.partner_support(shared["phase"])
+                if shared and not _cycle_is_minor(owner_profile)
+                else None
+            )
             entry["cycle"] = {
                 "applicable": _cycle_applicable(owner_profile),
                 "enabled": shared is not None,
@@ -1609,6 +1628,7 @@ def family_summary(
                 "days_until_next_period": shared["days_until_next_period"] if shared else None,
                 "confidence": shared["confidence"] if shared else None,
                 "detail": shared["detail"] if shared else None,
+                "support": support,
                 # Deliberately no flow, symptoms, BBT, notes or period history.
             }
         people.append(entry)

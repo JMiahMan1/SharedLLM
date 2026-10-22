@@ -1690,6 +1690,13 @@ export interface HealthFamilyPerson {
     days_until_next_period: number | null;
     confidence: string | null;
     detail: string | null;
+    /** Practical partner ideas, only when an adult chose to share. */
+    support?: {
+      phase: string;
+      title: string;
+      tips: string[];
+      disclaimer: string;
+    } | null;
   };
 }
 

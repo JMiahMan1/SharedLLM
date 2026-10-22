@@ -47,13 +47,18 @@ Health Connect bridge, watch export or scale uses — no schema change required.
 
 ## Cycle tracking
 
-Cycle tracking is opt-in, off by default, and never shown for a profile whose
-sex is `male` (`GET /cycle` returns `applicable: false` and the UI renders
-nothing). Phase and next-period estimates come only from logged dates; no
+Cycle tracking is opt-in, off by default, and shown only for a profile whose
+sex is `female`; male, unspecified and unset profiles get `applicable: false`
+and the UI renders nothing. Phase and next-period estimates come only from logged dates; no
 fertile window is predicted and every response carries the disclaimer that
-this is not contraception or medical advice. A user whose age is unknown or
-under 18 is treated as a minor for sharing: their cycle can be shared only
-with the guardian username configured in their own settings.
+this is not contraception or medical advice. A known age under 18 is treated
+as a minor for sharing; when the birth year is missing, `kid_mode` is the
+minor signal, so an adult mother without a birth year can share with her
+husband while a child stays guardian-only. A minor's cycle can be shared only
+with the guardian username configured in their own settings. When an adult
+shares, the family projection also returns short phase-aware support
+suggestions for the partner, labelled as general ideas rather than medical
+advice; a minor sharing with a parent gets the phase only.
 
 ## Auth
 

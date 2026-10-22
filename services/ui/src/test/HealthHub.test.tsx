@@ -343,3 +343,43 @@ describe('HealthNutrition', () => {
     );
   });
 });
+
+describe('HealthToday family sharing', () => {
+  it('shows a shared cycle phase with practical partner suggestions', async () => {
+    getHealthSummary.mockResolvedValue(summary());
+    getHealthFamily.mockResolvedValue({
+      viewer: 'jeremiah',
+      day: '2026-10-22',
+      people: [
+        {
+          user_id: 'mom',
+          scopes: ['cycle'],
+          cycle: {
+            applicable: true,
+            enabled: true,
+            phase: 'luteal',
+            phase_label: 'Luteal',
+            cycle_day: 20,
+            next_period_start: '2026-10-30',
+            days_until_next_period: 8,
+            confidence: 'medium',
+            detail: 'Cycle day 20 of an estimated 28-day cycle.',
+            support: {
+              phase: 'luteal',
+              title: 'Before the next period',
+              tips: ['Keep the plans flexible.', 'Offer quiet help.', 'Believe what she says.'],
+              disclaimer:
+                'Every person and cycle is different. These are general ideas, not medical advice — ask what actually helps.',
+            },
+          },
+        },
+      ],
+    });
+    renderWithClient(<HealthToday onNavigate={() => {}} />);
+
+    expect(await screen.findByText(/Cycle: Luteal/)).toBeInTheDocument();
+    expect(screen.getByText('Before the next period')).toBeInTheDocument();
+    expect(screen.getByText('Keep the plans flexible.')).toBeInTheDocument();
+    expect(screen.getByText(/not medical advice/)).toBeInTheDocument();
+  });
+});
