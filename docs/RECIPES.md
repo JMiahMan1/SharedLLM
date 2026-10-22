@@ -49,18 +49,19 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 ## Phase 1 — recipe importer
 
 - [ ] Download the dataset (CSV/parquet, ~1.5 GB) once; keep it out of the repo.
-- [ ] Filter candidates: tag matches for each level, `crock-pot-slow-cooker`,
-      pressure/Instant Pot titles, `30-minutes-or-less`, `5-ingredients-or-less`,
-      `inexpensive`. Drop dessert/drink noise; keep mains, breakfasts and lunches.
+- [ ] Filter candidates: tag matches for each level plus `30-minutes-or-less`,
+      `5-ingredients-or-less`, `inexpensive`. Drop dessert/drink noise; keep mains,
+      breakfasts and lunches. Slow-cooker and Instant-Pot titles (`crock-pot-slow-cooker`,
+      "pressure cooker", "instant pot") are a welcome bonus, not a requirement.
 - [ ] Rank by staple overlap + few ingredients + short total time; pick a balanced set per
-      level and appliance (~40 level-1, ~40 level-2, ~40 level-3).
+      level (~40 level-1, ~40 level-2, ~40 level-3), taking appliance meals when they fit.
 - [ ] Render markdown: header, labels, scaled ingredient list (`- [ ] 2 lb chicken`),
       numbered steps, source/licence line.
 - [ ] Guarantee unique note titles (`Title.md`; suffix ` (2)` on collision).
-- [ ] Wikibooks Cookbook: pull `Category:Slow cooker recipes` (~26 pages) through the
-      MediaWiki API, convert to markdown, keep the CC BY-SA credit line.
-- [ ] Dry-run report first: counts per level/appliance and a sample note for review,
-      before anything is written to Nextcloud.
+- [ ] Wikibooks Cookbook (bonus): the `Category:Slow cooker recipes` set (~26 pages) through
+      the MediaWiki API, converted to markdown with the CC BY-SA credit line.
+- [ ] Dry-run report first: counts per level (and how many appliance picks came along) and a
+      sample note for review, before anything is written to Nextcloud.
 
 ## Phase 2 — Recipes page touchpoints
 
@@ -189,7 +190,8 @@ account is connected, everything above still works.
 
 ## Acceptance
 
-- [ ] 100+ imported recipes on the Recipes page, filterable by level and appliance.
+- [ ] 100+ imported recipes on the Recipes page, filterable by level (and by appliance
+      label when present).
 - [ ] Family tab reaches Recipes; a recipe shares to a chat in one tap.
 - [ ] A week's plan produces a tappable shopping list that survives regeneration.
 - [ ] Jarvis answers dinner questions from the imported set in chat.
