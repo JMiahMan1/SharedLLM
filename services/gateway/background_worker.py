@@ -685,28 +685,6 @@ class RavenWorker:
                                 "_talk_source": "nextcloud"
                             }
                         )
-                    elif last_processed and content.strip():
-                        # A family member typed an answer while a game may be
-                        # running. Execution ignores it when no game is active;
-                        # keeping this short avoids sending whole conversations.
-                        answer = content.strip()
-                        player = msg.get("actor_display_name") or actor_id
-                        if len(answer) <= 120 and not answer.startswith("/"):
-                            try:
-                                await client.post(
-                                    url,
-                                    json={
-                                        "user_context": creds,
-                                        "action": "game",
-                                        "token": token,
-                                        "game_command": "answer",
-                                        "message": answer,
-                                        "card_detail": player,
-                                    },
-                                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                                )
-                            except Exception as exc:
-                                log.debug(f"[TalkMonitor] game answer forward failed in {token}: {exc}")
 
                 if new_last != last_processed:
                     await r.set(f"jarvis:talk:last_msg:{token}", new_last)
