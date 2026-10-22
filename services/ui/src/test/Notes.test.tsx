@@ -259,6 +259,53 @@ describe('Notes (Keep-style)', () => {
     expect(notesMoveCalls[1].destination).toBe('Notes/Trip ideas.md');
   });
 
+  it('moves the card to trash before the server answers', async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post('/api/communication/notes/move', async ({ request }) => {
+        const body = (await request.json()) as { path?: string };
+        await gate;
+        // Model the server actually moving the file before it answers.
+        const target = notesFixtures.find((n) => n.path === body.path);
+        if (target) target.path = 'Notes/Trash/Trip ideas.md';
+        return HttpResponse.json({ status: 'SUCCESS', message: 'Moved', service: 'note_move' });
+      }),
+    );
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByRole('button', { name: 'Move Trip ideas to trash' }));
+
+    // The card leaves the shelf at once, while the move is still in flight.
+    await waitFor(() => expect(screen.queryByText('Trip ideas')).toBeNull());
+
+    release();
+    await waitFor(() => expect(screen.queryByText('Trip ideas')).toBeNull());
+    await user.click(await screen.findByRole('button', { name: /^Trash/ }));
+    expect(await screen.findByRole('button', { name: 'Restore Trip ideas' })).toBeTruthy();
+  });
+
+  it('puts the card back when the move is refused', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post('/api/communication/notes/move', () =>
+        HttpResponse.json({ status: 'FAILURE', message: 'Source is gone' }),
+      ),
+    );
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByRole('button', { name: 'Move Trip ideas to trash' }));
+
+    // It leaves optimistically, then the refusal brings it home.
+    expect(await screen.findByText('Trip ideas')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Restore Trip ideas' })).toBeNull();
+  });
+
   it('duplicates a note through the copy route', async () => {
     const user = userEvent.setup();
     renderWithProviders(<Notes />);

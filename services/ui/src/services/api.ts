@@ -1848,17 +1848,17 @@ export const api = {
   },
 
   async createNote(payload: { title: string; content?: string; category?: string; storage?: string; as_user?: 'admin' }): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/create', payload);
+    const resp = await apiClient.post('/api/communication/notes/create', payload, { timeout: 60_000 });
     return resp.data;
   },
 
   async readNote(title: string, storage?: string, path?: string, as_user?: 'admin'): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/read', { title, storage, path, as_user });
+    const resp = await apiClient.post('/api/communication/notes/read', { title, storage, path, as_user }, { timeout: 60_000 });
     return resp.data;
   },
 
   async appendNote(payload: { title: string; content: string; storage?: string; path?: string }): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/append', payload);
+    const resp = await apiClient.post('/api/communication/notes/append', payload, { timeout: 60_000 });
     return resp.data;
   },
 
@@ -1871,7 +1871,7 @@ export const api = {
     path?: string;
     as_user?: 'admin';
   }): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/write', payload);
+    const resp = await apiClient.post('/api/communication/notes/write', payload, { timeout: 60_000 });
     return resp.data;
   },
 
@@ -1883,12 +1883,12 @@ export const api = {
     path?: string;
     as_user?: 'admin';
   }): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/check_off', payload);
+    const resp = await apiClient.post('/api/communication/notes/check_off', payload, { timeout: 60_000 });
     return resp.data;
   },
 
   async deleteNote(title: string, storage?: string, path?: string, as_user?: 'admin'): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/delete', { title, storage, path, as_user });
+    const resp = await apiClient.post('/api/communication/notes/delete', { title, storage, path, as_user }, { timeout: 60_000 });
     return resp.data;
   },
 
@@ -1902,7 +1902,7 @@ export const api = {
 
   /** Read the shared notes index (pin, colour, archive origin) from /Notes. */
   async getNotesMeta(payload: { storage?: string; as_user?: 'admin' } = {}): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/meta', payload);
+    const resp = await apiClient.post('/api/communication/notes/meta', payload, { timeout: 60_000 });
     return resp.data;
   },
 
@@ -1912,7 +1912,7 @@ export const api = {
     storage?: string;
     as_user?: 'admin';
   }): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/meta', { write: true, ...payload });
+    const resp = await apiClient.post('/api/communication/notes/meta', { write: true, ...payload }, { timeout: 60_000 });
     return resp.data;
   },
 
@@ -1923,7 +1923,7 @@ export const api = {
     storage?: string;
     as_user?: 'admin';
   }): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/move', payload);
+    const resp = await apiClient.post('/api/communication/notes/move', payload, { timeout: 60_000 });
     return resp.data;
   },
 
@@ -1934,18 +1934,18 @@ export const api = {
     storage?: string;
     as_user?: 'admin';
   }): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/duplicate', payload);
+    const resp = await apiClient.post('/api/communication/notes/duplicate', payload, { timeout: 60_000 });
     return resp.data;
   },
 
   /** Permanently delete everything in Notes/Trash. */
   async emptyNotesTrash(payload: { storage?: string; as_user?: 'admin' } = {}): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/empty_trash', payload);
+    const resp = await apiClient.post('/api/communication/notes/empty_trash', payload, { timeout: 60_000 });
     return resp.data;
   },
 
   async syncNotesRag(payload: { storage?: string; directories?: string[] } = {}): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/sync_rag', payload);
+    const resp = await apiClient.post('/api/communication/notes/sync_rag', payload, { timeout: 60_000 });
     return resp.data;
   },
 
