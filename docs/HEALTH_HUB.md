@@ -48,6 +48,61 @@ into the app that already has steps, recipes, a calendar, a chat coach and a fam
 - Nutrition: day log with per-meal macros, calorie range for adults, density
   colours, quick add (search / barcode / photo / voice), weekly digest.
 
+## Interface principles (what the best-rated apps prove)
+
+Researched Oct 2026 across Noom, Oura (4.9★ / 164k ratings), WHOOP (4.8★),
+Google Health (ex-Fitbit), Apple Health & Fitness, Garmin Connect, Strava,
+MyFitnessPal, plus UX award winners and published case studies.
+
+1. **One score that interprets itself.** The most-loved apps close the "now what?"
+   gap for you. WHOOP's Recovery ring and Oura's Readiness give a colour, a number
+   and one plain sentence; 300+ App Store reviews of Apple Health keep repeating
+   "I have all this data but I don't know what it means." The Today screen opens
+   with a check-in or score and a one-line reading — not a chart.
+2. **Layers: glance → focus → explore.** Oura's award-winning framework
+   (at-a-glance rings/bars → focused metric views → interactive charts) and the
+   Apple Health redesign (daily summary → personal baselines → weekly recap).
+   Jarvis: Today glanceable → card detail → Trends, each one tap deeper.
+   "Designing for moments, not metrics."
+3. **Colour as meaning, tuned to the person.** Semantic hues per domain (Oura's
+   teal/indigo/amber), thresholds against **your** baseline ("within your range"),
+   never population averages. Colour appears only when it carries information —
+   restraint over alarmism; the LabViz award win was specifically about moving
+   away from red/green good/bad semaphore.
+4. **Five-second design.** ~70% of tracker interactions are sub-5-second glances.
+   Home ≈ 60% the day's state, 40% the next action; large hero numbers with quiet
+   labels; the ring sweeps and the number counts up together (reduced-motion
+   respected) as a satisfying reveal.
+5. **Forgiving by default.** Case studies agree: "failed" days and red warnings
+   cause deletion. Forgiving streaks, rest-day states and recovery coaching beat
+   guilt — gently suggesting a 10-minute walk after two skipped days lifted return
+   rates by 31% in one project. Rings celebrate consistency; they never punish.
+6. **Friction is the enemy.** Quick-log bottom sheets for one-handed entry; smart
+   defaults (last night's portion, the usual bedtime); oversized targets (56px+)
+   and gesture adjusters for sweaty hands; a five-second undo; 60-second onboarding
+   that ends with a first log, not a form.
+7. **Tell me what to do next.** The 2026 differentiator: WHOOP's strain target and
+   Google's Coach feed answer "what now?" on the first screen. Jarvis is already a
+   coach — the Health tab should ask it ("given your sleep, a walk beats a hard
+   workout today"), grounded in the user's own data, never a black box.
+8. **Close the loop (journal → insight).** WHOOP's Journal and Oura's Tags turn
+   logged behaviours into personal cause-and-effect ("reading before bed → +8%
+   recovery"). Jarvis's check-ins can do the same locally: sleep vs. late meals,
+   steps vs. bedtime.
+9. **Personal first, weekly second.** Personal baselines over averages; a weekly
+   recap that spots one trend and suggests one small action; a monthly story card.
+10. **Family and friends, kindly.** Achievement beats competition (case-study
+    finding); family/partner streaks with a shared stake motivate; cheers for kids;
+    leaderboards opt-in and never about weight.
+11. **Customizable, but composed.** Pinnable/reorderable cards (Google Health) —
+    yet a small, deliberate set: every card earns its place, empty ones hide, so
+    the tab never reads like a spreadsheet.
+12. **Accessible and calm.** WCAG contrast, font scaling, screen-reader labels on
+    rings and charts, dark-first canvas (Oura's near-black), restrained typography
+    (hero number, small caps labels), privacy explained in plain language. The
+    top-rated health apps win on "easy to read, simple to operate", not feature
+    volume.
+
 ## Ties into the rest of Jarvis
 
 - **Recipes** — planned meals log into the day; the shopping list knows what is
