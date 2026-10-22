@@ -162,3 +162,83 @@ def test_a_newer_notice_replaces_an_undelivered_one_with_its_tag():
     client.telemetry_ok = True
     _run(r, client)
     assert [n["title"] for n in client.notified] == ["Service back up: rag"]
+
+
+def test_media_targets_build_the_right_liveness_probes():
+    targets = admin_alerts.media_targets({
+        "audiobookshelf_url": "https://abs.sumemail.com/",
+        "mass_url": "http://ha.sumemail.com:8095/",
+    })
+    assert targets == {
+        "audiobookshelf": "https://abs.sumemail.com/ping",
+        "music_assistant": "http://ha.sumemail.com:8095",
+    }
+
+
+def test_media_targets_accept_legacy_keys_and_skip_unset():
+    assert admin_alerts.media_targets({"abs_url": "http://abs.local"}) == {
+        "audiobookshelf": "http://abs.local/ping",
+    }
+    assert admin_alerts.media_targets({"ma_url": "  "}) == {}
+
+
+class _MediaClient(_Client):
+    """Readiness plus the two media liveness URLs, with switchable failures."""
+
+    def __init__(self, services, *, abs_down=False, ma_down=False, telemetry_ok=True):
+        super().__init__(services, telemetry_ok=telemetry_ok)
+        self.abs_down = abs_down
+        self.ma_down = ma_down
+
+    def get(self, url, **kw):
+        if url.endswith("/health/ready"):
+            return super().get(url, **kw)
+        if url == "https://abs.local/ping":
+            if self.abs_down:
+                raise asyncio.TimeoutError()
+            return _Resp(200)
+        if url == "http://ma.local":
+            if self.ma_down:
+                raise ConnectionError("refused")
+            return _Resp(200)
+        raise ConnectionError(url)
+
+
+_MEDIA_SETTINGS = {"audiobookshelf_url": "https://abs.local", "mass_url": "http://ma.local"}
+
+
+def _run_media(r, client, now=1_000_000.0):
+    return asyncio.run(admin_alerts.check_once(r, client, _MEDIA_SETTINGS, gateway="http://gw", now=now))
+
+
+def test_check_once_reports_a_wedged_audiobookshelf_after_two_failures():
+    r = _Redis()
+    assert _run_media(r, _MediaClient({"geo": "OK"})) == 0
+    down = _MediaClient({"geo": "OK"}, abs_down=True)
+    assert _run_media(r, down) == 0
+    assert _run_media(r, down) == 1
+    notice = down.notified[0]
+    assert notice["title"] == "Service down: audiobookshelf"
+    assert "UNREACHABLE" in notice["body"]
+    assert notice["tag"] == "admin:service:audiobookshelf"
+
+
+def test_check_once_reports_music_assistant_connection_refused():
+    r = _Redis()
+    client = _MediaClient({"geo": "OK"}, ma_down=True, telemetry_ok=False)
+    _run_media(r, client)
+    _run_media(r, client)
+    queued = json.loads(r.kv[admin_alerts.STATE_KEY])["outbox"][0]
+    assert queued["title"] == "Service down: music assistant"
+    assert "UNREACHABLE" in queued["body"]
+
+
+def test_check_once_announces_media_services_back():
+    r = _Redis()
+    down = _MediaClient({"geo": "OK"}, abs_down=True)
+    _run_media(r, down)
+    _run_media(r, down)
+    assert [n["title"] for n in down.notified] == ["Service down: audiobookshelf"]
+    up = _MediaClient({"geo": "OK"})
+    assert _run_media(r, up) == 1
+    assert [n["title"] for n in up.notified] == ["Service back up: audiobookshelf"]

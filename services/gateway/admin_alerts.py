@@ -36,6 +36,7 @@ from services.gateway.config import (
     INTERNAL_SECRET,
     TELEMETRY_SVC,
 )
+from services.gateway.service_probes import probe_http
 
 log = logging.getLogger("gateway.admin_alerts")
 
@@ -171,6 +172,22 @@ async def _answers(client: aiohttp.ClientSession, url: str) -> bool:
         return False
 
 
+def media_targets(settings: dict[str, Any]) -> dict[str, str]:
+    """Service -> liveness URL for the self-hosted media backends.
+
+    Audiobookshelf has an explicit ``/ping``; Music Assistant answers on its
+    bare origin, so the root is its liveness check. Unset URLs are skipped.
+    """
+    abs_url = str(settings.get("audiobookshelf_url") or settings.get("abs_url") or "").strip().rstrip("/")
+    ma_url = str(settings.get("mass_url") or settings.get("ma_url") or "").strip().rstrip("/")
+    targets: dict[str, str] = {}
+    if abs_url:
+        targets["audiobookshelf"] = f"{abs_url}/ping"
+    if ma_url:
+        targets["music_assistant"] = ma_url
+    return targets
+
+
 async def _readiness(client: aiohttp.ClientSession, gateway: str) -> dict[str, str] | None:
     try:
         async with client.get(f"{gateway}/health/ready", timeout=aiohttp.ClientTimeout(total=30)) as resp:
@@ -204,6 +221,14 @@ async def check_once(r, client: aiohttp.ClientSession, settings: dict[str, Any],
 
     statuses = await _readiness(client, gateway)
     if statuses is not None:
+        # Media backends are not in the gateway's readiness list, so probe
+        # them here and feed the same transition machinery. The classified
+        # line ("UNREACHABLE (No answer within 4s)") lands in the notice.
+        media = media_targets(settings)
+        if media:
+            results = await asyncio.gather(*(probe_http(client, name, url) for name, url in media.items()))
+            for result in results:
+                statuses[result.name] = result.line
         _queue(outbox, service_transitions(state.setdefault("services", {}), statuses))
 
     targets = desktop_targets(settings)
