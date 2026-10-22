@@ -188,6 +188,21 @@ account is connected, everything above still works.
 - [ ] Tests: stub the vision provider with a fixed sample page (and a handwriting-style
       response); UI draft edit + save test.
 
+## Phase 10 — Health tab connection
+
+- [ ] Carry per-serving nutrition from the dataset into each imported recipe note
+      (calories, protein, carbs, fat, fiber, sugar, sodium) and show it on the recipe
+      preview/editor.
+- [ ] Health tab: a **Meals** card showing today's planned meals from
+      `Recipes/Meal plan.md` with an estimated total, scaled to the household servings.
+- [ ] Ticking a meal cooked logs it for the day, so Health shows planned vs. eaten.
+- [ ] Optional (decide with the family): daily calorie/protein targets, weekly averages,
+      and per-person portions.
+- [ ] Stay out of the way when there is no plan or nutrition data: hide the card.
+- [ ] Tests: nutrition parsing and scaling (pure), plan → health day mapping, the card
+      and mark-cooked UI.
+- [ ] Docs and deploy.
+
 ## Acceptance
 
 - [ ] 100+ imported recipes on the Recipes page, filterable by level (and by appliance
