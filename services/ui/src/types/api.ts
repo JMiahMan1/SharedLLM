@@ -108,6 +108,8 @@ export type WorkspaceListResponse =
       workspaces?: Workspace[];
     };
 
+export type FamilyRole = 'father' | 'mother' | 'child' | 'teen' | 'adult_child' | 'other';
+
 export interface UserProfileRaw {
   mail_user?: string;
   id: string | number;
@@ -117,6 +119,11 @@ export interface UserProfileRaw {
   role?: 'admin' | 'user';
   is_admin?: boolean;
   is_system_default?: boolean;
+  family_role?: FamilyRole;
+  mother_username?: string | null;
+  /** Derived: child/teen. Their activity sharing cannot be switched off. */
+  is_minor?: boolean;
+  sharing_locked?: boolean;
   /** Roles this user holds, and the permissions they add up to (all for an admin). */
   role_ids?: number[];
   permissions?: string[];
@@ -275,6 +282,18 @@ export interface DeviceAssignment {
 export interface ShareRecipient {
   username: string;
   display_name: string;
+}
+
+/** A safe household-roster entry for the family-role editor. */
+export interface FamilyRecord {
+  username: string;
+  display_name: string;
+  family_role: FamilyRole;
+  mother_username: string | null;
+  is_minor: boolean;
+  sharing_locked: boolean;
+  is_admin: boolean;
+  avatar: string | null;
 }
 
 /**
@@ -1619,6 +1638,8 @@ export interface HealthSummary {
   resting_hr_baseline: number | null;
   /** Always null: activity belongs to geo and is composed by the UI. */
   activity: null;
+  /** Owner-only and absent unless cycle tracking is on. */
+  cycle: HealthCycleSummary | null;
   alerts: string[];
 }
 
@@ -1642,7 +1663,7 @@ export interface FoodSearchItem {
 
 export interface HealthShare {
   viewer: string;
-  scope: 'sleep' | 'nutrition';
+  scope: 'sleep' | 'nutrition' | 'cycle';
 }
 
 export interface HealthFamilyPerson {
@@ -1658,6 +1679,77 @@ export interface HealthFamilyPerson {
     logged: boolean;
     calories: number;
   };
+  /** Minimal phase summary only: never flow, symptoms or notes. */
+  cycle?: {
+    applicable: boolean;
+    enabled: boolean;
+    phase: string | null;
+    phase_label: string | null;
+    cycle_day: number | null;
+    next_period_start: string | null;
+    days_until_next_period: number | null;
+    confidence: string | null;
+    detail: string | null;
+  };
+}
+
+export type CycleFlow = 'spotting' | 'light' | 'medium' | 'heavy';
+
+export interface HealthCycleSummary {
+  has_data: boolean;
+  phase: 'menstrual' | 'follicular' | 'ovulation' | 'luteal' | 'late' | 'unknown';
+  phase_label: string;
+  cycle_day: number | null;
+  cycle_length_used: number | null;
+  cycle_length_source: 'user_average' | 'observed' | null;
+  period_length_used: number | null;
+  last_period_start: string | null;
+  next_period_start: string | null;
+  days_until_next_period: number | null;
+  estimated_ovulation_day: number | null;
+  irregular: boolean;
+  variation_days: number | null;
+  confidence: 'low' | 'medium' | 'high';
+  detail: string;
+  disclaimer: string;
+}
+
+export interface HealthCyclePeriod {
+  id: number;
+  start_day: string;
+  end_day: string | null;
+  flow: CycleFlow;
+  note: string;
+  source: string;
+  external_id: string | null;
+  created_at: string;
+}
+
+export interface HealthCycleLog {
+  id: number;
+  day: string;
+  symptoms: string[];
+  mood: number | null;
+  energy: number | null;
+  bbt_c: number | null;
+  ovulation_test: 'negative' | 'positive' | 'inconclusive' | null;
+  note: string;
+  updated_at: string;
+}
+
+export interface HealthCycleState {
+  /** False for a male profile: the UI hides the whole section. */
+  applicable: boolean;
+  enabled: boolean;
+  is_minor: boolean;
+  age_known?: boolean;
+  average_cycle_length: number | null;
+  average_period_length: number | null;
+  guardian_username: string | null;
+  summary: HealthCycleSummary | null;
+  periods: HealthCyclePeriod[];
+  logs: HealthCycleLog[];
+  reason?: string;
 }
 
 

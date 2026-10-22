@@ -5,6 +5,7 @@ import HealthToday from '../components/health/HealthToday';
 import HealthSleep from '../components/health/HealthSleep';
 import HealthNutrition from '../components/health/HealthNutrition';
 import HealthProfilePanel from '../components/health/HealthProfilePanel';
+import HealthCycle from '../components/health/HealthCycle';
 import HealthFitness from './HealthFitness';
 
 /**
@@ -47,7 +48,13 @@ const Health = () => {
         {tab === 'fitness' && <HealthFitness />}
         {tab === 'sleep' && <HealthSleep />}
         {tab === 'nutrition' && <HealthNutrition onNavigate={setTab} />}
-        {tab === 'health' && <HealthProfilePanel />}
+        {tab === 'health' && (
+          <div className="space-y-3 sm:space-y-4">
+            <HealthProfilePanel />
+            {/* Opt-in, private, and hidden entirely for a male profile. */}
+            <HealthCycle />
+          </div>
+        )}
       </div>
     </div>
   );

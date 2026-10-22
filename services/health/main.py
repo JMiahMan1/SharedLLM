@@ -35,9 +35,12 @@ from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.config import INTERNAL_SECRET
-from services.health import scoring
+from services.health import cycle, scoring
 from services.health.models import (
     Checkin,
+    CycleLog,
+    CyclePeriod,
+    CycleSettings,
     FoodEntry,
     HealthProfile,
     HealthShare,
@@ -54,6 +57,22 @@ _START_TIME = time.time()
 DEFAULT_DATABASE_URL = "sqlite:////data/health.db"
 METRICS = tuple(scoring.METRIC_UNITS)
 MEALS = ("breakfast", "lunch", "dinner", "snack")
+CYCLE_FLOWS = ("spotting", "light", "medium", "heavy")
+CYCLE_SYMPTOMS = (
+    "cramps",
+    "headache",
+    "bloating",
+    "acne",
+    "breast_tenderness",
+    "fatigue",
+    "cravings",
+    "backache",
+    "nausea",
+    "insomnia",
+    "mood_swing",
+)
+OVULATION_TESTS = ("negative", "positive", "inconclusive")
+USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,79}$")
 SOURCES_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 OFF_BASE = "https://world.openfoodfacts.org"
@@ -476,8 +495,59 @@ class ShareIn(BaseModel):
     @field_validator("scope")
     @classmethod
     def _scope(cls, value: str) -> str:
-        if value not in ("sleep", "nutrition"):
-            raise ValueError("scope must be sleep or nutrition")
+        if value not in ("sleep", "nutrition", "cycle"):
+            raise ValueError("scope must be sleep, nutrition or cycle")
+        return value
+
+
+class CycleSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    average_cycle_length: int | None = Field(default=None, ge=15, le=90)
+    average_period_length: int | None = Field(default=None, ge=1, le=20)
+    guardian_username: str | None = Field(default=None, max_length=80)
+
+
+class CyclePeriodIn(BaseModel):
+    start_day: str
+    end_day: str | None = None
+    flow: str = "medium"
+    note: str = Field(default="", max_length=2000)
+    source: str = "manual"
+    external_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("flow")
+    @classmethod
+    def _flow(cls, value: str) -> str:
+        if value not in CYCLE_FLOWS:
+            raise ValueError(f"flow must be one of {', '.join(CYCLE_FLOWS)}")
+        return value
+
+
+class CycleLogIn(BaseModel):
+    symptoms: list[str] = Field(default_factory=list, max_length=40)
+    mood: int | None = Field(default=None, ge=1, le=5)
+    energy: int | None = Field(default=None, ge=1, le=5)
+    bbt_c: float | None = Field(default=None, ge=34, le=42)
+    ovulation_test: str | None = None
+    note: str = Field(default="", max_length=2000)
+
+    @field_validator("symptoms")
+    @classmethod
+    def _symptoms(cls, values: list[str]) -> list[str]:
+        unknown = sorted(set(values) - set(CYCLE_SYMPTOMS))
+        if unknown:
+            raise ValueError(
+                f"unknown symptoms: {', '.join(unknown)}; valid symptoms: {', '.join(CYCLE_SYMPTOMS)}"
+            )
+        return list(dict.fromkeys(values))
+
+    @field_validator("ovulation_test")
+    @classmethod
+    def _ovulation_test(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in OVULATION_TESTS:
+            raise ValueError(f"ovulation_test must be one of {', '.join(OVULATION_TESTS)}")
         return value
 
 
@@ -527,7 +597,378 @@ def put_profile(body: ProfileUpdate, request: Request, session: Session = Depend
     return _profile_out(profile, user)
 
 
-# --- metrics ---------------------------------------------------------------
+# --- cycle tracking --------------------------------------------------------
+
+
+def _age_years(profile: HealthProfile | None) -> int | None:
+    if profile is None or not profile.birth_year:
+        return None
+    return date.today().year - profile.birth_year
+
+
+def _cycle_applicable(profile: HealthProfile | None) -> bool:
+    """Cycle controls are not shown for a profile explicitly marked male.
+
+    A missing or unspecified sex is **not** treated as male: people who have
+    not filled that in still see the opt-in. Existing data is never deleted
+    just because the profile changed; it is simply not surfaced.
+    """
+    return profile is None or profile.sex != "male"
+
+
+def _cycle_is_minor(profile: HealthProfile | None) -> bool:
+    """Conservative minor check for cycle sharing.
+
+    An unknown birth year stays guardian-only. That is deliberately stricter
+    than the calorie maths, which can simply decline to calculate: this is
+    about who may see another person's cycle data.
+    """
+    age = _age_years(profile)
+    return age is None or age < 18
+
+
+def _cycle_settings(session: Session, user: str) -> CycleSettings | None:
+    return session.get(CycleSettings, user)
+
+
+def _cycle_period_out(row: CyclePeriod) -> dict:
+    return {
+        "id": row.id,
+        "start_day": row.start_day,
+        "end_day": row.end_day,
+        "flow": row.flow,
+        "note": row.note,
+        "source": row.source,
+        "external_id": row.external_id,
+        "created_at": row.created_at,
+    }
+
+
+def _cycle_log_out(row: CycleLog) -> dict:
+    try:
+        symptoms = json.loads(row.symptoms_json or "[]")
+    except (TypeError, ValueError):
+        symptoms = []
+    return {
+        "id": row.id,
+        "day": row.day,
+        "symptoms": symptoms if isinstance(symptoms, list) else [],
+        "mood": row.mood,
+        "energy": row.energy,
+        "bbt_c": row.bbt_c,
+        "ovulation_test": row.ovulation_test,
+        "note": row.note,
+        "updated_at": row.updated_at,
+    }
+
+
+def _cycle_periods(session: Session, user: str) -> list[CyclePeriod]:
+    return list(
+        session.exec(
+            select(CyclePeriod)
+            .where(CyclePeriod.user_id == user)
+            .order_by(CyclePeriod.start_day.desc())
+        ).all()
+    )
+
+
+def _cycle_summary(
+    session: Session,
+    user: str,
+    day: str,
+    settings: CycleSettings | None = None,
+) -> dict | None:
+    """Owner-only phase estimate. ``None`` when tracking is off or not applicable."""
+    profile = session.get(HealthProfile, user)
+    if not _cycle_applicable(profile):
+        return None
+    settings = settings if settings is not None else _cycle_settings(session, user)
+    if settings is None or not settings.enabled:
+        return None
+    rows = _cycle_periods(session, user)
+    periods = [
+        cycle.Period(date.fromisoformat(row.start_day), date.fromisoformat(row.end_day) if row.end_day else None)
+        for row in rows
+    ]
+    return cycle.summarize(
+        periods,
+        date.fromisoformat(day),
+        average_cycle_length=settings.average_cycle_length,
+        average_period_length=settings.average_period_length,
+    )
+
+
+def _drop_cycle_shares(session: Session, user: str, *, keep: str | None = None) -> None:
+    rows = session.exec(
+        select(HealthShare).where(HealthShare.owner == user, HealthShare.scope == "cycle")
+    ).all()
+    for row in rows:
+        if keep is None or row.viewer != keep:
+            session.delete(row)
+
+
+@app.get("/cycle")
+def get_cycle(
+    request: Request,
+    day: str | None = None,
+    session: Session = Depends(get_session),
+):
+    """The cycle panel in one call: settings, current estimate, recent logs.
+
+    A male profile gets ``applicable: false`` and no cycle data at all. The
+    route still exists so the UI can make a clean decision without a 404.
+    """
+    user = _user(request)
+    day = _day(day or date.today().isoformat())
+    profile = session.get(HealthProfile, user)
+    if not _cycle_applicable(profile):
+        return {
+            "applicable": False,
+            "enabled": False,
+            "is_minor": False,
+            "average_cycle_length": None,
+            "average_period_length": None,
+            "guardian_username": None,
+            "summary": None,
+            "periods": [],
+            "logs": [],
+            "reason": "Cycle tracking is not shown for a male profile.",
+        }
+    settings = _cycle_settings(session, user)
+    enabled = bool(settings and settings.enabled)
+    periods = _cycle_periods(session, user) if enabled else []
+    logs = (
+        session.exec(
+            select(CycleLog)
+            .where(CycleLog.user_id == user)
+            .order_by(CycleLog.day.desc())
+            .limit(120)
+        ).all()
+        if enabled
+        else []
+    )
+    return {
+        "applicable": True,
+        "enabled": enabled,
+        "is_minor": _cycle_is_minor(profile),
+        "age_known": _age_years(profile) is not None,
+        "average_cycle_length": settings.average_cycle_length if settings else None,
+        "average_period_length": settings.average_period_length if settings else None,
+        "guardian_username": settings.guardian_username if settings else None,
+        "summary": _cycle_summary(session, user, day, settings),
+        "periods": [_cycle_period_out(row) for row in periods],
+        "logs": [_cycle_log_out(row) for row in logs],
+    }
+
+
+@app.put("/cycle/settings")
+def put_cycle_settings(
+    body: CycleSettingsUpdate,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    profile = session.get(HealthProfile, user)
+    changes = body.model_dump(exclude_unset=True)
+    enabling = changes.get("enabled") is True
+
+    if enabling and not _cycle_applicable(profile):
+        raise HTTPException(
+            status_code=422,
+            detail="Cycle tracking is not available for a male profile.",
+        )
+
+    age = _age_years(profile)
+    if enabling and ((age is not None and age < 10) or (age is None and profile and profile.kid_mode)):
+        raise HTTPException(
+            status_code=422,
+            detail="Cycle tracking is for teens and adults. Add a birth year to the profile first.",
+        )
+
+    if "guardian_username" in changes:
+        guardian = (changes["guardian_username"] or "").strip().lower() or None
+        if guardian:
+            if not USERNAME_RE.match(guardian):
+                raise HTTPException(status_code=422, detail="guardian_username is not a valid username")
+            if guardian == user:
+                raise HTTPException(status_code=422, detail="You cannot be your own guardian")
+        changes["guardian_username"] = guardian
+
+    settings = _cycle_settings(session, user)
+    if settings is None:
+        settings = CycleSettings(user_id=user)
+        session.add(settings)
+    for key, value in changes.items():
+        setattr(settings, key, value)
+    settings.updated_at = utcnow()
+
+    if changes.get("enabled") is False:
+        _drop_cycle_shares(session, user)
+    if "guardian_username" in changes:
+        _drop_cycle_shares(session, user, keep=settings.guardian_username)
+
+    session.commit()
+    session.refresh(settings)
+    return get_cycle(request, session=session)
+
+
+@app.post("/cycle/periods")
+def add_cycle_period(
+    body: CyclePeriodIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    profile = session.get(HealthProfile, user)
+    if not _cycle_applicable(profile):
+        raise HTTPException(status_code=422, detail="Cycle tracking is not available for a male profile.")
+    settings = _cycle_settings(session, user)
+    if settings is None or not settings.enabled:
+        raise HTTPException(status_code=422, detail="Enable cycle tracking before logging a period.")
+
+    start = _day(body.start_day, field="start_day")
+    today = date.today().isoformat()
+    if start > today:
+        raise HTTPException(status_code=422, detail="start_day cannot be in the future")
+    end = _day(body.end_day, field="end_day") if body.end_day else None
+    if end:
+        if end < start:
+            raise HTTPException(status_code=422, detail="end_day must be on or after start_day")
+        if end > today:
+            raise HTTPException(status_code=422, detail="end_day cannot be in the future")
+        if (date.fromisoformat(end) - date.fromisoformat(start)).days > 60:
+            raise HTTPException(status_code=422, detail="A logged period cannot be longer than 60 days")
+    source = _source(body.source)
+
+    row = session.exec(
+        select(CyclePeriod).where(CyclePeriod.user_id == user, CyclePeriod.start_day == start)
+    ).first()
+    if row is None:
+        row = CyclePeriod(user_id=user, start_day=start)
+        session.add(row)
+    row.end_day = end
+    row.flow = body.flow
+    row.note = body.note
+    row.source = source
+    row.external_id = body.external_id
+    session.commit()
+    session.refresh(row)
+    return {"period": _cycle_period_out(row), "summary": _cycle_summary(session, user, today)}
+
+
+@app.get("/cycle/periods")
+def list_cycle_periods(
+    request: Request,
+    days: int = Query(default=365, ge=1, le=3650),
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    since = (date.today() - timedelta(days=days)).isoformat()
+    rows = session.exec(
+        select(CyclePeriod)
+        .where(CyclePeriod.user_id == user, CyclePeriod.start_day >= since)
+        .order_by(CyclePeriod.start_day.desc())
+    ).all()
+    return {"periods": [_cycle_period_out(row) for row in rows]}
+
+
+@app.delete("/cycle/periods/{period_id}")
+def delete_cycle_period(
+    period_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    row = session.get(CyclePeriod, period_id)
+    if row is None or row.user_id != user:
+        raise HTTPException(status_code=404, detail="Period not found")
+    session.delete(row)
+    session.commit()
+    return {"deleted": period_id}
+
+
+@app.get("/cycle/logs")
+def list_cycle_logs(
+    request: Request,
+    days: int = Query(default=90, ge=1, le=3650),
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    since = (date.today() - timedelta(days=days)).isoformat()
+    rows = session.exec(
+        select(CycleLog)
+        .where(CycleLog.user_id == user, CycleLog.day >= since)
+        .order_by(CycleLog.day.desc())
+    ).all()
+    return {"logs": [_cycle_log_out(row) for row in rows]}
+
+
+@app.get("/cycle/logs/{day}")
+def get_cycle_log(
+    day: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    day = _day(day)
+    row = session.exec(
+        select(CycleLog).where(CycleLog.user_id == user, CycleLog.day == day)
+    ).first()
+    return {"day": day, "log": _cycle_log_out(row) if row else None}
+
+
+@app.put("/cycle/logs/{day}")
+def put_cycle_log(
+    day: str,
+    body: CycleLogIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    day = _day(day)
+    if day > date.today().isoformat():
+        raise HTTPException(status_code=422, detail="You cannot log symptoms for a future day")
+    profile = session.get(HealthProfile, user)
+    if not _cycle_applicable(profile):
+        raise HTTPException(status_code=422, detail="Cycle tracking is not available for a male profile.")
+    settings = _cycle_settings(session, user)
+    if settings is None or not settings.enabled:
+        raise HTTPException(status_code=422, detail="Enable cycle tracking before logging symptoms.")
+
+    row = session.exec(
+        select(CycleLog).where(CycleLog.user_id == user, CycleLog.day == day)
+    ).first()
+    if row is None:
+        row = CycleLog(user_id=user, day=day)
+        session.add(row)
+    row.symptoms_json = json.dumps(body.symptoms)
+    row.mood = body.mood
+    row.energy = body.energy
+    row.bbt_c = body.bbt_c
+    row.ovulation_test = body.ovulation_test
+    row.note = body.note
+    row.updated_at = utcnow()
+    session.commit()
+    session.refresh(row)
+    return {"log": _cycle_log_out(row)}
+
+
+@app.delete("/cycle/logs/{day}")
+def delete_cycle_log(
+    day: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    day = _day(day)
+    row = session.exec(
+        select(CycleLog).where(CycleLog.user_id == user, CycleLog.day == day)
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Log not found")
+    session.delete(row)
+    session.commit()
+    return {"deleted": day}
 
 
 @app.get("/metrics/catalog")
@@ -1064,6 +1505,29 @@ def put_share(body: ShareIn, request: Request, session: Session = Depends(get_se
     viewer = body.viewer.strip().lower()
     if viewer == user:
         raise HTTPException(status_code=422, detail="You already see your own data")
+    if not USERNAME_RE.match(viewer):
+        raise HTTPException(status_code=422, detail="viewer is not a valid username")
+
+    if body.scope == "cycle" and body.enabled:
+        profile = session.get(HealthProfile, user)
+        if not _cycle_applicable(profile):
+            raise HTTPException(status_code=422, detail="Cycle tracking is not available for a male profile.")
+        settings = _cycle_settings(session, user)
+        if settings is None or not settings.enabled:
+            raise HTTPException(status_code=422, detail="Enable cycle tracking before sharing it.")
+        if _cycle_is_minor(profile):
+            guardian = (settings.guardian_username or "").strip().lower()
+            if not guardian:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Set a mother or trusted adult before sharing cycle data.",
+                )
+            if viewer != guardian:
+                raise HTTPException(
+                    status_code=403,
+                    detail="A minor can only share cycle data with their designated mother or trusted adult.",
+                )
+
     row = session.exec(
         select(HealthShare).where(
             HealthShare.owner == user,
@@ -1121,6 +1585,21 @@ def family_summary(
             entry["nutrition"] = {
                 "logged": nutrition["logged"],
                 "calories": nutrition["totals"]["calories"],
+            }
+        if "cycle" in scopes:
+            owner_profile = session.get(HealthProfile, owner)
+            shared = _cycle_summary(session, owner, day)
+            entry["cycle"] = {
+                "applicable": _cycle_applicable(owner_profile),
+                "enabled": shared is not None,
+                "phase": shared["phase"] if shared else None,
+                "phase_label": shared["phase_label"] if shared else None,
+                "cycle_day": shared["cycle_day"] if shared else None,
+                "next_period_start": shared["next_period_start"] if shared else None,
+                "days_until_next_period": shared["days_until_next_period"] if shared else None,
+                "confidence": shared["confidence"] if shared else None,
+                "detail": shared["detail"] if shared else None,
+                # Deliberately no flow, symptoms, BBT, notes or period history.
             }
         people.append(entry)
     return {"viewer": viewer, "day": day, "people": people}
@@ -1256,6 +1735,9 @@ def summary(
         "metrics": {key: value for key, value in latest.items()},
         "resting_hr_baseline": round(baseline_rhr, 1) if baseline_rhr is not None else None,
         "activity": None,
+        # Owner-only and absent unless the person turned tracking on; never
+        # part of the family projection, which only sees the explicit grant.
+        "cycle": _cycle_summary(session, user, day),
         "alerts": alerts,
     }
 
@@ -1295,6 +1777,25 @@ def export_data(request: Request, session: Session = Depends(get_session)):
                 select(FoodEntry).where(FoodEntry.user_id == user).order_by(FoodEntry.day.asc())
             ).all()
         ],
+        "cycle": {
+            "settings": (
+                {
+                    "enabled": settings.enabled,
+                    "average_cycle_length": settings.average_cycle_length,
+                    "average_period_length": settings.average_period_length,
+                    "guardian_username": settings.guardian_username,
+                }
+                if (settings := _cycle_settings(session, user)) is not None
+                else None
+            ),
+            "periods": [_cycle_period_out(row) for row in _cycle_periods(session, user)],
+            "logs": [
+                _cycle_log_out(row)
+                for row in session.exec(
+                    select(CycleLog).where(CycleLog.user_id == user).order_by(CycleLog.day.asc())
+                ).all()
+            ],
+        },
         "shares": [
             {"viewer": row.viewer, "scope": row.scope}
             for row in session.exec(select(HealthShare).where(HealthShare.owner == user)).all()
@@ -1302,6 +1803,7 @@ def export_data(request: Request, session: Session = Depends(get_session)):
         "notes": {
             "activity": "Steps and workouts live in geo; request /api/geo/steps and /api/geo/workouts.",
             "scores": "Sleep and readiness scores are derived; the raw readings are included above.",
+            "cycle": "Cycle data is included because this is the owner's own export.",
         },
     }
 

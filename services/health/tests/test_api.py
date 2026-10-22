@@ -1,7 +1,7 @@
 """HTTP contract tests for the health service."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -397,3 +397,182 @@ class TestSharingAndExport:
         assert len(body["sleep"]) == 1
         assert len(body["checkins"]) == 1
         assert "activity" in body["notes"]
+
+
+def _cycle_profile(client, *, birth_year: int | None = 1990, sex: str = "female", kid_mode: bool = False):
+    payload = {"sex": sex, "kid_mode": kid_mode}
+    if birth_year is not None:
+        payload["birth_year"] = birth_year
+    response = client.put("/profile", json=payload)
+    assert response.status_code == 200
+
+
+def _enable_cycle(client, **extra):
+    response = client.put("/cycle/settings", json={"enabled": True, **extra})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+class TestCycleApi:
+    def test_cycle_is_hidden_for_a_male_profile(self, client):
+        _cycle_profile(client, sex="male")
+        body = client.get("/cycle").json()
+        assert body["applicable"] is False
+        assert body["enabled"] is False
+        assert body["summary"] is None
+        assert body["periods"] == []
+        assert client.put("/cycle/settings", json={"enabled": True}).status_code == 422
+        assert client.post("/cycle/periods", json={"start_day": TODAY}).status_code == 422
+        assert client.put(f"/cycle/logs/{TODAY}", json={"symptoms": []}).status_code == 422
+
+    def test_a_missing_sex_still_offers_the_opt_in(self, client):
+        client.put("/profile", json={"birth_year": 1990})
+        body = client.get("/cycle").json()
+        assert body["applicable"] is True
+        assert body["enabled"] is False
+
+    def test_opt_in_logs_periods_and_learns_the_gap(self, client):
+        _cycle_profile(client)
+        before = client.get("/cycle").json()
+        assert before["applicable"] is True
+        assert before["enabled"] is False
+
+        enabled = _enable_cycle(client)
+        assert enabled["enabled"] is True
+
+        prior = (date.today() - timedelta(days=32)).isoformat()
+        latest = (date.today() - timedelta(days=4)).isoformat()
+        assert client.post("/cycle/periods", json={"start_day": prior}).status_code == 200
+        saved = client.post(
+            "/cycle/periods",
+            json={"start_day": latest, "end_day": (date.today() - timedelta(days=2)).isoformat(), "flow": "heavy"},
+        )
+        assert saved.status_code == 200
+        assert saved.json()["period"]["flow"] == "heavy"
+
+        body = client.get("/cycle").json()
+        assert len(body["periods"]) == 2
+        summary = body["summary"]
+        assert summary["has_data"] is True
+        assert summary["cycle_day"] == 5
+        assert summary["cycle_length_used"] == 28
+        assert summary["phase"] == "follicular"
+        assert summary["next_period_start"] == (
+            date.today() - timedelta(days=4) + timedelta(days=28)
+        ).isoformat()
+
+    def test_period_and_log_validation(self, client):
+        _cycle_profile(client)
+        _enable_cycle(client)
+        today = date.today().isoformat()
+        future = (date.today() + timedelta(days=1)).isoformat()
+        assert client.post("/cycle/periods", json={"start_day": future}).status_code == 422
+        assert (
+            client.post(
+                "/cycle/periods",
+                json={"start_day": today, "end_day": (date.today() - timedelta(days=3)).isoformat()},
+            ).status_code
+            == 422
+        )
+        assert client.post("/cycle/periods", json={"start_day": today, "flow": "torrential"}).status_code == 422
+        assert client.put(f"/cycle/logs/{future}", json={"mood": 3}).status_code == 422
+        assert client.put(f"/cycle/logs/{today}", json={"symptoms": ["vibes"]}).status_code == 422
+        assert client.put(f"/cycle/logs/{today}", json={"bbt_c": 55}).status_code == 422
+
+    def test_symptom_log_round_trips(self, client):
+        _cycle_profile(client)
+        _enable_cycle(client)
+        today = date.today().isoformat()
+        saved = client.put(
+            f"/cycle/logs/{today}",
+            json={
+                "symptoms": ["cramps", "fatigue", "cramps"],
+                "mood": 3,
+                "energy": 2,
+                "bbt_c": 36.6,
+                "ovulation_test": "negative",
+                "note": "long day",
+            },
+        )
+        assert saved.status_code == 200
+        log = saved.json()["log"]
+        assert log["symptoms"] == ["cramps", "fatigue"]
+        fetched = client.get(f"/cycle/logs/{today}").json()["log"]
+        assert fetched["mood"] == 3
+        assert fetched["bbt_c"] == 36.6
+        assert client.delete(f"/cycle/logs/{today}").status_code == 200
+        assert client.get(f"/cycle/logs/{today}").json()["log"] is None
+
+    def test_a_minor_can_only_share_with_the_designated_guardian(self, client):
+        _cycle_profile(client, birth_year=date.today().year - 14)
+        _enable_cycle(client)
+        client.post("/cycle/periods", json={"start_day": TODAY})
+
+        # No guardian designated yet: sharing is refused before any viewer is
+        # considered, and the message asks for a guardian rather than leaking
+        # which viewers would otherwise be allowed.
+        assert client.put("/shares", json={"viewer": "dad", "scope": "cycle"}).status_code == 422
+        assert client.put("/shares", json={"viewer": "mom", "scope": "cycle"}).status_code == 422
+        guardian = client.put("/cycle/settings", json={"guardian_username": "mom"})
+        assert guardian.status_code == 200
+        assert guardian.json()["guardian_username"] == "mom"
+        assert client.put("/shares", json={"viewer": "dad", "scope": "cycle"}).status_code == 403
+        assert client.put("/shares", json={"viewer": "mom", "scope": "cycle"}).status_code == 200
+
+        family = client.get("/family", headers={"X-User-Id": "mom"}).json()
+        assert family["people"][0]["cycle"]["phase"] == "menstrual"
+        assert "symptoms" not in family["people"][0]["cycle"]
+        assert "periods" not in family["people"][0]
+
+        # Moving the guardian drops the old grant instead of leaving it behind.
+        assert client.put("/cycle/settings", json={"guardian_username": "grandma"}).status_code == 200
+        assert client.get("/family", headers={"X-User-Id": "mom"}).json()["people"] == []
+
+    def test_an_unknown_birth_year_is_treated_as_a_minor_for_sharing(self, client):
+        _cycle_profile(client, birth_year=None)
+        _enable_cycle(client)
+        client.post("/cycle/periods", json={"start_day": TODAY})
+        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 422
+        assert client.put("/cycle/settings", json={"guardian_username": "michele"}).status_code == 200
+        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 200
+
+    def test_an_adult_can_share_a_minimal_cycle_summary(self, client):
+        _cycle_profile(client)
+        _enable_cycle(client)
+        client.post("/cycle/periods", json={"start_day": TODAY})
+        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 200
+        family = client.get("/family", headers={"X-User-Id": "michele"}).json()
+        cycle_entry = family["people"][0]["cycle"]
+        assert cycle_entry["enabled"] is True
+        assert cycle_entry["phase"] == "menstrual"
+        for private_field in ("flow", "symptoms", "bbt_c", "note", "periods", "logs"):
+            assert private_field not in cycle_entry
+            assert private_field not in family["people"][0]
+
+    def test_cycle_sharing_requires_tracking_to_be_on(self, client):
+        _cycle_profile(client)
+        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 422
+
+    def test_turning_tracking_off_removes_cycle_grants(self, client):
+        _cycle_profile(client)
+        _enable_cycle(client)
+        client.post("/cycle/periods", json={"start_day": TODAY})
+        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 200
+        assert client.put("/cycle/settings", json={"enabled": False}).status_code == 200
+        assert client.get("/family", headers={"X-User-Id": "michele"}).json()["people"] == []
+
+    def test_a_young_child_cannot_enable_tracking(self, client):
+        _cycle_profile(client, birth_year=date.today().year - 8, kid_mode=True)
+        response = client.put("/cycle/settings", json={"enabled": True})
+        assert response.status_code == 422
+
+    def test_export_includes_cycle_history(self, client):
+        _cycle_profile(client)
+        _enable_cycle(client)
+        client.post("/cycle/periods", json={"start_day": TODAY})
+        client.put(f"/cycle/logs/{TODAY}", json={"symptoms": ["cramps"]})
+        body = client.get("/export").json()
+        assert body["cycle"]["settings"]["enabled"] is True
+        assert len(body["cycle"]["periods"]) == 1
+        assert len(body["cycle"]["logs"]) == 1
+        assert body["cycle"]["logs"][0]["symptoms"] == ["cramps"]

@@ -19,6 +19,28 @@ PERMISSIONS: dict[str, str] = {
     "devices.use_locked": "Control locked devices too",
     "devices.assign": "Choose who can use each device",
     "devices.lock": "Lock and unlock devices, and choose who may use a locked one",
+    "family.manage": "Manage family roles, mother/child links and household sharing",
+}
+
+#: The family roles Identity understands. These are relationships, not roles in
+#: the RBAC table: an admin can still give a child an explicit role, but the
+#: household defaults below are derived from the relationship.
+FAMILY_ROLES: tuple[str, ...] = ("father", "mother", "child", "teen", "adult_child", "other")
+MINOR_FAMILY_ROLES = {"child", "teen"}
+
+#: Defaults a relationship contributes on top of any explicitly assigned role.
+#: "father" is deliberately absent: fatherhood is not an elevation path, the
+#: admin flag is. A mother runs the house but cannot administer accounts.
+FAMILY_ROLE_PERMISSIONS: dict[str, set[str]] = {
+    "mother": {
+        "devices.use_all",
+        "devices.use_locked",
+        "devices.assign",
+        "devices.lock",
+        "family.manage",
+    },
+    "teen": {"devices.use_all"},
+    "adult_child": {"devices.use_all"},
 }
 
 # Seeded on start when missing (matched by key, so a renamed one stays).
@@ -26,8 +48,8 @@ DEFAULT_ROLES: list[dict] = [
     {
         "builtin": "home_manager",
         "name": "Home manager",
-        "description": "Runs the house: every device, who uses which, and locks. No say over accounts or server settings.",
-        "permissions": ["devices.use_all", "devices.use_locked", "devices.assign", "devices.lock"],
+        "description": "Runs the house: every device, who uses which, family roles and locks. No say over accounts or server settings.",
+        "permissions": ["devices.use_all", "devices.use_locked", "devices.assign", "devices.lock", "family.manage"],
     },
     {
         "builtin": "family_member",
@@ -68,14 +90,21 @@ def user_role_ids(session: Session, user: User) -> list[int]:
 
 
 def user_permissions(session: Session, user: User) -> set[str]:
-    """Everything this user may do; an admin may do all of it."""
+    """Everything this user may do; an admin may do all of it.
+
+    Family relationships contribute household defaults (a mother can manage
+    devices and family links; teens can use unlocked devices) without adding
+    more built-in RBAC roles to the admin page. Explicit roles are still
+    unioned in, so an admin can grant a child a narrow extra permission.
+    """
     if user.is_admin:
         return set(PERMISSIONS)
+    granted = set(FAMILY_ROLE_PERMISSIONS.get(user.family_role or "other", set()))
     ids = user_role_ids(session, user)
-    if not ids:
-        return set()
-    roles = session.exec(select(Role).where(Role.id.in_(ids))).all()  # type: ignore[union-attr]
-    return {key for role in roles for key in role_permissions(role)}
+    if ids:
+        held = session.exec(select(Role).where(Role.id.in_(ids))).all()  # type: ignore[union-attr]
+        granted |= {key for role in held for key in role_permissions(role)}
+    return granted
 
 
 def has_permission(session: Session, user: User, permission: str) -> bool:

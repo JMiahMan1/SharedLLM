@@ -121,6 +121,7 @@ function summary(overrides: Partial<HealthSummary> = {}): HealthSummary {
     metrics: {},
     resting_hr_baseline: null,
     activity: null,
+    cycle: null,
     alerts: [],
     ...overrides,
   };

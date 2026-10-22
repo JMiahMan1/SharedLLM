@@ -31,6 +31,9 @@ export default function ActivitySharingPanel() {
     queryKey: ['activity-sharing'],
     queryFn: () => api.getActivitySharing(),
   });
+  // A child or teen's family-circle sharing is a household safety rule, not
+  // an optional preference. The server enforces it too; this only explains it.
+  const locked = server?.sharing_locked === true;
 
   // `getSharingRecipients`, not `getUsers`: the latter is admin-only, which
   // rendered a non-admin's picker empty and left "Everyone" as the only
@@ -86,9 +89,9 @@ export default function ActivitySharingPanel() {
     setSaving(true);
     try {
       await api.updateActivitySharing({
-        enabled: state.enabled,
-        audience: state.audience,
-        user_ids: state.audience === 'users' ? state.user_ids : [],
+        enabled: locked ? true : state.enabled,
+        audience: locked ? 'circle' : state.audience,
+        user_ids: locked ? [] : state.audience === 'users' ? state.user_ids : [],
         share: state.share,
       });
       setDraft(null);
@@ -109,14 +112,17 @@ export default function ActivitySharingPanel() {
             Share my activity
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            {state.enabled
-              ? 'Your activity is visible to the people you chose below.'
-              : 'Private: nothing is visible to anyone else.'}
+            {locked
+              ? 'Your family circle can see your totals. For a child or teen this stays on; adult children can turn it off.'
+              : state.enabled
+                ? 'Your activity is visible to the people you chose below.'
+                : 'Private: nothing is visible to anyone else.'}
           </p>
         </div>
         <Toggle
-          checked={state.enabled}
+          checked={locked ? true : state.enabled}
           onChange={(next) => patch({ enabled: next })}
+          disabled={locked}
           ariaLabel="Share my activity"
           testId="sharing-toggle"
         />
@@ -136,7 +142,8 @@ export default function ActivitySharingPanel() {
                 type="button"
                 data-testid={`audience-${opt.id}`}
                 onClick={() => patch({ audience: opt.id })}
-                className={`px-3 py-2 text-xs rounded-lg border min-h-11 transition-colors ${
+                disabled={locked}
+                className={`px-3 py-2 text-xs rounded-lg border min-h-11 transition-colors disabled:opacity-40 ${
                   state.audience === opt.id
                     ? 'bg-purple-500/20 border-purple-500/40 text-purple-200'
                     : 'border-white/10 text-slate-400 hover:text-slate-200'

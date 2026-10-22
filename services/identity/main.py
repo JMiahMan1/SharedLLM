@@ -78,6 +78,8 @@ from services.identity.schemas import (
     EntityProtectionRead,
     EntityProtectionUpdate,
     DiscoverUser,
+    FamilyMemberRead,
+    FamilyUpdate,
     GlobalSettingRead,
     GlobalSettingUpdate,
     ImportResponse,
@@ -163,6 +165,8 @@ def _ensure_schema_upgrades() -> None:
 
     if _table_exists("user"):
         _add_column("user", "is_admin", "ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
+        _add_column("user", "family_role", "ALTER TABLE user ADD COLUMN family_role VARCHAR NOT NULL DEFAULT 'other'")
+        _add_column("user", "mother_username", "ALTER TABLE user ADD COLUMN mother_username VARCHAR")
         _add_column("user", "password_hash", "ALTER TABLE user ADD COLUMN password_hash VARCHAR")
         _add_column("user", "api_key", "ALTER TABLE user ADD COLUMN api_key VARCHAR")
         _add_column("user", "api_key_enc", "ALTER TABLE user ADD COLUMN api_key_enc VARCHAR")
@@ -918,6 +922,10 @@ def get_me(user: User = Depends(require_api_key), session: Session = Depends(get
 def _user_read(session: Session, user: User) -> UserRead:
     """A user as the API shows them, with their roles and what those allow."""
     read = UserRead.model_validate(user)
+    read.family_role = user.family_role if user.family_role in roles.FAMILY_ROLES else "other"
+    read.mother_username = user.mother_username or None
+    read.is_minor = read.family_role in roles.MINOR_FAMILY_ROLES
+    read.sharing_locked = read.is_minor
     read.role_ids = roles.user_role_ids(session, user)
     read.permissions = sorted(roles.user_permissions(session, user))
     return read
@@ -1825,6 +1833,147 @@ def list_sharing_recipients(
         if u.username != (caller.username or "").lower()
     ]
 
+# --- family roles and relationships ---------------------------------------
+
+_FAMILY_ORDER = {"father": 0, "mother": 1, "adult_child": 2, "teen": 3, "child": 4, "other": 5}
+
+
+def _family_read(user: User) -> FamilyMemberRead:
+    role = user.family_role if user.family_role in roles.FAMILY_ROLES else "other"
+    return FamilyMemberRead(
+        username=user.username,
+        display_name=user.display_name or user.username,
+        family_role=role,  # type: ignore[arg-type]
+        mother_username=user.mother_username or None,
+        is_minor=role in roles.MINOR_FAMILY_ROLES,
+        sharing_locked=role in roles.MINOR_FAMILY_ROLES,
+        is_admin=bool(user.is_admin),
+        avatar=user.avatar or None,
+    )
+
+
+def _require_family_manager(user: User, session: Session) -> None:
+    if not (user.is_admin or roles.has_permission(session, user, "family.manage")):
+        raise HTTPException(status_code=403, detail="Only a parent or household manager can change family roles")
+
+
+def _check_mother(session: Session, target_username: str, mother_username: str) -> User:
+    username = mother_username.strip().lower()
+    if not username:
+        raise HTTPException(status_code=422, detail="mother_username cannot be blank")
+    if username == target_username.strip().lower():
+        raise HTTPException(status_code=422, detail="A person cannot be their own mother")
+    mother = session.exec(select(User).where(User.username == username)).first()
+    if mother is None:
+        raise HTTPException(status_code=422, detail="That mother account does not exist")
+    if mother.family_role != "mother":
+        raise HTTPException(status_code=422, detail="That account is not marked as a mother")
+    return mother
+
+
+def _force_minor_activity_sharing(session: Session, user: User) -> None:
+    """Non-adult children cannot switch circle sharing off.
+
+    This is separate from health/cycle sharing: it is the household safety
+    rule that a minor's totals stay visible to the family circle. The row is
+    written, not just projected, so the geo feed sees the same policy.
+    """
+    row = session.exec(
+        select(UserActivitySharing).where(UserActivitySharing.username == user.username)
+    ).first()
+    if row is None:
+        row = UserActivitySharing(username=user.username, data="{}")
+        session.add(row)
+    data = _activity_sharing_data(row)
+    data["enabled"] = True
+    data["audience"] = "circle"
+    data["user_ids"] = []
+    if not data["share"]:
+        data["share"] = ["totals"]
+    row.data = json.dumps(data)
+
+
+@app.get("/api/users/family", response_model=list[FamilyMemberRead])
+def list_family(
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """The household roster with relationship roles, for a parent/manager.
+
+    It deliberately does not expose integration URLs, credentials, keys or the
+    raw admin flag beyond what a family panel needs.
+    """
+    _require_family_manager(caller, session)
+    people = session.exec(select(User)).all()
+    people.sort(key=lambda u: (_FAMILY_ORDER.get(u.family_role or "other", 9), (u.display_name or u.username).lower()))
+    return [_family_read(u) for u in people]
+
+
+@app.patch("/api/users/{username}/family", response_model=FamilyMemberRead)
+def update_family(
+    username: str,
+    body: FamilyUpdate,
+    request: Request,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Set a person's family role and (for a child/teen) their mother link.
+
+    Only an admin or a household manager may call this. A mother cannot edit
+    another parent or an admin, and cannot promote anyone to father/mother:
+    that would be a privilege change, not a relationship edit.
+    """
+    _require_family_manager(caller, session)
+    target = session.exec(select(User).where(User.username == username.strip().lower())).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not caller.is_admin:
+        if target.is_admin or target.family_role in ("father", "mother"):
+            raise HTTPException(status_code=403, detail="Only an admin can change a parent account")
+        if target.username == caller.username:
+            raise HTTPException(status_code=403, detail="You cannot change your own family role")
+        if body.family_role in ("father", "mother"):
+            raise HTTPException(status_code=403, detail="Only an admin can make someone a parent")
+
+    next_role = body.family_role if body.family_role is not None else (target.family_role or "other")
+    if next_role == "father" and not target.is_admin:
+        raise HTTPException(status_code=422, detail="Make this account an admin before marking it Father")
+
+    mother_changed = "mother_username" in body.model_fields_set or body.clear_mother
+    if mother_changed:
+        if body.clear_mother or not (body.mother_username or "").strip():
+            target.mother_username = None
+        else:
+            if next_role not in roles.MINOR_FAMILY_ROLES:
+                raise HTTPException(status_code=422, detail="A mother link only applies to a child or teen")
+            target.mother_username = _check_mother(session, target.username, body.mother_username or "").username
+
+    if body.family_role is not None:
+        target.family_role = next_role
+        if target.family_role not in roles.MINOR_FAMILY_ROLES:
+            target.mother_username = None
+
+    if target.family_role in roles.MINOR_FAMILY_ROLES:
+        _force_minor_activity_sharing(session, target)
+
+    session.add(target)
+    session.commit()
+    session.refresh(target)
+    _audit(
+        request,
+        session,
+        "user.family",
+        target.username,
+        actor=caller,
+        changes=[
+            {"field": "family_role", "change": "set", "value": target.family_role},
+            {"field": "mother_username", "change": "set", "value": target.mother_username},
+        ],
+    )
+    return _family_read(target)
+
+
 @app.post("/api/users", response_model=UserRead)
 def create_user(body: UserCreate, request: Request, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     if not admin.is_admin:
@@ -1838,11 +1987,20 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
     if any(_coerce(k) for k in [body.skylight_url, body.skylight_email, body.skylight_pass]) and admin.id != 1 and admin.username != "default":
         raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
 
+    if body.family_role == "father" and not body.is_admin:
+        raise HTTPException(status_code=422, detail="Make this account an admin before marking it Father")
+    if body.mother_username and body.family_role not in roles.MINOR_FAMILY_ROLES:
+        raise HTTPException(status_code=422, detail="A mother link only applies to a child or teen")
+    if body.mother_username:
+        _check_mother(session, body.username.lower(), body.mother_username)
+
     user = User(
         username=body.username.lower(),
         display_name=body.display_name,
         is_admin=body.is_admin,
         is_system_default=body.is_system_default,
+        family_role=body.family_role,
+        mother_username=(body.mother_username or "").strip().lower() or None,
         password_hash=hash_password(body.password) if body.password else None,
         nextcloud_url=_coerce(body.nextcloud_url),
         nextcloud_user=_coerce(body.nextcloud_user),
@@ -1875,6 +2033,9 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
     session.add(user)
     session.commit()
     session.refresh(user)
+    if user.family_role in roles.MINOR_FAMILY_ROLES:
+        _force_minor_activity_sharing(session, user)
+        session.commit()
     _audit(request, session, "user.create", user.username, actor=admin, before={}, after=audit.snapshot(user))
     return user
 
@@ -3812,11 +3973,19 @@ def get_activity_sharing(
     session: Session = Depends(get_session),
     user: User = Depends(require_api_key),
 ):
-    """Current user's activity-sharing preference (defaults to off)."""
+    """Current user's activity-sharing preference (defaults to off).
+
+    A child or teen is projected as locked-on to the family circle even if
+    they have no row yet, so the UI and the geo feed agree before the first
+    save. Adult children and other adults keep the private default.
+    """
     row = session.exec(
         select(UserActivitySharing).where(UserActivitySharing.username == user.username)
     ).first()
-    return {"status": "SUCCESS", **_activity_sharing_data(row)}
+    data = _activity_sharing_data(row)
+    if user.family_role in roles.MINOR_FAMILY_ROLES:
+        data.update({"enabled": True, "audience": "circle", "user_ids": []})
+    return {"status": "SUCCESS", "sharing_locked": user.family_role in roles.MINOR_FAMILY_ROLES, **data}
 
 
 @app.put("/api/users/me/activity-sharing")
@@ -3834,10 +4003,13 @@ def update_activity_sharing(
         session.add(row)
 
     data = _activity_sharing_data(row)
+    minor = user.family_role in roles.MINOR_FAMILY_ROLES
     for key, value in (body or {}).items():
         if key == "enabled":
             if not isinstance(value, bool):
                 raise HTTPException(status_code=422, detail="enabled must be a boolean")
+            if minor and value is False:
+                raise HTTPException(status_code=403, detail="A child or teen's family sharing cannot be turned off")
             data["enabled"] = value
         elif key == "audience":
             if value not in ACTIVITY_AUDIENCES:
@@ -3858,10 +4030,12 @@ def update_activity_sharing(
                     detail=f"share must be a non-empty subset of {sorted(ACTIVITY_SHARE_SCOPES)}",
                 )
             data["share"] = sorted(set(value))
+    if minor:
+        data.update({"enabled": True, "audience": "circle", "user_ids": []})
     row.data = json.dumps(data)
     session.add(row)
     session.commit()
-    return {"status": "SUCCESS", **data}
+    return {"status": "SUCCESS", "sharing_locked": minor, **data}
 
 
 @app.get("/api/internal/activity-sharing")

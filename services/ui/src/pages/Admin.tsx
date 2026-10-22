@@ -57,6 +57,7 @@ import Modal from '../components/ui/Modal';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import { EntityProtectionPanel } from '../components/admin/EntityProtectionPanel';
 import { RolesPanel } from '../components/admin/RolesPanel';
+import FamilyPanel from '../components/settings/FamilyPanel';
 import { HomeAlertsPanel } from '../components/admin/HomeAlertsPanel';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import ServiceAccessSetup from '../components/admin/ServiceAccessSetup';
@@ -882,6 +883,8 @@ const Admin = () => {
           </div>
 
           <RolesPanel users={users} />
+
+          <FamilyPanel />
 
           <section className="glass-panel p-4 sm:p-6 min-w-0 overflow-hidden" data-testid="admin-stars">
             <div className="mb-6 flex items-center justify-between gap-4 flex-wrap">
