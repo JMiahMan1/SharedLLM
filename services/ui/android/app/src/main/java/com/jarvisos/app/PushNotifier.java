@@ -28,13 +28,13 @@ import java.util.Map;
  * Chat messages are grouped per conversation in a MessagingStyle notification
  * with inline reply, and cleared when the conversation is opened in the app.
  */
-final class PushNotifier {
+public final class PushNotifier {
     /** Jarvis's own status bar icon, for the background notices; each notice
      *  category has its own in {@link PushCategories}. */
     static final int STATUS_ICON = R.drawable.mi_bolt;
 
     /** A tapped notification carries the page to open (MainActivity reads it). */
-    static final String EXTRA_OPEN_PATH = "jarvis_open_path";
+    public static final String EXTRA_OPEN_PATH = "jarvis_open_path";
 
     private static final String GROUP_CHAT = "com.jarvisos.app.FAMILY_CHAT";
     private static final int SUMMARY_NOTIFICATION_ID = 0x10C2;

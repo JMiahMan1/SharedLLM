@@ -13,4 +13,7 @@
     <string name="health_ring_description">Progress toward your daily step goal</string>
     <string name="verse_widget_description">Today\'s verse of the day and reading streak</string>
     <string name="verse_widget_refresh_description">Refresh the verse of the day</string>
+    <string name="notes_widget_description">Recent notes from your Nextcloud Notes folder</string>
+    <string name="notes_widget_refresh_description">Refresh notes</string>
+    <string name="notes_widget_add_description">New note</string>
 </resources>

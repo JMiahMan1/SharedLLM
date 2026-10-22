@@ -103,6 +103,30 @@ that, every save of an opened note stacked another header on top.
 - **Failures**: a failed list shows the backend message (e.g. "Nextcloud
   credentials missing") instead of an empty-looking notebook.
 
+## Android home screen widget
+
+- `NotesWidget` shows the newest four notes from the Nextcloud folder
+  (`POST /api/communication/notes/list`, previews included), skipping
+  `Notes/Archive` and `Notes/Trash`. It strips the stored `# Title` /
+  `Category:` header, renders checklist items as ☐/☑ and joins the first
+  blocks into one line.
+- It refreshes with the shared five-minute widget alarm and the refresh icon.
+  Tapping a row opens `/notes?note=<path>`; the add icon opens
+  `/notes?new=1` for quick capture. Both use the `jarvis_open_path` deep link,
+  and the page drops the query once consumed so closing the editor stays put.
+
+## Keep parity
+
+Shipped: pin and colour in the shared index, archive, trash with restore and
+empty trash, duplicate, move without copy, checklists, search, dashboard and
+home-screen capture.
+
+Still open: labels as inline `#tags`, reminders (time and place),
+attachments/images/drawings/audio, Nextcloud sharing, bulk multi-select,
+list/grid toggle, search filters (`label:`, `colour:`, `type:`), autosave and
+drafts, markdown preview and a formatting toolbar, keyboard shortcuts,
+per-item checklist editing and reordering, undo toasts, versions, offline.
+
 ## Tests
 
 - `services/ui/src/test/Notes.test.tsx`: list/preview/checklist, previews

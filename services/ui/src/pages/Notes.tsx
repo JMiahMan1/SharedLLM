@@ -243,12 +243,27 @@ export default function Notes() {
     );
   }, [asUser, index]);
 
-  // Deep link from the dashboard's Quick Notes widget: /notes?note=<path>.
-  // The list must land first because opening reads by path; once consumed the
-  // query is dropped so closing the editor does not immediately reopen it.
+  // Deep link from the dashboard's Quick Notes widget and the Android home
+  // screen widget: /notes?note=<path> opens a note, /notes?new=1 starts a new
+  // one. The list must land first because opening reads by path; once consumed
+  // the query is dropped so closing the editor does not immediately reopen it.
   const requestedNote = searchParams.get('note');
+  const requestedNew = searchParams.get('new') === '1';
   const deepLinkHandled = useRef<string | null>(null);
   useEffect(() => {
+    if (requestedNew) {
+      if (deepLinkHandled.current === 'new') return;
+      deepLinkHandled.current = 'new';
+      // Defer the open one tick: opening synchronously in an effect cascades
+      // renders, and this keeps the behaviour identical to the note deep link.
+      const timer = window.setTimeout(() => {
+        void openEditor();
+        const next = new URLSearchParams(searchParams);
+        next.delete('new');
+        setSearchParams(next, { replace: true });
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
     if (!requestedNote || requestedNote === deepLinkHandled.current) return;
     const match = notes.find((n) => n.path === requestedNote || n.title === requestedNote);
     if (!match) return;
@@ -262,7 +277,7 @@ export default function Notes() {
       setSearchParams(next, { replace: true });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [requestedNote, notes, openEditor, searchParams, setSearchParams]);
+  }, [requestedNew, requestedNote, notes, openEditor, searchParams, setSearchParams]);
 
   const saveDraft = async (draft: DraftState) => {
     const title = draft.title.trim() || draft.content.split('\n')[0].slice(0, 60).trim() || 'Untitled note';
