@@ -171,12 +171,8 @@ export default function HealthProfilePanel() {
   });
 
   const share = useMutation({
-    mutationFn: (enabled: boolean) =>
-      api.updateHealthShare({
-        viewer: shareViewer,
-        scope: shareScope,
-        enabled,
-      }),
+    mutationFn: (body: { viewer: string; scope: HealthShare['scope']; enabled: boolean }) =>
+      api.updateHealthShare(body),
     onSuccess: () => {
       toast.success('Sharing updated');
       void queryClient.invalidateQueries({ queryKey: ['health-shares'] });
@@ -491,7 +487,9 @@ export default function HealthProfilePanel() {
                 <button
                   type="button"
                   aria-label={`Stop sharing ${entry.scope} with ${entry.viewer}`}
-                  onClick={() => share.mutate(false)}
+                  onClick={() =>
+                    share.mutate({ viewer: entry.viewer, scope: entry.scope, enabled: false })
+                  }
                   className="text-slate-500 hover:text-red-300"
                 >
                   <X size={11} />
@@ -534,7 +532,7 @@ export default function HealthProfilePanel() {
                 toast.error('Choose a person');
                 return;
               }
-              share.mutate(true);
+              share.mutate({ viewer: shareViewer, scope: shareScope, enabled: true });
             }}
             disabled={share.isPending || !shareViewer}
             className="glass-button min-h-10 px-3 text-xs font-semibold disabled:opacity-50 pointer-coarse:min-h-11"

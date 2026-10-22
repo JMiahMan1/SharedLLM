@@ -1,7 +1,7 @@
 """HTTP contract tests for the health service."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -178,6 +178,15 @@ class TestSleep:
         )
         assert response.status_code == 200
         assert response.json()["duration_minutes"] == 480
+
+    def test_bare_bedtime_keeps_the_household_offset(self, client):
+        response = client.post(
+            "/sleep",
+            json={"night": "2026-10-21", "bedtime": "22:30", "wake_time": "06:30"},
+        )
+        bedtime = datetime.fromisoformat(response.json()["bedtime"])
+        assert bedtime.hour == 22
+        assert bedtime.utcoffset() == datetime.now().astimezone().utcoffset()
 
     def test_a_night_needs_a_duration_or_both_times(self, client):
         response = client.post("/sleep", json={"night": "2026-10-21"})
