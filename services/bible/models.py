@@ -194,6 +194,9 @@ class UserBibleState(SQLModel, table=True):
     reminder_time: str = Field(default="")
     read_aloud_voice: str = Field(default="")
     split_view: str = Field(default="compare")
+    #: Imported devotional whose daily reading leads the Today tab; blank
+    #: uses the built-in devotional sources.
+    devotional_work: str = Field(default="")
 
 
 class VerseMark(SQLModel, table=True):

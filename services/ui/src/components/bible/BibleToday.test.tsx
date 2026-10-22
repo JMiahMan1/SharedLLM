@@ -137,4 +137,52 @@ describe('Today tab', () => {
     await user.click(await screen.findByTestId('bible-votd'));
     expect(onOpenRef).toHaveBeenCalledWith('Psalm 23:1');
   });
+
+  it('keeps the saved devotional selected on Today', async () => {
+    apiMock.getBibleDevotionalWorks.mockResolvedValue({
+      works: [{ id: 2, title: 'Devotions for a Sacred Marriage', author: '', kind: 'devotional', chapter_count: 52 }],
+    });
+    apiMock.getBibleDaily.mockResolvedValue({
+      day: '2026-10-21',
+      verse_of_day: { reference: 'Psalm 23:1', text: 'The LORD is my shepherd.' },
+      devotional: { entry: null, skipped: [], reason: 'none' },
+      sources: [],
+    });
+    apiMock.getBiblePlans.mockResolvedValue({ catalogue: [], mine: [] });
+    apiMock.getBibleVerseContext.mockResolvedValue({ note: null });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <BibleToday onOpenRef={vi.fn()} devotionalWork="book:2" />
+      </QueryClientProvider>,
+    );
+
+    const select = await screen.findByTestId('bible-devotional-work');
+    expect(select).toHaveValue('book:2');
+    await vi.waitFor(() => expect(apiMock.getBibleDaily).toHaveBeenCalledWith('book:2'));
+  });
+
+  it('remembers a devotional chosen from the selector', async () => {
+    const user = userEvent.setup();
+    apiMock.getBibleDevotionalWorks.mockResolvedValue({
+      works: [{ id: 2, title: 'Devotions for a Sacred Marriage', author: '', kind: 'devotional', chapter_count: 52 }],
+    });
+    apiMock.getBibleDaily.mockResolvedValue({
+      day: '2026-10-21',
+      verse_of_day: { reference: 'Psalm 23:1', text: 'The LORD is my shepherd.' },
+      devotional: { entry: null, skipped: [], reason: 'none' },
+      sources: [],
+    });
+    apiMock.getBiblePlans.mockResolvedValue({ catalogue: [], mine: [] });
+    apiMock.getBibleVerseContext.mockResolvedValue({ note: null });
+    const onDevotionalWork = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <BibleToday onOpenRef={vi.fn()} onDevotionalWork={onDevotionalWork} />
+      </QueryClientProvider>,
+    );
+
+    const select = await screen.findByTestId('bible-devotional-work');
+    await user.selectOptions(select, 'book:2');
+    expect(onDevotionalWork).toHaveBeenCalledWith('book:2');
+  });
 });

@@ -198,6 +198,20 @@ def test_state_stores_typographic_preferences(loaded_client: TestClient):
     assert prefs["split_view"] == "parallel"
 
 
+def test_the_default_devotional_is_a_reader_preference(loaded_client: TestClient):
+    """Each reader can point Today at their own imported devotional."""
+    starts_empty = loaded_client.get("/state", params={"username": "new"}).json()
+    assert starts_empty["preferences"]["devotional_work"] == ""
+    body = loaded_client.put(
+        "/state",
+        params={"username": "sam"},
+        json={"devotional_work": "book:2"},
+    ).json()
+    assert body["preferences"]["devotional_work"] == "book:2"
+    remembered = loaded_client.get("/state", params={"username": "sam"}).json()
+    assert remembered["preferences"]["devotional_work"] == "book:2"
+
+
 def test_the_page_tone_is_a_reader_preference(loaded_client: TestClient):
     """The text sits on an opaque page; the reader picks dark, sepia or light."""
     assert loaded_client.get("/state", params={"username": "new"}).json()["preferences"]["page"] == "dark"

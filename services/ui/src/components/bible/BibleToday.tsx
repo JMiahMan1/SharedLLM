@@ -27,6 +27,9 @@ interface BibleTodayProps {
   /** Daily reminder time ("HH:MM"), empty when off. */
   reminderTime?: string;
   onReminderTime?: (value: string) => void;
+  /** The saved per-user devotional work (e.g. "book:2"); empty for built-in sources. */
+  devotionalWork?: string;
+  onDevotionalWork?: (value: string) => void;
 }
 
 /**
@@ -37,9 +40,23 @@ interface BibleTodayProps {
  * to fix rather than leaving an empty card -- an empty devotional looks like a
  * bug and reads as a broken product.
  */
-export default function BibleToday({ onOpenRef, page, reminderTime = '', onReminderTime }: BibleTodayProps) {
+export default function BibleToday({
+  onOpenRef,
+  page,
+  reminderTime = '',
+  onReminderTime,
+  devotionalWork: savedWork,
+  onDevotionalWork,
+}: BibleTodayProps) {
   const { trigger } = useHaptics();
-  const [devotionalWork, setDevotionalWork] = useState('');
+  // Outside Bible.tsx there is no saved preference, so the picker still works
+  // for the visit; with one, choosing a book becomes the reader's default.
+  const [localWork, setLocalWork] = useState('');
+  const devotionalWork = savedWork ?? localWork;
+  const changeWork = (value: string) => {
+    setLocalWork(value);
+    onDevotionalWork?.(value);
+  };
   const works = useQuery({
     queryKey: ['bible-devotional-works'],
     queryFn: () => api.getBibleDevotionalWorks(),
@@ -271,7 +288,7 @@ export default function BibleToday({ onOpenRef, page, reminderTime = '', onRemin
           {(works.data?.works ?? []).length > 0 ? (
             <select
               value={devotionalWork}
-              onChange={(event) => setDevotionalWork(event.target.value)}
+              onChange={(event) => changeWork(event.target.value)}
               aria-label="Devotional book"
               data-testid="bible-devotional-work"
               className="ml-auto min-h-9 max-w-[10rem] rounded-lg bg-slate-800/80 border border-white/10 px-2 text-[11px] text-slate-200"
