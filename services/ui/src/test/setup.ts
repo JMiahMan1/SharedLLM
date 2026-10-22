@@ -223,9 +223,9 @@ export const notesWriteCalls: Array<{ title?: string; content?: string }> = [];
 export const notesReadCalls: Array<{ title?: string }> = [];
 /** What the fake Nextcloud stores for each fixture note, header included. */
 function noteFixtureText(title?: string): string {
-  return title === 'Trip ideas'
-    ? '# Trip ideas\nCategory: Notes\n\nSedona in the fall, then the coast.'
-    : '# Shared Checklist\nCategory: Notes\n\n- [ ] Pick up groceries\n- [x] Take out recycling';
+  if (title === 'Trip ideas') return '# Trip ideas\nCategory: Notes\n\nSedona in the fall, then the coast.';
+  if (title === 'Weekend plans') return '# Weekend plans\nCategory: Notes\n\nHike #outdoors with the family #outdoors';
+  return '# Shared Checklist\nCategory: Notes\n\n- [ ] Pick up groceries\n- [x] Take out recycling';
 }
 export const notesCheckOffCalls: Array<{ item?: string }> = [];
 export const notesDeleteCalls: Array<{ path?: string; title?: string }> = [];

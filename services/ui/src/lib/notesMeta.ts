@@ -141,6 +141,100 @@ export function parseChecklist(content: string): ChecklistItem[] {
 }
 
 /**
+ * Inline #labels. Nextcloud Notes already reads hashtags out of note bodies,
+ * so labels live in the markdown itself rather than in a side table.
+ */
+const TAG_PATTERN = /(^|[\s(])#([\p{L}\p{N}][\p{L}\p{N}_/-]{0,31})/gu;
+
+/** Every #label in a note, lowercased, in the order it appears. */
+export function extractTags(content: string | undefined): string[] {
+  if (!content) return [];
+  const found: string[] = [];
+  for (const match of content.matchAll(TAG_PATTERN)) {
+    const tag = match[2].toLowerCase();
+    if (!found.includes(tag)) found.push(tag);
+  }
+  return found;
+}
+
+export function hasTag(content: string | undefined, tag: string): boolean {
+  return extractTags(content).includes(tag.toLowerCase());
+}
+
+/** A note is a checklist when it has checklist lines; otherwise it is prose. */
+export function noteKind(content: string | undefined): 'list' | 'note' {
+  return content && parseChecklist(content).length > 0 ? 'list' : 'note';
+}
+
+export interface NoteQuery {
+  text: string;
+  tags: string[];
+  colors: string[];
+  kinds: Array<'list' | 'note'>;
+}
+
+/**
+ * Keep-style search: bare words plus `tag:`/`label:`, `colour:`/`color:` and
+ * `type:list|note` operators, so a shelf can be narrowed the way Keep does.
+ */
+export function parseNoteQuery(raw: string): NoteQuery {
+  const query: NoteQuery = { text: '', tags: [], colors: [], kinds: [] };
+  const words: string[] = [];
+  for (const token of raw.trim().split(/\s+/)) {
+    if (!token) continue;
+    const [key, value] = token.split(/:(.+)/);
+    const name = key.toLowerCase();
+    const setting = (value ?? '').toLowerCase();
+    if (!setting) {
+      if (token.startsWith('#')) query.tags.push(token.slice(1).toLowerCase());
+      else words.push(token);
+      continue;
+    }
+    if (name === 'tag' || name === 'label') query.tags.push(setting);
+    else if (name === 'colour' || name === 'color') query.colors.push(setting);
+    else if (name === 'type' && (setting === 'list' || setting === 'note')) query.kinds.push(setting);
+    else words.push(token);
+  }
+  query.text = words.join(' ').toLowerCase();
+  return query;
+}
+
+export function matchesNoteQuery(
+  note: { title: string },
+  content: string | undefined,
+  query: NoteQuery,
+  color: string = 'default',
+): boolean {
+  const tags = extractTags(content);
+  if (query.tags.some((tag) => !tags.includes(tag))) return false;
+  if (query.colors.length > 0 && !query.colors.includes(color)) return false;
+  if (query.kinds.length > 0 && !query.kinds.includes(noteKind(content))) return false;
+  if (query.text) {
+    const haystack = `${note.title} ${noteBody(content ?? '')}`.toLowerCase();
+    if (!haystack.includes(query.text)) return false;
+  }
+  return true;
+}
+
+/** The labels on a shelf, most-used first, for the filter chips. */
+export function topTags(
+  notes: Array<{ path: string }>,
+  contents: Record<string, string | undefined>,
+  limit = 8,
+): Array<{ tag: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const note of notes) {
+    for (const tag of extractTags(contents[note.path])) {
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
+    .slice(0, limit);
+}
+
+/**
  * The shared notes index stored at Notes/.jarvis-notes.json.
  *
  * Nextcloud Notes keeps favourites in its own database and knows nothing

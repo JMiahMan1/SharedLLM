@@ -3,21 +3,27 @@ import {
   EMPTY_NOTES_INDEX,
   archivedPathFor,
   clearLegacyMeta,
+  extractTags,
   forgetIndexEntry,
   forgetNoteMeta,
   getNoteMeta,
+  hasTag,
   indexEntry,
   isArchivedPath,
   isTrashedPath,
+  matchesNoteQuery,
   mergeLegacyMeta,
+  noteKind,
   notePreview,
   parseChecklist,
+  parseNoteQuery,
   parseNotesIndex,
   readNoteMetaMap,
   setIndexEntry,
   setNoteMeta,
   sortNotes,
   sortNotesByIndex,
+  topTags,
 } from '../lib/notesMeta';
 
 describe('notesMeta', () => {
@@ -124,5 +130,47 @@ describe('notesMeta', () => {
     ];
     const index = setIndexEntry(EMPTY_NOTES_INDEX, 'Notes/b.md', { pinned: true });
     expect(sortNotesByIndex(notes, index).map((n) => n.title)).toEqual(['B', 'A']);
+  });
+
+  it('reads inline #labels, lowercased and deduped', () => {
+    expect(extractTags('# Trip\n\nVisit #Sedona, #sedona and (C#) code')).toEqual(['sedona']);
+    expect(extractTags(undefined)).toEqual([]);
+    expect(hasTag('- [ ] milk #groceries', 'GROCERIES')).toBe(true);
+  });
+
+  it('tells checklists from prose', () => {
+    expect(noteKind('- [ ] milk')).toBe('list');
+    expect(noteKind('just words')).toBe('note');
+    expect(noteKind(undefined)).toBe('note');
+  });
+
+  it('parses Keep-style search operators', () => {
+    expect(parseNoteQuery('tag:Travel label:food colour:rose type:list beach')).toEqual({
+      text: 'beach',
+      tags: ['travel', 'food'],
+      colors: ['rose'],
+      kinds: ['list'],
+    });
+  });
+
+  it('matches notes on labels, colour, kind and text', () => {
+    const note = { title: 'Packing' };
+    const content = '# Packing\nCategory: Notes\n\n- [ ] socks #travel';
+    expect(matchesNoteQuery(note, content, parseNoteQuery('tag:travel'), 'sky')).toBe(true);
+    expect(matchesNoteQuery(note, content, parseNoteQuery('type:list'), 'sky')).toBe(true);
+    expect(matchesNoteQuery(note, content, parseNoteQuery('type:note'), 'sky')).toBe(false);
+    expect(matchesNoteQuery(note, content, parseNoteQuery('colour:sky'), 'sky')).toBe(true);
+    expect(matchesNoteQuery(note, content, parseNoteQuery('colour:rose'), 'sky')).toBe(false);
+    expect(matchesNoteQuery(note, content, parseNoteQuery('socks'), 'sky')).toBe(true);
+    expect(matchesNoteQuery(note, content, parseNoteQuery('umbrella'), 'sky')).toBe(false);
+  });
+
+  it('counts labels per shelf, most used first', () => {
+    const notes = [{ path: 'a' }, { path: 'b' }];
+    const contents = { a: '#x #y', b: '#x' };
+    expect(topTags(notes, contents)).toEqual([
+      { tag: 'x', count: 2 },
+      { tag: 'y', count: 1 },
+    ]);
   });
 });
