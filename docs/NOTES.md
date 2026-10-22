@@ -58,6 +58,10 @@ that, every save of an opened note stacked another header on top.
   in the background. Opening a note whose text came with the list shows that
   text at once and reconciles with the stored file a moment later, unless you
   have already started editing.
+- **Prompt moves**: archive, trash and restore move the card on the shelf the
+  moment you tap, then reconcile with the server in the background. Every note
+  call allows a full minute, because WebDAV can be slow while previews are
+  still loading on a phone.
 - **Folders**: the page lists `Notes/` recursively; the editor's Folder field
   is a sub-folder inside it (one level). Changing a note's title or folder
   writes the new file, then deletes the old one once the new one is saved.

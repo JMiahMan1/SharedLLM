@@ -130,9 +130,10 @@ export default function Notes() {
   // the network answers; the request below still revalidates it in the
   // background and replaces it when it lands.
   const scope = asUser ?? 'me';
+  const listKey = useMemo(() => ['notes-list', scope] as const, [scope]);
   const snapshot = useMemo(() => readNotesSnapshot(scope), [scope]);
   const { data: listRes, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['notes-list', scope],
+    queryKey: listKey,
     queryFn: () => api.listNotes({ storage: STORAGE, as_user: asUser, previews: true }),
     staleTime: 30_000,
     initialData: snapshot
@@ -371,12 +372,26 @@ export default function Notes() {
   };
 
   const moveNote = async (note: NoteSummary, destination: string, previousPath?: string | null) => {
+    // Paint the move before the network answers: WebDAV MOVE plus the index
+    // write can outlast the old 15s window while the previews are busy, and a
+    // card that stays put for that long reads as "the move did not work".
+    type ListData = Awaited<ReturnType<typeof api.listNotes>>;
+    const previousList = queryClient.getQueryData<ListData>(listKey);
+    queryClient.setQueryData<ListData>(listKey, (current) => {
+      if (!current || current.status !== 'SUCCESS') return current;
+      const notesNow = (current.detail?.notes as NoteSummary[] | undefined) ?? [];
+      return {
+        ...current,
+        detail: {
+          ...(current.detail ?? {}),
+          notes: notesNow.map((n) => (n.path === note.path ? { ...n, path: destination } : n)),
+        },
+      };
+    });
+    setEditing(null);
     try {
       const res = await api.moveNote({ path: note.path, destination, storage: STORAGE, as_user: asUser });
-      if (res.status !== 'SUCCESS') {
-        toast.error(res.message || 'Could not move the note');
-        return;
-      }
+      if (res.status !== 'SUCCESS') throw new Error(res.message || 'Could not move the note');
       const existing = indexEntry(index, note.path);
       let next = forgetIndexEntry(index, note.path);
       // previousPath describes where this note came from; a fresh move sets its own.
@@ -384,10 +399,13 @@ export default function Notes() {
       delete rest.previousPath;
       next = setIndexEntry(next, destination, previousPath ? { ...rest, previousPath } : rest);
       await persistIndex(next);
-      setEditing(null);
-      await refresh();
+      // Reconcile in the background; the shelf is already showing the move.
+      void refresh();
     } catch (err) {
+      // The card was only moved optimistically, so put it back where it was.
+      if (previousList) queryClient.setQueryData(listKey, previousList);
       toast.error(errorText(err, 'Could not move the note'));
+      void refresh();
     }
   };
 
