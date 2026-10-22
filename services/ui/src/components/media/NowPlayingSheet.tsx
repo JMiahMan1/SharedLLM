@@ -124,6 +124,31 @@ export default function NowPlayingSheet({
     };
   }, [open, close]);
 
+  // Android's back gesture and the browser's back button should close the
+  // sheet, not quietly leave the page underneath. Push one same-URL entry on
+  // open and consume it when closing so back never grows a history pile.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    if (!open) return;
+    const previous = window.history.state;
+    window.history.pushState({ ...(previous ?? {}), jarvisSheet: 'now-playing' }, '');
+    let listening = true;
+    const onPop = () => {
+      if (!listening) return;
+      listening = false;
+      onCloseRef.current();
+    };
+    window.addEventListener('popstate', onPop);
+    return () => {
+      listening = false;
+      window.removeEventListener('popstate', onPop);
+      if (window.history.state?.jarvisSheet === 'now-playing') window.history.back();
+    };
+  }, [open]);
+
   const pauseRef = useRef(player?.pause);
   useEffect(() => {
     pauseRef.current = player?.pause;

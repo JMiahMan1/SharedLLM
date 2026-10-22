@@ -116,6 +116,9 @@ export interface MediaMocks {
   assertNoUnmocked: () => void;
 }
 
+/** The Sendspin id the app uses for its own player in hermetic specs. */
+export const WEB_PLAYER_ID = 'hermetic-web-player';
+
 export async function seedAuth(page: Page): Promise<void> {
   await page.addInitScript((profile) => {
     localStorage.setItem('jarvis_api_key', 'test-key');
@@ -124,6 +127,16 @@ export async function seedAuth(page: Page): Promise<void> {
   await page.route('**/api/users/me', (route) =>
     route.fulfill({ json: fixture('users-me') }),
   );
+}
+
+/**
+ * Pin the browser player's Sendspin id so MA events and commands can be
+ * addressed to it instead of an id generated on the fly.
+ */
+export async function seedPlayerId(page: Page, id: string = WEB_PLAYER_ID): Promise<void> {
+  await page.addInitScript((value) => {
+    localStorage.setItem('sendspin_webplayer_id', value);
+  }, id);
 }
 
 export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'): Promise<MediaMocks> {
@@ -176,6 +189,11 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
   await page.route('**/api/media/favorites', json('media-favorites'));
   await page.route('**/api/media/abs/progress', json('abs-progress'));
   await page.route('**/api/media/token', json('media-token'));
+  // Remote (non-web-player) MA commands are REST, not the player's JSON-RPC
+  // socket. Default to an empty answer; output.spec overrides players/all.
+  await page.route('**/api/media/ma-command', (route) =>
+    route.fulfill({ json: { status: 'SUCCESS', result: [] } }),
+  );
 
   await page.route('**/api/media/stream/music-assistant**', async (route) => {
     if (scenario === 'slow') await delay(2000);
@@ -250,12 +268,54 @@ export interface MaJsonRpcMock {
   pushEvent: (event: string, data: Record<string, unknown>) => void;
 }
 
-export async function mockMaJsonRpc(page: Page): Promise<MaJsonRpcMock> {
+export interface MaJsonRpcOptions {
+  /** Result for `players/all`, used by the output picker. */
+  players?: unknown[];
+  /** Result for `player_queues/get`. */
+  queue?: Record<string, unknown>;
+  /** Result for `player_queues/items`. */
+  items?: unknown[];
+}
+
+export interface MaCommandMock {
+  sentCommands: Array<{ command: string; args?: Record<string, unknown> }>;
+}
+
+/**
+ * Mock the gateway route used for remote MA control (`sendMaRemoteCommand`).
+ *
+ * The output picker queries `players/all` this way even while the browser
+ * player has its own JSON-RPC socket, so a spec that only mocks the socket
+ * would see an empty speaker list.
+ */
+export async function mockMaCommandApi(
+  page: Page,
+  options: { players?: unknown[] } = {},
+): Promise<MaCommandMock> {
+  const sentCommands: MaCommandMock['sentCommands'] = [];
+  await page.route('**/api/media/ma-command', async (route) => {
+    let body: { command?: string; args?: Record<string, unknown> } = {};
+    try {
+      body = route.request().postDataJSON() as typeof body;
+    } catch {
+      /* leave empty */
+    }
+    if (body.command) sentCommands.push({ command: body.command, args: body.args });
+    const result = body.command === 'players/all' ? (options.players ?? []) : {};
+    await route.fulfill({ json: { status: 'SUCCESS', result } });
+  });
+  return { sentCommands };
+}
+
+export async function mockMaJsonRpc(
+  page: Page,
+  options: MaJsonRpcOptions = {},
+): Promise<MaJsonRpcMock> {
   const sentCommands: Array<{ command: string; args?: Record<string, unknown> }> = [];
   let pushEvent: (event: string, data: Record<string, unknown>) => void = () => {};
 
   await page.routeWebSocket('**/api/ma-jsonrpc**', (ws) => {
-    pushEvent = (event, data) => ws.send(JSON.stringify({ event, ...data }));
+    pushEvent = (event, data) => ws.send(JSON.stringify({ event, data }));
     ws.onMessage((message) => {
       let req: { message_id?: string | number; command?: string; args?: Record<string, unknown> };
       try {
@@ -273,17 +333,81 @@ export async function mockMaJsonRpc(page: Page): Promise<MaJsonRpcMock> {
         }));
         return;
       }
-      ws.send(JSON.stringify({ message_id: req.message_id, result: {} }));
+      let result: unknown = {};
+      if (req.command === 'players/all' && options.players) result = options.players;
+      else if (req.command === 'player_queues/get' && options.queue) result = options.queue;
+      else if (req.command === 'player_queues/items' && options.items) result = options.items;
+      ws.send(JSON.stringify({ message_id: req.message_id, result }));
     });
   });
 
-  return { sentCommands, pushEvent };
+  // The route handler runs when the page opens the socket, after this
+  // function returns. Return a forwarding function rather than the initial
+  // no-op closure so events go to the live socket.
+  return { sentCommands, pushEvent: (event, data) => pushEvent(event, data) };
 }
 
-export async function mockSendspin(page: Page): Promise<void> {
-  await page.routeWebSocket('**/api/sendspin**', (ws) => {
-    ws.onMessage(() => {});
+export interface NowPlayingTrack {
+  title: string;
+  artist: string;
+  uri: string;
+  duration: number;
+  position?: number;
+  /** 0..100, matching the app's UI scale. */
+  volume?: number;
+  muted?: boolean;
+}
+
+/**
+ * Push the MA events that make the web player show a live track.
+ *
+ * `queue_updated` owns the playing state; `player_updated` owns the
+ * authoritative title/artist/duration. A real MA instance sends both.
+ */
+export function pushNowPlaying(
+  ma: MaJsonRpcMock,
+  playerId: string,
+  track: NowPlayingTrack,
+): void {
+  ma.pushEvent('queue_updated', {
+    queue_id: playerId,
+    state: 'playing',
+    current_item: {
+      name: track.title,
+      artist: track.artist,
+      uri: track.uri,
+      duration: track.duration,
+    },
   });
+  ma.pushEvent('player_updated', {
+    player_id: playerId,
+    volume_level: (track.volume ?? 70) / 100,
+    is_volume_muted: track.muted ?? false,
+    current_media: {
+      title: track.title,
+      artist: track.artist,
+      uri: track.uri,
+      duration: track.duration,
+      elapsed_time: track.position ?? 0,
+    },
+  });
+}
+
+export interface SendspinMock {
+  connections: number;
+  closes: number;
+}
+
+export async function mockSendspin(page: Page): Promise<SendspinMock> {
+  const state: SendspinMock = { connections: 0, closes: 0 };
+  await page.routeWebSocket('**/api/sendspin**', (ws) => {
+    state.connections += 1;
+    ws.onMessage(() => {});
+    ws.onClose(() => {
+      state.closes += 1;
+    });
+  });
+  return state;
 }
 
 export async function mockEvents(page: Page): Promise<void> {
