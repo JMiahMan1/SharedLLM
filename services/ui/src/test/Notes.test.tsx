@@ -152,6 +152,14 @@ describe('Notes (Keep-style)', () => {
     expect(notesReadCalls).toEqual([expect.objectContaining({ title: 'Trip ideas' })]);
   });
 
+  it('opens the exact note named in the URL from the dashboard widget', async () => {
+    renderWithProviders(<Notes />, { route: '/notes?note=Notes%2FTrip%20ideas.md' });
+
+    const content = await screen.findByLabelText('Note content');
+    expect((content as HTMLTextAreaElement).value).toBe('Sedona in the fall, then the coast.');
+    expect(notesReadCalls).toEqual([expect.objectContaining({ path: 'Notes/Trip ideas.md' })]);
+  });
+
   it('does not open an empty editor when the note cannot be read', async () => {
     const user = userEvent.setup();
     server.use(
