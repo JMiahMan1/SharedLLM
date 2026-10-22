@@ -93,6 +93,32 @@ describe('QueueSheet', () => {
     expect(screen.getByText('Playing · Artist One')).toBeTruthy();
   });
 
+  it('shows the track title when Music Assistant sends "Artist - Track" as the item name', async () => {
+    const combined = [
+      {
+        queue_item_id: 'q9',
+        name: 'Artist One - Fourth Song',
+        duration: 100,
+        available: true,
+        media_item: { name: 'Fourth Song', artists: [{ name: 'Artist One' }] },
+      },
+    ];
+    const value = player({
+      maCommand: vi.fn(async (command: string) => {
+        if (command === 'player_queues/get') {
+          return { current_index: 0, current_item: combined[0], items: combined.length };
+        }
+        if (command === 'player_queues/items') return combined;
+        return {};
+      }),
+    });
+    renderSheet(value);
+
+    expect(await screen.findByText('Fourth Song')).toBeTruthy();
+    expect(screen.queryByText('Artist One - Fourth Song')).toBeNull();
+    expect(screen.getByText('Playing · Artist One')).toBeTruthy();
+  });
+
   it('removes an item through the queue API', async () => {
     let current = [...queueItems];
     const value = player({

@@ -39,6 +39,7 @@ from services.gateway.apk_manifest import clear_cache as clear_apk_version_cache
 from services.gateway.apk_manifest import read_apk_digest, read_apk_version
 from services.gateway.background_worker import worker as raven_worker
 from services.gateway.config import (
+    ABS_PROBE_TIMEOUT,
     ABS_TIMEOUT,
     BIBLE_SVC,
     ALPACA_ARCADE_PUBLIC_URL,
@@ -13009,7 +13010,7 @@ async def get_abs_status(request: Request):
         return {"status": "UNAVAILABLE", "error": "ABS URL not configured", "reachable": False}
     try:
         async with shared_http_client() as client:
-            resp = await client.get(f"{abs_url}/ping", timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT))
+            resp = await client.get(f"{abs_url}/ping", timeout=aiohttp.ClientTimeout(total=ABS_PROBE_TIMEOUT))
             if resp.status == 200:
                 return {"status": "AVAILABLE", "url": abs_url, "reachable": True}
             return {"status": "ERROR", "url": abs_url, "reachable": False, "code": resp.status}

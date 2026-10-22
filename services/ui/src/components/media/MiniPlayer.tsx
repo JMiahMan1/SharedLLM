@@ -2,6 +2,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Music, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { useOptionalWebPlayer } from '../../context/webPlayerContext';
+import { proxiedImage } from '../../lib/mediaImage';
 
 /**
  * The web player above the page, so music does not disappear when the reader
@@ -14,6 +15,7 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
   if (!player || !player.mediaTitle || location.pathname.startsWith('/media')) return null;
 
   const pct = player.duration > 0 ? Math.min(100, Math.max(0, (player.position / player.duration) * 100)) : 0;
+  const image = proxiedImage(player.mediaImage);
   const summary = (
     <>
       <p className="truncate text-sm font-medium text-white">{player.mediaTitle}</p>
@@ -21,6 +23,9 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
     </>
   );
 
+  // Sit above the bottom bar wherever it is shown (its height is published as
+  // --bottom-bar, safe-area included); on desktop the var is 0 so this is the
+  // same 20px inset as before.
   return (
     <motion.div
       drag={onOpen ? 'y' : false}
@@ -30,7 +35,7 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
       onDragEnd={(_, info) => {
         if (info.offset.y < -28 || info.velocity.y < -300) onOpen?.();
       }}
-      className="fixed inset-x-3 bottom-20 md:bottom-5 z-40 mx-auto max-w-2xl"
+      className="fixed inset-x-3 bottom-[calc(var(--bottom-bar)+1.25rem)] z-40 mx-auto max-w-2xl"
       data-testid="mini-player"
     >
       <div className="glass-panel relative overflow-hidden rounded-2xl border border-cyan-500/25 shadow-lg shadow-black/30">
@@ -38,10 +43,10 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
           <div className="h-full bg-cyan-400 transition-[width] duration-500" style={{ width: `${pct}%` }} />
         </div>
         <div className="flex items-center gap-2 p-2 pl-3">
-          {player.mediaImage ? (
+          {image ? (
             <motion.img
               layoutId="np-art"
-              src={player.mediaImage}
+              src={image}
               alt=""
               className="h-11 w-11 shrink-0 rounded-lg object-cover"
             />

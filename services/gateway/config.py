@@ -119,6 +119,9 @@ RAVEN_ERROR_THRESHOLD = _safe_int("RAVEN_ERROR_THRESHOLD", 5)
 # ~0.2s once warm. 12s leaves room for a cold call and still lands below the
 # browser's 15s axios timeout, so the server answers first with a real notice.
 ABS_TIMEOUT = _safe_int("ABS_TIMEOUT", 12)
+# The liveness probe should fail fast: when the ABS host is down it accepts the
+# connection and never answers, so a 12s wait only makes the Media page spin.
+ABS_PROBE_TIMEOUT = _safe_int("ABS_PROBE_TIMEOUT", 4)
 
 # --- Phase 2: env-configurable poll intervals (capped backoff / fallback) ---
 # /api/ps has no push/event API, so the Ollama slot wait still polls, but with

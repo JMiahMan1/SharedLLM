@@ -26,7 +26,13 @@ async def _abs_session(abs_url: str, verify: bool = True):
     yield await get_session(host_of(abs_url), verify=verify)
 
 
-_TIMEOUT = aiohttp.ClientTimeout(total=30.0, connect=5.0)
+_TIMEOUT = aiohttp.ClientTimeout(total=12.0, connect=4.0)
+
+
+def _unreachable(e: Exception) -> str:
+    """A failure message that is never blank (timeouts stringify to "")."""
+    detail = str(e).strip()
+    return f"Audiobookshelf is unreachable ({type(e).__name__}{': ' + detail if detail else ''})"
 
 # Per-ABS-server caches (in-memory, TTL-based) to avoid re-authenticating and
 # re-discovering the book library on every request. Keys are by abs_url so this
@@ -114,7 +120,7 @@ async def abs_login(abs_url: str, username: str, password: str, force: bool = Fa
                     _cache_set(abs_url, cache_key, token, ttl=_token_ttl(token))
                 return token
         except Exception as e:
-            log.error(f"[abs_client] Login failed: {e}")
+            log.error(f"[abs_client] Login failed: {_unreachable(e)}")
             # Fall back to a cached token if the live login failed
             cached = _cache_get(abs_url, cache_key)
             return cached
@@ -135,8 +141,8 @@ async def abs_get(
             log.error(f"[abs_client] HTTP error on GET {path}: {e}")
             return {"error": f"ABS returned {e.status}: {e.message}"}
         except Exception as e:
-            log.error(f"[abs_client] GET {path} failed: {e}")
-            return {"error": f"Audiobookshelf is unreachable: {e}"}
+            log.error(f"[abs_client] GET {path} failed: {_unreachable(e)}")
+            return {"error": _unreachable(e)}
 
 
 async def abs_post(
@@ -155,8 +161,8 @@ async def abs_post(
             log.error(f"[abs_client] HTTP error on POST {path}: {e}")
             return {"error": f"ABS returned {e.status}: {e.message}"}
         except Exception as e:
-            log.error(f"[abs_client] POST {path} failed: {e}")
-            return {"error": f"Audiobookshelf is unreachable: {e}"}
+            log.error(f"[abs_client] POST {path} failed: {_unreachable(e)}")
+            return {"error": _unreachable(e)}
 
 
 async def abs_patch(
@@ -175,8 +181,8 @@ async def abs_patch(
             log.error(f"[abs_client] HTTP error on PATCH {path}: {e}")
             return {"error": f"ABS returned {e.status}: {e.message}"}
         except Exception as e:
-            log.error(f"[abs_client] PATCH {path} failed: {e}")
-            return {"error": f"Audiobookshelf is unreachable: {e}"}
+            log.error(f"[abs_client] PATCH {path} failed: {_unreachable(e)}")
+            return {"error": _unreachable(e)}
 
 
 async def get_all_library_items(

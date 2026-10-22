@@ -80,15 +80,24 @@ function toEntry(raw: unknown): QueueEntry | null {
   const id = typeof item.queue_item_id === 'string' ? item.queue_item_id : '';
   if (!id) return null;
   const media = item.media_item && typeof item.media_item === 'object' ? item.media_item : null;
+  const mediaName = typeof media?.name === 'string' ? media.name.trim() : '';
+  const rawName = typeof item.name === 'string' ? item.name.trim() : '';
+  const artists = artistNames(media);
+  // Music Assistant builds a queue item's name as "Artist - Track", so the
+  // primary line can look like it only knows the artist. The media item's own
+  // name is the track title; only fall back to the joined name without the
+  // artist prefix so a queued song is identifiable.
+  const splitName = rawName.includes(' - ') ? rawName.slice(rawName.indexOf(' - ') + 3).trim() : '';
   const name =
-    (typeof item.name === 'string' && item.name.trim())
+    mediaName
+    || (splitName && artists && rawName.startsWith(artists) ? splitName : rawName)
     || (typeof media?.name === 'string' && media.name.trim())
     || 'Untitled';
   const duration = Number(item.duration);
   return {
     id,
     name,
-    artist: artistNames(media),
+    artist: artists,
     duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
     image: proxiedImage(extractMaImage(item.image) ?? extractMaImage(media?.image)),
     available: item.available !== false,

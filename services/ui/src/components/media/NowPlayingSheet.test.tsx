@@ -118,6 +118,13 @@ describe('NowPlayingSheet', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Remove from favorites' })).toBeTruthy());
   });
 
+  it('loads cover art through the gateway image proxy', () => {
+    const { container } = renderSheet(player({ mediaImage: '/imageproxy/cover.jpg?size=512' }));
+    const img = container.querySelector('img');
+    expect(img?.getAttribute('src')).toContain('/api/media/imageproxy?path=');
+    expect(img?.getAttribute('src')).toContain(encodeURIComponent('/imageproxy/cover.jpg?size=512'));
+  });
+
   it('offers book controls and a playback speed for audiobooks', async () => {
     const value = player({ mediaUri: 'library://audiobook/7', position: 90, duration: 300 });
     renderSheet(value);
