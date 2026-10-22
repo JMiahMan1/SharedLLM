@@ -1483,7 +1483,7 @@ export interface HealthProfile {
   display_name: string;
   birth_year: number | null;
   height_cm: number | null;
-  sex: 'female' | 'male' | 'other' | 'unspecified' | null;
+  sex: 'female' | 'male' | 'unspecified' | null;
   activity_level: 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active';
   goal: 'lose' | 'maintain' | 'gain' | 'balance';
   units: 'imperial' | 'metric';
