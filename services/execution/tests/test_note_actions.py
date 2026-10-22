@@ -490,6 +490,27 @@ async def test_meta_read_refuses_a_corrupt_index(provider, monkeypatch):
     assert "index" in result.message.lower()
 
 
+async def test_meta_read_retries_once_after_a_connect_stall(provider, monkeypatch):
+    import asyncio
+
+    import services.execution.http_client as http_client
+
+    calls = {"n": 0}
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise asyncio.TimeoutError()
+        return {"status_code": 200, "text": '{"version": 1, "notes": {}}'}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(request("meta_read"))
+
+    assert result.status == "SUCCESS"
+    assert calls["n"] == 2
+    assert result.detail["meta"] == {"version": 1, "notes": {}}
+
+
 async def test_meta_write_stores_compact_json_in_notes(provider, monkeypatch):
     import json as _json
 

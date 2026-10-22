@@ -8,8 +8,8 @@ Run it after a deploy, when media misbehaves, or from a cron/monitoring job:
 
 Each target gets a classified answer (OK / UNAVAILABLE / UNREACHABLE /
 ERROR). Exit code is 1 when any target is not OK, so a scheduler can alert on
-it. Audiobookshelf and Music Assistant come from ``.env`` (the same values the
-gateway uses); the gateway itself defaults to the production host.
+it. Audiobookshelf, Music Assistant and Nextcloud come from ``.env`` (the same
+values the gateway uses); the gateway itself defaults to the production host.
 """
 from __future__ import annotations
 
@@ -43,12 +43,15 @@ def load_env() -> None:
 def targets() -> dict[str, str]:
     abs_url = (os.getenv("AUDIOBOOKSHELF_URL") or "").strip().rstrip("/")
     ma_url = (os.getenv("MA_URL") or os.getenv("MASS_URL") or "").strip().rstrip("/")
+    nextcloud_url = (os.getenv("NEXTCLOUD_URL") or "").strip().rstrip("/")
     gateway_url = (os.getenv("GATEWAY_URL") or "https://jarvis.sumemail.com").strip().rstrip("/")
     result: dict[str, str] = {}
     if abs_url:
         result["audiobookshelf"] = f"{abs_url}/ping"
     if ma_url:
         result["music_assistant"] = ma_url
+    if nextcloud_url:
+        result["nextcloud"] = f"{nextcloud_url}/status.php"
     result["gateway"] = f"{gateway_url}/health"
     return result
 

@@ -457,7 +457,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: reduceMotion ? 0 : 48, opacity: 0 }}
             transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 40 }}
-            className="flex max-h-[88dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-slate-900/95 shadow-2xl shadow-black/60 backdrop-blur-xl safe-area-bottom sm:rounded-3xl"
+            className="flex max-h-[88dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-slate-900/95 shadow-2xl shadow-black/60 backdrop-blur-xl safe-area-bottom sm:max-w-xl sm:rounded-3xl"
           >
             <header className="flex items-center justify-between border-b border-white/10 px-4 py-2">
               <div className="flex items-center gap-2">

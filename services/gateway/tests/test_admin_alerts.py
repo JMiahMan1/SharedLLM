@@ -168,10 +168,12 @@ def test_media_targets_build_the_right_liveness_probes():
     targets = admin_alerts.media_targets({
         "audiobookshelf_url": "https://abs.sumemail.com/",
         "mass_url": "http://ha.sumemail.com:8095/",
+        "nextcloud_url": "https://cloud.sumemail.com/",
     })
     assert targets == {
         "audiobookshelf": "https://abs.sumemail.com/ping",
         "music_assistant": "http://ha.sumemail.com:8095",
+        "nextcloud": "https://cloud.sumemail.com/status.php",
     }
 
 
@@ -180,15 +182,19 @@ def test_media_targets_accept_legacy_keys_and_skip_unset():
         "audiobookshelf": "http://abs.local/ping",
     }
     assert admin_alerts.media_targets({"ma_url": "  "}) == {}
+    assert admin_alerts.media_targets({"nextcloud_url": "https://cloud.local/"}) == {
+        "nextcloud": "https://cloud.local/status.php",
+    }
 
 
 class _MediaClient(_Client):
-    """Readiness plus the two media liveness URLs, with switchable failures."""
+    """Readiness plus the backends' liveness URLs, with switchable failures."""
 
-    def __init__(self, services, *, abs_down=False, ma_down=False, telemetry_ok=True):
+    def __init__(self, services, *, abs_down=False, ma_down=False, nc_down=False, telemetry_ok=True):
         super().__init__(services, telemetry_ok=telemetry_ok)
         self.abs_down = abs_down
         self.ma_down = ma_down
+        self.nc_down = nc_down
 
     def get(self, url, **kw):
         if url.endswith("/health/ready"):
@@ -201,10 +207,18 @@ class _MediaClient(_Client):
             if self.ma_down:
                 raise ConnectionError("refused")
             return _Resp(200)
+        if url == "https://cloud.local/status.php":
+            if self.nc_down:
+                raise asyncio.TimeoutError()
+            return _Resp(200)
         raise ConnectionError(url)
 
 
-_MEDIA_SETTINGS = {"audiobookshelf_url": "https://abs.local", "mass_url": "http://ma.local"}
+_MEDIA_SETTINGS = {
+    "audiobookshelf_url": "https://abs.local",
+    "mass_url": "http://ma.local",
+    "nextcloud_url": "https://cloud.local",
+}
 
 
 def _run_media(r, client, now=1_000_000.0):
@@ -230,6 +244,16 @@ def test_check_once_reports_music_assistant_connection_refused():
     _run_media(r, client)
     queued = json.loads(r.kv[admin_alerts.STATE_KEY])["outbox"][0]
     assert queued["title"] == "Service down: music assistant"
+    assert "UNREACHABLE" in queued["body"]
+
+
+def test_check_once_reports_a_wedged_nextcloud():
+    r = _Redis()
+    client = _MediaClient({"geo": "OK"}, nc_down=True, telemetry_ok=False)
+    _run_media(r, client)
+    _run_media(r, client)
+    queued = json.loads(r.kv[admin_alerts.STATE_KEY])["outbox"][0]
+    assert queued["title"] == "Service down: nextcloud"
     assert "UNREACHABLE" in queued["body"]
 
 
