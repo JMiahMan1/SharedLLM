@@ -190,3 +190,23 @@ describe('Media page: poisoned device names', () => {
     expect(body).not.toContain('someone@example.com');
   });
 });
+
+describe('Media page: upstream failures', () => {
+  it('names the service that did not answer instead of blaming both', async () => {
+    server.use(
+      http.get('/api/media/music-assistant/recent', () =>
+        HttpResponse.json({ status: 'SUCCESS', recent: [] }),
+      ),
+      http.get('/api/media/audiobookshelf/last-played', () =>
+        HttpResponse.json({ status: 'ERROR', notice: 'ABS unavailable', books: [] }),
+      ),
+    );
+
+    renderWithProviders(<Media />);
+
+    expect(
+      await screen.findByText('Audiobookshelf did not answer. Check its URL in Identity.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Neither Music Assistant/)).not.toBeInTheDocument();
+  });
+});

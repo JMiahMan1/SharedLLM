@@ -473,6 +473,13 @@ const Media = () => {
   }, [lastPlayedQ.data, recentQ.data]);
 
   const shelvesFailed = (recentQ.isError || !!lastPlayedQ.data?.notice || lastPlayedQ.isError) && jumpBackIn.length === 0;
+  const absDown = lastPlayedQ.isError || !!lastPlayedQ.data?.notice;
+  const maDown = recentQ.isError;
+  const shelvesDetail = absDown && maDown
+    ? 'Neither Music Assistant nor Audiobookshelf answered. Check their URLs in Identity.'
+    : absDown
+      ? 'Audiobookshelf did not answer. Check its URL in Identity.'
+      : 'Music Assistant did not answer. Check its URL in Identity.';
 
   /* render */
 
@@ -573,7 +580,7 @@ const Media = () => {
         ) : shelvesFailed ? (
           <ShelfMessage
             title="Couldn’t load your recent listening"
-            detail="Music Assistant or Audiobookshelf did not answer. Check their settings in Identity."
+            detail={shelvesDetail}
             onRetry={() => { void recentQ.refetch(); void lastPlayedQ.refetch(); }}
           />
         ) : jumpBackIn.length === 0 ? (
