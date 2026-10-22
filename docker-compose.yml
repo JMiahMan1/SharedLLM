@@ -288,6 +288,7 @@ services:
       - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
       - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
       - CONTROL_PLANE_URL=http://control_plane:8008
+      - BRIDGE_HEALTH_SVC_URL=${BRIDGE_HEALTH_SVC_URL:-http://health:8011}
       - REDIS_URL=${BRIDGE_REDIS_URL}
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
@@ -586,6 +587,42 @@ services:
       - 172.26.0.254
     networks:
       - sharedllm
+
+  # Health hub store: profiles, sleep, check-ins, nutrition and open metric
+  # ingestion. Activity stays in geo; this service only owns what geo does not.
+  health:
+    image: ghcr.io/jmiahman1/sharedllm-health:latest
+    build:
+      context: .
+      dockerfile: services/health/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_health
+    restart: unless-stopped
+    mem_limit: 256m
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - HEALTH_DATABASE_URL=${HEALTH_DATABASE_URL:-sqlite:////data/health.db}
+      - TZ=America/Phoenix
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./data/health:/data
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+      - 172.26.0.254
+    networks:
+      - sharedllm
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   # Road network for snapping trip routes to roads (services/geo/map_match.py).
   # Built with its map data by .github/workflows/osrm-map.yml (regions in

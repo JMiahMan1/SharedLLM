@@ -1,9 +1,46 @@
 # Health Hub: the best of the health apps in one
 
-Status: **planned — nothing built yet.** Last live app commit `152451cf`.
+Status: **partially built (2026-10-22): phases 1–5 core, sharing/export and tests are in code; deploy pending.** Last live app commit `152451cf`.
 Companion plans: `docs/RECIPES.md` (Phases 10–11 carry the recipe-nutrition and
 calorie-budget work that this hub consumes), `docs/HEALTH_STEPS.md` (step counting,
 already live).
+
+## Implementation status (2026-10-22)
+
+The hub is a new `health` service (`services/health`, port 8011) with its own
+SQLite store, proxied through the gateway at `/api/health/*`. It deliberately
+does **not** copy activity: steps, workouts and distance stay in `geo`, and the
+Today screen composes geo's number under its existing query key.
+
+Built in this pass:
+
+- **Profiles** per family member: birth year, height, sex, activity, goal,
+  units, kid mode, sleep need, water goal, weekly active minutes.
+- **Open metric store**: batch ingestion with a `source` on every reading,
+  canonical units (lb→kg, oz/cup/L→ml, h→min), sanity bounds, and idempotent
+  device replay via `external_id`. This is the Health Connect/wearable door:
+  a future bridge posts the same shape; no schema change is needed.
+- **Manual inputs** for sleep, weight, resting heart rate and water, so the hub
+  works with no device at all.
+- **Sleep score** from duration + efficiency + how it felt, with explicit
+  confidence and missing signals.
+- **Readiness** from sleep, resting HR against the person's own 30-day median,
+  and the morning energy/mood/soreness check-in. No signals means no score.
+- **Nutrition**: OpenFoodFacts search, barcode lookup, manual entry, per-meal
+  day view, per-serving macros, density guides, calorie range from Mifflin-St
+  Jeor, and guidance-only ranges for minors (never a deficit).
+- **Family sharing** per scope (`sleep`, `nutrition`), off by default; only
+  explicitly granted scopes are projected. Export returns all of one person's
+  data as JSON.
+- **UI**: `Today / Fitness / Sleep / Nutrition / Health` tabs. The previous
+  Fitness page is hosted unchanged under its tab, so hourly step charts,
+  workouts, achievements and the family activity feed keep one implementation.
+
+Not built yet, and not pretended otherwise: Health Connect/device import,
+recipe↔log round trip and one-tap planned meals, weekly digest, family
+challenges/cheers, dashboard and Android home-screen widgets, photo/voice food
+logging, fasting windows, micro-lessons and the chat coach. Those remain the
+later phases below.
 
 The goal: one local, family-first Health tab that pulls the strengths of the apps
 the family has used — Noom, Google Health (formerly Fitbit), MyFitnessPal and friends —
@@ -120,79 +157,67 @@ MyFitnessPal, plus UX award winners and published case studies.
 
 ### Phase 0 — decisions
 
-- [ ] Confirm profiles: one per family member, ages/heights/weights optional, kids vs adults.
-- [ ] Decide data sources: Health Connect on Android (plugin or native bridge), Google
-      Fit, Apple Health later; manual logging always works.
-- [ ] Decide the first slice: activity + sleep + readiness, or nutrition logging first.
+- [x] Confirm profiles: one per family member; age, height, sex, weight and activity are optional; kid mode is explicit.
+- [x] Decide data sources: an open, source-tagged ingestion API now (manual, Health Connect, watches, scales), with manual logging always available. No device is required.
+- [x] Decide the first slice: all of the dependency-ordered core — profiles, sleep, readiness and nutrition — while reusing the existing activity stack.
 
 ### Phase 1 — people and profiles
 
-- [ ] Health profile per user (age, height, sex, activity level, goal, units),
-      stored like other preferences; kid mode flags.
-- [ ] Health settings page: turn metrics on/off, family sharing toggles.
+- [x] Health profile per user (age, height, sex, activity level, goal, units), stored in the health service; kid mode flags.
+- [ ] Health settings page: turn metrics on/off, family sharing toggles. Profile and sharing toggles are built; per-metric on/off is not.
 
 ### Phase 2 — data in
 
-- [ ] Health Connect import on Android (steps already sync; add sleep sessions,
-      heart rate/HRV, weight, workouts) with a native bridge.
-- [ ] Manual logs for everything (sleep hours/quality, weight, workout, water).
-- [ ] A health store the gateway can read per user (mirroring the steps store).
+- [ ] Health Connect import on Android (steps already sync; add sleep sessions, heart rate/HRV, weight and workouts) with a native bridge. The ingestion API and idempotent `external_id` replay are ready for it.
+- [x] Manual logs for sleep hours/quality, weight, resting heart rate and water. Workouts remain on Fitness/geo.
+- [x] A health store the gateway can read per user, with every reading carrying its source.
 
 ### Phase 3 — scores and targets
 
-- [ ] Sleep score from duration + interruptions (or manual quality) — simple, honest.
-- [ ] Readiness from HRV/resting HR/sleep/recent activity when available, else a
-      two-tap morning check-in.
-- [ ] Weekly cardio target and Active-Zone-like minutes from step/heart-rate data.
+- [x] Sleep score from duration + interruptions (or manual quality), with confidence and missing-signal notes.
+- [x] Readiness from resting HR/sleep when available, else the morning check-in. Recent activity is not yet included.
+- [ ] Weekly cardio target and Active-Zone-like minutes from step/heart-rate data. The target is stored in the profile; no progress ring yet.
 
 ### Phase 4 — nutrition logging
 
-- [ ] Recipe-first logging: a cooked planned meal logs its per-serving macros with a
-      portion picker (this is recipes Phase 11's logging, surfaced here).
-- [ ] Quick add: search the imported recipe set, barcode lookup (OpenFoodFacts),
-      voice logging via the assistant, photo logging via Alpaca (recipes Phase 9).
-- [ ] Water tracking; fasting window indicator (opt-in).
+- [ ] Recipe-first logging: a cooked planned meal logs its per-serving macros with a portion picker. `FoodEntry` carries `recipe_path`; the recipe import/one-tap flow is not built.
+- [x] Quick add: OpenFoodFacts search, barcode lookup and manual entry. Voice and photo logging remain future work.
+- [x] Water tracking. Fasting window indicator is not built.
 
 ### Phase 5 — budget and day view
 
-- [ ] Calorie range for adults (Mifflin-St Jeor with optional gentle deficit);
-      guidance ranges for kids — never deficits.
-- [ ] Day view: eaten vs range, protein/carbs/fat, per-meal breakdown, density colours.
+- [x] Calorie range for adults (Mifflin-St Jeor with optional gentle deficit); guidance ranges for kids — never deficits.
+- [x] Day view: eaten vs range, protein/carbs/fat, per-meal breakdown, density colours.
 - [ ] Weekly digest card: averages, best day, what changed.
 
 ### Phase 6 — habits and coaching
 
-- [ ] Micro-lessons: a small library (nutrition basics, sleep, movement, stress) shown
-      one card at a time; Jarvis can also write a lesson from the day's data.
-- [ ] Chat coach grounded in the user's health data; gentle weekly goal setting;
-      reminders through the timer subsystem (bedtime, water, movement breaks).
+- [ ] Micro-lessons: a small library (nutrition basics, sleep, movement, stress) shown one card at a time.
+- [ ] Chat coach grounded in the user's health data; gentle weekly goal setting; reminders for bedtime, water and movement breaks.
 
 ### Phase 7 — family
 
 - [ ] Weekly family challenge (steps, veg servings, cook nights) with a leaderboard.
-- [ ] Cheers/kudos on a family member's day; share a health card to chat.
+- [ ] Cheers/kudos on a family member's day; share a health card to chat. Scope-limited sleep/nutrition sharing is built; cheers and cards are not.
 
 ### Phase 8 — integrations everywhere
 
-- [ ] Dashboard widget and Android home-screen widget (today card).
+- [ ] Dashboard widget and Android home-screen widget (today card). The existing activity widget is unchanged.
 - [ ] Recipes: plan ↔ log ↔ shopping list round trip; Calendar: workouts.
-- [ ] Family hub entry point.
+- [x] Family hub entry point: the existing Health nav item now opens the hub.
 
 ### Phase 9 — tests, docs, deploy
 
-- [ ] Pure tests: BMR/budget maths, scores, portion scaling, density mapping, streaks
-      that never shame.
-- [ ] UI tests: log a meal, day view, challenge join, kid mode hides budgets.
-- [ ] `npm run typecheck`, `npm run lint`, full suites, `npm run build`; docs; deploy
-      `execution gateway ui` (health/identity as needed); verify live.
+- [x] Pure tests: BMR/budget maths, scores, portion scaling, density mapping and water. Streaks are not built.
+- [x] UI tests: log a meal (search + manual), day view, check-in and water. Challenge join and kid-mode UI hiding are not built.
+- [x] `npm run typecheck`, `npm run lint`, full UI suite (188 files / 1518 tests), `npm run build`, backend health tests (62) and docs.
+- [ ] Deploy `health gateway ui`, then verify `/health/ready`, the version endpoint and an authenticated `/api/health/profile`.
 
 ## Acceptance
 
-- [ ] Each family member has a profile and their own Health day.
+- [x] Each family member has a profile and their own Health day.
 - [ ] A planned dinner logs with one tap and shows calories, macros and portions.
-- [ ] Barcode, photo and voice logging all work with the local stack (Alpaca vision,
-      OpenFoodFacts, the assistant).
-- [ ] Sleep and readiness show from phone/watch data when available; check-ins cover
-      the rest.
-- [ ] A family challenge is visible, joinable and shared in chat.
-- [ ] Kid accounts never see calorie deficits or weight-loss framing.
+- [ ] Barcode lookup works; photo and voice logging are not built.
+- [x] Sleep and readiness show from manual data now and are device-ready; check-ins cover the no-wearable case.
+- [ ] A family challenge is visible, joinable and shared in chat. Only opt-in scope sharing exists.
+- [x] Kid accounts never see calorie deficits or weight-loss framing.

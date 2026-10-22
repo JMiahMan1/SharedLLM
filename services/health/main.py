@@ -1,0 +1,1311 @@
+"""Jarvis Health service.
+
+The store and the arithmetic behind the Health hub: profiles, open metric
+ingestion, sleep, morning check-ins and nutrition. Activity (steps, workouts,
+distance) stays in **geo**, where it already lives and is already fused across
+devices; this service never copies those numbers. The summary deliberately
+returns ``activity: null`` and the UI composes the two sources, so there is one
+answer per question.
+
+Design commitments:
+
+* Readings keep their ``source``. A watch, Health Connect, a scale and a hand
+  entry are distinguishable forever.
+* Ingestion is idempotent when a source supplies an ``external_id``.
+* Missing data is reported as missing, never as a zero or a guessed score.
+* Nutrition targets come from the profile's own maths (Mifflin-St Jeor);
+  minors never get a deficit range.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import time
+from collections.abc import Iterator
+from contextlib import asynccontextmanager
+from datetime import date, datetime, timedelta, timezone
+from typing import Any
+
+import aiohttp
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, field_validator
+from sqlmodel import Session, SQLModel, create_engine, select
+
+from services.config import INTERNAL_SECRET
+from services.health import scoring
+from services.health.models import (
+    Checkin,
+    FoodEntry,
+    HealthProfile,
+    HealthShare,
+    MetricSample,
+    SleepSession,
+    utcnow,
+)
+from services.shared.info_endpoint import info_router
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+log = logging.getLogger("health")
+
+_START_TIME = time.time()
+DEFAULT_DATABASE_URL = "sqlite:////data/health.db"
+METRICS = tuple(scoring.METRIC_UNITS)
+MEALS = ("breakfast", "lunch", "dinner", "snack")
+SOURCES_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+OFF_BASE = "https://world.openfoodfacts.org"
+OFF_HEADERS = {"User-Agent": "Jarvis-OS/1.0 (family health hub; self-hosted)"}
+DEFAULT_SLEEP_NEED = 480
+DEFAULT_WATER_GOAL = 2000
+
+
+# --- database --------------------------------------------------------------
+
+
+def _database_url() -> str:
+    return os.getenv("HEALTH_DATABASE_URL") or DEFAULT_DATABASE_URL
+
+
+def _engine():
+    url = _database_url()
+    kwargs: dict[str, Any] = {}
+    if url.startswith("sqlite"):
+        kwargs = {"connect_args": {"check_same_thread": False, "timeout": 30}}
+    return create_engine(url, pool_pre_ping=True, **kwargs)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    engine = _db()
+    SQLModel.metadata.create_all(engine)
+    log.info("[Health] ready db=%s", _database_url())
+    yield
+
+
+app = FastAPI(title="Jarvis Health Service", lifespan=lifespan)
+app.state.engine = None
+
+
+def _db():
+    if app.state.engine is None:
+        app.state.engine = _engine()
+    return app.state.engine
+
+
+def get_session() -> Iterator[Session]:
+    with Session(_db()) as session:
+        yield session
+
+
+# --- service-to-service guard ---------------------------------------------
+
+
+def _verify_internal_secret(header_secret: str | None, query_secret: str | None = None) -> bool:
+    if not INTERNAL_SECRET:
+        return True
+    return header_secret == INTERNAL_SECRET or query_secret == INTERNAL_SECRET
+
+
+@app.middleware("http")
+async def require_internal_secret_middleware(request: Request, call_next):
+    """Only the gateway may call this service.
+
+    The service also listens on its own container port, so a per-route check
+    would be one forgotten decorator away from exposing a family's health data.
+    Only ``/health`` is exempt (container healthcheck, carries no data).
+    """
+    if request.url.path.rstrip("/") in ("/health", ""):
+        return await call_next(request)
+    secret = request.headers.get("X-Internal-Secret") or request.query_params.get("x_internal_secret")
+    if not _verify_internal_secret(secret):
+        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+    return await call_next(request)
+
+
+app.include_router(info_router)
+
+
+def _user(request: Request) -> str:
+    """The acting username, forwarded by the gateway after authentication.
+
+    No fallback identity: an unauthenticated request has no health data, and
+    defaulting to the admin would be exactly the privacy bug this avoids.
+    """
+    user = (request.headers.get("X-User-Id") or "").strip().lower()
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+def _admin(request: Request) -> bool:
+    return (request.headers.get("X-User-Is-Admin") or "").lower() in ("1", "true", "yes")
+
+
+# --- validation helpers ----------------------------------------------------
+
+
+def _day(value: str | None, *, field: str = "day") -> str:
+    if not value:
+        raise HTTPException(status_code=422, detail=f"{field} is required (YYYY-MM-DD)")
+    if not DAY_RE.match(value):
+        raise HTTPException(status_code=422, detail=f"{field} must be YYYY-MM-DD")
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field} is not a real date") from exc
+    return value
+
+
+def _instant(value: str | None, *, field: str = "recorded_at") -> str:
+    """Normalise an ISO-8601 instant. A date-only value anchors at local noon.
+
+    A bare date carries no timezone, so noon is the one anchor that cannot slip
+    into the previous or next day; it is only accepted for readings (weight,
+    body fat) where the exact hour is irrelevant.
+    """
+    if not value:
+        return datetime.now(timezone.utc).isoformat()
+    text = value.strip()
+    if DAY_RE.match(text):
+        return f"{text}T12:00:00"
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field} must be ISO-8601") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if parsed > now + timedelta(days=1):
+        raise HTTPException(status_code=422, detail=f"{field} is in the future")
+    if parsed.year < 1900:
+        raise HTTPException(status_code=422, detail=f"{field} is implausibly old")
+    return parsed.isoformat()
+
+
+def _metric(metric: str) -> str:
+    if metric not in scoring.METRIC_UNITS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown metric {metric!r}; valid metrics: {', '.join(METRICS)}",
+        )
+    return metric
+
+
+def _source(value: str | None) -> str:
+    source = (value or "manual").strip().lower()
+    if not SOURCES_RE.match(source):
+        raise HTTPException(
+            status_code=422,
+            detail="source must be a short lowercase slug (a-z, 0-9, _ or -)",
+        )
+    return source
+
+
+def _finite(value: float | None, name: str, low: float = 0.0) -> float:
+    if value is None:
+        raise HTTPException(status_code=422, detail=f"{name} is required")
+    number = float(value)
+    if number != number or number in (float("inf"), float("-inf")):
+        raise HTTPException(status_code=422, detail=f"{name} must be a finite number")
+    if number < low:
+        raise HTTPException(status_code=422, detail=f"{name} must be at least {low:g}")
+    return number
+
+
+def _num(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and number not in (float("inf"), float("-inf")) else None
+
+
+def _sample_out(sample: MetricSample) -> dict:
+    return {
+        "id": sample.id,
+        "user_id": sample.user_id,
+        "metric": sample.metric,
+        "value": sample.value,
+        "unit": sample.unit,
+        "recorded_at": sample.recorded_at,
+        "source": sample.source,
+        "external_id": sample.external_id,
+        "metadata": json.loads(sample.metadata_json or "{}"),
+    }
+
+
+def _sleep_out(session: SleepSession) -> dict:
+    return {
+        "id": session.id,
+        "user_id": session.user_id,
+        "night": session.night,
+        "bedtime": session.bedtime,
+        "wake_time": session.wake_time,
+        "duration_minutes": session.duration_minutes,
+        "efficiency": session.efficiency,
+        "quality": session.quality,
+        "stages": json.loads(session.stages_json or "{}"),
+        "source": session.source,
+        "external_id": session.external_id,
+        "note": session.note,
+    }
+
+
+def _checkin_out(checkin: Checkin) -> dict:
+    return {
+        "id": checkin.id,
+        "user_id": checkin.user_id,
+        "day": checkin.day,
+        "energy": checkin.energy,
+        "mood": checkin.mood,
+        "soreness": checkin.soreness,
+        "stress": checkin.stress,
+        "note": checkin.note,
+        "updated_at": checkin.updated_at,
+    }
+
+
+def _food_out(entry: FoodEntry) -> dict:
+    return {
+        "id": entry.id,
+        "user_id": entry.user_id,
+        "day": entry.day,
+        "meal": entry.meal,
+        "name": entry.name,
+        "brand": entry.brand,
+        "calories": entry.calories,
+        "protein_g": entry.protein_g,
+        "carbs_g": entry.carbs_g,
+        "fat_g": entry.fat_g,
+        "fiber_g": entry.fiber_g,
+        "sugar_g": entry.sugar_g,
+        "sodium_mg": entry.sodium_mg,
+        "servings": entry.servings,
+        "serving_grams": entry.serving_grams,
+        "barcode": entry.barcode,
+        "recipe_path": entry.recipe_path,
+        "source": entry.source,
+        "external_id": entry.external_id,
+        "created_at": entry.created_at,
+        "density": scoring.food_density(
+            entry.calories / entry.serving_grams * 100.0
+            if entry.serving_grams and entry.serving_grams > 0
+            else None
+        ),
+    }
+
+
+# --- request models --------------------------------------------------------
+
+
+class ProfileUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120)
+    birth_year: int | None = None
+    height_cm: float | None = None
+    sex: str | None = None
+    activity_level: str | None = None
+    goal: str | None = None
+    units: str | None = None
+    kid_mode: bool | None = None
+    sleep_need_minutes: int | None = None
+    water_goal_ml: int | None = None
+    weekly_active_minutes: int | None = None
+
+    @field_validator("birth_year")
+    @classmethod
+    def _birth_year(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if not (1900 <= value <= date.today().year):
+            raise ValueError("birth_year must be between 1900 and this year")
+        return value
+
+    @field_validator("height_cm")
+    @classmethod
+    def _height(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        if not (50 <= value <= 250):
+            raise ValueError("height_cm must be between 50 and 250")
+        return value
+
+    @field_validator("sex")
+    @classmethod
+    def _sex(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in ("female", "male", "other", "unspecified"):
+            raise ValueError("sex must be female, male, other or unspecified")
+        return value
+
+    @field_validator("activity_level")
+    @classmethod
+    def _activity(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in scoring.ACTIVITY_FACTORS:
+            raise ValueError(f"activity_level must be one of {', '.join(scoring.ACTIVITY_FACTORS)}")
+        return value
+
+    @field_validator("goal")
+    @classmethod
+    def _goal(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in ("lose", "maintain", "gain", "balance"):
+            raise ValueError("goal must be lose, maintain, gain or balance")
+        return value
+
+    @field_validator("units")
+    @classmethod
+    def _units(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in ("imperial", "metric"):
+            raise ValueError("units must be imperial or metric")
+        return value
+
+    @field_validator("sleep_need_minutes")
+    @classmethod
+    def _sleep_need(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if not (240 <= value <= 840):
+            raise ValueError("sleep_need_minutes must be between 240 and 840")
+        return value
+
+    @field_validator("water_goal_ml")
+    @classmethod
+    def _water_goal(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if not (250 <= value <= 10000):
+            raise ValueError("water_goal_ml must be between 250 and 10000")
+        return value
+
+    @field_validator("weekly_active_minutes")
+    @classmethod
+    def _weekly_active(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if not (0 <= value <= 2000):
+            raise ValueError("weekly_active_minutes must be between 0 and 2000")
+        return value
+
+
+class MetricIn(BaseModel):
+    metric: str
+    value: float
+    unit: str
+    recorded_at: str | None = None
+    source: str = "manual"
+    external_id: str | None = Field(default=None, max_length=128)
+    metadata: dict = Field(default_factory=dict)
+
+
+class MetricsBatch(BaseModel):
+    samples: list[MetricIn] = Field(min_length=1, max_length=500)
+
+
+class SleepIn(BaseModel):
+    night: str
+    bedtime: str | None = None
+    wake_time: str | None = None
+    duration_minutes: int | None = None
+    efficiency: float | None = None
+    quality: int | None = None
+    stages: dict = Field(default_factory=dict)
+    source: str = "manual"
+    external_id: str | None = Field(default=None, max_length=128)
+    note: str = Field(default="", max_length=2000)
+
+
+class CheckinIn(BaseModel):
+    energy: int | None = Field(default=None, ge=1, le=5)
+    mood: int | None = Field(default=None, ge=1, le=5)
+    soreness: int | None = Field(default=None, ge=1, le=5)
+    stress: int | None = Field(default=None, ge=1, le=5)
+    note: str = Field(default="", max_length=2000)
+
+
+class FoodIn(BaseModel):
+    day: str
+    meal: str = "snack"
+    name: str = Field(min_length=1, max_length=200)
+    brand: str = Field(default="", max_length=120)
+    calories: float = 0
+    protein_g: float = 0
+    carbs_g: float = 0
+    fat_g: float = 0
+    fiber_g: float | None = None
+    sugar_g: float | None = None
+    sodium_mg: float | None = None
+    servings: float = 1
+    serving_grams: float | None = None
+    barcode: str | None = Field(default=None, max_length=40)
+    recipe_path: str | None = Field(default=None, max_length=500)
+    source: str = "manual"
+    external_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("meal")
+    @classmethod
+    def _meal(cls, value: str) -> str:
+        if value not in MEALS:
+            raise ValueError(f"meal must be one of {', '.join(MEALS)}")
+        return value
+
+    @field_validator("servings")
+    @classmethod
+    def _servings(cls, value: float) -> float:
+        if not (0 < value <= 100):
+            raise ValueError("servings must be greater than 0 and at most 100")
+        return value
+
+
+class ShareIn(BaseModel):
+    viewer: str = Field(min_length=1, max_length=80)
+    scope: str
+    enabled: bool = True
+
+    @field_validator("scope")
+    @classmethod
+    def _scope(cls, value: str) -> str:
+        if value not in ("sleep", "nutrition"):
+            raise ValueError("scope must be sleep or nutrition")
+        return value
+
+
+# --- profile ---------------------------------------------------------------
+
+
+def _profile_out(profile: HealthProfile | None, user: str) -> dict:
+    if profile is None:
+        return {
+            "user_id": user,
+            "exists": False,
+            "display_name": "",
+            "birth_year": None,
+            "height_cm": None,
+            "sex": None,
+            "activity_level": "moderate",
+            "goal": "maintain",
+            "units": "imperial",
+            "kid_mode": False,
+            "sleep_need_minutes": None,
+            "water_goal_ml": None,
+            "weekly_active_minutes": None,
+        }
+    data = profile.model_dump()
+    data["exists"] = True
+    return data
+
+
+@app.get("/profile")
+def get_profile(request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    return _profile_out(session.get(HealthProfile, user), user)
+
+
+@app.put("/profile")
+def put_profile(body: ProfileUpdate, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    profile = session.get(HealthProfile, user)
+    if profile is None:
+        profile = HealthProfile(user_id=user)
+        session.add(profile)
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(profile, key, value)
+    profile.updated_at = utcnow()
+    session.commit()
+    session.refresh(profile)
+    return _profile_out(profile, user)
+
+
+# --- metrics ---------------------------------------------------------------
+
+
+@app.get("/metrics/catalog")
+def metric_catalog():
+    return {
+        "metrics": [
+            {
+                "key": metric,
+                "unit": unit,
+                "min": scoring.METRIC_BOUNDS.get(metric, (None, None))[0],
+                "max": scoring.METRIC_BOUNDS.get(metric, (None, None))[1],
+                "units": sorted(scoring.UNIT_ALIASES.get(metric, {})),
+            }
+            for metric, unit in scoring.METRIC_UNITS.items()
+        ]
+    }
+
+
+@app.post("/metrics")
+def add_metrics(body: MetricsBatch, request: Request, session: Session = Depends(get_session)):
+    """Accept a batch of readings from any source.
+
+    This is the open door for future devices: Health Connect, a watch export,
+    a scale or a script all post the same shape. Repeated ``external_id``s are
+    counted as duplicates instead of inflating history.
+    """
+    user = _user(request)
+    accepted: list[dict] = []
+    duplicates = 0
+
+    for sample in body.samples:
+        metric = _metric(sample.metric)
+        try:
+            value, unit = scoring.convert_unit(metric, _finite(sample.value, "value", -1e9), sample.unit)
+            scoring.validate_metric_value(metric, value)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        source = _source(sample.source)
+        recorded_at = _instant(sample.recorded_at)
+        if sample.external_id:
+            existing = session.exec(
+                select(MetricSample).where(
+                    MetricSample.user_id == user,
+                    MetricSample.source == source,
+                    MetricSample.external_id == sample.external_id,
+                )
+            ).first()
+            if existing is not None:
+                duplicates += 1
+                continue
+        row = MetricSample(
+            user_id=user,
+            metric=metric,
+            value=value,
+            unit=unit,
+            recorded_at=recorded_at,
+            source=source,
+            external_id=sample.external_id,
+            metadata_json=json.dumps(sample.metadata or {}),
+        )
+        session.add(row)
+        accepted.append(row)
+
+    session.commit()
+    for row in accepted:
+        session.refresh(row)
+    return {
+        "accepted": len(accepted),
+        "duplicates": duplicates,
+        "samples": [_sample_out(row) for row in accepted],
+    }
+
+
+@app.get("/metrics/{metric}")
+def get_metrics(
+    metric: str,
+    request: Request,
+    days: int = Query(30, ge=1, le=365),
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    metric = _metric(metric)
+    since = (date.today() - timedelta(days=days - 1)).isoformat()
+    rows = session.exec(
+        select(MetricSample)
+        .where(
+            MetricSample.user_id == user,
+            MetricSample.metric == metric,
+            MetricSample.recorded_at >= since,
+        )
+        .order_by(MetricSample.recorded_at.desc())
+    ).all()
+    samples = [_sample_out(row) for row in rows]
+    return {
+        "user_id": user,
+        "metric": metric,
+        "unit": scoring.METRIC_UNITS[metric],
+        "days": days,
+        "samples": samples,
+        "latest": samples[0] if samples else None,
+    }
+
+
+@app.delete("/metrics/{sample_id}")
+def delete_metric(sample_id: int, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    row = session.get(MetricSample, sample_id)
+    if row is None or row.user_id != user:
+        raise HTTPException(status_code=404, detail="Reading not found")
+    session.delete(row)
+    session.commit()
+    return {"deleted": sample_id}
+
+
+def _latest_metric(session: Session, user: str, metric: str, on_or_before: str | None = None) -> MetricSample | None:
+    query = select(MetricSample).where(MetricSample.user_id == user, MetricSample.metric == metric)
+    if on_or_before:
+        # ISO strings sort by their date prefix, whatever offset they carry, so
+        # "before tomorrow" includes every reading whose local day is <= today.
+        next_day = (date.fromisoformat(on_or_before) + timedelta(days=1)).isoformat()
+        query = query.where(MetricSample.recorded_at < next_day)
+    return session.exec(query.order_by(MetricSample.recorded_at.desc()).limit(1)).first()
+
+
+def _metric_series(session: Session, user: str, metric: str, since: str) -> list[MetricSample]:
+    return session.exec(
+        select(MetricSample)
+        .where(
+            MetricSample.user_id == user,
+            MetricSample.metric == metric,
+            MetricSample.recorded_at >= since,
+        )
+        .order_by(MetricSample.recorded_at.asc())
+    ).all()
+
+
+# --- sleep -----------------------------------------------------------------
+
+
+def _clock(value: str, night: str) -> datetime:
+    """A bedtime/wake time, with a bare ``HH:MM`` anchored to the night.
+
+    A bare evening time belongs to the previous calendar day (a 22:30 bedtime
+    for a night ending on the 21st is the 20th at 22:30); a bare morning time
+    belongs to the wake date.
+    """
+    text = value.strip()
+    if re.match(r"^\d{1,2}:\d{2}(:\d{2})?$", text):
+        parsed = datetime.fromisoformat(f"{night}T{text}")
+        if parsed.hour >= 12:
+            parsed -= timedelta(days=1)
+        return parsed
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+@app.post("/sleep")
+def add_sleep(body: SleepIn, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    night = _day(body.night, field="night")
+    duration = body.duration_minutes
+    bedtime: str | None = None
+    wake_time: str | None = None
+    if body.bedtime:
+        bedtime = _clock(body.bedtime, night).isoformat()
+    if body.wake_time:
+        wake_time = _clock(body.wake_time, night).isoformat()
+    if duration is None and bedtime and wake_time:
+        bed = datetime.fromisoformat(bedtime)
+        wake = datetime.fromisoformat(wake_time)
+        if wake <= bed:
+            wake += timedelta(days=1)
+        duration = int(round((wake - bed).total_seconds() / 60.0))
+    if duration is None:
+        raise HTTPException(status_code=422, detail="Provide duration_minutes, or both bedtime and wake_time")
+    if not (0 < duration <= 1440):
+        raise HTTPException(status_code=422, detail="duration_minutes must be between 1 and 1440")
+    if body.efficiency is not None and not (0 <= body.efficiency <= 100):
+        raise HTTPException(status_code=422, detail="efficiency must be between 0 and 100")
+    if body.quality is not None and not (1 <= body.quality <= 5):
+        raise HTTPException(status_code=422, detail="quality must be between 1 and 5")
+    source = _source(body.source)
+
+    if body.external_id:
+        existing = session.exec(
+            select(SleepSession).where(
+                SleepSession.user_id == user,
+                SleepSession.source == source,
+                SleepSession.external_id == body.external_id,
+            )
+        ).first()
+        if existing is not None:
+            return {**_sleep_out(existing), "duplicate": True}
+
+    row = SleepSession(
+        user_id=user,
+        night=night,
+        bedtime=_instant(bedtime, field="bedtime") if bedtime else None,
+        wake_time=_instant(wake_time, field="wake_time") if wake_time else None,
+        duration_minutes=duration,
+        efficiency=body.efficiency,
+        quality=body.quality,
+        stages_json=json.dumps(body.stages or {}),
+        source=source,
+        external_id=body.external_id,
+        note=body.note,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return {**_sleep_out(row), "duplicate": False}
+
+
+@app.get("/sleep")
+def get_sleep(
+    request: Request,
+    days: int = Query(14, ge=1, le=365),
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    since = (date.today() - timedelta(days=days - 1)).isoformat()
+    rows = session.exec(
+        select(SleepSession)
+        .where(SleepSession.user_id == user, SleepSession.night >= since)
+        .order_by(SleepSession.night.desc())
+    ).all()
+    return {"user_id": user, "sessions": [_sleep_out(row) for row in rows]}
+
+
+@app.delete("/sleep/{sleep_id}")
+def delete_sleep(sleep_id: int, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    row = session.get(SleepSession, sleep_id)
+    if row is None or row.user_id != user:
+        raise HTTPException(status_code=404, detail="Sleep session not found")
+    session.delete(row)
+    session.commit()
+    return {"deleted": sleep_id}
+
+
+def _sleep_for_night(session: Session, user: str, day: str) -> SleepSession | None:
+    """The night that ended on ``day``; a device session wins over a hand log."""
+    rows = session.exec(
+        select(SleepSession)
+        .where(SleepSession.user_id == user, SleepSession.night == day)
+        .order_by(SleepSession.created_at.desc())
+    ).all()
+    if not rows:
+        return None
+    return next((row for row in rows if row.source != "manual"), rows[0])
+
+
+# --- check-ins -------------------------------------------------------------
+
+
+@app.get("/checkins")
+def list_checkins(
+    request: Request,
+    days: int = Query(14, ge=1, le=365),
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    since = (date.today() - timedelta(days=days - 1)).isoformat()
+    rows = session.exec(
+        select(Checkin)
+        .where(Checkin.user_id == user, Checkin.day >= since)
+        .order_by(Checkin.day.desc())
+    ).all()
+    return {"user_id": user, "checkins": [_checkin_out(row) for row in rows]}
+
+
+@app.get("/checkins/{day}")
+def get_checkin(day: str, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    day = _day(day)
+    row = session.exec(
+        select(Checkin).where(Checkin.user_id == user, Checkin.day == day)
+    ).first()
+    return {"checkin": _checkin_out(row) if row else None}
+
+
+@app.put("/checkins/{day}")
+def put_checkin(day: str, body: CheckinIn, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    day = _day(day)
+    if all(value is None for value in (body.energy, body.mood, body.soreness, body.stress)) and not body.note:
+        raise HTTPException(status_code=422, detail="Give at least one check-in answer")
+    row = session.exec(
+        select(Checkin).where(Checkin.user_id == user, Checkin.day == day)
+    ).first()
+    if row is None:
+        row = Checkin(user_id=user, day=day)
+        session.add(row)
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    row.updated_at = utcnow()
+    session.commit()
+    session.refresh(row)
+    return _checkin_out(row)
+
+
+# --- nutrition -------------------------------------------------------------
+
+
+@app.post("/food")
+def add_food(body: FoodIn, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    day = _day(body.day)
+    if body.calories < 0 or body.protein_g < 0 or body.carbs_g < 0 or body.fat_g < 0:
+        raise HTTPException(status_code=422, detail="Nutrition values cannot be negative")
+    source = _source(body.source)
+    if body.external_id:
+        existing = session.exec(
+            select(FoodEntry).where(
+                FoodEntry.user_id == user,
+                FoodEntry.source == source,
+                FoodEntry.external_id == body.external_id,
+            )
+        ).first()
+        if existing is not None:
+            return {**_food_out(existing), "duplicate": True}
+    row = FoodEntry(
+        user_id=user,
+        day=day,
+        meal=body.meal,
+        name=body.name.strip(),
+        brand=body.brand.strip(),
+        calories=max(0.0, body.calories),
+        protein_g=max(0.0, body.protein_g),
+        carbs_g=max(0.0, body.carbs_g),
+        fat_g=max(0.0, body.fat_g),
+        fiber_g=body.fiber_g,
+        sugar_g=body.sugar_g,
+        sodium_mg=body.sodium_mg,
+        servings=body.servings,
+        serving_grams=body.serving_grams,
+        barcode=body.barcode,
+        recipe_path=body.recipe_path,
+        source=source,
+        external_id=body.external_id,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return {**_food_out(row), "duplicate": False}
+
+
+@app.get("/food")
+def list_food(
+    request: Request,
+    day: str | None = None,
+    days: int = Query(0, ge=0, le=365),
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    query = select(FoodEntry).where(FoodEntry.user_id == user)
+    if day:
+        query = query.where(FoodEntry.day == _day(day))
+    elif days:
+        since = (date.today() - timedelta(days=days - 1)).isoformat()
+        query = query.where(FoodEntry.day >= since)
+    rows = session.exec(query.order_by(FoodEntry.created_at.desc())).all()
+    return {"user_id": user, "entries": [_food_out(row) for row in rows]}
+
+
+@app.delete("/food/{entry_id}")
+def delete_food(entry_id: int, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    row = session.get(FoodEntry, entry_id)
+    if row is None or row.user_id != user:
+        raise HTTPException(status_code=404, detail="Food entry not found")
+    session.delete(row)
+    session.commit()
+    return {"deleted": entry_id}
+
+
+def _nutrition_day(session: Session, user: str, day: str, profile: HealthProfile | None) -> dict:
+    rows = session.exec(
+        select(FoodEntry)
+        .where(FoodEntry.user_id == user, FoodEntry.day == day)
+        .order_by(FoodEntry.created_at.asc())
+    ).all()
+    totals = {"calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0, "fiber_g": 0.0}
+    meals: dict[str, dict] = {meal: {"entries": [], "calories": 0.0} for meal in MEALS}
+    for row in rows:
+        factor = max(0.0, row.servings)
+        totals["calories"] += row.calories * factor
+        totals["protein_g"] += row.protein_g * factor
+        totals["carbs_g"] += row.carbs_g * factor
+        totals["fat_g"] += row.fat_g * factor
+        totals["fiber_g"] += (row.fiber_g or 0.0) * factor
+        meals.setdefault(row.meal, {"entries": [], "calories": 0.0})
+        meals[row.meal]["entries"].append(_food_out(row))
+        meals[row.meal]["calories"] += row.calories * factor
+
+    weight = _latest_metric(session, user, "weight", day)
+    target = scoring.calorie_target(
+        birth_year=profile.birth_year if profile else None,
+        height_cm=profile.height_cm if profile else None,
+        weight_kg=weight.value if weight else None,
+        sex=profile.sex if profile else None,
+        activity_level=profile.activity_level if profile else "moderate",
+        goal=profile.goal if profile else "maintain",
+        kid_mode=profile.kid_mode if profile else False,
+    )
+    # Macro targets use the midpoint of the range when one exists.
+    macro_calories = int(round((target.min + target.max) / 2)) if target.min and target.max else None
+    macros = scoring.macro_targets(macro_calories) if macro_calories else None
+
+    return {
+        "day": day,
+        "entries_count": len(rows),
+        "logged": len(rows) > 0,
+        "totals": {key: round(value, 1) for key, value in totals.items()},
+        "meals": meals,
+        "target": {
+            "kind": target.kind,
+            "min": target.min,
+            "max": target.max,
+            "bmr": target.bmr,
+            "tdee": target.tdee,
+            "goal": target.goal,
+            "note": target.note,
+            "missing": target.missing,
+            "deficit_allowed": target.deficit_allowed,
+            "protein_g": macros.protein_g if macros else None,
+            "carbs_g": macros.carbs_g if macros else None,
+            "fat_g": macros.fat_g if macros else None,
+        },
+    }
+
+
+@app.get("/nutrition/day")
+def nutrition_day(
+    request: Request,
+    day: str | None = None,
+    session: Session = Depends(get_session),
+):
+    user = _user(request)
+    day = _day(day or date.today().isoformat())
+    return {"user_id": user, **_nutrition_day(session, user, day, session.get(HealthProfile, user))}
+
+
+def _off_product(product: dict) -> dict | None:
+    nutriments = product.get("nutriments") or {}
+    calories = _num(nutriments.get("energy-kcal_100g"))
+    if calories is None:
+        energy_kj = _num(nutriments.get("energy_100g"))
+        calories = energy_kj / 4.184 if energy_kj is not None else None
+    name = (product.get("product_name") or "").strip()
+    if not name:
+        return None
+    serving_grams = _num(product.get("serving_quantity"))
+    sodium = _num(nutriments.get("sodium_100g"))
+    return {
+        "code": product.get("code") or product.get("_id"),
+        "name": name,
+        "brand": (product.get("brands") or "").strip(),
+        "image": product.get("image_front_small_url") or product.get("image_url"),
+        "serving_size": product.get("serving_size"),
+        "serving_grams": serving_grams,
+        "per_100g": {
+            "calories": calories,
+            "protein_g": _num(nutriments.get("proteins_100g")),
+            "carbs_g": _num(nutriments.get("carbohydrates_100g")),
+            "fat_g": _num(nutriments.get("fat_100g")),
+            "fiber_g": _num(nutriments.get("fiber_100g")),
+            "sugar_g": _num(nutriments.get("sugars_100g")),
+            "sodium_mg": sodium * 1000.0 if sodium is not None else None,
+        },
+    }
+
+
+async def _off_get(path: str, params: dict | None = None) -> dict:
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            async with client.get(f"{OFF_BASE}{path}", params=params, headers=OFF_HEADERS) as resp:
+                if resp.status != 200:
+                    raise HTTPException(status_code=502, detail=f"OpenFoodFacts returned {resp.status}")
+                return await resp.json(content_type=None)
+    except aiohttp.ClientError as exc:
+        log.warning("[Health] OpenFoodFacts lookup failed: %s", exc)
+        raise HTTPException(status_code=503, detail="OpenFoodFacts is unreachable; try again or add the food by hand.") from exc
+
+
+@app.get("/food/search")
+async def search_food(q: str = Query(min_length=1, max_length=120), limit: int = Query(10, ge=1, le=25)):
+    """Search OpenFoodFacts. Results are per 100 g plus a serving weight when known."""
+    data = await _off_get(
+        "/api/v2/search",
+        {
+            "search_terms": q,
+            "fields": "code,product_name,brands,serving_size,serving_quantity,image_front_small_url,nutriments",
+            "page_size": str(limit),
+        },
+    )
+    results = [item for item in (_off_product(p) for p in data.get("products", [])) if item]
+    return {"query": q, "source": "openfoodfacts", "results": results}
+
+
+@app.get("/food/barcode/{code}")
+async def barcode_food(code: str):
+    if not re.match(r"^[0-9A-Za-z-]{4,32}$", code):
+        raise HTTPException(status_code=422, detail="Not a valid barcode")
+    data = await _off_get(
+        f"/api/v2/product/{code}.json",
+        {"fields": "code,product_name,brands,serving_size,serving_quantity,image_front_small_url,nutriments"},
+    )
+    if data.get("status") != 1 or not data.get("product"):
+        raise HTTPException(status_code=404, detail="That barcode is not in OpenFoodFacts")
+    product = _off_product(data["product"])
+    if product is None:
+        raise HTTPException(status_code=404, detail="That barcode has no usable nutrition data")
+    return product
+
+
+# --- family sharing --------------------------------------------------------
+
+
+@app.get("/shares")
+def list_shares(request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    rows = session.exec(select(HealthShare).where(HealthShare.owner == user)).all()
+    return {
+        "owner": user,
+        "shares": [{"viewer": row.viewer, "scope": row.scope} for row in rows],
+    }
+
+
+@app.put("/shares")
+def put_share(body: ShareIn, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    viewer = body.viewer.strip().lower()
+    if viewer == user:
+        raise HTTPException(status_code=422, detail="You already see your own data")
+    row = session.exec(
+        select(HealthShare).where(
+            HealthShare.owner == user,
+            HealthShare.viewer == viewer,
+            HealthShare.scope == body.scope,
+        )
+    ).first()
+    if body.enabled and row is None:
+        session.add(HealthShare(owner=user, viewer=viewer, scope=body.scope))
+    elif not body.enabled and row is not None:
+        session.delete(row)
+    session.commit()
+    return {"owner": user, "viewer": viewer, "scope": body.scope, "enabled": body.enabled}
+
+
+@app.get("/family")
+def family_summary(
+    request: Request,
+    day: str | None = None,
+    session: Session = Depends(get_session),
+):
+    """Only what each person explicitly shared, one scope at a time.
+
+    This never returns a profile or a full day by accident: each owner's grants
+    are read first, then only those scopes are projected into the answer.
+    """
+    viewer = _user(request)
+    day = _day(day or date.today().isoformat())
+    grants = session.exec(select(HealthShare).where(HealthShare.viewer == viewer)).all()
+    by_owner: dict[str, set[str]] = {}
+    for grant in grants:
+        by_owner.setdefault(grant.owner, set()).add(grant.scope)
+
+    people = []
+    for owner, scopes in sorted(by_owner.items()):
+        entry: dict[str, Any] = {"user_id": owner, "scopes": sorted(scopes)}
+        if "sleep" in scopes:
+            night = _sleep_for_night(session, owner, day)
+            profile = session.get(HealthProfile, owner)
+            need = (profile.sleep_need_minutes if profile else None) or DEFAULT_SLEEP_NEED
+            score = scoring.sleep_score(
+                night.duration_minutes if night else None,
+                need,
+                night.efficiency if night else None,
+                night.quality if night else None,
+            )
+            entry["sleep"] = {
+                "duration_minutes": night.duration_minutes if night else None,
+                "score": score.score if score else None,
+                "label": score.label if score else None,
+                "logged": night is not None,
+            }
+        if "nutrition" in scopes:
+            nutrition = _nutrition_day(session, owner, day, session.get(HealthProfile, owner))
+            entry["nutrition"] = {
+                "logged": nutrition["logged"],
+                "calories": nutrition["totals"]["calories"],
+            }
+        people.append(entry)
+    return {"viewer": viewer, "day": day, "people": people}
+
+
+# --- summary ---------------------------------------------------------------
+
+
+@app.get("/summary")
+def summary(
+    request: Request,
+    day: str | None = None,
+    session: Session = Depends(get_session),
+):
+    """One call for the Today screen.
+
+    Composes sleep, readiness, check-in, nutrition, water and recent metrics.
+    Activity is **not** here: geo owns steps and workouts, and the UI already
+    has that number under a shared query key. Duplicating it here would create
+    two answers to one question.
+    """
+    user = _user(request)
+    day = _day(day or date.today().isoformat())
+    profile = session.get(HealthProfile, user)
+    profile_out = _profile_out(profile, user)
+
+    defaults: list[str] = []
+    sleep_need = profile.sleep_need_minutes if profile else None
+    if sleep_need is None:
+        sleep_need = DEFAULT_SLEEP_NEED
+        defaults.append("sleep_need_minutes")
+    water_goal = profile.water_goal_ml if profile else None
+    if water_goal is None:
+        water_goal = DEFAULT_WATER_GOAL
+        defaults.append("water_goal_ml")
+
+    night = _sleep_for_night(session, user, day)
+    sleep_hist = session.exec(
+        select(SleepSession)
+        .where(SleepSession.user_id == user, SleepSession.night <= day)
+        .order_by(SleepSession.night.desc())
+        .limit(14)
+    ).all()
+    sleep = scoring.sleep_score(
+        night.duration_minutes if night else None,
+        sleep_need,
+        night.efficiency if night else None,
+        night.quality if night else None,
+    )
+
+    checkin = session.exec(
+        select(Checkin).where(Checkin.user_id == user, Checkin.day == day)
+    ).first()
+
+    since_30 = (date.fromisoformat(day) - timedelta(days=30)).isoformat()
+    rhr_series = _metric_series(session, user, "resting_hr", since_30)
+    baseline_rhr = scoring.median([row.value for row in rhr_series])
+    latest_rhr = _latest_metric(session, user, "resting_hr", day)
+    latest = {
+        metric: _sample_out(sample)
+        for metric in ("weight", "body_fat", "resting_hr", "hrv", "spo2")
+        if (sample := _latest_metric(session, user, metric, day)) is not None
+    }
+
+    ready = scoring.readiness(
+        sleep,
+        resting_hr=latest_rhr.value if latest_rhr else None,
+        baseline_resting_hr=baseline_rhr,
+        energy=checkin.energy if checkin else None,
+        mood=checkin.mood if checkin else None,
+        soreness=checkin.soreness if checkin else None,
+        checkin_stress=checkin.stress if checkin else None,
+    )
+
+    water_rows = session.exec(
+        select(MetricSample).where(
+            MetricSample.user_id == user,
+            MetricSample.metric == "water",
+            MetricSample.recorded_at >= day,
+            MetricSample.recorded_at < (date.fromisoformat(day) + timedelta(days=1)).isoformat(),
+        )
+    ).all()
+    water = scoring.water_progress(
+        sum(row.value for row in water_rows) if water_rows else None,
+        water_goal,
+    )
+
+    nutrition = _nutrition_day(session, user, day, profile)
+
+    alerts: list[str] = []
+    if nutrition["target"]["kind"] == "unavailable":
+        alerts.append(
+            "Add " + ", ".join(nutrition["target"]["missing"] or ["profile details"]) + " to see a calorie range."
+        )
+    if night is None:
+        alerts.append("No sleep logged for last night.")
+    if checkin is None:
+        alerts.append("Morning check-in not done.")
+
+    return {
+        "user_id": user,
+        "day": day,
+        "profile": profile_out,
+        "defaults_used": defaults,
+        "sleep": {
+            "last_night": _sleep_out(night) if night else None,
+            "score": {
+                "score": sleep.score,
+                "label": sleep.label,
+                "detail": sleep.detail,
+                "confidence": sleep.confidence,
+                "missing": sleep.missing,
+                "components": sleep.components,
+            }
+            if sleep
+            else None,
+            "need_minutes": sleep_need,
+            "history": [_sleep_out(row) for row in sleep_hist],
+        },
+        "readiness": {
+            "score": ready.score,
+            "label": ready.label,
+            "detail": ready.detail,
+            "confidence": ready.confidence,
+            "missing": ready.missing,
+            "components": ready.components,
+        }
+        if ready
+        else None,
+        "checkin": _checkin_out(checkin) if checkin else None,
+        "nutrition": nutrition,
+        "water": {**water, "goal_ml": water_goal},
+        "metrics": {key: value for key, value in latest.items()},
+        "resting_hr_baseline": round(baseline_rhr, 1) if baseline_rhr is not None else None,
+        "activity": None,
+        "alerts": alerts,
+    }
+
+
+# --- export ----------------------------------------------------------------
+
+
+@app.get("/export")
+def export_data(request: Request, session: Session = Depends(get_session)):
+    """Everything this service holds for the caller, for a backup or a move."""
+    user = _user(request)
+    return {
+        "exported_at": utcnow(),
+        "user_id": user,
+        "profile": _profile_out(session.get(HealthProfile, user), user),
+        "metrics": [
+            _sample_out(row)
+            for row in session.exec(
+                select(MetricSample).where(MetricSample.user_id == user).order_by(MetricSample.recorded_at.asc())
+            ).all()
+        ],
+        "sleep": [
+            _sleep_out(row)
+            for row in session.exec(
+                select(SleepSession).where(SleepSession.user_id == user).order_by(SleepSession.night.asc())
+            ).all()
+        ],
+        "checkins": [
+            _checkin_out(row)
+            for row in session.exec(
+                select(Checkin).where(Checkin.user_id == user).order_by(Checkin.day.asc())
+            ).all()
+        ],
+        "food": [
+            _food_out(row)
+            for row in session.exec(
+                select(FoodEntry).where(FoodEntry.user_id == user).order_by(FoodEntry.day.asc())
+            ).all()
+        ],
+        "shares": [
+            {"viewer": row.viewer, "scope": row.scope}
+            for row in session.exec(select(HealthShare).where(HealthShare.owner == user)).all()
+        ],
+        "notes": {
+            "activity": "Steps and workouts live in geo; request /api/geo/steps and /api/geo/workouts.",
+            "scores": "Sleep and readiness scores are derived; the raw readings are included above.",
+        },
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "service": "health",
+        "uptime_seconds": round(time.time() - _START_TIME, 1),
+        "database": "sqlite" if _database_url().startswith("sqlite") else "other",
+    }

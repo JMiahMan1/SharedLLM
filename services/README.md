@@ -57,6 +57,17 @@ This directory contains the microservices refactor of the SharedLLM system.
 - **Upgrade path**: Traccar (Apache-2) is the documented drop-in if HA's sharing/geofence UX proves insufficient (HA has a `traccar_server` integration).
 - **Design doc**: `docs/GEO_SERVICE.md` (and `S26-Setup/geo-service/README.md`).
 
+### 7. Health Service (`services/health`)
+
+- **Role**: profiles, open metric ingestion, sleep, morning check-ins, nutrition
+  and scoped family sharing for the Health hub.
+- **Port**: `8011`; gateway proxies `/api/health/*`.
+- **Store**: SQLite at `/data/health.db`; every reading keeps its source and
+  device replay is idempotent via `external_id`.
+- **Boundary**: activity stays in `geo`; the Health service never copies steps
+  or workouts.
+- **Docs**: `docs/HEALTH_HUB.md`, `services/health/README.md`.
+
 ## Credential Resolution Architecture
 
 The `.env` file is a **seed-only** artifact. It must NEVER be read directly by any service, test, or script at runtime.

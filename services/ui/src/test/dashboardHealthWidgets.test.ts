@@ -65,9 +65,11 @@ describe('dashboard health widgets', () => {
   it('keeps the baseline insight on the Health page, not a duplicate card', () => {
     // Removing the hero must not orphan heroInsight/ActivityRings: the Health
     // page is where the baseline-relative insight still renders.
-    const healthPage = read('pages/Health.tsx');
+    const healthPage = read('pages/HealthFitness.tsx');
     expect(healthPage).toMatch(/heroInsight/);
     expect(healthPage).toMatch(/ActivityRings/);
+    // The hub must keep hosting that page rather than reimplementing it.
+    expect(read('pages/Health.tsx')).toMatch(/HealthFitness/);
   });
 
   it('only one widget component fetches step data for the dashboard', () => {

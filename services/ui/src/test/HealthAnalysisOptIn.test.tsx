@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
-import Health from '../pages/Health';
+import Health from '../pages/HealthFitness';
 
 const trendsRequests: string[] = [];
 
@@ -78,8 +78,8 @@ describe('Health health/fitness analysis is opt-in', () => {
   it('renders the Health page shell with steps and workouts', async () => {
     renderWithProviders(<Health />);
 
-    expect(await screen.findByTestId('health-page')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /health/i })).toBeInTheDocument();
+    expect(await screen.findByTestId('health-fitness')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /fitness/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /workouts/i })).toBeInTheDocument();
   });
 

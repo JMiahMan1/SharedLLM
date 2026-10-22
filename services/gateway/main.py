@@ -48,6 +48,7 @@ from services.gateway.config import (
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
     GEO_SVC,
+    HEALTH_SVC,
     IDENTITY_SVC,
     INTERNAL_SECRET,
     LOGGING_SVC,
@@ -913,6 +914,7 @@ async def readiness():
       # board while their pages were broken.
       "geo": f"{GEO_SVC}/health",
       "bible": f"{BIBLE_SVC}/health",
+      "health": f"{HEALTH_SVC}/health",
       "telemetry": f"{TELEMETRY_SVC}/health",
     }
 
@@ -11958,6 +11960,159 @@ async def proxy_bible_devotional_cadence(request: Request, book_id: int):
         label="Failed to set the devotional cadence",
         json={"cadence": str((payload or {}).get("cadence") or "")},
     )
+
+
+# --- Health hub -------------------------------------------------------------
+# The health service owns profiles, sleep, check-ins, nutrition and the open
+# metric store. Activity stays in geo. Every route acts as the authenticated
+# caller; there is deliberately no `user_id` parameter here, so one member
+# cannot read another's health data by guessing a username.
+
+
+async def _health_json(
+    method: str,
+    path: str,
+    request: Request,
+    *,
+    params: dict | None = None,
+    body: dict | None = None,
+):
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    headers = {
+        "X-Internal-Secret": INTERNAL_SECRET,
+        "X-User-Id": ident["user"],
+        "X-User-Is-Admin": "true" if ident.get("is_admin") else "false",
+    }
+    clean_params = {key: value for key, value in (params or {}).items() if value is not None}
+    async with shared_http_client() as client:
+        resp = await client.request(
+            method,
+            f"{HEALTH_SVC}{path}",
+            params=clean_params,
+            json=body,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=15.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        await _raise_scoped_failure(resp, "Health service unavailable")
+
+
+@app.get("/api/health/profile")
+async def get_health_profile(request: Request):
+    return await _health_json("GET", "/profile", request)
+
+
+@app.put("/api/health/profile")
+async def put_health_profile(request: Request):
+    return await _health_json("PUT", "/profile", request, body=await request.json())
+
+
+@app.get("/api/health/summary")
+async def get_health_summary(request: Request, day: str | None = None):
+    return await _health_json("GET", "/summary", request, params={"day": day})
+
+
+@app.get("/api/health/metrics/catalog")
+async def get_health_metric_catalog(request: Request):
+    return await _health_json("GET", "/metrics/catalog", request)
+
+
+@app.post("/api/health/metrics")
+async def post_health_metrics(request: Request):
+    return await _health_json("POST", "/metrics", request, body=await request.json())
+
+
+@app.get("/api/health/metrics/{metric}")
+async def get_health_metrics(metric: str, request: Request, days: int = 30):
+    return await _health_json("GET", f"/metrics/{metric}", request, params={"days": days})
+
+
+@app.delete("/api/health/metrics/{sample_id}")
+async def delete_health_metric(sample_id: int, request: Request):
+    return await _health_json("DELETE", f"/metrics/{sample_id}", request)
+
+
+@app.get("/api/health/sleep")
+async def get_health_sleep(request: Request, days: int = 14):
+    return await _health_json("GET", "/sleep", request, params={"days": days})
+
+
+@app.post("/api/health/sleep")
+async def post_health_sleep(request: Request):
+    return await _health_json("POST", "/sleep", request, body=await request.json())
+
+
+@app.delete("/api/health/sleep/{sleep_id}")
+async def delete_health_sleep(sleep_id: int, request: Request):
+    return await _health_json("DELETE", f"/sleep/{sleep_id}", request)
+
+
+@app.get("/api/health/checkins")
+async def get_health_checkins(request: Request, days: int = 14):
+    return await _health_json("GET", "/checkins", request, params={"days": days})
+
+
+@app.get("/api/health/checkins/{day}")
+async def get_health_checkin(day: str, request: Request):
+    return await _health_json("GET", f"/checkins/{day}", request)
+
+
+@app.put("/api/health/checkins/{day}")
+async def put_health_checkin(day: str, request: Request):
+    return await _health_json("PUT", f"/checkins/{day}", request, body=await request.json())
+
+
+@app.get("/api/health/nutrition/day")
+async def get_health_nutrition_day(request: Request, day: str | None = None):
+    return await _health_json("GET", "/nutrition/day", request, params={"day": day})
+
+
+@app.get("/api/health/food")
+async def get_health_food(request: Request, day: str | None = None, days: int = 0):
+    return await _health_json("GET", "/food", request, params={"day": day, "days": days})
+
+
+@app.post("/api/health/food")
+async def post_health_food(request: Request):
+    return await _health_json("POST", "/food", request, body=await request.json())
+
+
+@app.delete("/api/health/food/{entry_id}")
+async def delete_health_food(entry_id: int, request: Request):
+    return await _health_json("DELETE", f"/food/{entry_id}", request)
+
+
+@app.get("/api/health/food/search")
+async def search_health_food(request: Request, q: str, limit: int = 10):
+    return await _health_json("GET", "/food/search", request, params={"q": q, "limit": limit})
+
+
+@app.get("/api/health/food/barcode/{code}")
+async def barcode_health_food(code: str, request: Request):
+    return await _health_json("GET", f"/food/barcode/{code}", request)
+
+
+@app.get("/api/health/shares")
+async def get_health_shares(request: Request):
+    return await _health_json("GET", "/shares", request)
+
+
+@app.put("/api/health/shares")
+async def put_health_share(request: Request):
+    return await _health_json("PUT", "/shares", request, body=await request.json())
+
+
+@app.get("/api/health/family")
+async def get_health_family(request: Request, day: str | None = None):
+    return await _health_json("GET", "/family", request, params={"day": day})
+
+
+@app.get("/api/health/export")
+async def export_health(request: Request):
+    return await _health_json("GET", "/export", request)
 
 
 # --- Scheduled telemetry reports (health/fitness + power) --------------------

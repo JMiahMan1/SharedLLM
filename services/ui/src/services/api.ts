@@ -123,6 +123,17 @@ import type {
   ActivityWindow,
   AchievementsResponse,
   ActivityGoals,
+  HealthProfile,
+  HealthSummary,
+  SleepSession,
+  HealthCheckin,
+  FoodEntry,
+  FoodSearchItem,
+  NutritionDay,
+  HealthMetricHistory,
+  HealthMetricSample,
+  HealthShare,
+  HealthFamilyPerson,
   StarsResponse,
   StarGrant,
   AdminStarGrantResponse,
@@ -1453,6 +1464,157 @@ export const api = {
 
   async setStepGoal(goal: number, userId?: string): Promise<{ user_id: string; goal: number }> {
     const resp = await apiClient.put('/api/geo/steps/goal', { goal, user_id: userId });
+    return resp.data;
+  },
+
+  // --- Health hub (profiles, sleep, check-ins, nutrition) -----------------
+
+  async getHealthProfile(): Promise<HealthProfile> {
+    const resp = await apiClient.get('/api/health/profile');
+    return resp.data;
+  },
+
+  async updateHealthProfile(profile: Partial<HealthProfile>): Promise<HealthProfile> {
+    const resp = await apiClient.put('/api/health/profile', profile);
+    return resp.data;
+  },
+
+  /** One call for the Today screen. Activity comes from geo separately. */
+  async getHealthSummary(day?: string): Promise<HealthSummary> {
+    const query = day ? `?day=${encodeURIComponent(day)}` : '';
+    const resp = await apiClient.get(`/api/health/summary${query}`);
+    return resp.data;
+  },
+
+  async getHealthMetrics(metric: string, days = 30): Promise<HealthMetricHistory> {
+    const resp = await apiClient.get(
+      `/api/health/metrics/${encodeURIComponent(metric)}?days=${days}`,
+    );
+    return resp.data;
+  },
+
+  async addHealthMetrics(
+    samples: Array<{
+      metric: string;
+      value: number;
+      unit: string;
+      recorded_at?: string;
+      source?: string;
+      external_id?: string;
+      metadata?: Record<string, unknown>;
+    }>,
+  ): Promise<{ accepted: number; duplicates: number; samples: HealthMetricSample[] }> {
+    const resp = await apiClient.post('/api/health/metrics', { samples });
+    return resp.data;
+  },
+
+  async deleteHealthMetric(sampleId: number): Promise<{ deleted: number }> {
+    const resp = await apiClient.delete(`/api/health/metrics/${sampleId}`);
+    return resp.data;
+  },
+
+  async getSleep(days = 14): Promise<{ user_id: string; sessions: SleepSession[] }> {
+    const resp = await apiClient.get(`/api/health/sleep?days=${days}`);
+    return resp.data;
+  },
+
+  async logSleep(body: {
+    night: string;
+    bedtime?: string | null;
+    wake_time?: string | null;
+    duration_minutes?: number | null;
+    efficiency?: number | null;
+    quality?: number | null;
+    note?: string;
+    source?: string;
+  }): Promise<SleepSession & { duplicate: boolean }> {
+    const resp = await apiClient.post('/api/health/sleep', body);
+    return resp.data;
+  },
+
+  async deleteSleep(sleepId: number): Promise<{ deleted: number }> {
+    const resp = await apiClient.delete(`/api/health/sleep/${sleepId}`);
+    return resp.data;
+  },
+
+  async getCheckins(days = 14): Promise<{ user_id: string; checkins: HealthCheckin[] }> {
+    const resp = await apiClient.get(`/api/health/checkins?days=${days}`);
+    return resp.data;
+  },
+
+  async getCheckin(day: string): Promise<{ checkin: HealthCheckin | null }> {
+    const resp = await apiClient.get(`/api/health/checkins/${encodeURIComponent(day)}`);
+    return resp.data;
+  },
+
+  async saveCheckin(
+    day: string,
+    body: { energy?: number; mood?: number; soreness?: number; stress?: number; note?: string },
+  ): Promise<HealthCheckin> {
+    const resp = await apiClient.put(`/api/health/checkins/${encodeURIComponent(day)}`, body);
+    return resp.data;
+  },
+
+  async getNutritionDay(day: string): Promise<NutritionDay> {
+    const resp = await apiClient.get(`/api/health/nutrition/day?day=${encodeURIComponent(day)}`);
+    return resp.data;
+  },
+
+  async getFoodEntries(day: string): Promise<{ user_id: string; entries: FoodEntry[] }> {
+    const resp = await apiClient.get(`/api/health/food?day=${encodeURIComponent(day)}`);
+    return resp.data;
+  },
+
+  async addFood(
+    body: Partial<FoodEntry> & { day: string; name: string; meal: FoodEntry['meal'] },
+  ): Promise<FoodEntry & { duplicate: boolean }> {
+    const resp = await apiClient.post('/api/health/food', body);
+    return resp.data;
+  },
+
+  async deleteFood(entryId: number): Promise<{ deleted: number }> {
+    const resp = await apiClient.delete(`/api/health/food/${entryId}`);
+    return resp.data;
+  },
+
+  /** OpenFoodFacts search; results are per 100 g plus serving weight when known. */
+  async searchFood(q: string, limit = 10): Promise<{ query: string; source: string; results: FoodSearchItem[] }> {
+    const params = new URLSearchParams({ q, limit: String(limit) });
+    const resp = await apiClient.get(`/api/health/food/search?${params.toString()}`);
+    return resp.data;
+  },
+
+  async lookupBarcode(code: string): Promise<FoodSearchItem> {
+    const resp = await apiClient.get(`/api/health/food/barcode/${encodeURIComponent(code)}`);
+    return resp.data;
+  },
+
+  async getHealthShares(): Promise<{ owner: string; shares: HealthShare[] }> {
+    const resp = await apiClient.get('/api/health/shares');
+    return resp.data;
+  },
+
+  async updateHealthShare(body: {
+    viewer: string;
+    scope: HealthShare['scope'];
+    enabled: boolean;
+  }): Promise<{ owner: string; viewer: string; scope: string; enabled: boolean }> {
+    const resp = await apiClient.put('/api/health/shares', body);
+    return resp.data;
+  },
+
+  async getHealthFamily(day?: string): Promise<{
+    viewer: string;
+    day: string;
+    people: HealthFamilyPerson[];
+  }> {
+    const query = day ? `?day=${encodeURIComponent(day)}` : '';
+    const resp = await apiClient.get(`/api/health/family${query}`);
+    return resp.data;
+  },
+
+  async exportHealth(): Promise<Record<string, unknown>> {
+    const resp = await apiClient.get('/api/health/export');
     return resp.data;
   },
 

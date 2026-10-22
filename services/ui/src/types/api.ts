@@ -1442,6 +1442,225 @@ export interface StepHourBucket {
   steps: number;
 }
 
+// --- Health hub -----------------------------------------------------------
+// The health service owns these; steps/workouts stay in the geo types above.
+
+export type HealthConfidence = 'low' | 'medium' | 'high';
+
+/** A score that carries its evidence, not just a number. */
+export interface HealthScore {
+  score: number | null;
+  label: string;
+  detail: string;
+  confidence: HealthConfidence;
+  /** Signals that were absent, in plain language. */
+  missing: string[];
+  components: Record<string, number>;
+}
+
+export interface HealthProfile {
+  user_id: string;
+  exists: boolean;
+  display_name: string;
+  birth_year: number | null;
+  height_cm: number | null;
+  sex: 'female' | 'male' | 'other' | 'unspecified' | null;
+  activity_level: 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active';
+  goal: 'lose' | 'maintain' | 'gain' | 'balance';
+  units: 'imperial' | 'metric';
+  kid_mode: boolean;
+  sleep_need_minutes: number | null;
+  water_goal_ml: number | null;
+  weekly_active_minutes: number | null;
+  updated_at?: string;
+}
+
+export interface SleepSession {
+  id: number;
+  user_id: string;
+  /** Local date the person woke up (YYYY-MM-DD). */
+  night: string;
+  bedtime: string | null;
+  wake_time: string | null;
+  duration_minutes: number;
+  efficiency: number | null;
+  quality: number | null;
+  stages: Record<string, unknown>;
+  source: string;
+  external_id: string | null;
+  note: string;
+}
+
+export interface HealthCheckin {
+  id: number;
+  user_id: string;
+  day: string;
+  energy: number | null;
+  mood: number | null;
+  soreness: number | null;
+  stress: number | null;
+  note: string;
+  updated_at: string;
+}
+
+export interface FoodDensity {
+  band: 'green' | 'yellow' | 'orange';
+  label: string;
+  calories_per_100g: number;
+}
+
+export interface FoodEntry {
+  id: number;
+  user_id: string;
+  day: string;
+  meal: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+  name: string;
+  brand: string;
+  /** Per serving; multiply by `servings` for the logged amount. */
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number | null;
+  sugar_g: number | null;
+  sodium_mg: number | null;
+  servings: number;
+  serving_grams: number | null;
+  barcode: string | null;
+  recipe_path: string | null;
+  source: string;
+  external_id: string | null;
+  created_at: string;
+  density: FoodDensity | null;
+}
+
+export interface NutritionTarget {
+  /** `unavailable` names the missing profile fields instead of guessing. */
+  kind: 'adult_range' | 'teen_guidance' | 'unavailable';
+  min: number | null;
+  max: number | null;
+  bmr: number | null;
+  tdee: number | null;
+  goal: string;
+  note: string;
+  missing: string[];
+  deficit_allowed: boolean;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+}
+
+export interface NutritionDay {
+  user_id: string;
+  day: string;
+  entries_count: number;
+  /** False means nothing was logged, which is not the same as eating zero. */
+  logged: boolean;
+  totals: {
+    calories: number;
+    protein_g: number;
+    carbs_g: number;
+    fat_g: number;
+    fiber_g: number;
+  };
+  meals: Record<
+    string,
+    {
+      entries: FoodEntry[];
+      calories: number;
+    }
+  >;
+  target: NutritionTarget;
+}
+
+export interface HealthMetricSample {
+  id: number;
+  user_id: string;
+  metric: string;
+  value: number;
+  unit: string;
+  recorded_at: string;
+  source: string;
+  external_id: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface HealthMetricHistory {
+  user_id: string;
+  metric: string;
+  unit: string;
+  days: number;
+  samples: HealthMetricSample[];
+  latest: HealthMetricSample | null;
+}
+
+export interface HealthSummary {
+  user_id: string;
+  day: string;
+  profile: HealthProfile;
+  /** Guideline defaults in use, e.g. `sleep_need_minutes`. */
+  defaults_used: string[];
+  sleep: {
+    last_night: SleepSession | null;
+    score: HealthScore | null;
+    need_minutes: number;
+    history: SleepSession[];
+  };
+  readiness: HealthScore | null;
+  checkin: HealthCheckin | null;
+  nutrition: NutritionDay;
+  water: {
+    ml: number;
+    goal_ml: number;
+    percent: number | null;
+    logged: boolean;
+  };
+  metrics: Record<string, HealthMetricSample>;
+  resting_hr_baseline: number | null;
+  /** Always null: activity belongs to geo and is composed by the UI. */
+  activity: null;
+  alerts: string[];
+}
+
+export interface FoodSearchItem {
+  code: string;
+  name: string;
+  brand: string;
+  image: string | null;
+  serving_size: string | null;
+  serving_grams: number | null;
+  per_100g: {
+    calories: number | null;
+    protein_g: number | null;
+    carbs_g: number | null;
+    fat_g: number | null;
+    fiber_g: number | null;
+    sugar_g: number | null;
+    sodium_mg: number | null;
+  };
+}
+
+export interface HealthShare {
+  viewer: string;
+  scope: 'sleep' | 'nutrition';
+}
+
+export interface HealthFamilyPerson {
+  user_id: string;
+  scopes: string[];
+  sleep?: {
+    duration_minutes: number | null;
+    score: number | null;
+    label: string | null;
+    logged: boolean;
+  };
+  nutrition?: {
+    logged: boolean;
+    calories: number;
+  };
+}
+
+
 /**
  * One bucket of an event metric's history (workouts, distance, minutes).
  *
