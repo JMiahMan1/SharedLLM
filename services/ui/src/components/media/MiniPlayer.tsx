@@ -22,7 +22,14 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
   );
 
   return (
-    <div
+    <motion.div
+      drag={onOpen ? 'y' : false}
+      dragConstraints={{ top: 0, bottom: 0 }}
+      dragElastic={0.25}
+      dragSnapToOrigin
+      onDragEnd={(_, info) => {
+        if (info.offset.y < -28 || info.velocity.y < -300) onOpen?.();
+      }}
       className="fixed inset-x-3 bottom-20 md:bottom-5 z-40 mx-auto max-w-2xl"
       data-testid="mini-player"
     >
@@ -86,6 +93,6 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
           </button>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
