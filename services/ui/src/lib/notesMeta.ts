@@ -359,3 +359,50 @@ export function sortNotesByIndex<T extends { title: string; path: string }>(
   const pinned = (n: T) => (indexEntry(index, n.path).pinned ? 1 : 0);
   return [...notes].sort((a, b) => pinned(b) - pinned(a));
 }
+
+/**
+ * A visit's notes list and index, kept per account so the next visit paints
+ * the shelf before the network answers. The live queries still revalidate.
+ */
+export interface NotesSnapshot {
+  savedAt: number;
+  notes: unknown[];
+  index: NotesIndex;
+}
+
+export function notesSnapshotKey(scope: string): string {
+  return `jarvis_notes_snapshot_v1:${scope}`;
+}
+
+export function readNotesSnapshot(scope: string): NotesSnapshot | null {
+  try {
+    const raw = localStorage.getItem(notesSnapshotKey(scope));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<NotesSnapshot>;
+    const index = parseNotesIndex(parsed.index);
+    if (!index || !Array.isArray(parsed.notes) || typeof parsed.savedAt !== 'number') return null;
+    return { savedAt: parsed.savedAt, notes: parsed.notes, index };
+  } catch {
+    return null;
+  }
+}
+
+export function writeNotesSnapshot(scope: string, notes: unknown[], index: NotesIndex): void {
+  const key = notesSnapshotKey(scope);
+  try {
+    localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), notes, index }));
+    return;
+  } catch {
+    // Quota: keep the list's shape (titles and paths) and drop note bodies.
+  }
+  try {
+    const trimmed = notes.map((note) => {
+      const rest = { ...(note as Record<string, unknown>) };
+      delete rest.content;
+      return rest;
+    });
+    localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), notes: trimmed, index }));
+  } catch {
+    // Storage is full or unavailable: the page just loads from the network.
+  }
+}
