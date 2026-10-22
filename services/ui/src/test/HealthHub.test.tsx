@@ -368,8 +368,6 @@ describe('HealthToday family sharing', () => {
               phase: 'luteal',
               title: 'Before the next period',
               tips: ['Keep the plans flexible.', 'Offer quiet help.', 'Believe what she says.'],
-              disclaimer:
-                'Every person and cycle is different. These are general ideas, not medical advice — ask what actually helps.',
             },
           },
         },
@@ -380,6 +378,5 @@ describe('HealthToday family sharing', () => {
     expect(await screen.findByText(/Cycle: Luteal/)).toBeInTheDocument();
     expect(screen.getByText('Before the next period')).toBeInTheDocument();
     expect(screen.getByText('Keep the plans flexible.')).toBeInTheDocument();
-    expect(screen.getByText(/not medical advice/)).toBeInTheDocument();
   });
 });

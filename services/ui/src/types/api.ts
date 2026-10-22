@@ -1690,12 +1690,11 @@ export interface HealthFamilyPerson {
     days_until_next_period: number | null;
     confidence: string | null;
     detail: string | null;
-    /** Practical partner ideas, only when an adult chose to share. */
+    /** Practical partner ideas that travel with a shared phase. */
     support?: {
       phase: string;
       title: string;
       tips: string[];
-      disclaimer: string;
     } | null;
   };
 }

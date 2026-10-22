@@ -25,7 +25,7 @@ class TestEmpty:
         assert result["cycle_day"] is None
         assert result["next_period_start"] is None
         assert "nothing is assumed" in result["detail"].lower()
-        assert "not contraception" in result["disclaimer"].lower()
+        assert "estimates only" in result["disclaimer"].lower()
 
     def test_a_future_period_is_ignored(self):
         result = cycle.summarize([_period(TODAY + timedelta(days=2))], TODAY)
@@ -142,7 +142,7 @@ class TestIrregular:
 
 
 class TestPartnerSupport:
-    """Support ideas are general, short and never medical advice."""
+    """Support ideas are general, short and practical."""
 
     def test_every_phase_has_a_title_and_three_tips(self):
         for phase in cycle.PHASE_LABELS:
@@ -151,7 +151,6 @@ class TestPartnerSupport:
             assert support["title"]
             assert len(support["tips"]) == 3
             assert all(tip.strip() for tip in support["tips"])
-            assert "not medical advice" in support["disclaimer"]
 
     def test_unknown_phase_falls_back_to_the_neutral_advice(self):
         for value in (None, "", "nonsense"):

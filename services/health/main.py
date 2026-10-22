@@ -799,13 +799,6 @@ def put_cycle_settings(
             detail=_cycle_hidden_reason(profile),
         )
 
-    age = _age_years(profile)
-    if enabling and ((age is not None and age < 10) or (age is None and profile and profile.kid_mode)):
-        raise HTTPException(
-            status_code=422,
-            detail="Cycle tracking is for teens and adults. Add a birth year to the profile first.",
-        )
-
     if "guardian_username" in changes:
         guardian = (changes["guardian_username"] or "").strip().lower() or None
         if guardian:
@@ -1610,14 +1603,8 @@ def family_summary(
         if "cycle" in scopes:
             owner_profile = session.get(HealthProfile, owner)
             shared = _cycle_summary(session, owner, day)
-            # Partner ideas come only with an adult's own choice to share.
-            # A minor sharing with their mother gets the phase, not a
-            # partner role-play guide.
-            support = (
-                cycle.partner_support(shared["phase"])
-                if shared and not _cycle_is_minor(owner_profile)
-                else None
-            )
+            # Support ideas travel with the share the owner chose to make.
+            support = cycle.partner_support(shared["phase"]) if shared else None
             entry["cycle"] = {
                 "applicable": _cycle_applicable(owner_profile),
                 "enabled": shared is not None,

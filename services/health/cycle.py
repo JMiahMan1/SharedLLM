@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-DISCLAIMER = "Estimates only, based on logged dates. Not contraception or medical advice."
+DISCLAIMER = "Estimates only, based on logged dates."
 PHASE_LABELS = {
     "menstrual": "Period",
     "follicular": "Follicular",
@@ -22,12 +22,9 @@ PHASE_LABELS = {
 }
 
 #: Phase-aware ideas for a partner who was trusted with the phase summary.
-#: They are deliberately practical and non-clinical, and never tell a partner
-#: to explain someone's feelings as hormones or to act as a clinician.
-SUPPORT_DISCLAIMER = (
-    "Every person and cycle is different. These are general ideas, not medical "
-    "advice — ask what actually helps."
-)
+#: They are deliberately practical and stay on what a partner can actually do;
+#: no tip explains someone's feelings as hormones or asks a partner to act as
+#: a clinician.
 PARTNER_SUPPORT: dict[str, tuple[str, tuple[str, ...]]] = {
     "menstrual": (
         "During the period",
@@ -92,7 +89,6 @@ def partner_support(phase: str | None) -> dict:
         "phase": key,
         "title": title,
         "tips": list(tips),
-        "disclaimer": SUPPORT_DISCLAIMER,
     }
 
 

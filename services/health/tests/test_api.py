@@ -552,7 +552,10 @@ class TestCycleApi:
 
         family = client.get("/family", headers={"X-User-Id": "mom"}).json()
         assert family["people"][0]["cycle"]["phase"] == "menstrual"
-        assert family["people"][0]["cycle"]["support"] is None
+        support = family["people"][0]["cycle"]["support"]
+        assert support["phase"] == "menstrual"
+        assert support["title"]
+        assert len(support["tips"]) == 3
         assert "symptoms" not in family["people"][0]["cycle"]
         assert "periods" not in family["people"][0]
 
@@ -576,9 +579,13 @@ class TestCycleApi:
 
     def test_unknown_birth_year_in_kid_mode_stays_guardian_only(self, client):
         _cycle_profile(client, birth_year=None, kid_mode=True)
-        # Enabling is refused outright: there is not enough information to
-        # know this is a teen rather than a child.
-        assert client.put("/cycle/settings", json={"enabled": True}).status_code == 422
+        # Tracking is available; the minor signal only narrows who may view it.
+        assert client.put("/cycle/settings", json={"enabled": True}).status_code == 200
+        client.post("/cycle/periods", json={"start_day": TODAY})
+        assert client.put("/shares", json={"viewer": "dad", "scope": "cycle"}).status_code == 422
+        assert client.put("/cycle/settings", json={"guardian_username": "mom"}).status_code == 200
+        assert client.put("/shares", json={"viewer": "dad", "scope": "cycle"}).status_code == 403
+        assert client.put("/shares", json={"viewer": "mom", "scope": "cycle"}).status_code == 200
 
     def test_an_adult_can_share_a_minimal_cycle_summary(self, client):
         _cycle_profile(client)
@@ -593,7 +600,6 @@ class TestCycleApi:
         assert support["phase"] == "menstrual"
         assert support["title"]
         assert len(support["tips"]) == 3
-        assert "not medical advice" in support["disclaimer"]
         for private_field in ("flow", "symptoms", "bbt_c", "note", "periods", "logs"):
             assert private_field not in cycle_entry
             assert private_field not in family["people"][0]
@@ -610,10 +616,11 @@ class TestCycleApi:
         assert client.put("/cycle/settings", json={"enabled": False}).status_code == 200
         assert client.get("/family", headers={"X-User-Id": "michele"}).json()["people"] == []
 
-    def test_a_young_child_cannot_enable_tracking(self, client):
+    def test_tracking_is_available_to_a_young_profile_too(self, client):
+        # Tracking follows the person's own choice; only sharing narrows for a
+        # known minor (or a kid_mode profile with no age).
         _cycle_profile(client, birth_year=date.today().year - 8, kid_mode=True)
-        response = client.put("/cycle/settings", json={"enabled": True})
-        assert response.status_code == 422
+        assert client.put("/cycle/settings", json={"enabled": True}).status_code == 200
 
     def test_export_includes_cycle_history(self, client):
         _cycle_profile(client)
