@@ -100,6 +100,47 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 - [ ] Update `docs/FAMILY_HUB.md` (Recipes section) and this doc; commit; deploy
       `execution gateway ui` as needed; verify live.
 
+## Phase 7 — Skylight integration
+
+The family's Skylight Calendar has its own meal planning (Meals tab + Recipe
+Box + grocery list). Skylight has no official API, but its mobile app's API is
+reverse-engineered and documented by the community (JSON:API on
+`api.ourskylight.com`). This phase is optional and fail-safe: when no Skylight
+account is connected, everything above still works.
+
+- [ ] **Connect** — Settings card: Skylight email + password. Sign in with
+      `POST /sessions` (`User-Agent: SkylightMobile (web)`) and keep the
+      token with the user's credentials; list frames with `GET /frames` and
+      let the family pick one (default: the only frame).
+- [ ] **Connector** — small fail-safe module wrapping the endpoints: create a
+      Recipe Box recipe (`POST /frames/{id}/meals/recipes` with
+      `meal_category_id`, `summary`, `description` = `Ingredients:` block +
+      `Instructions:` block); plan a meal (`POST /frames/{id}/meals/sittings`
+      — when `meal_recipe_id` is set, leave `summary` blank or the API
+      returns 422); read the week (`GET .../meals/sittings?date_min&date_max`);
+      push a recipe's ingredients to the Skylight grocery list
+      (`POST .../add_to_grocery_list`), or write items directly
+      (`POST .../lists/{listId}/items`; delete only via
+      `DELETE .../list_items/bulk_destroy`).
+- [ ] **Recipes → Skylight** — "Send to Skylight" on a recipe card and in the
+      editor pushes it to the Recipe Box under Dinner (or the picked meal
+      category); sending again updates the same recipe instead of duplicating.
+- [ ] **Meal plan → Skylight** — "Push week" writes each planned day as a
+      dinner sitting (`add_to_grocery_list` off by default); shows what
+      landed and surfaces failures as a toast, never a broken page.
+- [ ] **Shopping list → Skylight** — optional "Send to Skylight list" mirrors
+      the shopping list onto the frame's grocery list so it is tickable on the
+      display too.
+- [ ] **Fallback without credentials** — publish the week's dinners as
+      calendar events into a calendar Skylight already syncs (Google/iCloud or
+      a public ICS feed); the Skylight's unique email can also receive events.
+- [ ] **Tests** — fake-HTTP tests for sessions, frames, recipes, sittings
+      (blank-`summary` 422, array `data`, `instances` lagging) and grocery
+      list bulk delete; UI tests for connect, send-to-Skylight and push-week.
+- [ ] **Note** — the API is unofficial and may change with app updates: keep
+      the connector optional, conservative on rate, and never block the local
+      flows on it.
+
 ## Acceptance
 
 - [ ] 100+ imported recipes on the Recipes page, filterable by level and appliance.
