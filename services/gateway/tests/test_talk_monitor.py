@@ -27,10 +27,14 @@ class _Resp:
 class _Client:
     def __init__(self, messages):
         self.messages = messages
+        self.game_posts = []
 
     async def post(self, url, json=None, **kwargs):
         if json["action"] == "list":
             return _Resp({"detail": {"conversations": [{"token": "room1"}]}})
+        if json["action"] == "game":
+            self.game_posts.append(json)
+            return _Resp({"status": "SUCCESS"})
         return _Resp({"detail": {"messages": self.messages}})
 
 
@@ -51,16 +55,20 @@ class _Redis:
 @pytest.fixture
 def worker(monkeypatch):
     def run(messages):
+        client_instance = _Client(messages)
+
         @asynccontextmanager
         async def client():
-            yield _Client(messages)
+            yield client_instance
 
         monkeypatch.setattr(bw, "_shared_http_client", client)
-        return types.SimpleNamespace(
+        w = types.SimpleNamespace(
             _get_system_creds=AsyncMock(return_value={"user": "admin", "nextcloud_user": "admin"}),
             _get_model_from_settings=AsyncMock(return_value="m"),
             job_queue=types.SimpleNamespace(enqueue_job=AsyncMock()),
         )
+        w.client = client_instance
+        return w
 
     return run
 
@@ -74,6 +82,7 @@ async def test_monitor_answers_a_question_from_another_talk_app(worker):
     await bw.RavenWorker._check_talk_once(w, r)
     w.job_queue.enqueue_job.assert_awaited_once()
     assert w.job_queue.enqueue_job.await_args.kwargs["payload"]["query"] == "what's for dinner?"
+    assert w.client.game_posts == []
 
 
 @pytest.mark.asyncio
@@ -84,3 +93,49 @@ async def test_monitor_skips_a_question_the_app_already_claimed(worker):
     await bw.RavenWorker._check_talk_once(w, r)
     w.job_queue.enqueue_job.assert_not_awaited()
     assert r.store["jarvis:talk:last_msg:room1"] == "7"
+
+
+@pytest.mark.asyncio
+async def test_monitor_forwards_a_chat_message_as_a_game_answer(worker):
+    w = worker(
+        [{"id": 7, "actor_id": "michele", "actor_display_name": "Michele", "message": "Noah"}]
+    )
+    r = _Redis()
+    r.store["jarvis:talk:last_msg:room1"] = "6"
+    await bw.RavenWorker._check_talk_once(w, r)
+    w.job_queue.enqueue_job.assert_not_awaited()
+    assert w.client.game_posts == [
+        {
+            "user_context": {"user": "admin", "nextcloud_user": "admin"},
+            "action": "game",
+            "token": "room1",
+            "game_command": "answer",
+            "message": "Noah",
+            "card_detail": "Michele",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_monitor_primes_before_forwarding_answers(worker):
+    w = worker(
+        [{"id": 7, "actor_id": "michele", "actor_display_name": "Michele", "message": "Noah"}]
+    )
+    r = _Redis()
+    await bw.RavenWorker._check_talk_once(w, r)
+    assert w.client.game_posts == []
+    assert r.store["jarvis:talk:last_msg:room1"] == "7"
+
+
+@pytest.mark.asyncio
+async def test_monitor_does_not_forward_system_or_command_messages(worker):
+    w = worker(
+        [
+            {"id": 7, "actor_id": "admin", "message": "I am the system"},
+            {"id": 8, "actor_id": "michele", "actor_display_name": "Michele", "message": "/stop"},
+        ]
+    )
+    r = _Redis()
+    r.store["jarvis:talk:last_msg:room1"] = "6"
+    await bw.RavenWorker._check_talk_once(w, r)
+    assert w.client.game_posts == []

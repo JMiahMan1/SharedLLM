@@ -6,9 +6,14 @@
  *  - a full URL string (e.g. http://<ma-host>:8095/imageproxy/...)
  *  - a PlayerMedia `image_url` string (current_media on player_updated)
  *  - a QueueItem `image` string (current_item on queue_updated)
- *  - a MediaItemImage object: { type, path, provider, remote_url, ... }
+ *  - a MediaItemImage object: { type, path, provider, proxy_id, remote_url, ... }
  *  - an array of any of the above
  *  - a nested { image: <any> } wrapper
+ *
+ * When MA supplies a `proxy_id` (every library image does), that id is the
+ * only reliable handle: `path` values such as `album-716` are provider-
+ * relative and the image proxy rejects them. The gateway serves
+ * `/imageproxy/<proxy_id>` from the Music Assistant host.
  *
  * Return whatever the gateway's /api/media/imageproxy can resolve.
  */
@@ -24,6 +29,10 @@ export function extractMaImage(img: unknown): string | null {
   }
   if (typeof img === 'object') {
     const record = img as Record<string, unknown>;
+    const proxyId = record['proxy_id'];
+    if (typeof proxyId === 'string' && proxyId.trim()) {
+      return `/imageproxy/${proxyId.trim()}`;
+    }
     // `remote_url` carries the absolute upstream URL; `path`/`uri` are
     // relative and resolved by the gateway imageproxy against the MA host.
     for (const key of ['image_url', 'remote_url', 'uri', 'path', 'url']) {
