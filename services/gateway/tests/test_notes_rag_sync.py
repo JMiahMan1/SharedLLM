@@ -109,3 +109,73 @@ async def test_the_notes_list_passes_the_preview_request_through(monkeypatch):
     assert seen["path"] == "/execute/note"
     assert seen["payload"]["previews"] is True
     assert seen["as_user"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_the_notes_meta_route_reads_and_writes_the_index(monkeypatch):
+    from services.gateway import main
+
+    seen: dict = {}
+
+    async def fake_proxy(request, path, payload, as_user=None):
+        seen.update(path=path, payload=payload, as_user=as_user)
+        return JSONResponse(content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
+
+    await main.proxy_notes_meta(_request({"as_user": "admin"}))
+    assert seen["path"] == "/execute/note"
+    assert seen["payload"] == {"action": "meta_read", "storage": "nextcloud"}
+    assert seen["as_user"] == "admin"
+
+    meta = {"version": 1, "notes": {"Notes/A.md": {"pinned": True}}}
+    await main.proxy_notes_meta(_request({"write": True, "meta": meta}))
+    assert seen["payload"] == {"action": "meta_write", "meta": meta, "storage": "nextcloud"}
+
+
+@pytest.mark.asyncio
+async def test_the_notes_move_route_passes_path_and_destination(monkeypatch):
+    from services.gateway import main
+
+    seen: dict = {}
+
+    async def fake_proxy(request, path, payload, as_user=None):
+        seen.update(path=path, payload=payload)
+        return JSONResponse(content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
+
+    await main.proxy_move_note(
+        _request({"path": "Notes/A.md", "destination": "Notes/Trash/A.md"})
+    )
+    assert seen["path"] == "/execute/note"
+    assert seen["payload"] == {
+        "action": "move",
+        "path": "Notes/A.md",
+        "destination": "Notes/Trash/A.md",
+        "storage": "nextcloud",
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_notes_duplicate_and_empty_trash_routes(monkeypatch):
+    from services.gateway import main
+
+    seen: list[dict] = []
+
+    async def fake_proxy(request, path, payload, as_user=None):
+        seen.append(payload)
+        return JSONResponse(content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
+
+    await main.proxy_duplicate_note(_request({"path": "Notes/A.md", "title": "A copy"}))
+    assert seen[-1] == {
+        "action": "duplicate",
+        "path": "Notes/A.md",
+        "title": "A copy",
+        "storage": "nextcloud",
+    }
+
+    await main.proxy_empty_note_trash(_request({}))
+    assert seen[-1] == {"action": "empty_trash", "storage": "nextcloud"}

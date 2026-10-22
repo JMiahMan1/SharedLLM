@@ -457,3 +457,246 @@ async def test_local_append_adds_a_checklist_item(monkeypatch, tmp_path):
 
     assert result.status == "SUCCESS", result.message
     assert (tmp_path / "Groceries.md").read_text(encoding="utf-8").endswith("- [ ] milk")
+
+
+# --- Keep-style index, move, duplicate and trash ---------------------------
+
+
+async def test_meta_read_defaults_when_index_is_missing(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        assert method == "GET"
+        assert url == "http://nextcloud.test/Notes/.jarvis-notes.json"
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(request("meta_read"))
+
+    assert result.status == "SUCCESS"
+    assert result.detail["meta"] == {"version": 1, "notes": {}}
+
+
+async def test_meta_read_refuses_a_corrupt_index(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        return {"status_code": 200, "text": "{not json"}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(request("meta_read"))
+
+    assert result.status == "FAILURE"
+    assert "index" in result.message.lower()
+
+
+async def test_meta_write_stores_compact_json_in_notes(provider, monkeypatch):
+    import json as _json
+
+    import services.execution.http_client as http_client
+
+    puts: list[tuple[str, bytes, dict]] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        puts.append((url, data, headers or {}))
+        return {"status_code": 204, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    meta = {"version": 1, "notes": {"Notes/Groceries.md": {"pinned": True, "color": "amber"}}}
+    result = await note_handler.handle_note(request("meta_write", meta=meta))
+
+    assert result.status == "SUCCESS"
+    assert result.detail["meta"] == meta
+    assert provider.dirs == ["Notes"]
+    url, data, headers = puts[0]
+    assert url == "http://nextcloud.test/Notes/.jarvis-notes.json"
+    assert _json.loads(data) == meta
+    assert "application/json" in headers["Content-Type"]
+
+
+async def test_meta_write_rejects_a_bad_shape(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    puts: list[str] = []
+
+    async def fake_request(method, url, data=None, **kwargs):
+        puts.append(method)
+        return {"status_code": 204, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(request("meta_write", meta={"notes": []}))
+
+    assert result.status == "FAILURE"
+    assert puts == []
+
+
+async def test_meta_write_rejects_an_oversized_index(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    puts: list[str] = []
+
+    async def fake_request(method, url, data=None, **kwargs):
+        puts.append(method)
+        return {"status_code": 204, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    huge = {"version": 1, "notes": {"a": {"blob": "x" * (note_handler.META_MAX_BYTES + 1)}}}
+    result = await note_handler.handle_note(request("meta_write", meta=huge))
+
+    assert result.status == "FAILURE"
+    assert puts == []
+
+
+async def test_move_sends_webdav_move_and_records_the_original_path(provider, monkeypatch):
+    import json as _json
+
+    import services.execution.http_client as http_client
+
+    written: dict = {}
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        if method == "MOVE":
+            assert url == "http://nextcloud.test/Notes/Old.md"
+            assert headers["Destination"] == "http://nextcloud.test/Notes/Archive/Old.md"
+            assert headers["Overwrite"] == "T"
+            return {"status_code": 201, "text": ""}
+        if method == "PUT":
+            written.update(_json.loads(data))
+            return {"status_code": 204, "text": ""}
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(
+        request("move", path="Notes/Old.md", destination="Notes/Archive/Old.md")
+    )
+
+    assert result.status == "SUCCESS"
+    assert result.detail["path"] == "Notes/Archive/Old.md"
+    assert result.detail["from"] == "Notes/Old.md"
+    assert provider.dirs == ["Notes/Archive", "Notes"]
+    assert written["notes"]["Notes/Archive/Old.md"]["previousPath"] == "Notes/Old.md"
+
+
+async def test_move_back_out_of_archive_restores_the_entry(provider, monkeypatch):
+    import json as _json
+
+    import services.execution.http_client as http_client
+
+    existing = {
+        "version": 1,
+        "notes": {"Notes/Archive/Old.md": {"previousPath": "Notes/Old.md", "pinned": True}},
+    }
+    written: dict = {}
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        if method == "GET":
+            return {"status_code": 200, "text": _json.dumps(existing)}
+        if method == "MOVE":
+            return {"status_code": 204, "text": ""}
+        if method == "PUT":
+            written.update(_json.loads(data))
+            return {"status_code": 204, "text": ""}
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(
+        request("move", path="Notes/Archive/Old.md", destination="Notes/Old.md")
+    )
+
+    assert result.status == "SUCCESS"
+    assert written["notes"]["Notes/Old.md"] == {"pinned": True}
+
+
+async def test_move_to_the_same_path_does_nothing(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    calls: list[str] = []
+
+    async def fake_request(method, url, data=None, **kwargs):
+        calls.append(method)
+        return {"status_code": 204, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(
+        request("move", path="Notes/Old.md", destination="Notes/Old.md")
+    )
+
+    assert result.status == "SUCCESS"
+    assert calls == []
+
+
+async def test_duplicate_copies_to_a_name_that_does_not_exist(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    source = "# Old\nCategory: Notes\n\nbody text"
+    puts: list[tuple[str, bytes]] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        if method == "GET":
+            return {"status_code": 200, "text": source}
+        if method == "PROPFIND":
+            # The first candidate is taken; the copy name is free.
+            return {"status_code": 207 if url.endswith("/Notes/New.md") else 404, "text": ""}
+        if method == "PUT":
+            puts.append((url, data))
+            return {"status_code": 204, "text": ""}
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(request("duplicate", path="Notes/Old.md", title="New"))
+
+    assert result.status == "SUCCESS"
+    assert result.detail["path"] == "Notes/New (copy).md"
+    assert result.detail["title"] == "New (copy)"
+    url, data = puts[0]
+    assert url == "http://nextcloud.test/Notes/New (copy).md"
+    assert data.decode() == "# New (copy)\nCategory: Notes\n\nbody text"
+
+
+async def test_empty_trash_deletes_every_note_and_forgets_them(provider, monkeypatch):
+    import json as _json
+
+    import services.execution.http_client as http_client
+
+    listing = _listing(
+        ("Trash/a", "Mon, 13 Oct 2026 09:00:00 GMT", 3),
+        ("Trash/b", "Tue, 14 Oct 2026 09:00:00 GMT", 3),
+    )
+    existing = {"version": 1, "notes": {"Notes/Trash/a.md": {}, "Notes/Old.md": {}}}
+    deleted: list[str] = []
+    written: dict = {}
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        if method == "PROPFIND":
+            return {"status_code": 207, "text": listing}
+        if method == "DELETE":
+            deleted.append(url)
+            return {"status_code": 204, "text": ""}
+        if method == "GET":
+            return {"status_code": 200, "text": _json.dumps(existing)}
+        if method == "PUT":
+            written.update(_json.loads(data))
+            return {"status_code": 204, "text": ""}
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(request("empty_trash"))
+
+    assert result.status == "SUCCESS"
+    assert sorted(result.detail["deleted"]) == ["Notes/Trash/a.md", "Notes/Trash/b.md"]
+    assert deleted == [
+        "http://nextcloud.test/Notes/Trash/a.md",
+        "http://nextcloud.test/Notes/Trash/b.md",
+    ]
+    assert "Notes/Trash/a.md" not in written["notes"]
+    assert "Notes/Old.md" in written["notes"]
+
+
+async def test_new_actions_stay_unavailable_in_local_mode(monkeypatch):
+    from services.execution.schemas import NoteRequest
+
+    result = await note_handler.handle_note(
+        NoteRequest(user_context={"user": "jeremiah"}, action="meta_read", storage="local")
+    )
+
+    assert result.status == "FAILURE"

@@ -400,7 +400,10 @@ class CalendarRequest(BaseRequest):
 
 class NoteRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["create", "write", "append", "read", "delete", "check_off", "list", "sync_rag"]
+    action: Literal[
+        "create", "write", "append", "read", "delete", "check_off", "list", "sync_rag",
+        "meta_read", "meta_write", "move", "duplicate", "empty_trash",
+    ]
     title: str | None = None
     content: str | None = None
     category: str | None = "General"
@@ -409,6 +412,8 @@ class NoteRequest(BaseRequest):
     directories: list[str] | None = None # Custom Nextcloud directories to scan (recursive)
     path: str | None = None # Specific file path for read/write operations
     previews: bool = False # list: also return the text of the newest notes
+    destination: str | None = None # move: the note's new path
+    meta: dict | None = None # meta_write: the shared notes index to store
 
 
 # Timers / Alarms / Household Reminders

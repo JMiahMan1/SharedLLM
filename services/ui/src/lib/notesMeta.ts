@@ -139,3 +139,129 @@ export function parseChecklist(content: string): ChecklistItem[] {
   }
   return items;
 }
+
+/**
+ * The shared notes index stored at Notes/.jarvis-notes.json.
+ *
+ * Nextcloud Notes keeps favourites in its own database and knows nothing
+ * about archive or trash, so Jarvis keeps the presentation layer here: a
+ * dotfile, invisible to the Notes app and to the markdown itself.
+ */
+export interface NotesIndexEntry {
+  pinned?: boolean;
+  color?: NoteColor;
+  /** Where an archived/trashed note came from, for Restore. */
+  previousPath?: string;
+}
+
+export interface NotesIndex {
+  version: number;
+  notes: Record<string, NotesIndexEntry>;
+}
+
+export const EMPTY_NOTES_INDEX: NotesIndex = { version: 1, notes: {} };
+
+export const ARCHIVE_PREFIX = 'Notes/Archive/';
+export const TRASH_PREFIX = 'Notes/Trash/';
+
+/** Validate whatever the server returned before it reaches React state. */
+export function parseNotesIndex(raw: unknown): NotesIndex | null {
+  let value = raw;
+  if (typeof raw === 'string') {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as { version?: unknown; notes?: unknown };
+  if (!candidate.notes || typeof candidate.notes !== 'object' || Array.isArray(candidate.notes)) {
+    return null;
+  }
+  const notes: Record<string, NotesIndexEntry> = {};
+  for (const [path, entry] of Object.entries(candidate.notes as Record<string, unknown>)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const source = entry as NotesIndexEntry;
+    const clean: NotesIndexEntry = {};
+    if (typeof source.pinned === 'boolean') clean.pinned = source.pinned;
+    if (typeof source.color === 'string') clean.color = source.color;
+    if (typeof source.previousPath === 'string') clean.previousPath = source.previousPath;
+    notes[path] = clean;
+  }
+  return { version: typeof candidate.version === 'number' ? candidate.version : 1, notes };
+}
+
+export function indexEntry(index: NotesIndex | undefined, path: string): NotesIndexEntry {
+  return index?.notes[path] ?? {};
+}
+
+/** Pure patch, matching setNoteMeta: an empty entry is dropped. */
+export function setIndexEntry(index: NotesIndex, path: string, patch: NotesIndexEntry): NotesIndex {
+  const next = { ...indexEntry(index, path), ...patch };
+  const notes = { ...index.notes };
+  if (!next.pinned && (!next.color || next.color === 'default') && !next.previousPath) {
+    delete notes[path];
+  } else {
+    notes[path] = next;
+  }
+  return { ...index, notes };
+}
+
+export function forgetIndexEntry(index: NotesIndex, path: string): NotesIndex {
+  if (!(path in index.notes)) return index;
+  const notes = { ...index.notes };
+  delete notes[path];
+  return { ...index, notes };
+}
+
+export function isArchivedPath(path: string): boolean {
+  return path.startsWith(ARCHIVE_PREFIX);
+}
+
+export function isTrashedPath(path: string): boolean {
+  return path.startsWith(TRASH_PREFIX);
+}
+
+/** Where a note lives when it is archived/trashed, keeping its filename. */
+export function archivedPathFor(path: string, prefix: string = ARCHIVE_PREFIX): string {
+  const base = path.split('/').pop() ?? path;
+  return `${prefix}${base}`;
+}
+
+/**
+ * Merge this device's old localStorage pins/colours into the shared index.
+ * The first device to load after the upgrade uploads its map; later devices
+ * only fill gaps, so nobody's pins are overwritten by a stale copy.
+ */
+export function mergeLegacyMeta(index: NotesIndex, notes: Array<{ title: string; path: string }>): NotesIndex {
+  const legacy = readAll();
+  if (Object.keys(legacy).length === 0) return index;
+  let next = index;
+  for (const note of notes) {
+    const old = legacy[noteKey(note.title, note.path)];
+    if (!old) continue;
+    const current = indexEntry(next, note.path);
+    if (current.pinned !== undefined || current.color !== undefined) continue;
+    next = setIndexEntry(next, note.path, { pinned: old.pinned, color: old.color });
+  }
+  return next;
+}
+
+/** Forget this device's pre-index pins once they live in the shared index. */
+export function clearLegacyMeta(): void {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    // Storage unavailable: the migration simply runs again next time.
+  }
+}
+
+/** Sort by the shared index: pinned first, then backend order (modified desc). */
+export function sortNotesByIndex<T extends { title: string; path: string }>(
+  notes: T[],
+  index: NotesIndex | undefined,
+): T[] {
+  const pinned = (n: T) => (indexEntry(index, n.path).pinned ? 1 : 0);
+  return [...notes].sort((a, b) => pinned(b) - pinned(a));
+}

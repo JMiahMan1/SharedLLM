@@ -5157,6 +5157,61 @@ async def proxy_list_notes(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/communication/notes/meta")
+async def proxy_notes_meta(request: Request):
+    """Read or write the shared notes index (pin, colour, archive origin)."""
+    body = await request.json()
+    if body.get("write"):
+        payload = {
+            "action": "meta_write",
+            "meta": body.get("meta") or {},
+            "storage": body.get("storage", "nextcloud"),
+        }
+    else:
+        payload = {
+            "action": "meta_read",
+            "storage": body.get("storage", "nextcloud"),
+        }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
+
+
+@app.post("/api/communication/notes/move")
+async def proxy_move_note(request: Request):
+    """Move a note (archive, trash, restore or rename) without a copy."""
+    body = await request.json()
+    payload = {
+        "action": "move",
+        "path": body.get("path"),
+        "destination": body.get("destination"),
+        "storage": body.get("storage", "nextcloud"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
+
+
+@app.post("/api/communication/notes/duplicate")
+async def proxy_duplicate_note(request: Request):
+    """Copy a note under a name that does not exist yet."""
+    body = await request.json()
+    payload = {
+        "action": "duplicate",
+        "title": body.get("title"),
+        "path": body.get("path"),
+        "storage": body.get("storage", "nextcloud"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
+
+
+@app.post("/api/communication/notes/empty_trash")
+async def proxy_empty_note_trash(request: Request):
+    """Permanently delete every note in Notes/Trash."""
+    body = await request.json()
+    payload = {
+        "action": "empty_trash",
+        "storage": body.get("storage", "nextcloud"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
+
+
 #: RAG collection chat searches for the family's files; notes join it.
 NOTES_RAG_COLLECTION = "nextcloud_files"
 

@@ -31,6 +31,10 @@ old second editor (whose Save called `append`) is gone.
 | `append` | quick-capture only: adds `- [ ] <content>` to the end |
 | `read` | return the file body in `message` |
 | `delete` | remove the file |
+| `move` | move a note with one WebDAV `MOVE` (archive, trash, restore or rename) |
+| `duplicate` | copy a note to the first free `<title> (copy).md` in its folder |
+| `empty_trash` | permanently delete every note under `Notes/Trash` |
+| `meta_read` / `meta_write` | read or replace the shared index `Notes/.jarvis-notes.json` (pin, colour, archive origin) |
 | `check_off` | toggle one checklist item (`- [ ] x` ↔ `- [x] x`) by text |
 | `list` | list markdown files under the configured directories, newest first; with `previews: true` the newest 24 also carry their text in `content` |
 | `sync_rag` | read every note (execution); the gateway then indexes them (below) |
@@ -61,11 +65,19 @@ that, every save of an opened note stacked another header on top.
   toggling one calls `check_off` and reloads the list. Non-checklist notes
   show a text preview with the stored `# title` / `Category:` header stripped.
 - **Search**: filters on title and (for the first 24 notes) body text.
-- **Pin and colour**: view preferences, stored per device in
-  `jarvis_notes_meta_v1` (localStorage) and never sent to the LLM. Note
-  *content* stays in Nextcloud. On a touch screen the pin is always shown and
-  colour is set in the editor; hover reveals both on a desktop. Delete asks
-  first.
+- **Pin, colour and location**: stored in a shared index,
+  `Notes/.jarvis-notes.json`, so they follow the family's notes instead of one
+  browser. The page reads it with the list and writes it back after a pin,
+  colour, archive, trash or restore; a one-time migration lifts any
+  `jarvis_notes_meta_v1` entries that are still only in localStorage. The
+  index is a hidden dotfile inside `Notes/`, not a note: markdown files stay
+  the only source of note content, and Nextcloud Notes ignores it.
+- **Archive and Trash**: card actions move a note with one WebDAV `MOVE` into
+  `Notes/Archive/` or `Notes/Trash/`; the index remembers the path it came
+  from so **Restore** puts it back. Trash has an "Empty trash" action that
+  confirms before deleting permanently. Both folders are excluded from the
+  main grid. On a touch screen the pin is always shown and colour is set in
+  the editor; hover reveals both on a desktop. Delete asks first.
 - **Previews**: the page asks `list` for `previews: true` and gets the newest
   24 notes' text in the same reply. Execution reads them four at a time and
   keeps each note's text keyed by its file URL, modified time and size, so a
@@ -96,8 +108,9 @@ that, every save of an opened note stacked another header on top.
 - `services/ui/src/test/Notes.test.tsx`: list/preview/checklist, previews
   arrive with the list (no per-card reads), opening reads the note fresh, a
   failed read opens no editor, typing does not reload the list, save uses
-  `write`, opens without the header, rename moves the file, pin persistence,
-  search, failure surfacing
+  `write`, opens without the header, rename moves the file, pin writes the
+  shared index, archive and trash move and restore, duplicate and empty trash
+  call their routes, search, failure surfacing
 - `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
 - `services/gateway/tests/test_notes_rag_sync.py`: indexing writes to RAG;
   the list route passes `previews` through

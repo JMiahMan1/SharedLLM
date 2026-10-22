@@ -1,10 +1,26 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Notes from '../pages/Notes';
 import { renderWithProviders } from './render';
-import { notesCheckOffCalls, notesReadCalls, notesWriteCalls, server } from './setup';
+import {
+  notesCheckOffCalls,
+  notesDuplicateCalls,
+  notesEmptyTrashCalls,
+  notesMetaWrites,
+  notesMoveCalls,
+  notesReadCalls,
+  notesWriteCalls,
+  server,
+} from './setup';
 import { http, HttpResponse } from 'msw';
+
+const lastIndex = (path: string) => {
+  const meta = notesMetaWrites.at(-1)?.meta as
+    | { notes?: Record<string, { previousPath?: string }> }
+    | undefined;
+  return meta?.notes?.[path];
+};
 
 describe('Notes (Keep-style)', () => {
   beforeEach(() => {
@@ -91,7 +107,7 @@ describe('Notes (Keep-style)', () => {
     expect(notesCheckOffCalls[0].item).toBe('Pick up groceries');
   });
 
-  it('pins a note and persists the preference locally', async () => {
+  it('pins a note into the shared notes index', async () => {
     const user = userEvent.setup();
     renderWithProviders(<Notes />);
 
@@ -99,9 +115,10 @@ describe('Notes (Keep-style)', () => {
     await user.click(screen.getAllByRole('button', { name: /pin note/i })[1]);
 
     await waitFor(() => {
-      const stored = JSON.parse(localStorage.getItem('jarvis_notes_meta_v1') || '{}');
-      expect(Object.keys(stored).length).toBe(1);
-      expect(Object.values(stored)[0]).toMatchObject({ pinned: true });
+      const pinned = notesMetaWrites.some(
+        (call) => (call.meta as { notes?: Record<string, { pinned?: boolean }> })?.notes?.['Notes/Trip ideas.md']?.pinned,
+      );
+      expect(pinned).toBe(true);
     });
   });
 
@@ -195,5 +212,66 @@ describe('Notes (Keep-style)', () => {
 
     expect((screen.getByLabelText('Note content') as HTMLTextAreaElement).value).toBe('a few words');
     expect(lists).toBe(1);
+  });
+
+  it('archives a note by moving it into Notes/Archive and keeps its origin', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByRole('button', { name: 'Archive Trip ideas' }));
+
+    await waitFor(() => expect(notesMoveCalls.length).toBe(1));
+    expect(notesMoveCalls[0]).toMatchObject({
+      path: 'Notes/Trip ideas.md',
+      destination: 'Notes/Archive/Trip ideas.md',
+    });
+    await waitFor(() => {
+      expect(lastIndex('Notes/Archive/Trip ideas.md')?.previousPath).toBe('Notes/Trip ideas.md');
+    });
+  });
+
+  it('moves a note to Notes/Trash and restores it to where it lived', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByRole('button', { name: 'Move Trip ideas to trash' }));
+
+    await waitFor(() => expect(notesMoveCalls.length).toBe(1));
+    expect(notesMoveCalls[0].destination).toBe('Notes/Trash/Trip ideas.md');
+
+    await user.click(await screen.findByRole('button', { name: /^Trash/ }));
+    await user.click(await screen.findByRole('button', { name: 'Restore Trip ideas' }));
+
+    await waitFor(() => expect(notesMoveCalls.length).toBe(2));
+    expect(notesMoveCalls[1].destination).toBe('Notes/Trip ideas.md');
+  });
+
+  it('duplicates a note through the copy route', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByRole('button', { name: 'Duplicate Trip ideas' }));
+
+    await waitFor(() => expect(notesDuplicateCalls.length).toBe(1));
+    expect(notesDuplicateCalls[0]).toMatchObject({ path: 'Notes/Trip ideas.md' });
+  });
+
+  it('empties the trash after a confirmation', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByRole('button', { name: 'Move Trip ideas to trash' }));
+    await waitFor(() => expect(notesMoveCalls.length).toBe(1));
+
+    await user.click(await screen.findByRole('button', { name: /^Trash/ }));
+    await user.click(await screen.findByRole('button', { name: 'Empty trash' }));
+
+    await waitFor(() => expect(notesEmptyTrashCalls.length).toBe(1));
+    vi.unstubAllGlobals();
   });
 });
