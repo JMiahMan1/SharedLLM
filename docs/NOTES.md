@@ -129,8 +129,11 @@ that, every save of an opened note stacked another header on top.
 Shipped: pin and colour in the shared index, archive, trash with restore and
 empty trash, duplicate, move without copy, checklists, search, labels as inline
 `#tags` (with per-label chips, a label filter, an editor "Add label" button and
-`tag:`/`label:`, `colour:`/`color:` and `type:` search operators), dashboard and
-home-screen capture.
+`tag:`/`label:`, `colour:`/`color:` and `type:` search operators), the instant shelf (the last visit's list is cached
+per account and revalidated in the background, and a note whose text came with
+the list opens at once), prompt archive/trash/restore (cards move on tap, roll
+back on failure, and note calls allow a minute), dashboard and home-screen
+capture.
 
 Still open: reminders (time and place), attachments/images/drawings/audio,
 Nextcloud sharing, bulk multi-select, list/grid toggle, autosave and drafts,

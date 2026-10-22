@@ -22,8 +22,10 @@
 > Music Assistant speakers (`ma:<id>`) now send play, transport, volume, mute
 > and seek through `POST /api/media/ma-command` (gateway `_ma_rpc`), so the
 > browser's Sendspin player only starts for "This device". Ledger rows
-> below are marked. What follows is
-> the plan for the remaining phases 3-9.
+> below are marked. Phase 4 shipped (2026-10-22, `538315bc`): the global
+> MiniPlayer, now-playing sheet with sleep timer, output picker, queue,
+> keyboard shortcuts and the hermetic end-to-end suite. What follows is the
+> plan for the remaining phases 3 and 5-9.
 
 ---
 
@@ -117,7 +119,7 @@ Paths are relative to `services/ui/src/`.
 
 | ID | Sev | Where | Problem | Fix / required test |
 |---|---|---|---|---|
-| BUG-40 | P1 | page lifecycle | **Fixed 2026-10-15** (`dd9e8df2`): the MA web player lives in `context/MediaPlayerContext.tsx` above the router; Media replays its state on return | Remaining: the E2E (play → navigate → still playing, mini-player visible) once the mini-player exists |
+| BUG-40 | P1 | page lifecycle | **Fixed 2026-10-15** (`dd9e8df2`): the MA web player lives in `context/MediaPlayerContext.tsx` above the router; Media replays its state on return | Done (`538315bc`): the global mini player ships and `e2e/media/persistence.spec.ts` proves play → navigate → still playing with the mini player and a single Sendspin connection (18 passed / 2 skipped on desktop + Pixel; iPhone/WebKit not run locally) |
 | BUG-41 | P1 | `Media.tsx:288-293` `formatTime` | No hours: a 10h audiobook shows `605:12` | Shared `formatDuration()` → `H:MM:SS` when ≥1h. Unit test: 0, 59, 3600, 36012, NaN |
 | BUG-42 | P1 | `Media.tsx:705-738,814,852,877,949` | **Fixed 2026-10-15**: explorer rows await the play and show their own spinner. Explorer spinner can never show: async calls are not awaited (the `finally` clears immediately) and the keys never match (`ma-${uri}` vs `uri`) | Await the promise; one `itemKey()` helper. Component test: click → spinner visible until the promise resolves |
 | BUG-43 | P1 | `Media.tsx:992-993` | **Fixed 2026-10-15** (play): a podcast resolves to its MA `library://podcast/<n>` like a book; an episode list is still to do. ABS **podcast** passed as `'playlist'` → plays a raw podcast id via MA (broken) | Podcasts open the Podcast detail view (episode list); play an episode. Component test |
