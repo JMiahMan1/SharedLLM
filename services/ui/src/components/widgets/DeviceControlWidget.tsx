@@ -132,6 +132,18 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   const [temperature, setTemperature] = useState<number | null>(null);
   const [volume, setVolume] = useState<number>(50);
 
+  // Escape closes the device dialog, matching every other sheet in the app.
+  // The visible close button is sticky too: on a long thermostat panel it must
+  // not scroll out of reach.
+  useEffect(() => {
+    if (!selectedDevice) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedDevice(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selectedDevice]);
+
   const loadDevices = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -669,14 +681,22 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setSelectedDevice(null)} />
           
-          <div className="relative w-full max-w-md max-h-[90dvh] overflow-y-auto bg-slate-900 border border-white/10 p-5 sm:p-6 rounded-2xl shadow-2xl flex flex-col gap-4 animate-in fade-in zoom-in duration-200">
-            <button
-              onClick={() => setSelectedDevice(null)}
-              aria-label="Close device details"
-              className="absolute top-3 right-3 text-slate-400 hover:text-white p-1 rounded hover:bg-white/5 min-h-11 min-w-11 flex items-center justify-center"
-            >
-              <X size={18} />
-            </button>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Device details"
+            className="relative w-full max-w-md max-h-[90dvh] overflow-y-auto bg-slate-900 border border-white/10 p-5 sm:p-6 rounded-2xl shadow-2xl flex flex-col gap-4 animate-in fade-in zoom-in duration-200"
+          >
+            <div className="sticky -top-5 sm:-top-6 z-20 -mx-5 sm:-mx-6 -mt-5 sm:-mt-6 flex items-center justify-between gap-2 border-b border-white/10 bg-slate-900/95 px-4 py-2 backdrop-blur">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Device details</span>
+              <button
+                onClick={() => setSelectedDevice(null)}
+                aria-label="Close device details"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-lg p-1 text-slate-400 hover:bg-white/5 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
 
             {/* Title */}
             <div>
