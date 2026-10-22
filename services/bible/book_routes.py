@@ -245,14 +245,14 @@ async def admin_delete_book(book_id: int):
     return {"status": "deleted", "id": book_id}
 
 
-@router.get("/books")
+@router.get("/imported-books")
 def list_books(kind: str | None = Query(default=None)):
     with Session(_db()) as session:
         books = book_import.list_books(session, kind=kind)
         return {"books": [book_import.book_dict(book) for book in books], "count": len(books)}
 
 
-@router.get("/books/{book_id}")
+@router.get("/imported-books/{book_id}")
 def read_book(book_id: int):
     with Session(_db()) as session:
         book = book_import.get_book(session, book_id)
@@ -265,7 +265,7 @@ def read_book(book_id: int):
         }
 
 
-@router.get("/books/{book_id}/chapters/{ordinal}")
+@router.get("/imported-books/{book_id}/chapters/{ordinal}")
 def read_book_chapter(book_id: int, ordinal: int):
     with Session(_db()) as session:
         chapters = book_import.chapters_for(session, book_id)
@@ -321,7 +321,7 @@ class BookQuestionRequest(BaseModel):
     question: str
 
 
-@router.post("/books/{book_id}/chapters/{ordinal}/ask")
+@router.post("/imported-books/{book_id}/chapters/{ordinal}/ask")
 async def ask_book_question(book_id: int, ordinal: int, payload: BookQuestionRequest):
     """Answer a chapter's end questions from that chapter, never from elsewhere."""
     from services.bible import study_ask

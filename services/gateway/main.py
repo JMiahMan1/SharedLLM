@@ -11841,21 +11841,24 @@ async def proxy_bible_imported_books(request: Request, kind: str | None = None):
     """Imported devotional/study books available to readers."""
     await _require_identity_from_request(request)
     return await _bible_json(
-        "GET", "/books", label="Failed to read the imported book library", params={"kind": kind}
+        "GET",
+        "/imported-books",
+        label="Failed to read the imported book library",
+        params={"kind": kind},
     )
 
 
 @app.get("/api/bible/imported-books/{book_id}")
 async def proxy_bible_imported_book(request: Request, book_id: int):
     await _require_identity_from_request(request)
-    return await _bible_json("GET", f"/books/{book_id}", label="Failed to read that book")
+    return await _bible_json("GET", f"/imported-books/{book_id}", label="Failed to read that book")
 
 
 @app.get("/api/bible/imported-books/{book_id}/chapters/{ordinal}")
 async def proxy_bible_imported_book_chapter(request: Request, book_id: int, ordinal: int):
     await _require_identity_from_request(request)
     return await _bible_json(
-        "GET", f"/books/{book_id}/chapters/{ordinal}", label="Failed to read that chapter"
+        "GET", f"/imported-books/{book_id}/chapters/{ordinal}", label="Failed to read that chapter"
     )
 
 
@@ -11866,7 +11869,7 @@ async def proxy_bible_imported_book_question(request: Request, book_id: int, ord
     payload = body if isinstance(body, dict) else {}
     return await _bible_json(
         "POST",
-        f"/books/{book_id}/chapters/{ordinal}/ask",
+        f"/imported-books/{book_id}/chapters/{ordinal}/ask",
         label="Could not answer from that chapter",
         json={"username": username, "question": str(payload.get("question") or "")},
         timeout=_BIBLE_STUDY_TIMEOUT,

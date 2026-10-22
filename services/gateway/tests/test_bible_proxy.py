@@ -26,6 +26,7 @@ from services.gateway.main import app
 ROUTES = [
     ("get", "/api/bible/versions"),
     ("get", "/api/bible/books"),
+    ("get", "/api/bible/imported-books?kind=study"),
     ("get", "/api/bible/passages?ref=John+3:16"),
     ("get", "/api/bible/search?q=faith"),
     ("get", "/api/bible/verse-of-day"),
@@ -214,6 +215,21 @@ def test_a_junk_key_never_becomes_the_default_admin(make_client, monkeypatch):
 def test_health_needs_no_credentials(monkeypatch):
     _patch_bible(monkeypatch, payload={"status": "ok"})
     assert TestClient(app).get("/api/bible/health").status_code == 200
+
+
+def test_imported_books_are_proxied_to_their_own_path(make_client, monkeypatch):
+    """The imported shelf must not be sent to the Scripture catalogue route."""
+    captured = _patch_bible(monkeypatch, payload={"books": [], "count": 0})
+
+    async def _allow(*_args, **_kwargs):
+        return {"user": "michele", "is_admin": False}
+
+    monkeypatch.setattr(gateway_main, "_require_identity_from_request", _allow)
+    resp = make_client().get("/api/bible/imported-books", params={"kind": "study"})
+    assert resp.status_code == 200
+    sent = captured["calls"][-1]
+    assert sent["url"].endswith("/imported-books")
+    assert sent["params"]["kind"] == "study"
 
 
 # identity is taken from the token, never from the request
