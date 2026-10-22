@@ -684,7 +684,11 @@ export default function Bible() {
       {tab === 'studies' && (
         <div className="space-y-6">
           <BibleStudySessions
-            reference={requestedRef ?? 'Reading'}
+            reference={
+              requestedRef
+              ?? stateData?.position?.reference
+              ?? (stateData?.position ? chapterRef(stateData.position) : '')
+            }
             version={version}
             onOpenRef={openRef}
           />
