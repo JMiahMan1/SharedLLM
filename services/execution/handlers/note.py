@@ -17,6 +17,17 @@ log = logging.getLogger("execution.note")
 DEFAULT_NOTES_DIRS = ["Notes"]
 LOCAL_NOTES_ROOT = _LOCAL_NOTES_ROOT or "/app/data/notes"
 
+#: The shared notes index. Pin, colour, reminders and the archive/trash
+#: original path live here so they follow the family across devices and
+#: clients while every note stays a plain markdown file. The name starts with
+#: a dot so Nextcloud's Files view hides it, and it is not a ``.md`` file, so
+#: it is never listed as a note.
+META_PATH = "Notes/.jarvis-notes.json"
+META_VERSION = 1
+META_MAX_BYTES = 512 * 1024
+ARCHIVE_DIR = "Notes/Archive"
+TRASH_DIR = "Notes/Trash"
+
 #: How many of the newest notes a ``list`` with ``previews`` fills in, and how
 #: many of those reads run at once. The Notes page used to fetch each preview
 #: as its own request: 24 parallel reads filled the execution service's 10
@@ -102,6 +113,151 @@ async def _attach_previews(provider, notes: list[dict]) -> None:
             _remember_preview(url, version, resp["text"])
 
     await asyncio.gather(*(fill(note) for note in notes[:PREVIEW_LIMIT]))
+
+def _default_meta() -> dict:
+    return {"version": META_VERSION, "notes": {}}
+
+
+def _meta_url(provider) -> str:
+    return provider.file_url(META_PATH)
+
+
+async def _read_meta(provider) -> dict | None:
+    """The shared index, or ``None`` when it exists but cannot be read.
+
+    A missing file is a normal first run and reads as an empty index; a
+    corrupt or unreachable one is reported rather than overwritten, because
+    silently replacing it would lose every pin and archived path.
+    """
+    import json
+
+    from ..http_client import request as http_request
+
+    resp = await http_request(
+        "GET", _meta_url(provider),
+        auth=(provider.username, provider.password), verify=False,
+    )
+    if resp["status_code"] == 404:
+        return _default_meta()
+    if resp["status_code"] != 200:
+        return None
+    try:
+        meta = json.loads(resp["text"] or "{}")
+    except ValueError:
+        log.warning("Notes index at %s is not valid JSON", META_PATH)
+        return None
+    if not isinstance(meta, dict) or not isinstance(meta.get("notes", {}), dict):
+        log.warning("Notes index at %s has an unexpected shape", META_PATH)
+        return None
+    meta.setdefault("version", META_VERSION)
+    meta.setdefault("notes", {})
+    return meta
+
+
+async def _write_meta(provider, meta: dict) -> tuple[bool, str]:
+    import json
+
+    from ..http_client import request as http_request
+
+    payload = json.dumps(meta, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(payload) > META_MAX_BYTES:
+        return False, "The notes index is too large to store."
+    await provider.ensure_directory("Notes")
+    resp = await http_request(
+        "PUT", _meta_url(provider),
+        data=payload,
+        auth=(provider.username, provider.password),
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        verify=False,
+    )
+    if resp["status_code"] in (200, 201, 204):
+        return True, ""
+    return False, f"Could not write the notes index (HTTP {resp['status_code']})."
+
+
+def _in_archive_or_trash(path: str) -> bool:
+    return path.startswith(ARCHIVE_DIR + "/") or path.startswith(TRASH_DIR + "/")
+
+
+async def _index_after_move(provider, source: str, destination: str) -> None:
+    """Keep pin/colour/reminder state attached to a moved note, best effort.
+
+    Moving into Archive or Trash records where the note came from so it can be
+    restored; moving back out clears that pointer. The note itself has already
+    moved, so a failed index write only costs the extra metadata.
+    """
+    meta = await _read_meta(provider)
+    if meta is None:
+        return
+    notes = meta["notes"]
+    entry = notes.pop(source, None)
+    if entry is None and not _in_archive_or_trash(destination):
+        return
+    entry = dict(entry or {})
+    if _in_archive_or_trash(destination):
+        entry["previousPath"] = source
+    else:
+        entry.pop("previousPath", None)
+    notes[destination] = entry
+    ok, reason = await _write_meta(provider, meta)
+    if not ok:
+        log.warning("Could not update the notes index after moving %s: %s", source, reason)
+
+
+async def _index_forget(provider, *paths: str) -> None:
+    meta = await _read_meta(provider)
+    if meta is None:
+        return
+    notes = meta["notes"]
+    if not any(path in notes for path in paths):
+        return
+    for path in paths:
+        notes.pop(path, None)
+    ok, reason = await _write_meta(provider, meta)
+    if not ok:
+        log.warning("Could not update the notes index after deleting a note: %s", reason)
+
+
+async def _path_exists(provider, path: str) -> bool:
+    status, _ = await _propfind(provider, path, "0")
+    return status == 207
+
+
+async def _unique_note_path(provider, directory: str, file_title: str) -> tuple[str, str]:
+    """``directory/<file_title>.md``, numbered until it does not overwrite a note.
+
+    PUT replaces a file with no warning, so a duplicate has to prove the name
+    is free first. Returns the path and the title (file name without ``.md``)
+    so a caller can use the same name in the new note's header.
+    """
+    candidate = f"{directory}/{file_title}.md"
+    if not await _path_exists(provider, candidate):
+        return candidate, file_title
+    for suffix in [" (copy)"] + [f" (copy {n})" for n in range(2, 100)]:
+        candidate = f"{directory}/{file_title}{suffix}.md"
+        if not await _path_exists(provider, candidate):
+            return candidate, f"{file_title}{suffix}"
+    return f"{directory}/{file_title} (copy {len(_preview_cache) + 2}).md", f"{file_title} (copy {len(_preview_cache) + 2})"
+
+
+async def _move_note(provider, source: str, destination: str) -> tuple[bool, str]:
+    from ..http_client import request as http_request
+
+    await provider.ensure_directory(destination.rsplit("/", 1)[0] or "Notes")
+    resp = await http_request(
+        "MOVE", provider.file_url(source),
+        auth=(provider.username, provider.password),
+        headers={
+            "Destination": provider.file_url(destination),
+            "Overwrite": "T",
+        },
+        verify=False,
+        timeout=60,
+    )
+    if resp["status_code"] in (200, 201, 204):
+        return True, ""
+    return False, f"Could not move the note (HTTP {resp['status_code']})."
+
 
 async def handle_note(req: NoteRequest) -> ExecutionResult:
     storage_mode = getattr(req, "storage", "nextcloud")
@@ -297,12 +453,15 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
         elif action == "delete":
             if req.path:
                 url = provider.file_url(req.path.lstrip("/"))
+                deleted_path = req.path.lstrip("/")
             else:
                 file_title = provider.sanitize_filename(req.title or "", "note")
-                url = provider.file_url(f"Notes/{file_title}.md")
+                deleted_path = f"Notes/{file_title}.md"
+                url = provider.file_url(deleted_path)
             _forget_preview(url)
             resp = await http_request("DELETE", url, auth=(provider.username, provider.password), verify=False)
             if resp["status_code"] in [200, 204]:
+                await _index_forget(provider, deleted_path)
                 return ExecutionResult(status="SUCCESS", message=f"Note '{req.title}' deleted.", service="note_delete")
 
         elif action == "list":
@@ -344,6 +503,109 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 message=f"Synced {len(synced)} notes for RAG indexing",
                 service="note_sync_rag",
                 detail={"synced": synced}
+            )
+
+        elif action == "meta_read":
+            meta = await _read_meta(provider)
+            if meta is None:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message=f"Notes index at {META_PATH} is unreadable; pins, colours and archive paths could not be loaded.",
+                    service="note_meta_read",
+                )
+            return ExecutionResult(
+                status="SUCCESS",
+                message="Notes index loaded",
+                service="note_meta_read",
+                detail={"meta": meta, "path": META_PATH},
+            )
+
+        elif action == "meta_write":
+            meta = req.meta if isinstance(req.meta, dict) else None
+            if meta is None:
+                return ExecutionResult(status="FAILURE", message="meta_write requires the index as 'meta'.", service="note_meta_write")
+            if not isinstance(meta.get("notes", {}), dict):
+                return ExecutionResult(status="FAILURE", message="meta_write: 'notes' must be an object.", service="note_meta_write")
+            meta = dict(meta)
+            meta.setdefault("version", META_VERSION)
+            meta.setdefault("notes", {})
+            ok, reason = await _write_meta(provider, meta)
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=reason, service="note_meta_write")
+            return ExecutionResult(
+                status="SUCCESS",
+                message="Notes index saved",
+                service="note_meta_write",
+                detail={"meta": meta, "path": META_PATH},
+            )
+
+        elif action == "move":
+            source = (req.path or "").lstrip("/")
+            destination = (req.destination or "").lstrip("/")
+            if not source or not destination:
+                return ExecutionResult(status="FAILURE", message="move requires path and destination.", service="note_move")
+            if source == destination:
+                return ExecutionResult(status="SUCCESS", message="The note is already there.", service="note_move", detail={"path": destination})
+            ok, reason = await _move_note(provider, source, destination)
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=reason, service="note_move")
+            _forget_preview(provider.file_url(source))
+            _forget_preview(provider.file_url(destination))
+            await _index_after_move(provider, source, destination)
+            return ExecutionResult(
+                status="SUCCESS",
+                message="Note moved.",
+                service="note_move",
+                detail={"path": destination, "from": source},
+            )
+
+        elif action == "duplicate":
+            source = (req.path or "").lstrip("/")
+            if not source:
+                return ExecutionResult(status="FAILURE", message="duplicate requires path.", service="note_duplicate")
+            url = provider.file_url(source)
+            resp = await http_request("GET", url, auth=(provider.username, provider.password), verify=False)
+            if resp["status_code"] != 200:
+                return ExecutionResult(status="FAILURE", message=f"Note '{req.title or source}' not found.", service="note_duplicate")
+            directory = source.rsplit("/", 1)[0] if "/" in source else "Notes"
+            file_title = provider.sanitize_filename(
+                (req.title or source.rsplit("/", 1)[-1].removesuffix(".md")), "note"
+            )
+            new_path, new_title = await _unique_note_path(provider, directory, file_title)
+            content = _with_header(new_title, directory, note_body(resp["text"]))
+            put = await http_request(
+                "PUT", provider.file_url(new_path),
+                data=content.encode("utf-8"),
+                auth=(provider.username, provider.password),
+                headers={"Content-Type": "text/markdown; charset=utf-8"},
+                verify=False,
+            )
+            if put["status_code"] not in (200, 201, 204):
+                return ExecutionResult(status="FAILURE", message=f"Could not write the copy (HTTP {put['status_code']}).", service="note_duplicate")
+            _forget_preview(provider.file_url(new_path))
+            return ExecutionResult(
+                status="SUCCESS",
+                message=f"Copied to '{new_title}'.",
+                service="note_duplicate",
+                detail={"path": new_path, "title": new_title},
+            )
+
+        elif action == "empty_trash":
+            trashed = await _walk_webdav_dir(provider, TRASH_DIR)
+            deleted = []
+            for note in trashed:
+                note_path = note["path"]
+                url = provider.file_url(note_path.lstrip("/"))
+                resp = await http_request("DELETE", url, auth=(provider.username, provider.password), verify=False)
+                if resp["status_code"] in (200, 204):
+                    deleted.append(note_path)
+                    _forget_preview(url)
+            await _index_forget(provider, *[note["path"] for note in trashed])
+            return ExecutionResult(
+                status="SUCCESS",
+                message=f"Emptied Trash ({len(deleted)} notes deleted).",
+                service="note_empty_trash",
+                detail={"deleted": deleted},
             )
 
         return ExecutionResult(status="FAILURE", message=f"Action {action} failed or not implemented.", service="note")

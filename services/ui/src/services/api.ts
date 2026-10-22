@@ -1900,6 +1900,50 @@ export const api = {
     return resp.data;
   },
 
+  /** Read the shared notes index (pin, colour, archive origin) from /Notes. */
+  async getNotesMeta(payload: { storage?: string; as_user?: 'admin' } = {}): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/meta', payload);
+    return resp.data;
+  },
+
+  /** Replace the shared notes index. One writer, so callers read-modify-write. */
+  async writeNotesMeta(payload: {
+    meta: Record<string, unknown>;
+    storage?: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/meta', { write: true, ...payload });
+    return resp.data;
+  },
+
+  /** WebDAV MOVE: archive, trash, restore or rename without copy+delete. */
+  async moveNote(payload: {
+    path: string;
+    destination: string;
+    storage?: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/move', payload);
+    return resp.data;
+  },
+
+  /** Copy a note to "<title> (copy).md", never overwriting an existing file. */
+  async duplicateNote(payload: {
+    path: string;
+    title?: string;
+    storage?: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/duplicate', payload);
+    return resp.data;
+  },
+
+  /** Permanently delete everything in Notes/Trash. */
+  async emptyNotesTrash(payload: { storage?: string; as_user?: 'admin' } = {}): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/empty_trash', payload);
+    return resp.data;
+  },
+
   async syncNotesRag(payload: { storage?: string; directories?: string[] } = {}): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/sync_rag', payload);
     return resp.data;

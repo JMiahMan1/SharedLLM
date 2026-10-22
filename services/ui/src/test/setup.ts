@@ -228,6 +228,14 @@ function noteFixtureText(title?: string): string {
     : '# Shared Checklist\nCategory: Notes\n\n- [ ] Pick up groceries\n- [x] Take out recycling';
 }
 export const notesCheckOffCalls: Array<{ item?: string }> = [];
+export const notesDeleteCalls: Array<{ path?: string; title?: string }> = [];
+export const notesMoveCalls: Array<{ path?: string; destination?: string }> = [];
+export const notesDuplicateCalls: Array<{ path?: string; title?: string }> = [];
+export const notesMetaWrites: Array<{ meta?: unknown }> = [];
+export const notesEmptyTrashCalls: number[] = [];
+/** The hidden Notes/.jarvis-notes.json the fake Nextcloud holds. */
+let notesIndexFixture: { version: number; notes: Record<string, unknown> } = { version: 1, notes: {} };
+const NOTES_FIXTURE_BASE = notesFixtures.map((note) => ({ ...note }));
 
 const userThemePref = {  theme_id: 'aurora',
   packs: [] as unknown[],
@@ -663,11 +671,66 @@ export const server = setupServer(
     message: 'Note appended.',
     service: 'note_append',
   })),
-  http.post('/api/communication/notes/delete', () => HttpResponse.json({
-    status: 'SUCCESS',
-    message: 'Note deleted.',
-    service: 'note_delete',
-  })),
+  http.post('/api/communication/notes/delete', async ({ request }) => {
+    const body = await request.json() as { path?: string; title?: string };
+    notesDeleteCalls.push(body);
+    if (body.path) {
+      const index = notesFixtures.findIndex((note) => note.path === body.path);
+      if (index >= 0) notesFixtures.splice(index, 1);
+    }
+    return HttpResponse.json({ status: 'SUCCESS', message: 'Note deleted.', service: 'note_delete' });
+  }),
+  http.post('/api/communication/notes/meta', async ({ request }) => {
+    const body = await request.json() as { write?: boolean; meta?: { version?: number; notes?: Record<string, unknown> } };
+    if (body.write) {
+      notesMetaWrites.push({ meta: body.meta });
+      notesIndexFixture = {
+        version: body.meta?.version ?? 1,
+        notes: body.meta?.notes ?? {},
+      };
+    }
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      message: 'Notes index ready.',
+      service: 'note_meta_read',
+      detail: { meta: notesIndexFixture, path: 'Notes/.jarvis-notes.json' },
+    });
+  }),
+  http.post('/api/communication/notes/move', async ({ request }) => {
+    const body = await request.json() as { path?: string; destination?: string };
+    notesMoveCalls.push(body);
+    const note = notesFixtures.find((item) => item.path === body.path);
+    if (note && body.destination) note.path = body.destination;
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      message: 'Note moved.',
+      service: 'note_move',
+      detail: { path: body.destination, from: body.path },
+    });
+  }),
+  http.post('/api/communication/notes/duplicate', async ({ request }) => {
+    const body = await request.json() as { path?: string; title?: string };
+    notesDuplicateCalls.push(body);
+    const source = notesFixtures.find((item) => item.path === body.path);
+    const title = body.title || `${source?.title ?? 'Note'} (copy)`;
+    const folder = source?.path.split('/').slice(0, -1).join('/') || 'Notes';
+    notesFixtures.push({ title, path: `${folder}/${title}.md`, size: source?.size ?? 0, modified: new Date().toISOString() });
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      message: 'Note duplicated.',
+      service: 'note_duplicate',
+      detail: { path: `${folder}/${title}.md`, title },
+    });
+  }),
+  http.post('/api/communication/notes/empty_trash', () => {
+    notesEmptyTrashCalls.push(Date.now());
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      message: 'Trash emptied.',
+      service: 'note_empty_trash',
+      detail: { deleted: [] },
+    });
+  }),
   http.post('/api/communication/announcements', () => HttpResponse.json({
     status: 'SUCCESS',
     message: 'Announcement sent.',
@@ -1055,6 +1118,13 @@ afterEach(() => {
   notesWriteCalls.length = 0;
   notesCheckOffCalls.length = 0;
   notesReadCalls.length = 0;
+  notesDeleteCalls.length = 0;
+  notesMoveCalls.length = 0;
+  notesDuplicateCalls.length = 0;
+  notesMetaWrites.length = 0;
+  notesEmptyTrashCalls.length = 0;
+  notesIndexFixture = { version: 1, notes: {} };
+  notesFixtures.splice(0, notesFixtures.length, ...NOTES_FIXTURE_BASE.map((note) => ({ ...note })));
 });
 
 // Timers and refetch intervals can outlive a file's tests. Once msw is closed
