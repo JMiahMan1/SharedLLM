@@ -21,6 +21,7 @@
 [data-site-theme-active] .bg-purple-400\/40 { background-color: color-mix(in srgb, var(--site-accent) 40%, transparent) !important; }
 [data-site-theme-active] .bg-purple-400\/70 { background-color: color-mix(in srgb, var(--site-accent) 70%, transparent) !important; }
 [data-site-theme-active] .bg-purple-500 { background-color: var(--site-accent) !important; }
+[data-site-theme-active] .bg-purple-500\/\[0\.06\] { background-color: color-mix(in srgb, var(--site-accent) 6%, transparent) !important; }
 [data-site-theme-active] .bg-purple-500\/10 { background-color: color-mix(in srgb, var(--site-accent) 10%, transparent) !important; }
 [data-site-theme-active] .bg-purple-500\/15 { background-color: color-mix(in srgb, var(--site-accent) 15%, transparent) !important; }
 [data-site-theme-active] .bg-purple-500\/20 { background-color: color-mix(in srgb, var(--site-accent) 20%, transparent) !important; }
@@ -213,6 +214,7 @@
 [data-theme-scheme="light"] .bg-white\/\[0\.03\] { background-color: rgba(17, 24, 39, 0.02) !important; }
 [data-theme-scheme="light"] .bg-white\/\[0\.04\] { background-color: rgba(17, 24, 39, 0.02) !important; }
 [data-theme-scheme="light"] .bg-white\/\[0\.05\] { background-color: rgba(17, 24, 39, 0.03) !important; }
+[data-theme-scheme="light"] .bg-white\/\[0\.06\] { background-color: rgba(17, 24, 39, 0.04) !important; }
 [data-theme-scheme="light"] .bg-white\/\[0\.07\] { background-color: rgba(17, 24, 39, 0.04) !important; }
 [data-theme-scheme="light"] .bg-white\/\[0\.08\] { background-color: rgba(17, 24, 39, 0.05) !important; }
 [data-theme-scheme="light"] .bg-white\/10 { background-color: rgba(17, 24, 39, 0.06) !important; }

@@ -75,6 +75,7 @@ WORKSPACE_RUNTIME_SVC_URL = _net_url("WORKSPACE_RUNTIME", "http://workspace_runt
 GEO_SVC_URL = _net_url("GEO", "http://geo:8009")
 TELEMETRY_SVC_URL = _net_url("TELEMETRY", "http://telemetry:11438")
 BIBLE_SVC_URL = _net_url("BIBLE", "http://bible:8010")
+HEALTH_SVC_URL = _net_url("HEALTH", "http://health:8011")
 CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
 SEARXNG_URL = os.getenv(f"{NETWORK_MODE.upper()}_SEARXNG_URL") or os.getenv("SEARXNG_URL", "")
 HA_URL = os.getenv("HA_URL")
@@ -262,6 +263,8 @@ RAG_SVC = RAG_SVC_URL
 STORAGE_SVC = STORAGE_SVC_URL
 LOGGING_SVC = LOGGING_SVC_URL
 WORKSPACE_RUNTIME_SVC = WORKSPACE_RUNTIME_SVC_URL
+TELEMETRY_SVC = TELEMETRY_SVC_URL
+HEALTH_SVC = HEALTH_SVC_URL
 
 async def resolve_runtime_config():
     """Fetch all runtime configuration from Identity service.
@@ -293,6 +296,7 @@ async def resolve_runtime_config():
         f"{NETWORK_MODE}_logging_svc_url": "LOGGING_SVC_URL",
         f"{NETWORK_MODE}_workspace_runtime_svc_url": "WORKSPACE_RUNTIME_SVC_URL",
         f"{NETWORK_MODE}_bible_svc_url": "BIBLE_SVC_URL",
+        f"{NETWORK_MODE}_health_svc_url": "HEALTH_SVC_URL",
         f"{NETWORK_MODE}_searxng_url": "SEARXNG_URL",
         "geo_svc_url": "GEO_SVC_URL",
         "blb_base_url": "BLB_BASE_URL",
@@ -393,6 +397,7 @@ async def resolve_runtime_config():
                 globals()["WORKSPACE_RUNTIME_SVC"] = globals()["WORKSPACE_RUNTIME_SVC_URL"]
                 globals()["GEO_SVC"] = globals()["GEO_SVC_URL"]
                 globals()["BIBLE_SVC"] = globals()["BIBLE_SVC_URL"]
+                globals()["HEALTH_SVC"] = globals()["HEALTH_SVC_URL"]
 
                 # Check if special variables were updated in UI and sync to .env
                 _sync_special_vars_to_env()

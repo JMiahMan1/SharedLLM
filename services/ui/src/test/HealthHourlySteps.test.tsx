@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
-import Health from '../pages/Health';
+import Health from '../pages/HealthFitness';
 
 /**
  * The day view charts the hours inside today.

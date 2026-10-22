@@ -37,7 +37,7 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useNavigate: () => vi.fn() };
 });
 
-import Health from '../pages/Health';
+import Health from '../pages/HealthFitness';
 import Wander from '../pages/Wander';
 
 const healthy = () => {
@@ -63,7 +63,7 @@ beforeEach(() => {
 describe('Health page sensor visibility', () => {
   it('mounts the sensor banner', () => {
     renderWithProviders(<Health />);
-    expect(screen.getByTestId('health-page')).toBeInTheDocument();
+    expect(screen.getByTestId('health-fitness')).toBeInTheDocument();
     stepsOff();
     renderWithProviders(<Health />);
     expect(screen.getAllByTestId('sensor-status-banner').length).toBeGreaterThan(0);
@@ -71,7 +71,7 @@ describe('Health page sensor visibility', () => {
 
   it('adds no banner at all when tracking is healthy', () => {
     renderWithProviders(<Health />);
-    expect(screen.getByTestId('health-page')).toBeInTheDocument();
+    expect(screen.getByTestId('health-fitness')).toBeInTheDocument();
     expect(screen.queryByTestId('sensor-status-banner')).toBeNull();
   });
 
