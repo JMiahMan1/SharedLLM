@@ -124,3 +124,48 @@ def test_an_uploaded_book_decodes_its_filename_and_keeps_the_whole_title(tmp_pat
     assert len(saved) == 1
     assert saved[0].name.endswith("-Walk With Jesus PDF - 1st Edition.pdf")
     assert "%20" not in saved[0].name
+
+
+def test_imported_book_routes_do_not_collide_with_the_scripture_catalogue(
+    tmp_path, client, monkeypatch
+):
+    """The reader's imported shelf is not the list of Bible books.
+
+    ``GET /books`` in the bible service is the Scripture catalogue. The imported
+    library used to register the same path, so the later route was shadowed and
+    the shelf received 66 Bible books with no ``chapter_count`` and rendered an
+    empty list.
+    """
+    from services.bible import main as bible_main
+
+    monkeypatch.setattr(bible_main, "_import_dir", lambda: tmp_path)
+    uploaded = client.post(
+        "/admin/books/upload",
+        files={"file": ("Reader Study.pdf", _pdf("A chapter from the reader."), "application/pdf")},
+        data={"kind": "study"},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    book_id = uploaded.json()["book"]["id"]
+
+    listed = client.get("/imported-books", params={"kind": "study"})
+    assert listed.status_code == 200, listed.text
+    body = listed.json()
+    assert body["count"] == 1
+    assert body["books"][0]["title"] == "Reader Study"
+    assert body["books"][0]["chapter_count"] == 1
+
+    detail = client.get(f"/imported-books/{book_id}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["chapters"][0]["ordinal"] == 1
+
+    chapter = client.get(f"/imported-books/{book_id}/chapters/1")
+    assert chapter.status_code == 200, chapter.text
+    assert "reader" in chapter.json()["text"].lower()
+
+    scripture = client.get("/books")
+    # The fixture has no translation loaded, so /books may be 503. What matters
+    # is that it is the Scripture catalogue, never the imported shelf.
+    assert scripture.status_code in (200, 503), scripture.text
+    if scripture.status_code == 200:
+        assert scripture.json()["books"][0]["name"] == "Genesis"
+        assert "chapter_count" not in scripture.json()["books"][0]
