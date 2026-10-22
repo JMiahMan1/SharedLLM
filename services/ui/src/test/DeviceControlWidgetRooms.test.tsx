@@ -58,4 +58,48 @@ describe('DeviceControlWidget rooms', () => {
     expect(apiClient.post).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+
+  it('uses the thermostat own modes and repaints after a mode command', async () => {
+    const attrs = {
+      friendly_name: 'Upstairs',
+      hvac_mode: 'heat',
+      hvac_modes: ['off', 'heat', 'cool'],
+      temperature: 70,
+      current_temperature: 68,
+      min_temp: 50,
+      max_temp: 90,
+      target_temp_step: 1,
+    };
+    vi.mocked(api.getDeviceStates)
+      .mockResolvedValueOnce([{
+        entity_id: 'climate.upstairs', friendly_name: 'Upstairs', state: 'heat', domain: 'climate', room: 'Upstairs', attributes: attrs,
+      }])
+      .mockResolvedValue([{
+        entity_id: 'climate.upstairs', friendly_name: 'Upstairs', state: 'heat', domain: 'climate', room: 'Upstairs',
+        attributes: { ...attrs, hvac_mode: 'heat' },
+      }]);
+
+    renderWidget();
+    fireEvent.click(await screen.findByRole('button', { name: 'All (1)' }));
+    const [deviceName] = await screen.findAllByText('Upstairs');
+    fireEvent.click(deviceName);
+
+    expect(await screen.findByText('Climate Thermostat Controls')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Heat' })).toHaveAttribute('aria-pressed', 'true');
+    // The dialog must not invent a mode the thermostat never advertised.
+    expect(screen.queryByRole('button', { name: 'Heat/Cool' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Off' }));
+
+    // The panel paints the requested mode before the service returns.
+    expect(screen.getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(apiClient.post).toHaveBeenCalledWith('/execute/ha_service', expect.objectContaining({
+      domain: 'climate',
+      service: 'set_hvac_mode',
+      entity_id: 'climate.upstairs',
+      service_data: { hvac_mode: 'off' },
+    })));
+    // The follow-up load still reports heat; the optimistic patch must hold.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true'));
+  });
 });

@@ -45,6 +45,57 @@ def test_entity_search_by_query(mocker):
     assert entities[0]["entity_id"].startswith("media_player.")
 
 
+def test_entity_search_keeps_climate_control_attributes(mocker):
+    """Thermostat controls need dual targets, presets, fan and swing."""
+    mocker.patch("services.execution.ha_client.get_states", return_value=[
+        {
+            "entity_id": "climate.downstairs",
+            "state": "heat_cool",
+            "attributes": {
+                "friendly_name": "Downstairs",
+                "hvac_modes": ["off", "heat", "cool", "heat_cool"],
+                "hvac_action": "idle",
+                "temperature": None,
+                "target_temp_low": 68,
+                "target_temp_high": 74,
+                "current_temperature": 71,
+                "min_temp": 45,
+                "max_temp": 92,
+                "target_temp_step": 1,
+                "preset_mode": "home",
+                "preset_modes": ["home", "away"],
+                "fan_mode": "auto",
+                "fan_modes": ["on", "auto"],
+                "swing_mode": "off",
+                "swing_modes": ["on", "off"],
+                "current_humidity": 42,
+            },
+        },
+    ])
+
+    resp = client.post("/execute/entity/search",
+        headers={"X-Internal-Secret": "test-secret"},
+        json={
+            "user_context": valid_context,
+            "query": "",
+            "domain": "climate",
+        }
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "SUCCESS"
+    attrs = data["detail"]["entities"][0]["attributes"]
+    assert attrs["target_temp_low"] == 68
+    assert attrs["target_temp_high"] == 74
+    assert attrs["preset_mode"] == "home"
+    assert attrs["preset_modes"] == ["home", "away"]
+    assert attrs["fan_mode"] == "auto"
+    assert attrs["fan_modes"] == ["on", "auto"]
+    assert attrs["swing_mode"] == "off"
+    assert attrs["swing_modes"] == ["on", "off"]
+    assert attrs["current_humidity"] == 42
+
+
 def test_entity_search_no_results(mocker):
     """Test entity search returns empty list when no matches."""
     mocker.patch("services.execution.ha_client.get_states", return_value=[
