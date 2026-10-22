@@ -65,6 +65,10 @@ function studyMarkdown(session: BibleStudySession): string {
  */
 export default function BibleStudySessions({ reference, version, edition, onOpenRef }: Props) {
   const client = useQueryClient();
+  // "Reading" was a placeholder for “no passage selected”. It turned the
+  // primary action into "Study Reading", which reads like a mode rather than
+  // a passage. Treat it as no reference and ask for one instead.
+  const studyReference = reference === 'Reading' ? '' : reference;
   const [openId, setOpenId] = useState<number | null>(null);
   const [memoryQuery, setMemoryQuery] = useState('');
   const [exportWorkspace, setExportWorkspace] = useState('');
@@ -101,10 +105,10 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
   const create = useMutation({
     mutationFn: () =>
       api.createBibleStudySession({
-        reference,
+        reference: studyReference,
         version,
         edition,
-        title: reference,
+        title: studyReference,
       }),
     onSuccess: (result) => {
       setError('');
@@ -168,17 +172,19 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
             My Bible studies
           </h2>
           <p className="mt-1 text-xs text-slate-400">
-            Keep several passages open at once. Each study keeps its own questions and grounded answers.
+            Start a saved Jarvis study on the passage you are reading. Each study keeps its own questions and grounded answers.
           </p>
         </div>
         <button
           type="button"
           onClick={() => create.mutate()}
-          disabled={create.isPending || !reference}
+          disabled={create.isPending || !studyReference}
+          aria-label={studyReference ? `Start a Bible study on ${studyReference}` : 'Start a Bible study'}
+          title={studyReference ? `Start a saved study on ${studyReference}` : 'Open a passage in the reader first'}
           className="min-h-10 rounded-xl bg-sky-500/20 px-3 text-xs font-medium text-sky-200 disabled:opacity-50 inline-flex items-center gap-1.5"
         >
           {create.isPending ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-          Study {reference || 'this passage'}
+          {studyReference ? `Study ${studyReference}` : 'Start a study'}
         </button>
       </header>
 
