@@ -165,11 +165,19 @@ account is connected, everything above still works.
       Capacitor camera plugin is installed; it can come later for a nicer native flow).
       Keep the photo by uploading it to Nextcloud with the existing `provider.upload_file`
       and link it from the note, so the original page stays with the recipe.
-- [ ] Vision: a `vision_model` setting (empty = feature off) plus an Ollama multimodal call
-      (a message `images` array with base64 bytes). The house's model today
-      (`qwen3-6-35b-a3b`) is text-only, so the admin pulls a multimodal model
-      (qwen2.5-vl, llama3.2-vision or llava) on the desktop; an OpenRouter key can stand in
-      for cloud vision, with a clear note that photos would leave the house.
+- [ ] Vision: the family's **Alpaca** server (`/Users/jeremiahsummers/Code/alpaca`, the
+      Ollama-compatible `llama.cpp` proxy behind `llm_local_url`) already has vision. Use
+      its document-AI OCR endpoint — `POST /api/vision/ocr` on the Alpaca web backend
+      (port 5000, Qwen2.5-VL with automatic VL fallback) — which is built for exactly this
+      (photos of pages, headlines/structure, handwriting). The Ollama-compatible
+      `/api/chat` also passes a message `images` array through to `llama.cpp` as
+      `image_data` when a VL model with an `mmproj` projector is loaded (those models
+      report `capabilities: ['vision']`; `alpaca-puller` wires `*mmproj*.gguf` companions
+      automatically, and a Qwen3VL-8B mmproj companion is already present). A
+      `vision_model` setting (empty = feature off) can name the VL model when going
+      through `llm_local_url` — that path needs the gateway `OllamaProvider` extended to
+      send images. No cloud key is required; an OpenRouter key remains an optional cloud
+      alternative, with a clear note that photos would leave the house.
 - [ ] Pipeline: photo → prompt for strict JSON (title, servings, prep/cook/total time,
       ingredients with quantities, steps, notes, uncertain words marked) → **editable
       draft** beside the raw transcription → Save to Recipes (`#photo-import` label).
