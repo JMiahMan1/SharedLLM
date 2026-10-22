@@ -203,6 +203,22 @@ account is connected, everything above still works.
       and mark-cooked UI.
 - [ ] Docs and deploy.
 
+## Phase 11 — calorie budget and logging (Noom-style)
+
+- [ ] Per-person nutrition profile in the Health tab: age, height, weight, sex and
+      activity level. Adults get a daily calorie budget from Mifflin-St Jeor BMR ×
+      activity (minus a gentle deficit only when they ask); kids and teens get
+      age-appropriate guidance ranges, never weight-loss deficits.
+- [ ] Log meals: ticking a planned meal cooked adds its per-serving nutrition to the
+      day (portion picker ½, 1, 1½ …); quick-add other foods from the imported set
+      or by hand.
+- [ ] Day view: calories eaten vs budget, protein/carbs/fat totals, and a simple
+      density colour (green / yellow / orange) like Noom's food colours.
+- [ ] Optional: weight trend for adults, weekly averages, per-person portions.
+- [ ] Keep it local: no coaching, no cloud, no streaks.
+- [ ] Tests: BMR/budget maths (pure), portion scaling, day totals, the day view UI.
+- [ ] Docs and deploy.
+
 ## Acceptance
 
 - [ ] 100+ imported recipes on the Recipes page, filterable by level (and by appliance
