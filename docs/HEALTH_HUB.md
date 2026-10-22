@@ -210,7 +210,7 @@ MyFitnessPal, plus UX award winners and published case studies.
 
 - [x] Pure tests: BMR/budget maths, scores, portion scaling, density mapping and water. Streaks are not built.
 - [x] UI tests: log a meal (search + manual), day view, check-in and water. Challenge join and kid-mode UI hiding are not built.
-- [x] `npm run typecheck`, `npm run lint`, full UI suite (188 files / 1518 tests), `npm run build`, backend health tests (62) and docs.
+- [x] `npm run typecheck`, `npm run lint`, full UI suite (188 files / 1518 tests), `npm run build`, backend health tests (63) and docs.
 - [ ] Deploy `health gateway ui`, then verify `/health/ready`, the version endpoint and an authenticated `/api/health/profile`.
 
 ## Acceptance

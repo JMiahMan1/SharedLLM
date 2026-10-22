@@ -176,7 +176,10 @@ def _instant(value: str | None, *, field: str = "recorded_at") -> str:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"{field} must be ISO-8601") from exc
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        # A bare instant came from a person or a device on this network, not
+        # from UTC. Anchor it to the household's timezone so a 22:30 bedtime
+        # does not render as 15:30 in the UI.
+        parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
     now = datetime.now(timezone.utc)
     if parsed > now + timedelta(days=1):
         raise HTTPException(status_code=422, detail=f"{field} is in the future")
@@ -673,7 +676,9 @@ def _clock(value: str, night: str) -> datetime:
     """
     text = value.strip()
     if re.match(r"^\d{1,2}:\d{2}(:\d{2})?$", text):
-        parsed = datetime.fromisoformat(f"{night}T{text}")
+        parsed = datetime.fromisoformat(f"{night}T{text}").replace(
+            tzinfo=datetime.now().astimezone().tzinfo
+        )
         if parsed.hour >= 12:
             parsed -= timedelta(days=1)
         return parsed
