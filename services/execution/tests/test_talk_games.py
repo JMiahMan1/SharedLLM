@@ -270,3 +270,30 @@ def test_bank_game_stars_swallows_a_dead_geo_and_says_so(monkeypatch):
     asyncio.run(talk_module._bank_game_stars("kiddo", 1, "Trivia"))  # must not raise
 
     assert any("star banking failed" in w for w in warnings), warnings
+
+
+@pytest.mark.asyncio
+async def test_a_chat_message_answers_the_running_trivia_game(talk, monkeypatch):
+    monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+    from services.execution.handlers import family_games as games
+
+    await talk.handle_talk(_request(game_command="start", game_kind="trivia"))
+    state = games.registry.get("room-1")
+    assert state is not None
+    answer = state.answers[0]
+
+    result = await talk.handle_talk(_request(action="send", message=answer))
+
+    assert result.status == "SUCCESS"
+    assert any("got it" in str(m.get("message", "")) for m in talk.posted)
+
+
+@pytest.mark.asyncio
+async def test_a_chat_message_is_left_alone_when_no_game_is_running(talk, monkeypatch):
+    monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+
+    result = await talk.handle_talk(_request(action="send", message="hello everyone"))
+
+    assert result.status == "SUCCESS"
+    assert result.service == "talk_send"
+    assert talk.posted == [{"message": "hello everyone"}]

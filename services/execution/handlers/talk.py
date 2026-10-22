@@ -477,8 +477,53 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
         )
 
     who = (req.card_detail or "family").strip()
+    outcome = await _apply_game_answer(provider, req.token, who, req.message or "", req.game_words)
+    if outcome is None:
+        return ExecutionResult(
+            status="FAILURE",
+            message="No game is running here. Say 'start a game' first.",
+            service="talk_game",
+        )
+    if outcome["kind"] == "trivia":
+        message = "Answer correct." if outcome["result"]["correct"] else "Not this time."
+    else:
+        message = "Flip processed."
+    return ExecutionResult(status="SUCCESS", message=message, service="talk_game", detail=outcome["result"])
+
+
+async def _apply_game_answer(
+    provider: Any,
+    token: str,
+    who: str,
+    text: str,
+    game_words: str | None = None,
+) -> dict[str, Any] | None:
+    """Apply a chat message as an answer to the game running in the room.
+
+    Returns ``{"kind": ..., "result": ...}`` when a game consumed the text,
+    or ``None`` when no game is running. Shared by the explicit game action
+    and ordinary chat messages, so an answer typed in the app counts whether
+    or not the system account is a member of the room.
+    """
+    from services.execution.handlers import family_games as games
+
+    if not text.strip() and not (game_words or "").strip():
+        return None
+    state = games.registry.get(token)
+    if state is None:
+        return None
+
+    async def say(message: str, card=None) -> None:
+        wire = _encode_envelope(message, card) if card else message
+        await _talk_request_with_retry(
+            provider,
+            "POST",
+            f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(token)}",
+            data={"message": wire},
+        )
+
     if state.kind == "trivia":
-        result = games.apply_trivia_answer(state, who, req.message or "")
+        result = games.apply_trivia_answer(state, who, text)
         if result["correct"]:
             # Bank the win in the real star ledger, not just the in-memory game.
             await _bank_game_stars(who, result["stars"], f"Trivia: {state.question}")
@@ -486,17 +531,17 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
                 f"✅ {result['player']} got it!",
                 games.game_card(state, "Correct!", f"{result['player']} is on {result['stars']} ⭐"),
             )
-            return ExecutionResult(status="SUCCESS", message="Answer correct.", service="talk_game", detail=result)
+            return {"kind": "trivia", "result": result}
 
         # Wrong answers stay quiet unless everyone has had a go.
         if all(p.attempts for p in state.players.values()) and len(state.players) > 1:
             await say(f"The answer was {state.answers[0]}. Next question coming.", None)
-            games.registry.start_trivia(req.token)
-            fresh = games.registry.get(req.token)
+            games.registry.start_trivia(token)
+            fresh = games.registry.get(token)
             await say(games.trivia_prompt(fresh))
-        return ExecutionResult(status="SUCCESS", message="Not this time.", service="talk_game", detail=result)
+        return {"kind": "trivia", "result": result}
 
-    words = [w for w in (req.game_words or req.message or "").split() if w][:2]
+    words = [w for w in (game_words or text).split() if w][:2]
     result = games.apply_memory_flip(state, who, words)
     card = games.game_card(
         state,
@@ -507,7 +552,7 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
     if state.over:
         board = ", ".join(f"{p.name} {p.stars} ⭐" for p in state.leaderboard)
         await say(f"🏆 All pairs found! {board}")
-    return ExecutionResult(status="SUCCESS", message="Flip processed.", service="talk_game", detail=result)
+    return {"kind": "memory", "result": result}
 
 
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
@@ -829,6 +874,14 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 task = asyncio.create_task(run_jarvis_orchestration(query, req.token, req.user_context, reply_to=question_id))
                 _JARVIS_TASKS.add(task)
                 task.add_done_callback(_JARVIS_TASKS.discard)
+            elif (
+                (req.message or "").strip()
+                and len((req.message or "").strip()) <= 120
+                and not (req.message or "").strip().startswith("/")
+            ):
+                # A short message can be an answer to a family game running in
+                # this room; nothing happens when no game is active.
+                await _apply_game_answer(provider, req.token, req.user_context.user, req.message.strip())
 
             return ExecutionResult(
                 status="SUCCESS",
