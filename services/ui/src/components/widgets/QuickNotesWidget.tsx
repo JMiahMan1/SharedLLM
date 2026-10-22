@@ -152,8 +152,8 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
                 key={note.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => navigate('/notes')}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate('/notes'); }}
+                onClick={() => navigate(`/notes?note=${encodeURIComponent(note.path ?? note.title)}`)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate(`/notes?note=${encodeURIComponent(note.path ?? note.title)}`); }}
                 title="Open in Notes"
                 className="glass-card p-3 group cursor-pointer hover:border-purple-500/40"
               >

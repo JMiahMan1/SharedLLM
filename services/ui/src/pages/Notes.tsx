@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
@@ -91,6 +92,7 @@ export default function Notes() {
   const [editing, setEditing] = useState<{ draft: DraftState | null; title: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [metaVersion, setMetaVersion] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
@@ -148,7 +150,7 @@ export default function Notes() {
 
   const closeEditor = useCallback(() => setEditing(null), []);
 
-  const openEditor = async (note?: NoteSummary) => {
+  const openEditor = useCallback(async (note?: NoteSummary) => {
     if (!note) {
       setEditing({ draft: { ...EMPTY_DRAFT }, title: '' });
       return;
@@ -187,7 +189,28 @@ export default function Notes() {
           }
         : current,
     );
-  };
+  }, [asUser, keyOf, metaMap]);
+
+  // Deep link from the dashboard's Quick Notes widget: /notes?note=<path>.
+  // The list must land first because opening reads by path; once consumed the
+  // query is dropped so closing the editor does not immediately reopen it.
+  const requestedNote = searchParams.get('note');
+  const deepLinkHandled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!requestedNote || requestedNote === deepLinkHandled.current) return;
+    const match = notes.find((n) => n.path === requestedNote || n.title === requestedNote);
+    if (!match) return;
+    deepLinkHandled.current = requestedNote;
+    // Defer the open one tick: opening synchronously in an effect cascades
+    // renders, and the notes are already in hand by the time it runs.
+    const timer = window.setTimeout(() => {
+      void openEditor(match);
+      const next = new URLSearchParams(searchParams);
+      next.delete('note');
+      setSearchParams(next, { replace: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [requestedNote, notes, openEditor, searchParams, setSearchParams]);
 
   const saveDraft = async (draft: DraftState) => {
     const title = draft.title.trim() || draft.content.split('\n')[0].slice(0, 60).trim() || 'Untitled note';
