@@ -141,6 +141,44 @@ account is connected, everything above still works.
       the connector optional, conservative on rate, and never block the local
       flows on it.
 
+## Phase 8 — search and import
+
+- [ ] Search sources: the seeded CC0 set itself (a SQLite FTS index over title,
+      ingredients and tags, so search stays offline and instant), TheMealDB's free API for
+      a quick lookup with photos, and "paste a link" import that reads a page's schema.org
+      `Recipe` JSON-LD.
+- [ ] Backend: a small search service or execution handler that builds the index from the
+      imported dataset, with `search`, `fetch` and `url-import` endpoints behind
+      `/api/recipes/*`; conservative rate limits; never block on a dead source.
+- [ ] UI: a search box on Recipes with results (photo, title, time, servings, source), a
+      preview sheet (ingredients + steps), and **Save to Recipes** writing the note with the
+      standard header, guessed labels (`#level-…` from time and ingredient count,
+      `#slow-cooker`/`#instant-pot` from the title, `#30-minutes`, `#5-ingredients`) and
+      the source URL + licence line.
+- [ ] Duplicate guard: skip a result whose source URL is already imported.
+- [ ] Tests: index search and JSON-LD parsing (pytest, fixture page), search → preview →
+      save (vitest).
+
+## Phase 9 — photo and handwriting import
+
+- [ ] Capture: `<input type="file" accept="image/*" capture="environment">` for now (no
+      Capacitor camera plugin is installed; it can come later for a nicer native flow).
+      Keep the photo by uploading it to Nextcloud with the existing `provider.upload_file`
+      and link it from the note, so the original page stays with the recipe.
+- [ ] Vision: a `vision_model` setting (empty = feature off) plus an Ollama multimodal call
+      (a message `images` array with base64 bytes). The house's model today
+      (`qwen3-6-35b-a3b`) is text-only, so the admin pulls a multimodal model
+      (qwen2.5-vl, llama3.2-vision or llava) on the desktop; an OpenRouter key can stand in
+      for cloud vision, with a clear note that photos would leave the house.
+- [ ] Pipeline: photo → prompt for strict JSON (title, servings, prep/cook/total time,
+      ingredients with quantities, steps, notes, uncertain words marked) → **editable
+      draft** beside the raw transcription → Save to Recipes (`#photo-import` label).
+- [ ] Handwriting: ask the model to flag low-confidence words, keep the raw text for
+      comparison, and never save without a review.
+- [ ] Errors: no vision model configured → one-line explanation and the typing path stays.
+- [ ] Tests: stub the vision provider with a fixed sample page (and a handwriting-style
+      response); UI draft edit + save test.
+
 ## Acceptance
 
 - [ ] 100+ imported recipes on the Recipes page, filterable by level and appliance.
