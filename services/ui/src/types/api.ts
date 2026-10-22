@@ -1934,6 +1934,8 @@ export interface BiblePreferences {
   reminder_time?: string;
   read_aloud_voice: string;
   split_view: 'compare' | 'parallel';
+  /** Imported devotional (e.g. "book:2") whose reading leads Today; empty picks the built-in sources. */
+  devotional_work?: string;
 }
 
 export interface BibleStateResponse {

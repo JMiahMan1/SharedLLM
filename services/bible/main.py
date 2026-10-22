@@ -1074,6 +1074,7 @@ class StatePayload(BaseModel):
     reminder_time: str | None = Field(default=None, pattern="^$|^([01][0-9]|2[0-3]):[0-5][0-9]$")
     read_aloud_voice: str | None = None
     split_view: str | None = Field(default=None, pattern="^(compare|parallel)$")
+    devotional_work: str | None = None
 
 
 @app.get("/state")
@@ -1106,6 +1107,7 @@ def _default_preferences(session: Session) -> dict:
         "reminder_time": "",
         "read_aloud_voice": "",
         "split_view": "compare",
+        "devotional_work": "",
     }
 
 
@@ -1124,6 +1126,7 @@ def _preferences(state: UserBibleState) -> dict:
         "reminder_time": state.reminder_time,
         "read_aloud_voice": state.read_aloud_voice,
         "split_view": state.split_view,
+        "devotional_work": state.devotional_work,
     }
 
 
@@ -1189,7 +1192,7 @@ def put_state(
             state.compare_version = _require_version(session, payload.compare_version)
     if payload.cross_version_notes is not None:
         state.cross_version_notes = payload.cross_version_notes
-    for attr in ("show_notes", "font_scale", "line_height", "theme", "page", "reminder_time", "read_aloud_voice", "split_view"):
+    for attr in ("show_notes", "font_scale", "line_height", "theme", "page", "reminder_time", "read_aloud_voice", "split_view", "devotional_work"):
         value = getattr(payload, attr)
         if value is not None:
             setattr(state, attr, value)

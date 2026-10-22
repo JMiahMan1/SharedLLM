@@ -676,6 +676,8 @@ export default function Bible() {
             page={effectivePreferences.page}
             reminderTime={effectivePreferences.reminder_time ?? ''}
             onReminderTime={(reminder_time) => applyPreferences({ reminder_time })}
+            devotionalWork={effectivePreferences.devotional_work ?? ''}
+            onDevotionalWork={(devotional_work) => applyPreferences({ devotional_work })}
           />
           <ImportedDevotionals
             preferences={{
