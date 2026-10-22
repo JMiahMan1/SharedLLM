@@ -11948,6 +11948,18 @@ async def proxy_bible_devotional_book(request: Request, book_id: int, day: str |
     )
 
 
+@app.post("/api/bible/devotional/book/{book_id}/cadence")
+async def proxy_bible_devotional_cadence(request: Request, book_id: int):
+    await _require_identity_from_request(request)
+    payload = await request.json()
+    return await _bible_json(
+        "POST",
+        f"/devotional/book/{book_id}/cadence",
+        label="Failed to set the devotional cadence",
+        json={"cadence": str((payload or {}).get("cadence") or "")},
+    )
+
+
 # --- Scheduled telemetry reports (health/fitness + power) --------------------
 # The user is always taken from the authenticated request, never from the body,
 # so one user cannot schedule or read another user's reports.

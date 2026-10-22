@@ -186,6 +186,7 @@ import type {
   BibleLibraryListing,
   BibleBookListing,
   BibleBookChapter,
+  BibleImportedBook,
   BibleImportedBookDetail,
   BibleImportedBooksResponse,
   BibleDevotionalWork,
@@ -3842,6 +3843,16 @@ export const api = {
   async getBibleDevotionalWorks(): Promise<{ works: BibleDevotionalWork[] }> {
     const resp = await apiClient.get('/api/bible/devotional/works');
     return resp.data;
+  },
+
+  /** Store how a devotional advances: a reading every day or one a week. */
+  async setBibleDevotionalCadence(bookId: number, cadence: 'day' | 'week') {
+    const res = await apiClient.post<{ book: BibleImportedBook }>(
+      `/api/bible/devotional/book/${bookId}/cadence`,
+      { cadence },
+      { timeout: 60_000 },
+    );
+    return res.data;
   },
 
   async getBibleDevotionalBook(

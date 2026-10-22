@@ -28,6 +28,7 @@ import BibleGames from '../components/bible/BibleGames';
 import BibleMemorize from '../components/bible/BibleMemorize';
 import BibleStudySessions from '../components/bible/BibleStudySessions';
 import BibleStudyBooks from '../components/bible/BibleStudyBooks';
+import ImportedDevotionals from '../components/bible/ImportedDevotionals';
 import { marksOnVerse } from '../components/bible/verseMarks';
 import { errorText } from '../lib/errorText';
 
@@ -669,12 +670,23 @@ export default function Bible() {
       )}
 
       {tab === 'today' && (
-        <BibleToday
-          onOpenRef={openRef}
-          page={effectivePreferences.page}
-          reminderTime={effectivePreferences.reminder_time ?? ''}
-          onReminderTime={(reminder_time) => applyPreferences({ reminder_time })}
-        />
+        <div className="space-y-6">
+          <BibleToday
+            onOpenRef={openRef}
+            page={effectivePreferences.page}
+            reminderTime={effectivePreferences.reminder_time ?? ''}
+            onReminderTime={(reminder_time) => applyPreferences({ reminder_time })}
+          />
+          <ImportedDevotionals
+            preferences={{
+              page: effectivePreferences.page,
+              font_scale: effectivePreferences.font_scale,
+              line_height: effectivePreferences.line_height,
+              theme: effectivePreferences.theme,
+            }}
+            onPreferences={applyPreferences}
+          />
+        </div>
       )}
 
       {tab === 'play' && <BibleGames page={effectivePreferences.page} />}

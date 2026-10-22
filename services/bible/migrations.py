@@ -47,6 +47,7 @@ COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("userbiblestate", "reminder_time", "TEXT", "''"),
     ("gamescore", "answers", "TEXT", "''"),
     ("narrationaudio", "chunk_index", "INTEGER", "0"),
+    ("importedbook", "cadence", "TEXT", "'day'"),
 )
 
 

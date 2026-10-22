@@ -47,6 +47,41 @@ _QUESTION_LABEL = re.compile(
     re.IGNORECASE,
 )
 
+# EPUB imports keep the package's own part names ("..._epub_c5_r1"): they mean
+# nothing to a reader, so the first short line of the text is a better label.
+_INTERNAL_LABEL = re.compile(r"_epub_|(?:^|[ _])c\d+_r\d+(?:_|$)", re.IGNORECASE)
+_LABEL_FALLBACK_CHARS = 90
+
+#: "1. The God-Centered Spouse" and "42) One Day at a Time" both name their
+#: devotion. Front matter (contents, introduction) has no such number, so it
+#: never takes a day in the rotation.
+_DEVOTION_NUMBER = re.compile(r"^\s*(\d{1,3})[.)]\s+")
+
+
+def devotion_number(text: str) -> int | None:
+    """The printed devotion number a section opens with, when it has one."""
+    match = _DEVOTION_NUMBER.match(text or "")
+    return int(match.group(1)) if match else None
+
+
+def display_label(chapter: ImportedBookChapter) -> str:
+    """A human label for a chapter, hiding EPUB-internal file names.
+
+    A printed label like "Page 12" is kept as it is. Nothing is stored, so an
+    existing import shows the friendlier label without being uploaded again.
+    """
+    label = (chapter.label or "").strip()
+    if label and not _INTERNAL_LABEL.search(label):
+        return label
+    for line in (chapter.text or "").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        if len(text) <= _LABEL_FALLBACK_CHARS:
+            return text
+        break
+    return f"Reading {chapter.ordinal}"
+
 
 def _merge_question_sections(sections: list[tuple[str, str]]) -> list[tuple[str, str]]:
     """Keep a chapter's question list with the chapter it belongs to.
@@ -216,6 +251,7 @@ def book_dict(book: ImportedBook) -> dict:
         "source": book.source,
         "source_path": book.source_path,
         "chapter_count": book.chapter_count,
+        "cadence": getattr(book, "cadence", "day") or "day",
         "created_at": book.created_at.isoformat() if book.created_at else None,
     }
 
@@ -223,7 +259,8 @@ def book_dict(book: ImportedBook) -> dict:
 def chapter_dict(chapter: ImportedBookChapter) -> dict:
     return {
         "ordinal": chapter.ordinal,
-        "label": chapter.label,
+        "label": display_label(chapter),
+        "number": devotion_number(chapter.text or ""),
         "characters": len(chapter.text or ""),
         "questions": json.loads(chapter.questions) if chapter.questions else [],
     }
@@ -261,31 +298,58 @@ def delete_book(session: Session, book_id: int) -> bool:
     return True
 
 
+def devotional_entries(session: Session, book_id: int) -> list[ImportedBookChapter]:
+    """The sections a devotional rotation may land on.
+
+    A printed number ("1.", "42)") means a real devotion; front matter and
+    back matter have none, so a numbered book never spends a day on its
+    copyright page. Books without printed numbers keep every section.
+    """
+    chapters = chapters_for(session, book_id)
+    numbered = [chapter for chapter in chapters if devotion_number(chapter.text or "")]
+    return numbered or chapters
+
+
+def set_cadence(session: Session, book_id: int, cadence: str) -> bool:
+    """Store how often this book advances: every day or once a week."""
+    if cadence not in ("day", "week"):
+        return False
+    book = session.get(ImportedBook, book_id)
+    if book is None:
+        return False
+    book.cadence = cadence
+    session.add(book)
+    session.commit()
+    return True
+
+
 def devotional_for_day(
     session: Session, book_id: int, day_of_year: int
 ) -> dict | None:
     """A day's reading from an imported devotional book.
 
-    A 365-entry book addresses the day directly. A shorter book cycles, so a
-    30-day devotional still has something to read in February rather than
-    silently stopping in January.
+    The rotation starts at the book's first devotion, so day one of the year
+    is devotion one. A daily book steps once a day; a weekly book steps once
+    a week, which is what a year-long devotional expects. A 365-entry book
+    therefore addresses the day directly, and a shorter book cycles rather
+    than silently stopping.
     """
     book = session.get(ImportedBook, book_id)
-    if book is None or book.kind != "devotional" or book.chapter_count <= 0:
+    if book is None or book.kind != "devotional":
         return None
-    ordinal = ((day_of_year - 1) % book.chapter_count) + 1
-    chapter = session.exec(
-        select(ImportedBookChapter).where(
-            ImportedBookChapter.book_id == book_id,
-            ImportedBookChapter.ordinal == ordinal,
-        )
-    ).first()
-    if chapter is None:
+    entries = devotional_entries(session, book_id)
+    if not entries:
         return None
+    cadence = getattr(book, "cadence", "day") or "day"
+    if cadence == "week":
+        index = ((day_of_year - 1) // 7) % len(entries)
+    else:
+        index = (day_of_year - 1) % len(entries)
+    chapter = entries[index]
     return {
         "source": "library",
         "work": f"book:{book.id}",
-        "title": chapter.label or book.title,
+        "title": display_label(chapter),
         "reference": book.title,
         "text": chapter.text,
         "kind": "text",
