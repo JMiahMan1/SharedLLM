@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
   AlertTriangle, Check, Fan, Minus, Plus, Settings2, Thermometer, Wind, X,
@@ -49,6 +49,8 @@ const ARC_LENGTH = CIRCUMFERENCE * ARC_SWEEP;
 // Claiming only the horizontal axis leaves vertical panning to the ancestor
 // scroller, which is what a thumb expects.
 const MODE_STRIP_TOUCH = 'touch-pan-x';
+
+const STATES_KEY = ['widget', 'climate', 'states'] as const;
 
 type DialProps = {
   /** Arc fill start/end as 0..1 fractions of the 270° sweep. */
@@ -118,6 +120,7 @@ type SetpointPatch = { target?: number; low?: number; high?: number };
 
 export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetProps) {
   const { trigger: haptic } = useHaptics();
+  const queryClient = useQueryClient();
   const updateWidgetConfig = useWidgetStore((s) => s.updateWidgetConfig);
   const config = useMemo(
     () => (userSettings.config ?? {}) as ClimateConfig,
@@ -130,23 +133,46 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
   const [saving, setSaving] = useState(false);
   const [inFlight, setInFlight] = useState<Record<string, boolean>>({});
   const [optimistic, setOptimistic] = useState<Record<string, SetpointPatch>>({});
+  const [modeOverride, setModeOverride] = useState<Record<string, string>>({});
 
   // Mirrors `optimistic` so debounced flushes never read a stale closure.
   const pendingRef = useRef<Record<string, SetpointPatch>>({});
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const ttlTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const modeTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => () => {
     Object.values(debounceTimers.current).forEach(clearTimeout);
     Object.values(ttlTimers.current).forEach(clearTimeout);
+    Object.values(modeTimers.current).forEach(clearTimeout);
   }, []);
 
   const { data, isPending, isError, error, refetch } = useQuery({
-    queryKey: ['widget', 'climate', 'states'],
+    queryKey: STATES_KEY,
     queryFn: () => api.getDeviceStates(['climate']),
     refetchInterval: POLL_MS,
     refetchOnWindowFocus: true,
   });
+
+  /**
+   * Paint a control change into the cached entity before Home Assistant has
+   * echoed it. Without this a mode tap looked ignored until the 15s poll, so
+   * people kept tapping and re-sent the same command. A failed call refetches,
+   * which rolls the optimistic paint back to what HA actually reports.
+   */
+  const patchDevice = useCallback((entityId: string, patch: {
+    state?: string;
+    attributes?: Record<string, number | string | boolean | string[] | null>;
+  }) => {
+    queryClient.setQueryData<DeviceEntry[]>(STATES_KEY, (previous) => previous?.map((device) => {
+      if (device.entity_id !== entityId) return device;
+      return {
+        ...device,
+        ...(patch.state === undefined ? {} : { state: patch.state }),
+        attributes: { ...device.attributes, ...patch.attributes },
+      };
+    }));
+  }, [queryClient]);
 
   const all = useMemo(() => data || [], [data]);
 
@@ -220,9 +246,14 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
     try {
       await api.callHaService('climate', service, entityId, payload);
       void haptic('light');
+      // Pull the authoritative state back instead of waiting for the 15s poll.
+      // If HA accepted the command but settles asynchronously, the optimistic
+      // paint above stays until it echoes or its TTL expires.
+      void refetch();
       return true;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : `climate.${service} failed`);
+      void refetch();
       return false;
     } finally {
       setInFlight((prev) => {
@@ -231,7 +262,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
         return next;
       });
     }
-  }, [accessible, haptic]);
+  }, [accessible, haptic, refetch]);
 
   /**
    * Apply a setpoint change: paint it immediately, then send one debounced
@@ -298,22 +329,49 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
   }, [queueSetpoint]);
 
   const setMode = useCallback((device: DeviceEntry, mode: string) => {
-    const current = climateAttrs(device).hvac_mode;
+    const entityId = device.entity_id;
+    const current = modeOverride[entityId] ?? climateAttrs(device).hvac_mode;
     if (current === mode) return;
-    void run(device.entity_id, 'set_hvac_mode', { hvac_mode: mode }, `${device.entity_id}:mode`);
-  }, [run]);
+    // The mode is the one control whose whole panel changes shape (dual
+    // setpoint, fan/swing rows), so paint it before the service round-trip.
+    // Hold it past the refetch too: HA can accept the call before its state
+    // machine reports the new mode, and a refetch would otherwise paint the
+    // old one for the rest of the poll interval.
+    patchDevice(entityId, { state: mode, attributes: { hvac_mode: mode } });
+    setModeOverride((previous) => ({ ...previous, [entityId]: mode }));
+    clearTimeout(modeTimers.current[entityId]);
+    modeTimers.current[entityId] = setTimeout(() => {
+      setModeOverride((previous) => {
+        const next = { ...previous };
+        delete next[entityId];
+        return next;
+      });
+    }, OPTIMISTIC_TTL_MS + 4000);
+    void run(entityId, 'set_hvac_mode', { hvac_mode: mode }, `${entityId}:mode`).then((ok) => {
+      if (ok) return;
+      clearTimeout(modeTimers.current[entityId]);
+      setModeOverride((previous) => {
+        const next = { ...previous };
+        delete next[entityId];
+        return next;
+      });
+    });
+  }, [modeOverride, patchDevice, run]);
 
   const setPreset = useCallback((device: DeviceEntry, preset: string) => {
+    patchDevice(device.entity_id, { attributes: { preset_mode: preset } });
     void run(device.entity_id, 'set_preset_mode', { preset_mode: preset }, `${device.entity_id}:preset`);
-  }, [run]);
+  }, [patchDevice, run]);
 
   const setFanMode = useCallback((device: DeviceEntry, mode: string) => {
+    patchDevice(device.entity_id, { attributes: { fan_mode: mode } });
     void run(device.entity_id, 'set_fan_mode', { fan_mode: mode }, `${device.entity_id}:fan`);
-  }, [run]);
+  }, [patchDevice, run]);
 
   const setSwingMode = useCallback((device: DeviceEntry, mode: string) => {
+    patchDevice(device.entity_id, { attributes: { swing_mode: mode } });
     void run(device.entity_id, 'set_swing_mode', { swing_mode: mode }, `${device.entity_id}:swing`);
-  }, [run]);
+  }, [patchDevice, run]);
 
   const saveSetup = useCallback(async (deviceIds: string[], nextLayout: ClimateLayout) => {
     const widgetKey = userSettings.widget_key;
@@ -343,15 +401,17 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
   /** Hero dial for one device: ring + setpoint control + modes + presets. */
   const renderDial = (device: DeviceEntry) => {
     const attrs = climateAttrs(device);
+    const activeMode = modeOverride[device.entity_id] ?? attrs.hvac_mode;
+    const shownAttrs = { ...attrs, hvac_mode: activeMode };
     const patch = pending[device.entity_id] || {};
     const { min, max } = setpointRange(attrs);
-    const tone = actionTone(attrs.hvac_action, attrs.hvac_mode);
+    const tone = actionTone(attrs.hvac_action, activeMode);
     const current = numberAttr(attrs.current_temperature);
     const target = patch.target ?? numberAttr(attrs.temperature);
     const low = patch.low ?? numberAttr(attrs.target_temp_low);
     const high = patch.high ?? numberAttr(attrs.target_temp_high);
-    const dual = typeof low === 'number' && typeof high === 'number' && attrs.hvac_mode === 'heat_cool';
-    const off = device.state === 'off';
+    const dual = typeof low === 'number' && typeof high === 'number' && activeMode === 'heat_cool';
+    const off = activeMode ? activeMode === 'off' : device.state === 'off';
     const span = Math.max(max - min, 1);
     const frac = (value: number) => clamp((value - min) / span, 0, 1);
     const disabled = controlsDisabled(device);
@@ -397,7 +457,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
         </div>
 
         <p className={`truncate text-center text-[10px] font-semibold uppercase tracking-wider ${tone.text}`}>
-          {statusLine(device, attrs)}
+          {statusLine(device, shownAttrs)}
         </p>
 
         {dual && (
@@ -431,7 +491,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
           <div className={`flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${MODE_STRIP_TOUCH}`}>
             {modesFor(device).map((mode) => {
               const { Icon, label, tone: modeTone } = modeVisual(mode);
-              const active = attrs.hvac_mode === mode;
+              const active = activeMode === mode;
               return (
                 <button
                   key={mode}
@@ -520,22 +580,24 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
   /** Compact room tile. The whole tile is the tap target → promotes to dial. */
   const renderTile = (device: DeviceEntry) => {
     const attrs = climateAttrs(device);
-    const tone = actionTone(attrs.hvac_action, attrs.hvac_mode);
+    const activeMode = modeOverride[device.entity_id] ?? attrs.hvac_mode;
+    const shownAttrs = { ...attrs, hvac_mode: activeMode };
+    const tone = actionTone(attrs.hvac_action, activeMode);
     const target = pending[device.entity_id]?.target ?? numberAttr(attrs.temperature);
     const current = numberAttr(attrs.current_temperature);
     const low = numberAttr(attrs.target_temp_low);
     const high = numberAttr(attrs.target_temp_high);
     // A dual-bound thermostat never reports a single target, so the tile must
     // show the band instead of an empty "--°".
-    const dual = attrs.hvac_mode === 'heat_cool' && typeof low === 'number' && typeof high === 'number';
+    const dual = activeMode === 'heat_cool' && typeof low === 'number' && typeof high === 'number';
     const headline = typeof target === 'number' ? formatTemp(target)
       : dual ? `${formatTemp(low)}-${formatTemp(high)}`
       : formatTemp(current);
     const fillValue = typeof target === 'number' ? target : dual ? (low + high) / 2 : undefined;
     const { min, max } = setpointRange(attrs);
     const span = Math.max(max - min, 1);
-    const off = device.state === 'off';
-    const { Icon } = modeVisual(attrs.hvac_mode);
+    const off = activeMode ? activeMode === 'off' : device.state === 'off';
+    const { Icon } = modeVisual(activeMode);
     const fill = typeof fillValue === 'number' ? clamp((fillValue - min) / span, 0, 1) : 0;
     return (
       <button
@@ -554,7 +616,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
           {headline}°
         </span>
         <span className="text-[9px] tabular-nums text-slate-500">
-          {typeof current === 'number' ? `${formatTemp(current)}° now` : statusLine(device, attrs)}
+          {typeof current === 'number' ? `${formatTemp(current)}° now` : statusLine(device, shownAttrs)}
         </span>
         <span className="mt-0.5 block h-1 w-full overflow-hidden rounded-full bg-white/10">
           <span

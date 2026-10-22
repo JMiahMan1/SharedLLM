@@ -138,6 +138,23 @@ describe('ClimateWidget', () => {
     ));
   });
 
+  it('shows a mode change immediately and keeps it through the refetch', async () => {
+    renderWidget({ config: { devices: ['climate.living_room'] } });
+
+    const off = await screen.findByRole('button', { name: 'Off' });
+    fireEvent.click(off);
+
+    // The command is in flight, but the dial must already say Off. Waiting for
+    // the poll is what made a working thermostat look unresponsive.
+    expect(off).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('System off')).toBeInTheDocument();
+
+    await waitFor(() => expect(mockedApi.getDeviceStates.mock.calls.length).toBeGreaterThan(1));
+    // The fixture still reports heat; the optimistic mode must survive that
+    // stale refetch instead of snapping back until HA catches up.
+    expect(screen.getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('trusts the server-filtered listing instead of re-deriving permission', async () => {
     // An entity protection permit exists with no DeviceAssignment row behind
     // it. The old client-side check compared against assignments and would

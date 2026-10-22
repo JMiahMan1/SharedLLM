@@ -1,8 +1,8 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useWidgetStore } from '../../stores/widgetStore';
-import { titleize } from '../../lib/climate';
+import { climateAttrs, modesFor, numberAttr, titleize } from '../../lib/climate';
 import { api, apiClient } from '../../services/api';
 import type { DeviceEntry, IWidgetProps } from '../../types/widget';
 import { WidgetCard } from './WidgetCard';
@@ -124,12 +124,18 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
 
   // Detailed modal
   const [selectedDevice, setSelectedDevice] = useState<DeviceEntry | null>(null);
+  // A thermostat command can round-trip through `loadDevices` before Home
+  // Assistant publishes the new attribute. Hold the user's change briefly so
+  // the panel does not snap back to the old mode/setpoint.
+  const climatePatchRef = useRef<{
+    entityId: string;
+    attributes: Record<string, number | string>;
+    until: number;
+  } | null>(null);
   const [updatingAssignment, setUpdatingAssignment] = useState(false);
 
   // Local attribute state for controls inside modal
   const [brightness, setBrightness] = useState<number>(100);
-  // Null until the thermostat reports a target: no invented 72°F.
-  const [temperature, setTemperature] = useState<number | null>(null);
   const [volume, setVolume] = useState<number>(50);
 
   // Escape closes the device dialog, matching every other sheet in the app.
@@ -151,6 +157,20 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       // Load device states (isolated): failure here is shown as error
       const state = await api.getDeviceStates(['light', 'switch', 'media_player', 'cover', 'climate', 'lock', 'fan']);
       setDevices(state);
+      // Keep an open detail dialog in step with the state that was just read.
+      // Without this the modal kept the attributes it opened with, so a mode
+      // change looked ignored until the dialog was closed and reopened.
+      setSelectedDevice((current) => {
+        if (!current) return current;
+        const fresh = state.find((device) => device.entity_id === current.entity_id);
+        if (!fresh) return current;
+        const patch = climatePatchRef.current;
+        if (patch && patch.entityId === fresh.entity_id && Date.now() < patch.until) {
+          return { ...fresh, attributes: { ...fresh.attributes, ...patch.attributes } };
+        }
+        if (patch && patch.entityId === fresh.entity_id) climatePatchRef.current = null;
+        return fresh;
+      });
       setActivityCutoff(Date.now() - 30 * 24 * 60 * 60 * 1000);
     } catch (err) {
       console.error('Failed to load device states:', err);
@@ -309,9 +329,6 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
           ? Math.max(1, Math.round(brightnessAttr / 2.55))
           : isActive(device.state) ? 100 : 1
       );
-    } else if (device.domain === 'climate') {
-      const tempAttr = typeof attrs?.temperature === 'number' ? attrs.temperature : null;
-      setTemperature(tempAttr != null ? Math.round(tempAttr) : null);
     } else if (device.domain === 'media_player') {
       const volAttr = typeof attrs?.volume_level === 'number' ? attrs.volume_level : null;
       setVolume(volAttr != null ? Math.round(volAttr * 100) : 50);
@@ -321,6 +338,31 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   const selectedToggleAction = selectedDevice
     ? getToggleAction(selectedDevice.domain, selectedDevice.state)
     : null;
+
+  const selectedClimate = selectedDevice?.domain === 'climate' ? climateAttrs(selectedDevice) : null;
+  const targetTemperature = numberAttr(selectedClimate?.temperature);
+  const lowSetpoint = numberAttr(selectedClimate?.target_temp_low);
+  const highSetpoint = numberAttr(selectedClimate?.target_temp_high);
+  const heatCool = selectedClimate?.hvac_mode === 'heat_cool'
+    && typeof lowSetpoint === 'number' && typeof highSetpoint === 'number';
+  const climateMode = selectedClimate?.hvac_mode ?? selectedDevice?.state?.toLowerCase() ?? '';
+  const climateStep = numberAttr(selectedClimate?.target_temp_step) ?? 1;
+
+  /** Paint the thermostat optimistically; `loadDevices` merges it until HA echoes. */
+  const patchSelectedClimate = useCallback((attributes: Record<string, number | string>) => {
+    if (!selectedDevice || selectedDevice.domain !== 'climate') return;
+    const { entity_id: entityId } = selectedDevice;
+    climatePatchRef.current = {
+      entityId,
+      attributes: { ...climatePatchRef.current?.attributes, ...attributes },
+      until: Date.now() + 6000,
+    };
+    setSelectedDevice((current) => (
+      current && current.entity_id === entityId
+        ? { ...current, attributes: { ...current.attributes, ...attributes } }
+        : current
+    ));
+  }, [selectedDevice]);
 
   // Who may use the selected device. A device can be shared: ticking a member
   // adds them and unticking removes only them.
@@ -806,54 +848,145 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                   <h4 className="text-xs font-bold text-slate-400 flex items-center gap-1">
                     <Thermometer size={12} /> Climate Thermostat Controls
                   </h4>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500">Target Temperature</p>
-                      <p className="text-2xl font-black text-white mt-1">{temperature == null ? 'No data' : `${temperature}°`}</p>
+                  {heatCool ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-xl border border-white/5 bg-white/[0.03] p-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">Heat</p>
+                        <p className="mt-0.5 text-xl font-black text-white tabular-nums">
+                          {lowSetpoint == null ? 'No data' : `${lowSetpoint}°`}
+                        </p>
+                        <div className="mt-1 flex items-center gap-2">
+                          <button
+                            disabled={lowSetpoint == null || highSetpoint == null}
+                            aria-label="Lower heat setpoint"
+                            onClick={() => {
+                              if (lowSetpoint == null || highSetpoint == null) return;
+                              const next = Math.min(lowSetpoint - climateStep, highSetpoint);
+                              patchSelectedClimate({ target_temp_low: next });
+                              callHAService('climate', 'set_temperature', selectedDevice.entity_id, {
+                                target_temp_low: next,
+                                target_temp_high: highSetpoint,
+                              });
+                            }}
+                            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
+                          >
+                            -
+                          </button>
+                          <button
+                            disabled={lowSetpoint == null || highSetpoint == null}
+                            aria-label="Raise heat setpoint"
+                            onClick={() => {
+                              if (lowSetpoint == null || highSetpoint == null) return;
+                              const next = Math.min(lowSetpoint + climateStep, highSetpoint);
+                              patchSelectedClimate({ target_temp_low: next });
+                              callHAService('climate', 'set_temperature', selectedDevice.entity_id, {
+                                target_temp_low: next,
+                                target_temp_high: highSetpoint,
+                              });
+                            }}
+                            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-white/5 bg-white/[0.03] p-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">Cool</p>
+                        <p className="mt-0.5 text-xl font-black text-white tabular-nums">
+                          {highSetpoint == null ? 'No data' : `${highSetpoint}°`}
+                        </p>
+                        <div className="mt-1 flex items-center gap-2">
+                          <button
+                            disabled={lowSetpoint == null || highSetpoint == null}
+                            aria-label="Lower cool setpoint"
+                            onClick={() => {
+                              if (lowSetpoint == null || highSetpoint == null) return;
+                              const next = Math.max(highSetpoint - climateStep, lowSetpoint);
+                              patchSelectedClimate({ target_temp_high: next });
+                              callHAService('climate', 'set_temperature', selectedDevice.entity_id, {
+                                target_temp_low: lowSetpoint,
+                                target_temp_high: next,
+                              });
+                            }}
+                            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
+                          >
+                            -
+                          </button>
+                          <button
+                            disabled={lowSetpoint == null || highSetpoint == null}
+                            aria-label="Raise cool setpoint"
+                            onClick={() => {
+                              if (lowSetpoint == null || highSetpoint == null) return;
+                              const next = Math.max(highSetpoint + climateStep, lowSetpoint);
+                              patchSelectedClimate({ target_temp_high: next });
+                              callHAService('climate', 'set_temperature', selectedDevice.entity_id, {
+                                target_temp_low: lowSetpoint,
+                                target_temp_high: next,
+                              });
+                            }}
+                            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        disabled={temperature == null}
-                        aria-label="Lower target temperature"
-                        onClick={() => {
-                          if (temperature == null) return;
-                          const next = temperature - 1;
-                          setTemperature(next);
-                          callHAService('climate', 'set_temperature', selectedDevice.entity_id, { temperature: next });
-                        }}
-                        className="w-11 h-11 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white hover:bg-slate-700 transition-colors disabled:opacity-40"
-                      >
-                        -
-                      </button>
-                      <button
-                        disabled={temperature == null}
-                        aria-label="Raise target temperature"
-                        onClick={() => {
-                          if (temperature == null) return;
-                          const next = temperature + 1;
-                          setTemperature(next);
-                          callHAService('climate', 'set_temperature', selectedDevice.entity_id, { temperature: next });
-                        }}
-                        className="w-11 h-11 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white hover:bg-slate-700 transition-colors disabled:opacity-40"
-                      >
-                        +
-                      </button>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-slate-500">Target Temperature</p>
+                        <p className="text-2xl font-black text-white mt-1">
+                          {targetTemperature == null ? 'No data' : `${targetTemperature}°`}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          disabled={targetTemperature == null}
+                          aria-label="Lower target temperature"
+                          onClick={() => {
+                            if (targetTemperature == null) return;
+                            const next = targetTemperature - climateStep;
+                            patchSelectedClimate({ temperature: next });
+                            callHAService('climate', 'set_temperature', selectedDevice.entity_id, { temperature: next });
+                          }}
+                          className="w-11 h-11 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white hover:bg-slate-700 transition-colors disabled:opacity-40"
+                        >
+                          -
+                        </button>
+                        <button
+                          disabled={targetTemperature == null}
+                          aria-label="Raise target temperature"
+                          onClick={() => {
+                            if (targetTemperature == null) return;
+                            const next = targetTemperature + climateStep;
+                            patchSelectedClimate({ temperature: next });
+                            callHAService('climate', 'set_temperature', selectedDevice.entity_id, { temperature: next });
+                          }}
+                          className="w-11 h-11 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white hover:bg-slate-700 transition-colors disabled:opacity-40"
+                        >
+                          +
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
                   <div className="space-y-1">
                     <p className="text-xs text-slate-500">HVAC Operation Mode</p>
-                    <div className="flex gap-2">
-                      {['cool', 'heat', 'off'].map((mode) => (
+                    <div className="flex flex-wrap gap-2">
+                      {modesFor(selectedDevice).map((mode) => (
                         <button
                           key={mode}
-                          onClick={() => callHAService('climate', 'set_hvac_mode', selectedDevice.entity_id, { hvac_mode: mode })}
+                          onClick={() => {
+                            patchSelectedClimate({ hvac_mode: mode });
+                            callHAService('climate', 'set_hvac_mode', selectedDevice.entity_id, { hvac_mode: mode });
+                          }}
+                          aria-pressed={climateMode === mode}
                           className={`text-xs font-semibold px-3 py-1.5 rounded-lg border uppercase ${
-                            selectedDevice.state.toLowerCase() === mode
+                            climateMode === mode
                               ? 'bg-indigo-600/20 border-indigo-500 text-white'
                               : 'bg-slate-950/20 border-slate-800 text-slate-500 hover:text-slate-300'
                           }`}
                         >
-                          {mode}
+                          {titleize(mode)}
                         </button>
                       ))}
                     </div>
