@@ -1028,6 +1028,13 @@ marked *planned* are not built.
 **2. Today** (`components/bible/BibleToday.tsx`, `BiblePlans.tsx`)
 
 - Verse of the Day and today's devotional.
+- Imported devotionals: the **Devotional books** shelf lists every PDF/EPUB
+  imported as *Daily Devotions*. A book's card switches it between daily and
+  weekly reading (weekly steps once a week, so 21 Oct reads devotion 42) and
+  opens it in the focused reader. Each reader's **default devotional** is
+  saved with their Bible preferences: the "Devotional book" selector on Today
+  remembers the pick and opens on that book's reading for the day, while
+  "Default sources" keeps the built-in readings.
 - Plans: catalog grouped by category; a plan shows its day checklist,
   progress, **Catch me up** (marks missed days complete in one tap,
   YouVersion parity) and stop (asks first). Twelve plans are generated from

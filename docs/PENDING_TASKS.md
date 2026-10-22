@@ -7,7 +7,9 @@ on 2026-10-21. When something here ships, delete it; history lives in git.
 
 - Background playback stops when the app is swiped away from recents (the
   WebView is destroyed). Surviving that needs a native audio player.
-- The remaining phases of `docs/MEDIA_OVERHAUL.md`.
+- The remaining phases of `docs/MEDIA_OVERHAUL.md` (Phase 4 — the global
+  mini player, now-playing, output picker, queue, shortcuts and sleep timer —
+  has shipped; phases 3 and 5-9 remain).
 
 ## Bible study
 
