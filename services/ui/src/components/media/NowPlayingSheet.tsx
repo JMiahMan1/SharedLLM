@@ -12,6 +12,7 @@ import { useAccentColor } from '../../hooks/useAccentColor';
 import { useHaptics } from '../../hooks/useHaptics';
 import { api } from '../../services/api';
 import { formatClock } from '../../lib/utils';
+import { proxiedImage } from '../../lib/mediaImage';
 import OutputSheet from './OutputSheet';
 
 type RepeatMode = 'off' | 'all' | 'one';
@@ -58,7 +59,10 @@ export default function NowPlayingSheet({
   const player = useOptionalWebPlayer();
   const reduceMotion = useReducedMotion();
   const { trigger } = useHaptics();
-  const accent = useAccentColor(player?.mediaImage);
+  // MA hands out relative paths and provider URLs; only the gateway proxy can
+  // fetch both with credentials, and the accent canvas needs the same origin.
+  const art = proxiedImage(player?.mediaImage);
+  const accent = useAccentColor(art);
 
   const [dragPosition, setDragPosition] = useState<number | null>(null);
   const [favorite, setFavorite] = useState<{ uri: string; value: boolean } | null>(null);
@@ -263,11 +267,11 @@ export default function NowPlayingSheet({
           transition={{ duration: reduceMotion ? 0 : 0.2 }}
         >
           <div className="absolute inset-0 bg-slate-950" />
-          {player.mediaImage ? (
+          {art ? (
             <div
               aria-hidden
               className="absolute inset-0 scale-125 bg-cover bg-center opacity-40 blur-3xl"
-              style={{ backgroundImage: `url("${player.mediaImage}")` }}
+              style={{ backgroundImage: `url("${art}")` }}
             />
           ) : (
             <div
@@ -303,10 +307,10 @@ export default function NowPlayingSheet({
 
             <div className="flex min-h-0 flex-1 flex-col justify-start gap-4 overflow-y-auto py-1 sm:justify-center sm:gap-6">
               <div className="flex justify-center">
-                {player.mediaImage ? (
+                {art ? (
                   <motion.img
                     layoutId="np-art"
-                    src={player.mediaImage}
+                    src={art}
                     alt=""
                     className="aspect-square w-[min(74vw,36dvh)] max-w-[380px] rounded-2xl object-cover shadow-2xl shadow-black/60"
                   />

@@ -21,6 +21,7 @@ import { getServerOrigin, getWsProtocolFor } from './serverUrl';
 import { storageGetSync } from './storage';
 import { parseMaPlayerList, type MaPlayerListEntry } from './deviceLabels';
 import { extractMaImage } from './maImage';
+import { proxiedImage } from './mediaImage';
 
 /**
  * UI-level playback state. Deliberately distinct from Sendspin's own
@@ -94,18 +95,13 @@ function gatewaySocketUrl(path: string, apiToken: string): string {
 }
 
 /* Resolve a (possibly relative) MA image reference to an absolute URL so the
-   OS MediaSession artwork can load it. */
+   OS MediaSession artwork can load it. Goes through the gateway image proxy:
+   MA paths are relative to the MA host, not the app, and the proxy carries the
+   credentials. */
 function buildMediaArtwork(img?: string | null): MediaImage[] {
-  if (!img) return [];
-  let url = img;
-  if (img.startsWith('/')) {
-    try {
-      url = new URL(img, getServerOrigin()).href;
-    } catch {
-      /* keep as-is */
-    }
-  }
-  return [{ src: url, sizes: '512x512', type: 'image/png' }];
+  const src = proxiedImage(img);
+  if (!src) return [];
+  return [{ src, sizes: '512x512', type: 'image/png' }];
 }
 
 function clientName(): string {

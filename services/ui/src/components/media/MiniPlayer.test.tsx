@@ -63,6 +63,18 @@ describe('MiniPlayer', () => {
     expect(onOpen).toHaveBeenCalled();
   });
 
+  it('loads cover art through the gateway image proxy', () => {
+    const { container } = renderAt('/bible', player({ mediaImage: '/imageproxy/cover.jpg?size=512' }));
+    const img = container.querySelector('img');
+    expect(img?.getAttribute('src')).toContain('/api/media/imageproxy?path=');
+    expect(img?.getAttribute('src')).toContain(encodeURIComponent('/imageproxy/cover.jpg?size=512'));
+  });
+
+  it('sits above the measured bottom bar instead of a hard-coded offset', () => {
+    renderAt('/bible', player());
+    expect(screen.getByTestId('mini-player').className).toContain('--bottom-bar');
+  });
+
   it('renders nothing when the player is idle', () => {
     renderAt('/bible', player({ mediaTitle: null }));
     expect(screen.queryByTestId('mini-player')).toBeNull();

@@ -1117,7 +1117,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       {children}
       {bannerCall && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] left-1/2 z-[130] flex w-[min(92vw,28rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-emerald-400/30 bg-slate-900 px-3 py-2.5 shadow-2xl sm:bottom-4"
+          className="fixed bottom-[calc(var(--bottom-bar)+0.75rem)] left-1/2 z-[130] flex w-[min(92vw,28rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-emerald-400/30 bg-slate-900 px-3 py-2.5 shadow-2xl"
           data-testid="call-banner"
         >
           <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
