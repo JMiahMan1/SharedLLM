@@ -16,6 +16,14 @@ class User(SQLModel, table=True):  # type: ignore
     display_name: str = Field(default="")
     is_admin: bool = Field(default=False)
     is_system_default: bool = Field(default=False)
+    # Family shape, used for household permissions and privacy rules. Admin
+    # remains a separate flag: marking someone "father" never silently grants
+    # account or server access.
+    family_role: str = Field(default="other")  # father|mother|child|teen|adult_child|other
+    # Only meaningful for a child/teen: the mother account they belong to.
+    # This is a relationship, not a credential; the person can still choose
+    # whether to share anything with her.
+    mother_username: str | None = Field(default=None)
     password_hash: str | None = Field(default=None)
     api_key: str | None = Field(default=None, index=True)
     api_key_enc: str | None = Field(default=None)

@@ -1,6 +1,6 @@
 # Health Hub: the best of the health apps in one
 
-Status: **partially built (2026-10-22): phases 1–5 core, sharing/export and tests are in code; deploy pending.** Last live app commit `152451cf`.
+Status: **partially built (2026-10-22): phases 1–5 core plus opt-in cycle tracking, family sharing/export and tests are in code; deploy pending.** Last live app commit `152451cf`.
 Companion plans: `docs/RECIPES.md` (Phases 10–11 carry the recipe-nutrition and
 calorie-budget work that this hub consumes), `docs/HEALTH_STEPS.md` (step counting,
 already live).
@@ -29,9 +29,23 @@ Built in this pass:
 - **Nutrition**: OpenFoodFacts search, barcode lookup, manual entry, per-meal
   day view, per-serving macros, density guides, calorie range from Mifflin-St
   Jeor, and guidance-only ranges for minors (never a deficit).
-- **Family sharing** per scope (`sleep`, `nutrition`), off by default; only
-  explicitly granted scopes are projected. Export returns all of one person's
-  data as JSON.
+- **Opt-in cycle tracking**: private by default and hidden entirely for a
+  profile whose sex is `male`. Period dates, flow, symptoms, mood/energy, BBT
+  and ovulation-test logs are stored per person; phase, cycle day, next-period
+  estimate and confidence are computed from logged dates (explicit averages or
+  observed 15–90 day gaps). Irregular cycles are described, not diagnosed.
+  Fertile windows are deliberately not predicted: every surface says estimates
+  only, not contraception or medical advice. The family projection shares at
+  most phase/next-period, never flow, symptoms, notes or periods.
+- **Family roles and sharing**: `father`, `mother`, `child`, `teen`,
+  `adult_child`, `other` on the Identity account, with `family.manage` for a
+  Home manager/mother. Minors keep circle activity sharing on (locked in the
+  UI and refused by the API); an adult child may opt out. Cycle sharing for a
+  minor is limited to the one linked mother account. See
+  [ROLES.md](ROLES.md).
+- **Family sharing** per scope (`sleep`, `nutrition`, `cycle`), off by
+  default; only explicitly granted scopes are projected. Export returns all of
+  one person's data as JSON.
 - **UI**: `Today / Fitness / Sleep / Nutrition / Health` tabs. The previous
   Fitness page is hosted unchanged under its tab, so hourly step charts,
   workouts, achievements and the family activity feed keep one implementation.
@@ -198,7 +212,7 @@ MyFitnessPal, plus UX award winners and published case studies.
 ### Phase 7 — family
 
 - [ ] Weekly family challenge (steps, veg servings, cook nights) with a leaderboard.
-- [ ] Cheers/kudos on a family member's day; share a health card to chat. Scope-limited sleep/nutrition sharing is built; cheers and cards are not.
+- [ ] Cheers/kudos on a family member's day; share a health card to chat. Scope-limited sleep/nutrition/cycle sharing is built; cheers and cards are not.
 
 ### Phase 8 — integrations everywhere
 
@@ -209,8 +223,8 @@ MyFitnessPal, plus UX award winners and published case studies.
 ### Phase 9 — tests, docs, deploy
 
 - [x] Pure tests: BMR/budget maths, scores, portion scaling, density mapping and water. Streaks are not built.
-- [x] UI tests: log a meal (search + manual), day view, check-in and water. Challenge join and kid-mode UI hiding are not built.
-- [x] `npm run typecheck`, `npm run lint`, full UI suite (188 files / 1518 tests), `npm run build`, backend health tests (63) and docs.
+- [x] UI tests: log a meal (search + manual), day view, check-in, water and cycle opt-in/log/share. Challenge join and kid-mode UI hiding are not built.
+- [x] `npm run typecheck`, `npm run lint`, full UI suite (189 files / 1525 tests), `npm run build`, backend health tests (87), identity family-role tests and docs.
 - [ ] Deploy `health gateway ui`, then verify `/health/ready`, the version endpoint and an authenticated `/api/health/profile`.
 
 ## Acceptance
@@ -219,5 +233,6 @@ MyFitnessPal, plus UX award winners and published case studies.
 - [ ] A planned dinner logs with one tap and shows calories, macros and portions.
 - [ ] Barcode lookup works; photo and voice logging are not built.
 - [x] Sleep and readiness show from manual data now and are device-ready; check-ins cover the no-wearable case.
+- [x] Cycle tracking is opt-in, private, hidden for a male profile, and minors can share it only with their linked mother account.
 - [ ] A family challenge is visible, joinable and shared in chat. Only opt-in scope sharing exists.
 - [x] Kid accounts never see calorie deficits or weight-loss framing.

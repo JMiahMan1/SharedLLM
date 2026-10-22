@@ -3,9 +3,11 @@
 Pydantic schemas for the Identity Service API.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+FamilyRole = Literal["father", "mother", "child", "teen", "adult_child", "other"]
 
 # Internal inter-service schema
 
@@ -97,6 +99,8 @@ class UserCreate(BaseModel):
     display_name: str = ""
     is_admin: bool = False
     is_system_default: bool = False
+    family_role: FamilyRole = "other"
+    mother_username: str | None = None
     api_key: str | None = None
     password: str | None = None
     nextcloud_url: str | None = None
@@ -208,6 +212,13 @@ class UserRead(BaseModel):
     display_name: str
     is_admin: bool
     is_system_default: bool
+    #: Household relationship and the mother account a child/teen belongs to.
+    family_role: FamilyRole = "other"
+    mother_username: str | None = None
+    #: Derived: child/teen are minors. Their activity sharing cannot be turned
+    #: off (the family circle sees totals); adult children can opt out.
+    is_minor: bool = False
+    sharing_locked: bool = False
     #: Ids of the roles this user holds, and the permissions they add up to
     #: (every permission for an admin). Filled by Identity, not stored.
     role_ids: list[int] = []
@@ -293,6 +304,32 @@ class RoleRead(BaseModel):
 
 class UserRolesUpdate(BaseModel):
     role_ids: list[int]
+
+
+class FamilyUpdate(BaseModel):
+    """Change one person's place in the family, without touching credentials.
+
+    ``mother_username`` is only meaningful for a child or teen. Send an empty
+    string (or ``clear_mother``) to remove the link; omitting it leaves the
+    existing link alone.
+    """
+
+    family_role: FamilyRole | None = None
+    mother_username: str | None = None
+    clear_mother: bool = False
+
+
+class FamilyMemberRead(BaseModel):
+    """Safe family-list fields; never credentials, keys or integration URLs."""
+
+    username: str
+    display_name: str
+    family_role: FamilyRole
+    mother_username: str | None = None
+    is_minor: bool = False
+    sharing_locked: bool = False
+    is_admin: bool = False
+    avatar: str | None = None
 
 
 class EntityProtectionUpdate(BaseModel):

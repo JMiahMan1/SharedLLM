@@ -12095,6 +12095,51 @@ async def barcode_health_food(code: str, request: Request):
     return await _health_json("GET", f"/food/barcode/{code}", request)
 
 
+@app.get("/api/health/cycle")
+async def get_health_cycle(request: Request, day: str | None = None):
+    return await _health_json("GET", "/cycle", request, params={"day": day})
+
+
+@app.put("/api/health/cycle/settings")
+async def put_health_cycle_settings(request: Request):
+    return await _health_json("PUT", "/cycle/settings", request, body=await request.json())
+
+
+@app.get("/api/health/cycle/periods")
+async def get_health_cycle_periods(request: Request, days: int = 365):
+    return await _health_json("GET", "/cycle/periods", request, params={"days": days})
+
+
+@app.post("/api/health/cycle/periods")
+async def post_health_cycle_period(request: Request):
+    return await _health_json("POST", "/cycle/periods", request, body=await request.json())
+
+
+@app.delete("/api/health/cycle/periods/{period_id}")
+async def delete_health_cycle_period(period_id: int, request: Request):
+    return await _health_json("DELETE", f"/cycle/periods/{period_id}", request)
+
+
+@app.get("/api/health/cycle/logs")
+async def get_health_cycle_logs(request: Request, days: int = 90):
+    return await _health_json("GET", "/cycle/logs", request, params={"days": days})
+
+
+@app.get("/api/health/cycle/logs/{day}")
+async def get_health_cycle_log(day: str, request: Request):
+    return await _health_json("GET", f"/cycle/logs/{day}", request)
+
+
+@app.put("/api/health/cycle/logs/{day}")
+async def put_health_cycle_log(day: str, request: Request):
+    return await _health_json("PUT", f"/cycle/logs/{day}", request, body=await request.json())
+
+
+@app.delete("/api/health/cycle/logs/{day}")
+async def delete_health_cycle_log(day: str, request: Request):
+    return await _health_json("DELETE", f"/cycle/logs/{day}", request)
+
+
 @app.get("/api/health/shares")
 async def get_health_shares(request: Request):
     return await _health_json("GET", "/shares", request)

@@ -8,6 +8,7 @@ import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock
 import { useNavigate } from 'react-router-dom';
 import LocationPanel from '../components/location/LocationPanel';
 import ActivitySharingPanel from '../components/settings/ActivitySharingPanel';
+import FamilyPanel from '../components/settings/FamilyPanel';
 import AppCleanupPanel from '../components/settings/AppCleanupPanel';
 import MobileMenuPanel from '../components/settings/MobileMenuPanel';
 import NotificationPreferencesPanel from '../components/settings/NotificationPreferencesPanel';
@@ -95,6 +96,8 @@ const Settings = () => {
       <SiteThemePanel />
 
       <ActivitySharingPanel />
+
+      <FamilyPanel />
 
       <TelemetryReportsPanel />
 

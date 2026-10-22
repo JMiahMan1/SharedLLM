@@ -27,6 +27,8 @@ import type {
   RoleCatalog,
   EntityProtection,
   ShareRecipient,
+  FamilyRecord,
+  FamilyRole,
   AiCapability,
   GlobalSetting,
   GatewayConfig,
@@ -134,6 +136,10 @@ import type {
   HealthMetricSample,
   HealthShare,
   HealthFamilyPerson,
+  HealthCycleState,
+  HealthCycleSummary,
+  HealthCyclePeriod,
+  HealthCycleLog,
   StarsResponse,
   StarGrant,
   AdminStarGrantResponse,
@@ -234,6 +240,8 @@ export type {
   RoleCatalog,
   EntityProtection,
   ShareRecipient,
+  FamilyRecord,
+  FamilyRole,
   AiCapability,
   DiscoveredUser,
   RagStats,
@@ -868,6 +876,8 @@ export const api = {
     audience: 'circle' | 'users';
     user_ids: string[];
     share: string[];
+    /** child/teen: circle sharing is mandatory and the toggle is disabled. */
+    sharing_locked?: boolean;
   }> {
     const resp = await apiClient.get('/api/users/me/activity-sharing');
     return resp.data;
@@ -889,6 +899,20 @@ export const api = {
   async getSharingRecipients(): Promise<ShareRecipient[]> {
     const resp = await apiClient.get('/api/users/sharing-recipients');
     return resp.data ?? [];
+  },
+
+  /** Household roster with family roles; parent/household-manager only. */
+  async getFamily(): Promise<FamilyRecord[]> {
+    const resp = await apiClient.get('/api/users/family');
+    return resp.data ?? [];
+  },
+
+  async updateFamilyMember(
+    username: string,
+    body: { family_role?: FamilyRole; mother_username?: string | null; clear_mother?: boolean },
+  ): Promise<FamilyRecord> {
+    const resp = await apiClient.patch(`/api/users/${username}/family`, body);
+    return resp.data;
   },
 
   async updateActivitySharing(body: {
@@ -1611,6 +1635,62 @@ export const api = {
     const query = day ? `?day=${encodeURIComponent(day)}` : '';
     const resp = await apiClient.get(`/api/health/family${query}`);
     return resp.data;
+  },
+
+  // --- Cycle tracking (opt-in, private, owner-only by default) -----------
+
+  async getHealthCycle(day?: string): Promise<HealthCycleState> {
+    const query = day ? `?day=${encodeURIComponent(day)}` : '';
+    const resp = await apiClient.get(`/api/health/cycle${query}`);
+    return resp.data;
+  },
+
+  async updateHealthCycleSettings(body: {
+    enabled?: boolean;
+    average_cycle_length?: number | null;
+    average_period_length?: number | null;
+    guardian_username?: string | null;
+  }): Promise<HealthCycleState> {
+    const resp = await apiClient.put('/api/health/cycle/settings', body);
+    return resp.data;
+  },
+
+  async addHealthCyclePeriod(body: {
+    start_day: string;
+    end_day?: string | null;
+    flow?: 'spotting' | 'light' | 'medium' | 'heavy';
+    note?: string;
+  }): Promise<{ period: HealthCyclePeriod; summary: HealthCycleSummary | null }> {
+    const resp = await apiClient.post('/api/health/cycle/periods', body);
+    return resp.data;
+  },
+
+  async deleteHealthCyclePeriod(periodId: number): Promise<void> {
+    await apiClient.delete(`/api/health/cycle/periods/${periodId}`);
+  },
+
+  async getHealthCycleLog(day: string): Promise<{ day: string; log: HealthCycleLog | null }> {
+    const resp = await apiClient.get(`/api/health/cycle/logs/${encodeURIComponent(day)}`);
+    return resp.data;
+  },
+
+  async saveHealthCycleLog(
+    day: string,
+    body: {
+      symptoms?: string[];
+      mood?: number | null;
+      energy?: number | null;
+      bbt_c?: number | null;
+      ovulation_test?: 'negative' | 'positive' | 'inconclusive' | null;
+      note?: string;
+    },
+  ): Promise<{ log: HealthCycleLog }> {
+    const resp = await apiClient.put(`/api/health/cycle/logs/${encodeURIComponent(day)}`, body);
+    return resp.data;
+  },
+
+  async deleteHealthCycleLog(day: string): Promise<void> {
+    await apiClient.delete(`/api/health/cycle/logs/${encodeURIComponent(day)}`);
   },
 
   async exportHealth(): Promise<Record<string, unknown>> {

@@ -159,13 +159,81 @@ class FoodEntry(SQLModel, table=True):  # type: ignore
     created_at: str = Field(default_factory=utcnow)
 
 
+class CycleSettings(SQLModel, table=True):  # type: ignore
+    """Opt-in cycle tracking settings for one person.
+
+    Off by default and never part of the family feed unless the person makes a
+    separate grant. ``average_cycle_length`` and ``average_period_length`` are
+    optional: without them the summary learns from logged periods, and with no
+    periods at all it says there is not enough data instead of assuming 28
+    days. ``guardian_username`` is the mother/trusted adult a minor may share
+    with; it is a username, not a credential.
+    """
+
+    __table_args__ = {"extend_existing": True}
+
+    user_id: str = Field(primary_key=True)
+    enabled: bool = Field(default=False)
+    average_cycle_length: int | None = None
+    average_period_length: int | None = None
+    guardian_username: str | None = None
+    created_at: str = Field(default_factory=utcnow)
+    updated_at: str = Field(default_factory=utcnow)
+
+
+class CyclePeriod(SQLModel, table=True):  # type: ignore
+    """A period start (and optional end), entered by hand or imported.
+
+    One row per start day prevents double-tapping the same day from creating
+    two periods. The source/external id pair follows the same open-ingestion
+    rule as every other reading in this service.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "start_day", name="uq_cycle_period_start"),
+        {"extend_existing": True},
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    start_day: str = Field(index=True)
+    end_day: str | None = None
+    flow: str = Field(default="medium")  # spotting | light | medium | heavy
+    note: str = Field(default="")
+    source: str = Field(default="manual", index=True)
+    external_id: str | None = Field(default=None, index=True)
+    created_at: str = Field(default_factory=utcnow)
+
+
+class CycleLog(SQLModel, table=True):  # type: ignore
+    """Optional daily symptoms around a cycle. Independent of period rows."""
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "day", name="uq_cycle_log_day"),
+        {"extend_existing": True},
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    day: str = Field(index=True)
+    symptoms_json: str = Field(default="[]")
+    mood: int | None = None  # 1-5
+    energy: int | None = None  # 1-5
+    bbt_c: float | None = None
+    ovulation_test: str | None = None  # negative | positive | inconclusive
+    note: str = Field(default="")
+    created_at: str = Field(default_factory=utcnow)
+    updated_at: str = Field(default_factory=utcnow)
+
+
 class HealthShare(SQLModel, table=True):  # type: ignore
     """A per-scope family sharing grant.
 
     Kept separate from Identity's activity sharing because health data has its
     own scopes and a stricter default. One row per (owner, viewer, scope);
-    ``scope`` is ``sleep`` or ``nutrition``. An empty table means nobody shares
-    anything, which is the intended default.
+    ``scope`` is ``sleep``, ``nutrition`` or ``cycle``. An empty table means
+    nobody shares anything, which is the intended default. A cycle grant for a
+    minor is only allowed to their designated guardian.
     """
 
     __table_args__ = (
