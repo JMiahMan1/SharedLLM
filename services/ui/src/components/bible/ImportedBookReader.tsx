@@ -35,6 +35,8 @@ type ReadingPreferences = Pick<BiblePreferences, 'page' | 'font_scale' | 'line_h
 interface ImportedBookReaderProps {
   book: BibleImportedBook;
   chapters: BibleImportedBookDetail['chapters'];
+  /** Where to open first, e.g. today's entry in an imported devotional. */
+  startOrdinal?: number;
   preferences: ReadingPreferences;
   onPreferences: (patch: Partial<BiblePreferences>) => void;
   onClose: () => void;
@@ -44,8 +46,14 @@ function positionKey(bookId: number): string {
   return `jarvis.study-book.${bookId}.page`;
 }
 
-function initialOrdinal(bookId: number, chapters: BibleImportedBookDetail['chapters']): number {
-  const fallback = chapters[0]?.ordinal ?? 1;
+function initialOrdinal(
+  bookId: number,
+  chapters: BibleImportedBookDetail['chapters'],
+  startOrdinal?: number,
+): number {
+  const fallback = chapters.some((entry) => entry.ordinal === startOrdinal)
+    ? (startOrdinal as number)
+    : chapters[0]?.ordinal ?? 1;
   try {
     const saved = Number(window.localStorage.getItem(positionKey(bookId)));
     if (chapters.some((entry) => entry.ordinal === saved)) return saved;
@@ -113,12 +121,13 @@ function ReaderSheet({
 export default function ImportedBookReader({
   book,
   chapters,
+  startOrdinal,
   preferences,
   onPreferences,
   onClose,
 }: ImportedBookReaderProps) {
   const { trigger } = useHaptics();
-  const [ordinal, setOrdinal] = useState(() => initialOrdinal(book.id, chapters));
+  const [ordinal, setOrdinal] = useState(() => initialOrdinal(book.id, chapters, startOrdinal));
   const [contentsOpen, setContentsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -285,7 +294,7 @@ export default function ImportedBookReader({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Back to study books"
+            aria-label="Back to books"
             className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-[var(--page-muted)] hover:bg-[var(--page-hover)]"
           >
             <ArrowLeft size={19} />
@@ -497,7 +506,7 @@ export default function ImportedBookReader({
               <div>
                 <p className="text-sm font-semibold text-white">Contents</p>
                 <p className="text-[11px] text-slate-400">
-                  {total} {unit.toLowerCase()}s · {book.author.trim() || 'Imported study'}
+                  {total} {unit.toLowerCase()}s · {book.author.trim() || 'Imported book'}
                 </p>
               </div>
               <button

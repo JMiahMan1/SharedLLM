@@ -2517,6 +2517,8 @@ export interface BibleImportedBook {
   source: 'nextcloud' | 'calibre' | 'upload' | string;
   source_path: string;
   chapter_count: number;
+  /** How often a devotional advances: a reading a day or one a week. */
+  cadence?: 'day' | 'week';
   created_at: string | null;
 }
 
@@ -2540,7 +2542,7 @@ export interface BibleBookListing {
 
 export interface BibleImportedBookDetail {
   book: BibleImportedBook;
-  chapters: Array<{ ordinal: number; label: string; characters: number }>;
+  chapters: Array<{ ordinal: number; label: string; characters: number; number?: number | null }>;
 }
 
 export interface BibleBookChapter {
@@ -2557,6 +2559,7 @@ export interface BibleDevotionalWork {
   author: string;
   kind: BibleBookKind;
   chapter_count: number;
+  cadence?: 'day' | 'week';
 }
 
 export interface BibleStudySessionTurn {

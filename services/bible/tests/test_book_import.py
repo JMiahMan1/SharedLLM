@@ -1,10 +1,10 @@
 import io
 import zipfile
 
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.bible import book_import
-from services.bible.models import ImportedBook
+from services.bible.models import ImportedBook, ImportedBookChapter
 
 
 def _epub() -> bytes:
@@ -169,3 +169,75 @@ def test_imported_book_routes_do_not_collide_with_the_scripture_catalogue(
     if scripture.status_code == 200:
         assert scripture.json()["books"][0]["name"] == "Genesis"
         assert "chapter_count" not in scripture.json()["books"][0]
+
+def _cadence_session() -> Session:
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    return Session(engine)
+
+
+def _cadence_book(session: Session, cadence: str = "day") -> ImportedBook:
+    """A devotional with front matter, two numbered devotions and a 42nd."""
+    book = ImportedBook(title="Devotions for a Test", kind="devotional", source="upload")
+    session.add(book)
+    session.flush()
+    sections = [
+        "Contents\nTitle Page",
+        "Introduction\nWelcome",
+        "1. First Devotion\nText",
+        "2. Second Devotion\nText",
+        "42) Later Devotion\nText",
+    ]
+    for ordinal, body in enumerate(sections, start=1):
+        session.add(
+            ImportedBookChapter(
+                book_id=book.id, ordinal=ordinal, label=f"Part {ordinal}", text=body
+            )
+        )
+    book.chapter_count = len(sections)
+    book.cadence = cadence
+    session.add(book)
+    session.commit()
+    session.refresh(book)
+    return book
+
+
+def test_devotion_number_reads_the_printed_number():
+    assert book_import.devotion_number("1. The God-Centered Spouse") == 1
+    assert book_import.devotion_number("42) One Day at a Time") == 42
+    assert book_import.devotion_number("Contents Title Page") is None
+    assert book_import.devotion_number("") is None
+
+
+def test_a_numbered_devotional_starts_at_its_first_devotion():
+    with _cadence_session() as session:
+        book = _cadence_book(session)
+        first = book_import.devotional_for_day(session, book.id, 1)
+        assert first is not None and first["text"].startswith("1. First Devotion")
+        # Front matter never takes a day: day two is the second devotion, and
+        # day four wraps back to the first.
+        assert book_import.devotional_for_day(session, book.id, 2)["text"].startswith("2. Second Devotion")
+        assert book_import.devotional_for_day(session, book.id, 4)["text"].startswith("1. First Devotion")
+        chapter = book_import.chapters_for(session, book.id)[2]
+        assert book_import.chapter_dict(chapter)["number"] == 1
+
+
+def test_a_weekly_devotional_advances_once_a_week():
+    with _cadence_session() as session:
+        book = _cadence_book(session, cadence="week")
+        assert book_import.devotional_for_day(session, book.id, 1)["text"].startswith("1. First Devotion")
+        assert book_import.devotional_for_day(session, book.id, 7)["text"].startswith("1. First Devotion")
+        assert book_import.devotional_for_day(session, book.id, 8)["text"].startswith("2. Second Devotion")
+        # Day 294 (Oct 21) is week 42: 41 % 3 lands on the last of the three
+        # numbered devotions, the one printed as 42.
+        assert book_import.devotional_for_day(session, book.id, 294)["text"].startswith("42) Later Devotion")
+
+
+def test_set_cadence_validates_and_stores_it():
+    with _cadence_session() as session:
+        book = _cadence_book(session)
+        assert book_import.set_cadence(session, book.id, "week") is True
+        session.refresh(book)
+        assert book.cadence == "week"
+        assert book_import.set_cadence(session, book.id, "monthly") is False
+        assert book_import.set_cadence(session, 999, "day") is False

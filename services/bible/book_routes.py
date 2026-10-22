@@ -302,6 +302,22 @@ def devotional_book(book_id: int, day: str | None = Query(default=None)):
     return {"day": target.isoformat(), "entry": entry}
 
 
+class DevotionalCadenceUpdate(BaseModel):
+    cadence: str
+
+
+@router.post("/devotional/book/{book_id}/cadence")
+def devotional_cadence(book_id: int, payload: DevotionalCadenceUpdate):
+    """Choose how a devotional advances: daily or weekly."""
+    with Session(_db()) as session:
+        if not book_import.set_cadence(session, book_id, payload.cadence):
+            raise HTTPException(status_code=400, detail="Cadence must be 'day' or 'week'.")
+        book = book_import.get_book(session, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="That book is not in the library.")
+    return {"book": book_import.book_dict(book)}
+
+
 class StudySessionCreate(BaseModel):
     username: str
     reference: str
