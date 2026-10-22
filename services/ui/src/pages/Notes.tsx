@@ -47,9 +47,11 @@ import {
   parseChecklist,
   parseNoteQuery,
   parseNotesIndex,
+  readNotesSnapshot,
   setIndexEntry,
   sortNotesByIndex,
   topTags,
+  writeNotesSnapshot,
   type NoteColor,
   type NotesIndex,
 } from '../lib/notesMeta';
@@ -124,9 +126,21 @@ export default function Notes() {
   // One request: the list carries the newest notes' text for the previews.
   // It used to be one read per card, and 24 reads at once filled the server's
   // connections to Nextcloud, so the editor's own read then timed out.
+  // The last visit's list is kept in localStorage so this page paints before
+  // the network answers; the request below still revalidates it in the
+  // background and replaces it when it lands.
+  const scope = asUser ?? 'me';
+  const snapshot = useMemo(() => readNotesSnapshot(scope), [scope]);
   const { data: listRes, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['notes-list', asUser ?? 'me'],
+    queryKey: ['notes-list', scope],
     queryFn: () => api.listNotes({ storage: STORAGE, as_user: asUser, previews: true }),
+    staleTime: 30_000,
+    initialData: snapshot
+      ? ({ status: 'SUCCESS', detail: { notes: snapshot.notes } } as unknown as Awaited<
+          ReturnType<typeof api.listNotes>
+        >)
+      : undefined,
+    initialDataUpdatedAt: snapshot?.savedAt,
   });
 
   const notes = useMemo<NoteSummary[]>(
@@ -143,8 +157,18 @@ export default function Notes() {
       return parseNotesIndex(res.detail?.meta) ?? EMPTY_NOTES_INDEX;
     },
     retry: false,
+    staleTime: 30_000,
+    initialData: snapshot?.index,
+    initialDataUpdatedAt: snapshot?.savedAt,
   });
   const index = indexQuery.data ?? EMPTY_NOTES_INDEX;
+
+  // Keep the last good list on this device. The next visit seeds the queries
+  // above with it, so the shelf never waits on WebDAV to show anything.
+  useEffect(() => {
+    if (!listRes || listRes.status !== 'SUCCESS' || !indexQuery.isSuccess) return;
+    writeNotesSnapshot(scope, notes, index);
+  }, [listRes, notes, index, indexQuery.isSuccess, scope]);
 
   const persistIndex = useCallback(
     async (next: NotesIndex) => {
@@ -214,9 +238,48 @@ export default function Notes() {
       setEditing({ draft: { ...EMPTY_DRAFT }, title: '' });
       return;
     }
-    // The sheet opens at once and fills when the read lands. Always the
-    // stored text, never the preview: saving a stale copy would overwrite a
-    // change made elsewhere since the list loaded.
+    const meta = indexEntry(index, note.path);
+    const folder = folderFromPath(note.path);
+    /** The draft as it is stored, so every open path paints the same shape. */
+    const draftFor = (text: string): DraftState => ({
+      title: note.title,
+      // The editor shows the note's own text; the server adds the header.
+      content: noteBody(text),
+      path: note.path,
+      original: { title: note.title, category: categoryFor(folder) },
+      folder,
+      color: (meta.color ?? 'default') as NoteColor,
+      pinned: Boolean(meta.pinned),
+    });
+    const cached = contents[note.path];
+    if (typeof cached === 'string') {
+      // The list already carried this note's text, so open it now and read
+      // the stored file in the background. Typing is never clobbered: the
+      // fresh text only lands while the draft still matches the cache.
+      const initial = noteBody(cached);
+      setEditing({ draft: draftFor(cached), title: note.title });
+      try {
+        const res = await api.readNote(note.title, STORAGE, note.path, asUser);
+        if (res.status !== 'SUCCESS') throw new Error(res.message || 'Could not read that note');
+        const fresh = noteBody(res.message ?? '');
+        setEditing((current) =>
+          current && current.title === note.title && current.draft?.content === initial
+            ? { ...current, draft: { ...current.draft, content: fresh } }
+            : current,
+        );
+      } catch (err) {
+        // The cache may be stale, so an untouched editor closes instead of
+        // risking a save over a change made elsewhere.
+        setEditing((current) =>
+          current && current.title === note.title && current.draft?.content === initial ? null : current,
+        );
+        toast.error(errorText(err, 'Could not read that note'));
+      }
+      return;
+    }
+    // Not in this visit's previews: the sheet opens at once and fills when
+    // the read lands. Always the stored text, never the preview: saving a
+    // stale copy would overwrite a change made elsewhere since the list loaded.
     setEditing({ draft: null, title: note.title });
     let content: string;
     try {
@@ -229,26 +292,12 @@ export default function Notes() {
       toast.error(errorText(err, 'Could not read that note'));
       return;
     }
-    const meta = indexEntry(index, note.path);
-    const folder = folderFromPath(note.path);
     setEditing((current) =>
       current && current.title === note.title && current.draft === null
-        ? {
-            title: note.title,
-            draft: {
-              title: note.title,
-              // The editor shows the note's own text; the server adds the header.
-              content: noteBody(content),
-              path: note.path,
-              original: { title: note.title, category: categoryFor(folder) },
-              folder,
-              color: (meta.color ?? 'default') as NoteColor,
-              pinned: Boolean(meta.pinned),
-            },
-          }
+        ? { title: note.title, draft: draftFor(content) }
         : current,
     );
-  }, [asUser, index]);
+  }, [asUser, index, contents]);
 
   // Deep link from the dashboard's Quick Notes widget and the Android home
   // screen widget: /notes?note=<path> opens a note, /notes?new=1 starts a new

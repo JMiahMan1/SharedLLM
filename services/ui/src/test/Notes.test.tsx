@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Notes from '../pages/Notes';
+import { EMPTY_NOTES_INDEX, readNotesSnapshot, writeNotesSnapshot } from '../lib/notesMeta';
 import { renderWithProviders } from './render';
 import {
   notesCheckOffCalls,
@@ -321,5 +322,49 @@ describe('Notes (Keep-style)', () => {
     await user.click(screen.getByRole('button', { name: 'Add label' }));
 
     expect((screen.getByLabelText('Note content') as HTMLTextAreaElement).value).toContain('#friends');
+  });
+
+  it('paints the shelf from the last visit before the list answers', () => {
+    writeNotesSnapshot(
+      'me',
+      [
+        {
+          title: 'Snapshot note',
+          path: 'Notes/Snapshot note.md',
+          size: 40,
+          modified: '2026-05-11T12:00:00.000Z',
+          content: '# Snapshot note\nCategory: Notes\n\nCached line',
+        },
+      ],
+      EMPTY_NOTES_INDEX,
+    );
+
+    renderWithProviders(<Notes />);
+
+    // The seeded list renders on the first paint, so nothing shows a spinner.
+    expect(screen.getByText('Snapshot note')).toBeInTheDocument();
+    expect(screen.queryByText('Loading your notes…')).not.toBeInTheDocument();
+  });
+
+  it('keeps the list in a snapshot for the next visit', async () => {
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    const snapshot = readNotesSnapshot('me');
+    expect(snapshot?.notes).toHaveLength(notesFixtures.length);
+    expect(typeof snapshot?.savedAt).toBe('number');
+  });
+
+  it('opens a note from the list text without a fresh read wait', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    notesReadCalls.length = 0;
+    await user.click(screen.getByText('Trip ideas'));
+
+    // The stored text shows at once, then the read reconciles it.
+    expect(await screen.findByDisplayValue(/Sedona in the fall/)).toBeInTheDocument();
+    await waitFor(() => expect(notesReadCalls.length).toBe(1));
   });
 });

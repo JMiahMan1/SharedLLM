@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   EMPTY_NOTES_INDEX,
   archivedPathFor,
@@ -19,11 +19,13 @@ import {
   parseNoteQuery,
   parseNotesIndex,
   readNoteMetaMap,
+  readNotesSnapshot,
   setIndexEntry,
   setNoteMeta,
   sortNotes,
   sortNotesByIndex,
   topTags,
+  writeNotesSnapshot,
 } from '../lib/notesMeta';
 
 describe('notesMeta', () => {
@@ -172,5 +174,40 @@ describe('notesMeta', () => {
       { tag: 'x', count: 2 },
       { tag: 'y', count: 1 },
     ]);
+  });
+
+  it('keeps a visit in a snapshot for the next visit to paint', () => {
+    const index = setIndexEntry(EMPTY_NOTES_INDEX, 'Notes/A.md', { pinned: true });
+    writeNotesSnapshot('me', [{ title: 'A', path: 'Notes/A.md', content: '# A\nCategory: Notes\n\nbody' }], index);
+
+    const snapshot = readNotesSnapshot('me');
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.notes).toHaveLength(1);
+    expect(indexEntry(snapshot?.index, 'Notes/A.md').pinned).toBe(true);
+    expect(typeof snapshot?.savedAt).toBe('number');
+    // The admin "send as" switch keeps its own snapshot.
+    expect(readNotesSnapshot('admin')).toBeNull();
+  });
+
+  it('ignores a corrupt snapshot', () => {
+    localStorage.setItem('jarvis_notes_snapshot_v1:me', '{oops');
+    expect(readNotesSnapshot('me')).toBeNull();
+    localStorage.setItem(
+      'jarvis_notes_snapshot_v1:me',
+      JSON.stringify({ savedAt: 1, notes: [], index: { version: 1, notes: [] } }),
+    );
+    expect(readNotesSnapshot('me')).toBeNull();
+  });
+
+  it('drops the note bodies when storage is full', () => {
+    const setItem = vi.spyOn(localStorage, 'setItem');
+    setItem.mockImplementationOnce(() => {
+      throw new Error('quota');
+    });
+    writeNotesSnapshot('me', [{ title: 'A', path: 'Notes/A.md', content: 'big' }], EMPTY_NOTES_INDEX);
+    setItem.mockRestore();
+
+    const snapshot = readNotesSnapshot('me');
+    expect(snapshot?.notes).toEqual([{ title: 'A', path: 'Notes/A.md' }]);
   });
 });

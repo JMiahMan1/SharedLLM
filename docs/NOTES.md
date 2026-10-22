@@ -53,6 +53,11 @@ that, every save of an opened note stacked another header on top.
 
 - **Quick capture**: the "Take a note…" bar opens an empty editor; the title
   falls back to the first line of the body, then `Untitled note`.
+- **Instant shelf**: each visit's list and index are kept in localStorage per
+  account, so the page paints the last known notes immediately and revalidates
+  in the background. Opening a note whose text came with the list shows that
+  text at once and reconciles with the stored file a moment later, unless you
+  have already started editing.
 - **Folders**: the page lists `Notes/` recursively; the editor's Folder field
   is a sub-folder inside it (one level). Changing a note's title or folder
   writes the new file, then deletes the old one once the new one is saved.
