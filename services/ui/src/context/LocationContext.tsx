@@ -69,6 +69,10 @@ export const LocationContext = createContext<LocationContextValue | null>(null);
 
 const SPEED_THRESHOLD_MPH = 15;
 const DAILY_STEPS_SYNC_INTERVAL_MS = 30000; // sync steps at least every 30s when stationary
+// The pedometer listener fires on every step change; without coalescing a
+// walk becomes one POST per reading. One request in flight, one trailing sync.
+let stepSyncInFlight = false;
+let stepSyncQueued = false;
 const KEY_LOCATION_ENABLED = 'jarvis_sensor_location_enabled';
 const KEY_STEPS_ENABLED = 'jarvis_sensor_steps_enabled';
 const KEY_STEPS_BACKFILLED = 'jarvis_steps_backfilled_through';
@@ -403,6 +407,13 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
   const syncDailySteps = useCallback(async () => {
     if (!sensorsRef.current.steps.enabled) return;
+    // The pedometer listener fires on every step change, so coalesce: one
+    // request in flight at a time, with one trailing sync if steps moved on.
+    if (stepSyncInFlight) {
+      stepSyncQueued = true;
+      return;
+    }
+    stepSyncInFlight = true;
     try {
       const token = await storageGet('jarvis_api_key');
       const rawServerUrl = await storageGet('jarvis_server_url');
@@ -447,6 +458,12 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       logSensor('steps', 'sync failed', err);
       markRecovering('steps', 'read', true, sensorErrorMessage(err, 'Step sync failed'));
+    } finally {
+      stepSyncInFlight = false;
+      if (stepSyncQueued) {
+        stepSyncQueued = false;
+        void syncDailySteps();
+      }
     }
   }, [ patchSensor, readHourlySteps, resolveSyncUsername ]);
 
