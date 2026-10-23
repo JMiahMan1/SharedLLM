@@ -289,8 +289,10 @@ live search is the ecosystem-standard pattern.
       timeline, and the top apps by foreground time.
 - [ ] Jarvis itself: log feature events from the web bundle (chat, recipes, notes, timers, games,
       verses) — no permission needed — and show what each person does most inside Jarvis.
-- [ ] Sharing follows the rest of Health: per-user by default, opt-in family sharing (a new
-      `digital` scope), and kid mode keeps the card private.
+- [ ] Visibility follows Phase 11's rule: a minor's usage data is parents-only (the raw card
+      lives on the parents' view, not the child's), an adult's is their own unless they opt
+      into family sharing (a new `digital` scope), and suggestions derived from the data are
+      visible to the member they are for.
 
 ### Phase 11 — family guardianship and discipleship (full Bark / Qustodio / Family Link parity; planned 2026-10-23)
 
@@ -372,11 +374,17 @@ point.
       show becomes a better-fit alternative, a game a family pick, and the devotional library
       answers what the week actually showed. Matching works on themes and styles, not names:
       music first (a small reviewed genre map), then video (topic and creator themes), then
-      podcasts, books, games and activities. Every suggestion says why it was made, and a
-      parent can bless or block a lane.
-- [ ] **Guardianship profiles, three audiences.** Every member's profile visible to
-      themselves, each parent, and (for a minor) the linked mother; siblings never see each
-      other; a mutual, revocable father–mother parents' page for accountability.
+      podcasts, books, games and activities. Every suggestion says why it was made, the
+      member it is for sees it (suggestions are theirs; the raw feed behind them is not),
+      and a parent can bless or block a lane.
+- [ ] **Who sees what (the visibility rule).** The collected data is parents-only: a minor's
+      profile — every raw section — is open to both parents (including the linked mother
+      under `docs/ROLES.md`) and to no one else; a minor does not browse their own raw feed,
+      and siblings never see each other. The member's own view is the *output*, not the
+      collection: their suggestions, recommendations and their own lanes are theirs to see
+      and act on, never the stream behind them. A father–mother shared parents' page stays
+      mutual and revocable for accountability; an adult child's data is their own to share
+      or hold.
 - [ ] **Prayer and guidance.** The parent view pairs the week's real activity with Scripture:
       prayer prompts grounded in what actually happened, conversation starters from the
       devotional library, and a talk journal. Jarvis drafts gentle notes a parent reviews
