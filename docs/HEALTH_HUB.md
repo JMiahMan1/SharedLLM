@@ -305,8 +305,9 @@ without Play-policy limits.
 **The focus is the digital profile.** Everything below collects from the mobile devices
 first and lands in one living per-person profile — what they listen to, play, watch and
 browse, when and for how long, and the patterns across a week. Jarvis then reads that
-profile to make recommendations and give positive, Biblical direction (the music example:
-an artist whose lyrics are not appropriate becomes a Christian artist with a similar style).
+profile to make recommendations and give positive, Biblical direction (music first: an
+artist whose lyrics are not appropriate becomes a Christian artist with a similar style;
+video themes get the same treatment — redeemed or redirected).
 The guarding mechanics are the collection substrate; the profile and the guidance are the
 point.
 
@@ -325,6 +326,10 @@ point.
       each member links their Spotify account (Web API `recently-played`, opt-in) so
       listening in the Spotify app itself lands on the profile; for other services the
       Android app reads media sessions (title, artist, package).
+- [ ] **Video and creators (YouTube and the like).** The same media-session reading catches
+      what video is playing (title, channel) and the on-device filter reports video domains,
+      so watching lands on the digital profile next to music. Creators are first-class
+      entities: their themes are reviewed once and the review applies everywhere they appear.
 - [ ] **Device usage (Android).** `UsageStatsManager` foreground time and screen sessions per
       app — the Phase 10 engine that the screen-time and top-apps views share.
 - [ ] **Calls and SMS (Android).** The sideloaded app collects the call log and SMS content
@@ -361,11 +366,14 @@ point.
 **Discipleship (what those apps do not have)**
 - [ ] **Recommendations and positive, Biblical direction.** Jarvis reads the digital profile
       and suggests rather than scolds: an artist whose lyrics are not appropriate maps to a
-      Christian artist with a similar style (genre, era, energy), a show to a better-fit
-      alternative, a game to a family pick; the devotional library answers what the week
-      actually showed. Style matching starts with music (a small reviewed genre map) and the
-      same engine later covers podcasts, books, games and activities. Every suggestion says
-      why it was made, and a parent can bless or block a lane.
+      Christian artist with a similar style (genre, era, energy); a **YouTube video or
+      creator** with a negative theme is first *redeemed* — the same theme told well, by a
+      creator who lifts people up — and only redirected when redeeming is not possible; a
+      show becomes a better-fit alternative, a game a family pick, and the devotional library
+      answers what the week actually showed. Matching works on themes and styles, not names:
+      music first (a small reviewed genre map), then video (topic and creator themes), then
+      podcasts, books, games and activities. Every suggestion says why it was made, and a
+      parent can bless or block a lane.
 - [ ] **Guardianship profiles, three audiences.** Every member's profile visible to
       themselves, each parent, and (for a minor) the linked mother; siblings never see each
       other; a mutual, revocable father–mother parents' page for accountability.
@@ -380,10 +388,11 @@ point.
       locked; children never see parents' private sections; kid mode respected throughout.
 
 **Build order (profile first):** (1) the digital profile store and the activity recorders
-around it; (2) the Android collection engine — usage, media sessions, calls and SMS;
-(3) Jarvis recommendations from the profile (music style matching first); (4) time budgets
-and routines; (5) app control and the web filter; (6) monitoring alerts and the weekly
-recap; (7) the parents' page and the discipleship surfaces.
+around it; (2) the Android collection engine — usage, media sessions, calls and SMS, video;
+(3) Jarvis recommendations from the profile (music style matching first, then video themes
+redeemed or redirected); (4) time budgets and routines; (5) app control and the web filter;
+(6) monitoring alerts and the weekly recap; (7) the parents' page and the discipleship
+surfaces.
 
 ## Acceptance
 
