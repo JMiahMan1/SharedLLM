@@ -6,10 +6,13 @@ expired Home Assistant long-lived token is the classic case — every attempt
 logs the same line forever and nobody notices. This module keeps one flag per
 (service, account): the first rejection logs a line and sends a single admin
 notice through telemetry, repeats stay quiet, and the first accepted call
-logs a recovery line and replaces the notice on the phone (same tag). State
-lives in Redis, so a restart neither repeats an alert nor forgets one; a
-notice telemetry did not take is retried on the next pass.
+logs a recovery line and replaces the notice on the phone (same tag). A
+recovery starts a quiet window, so a login that flaps between accepted and
+rejected does not ring phones each way. State lives in Redis, so a restart
+neither repeats an alert nor forgets one; a notice telemetry did not take is
+retried on the next pass.
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,11 +25,24 @@ log = logging.getLogger("execution.credentials")
 
 STATE_KEY = "admin:alerts:credentials"
 
+#: A fresh rejection within this window of a recovery stays quiet: the login
+#: is proving itself and should not re-ring the phones on every wobble.
+QUIET_SECONDS = 600
+
+#: The generic account name used by callers that do not know whose login it
+#: is; kept short so "the {account}" phrases read naturally.
+DEFAULT_ACCOUNT = "stored login"
+
 _SERVICE_LABELS = {"home_assistant": "Home Assistant"}
 
 #: The flags this process knows about. Loaded from Redis on first use; kept in
 #: memory so a healthy call never touches Redis.
 _mirror: dict[str, dict] | None = None
+
+#: Keys with an alert or recovery in flight. One rejected burst is many
+#: parallel calls, and without this they all notified before any had written
+#: the flag. A plain set works because the check-and-add has no await in it.
+_inflight: set[str] = set()
 
 
 def _label(service: str) -> str:
@@ -35,6 +51,10 @@ def _label(service: str) -> str:
 
 def _entry_key(service: str, account: str) -> str:
     return f"{service}:{account}"
+
+
+def _named_account(account: str) -> bool:
+    return bool(account) and account != DEFAULT_ACCOUNT
 
 
 async def _redis_client():
@@ -48,7 +68,7 @@ async def _load(r) -> dict:
     fresh start (the alert repeats once after a crash — the safe direction)."""
     global _mirror
     if _mirror is None:
-        _mirror = {"flagged": {}, "outbox": []}
+        _mirror = {"flagged": {}, "outbox": [], "quiet": {}}
         try:
             import json
 
@@ -59,6 +79,8 @@ async def _load(r) -> dict:
                     _mirror["flagged"] = state["flagged"]
                 if isinstance(state.get("outbox"), list):
                     _mirror["outbox"] = state["outbox"]
+                if isinstance(state.get("quiet"), dict):
+                    _mirror["quiet"] = state["quiet"]
         except Exception as e:  # store unavailable: in-memory only this run
             log.debug(f"[credentials] state read failed: {e}")
     return _mirror
@@ -92,21 +114,35 @@ async def _flush(state: dict) -> None:
 async def auth_failed(service: str, account: str, detail: str = "") -> None:
     """A stored login was rejected (HTTP 401/403). First sight notifies, then quiet."""
     key = _entry_key(service, account)
+    if key in _inflight or key in (_mirror or {}).get("flagged", {}):
+        return
+    _inflight.add(key)
     r = None
     try:
         r = await _redis_client()
         state = await _load(r)
-        if key in _mirror.get("flagged", {}):
+        if key in state.get("flagged", {}):
             return
-        state["flagged"][key] = {"since": time.time()}
+        now = time.time()
+        state["flagged"][key] = {"since": now}
+        quiet_until = float(state.setdefault("quiet", {}).get(key, 0))
         await _flush(state)
         label = _label(service)
-        log.warning(f"[credentials] {label} rejected the {account} login ({detail or 'unauthorized'}); admins notified")
+        suffix = f" for the {account}" if _named_account(account) else ""
+        if now < quiet_until:
+            # It was just working again; let the phones rest until it settles.
+            log.info(
+                f"[credentials] {label} login rejected again{suffix} "
+                f"({detail or 'unauthorized'}) within the quiet window"
+            )
+            await _save(r, state)
+            return
+        log.warning(f"[credentials] {label} login rejected{suffix} ({detail or 'unauthorized'}); admins notified")
         payload = notify.notice(
             "@admins",
             "admin",
             f"Credential expired: {label}",
-            f"The {label} login for {account} was rejected ({detail or 'unauthorized'}). "
+            f"The {label} login{suffix} was rejected ({detail or 'unauthorized'}). "
             "Renew it in Settings; flows using it keep failing until then.",
             url="/",
             priority=3,
@@ -118,6 +154,7 @@ async def auth_failed(service: str, account: str, detail: str = "") -> None:
     except Exception as e:
         log.debug(f"[credentials] alert failed: {e}")
     finally:
+        _inflight.discard(key)
         if r is not None:
             try:
                 await r.aclose()
@@ -130,21 +167,26 @@ async def auth_ok(service: str, account: str) -> None:
     key = _entry_key(service, account)
     if _mirror is not None and key not in _mirror.get("flagged", {}):
         return  # the common case: nothing was wrong
+    if key in _inflight:
+        return
+    _inflight.add(key)
     r = None
     try:
         r = await _redis_client()
         state = await _load(r)
-        if key not in state["flagged"]:
+        if key not in state.get("flagged", {}):
             return
         del state["flagged"][key]
+        state.setdefault("quiet", {})[key] = time.time() + QUIET_SECONDS
         await _flush(state)
         label = _label(service)
-        log.info(f"[credentials] {label} accepted the {account} login again")
+        suffix = f" for the {account}" if _named_account(account) else ""
+        log.info(f"[credentials] {label} login accepted again{suffix}")
         payload = notify.notice(
             "@admins",
             "admin",
             f"{label} login works again",
-            f"The stored login for {account} was accepted again.",
+            f"The {label} login{suffix} was accepted again.",
             url="/",
             priority=2,
             tag=f"admin:expired:{key}",
@@ -155,6 +197,7 @@ async def auth_ok(service: str, account: str) -> None:
     except Exception as e:
         log.debug(f"[credentials] recovery notice failed: {e}")
     finally:
+        _inflight.discard(key)
         if r is not None:
             try:
                 await r.aclose()

@@ -71,15 +71,15 @@ def session(monkeypatch):
 
 async def test_a_401_flags_the_credential(session):
     session(_Resp(status=401))
-    areas = await ha_client.get_areas("https://ha.example", "tok", account="the system account")
+    areas = await ha_client.get_areas("https://ha.example", "tok", account="system account")
     assert areas == {}
     ha_client.credential_alerts.auth_failed.assert_awaited_once_with(
-        "home_assistant", "the system account", "HTTP 401"
+        "home_assistant", "system account", "HTTP 401"
     )
 
 
 async def test_success_acknowledges_the_credential(session):
     session(_Resp(status=200, payload=[{"eid": "media_player.x", "a": "Kitchen"}]))
-    areas = await ha_client.get_areas("https://ha.example", "tok", account="the system account")
+    areas = await ha_client.get_areas("https://ha.example", "tok", account="system account")
     assert areas == {"media_player.x": "Kitchen"}
-    ha_client.credential_alerts.auth_ok.assert_awaited_once_with("home_assistant", "the system account")
+    ha_client.credential_alerts.auth_ok.assert_awaited_once_with("home_assistant", "system account")

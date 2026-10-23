@@ -14,7 +14,7 @@ import pytest
 from services.execution import credential_alerts as ca
 
 STATE_KEY = ca.STATE_KEY
-KEY = "home_assistant:the system account"
+KEY = "home_assistant:system account"
 
 
 class FakeRedis:
@@ -40,6 +40,7 @@ def redis(monkeypatch):
         return fake
 
     monkeypatch.setattr(ca, "_mirror", None)
+    monkeypatch.setattr(ca, "_inflight", set())
     monkeypatch.setattr(ca, "_redis_client", _client)
     monkeypatch.setattr(ca.notify, "send", AsyncMock(return_value=True))
     return fake
@@ -47,10 +48,10 @@ def redis(monkeypatch):
 
 async def test_a_rejection_notifies_once_and_repeats_stay_quiet(redis, caplog):
     with caplog.at_level(logging.WARNING, logger="execution.credentials"):
-        await ca.auth_failed("home_assistant", "the system account", "HTTP 401")
-        await ca.auth_failed("home_assistant", "the system account", "HTTP 401")
+        await ca.auth_failed("home_assistant", "system account", "HTTP 401")
+        await ca.auth_failed("home_assistant", "system account", "HTTP 401")
 
-    warnings = [r for r in caplog.records if "rejected the" in r.getMessage()]
+    warnings = [r for r in caplog.records if "login rejected" in r.getMessage()]
     assert len(warnings) == 1
     ca.notify.send.assert_awaited_once()
     payload = ca.notify.send.await_args.args[0]
@@ -61,19 +62,19 @@ async def test_a_rejection_notifies_once_and_repeats_stay_quiet(redis, caplog):
 
 
 async def test_the_flag_is_kept_in_redis(redis):
-    await ca.auth_failed("home_assistant", "the system account", "HTTP 401")
+    await ca.auth_failed("home_assistant", "system account", "HTTP 401")
     state = json.loads(redis.store[STATE_KEY])
     assert KEY in state["flagged"]
     assert state["outbox"] == []
 
 
 async def test_acceptance_replaces_the_notice(redis, caplog):
-    await ca.auth_failed("home_assistant", "the system account", "HTTP 401")
+    await ca.auth_failed("home_assistant", "system account", "HTTP 401")
     with caplog.at_level(logging.INFO, logger="execution.credentials"):
-        await ca.auth_ok("home_assistant", "the system account")
-        await ca.auth_ok("home_assistant", "the system account")
+        await ca.auth_ok("home_assistant", "system account")
+        await ca.auth_ok("home_assistant", "system account")
 
-    infos = [r for r in caplog.records if "accepted the" in r.getMessage()]
+    infos = [r for r in caplog.records if "login accepted again" in r.getMessage()]
     assert len(infos) == 1
     assert ca.notify.send.await_count == 2
     recovery = ca.notify.send.await_args.args[0]
@@ -84,11 +85,11 @@ async def test_acceptance_replaces_the_notice(redis, caplog):
 
 async def test_a_notice_telemetry_refused_is_retried(redis):
     ca.notify.send.side_effect = [False, True, True]
-    await ca.auth_failed("home_assistant", "the system account", "HTTP 401")
+    await ca.auth_failed("home_assistant", "system account", "HTTP 401")
     state = json.loads(redis.store[STATE_KEY])
     assert len(state["outbox"]) == 1
 
-    await ca.auth_ok("home_assistant", "the system account")
+    await ca.auth_ok("home_assistant", "system account")
     # The queued "expired" card goes out first, then the recovery card.
     titles = [call.args[0]["title"] for call in ca.notify.send.await_args_list]
     assert titles == [
@@ -97,3 +98,20 @@ async def test_a_notice_telemetry_refused_is_retried(redis):
         "Home Assistant login works again",
     ]
     assert json.loads(redis.store[STATE_KEY])["outbox"] == []
+
+
+async def test_a_rejection_during_the_quiet_window_stays_quiet(redis, caplog):
+    await ca.auth_failed("home_assistant", "system account", "HTTP 401")
+    await ca.auth_ok("home_assistant", "system account")
+    sends_after_recovery = ca.notify.send.await_count
+
+    with caplog.at_level(logging.INFO, logger="execution.credentials"):
+        await ca.auth_failed("home_assistant", "system account", "HTTP 401")
+
+    # The login is flapping: the phones were just told it works again, so the
+    # fresh rejection only gets a log line until the quiet window passes.
+    assert ca.notify.send.await_count == sends_after_recovery
+    quiet = [r for r in caplog.records if "within the quiet window" in r.getMessage()]
+    assert len(quiet) == 1
+    state = json.loads(redis.store[STATE_KEY])
+    assert KEY in state["flagged"]

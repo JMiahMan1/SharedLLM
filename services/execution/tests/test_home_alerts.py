@@ -140,7 +140,7 @@ async def test_a_round_sends_to_the_listed_people_or_everyone(monkeypatch):
         return {"ha_url": "http://ha", "ha_token": "t"}
 
     async def fake_states(url, token, account=""):
-        assert account == "the system account"
+        assert account == "system account"
         return list(st("binary_sensor.sink_leak", "on", T0).values()) + list(st("binary_sensor.door", "off", T0).values())
 
     async def fake_family(**_):
