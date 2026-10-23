@@ -41,6 +41,7 @@ from services.execution import hardware_router
 from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
 from services.execution.artifacts import artifact_name, create_artifact
 from services.execution.handlers import (
+    activity_feed,
     audiobookshelf,
     bible,
     browser,
@@ -73,6 +74,7 @@ from services.execution.handlers import volumes as volume_handler
 from services.execution.media_links import media_file_url
 from services.execution.media_playback_service import LOCAL_PLAYER_ALIASES, MediaPlaybackService
 from services.execution.schemas import (
+    ActivityRequest,
     AnnouncementRequest,
     AudiobookshelfRequest,
     CalendarRequest,
@@ -956,6 +958,10 @@ async def execute_note(req: NoteRequest):
 @app.post("/execute/recipes", response_model=ExecutionResult)
 async def execute_recipes(req: RecipeRequest):
     return await recipe_import.handle_recipe(req)
+
+@app.post("/execute/activity", response_model=ExecutionResult)
+async def execute_activity(req: ActivityRequest):
+    return await activity_feed.handle_activity(req)
 
 @app.post("/execute/timer", response_model=ExecutionResult)
 async def execute_timer(req: TimerRequest):

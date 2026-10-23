@@ -319,10 +319,11 @@ point.
       profile: a living picture of what they listen to, play, watch and browse, when and for
       how long, and the week's patterns. This is the data model Jarvis reads for
       recommendations and for the discipleship surfaces further down.
-- [ ] **Activity feed (music, games, pages, verses).** First brick landed: telemetry stores a
-      capped per-person stream (`POST/GET /api/telemetry/activity`) and execution records
-      through `activity.record` (trivia wins are wired). Recorders still to add: music played
-      through Jarvis (media stack), app feature pages, verses and devotionals.
+- [ ] **Activity feed (music, games, pages, verses).** Telemetry stores a capped per-person
+      stream (`POST/GET /api/telemetry/activity`) and execution records through
+      `activity.record`; trivia wins, media plays (music/video/podcast/audiobook) and app
+      feature pages (the route beacon, posted from the web bundle) are wired. Verses and
+      devotionals come next.
 - [ ] **Music everywhere, not just Jarvis.** Baseline: everything played through the house
       media stack (local library and `spotify://` through Music Assistant). If possible:
       each member links their Spotify account (Web API `recently-played`, opt-in) so
