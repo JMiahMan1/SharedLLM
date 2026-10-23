@@ -73,6 +73,10 @@ const DAILY_STEPS_SYNC_INTERVAL_MS = 30000; // sync steps at least every 30s whe
 // walk becomes one POST per reading. One request in flight, one trailing sync.
 let stepSyncInFlight = false;
 let stepSyncQueued = false;
+// The geolocation watcher also fires bursts of fixes; coalesce the uploads
+// the same way. A location fix is fresh-or-never, so only the newest waits.
+let locationSyncInFlight = false;
+let pendingLocationFix: { lat: number; lng: number; accuracy: number | null; speed: number | null; fixTs?: number } | null = null;
 const KEY_LOCATION_ENABLED = 'jarvis_sensor_location_enabled';
 const KEY_STEPS_ENABLED = 'jarvis_sensor_steps_enabled';
 const KEY_STEPS_BACKFILLED = 'jarvis_steps_backfilled_through';
@@ -545,6 +549,12 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
   const syncToGateway = useCallback(async (lat: number, lng: number, accuracy: number | null, speed: number | null, fixTs?: number) => {
     if (!sensorsRef.current.location.enabled) return;
+    if (locationSyncInFlight) {
+      // One upload in flight; remember only the newest fix for a trailing send.
+      pendingLocationFix = { lat, lng, accuracy, speed, fixTs };
+      return;
+    }
+    locationSyncInFlight = true;
     try {
       const token = await storageGet('jarvis_api_key');
       const rawServerUrl = await storageGet('jarvis_server_url');
@@ -616,6 +626,13 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       logSensor('location', 'sync failed', err);
       markRecovering('location', 'service', true, sensorErrorMessage(err, 'Location unavailable'));
+    } finally {
+      locationSyncInFlight = false;
+      const next = pendingLocationFix;
+      pendingLocationFix = null;
+      if (next) {
+        void syncToGateway(next.lat, next.lng, next.accuracy, next.speed, next.fixTs);
+      }
     }
   }, [ patchSensor, resolveSyncUsername ]);
 
