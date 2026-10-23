@@ -12,17 +12,19 @@ describe('Announcements panel', () => {
     expect(await screen.findByText('Kitchen Timer')).toBeInTheDocument();
   });
 
-  it('links to the one calendar and notes instead of hosting second copies', async () => {
+  it('hosts no calendar, notes or chat copies, and points nowhere', async () => {
     renderWithProviders(<AnnouncementsPanel />);
 
-    expect(await screen.findByRole('link', { name: /open calendar/i })).toHaveAttribute('href', '/calendar');
-    expect(screen.getByRole('link', { name: /open notes/i })).toHaveAttribute('href', '/notes');
-    // The old notes editor (Save appended the note to itself) and the calendar
-    // panel that only printed "Loaded N events" are gone.
+    expect(await screen.findByText('Active Timers')).toBeInTheDocument();
+    // The old notes editor (Save appended the note to itself), the calendar
+    // panel that only printed "Loaded N events", and the cards that linked
+    // out to /calendar and /notes are all gone — timers and announcements
+    // are the whole panel.
     expect(screen.queryByPlaceholderText('Note title')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Calendar selection')).not.toBeInTheDocument();
-    // Chat lives on the Family tab; the panel must not grow its own composer.
     expect(screen.queryByPlaceholderText('Send a live Nextcloud Talk message')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /open calendar/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /open notes/i })).not.toBeInTheDocument();
   });
 
   it('creates and deletes a timer', async () => {

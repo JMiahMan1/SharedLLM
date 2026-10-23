@@ -58,9 +58,9 @@ export default function Family() {
     >
       {/* One compact row, so the conversations get the screen. */}
       {/* The tabs sit beside the title when they fit at full size and wrap to
-          a full-width row of their own when they do not (a large system font
-          on a narrow phone ran them past the right edge). They never shrink
-          their labels to "Ch…". */}
+          a full-width row of their own when they do not. On a phone five
+          labels never fit, so the row shows icons only — the labels return
+          from sm up and the accessible name is the label at every size. */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-1">
         <h1 className="shrink-0 text-2xl font-bold tracking-tight text-white">Family</h1>
         <SafetyButtons />
@@ -77,12 +77,15 @@ export default function Family() {
               key={id}
               role="tab"
               aria-selected={tab === id}
+              aria-label={label}
+              title={label}
               onClick={() => changeTab(id)}
-              className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2 text-[13px] font-medium transition sm:px-3 ${
+              className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] font-medium transition ${
                 tab === id ? 'bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Icon size={14} className="shrink-0" /> {label}
+              <Icon size={16} className="shrink-0" />
+              <span className="hidden sm:inline">{label}</span>
             </button>
           ))}
         </div>

@@ -3,8 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlarmClock,
   BellRing,
-  Calendar,
-  ChevronRight,
   Clock3,
   Megaphone,
   Monitor,
@@ -15,14 +13,12 @@ import {
   SlidersHorizontal,
   Smartphone,
   Square,
-  StickyNote,
   Trash2,
   Users,
   Volume2,
   Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { Link as RouterLink } from 'react-router-dom';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import { ALARM_SOUNDS, EMOJI_PRESETS, playTimerSound, stopLoopingAlarm, unlockChime } from '../../lib/chime';
@@ -39,12 +35,6 @@ const QUICK_PRESETS = [
   { label: '10m 🥚 Hard Egg', duration: '10m', emoji: '🥚', title: 'Hard Boiled Egg' },
   { label: '15m', duration: '15m', emoji: '' },
   { label: '30m', duration: '30m', emoji: '' },
-];
-
-/** The calendar and notes each have one home; this panel points there. */
-const ELSEWHERE = [
-  { icon: Calendar, tone: 'text-emerald-300', title: 'Calendar', detail: 'Every family calendar in one agenda, with add, edit and delete.', to: '/calendar', cta: 'Open Calendar' },
-  { icon: StickyNote, tone: 'text-cyan-300', title: 'Notes', detail: 'Notes and checklists, kept in Nextcloud and searchable by Jarvis.', to: '/notes', cta: 'Open Notes' },
 ];
 
 /** "media_player.kitchen_speaker" -> "Kitchen speaker". */
@@ -711,23 +701,6 @@ const AnnouncementsPanel = () => {
         </section>
       </div>
 
-      <nav className="grid gap-3 md:grid-cols-2" aria-label="Calendar and notes">
-        {ELSEWHERE.map(({ icon: Icon, tone, title, detail, to, cta }) => (
-          <RouterLink
-            key={to}
-            to={to}
-            aria-label={cta}
-            className="glass-panel flex min-h-16 items-center gap-3 rounded-2xl border border-white/10 p-4 hover:border-purple-400/40"
-          >
-            <Icon size={20} className={`shrink-0 ${tone}`} />
-            <span className="min-w-0 flex-1">
-              <span className="block font-bold text-white">{title}</span>
-              <span className="block text-xs text-slate-400">{detail}</span>
-            </span>
-            <ChevronRight size={16} className="shrink-0 text-slate-500" />
-          </RouterLink>
-        ))}
-      </nav>
     </div>
   );
 };

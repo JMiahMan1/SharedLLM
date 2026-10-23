@@ -21,9 +21,10 @@ This page reuses existing systems and must not grow parallel copies:
 | Chores & rewards | Skylight integration (`/api/integrations/skylight/*`) |
 
 The Family page's **Announce** tab (timers and spoken announcements) hosts no
-chat, calendar or notes of its own: it links to `/calendar` and `/notes`, and
-its tests assert the old copies are gone (its notes editor appended the whole
-note to itself on every save; its calendar only printed "Loaded N events").
+chat, calendar or notes of its own — timers and announcements are the whole
+panel. Its tests assert the old copies are gone (its notes editor appended the
+whole note to itself on every save; its calendar only printed "Loaded N
+events"), and the tab no longer links out to `/calendar` or `/notes` either.
 
 ## What is there now
 
@@ -152,8 +153,8 @@ earned, only when `FAMILY_CHAT_TOKEN` names a room.
   send, voice preview → caption → send, a drawing sent to a picked chat.
 - `src/test/ChatFeatures.test.tsx`: envelopes, replies, edits, attachments,
   "Show earlier messages".
-- `src/components/family/AnnouncementsPanel.test.tsx`: timers and announcements;
-  calendar and notes are links, not copies.
+- `src/components/family/AnnouncementsPanel.test.tsx`: timers and announcements
+  only — no calendar, notes or chat copies anywhere in the panel.
 - `services/gateway/tests/test_talk_monitor.py`: the monitor answers other
   Talk apps and skips questions the app already claimed.
 - `services/execution/tests/test_family_games.py` and `test_talk_games.py` for games;
@@ -272,9 +273,11 @@ week's ingredients into `Recipes/Shopping list.md`, a tickable checklist that ke
 already ticked when it is rebuilt. **Import a link** reads a recipe page's published
 schema.org data: paste the URL, preview the ingredients and steps, and **Save to Recipes**
 adds it with guessed level labels and a source line. When a link is not to hand, the same
-panel **searches TheMealDB** — results show a photo and save with attribution to
-themealdb.com. A name filter above the shelf narrows the list as you type; the week plan,
-shopping list and import all pick from the same shelf.
+panel **searches recipes** — the built-in offline index over the whole CC0 Food.com corpus
+answers instantly and a pick reads its full ingredients and steps locally; TheMealDB fills
+in the rest with photos, saved with attribution to themealdb.com. A name filter above the
+shelf narrows the list as you type; the week plan, shopping list and import all pick from
+the same shelf.
 
 ## Voice signatures (shipped)
 
