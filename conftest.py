@@ -151,6 +151,7 @@ _TEST_ENV_DEFAULTS = {
     "WORKSPACE_ROOT": tempfile.gettempdir(),
     "WORKSPACE_REGISTRY_PATH": os.path.join(tempfile.gettempdir(), "workspaces.json"),
     "LOCAL_NOTES_ROOT": os.path.join(tempfile.gettempdir(), "notes"),
+    "BIBLE_BOOKS_PATH": "/Books",
     "PHRASEBOOK_PATH": os.path.join(_root, "data", "phrasebook.json"),
     "VOLUME_BACKUP_ROOT": os.path.join(tempfile.gettempdir(), "backups"),
     "VOLUME_MANIFEST_PATH": os.path.join(tempfile.gettempdir(), "volumes.json"),
