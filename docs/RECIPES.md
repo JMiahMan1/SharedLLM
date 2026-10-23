@@ -1,6 +1,8 @@
 # Recipes and meal planning
 
-Status: **planned — nothing built yet.** Last live app commit `152451cf` (v1.5.1).
+Status: **Phases 0–1 built** — the importer (`scripts/import_recipes.py`) renders the
+first level-balanced note set; everything app-side (Phases 2+) is still planned.
+Last live app commit `d766a19f` (v1.5.1).
 
 Goal: fill the family's Recipes shelf with kid-tiered, fast and appliance-friendly meals,
 then turn them into a weekly plan and a shared shopping list. Every artefact stays a plain
@@ -55,32 +57,40 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 
 ## Phase 0 — decisions
 
-- [ ] Importer home: one-off `tools/import_recipes.py` run from a workstation (proposed),
-      or an Admin › Recipes button.
-- [ ] Dataset access: Hugging Face mirror or Kaggle CLI token for
-      `irkaal/foodcom-recipes-and-reviews` (522k recipes, **CC0**; dataset docs
-      describe the nutrition columns — verify on first download whether they are
-      per-serving or per-recipe). Fallback `shuyangli94/food-com-recipes-with-search-terms-and-tags`
-      for tags/search terms — that older set is **not** CC0.
+- [x] Importer home: `scripts/import_recipes.py`, a one-off workstation script
+      (repo convention — `tools/` is reserved for execution-image subprocess tools).
+- [x] Dataset access: `kagglehub`'s anonymous download works — no Kaggle account or
+      token needed; `kagglehub.dataset_download("irkaal/foodcom-recipes-and-reviews")`
+      (~723 MB) caches under `~/.cache/kagglehub/`, kept out of the repo. Nutrition
+      columns are **per serving**: recipe #38's 170.9 kcal matches the live food.com
+      JSON-LD byte for byte. The shuyangli94 fallback was not needed.
 - [ ] Confirm the level rules, staple list and household serving count (7).
 - [ ] Confirm the meal-plan note format below.
 
 ## Phase 1 — recipe importer
 
-- [ ] Download the dataset (CSV/parquet, ~1.5 GB) once; keep it out of the repo.
-- [ ] Filter candidates: tag matches for each level plus `30-minutes-or-less`,
-      `5-ingredients-or-less`, `inexpensive`. Drop dessert/drink noise; keep mains,
-      breakfasts and lunches. Slow-cooker and Instant-Pot titles (`crock-pot-slow-cooker`,
-      "pressure cooker", "instant pot") are a welcome bonus, not a requirement.
-- [ ] Rank by staple overlap + few ingredients + short total time; pick a balanced set per
-      level (~40 level-1, ~40 level-2, ~40 level-3), taking appliance meals when they fit.
-- [ ] Render markdown: header, labels, scaled ingredient list (`- [ ] 2 lb chicken`),
-      numbered steps, source/licence line.
-- [ ] Guarantee unique note titles (`Title.md`; suffix ` (2)` on collision).
+- [x] Download the dataset once via anonymous `kagglehub` (~723 MB, cached under
+      `~/.cache/kagglehub/`); kept out of the repo.
+- [x] Filter candidates in `scripts/import_recipes.py`. The corpus' real tag
+      vocabulary is `kid friendly` / `easy` / `beginner cook` / `< 30 mins` /
+      `< 60 mins` / `inexpensive` / `oven` / `stove top` (not the assumed
+      `30-minutes-or-less` names). Level 1 tops that with heat/knife-word filters
+      on the instructions; all levels drop dessert/drink/sauce noise, alcohol and
+      recipes without numeric servings. Slow-cooker and pressure-cooker picks are
+      detected from keywords/instructions as a bonus where they fit.
+- [x] Rank by staple overlap, then fewer ingredients, shorter total time and
+      better rating; a per-category cap keeps variety (~40 per level).
+- [x] Render markdown from each recipe's live food.com JSON-LD (the dataset strips
+      ingredient units): scaled `- [ ] 2 lb chicken` lines (×7/servings), numbered
+      steps, source/licence line, and a per-serving nutrition block tagged
+      `foodcom`.
+- [x] Guarantee unique note titles (`Title.md`; suffix ` (2)` on collision).
 - [ ] Wikibooks Cookbook (bonus): the `Category:Slow cooker recipes` set (~26 pages) through
       the MediaWiki API, converted to markdown with the CC BY-SA credit line.
-- [ ] Dry-run report first: counts per level (and how many appliance picks came along) and a
-      sample note for review, before anything is written to Nextcloud.
+- [x] Dry-run report first: funnel + sample notes printed before anything is
+      written (522,517 rows → 339,044 with servings → 246,772 non-noise → 213,716
+      ingredient/step bounds → 188,908 no alcohol; pools L1 2,253 / L2 56,171 /
+      L3 88,426).
 
 ## Phase 2 — Recipes page touchpoints
 
