@@ -120,6 +120,20 @@ def _find_recipe(data: Any) -> dict | None:
     return None
 
 
+def _yield_text(value: Any) -> str:
+    """Sites often send yield as ["12", "12 cookies"]; prefer the fuller one."""
+    if isinstance(value, list):
+        parts = [_text(item) for item in value if _text(item)]
+        if len(parts) >= 2 and parts[-1].startswith(parts[0]):
+            return parts[-1]
+        seen: list[str] = []
+        for part in parts:
+            if part not in seen:
+                seen.append(part)
+        return " ".join(seen)
+    return _text(value)
+
+
 def parse_recipe(recipe: dict, source_url: str) -> dict:
     """Normalize a schema.org Recipe node into the shape the app saves."""
     ingredients = [
@@ -133,7 +147,7 @@ def parse_recipe(recipe: dict, source_url: str) -> dict:
         "prep_minutes": _minutes(recipe.get("prepTime")),
         "cook_minutes": _minutes(recipe.get("cookTime")),
         "total_minutes": _minutes(recipe.get("totalTime")),
-        "yield": _text(recipe.get("recipeYield")),
+        "yield": _yield_text(recipe.get("recipeYield")),
         "image": _image(recipe.get("image")),
         "source_url": source_url,
         "site": urlparse(source_url).netloc,

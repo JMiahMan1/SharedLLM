@@ -73,6 +73,7 @@ export default function Recipes() {
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState<ImportedRecipe | null>(null);
   const [savingImport, setSavingImport] = useState(false);
+  const [filter, setFilter] = useState('');
   const [planOpen, setPlanOpen] = useState(false);
   const [plan, setPlan] = useState<WeeklyPlan>(emptyPlan());
   const [planExists, setPlanExists] = useState(false);
@@ -407,6 +408,11 @@ export default function Recipes() {
     new Set(plannedTitles.filter((candidate, index) => plannedTitles.indexOf(candidate) !== index)),
   );
 
+  const filterText = filter.trim().toLowerCase();
+  const visibleRecipes = filterText
+    ? recipes.filter((recipe) => recipe.title.toLowerCase().includes(filterText))
+    : recipes;
+
   return (
     <div className="space-y-4" data-testid="recipes">
       <div className="glass-panel p-4 rounded-2xl border border-white/5 space-y-2">
@@ -423,6 +429,13 @@ export default function Recipes() {
           Saved in Nextcloud under <code className="text-slate-300">{RECIPES_DIR}/</code>: yours, or the house account
           when an admin switches.
         </p>
+        <input
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder="Filter recipes…"
+          aria-label="Filter recipes"
+          className="glass-input min-h-11 w-full px-2 py-1 text-base sm:max-w-xs sm:text-sm"
+        />
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -597,7 +610,12 @@ export default function Recipes() {
               No recipes yet. Add the first one on the right.
             </p>
           )}
-          {recipes.map((recipe) => (
+          {!isLoading && recipes.length > 0 && visibleRecipes.length === 0 && (
+            <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
+              No recipes match “{filter.trim()}”.
+            </p>
+          )}
+          {visibleRecipes.map((recipe) => (
             <div
               key={recipe.path}
               className={`flex items-center gap-2 rounded-xl border p-1.5 pl-3 ${

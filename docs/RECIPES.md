@@ -187,8 +187,9 @@ account is connected, everything above still works.
 - [ ] Search sources: the seeded CC0 set itself (a SQLite FTS index over title,
       ingredients and tags, so search stays offline and instant), TheMealDB's free API for
       a quick lookup with photos, and "paste a link" import that reads a page's schema.org
-      `Recipe` JSON-LD. **Paste-a-link is built** (`/execute/recipes` + `/api/recipes/import`);
-      the offline corpus index and TheMealDB lookups are still open.
+      `Recipe` JSON-LD. **Paste-a-link is built** (`/execute/recipes` + `/api/recipes/import`),
+      and the Recipes page filters the shelf by name as you type; the offline corpus index
+      and TheMealDB lookups are still open.
 - [x] Backend: `url_import` lives in `services/execution/handlers/recipe_import.py` — it
       fetches the page (http/https only, 25 s timeout, 1.5 MB cap) and reads the first
       `Recipe` node (arrays and `@graph` included), returning title, ingredients, ordered
@@ -199,7 +200,8 @@ account is connected, everything above still works.
       yield, counts) and **Save to Recipes** writes the note with the standard header, guessed
       labels (`#level-…` from time and ingredient count, `#slow-cooker`/`#instant-pot` from
       the title, `#30-minutes`, `#5-ingredients`) and the source URL line. The search box
-      with photos and servings waits for the search sources.
+      with photos and servings waits for the search sources. A name filter above the shelf
+      narrows the list as you type.
 - [ ] Duplicate guard: skip a result whose source URL is already imported. (The paste-a-link
       save stamps the source URL into the note and refuses a same-title save; the search
       results guard arrives with the search slice.)

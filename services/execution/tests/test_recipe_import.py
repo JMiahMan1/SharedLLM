@@ -168,3 +168,11 @@ async def test_a_network_error_fails_plainly(monkeypatch):
     result = await recipe_import.handle_recipe(_request())
     assert result.status == "FAILURE"
     assert "could not be reached" in result.message
+
+
+def test_prefers_the_full_yield_when_the_site_sends_two():
+    recipe = recipe_import.parse_recipe(
+        {**RECIPE_NODE, "recipeYield": ["12", "12 cookies"]},
+        "https://example.com/recipes/lemonade",
+    )
+    assert recipe["yield"] == "12 cookies"
