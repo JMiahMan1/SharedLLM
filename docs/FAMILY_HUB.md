@@ -20,14 +20,14 @@ This page reuses existing systems and must not grow parallel copies:
 | Points, badges, cheers | Achievements engine + points ledger (`docs/ACHIEVEMENTS.md`) |
 | Chores & rewards | Skylight integration (`/api/integrations/skylight/*`) |
 
-`Communication` (timers and spoken announcements) hosts no chat, calendar or
-notes of its own: it links to Family, `/calendar` and `/notes`, and its tests
-assert the old copies are gone (its notes editor appended the whole note to
-itself on every save; its calendar only printed "Loaded N events").
+The Family page's **Announce** tab (timers and spoken announcements) hosts no
+chat, calendar or notes of its own: it links to `/calendar` and `/notes`, and
+its tests assert the old copies are gone (its notes editor appended the whole
+note to itself on every save; its calendar only printed "Loaded N events").
 
 ## What is there now
 
-- **Family page** with Chat / Games / Create tabs. On phones the chat tab is
+- **Family page** with Chat / Calls / Announce / Games / Create tabs. On phones the chat tab is
   exactly the screen's height and only the conversation list (or the thread)
   scrolls; the shell sizes to the dynamic viewport (`dvh`).
 - **Chat on Nextcloud Talk** (`ChatPanel` and `components/chat/*`): avatars
@@ -152,7 +152,7 @@ earned, only when `FAMILY_CHAT_TOKEN` names a room.
   send, voice preview → caption → send, a drawing sent to a picked chat.
 - `src/test/ChatFeatures.test.tsx`: envelopes, replies, edits, attachments,
   "Show earlier messages".
-- `src/pages/Communication.test.tsx`: timers and announcements; chat,
+- `src/components/family/AnnouncementsPanel.test.tsx`: timers and announcements;
   calendar and notes are links, not copies.
 - `services/gateway/tests/test_talk_monitor.py`: the monitor answers other
   Talk apps and skips questions the app already claimed.

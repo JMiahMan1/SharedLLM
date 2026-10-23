@@ -18,7 +18,6 @@ import AdminElevation from './components/auth/AdminElevation';
 import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import Identity from './pages/Identity';
-import Communication from './pages/Communication';
 import Notes from './pages/Notes';
 import Recipes from './pages/Recipes';
 import Family from './pages/Family';
@@ -132,7 +131,9 @@ function App() {
 
             {/* Service routes */}
             <Route path="/identity" element={<ProtectedRoute isMobile={isMobile}><Identity /></ProtectedRoute>} />
-            <Route path="/communication" element={<ProtectedRoute isMobile={isMobile}><Communication /></ProtectedRoute>} />
+            {/* The timers and announcements panel moved into the Family page
+                (Announce tab); the old URL keeps working. */}
+            <Route path="/communication" element={<Navigate to="/family" replace />} />
             <Route path="/notes" element={<ProtectedRoute isMobile={isMobile}><Notes /></ProtectedRoute>} />
             <Route path="/recipes" element={<ProtectedRoute isMobile={isMobile}><Recipes /></ProtectedRoute>} />
             <Route path="/family" element={<ProtectedRoute isMobile={isMobile}><Family /></ProtectedRoute>} />

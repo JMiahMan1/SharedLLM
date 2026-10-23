@@ -17,8 +17,8 @@ grid of colour-coded cards with checklists, search, and a full editor.
 | Schema | `services/execution/schemas.py` (`NoteRequest`) |
 
 Recipes (`pages/Recipes.tsx`, `Recipes/` folder) use the same actions. The
-dashboard `QuickNotesWidget` shows recent titles. Communication links here; its
-old second editor (whose Save called `append`) is gone.
+dashboard `QuickNotesWidget` shows recent titles. The Family page's Announce tab
+links here; its old second editor (whose Save called `append`) is gone.
 
 ## Actions
 
