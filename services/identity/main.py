@@ -123,11 +123,18 @@ def _require_internal_secret(x_internal_secret: str | None) -> None:
 DATABASE_URL = IDENTITY_DATABASE_URL or "sqlite:///default.db"
 
 if "sqlite" in DATABASE_URL:
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"check_same_thread": False, "timeout": 30},
-        pool_pre_ping=True
-    )
+    # The small deployment runs file-backed SQLite. Its branch kept the
+    # default 5 + 10 connection pool: a phone's parallel location posts could
+    # exhaust it and the wait turned into 500s. Widen it like the server
+    # database branch. An in-memory database (the tests) uses SQLAlchemy's
+    # single-threaded pool, which has no size knobs.
+    sqlite_kwargs: dict = {
+        "connect_args": {"check_same_thread": False, "timeout": 30},
+        "pool_pre_ping": True,
+    }
+    if DATABASE_URL != "sqlite://" and ":memory:" not in DATABASE_URL:
+        sqlite_kwargs.update(pool_size=20, max_overflow=40, pool_timeout=60)
+    engine = create_engine(DATABASE_URL, **sqlite_kwargs)
 else:
     engine = create_engine(
         DATABASE_URL,
