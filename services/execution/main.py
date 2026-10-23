@@ -235,7 +235,9 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
     while True:
         try:
             await asyncio.sleep(interval_seconds)
-            creds = await resolve_internal_user()
+            # The system account (user 1) owns the stored HA login; an empty
+            # payload would be refused by identity and leave the loop blind.
+            creds = await resolve_internal_user(user_id=1)
             ha_url = creds.get("ha_url") if creds else None
             ha_token = creds.get("ha_token") if creds else None
             if not ha_url or not ha_token:
@@ -264,7 +266,7 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
                 if not entity_id:
                     continue
                 try:
-                    state = await ha_client.get_state(ha_url, ha_token, entity_id)
+                    state = await ha_client.get_state(ha_url, ha_token, entity_id, account="the system account")
                     if not state:
                         continue
                     raw = state.get("state")

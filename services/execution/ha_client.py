@@ -12,6 +12,7 @@ log = logging.getLogger("execution.ha_client")
 
 import re
 
+from services.execution import credential_alerts
 from services.execution.http_client import get_session, host_of
 
 _TIMEOUT = aiohttp.ClientTimeout(total=45.0, connect=15.0)
@@ -126,7 +127,7 @@ async def call_service(
             log.error(f"[ha_client] Unexpected error: {e}")
             return {"ok": False, "error": str(e)}
 
-async def get_state(ha_url: str, ha_token: str, entity_id: str) -> dict | None:
+async def get_state(ha_url: str, ha_token: str, entity_id: str, account: str = "") -> dict | None:
     """Retrieve the current state of an HA entity."""
     if not ha_url:
         log.error("[ha_client] ha_url is None or empty. Cannot get state.")
@@ -142,14 +143,19 @@ async def get_state(ha_url: str, ha_token: str, entity_id: str) -> dict | None:
                 if resp.status == 404:
                     return None
                 resp.raise_for_status()
-                return await resp.json()
+                payload = await resp.json()
+                await credential_alerts.auth_ok("home_assistant", account or "the stored login")
+                return payload
         except Exception as e:
+            status = getattr(e, "status", None)
+            if status in (401, 403):
+                await credential_alerts.auth_failed("home_assistant", account or "the stored login", f"HTTP {status}")
             log.error(f"[ha_client] get_state({entity_id}) failed: {type(e).__name__}: {e}")
             return None
 
-async def get_all_states(ha_url: str, ha_token: str) -> list:
+async def get_all_states(ha_url: str, ha_token: str, account: str = "") -> list:
     """Retrieve all entity states from HA."""
-    return await get_states(ha_url, ha_token)
+    return await get_states(ha_url, ha_token, account)
 
 async def get_config(ha_url: str, ha_token: str) -> dict:
     """Retrieve the core configuration from HA."""
@@ -193,7 +199,7 @@ async def find_mass_config_entry(ha_url: str, ha_token: str) -> str:
             return entry_id
     return ""
 
-async def get_states(ha_url: str, ha_token: str) -> list:
+async def get_states(ha_url: str, ha_token: str, account: str = "") -> list:
     """Retrieve all states from HA."""
     if not ha_url:
         log.error("[ha_client] ha_url is None or empty. Cannot get states.")
@@ -207,8 +213,13 @@ async def get_states(ha_url: str, ha_token: str) -> list:
             log.info(f"[ha_client] GET {url}")
             async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
-                return await resp.json()
+                payload = await resp.json()
+                await credential_alerts.auth_ok("home_assistant", account or "the stored login")
+                return payload
         except Exception as e:
+            status = getattr(e, "status", None)
+            if status in (401, 403):
+                await credential_alerts.auth_failed("home_assistant", account or "the stored login", f"HTTP {status}")
             log.error(f"[ha_client] get_states failed: {type(e).__name__}: {e}")
             return []  # Ensure empty list on error
 
@@ -258,7 +269,7 @@ async def get_logbook(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
             log.error(f"[ha_client] get_logbook({entity_id}) failed: {e}")
             return []
 
-async def get_areas(ha_url: str, ha_token: str) -> dict:
+async def get_areas(ha_url: str, ha_token: str, account: str = "") -> dict:
     """Retrieve mapping of entity_id to area_name using HA Template API."""
     if not ha_url:
         return {}
@@ -283,11 +294,15 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
             async with client.post(url, headers=headers, json={"template": template}, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 raw_data = await resp.json(content_type=None)
+                await credential_alerts.auth_ok("home_assistant", account or "the stored login")
                 # Convert list of dicts to a single mapping dict
                 if isinstance(raw_data, list):
                     return {item["eid"]: item["a"] for item in raw_data if item.get("a")}
                 return {}
         except Exception as e:
+            status = getattr(e, "status", None)
+            if status in (401, 403):
+                await credential_alerts.auth_failed("home_assistant", account or "the stored login", f"HTTP {status}")
             log.error(f"[ha_client] get_areas failed: {e}")
             return {}
     return {}  # Fallback
