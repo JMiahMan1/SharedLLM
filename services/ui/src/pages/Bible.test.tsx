@@ -43,6 +43,7 @@ vi.mock('../services/api', async (importOriginal) => {
       putBibleMark: vi.fn(),
       deleteBibleMark: vi.fn(),
       recordBibleEvent: vi.fn(),
+      postActivity: vi.fn(),
       createNote: vi.fn(),
       getBlbLink: vi.fn(),
       getBibleStudyNotes: vi.fn(),
@@ -273,6 +274,12 @@ beforeEach(() => {
   mocked.putBibleMark.mockReset().mockResolvedValue({ mark: MARKS().marks[0] });
   mocked.deleteBibleMark.mockReset().mockResolvedValue({ deleted: 1 });
   mocked.recordBibleEvent.mockReset().mockResolvedValue({ ok: true });
+  mocked.postActivity.mockReset().mockResolvedValue({
+    status: 'SUCCESS',
+    message: 'Noted.',
+    service: 'activity_feed',
+    detail: {},
+  } as never);
   mocked.createNote.mockReset().mockResolvedValue({ status: 'SUCCESS', message: 'saved', service: 'note' });
   mocked.getBlbLink.mockReset().mockResolvedValue({ ref: 'John 3:16', url: 'https://bible.test/jhn/3/16', tool: null });
   mocked.getBibleEditions.mockReset().mockResolvedValue({
@@ -340,6 +347,19 @@ describe('Bible page', () => {
       expect(mocked.putBibleState).toHaveBeenCalledWith({ book: 'John', chapter: 3, verse: 1 })
     );
     expect(mocked.recordBibleEvent).toHaveBeenCalledWith('chapter_complete', 'John 3');
+  });
+
+  it('lands the chapter on the activity feed so the family profile sees it', async () => {
+    renderPage('/bible?ref=John%203:16');
+
+    await screen.findByTestId('bible-chapter-heading');
+    await waitFor(() =>
+      expect(mocked.postActivity).toHaveBeenCalledWith({
+        feature: 'bible',
+        item: 'John 3',
+        event: 'read',
+      })
+    );
   });
 
   it('saves a display change to the server instead of only to this device', async () => {

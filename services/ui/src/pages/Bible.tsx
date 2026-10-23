@@ -208,6 +208,15 @@ function BibleReaderPane({
       'chapter_complete',
       `${shownChapter.book_name} ${shownChapter.chapter_start}`
     );
+    // The same chapter lands on the person's activity feed (parents-only), so
+    // the digital profile sees what was actually read.
+    void api
+      .postActivity({
+        feature: 'bible',
+        item: `${shownChapter.book_name} ${shownChapter.chapter_start}`,
+        event: 'read',
+      })
+      .catch(() => undefined);
     // `position.verse` is intentionally not a dependency: it changes on every
     // verse tap, and the chapter is what this records.
     // eslint-disable-next-line react-hooks/exhaustive-deps
