@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, CalendarDays, Link2, Loader2, Plus, Save, Share2, ShoppingCart, Shuffle, Trash2, Users } from 'lucide-react';
+import { BookOpen, CalendarDays, Link2, Loader2, Plus, Save, Search, Share2, ShoppingCart, Shuffle, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
@@ -74,6 +74,9 @@ export default function Recipes() {
   const [imported, setImported] = useState<ImportedRecipe | null>(null);
   const [savingImport, setSavingImport] = useState(false);
   const [filter, setFilter] = useState('');
+  const [mealQuery, setMealQuery] = useState('');
+  const [mealSearching, setMealSearching] = useState(false);
+  const [mealResults, setMealResults] = useState<ImportedRecipe[]>([]);
   const [planOpen, setPlanOpen] = useState(false);
   const [plan, setPlan] = useState<WeeklyPlan>(emptyPlan());
   const [planExists, setPlanExists] = useState(false);
@@ -403,6 +406,27 @@ export default function Recipes() {
     }
   };
 
+  const searchMealDb = async () => {
+    const query = mealQuery.trim();
+    if (query.length < 2) {
+      toast.error('Type at least two letters to search');
+      return;
+    }
+    setMealSearching(true);
+    try {
+      const res = await api.searchRecipes(query);
+      const results = (res.detail?.recipes ?? []) as ImportedRecipe[];
+      setMealResults(results);
+      if (res.status !== 'SUCCESS' || results.length === 0) {
+        toast.error(res.message || 'No recipes found');
+      }
+    } catch {
+      toast.error('The search could not be completed');
+    } finally {
+      setMealSearching(false);
+    }
+  };
+
   const plannedTitles = PLAN_DAYS.map((day) => plan[day].title).filter(Boolean) as string[];
   const repeated = Array.from(
     new Set(plannedTitles.filter((candidate, index) => plannedTitles.indexOf(candidate) !== index)),
@@ -468,7 +492,7 @@ export default function Recipes() {
 
       {importOpen && (
         <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="recipe-import">
-          <span className="text-sm font-semibold text-slate-200">Import from a link</span>
+          <span className="text-sm font-semibold text-slate-200">Add a recipe</span>
           <p className="text-xs text-slate-400">Paste a recipe page — Jarvis reads its published recipe data.</p>
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -488,14 +512,63 @@ export default function Recipes() {
               Read the link
             </button>
           </div>
+          <div className="text-center text-[10px] uppercase tracking-wide text-slate-500">or search TheMealDB</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={mealQuery}
+              onChange={(event) => setMealQuery(event.target.value)}
+              placeholder="Search TheMealDB…"
+              aria-label="Search TheMealDB"
+              className="glass-input min-h-11 min-w-0 flex-1 px-2 py-1 text-base sm:text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => void searchMealDb()}
+              disabled={mealSearching}
+              className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+            >
+              {mealSearching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              Search
+            </button>
+          </div>
+          {mealResults.length > 0 && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="meal-results">
+              {mealResults.map((result) => (
+                <button
+                  key={result.source_url}
+                  type="button"
+                  onClick={() => setImported(result)}
+                  className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-purple-400/40"
+                >
+                  {result.image ? (
+                    <img src={result.image} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+                  ) : null}
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-semibold text-slate-100">{result.title}</span>
+                    <span className="block truncate text-[10px] text-slate-400">{result.description}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           {imported && (
             <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-3" data-testid="recipe-import-preview">
-              <div className="text-sm font-semibold text-slate-100">{imported.title}</div>
-              <div className="text-xs text-slate-400">
-                {imported.site}
-                {imported.total_minutes ? ` · ${imported.total_minutes} min total` : ''}
-                {imported.yield ? ` · ${imported.yield}` : ''}
-                {` · ${imported.ingredients.length} ingredients · ${imported.instructions.length} steps`}
+              <div className="flex items-start gap-3">
+                {imported.image ? (
+                  <img src={imported.image} alt="" className="h-16 w-16 shrink-0 rounded-lg object-cover" />
+                ) : null}
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-100">{imported.title}</div>
+                  <div className="text-xs text-slate-400">
+                    {imported.site}
+                    {imported.total_minutes ? ` · ${imported.total_minutes} min total` : ''}
+                    {imported.yield ? ` · ${imported.yield}` : ''}
+                    {` · ${imported.ingredients.length} ingredients · ${imported.instructions.length} steps`}
+                  </div>
+                  {imported.description ? (
+                    <div className="text-[11px] text-slate-500">{imported.description}</div>
+                  ) : null}
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button

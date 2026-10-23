@@ -18,6 +18,7 @@ vi.mock('../services/api', async (importOriginal) => {
       deleteNote: vi.fn(),
       syncNotesRag: vi.fn(),
       importRecipe: vi.fn(),
+      searchRecipes: vi.fn(),
       getTalkConversations: vi.fn(),
       sendTalkMessage: vi.fn(),
     },
@@ -36,6 +37,7 @@ const writeNote = vi.mocked(api.writeNote);
 const deleteNote = vi.mocked(api.deleteNote);
 const syncNotesRag = vi.mocked(api.syncNotesRag);
 const importRecipe = vi.mocked(api.importRecipe);
+const searchRecipes = vi.mocked(api.searchRecipes);
 const getTalkConversations = vi.mocked(api.getTalkConversations);
 const sendTalkMessage = vi.mocked(api.sendTalkMessage);
 
@@ -67,6 +69,7 @@ describe('Recipes', () => {
     deleteNote.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'note_delete' });
     syncNotesRag.mockResolvedValue({ status: 'SUCCESS', message: 'queued', service: 'notes_sync_rag' });
     importRecipe.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'recipe_import' });
+    searchRecipes.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'recipe_import' });
     getTalkConversations.mockResolvedValue({
       status: 'SUCCESS',
       message: '',
@@ -270,5 +273,49 @@ describe('Recipes', () => {
 
     fireEvent.change(screen.getByLabelText('Filter recipes'), { target: { value: 'zzz' } });
     expect(screen.getByText('No recipes match “zzz”.')).toBeTruthy();
+  });
+
+  it('searches TheMealDB and saves a pick', async () => {
+    searchRecipes.mockResolvedValue({
+      status: 'SUCCESS',
+      message: 'Found 1 recipe(s).',
+      service: 'recipe_import',
+      detail: {
+        recipes: [
+          {
+            title: 'Chocolate Gateau',
+            description: 'Dessert · French',
+            ingredients: ['175g Butter', '200g Dark Chocolate'],
+            instructions: ['Melt the butter.', 'Bake.'],
+            prep_minutes: null,
+            cook_minutes: null,
+            total_minutes: null,
+            yield: '',
+            image: null,
+            source_url: 'https://www.themealdb.com/meal/52772',
+            site: 'themealdb.com',
+          },
+        ],
+      },
+    } as never);
+
+    renderRecipes();
+    await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+    fireEvent.change(screen.getByLabelText('Search TheMealDB'), { target: { value: 'gateau' } });
+    fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
+
+    const card = await screen.findByText('Chocolate Gateau');
+    fireEvent.click(card);
+
+    expect(await screen.findByTestId('recipe-import-preview')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /save to recipes/i }));
+
+    await waitFor(() => expect(writeNote).toHaveBeenCalled());
+    const body = writeNote.mock.calls[0][0] as { title: string; content: string };
+    expect(body.title).toBe('Chocolate Gateau');
+    expect(body.content).toContain('Source: https://www.themealdb.com/meal/52772');
+    expect(body.content).toContain('- [ ] 175g Butter');
   });
 });

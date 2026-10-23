@@ -182,25 +182,28 @@ account is connected, everything above still works.
       the connector optional, conservative on rate, and never block the local
       flows on it.
 
-## Phase 8 — search and import (paste-a-link import shipped)
+## Phase 8 — search and import (paste-a-link + TheMealDB shipped)
 
 - [ ] Search sources: the seeded CC0 set itself (a SQLite FTS index over title,
       ingredients and tags, so search stays offline and instant), TheMealDB's free API for
       a quick lookup with photos, and "paste a link" import that reads a page's schema.org
-      `Recipe` JSON-LD. **Paste-a-link is built** (`/execute/recipes` + `/api/recipes/import`),
-      and the Recipes page filters the shelf by name as you type; the offline corpus index
-      and TheMealDB lookups are still open.
+      `Recipe` JSON-LD. **Paste-a-link and TheMealDB search are built** (`/execute/recipes`
+      behind `/api/recipes/import` and `/api/recipes/search`); the Recipes page filters the
+      shelf by name as you type; the offline corpus index is still open.
 - [x] Backend: `url_import` lives in `services/execution/handlers/recipe_import.py` — it
       fetches the page (http/https only, 25 s timeout, 1.5 MB cap) and reads the first
       `Recipe` node (arrays and `@graph` included), returning title, ingredients, ordered
       steps (sections flattened), prep/cook/total minutes, yield, image and the source URL;
-      pages without recipe data get a plain message instead of a guess. `search` and
-      `fetch` endpoints still to come.
+      pages without recipe data get a plain message instead of a guess. `themealdb_search`
+      reads the free TheMealDB API (`search.php`) and maps each meal into the same shape —
+      measured ingredient pairs, steps split on line breaks, source URL `/meal/{id}`. A
+      corpus `fetch` endpoint is still to come.
 - [x] UI: **Import a link** on the Recipes page — paste, read, preview (title, site, time,
       yield, counts) and **Save to Recipes** writes the note with the standard header, guessed
       labels (`#level-…` from time and ingredient count, `#slow-cooker`/`#instant-pot` from
-      the title, `#30-minutes`, `#5-ingredients`) and the source URL line. The search box
-      with photos and servings waits for the search sources. A name filter above the shelf
+      the title, `#30-minutes`, `#5-ingredients`) and the source URL line. The same panel
+      searches TheMealDB — results show a photo and pick into the same preview and save
+      (the source line points back at themealdb.com). A name filter above the shelf
       narrows the list as you type.
 - [ ] Duplicate guard: skip a result whose source URL is already imported. (The paste-a-link
       save stamps the source URL into the note and refuses a same-title save; the search

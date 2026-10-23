@@ -271,8 +271,10 @@ for *cooked*, a surprise-me fill and a repeat warning; **Save plan** writes
 week's ingredients into `Recipes/Shopping list.md`, a tickable checklist that keeps what is
 already ticked when it is rebuilt. **Import a link** reads a recipe page's published
 schema.org data: paste the URL, preview the ingredients and steps, and **Save to Recipes**
-adds it with guessed level labels and a source line. A name filter above the shelf narrows
-the list as you type; the week plan, shopping list and import all pick from the same shelf.
+adds it with guessed level labels and a source line. When a link is not to hand, the same
+panel **searches TheMealDB** — results show a photo and save with attribution to
+themealdb.com. A name filter above the shelf narrows the list as you type; the week plan,
+shopping list and import all pick from the same shelf.
 
 ## Voice signatures (shipped)
 
