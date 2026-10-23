@@ -205,7 +205,18 @@ export default function ImportedBookReader({
     } catch {
       /* storage disabled: this session still reads correctly */
     }
+    // Every page that opens is what the reader actually saw, devotionals and
+    // imported study books alike; the family profile records the read.
+    void api
+      .postActivity({
+        feature: 'bible',
+        item: `${book.title} — ${pageLabel}`,
+        event: 'read',
+      })
+      .catch(() => undefined);
     textRef.current?.scrollTo({ top: 0 });
+    // The beacon records once per page; the label is best effort at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book.id, ordinal]);
 
   useEffect(() => {

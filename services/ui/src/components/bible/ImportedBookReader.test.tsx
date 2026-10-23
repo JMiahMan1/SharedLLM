@@ -10,6 +10,7 @@ const apiMock = vi.hoisted(() => ({
   getBibleImportedBookChapter: vi.fn(),
   askBibleBookQuestion: vi.fn(),
   createNote: vi.fn(),
+  postActivity: vi.fn(),
 }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -89,6 +90,8 @@ beforeEach(() => {
     }),
   );
   apiMock.createNote.mockResolvedValue({ ok: true });
+  apiMock.postActivity.mockReset();
+  apiMock.postActivity.mockResolvedValue({ status: 'SUCCESS' });
   apiMock.askBibleBookQuestion.mockResolvedValue({
     answer: 'Following Jesus means walking with him day by day.',
     book_id: 1,
@@ -98,6 +101,18 @@ beforeEach(() => {
 });
 
 describe('imported book reader', () => {
+  it('lands the open page on the activity feed so the family profile sees reading', async () => {
+    renderReader();
+
+    await vi.waitFor(() =>
+      expect(apiMock.postActivity).toHaveBeenCalledWith({
+        feature: 'bible',
+        item: 'Walk With Jesus PDF - 1st Edition — Page 1',
+        event: 'read',
+      }),
+    );
+  });
+
   it('reads one page as prose instead of listing every page as a button', async () => {
     renderReader();
 
