@@ -287,8 +287,10 @@ live search is the ecosystem-standard pattern.
       `PhoneUsageSync` every five minutes. The top-apps view itself lands on the parents'
       surface (step 7).
       Android-only: the card hides everywhere else, exactly like the steps sensor.
-- [ ] Ingestion mirrors the steps pipeline: the phone owns the day arithmetic, uploads batched,
+- [x] Ingestion mirrors the steps pipeline: the phone owns the day arithmetic, uploads batched,
       idempotent payloads (`source: phone`), coalesced — stored per user, every reading source-tagged.
+      Phone usage (`PhoneUsageSync`, 5-min) and per-app foreground time land this way; media
+      sessions, calls and SMS reuse the activity pipeline.
 - [ ] Digital wellbeing card in the hub: first use, last use, total screen time, the day's session
       timeline, and the top apps by foreground time.
 - [ ] Jarvis itself: log feature events from the web bundle (chat, recipes, notes, timers, games,
@@ -323,7 +325,7 @@ point.
       profile: a living picture of what they listen to, play, watch and browse, when and for
       how long, and the week's patterns. This is the data model Jarvis reads for
       recommendations and for the discipleship surfaces further down.
-- [ ] **Activity feed (music, games, pages, verses).** Telemetry stores a capped per-person
+- [x] **Activity feed (music, games, pages, verses).** Telemetry stores a capped per-person
       stream (`POST/GET /api/telemetry/activity`) and execution records through
       `activity.record`; trivia wins, media plays (music/video/podcast/audiobook) and app
       feature pages (the route beacon, posted from the web bundle) are wired; Bible chapter
@@ -388,6 +390,9 @@ point.
       podcasts, books, games and activities. Every suggestion says why it was made, the
       member it is for sees it (suggestions are theirs; the raw feed behind them is not),
       and a parent can bless or block a lane.
+      First brick (music): a reviewed genre/artist map (`services/common/music_recommendations.py`)
+      plus `GET /api/recommendations/music` returning a suggestion derived from the member's
+      listening, and a `MusicRecommendationCard` on the Health page. Raw feed stays parents-only.
 - [ ] **Who sees what (the visibility rule).** The collected data is parents-only: a minor's
       profile — every raw section — is open to both parents (including the linked mother
       under `docs/ROLES.md`) and to no one else; a minor does not browse their own raw feed,
@@ -407,9 +412,13 @@ point.
       locked; children never see parents' private sections; kid mode respected throughout.
 
 **Build order (profile first):** (1) the digital profile store and the activity recorders
-around it; (2) the Android collection engine — usage, media sessions, calls and SMS, video;
-(3) Jarvis recommendations from the profile (music style matching first, then video themes
-redeemed or redirected); (4) time budgets and routines; (5) app control and the web filter;
+around it — DONE (trivia wins, media plays, app pages, Bible chapters, imported devotional/
+study-book reads, external media sessions, general phone usage, per-app foreground time,
+calls and SMS all land on the profile); (2) the Android collection engine — usage,
+media sessions, calls and SMS DONE (video covered by media sessions + per-app foreground
+time); (3) Jarvis recommendations from the profile — IN PROGRESS (music style matching
+first, then video themes redeemed or redirected); (4) time budgets and routines;
+(5) app control and the web filter;
 (6) monitoring alerts and the weekly recap; (7) the parents' page and the discipleship
 surfaces.
 

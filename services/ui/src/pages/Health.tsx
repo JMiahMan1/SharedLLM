@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { HeartPulse } from 'lucide-react';
 import HealthTabs, { type HealthTab } from '../components/health/HealthTabs';
 import HealthToday from '../components/health/HealthToday';
+import MusicRecommendationCard from '../components/health/MusicRecommendationCard';
 import HealthSleep from '../components/health/HealthSleep';
 import HealthNutrition from '../components/health/HealthNutrition';
 import HealthProfilePanel from '../components/health/HealthProfilePanel';
@@ -44,7 +45,12 @@ const Health = () => {
         aria-labelledby={`health-tab-${tab}`}
         className="pt-1"
       >
-        {tab === 'today' && <HealthToday onNavigate={setTab} />}
+        {tab === 'today' && (
+          <>
+            <MusicRecommendationCard />
+            <HealthToday onNavigate={setTab} />
+          </>
+        )}
         {tab === 'fitness' && <HealthFitness />}
         {tab === 'sleep' && <HealthSleep />}
         {tab === 'nutrition' && <HealthNutrition onNavigate={setTab} />}
