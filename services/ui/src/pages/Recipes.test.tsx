@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Recipes, { RECIPES_DIR } from './Recipes';
 import { api } from '../services/api';
@@ -15,22 +16,35 @@ vi.mock('../services/api', async (importOriginal) => {
       readNote: vi.fn(),
       writeNote: vi.fn(),
       deleteNote: vi.fn(),
+      syncNotesRag: vi.fn(),
+      getTalkConversations: vi.fn(),
+      sendTalkMessage: vi.fn(),
     },
   };
 });
+
+vi.mock('../components/chat/familyDirectory', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../components/chat/familyDirectory')>()),
+  useFamilyDirectory: () => () => undefined,
+}));
 
 const getMe = vi.mocked(api.getMe);
 const listNotes = vi.mocked(api.listNotes);
 const readNote = vi.mocked(api.readNote);
 const writeNote = vi.mocked(api.writeNote);
 const deleteNote = vi.mocked(api.deleteNote);
+const syncNotesRag = vi.mocked(api.syncNotesRag);
+const getTalkConversations = vi.mocked(api.getTalkConversations);
+const sendTalkMessage = vi.mocked(api.sendTalkMessage);
 
 function renderRecipes() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <Recipes />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <Recipes />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -49,6 +63,14 @@ describe('Recipes', () => {
     readNote.mockResolvedValue({ status: 'SUCCESS', message: 'flour, milk', service: 'note_read' });
     writeNote.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'note_write' });
     deleteNote.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'note_delete' });
+    syncNotesRag.mockResolvedValue({ status: 'SUCCESS', message: 'queued', service: 'notes_sync_rag' });
+    getTalkConversations.mockResolvedValue({
+      status: 'SUCCESS',
+      message: '',
+      service: 'talk_conversations',
+      detail: { conversations: [{ token: 'room-1', display_name: 'Family' }] },
+    } as never);
+    sendTalkMessage.mockResolvedValue({ status: 'SUCCESS', message: '', service: 'talk_send' });
   });
 
   it('lists recipes from the Recipes folder in Nextcloud', async () => {
@@ -154,5 +176,39 @@ describe('Recipes', () => {
 
     await waitFor(() => expect(deleteNote).toHaveBeenCalledWith('Pancakes', 'nextcloud', `${RECIPES_DIR}/Pancakes.md`, undefined));
     expect(writeNote).toHaveBeenCalledWith(expect.objectContaining({ title: 'Crepes', path: undefined }));
+  });
+
+  it('shares a recipe from the list to a family chat', async () => {
+    readNote.mockResolvedValue({
+      status: 'SUCCESS',
+      message: '# Pancakes\nCategory: Recipes\n\nflour, milk, syrup',
+      service: 'note_read',
+    });
+    renderRecipes();
+    await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
+
+    fireEvent.click(screen.getByLabelText('Share Pancakes'));
+    fireEvent.click(await screen.findByTestId('bible-share-chat-target'));
+
+    await waitFor(() =>
+      expect(sendTalkMessage).toHaveBeenCalledWith({
+        token: 'room-1',
+        message: expect.stringContaining('🍽 Pancakes'),
+      }),
+    );
+    const sent = sendTalkMessage.mock.calls[0][0].message;
+    expect(sent).toContain('flour, milk, syrup');
+    expect(sent).not.toContain('Category:');
+  });
+
+  it('teaches Jarvis from the Recipes page', async () => {
+    renderRecipes();
+    await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /teach jarvis/i }));
+
+    await waitFor(() =>
+      expect(syncNotesRag).toHaveBeenCalledWith({ directories: [RECIPES_DIR] }),
+    );
   });
 });
