@@ -87,7 +87,7 @@ public class PhoneUsagePlugin extends Plugin {
         int limit = Math.min(20, appRows.size());
         for (int i = 0; i < limit; i++) {
             UsageStats row = appRows.get(i);
-            JSONObject app = new JSONObject();
+            JSObject app = new JSObject();
             app.put("package", row.getPackageName());
             app.put("millis", row.getTotalTimeInForeground());
             app.put("lastUse", row.getLastTimeUsed());
