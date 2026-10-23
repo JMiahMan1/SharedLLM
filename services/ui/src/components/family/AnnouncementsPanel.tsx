@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Clock3,
   Megaphone,
-  MessageSquare,
   Monitor,
   Pause,
   Play,
@@ -24,10 +23,10 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Link as RouterLink } from 'react-router-dom';
-import { api } from '../services/api';
-import { useHaptics } from '../hooks/useHaptics';
-import { ALARM_SOUNDS, EMOJI_PRESETS, playTimerSound, stopLoopingAlarm, unlockChime } from '../lib/chime';
-import type { DeviceAssignment, TimerDevicesResponse, TimerRecord, TimerTargetDevice } from '../services/api';
+import { api } from '../../services/api';
+import { useHaptics } from '../../hooks/useHaptics';
+import { ALARM_SOUNDS, EMOJI_PRESETS, playTimerSound, stopLoopingAlarm, unlockChime } from '../../lib/chime';
+import type { DeviceAssignment, TimerDevicesResponse, TimerRecord, TimerTargetDevice } from '../../services/api';
 
 const EMPTY_TIMERS: TimerRecord[] = [];
 const EMPTY_DEVICES: DeviceAssignment[] = [];
@@ -42,9 +41,8 @@ const QUICK_PRESETS = [
   { label: '30m', duration: '30m', emoji: '' },
 ];
 
-/** Chat, the calendar and notes each have one home; this page points there. */
+/** The calendar and notes each have one home; this panel points there. */
 const ELSEWHERE = [
-  { icon: MessageSquare, tone: 'text-fuchsia-300', title: 'Chat', detail: 'Conversations, voice messages and games live on the Family page.', to: '/family', cta: 'Open Family' },
   { icon: Calendar, tone: 'text-emerald-300', title: 'Calendar', detail: 'Every family calendar in one agenda, with add, edit and delete.', to: '/calendar', cta: 'Open Calendar' },
   { icon: StickyNote, tone: 'text-cyan-300', title: 'Notes', detail: 'Notes and checklists, kept in Nextcloud and searchable by Jarvis.', to: '/notes', cta: 'Open Notes' },
 ];
@@ -61,10 +59,10 @@ function deviceLabel(deviceId: string): string {
 }
 
 /**
- * Timers, alarms, household reminders, and spoken announcements, plus the way
- * to the family's chat, calendar and notes.
+ * Timers, alarms, household reminders, and spoken announcements — the panel
+ * behind the Family page's Announce tab.
  */
-const Communication = () => {
+const AnnouncementsPanel = () => {
   const queryClient = useQueryClient();
   const { trigger } = useHaptics();
   const [timerTitle, setTimerTitle] = useState('');
@@ -242,10 +240,10 @@ const Communication = () => {
   });
 
   return (
-    <div className="space-y-6 md:space-y-8 pb-12">
+    <div className="space-y-5 md:space-y-6 pb-2">
       <header>
-        <h2 className="text-2xl md:text-4xl font-black tracking-tighter text-white uppercase">Communication</h2>
-        <p className="mt-2 text-sm md:text-base text-slate-400">Timers, alarms, household reminders, and spoken announcements around the house.</p>
+        <h2 className="text-xl font-black tracking-tighter text-white uppercase md:text-2xl">Timers &amp; announcements</h2>
+        <p className="mt-2 text-sm text-slate-400">Timers, alarms, household reminders, and spoken announcements around the house.</p>
       </header>
 
       <div className="grid gap-6 xl:gap-8 lg:grid-cols-2">
@@ -713,7 +711,7 @@ const Communication = () => {
         </section>
       </div>
 
-      <nav className="grid gap-3 md:grid-cols-3" aria-label="Chat, calendar and notes">
+      <nav className="grid gap-3 md:grid-cols-2" aria-label="Calendar and notes">
         {ELSEWHERE.map(({ icon: Icon, tone, title, detail, to, cta }) => (
           <RouterLink
             key={to}
@@ -734,5 +732,5 @@ const Communication = () => {
   );
 };
 
-export default Communication;
+export default AnnouncementsPanel;
 

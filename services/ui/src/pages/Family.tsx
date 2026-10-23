@@ -1,6 +1,7 @@
 import { Link, useSearchParams } from 'react-router-dom';
-import { Brain, Brush, ChevronRight, Crown, Gamepad2, MessageCircle, Phone } from 'lucide-react';
+import { Brain, Brush, ChevronRight, Crown, Gamepad2, Megaphone, MessageCircle, Phone } from 'lucide-react';
 import ChatPanel from '../components/chat/ChatPanel';
+import AnnouncementsPanel from '../components/family/AnnouncementsPanel';
 import ArcadeGames from '../components/family/ArcadeGames';
 import FamilyCalls from '../components/family/FamilyCalls';
 import DrawCanvas from '../components/family/DrawCanvas';
@@ -8,7 +9,7 @@ import MakeMusic from '../components/family/MakeMusic';
 import SafetyButtons from '../components/family/SafetyButtons';
 import Recipes from './Recipes';
 
-type Tab = 'chat' | 'calls' | 'games' | 'create';
+type Tab = 'chat' | 'calls' | 'games' | 'create' | 'announce';
 
 /** The Bible games that exist today, one tap away from the family hub. */
 const BIBLE_GAMES = [
@@ -20,6 +21,7 @@ const BIBLE_GAMES = [
 const TABS: Array<{ id: Tab; label: string; icon: typeof MessageCircle }> = [
   { id: 'chat', label: 'Chat', icon: MessageCircle },
   { id: 'calls', label: 'Calls', icon: Phone },
+  { id: 'announce', label: 'Announce', icon: Megaphone },
   { id: 'games', label: 'Games', icon: Gamepad2 },
   { id: 'create', label: 'Create', icon: Brush },
 ];
@@ -66,7 +68,7 @@ export default function Family() {
           className="flex grow justify-end"
         >
         <div
-          className="flex w-full max-w-sm rounded-full border border-white/10 bg-slate-900/80 p-1 sm:w-auto"
+          className="flex w-full max-w-sm overflow-x-auto rounded-full border border-white/10 bg-slate-900/80 p-1 [scrollbar-width:none] sm:w-auto"
           role="tablist"
           aria-label="Family sections"
         >
@@ -127,6 +129,11 @@ export default function Family() {
           <DrawCanvas />
           <MakeMusic />
           <Recipes />
+        </div>
+      )}
+      {tab === 'announce' && (
+        <div className="space-y-4" data-testid="family-announce">
+          <AnnouncementsPanel />
         </div>
       )}
     </div>
