@@ -276,6 +276,22 @@ live search is the ecosystem-standard pattern.
 - [x] `npm run typecheck`, `npm run lint`, full UI suite (191 files / 1538 tests), `npm run build`, backend health tests (108), identity family-role tests and docs.
 - [ ] Deploy `health gateway ui`, then verify `/health/ready`, the version endpoint and an authenticated `/api/health/profile`.
 
+### Phase 10 — digital wellbeing (planned 2026-10-23)
+
+- [ ] Phone usage on Android: a `DigitalWellbeingPlugin` (mirroring `StepCounterPlugin`) reads
+      `UsageStatsManager` — usage sessions (start, stop, duration) from `UsageEvents`
+      (`ACTIVITY_RESUMED`/`ACTIVITY_PAUSED`) and per-app foreground time for the day. Needs the
+      Usage Access permission, which the member grants once in Android Settings (the card walks
+      them there). Android-only: the card hides everywhere else, exactly like the steps sensor.
+- [ ] Ingestion mirrors the steps pipeline: the phone owns the day arithmetic, uploads batched,
+      idempotent payloads (`source: phone`), coalesced — stored per user, every reading source-tagged.
+- [ ] Digital wellbeing card in the hub: first use, last use, total screen time, the day's session
+      timeline, and the top apps by foreground time.
+- [ ] Jarvis itself: log feature events from the web bundle (chat, recipes, notes, timers, games,
+      verses) — no permission needed — and show what each person does most inside Jarvis.
+- [ ] Sharing follows the rest of Health: per-user by default, opt-in family sharing (a new
+      `digital` scope), and kid mode keeps the card private.
+
 ## Acceptance
 
 - [x] Each family member has a profile and their own Health day.
