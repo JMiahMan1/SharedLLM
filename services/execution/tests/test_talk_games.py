@@ -38,6 +38,14 @@ def talk(monkeypatch):
     return talk_module
 
 
+@pytest.fixture(autouse=True)
+def _quiet_activity(monkeypatch):
+    """The activity recorder posts to telemetry; tests never reach the network."""
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr("services.execution.activity.record", AsyncMock())
+
+
 def test_games_are_off_unless_enabled(talk, monkeypatch):
     monkeypatch.delenv("FAMILY_GAMES_ENABLED", raising=False)
     result = asyncio.run(
@@ -116,6 +124,11 @@ def test_correct_trivia_answers_bank_a_star(talk, monkeypatch):
 
     monkeypatch.setattr(talk, "_bank_game_stars", fake_bank)
 
+    from unittest.mock import AsyncMock
+
+    recorded = AsyncMock()
+    monkeypatch.setattr("services.execution.activity.record", recorded)
+
     from services.execution.handlers import family_games as games
 
     state = games.registry.start_trivia("room-1")
@@ -126,6 +139,9 @@ def test_correct_trivia_answers_bank_a_star(talk, monkeypatch):
     assert banked and banked[0]["user"] == "Kiddo"
     assert banked[0]["stars"] == 1
     assert "Trivia" in banked[0]["reason"]
+    recorded.assert_awaited_once()
+    assert recorded.await_args.args[:2] == ("Kiddo", "game")
+    assert recorded.await_args.kwargs["action"] == "win"
 
 
 def test_star_banking_failure_never_breaks_a_game(talk, monkeypatch):

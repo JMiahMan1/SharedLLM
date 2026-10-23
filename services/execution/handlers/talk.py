@@ -632,6 +632,10 @@ async def _apply_game_answer(
             # game; capture the question before the session moves on.
             question_text = state.question
             await _bank_game_stars(who, result["stars"], f"Trivia: {question_text}")
+            from services.execution import activity
+
+            # The same win lands in the person's activity feed (profiles read it).
+            await activity.record(result["player"] or who, "game", item=question_text, action="win")
             await say(
                 f"✅ {result['player']} got it!",
                 games.game_card(state, "Correct!", f"{result['player']} is on {result['stars']} ⭐"),

@@ -27,6 +27,11 @@ NOTIFY_PREFIX = "tel:notify:"
 QUEUE = "tel:queue"
 LOCK_PREFIX = "tel:lock:"
 
+# What each person does inside Jarvis (music played, games finished, pages
+# opened, verses read). Capped so a busy month cannot grow without bound.
+ACTIVITY_PREFIX = "tel:activity:"
+ACTIVITY_MAX = 500
+
 
 def new_id() -> str:
     return uuid.uuid4().hex
@@ -176,6 +181,27 @@ async def push_notification(rc, user: str, notification: dict[str, Any]) -> None
 async def list_notifications(rc, user: str, limit: int = 20) -> list[dict[str, Any]]:
     raw = await rc.lrange(f"{NOTIFY_PREFIX}{user}", -limit, -1)
     return [json.loads(r) for r in raw if r]
+
+
+async def append_activity(rc, user: str, event: dict[str, Any]) -> None:
+    """Append one activity event, keeping only the newest ACTIVITY_MAX."""
+    key = f"{ACTIVITY_PREFIX}{user}"
+    await rc.rpush(key, json.dumps(event))
+    await rc.ltrim(key, -ACTIVITY_MAX, -1)
+
+
+async def list_activity(rc, user: str, limit: int = 50) -> list[dict[str, Any]]:
+    """The user's recent events, newest first."""
+    raw = await rc.lrange(f"{ACTIVITY_PREFIX}{user}", -limit, -1)
+    events: list[dict[str, Any]] = []
+    for item in reversed(raw):
+        try:
+            event = json.loads(item)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
 
 
 def internal_headers() -> dict[str, str]:

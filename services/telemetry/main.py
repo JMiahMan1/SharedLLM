@@ -386,6 +386,37 @@ def create_app():
         rc = _redis()
         return {"status": "SUCCESS", "notifications": await store.list_notifications(rc, user, limit)}
 
+    @application.post("/api/telemetry/activity")
+    async def record_activity(body: dict = Body(...), _: bool = Depends(require_internal)):
+        """One thing a person did inside Jarvis (music, a game, a page, a verse).
+
+        Callers send what happened; the feed keeps the last few hundred events
+        per user and a profile reads them back newest-first. ``at`` defaults to
+        now (ISO-8601, UTC)."""
+        user = str(body.get("user") or "").strip()
+        feature = str(body.get("feature") or "").strip()
+        if not user or not feature:
+            raise HTTPException(status_code=422, detail="user and feature required")
+        event = {
+            "user": user,
+            "feature": feature,
+            "item": str(body.get("item") or "").strip(),
+            "action": str(body.get("action") or "view").strip(),
+            "duration_s": body.get("duration_s"),
+            "at": str(body.get("at") or "").strip() or utcnow_iso(),
+            "detail": body.get("detail") if isinstance(body.get("detail"), dict) else {},
+        }
+        rc = _redis()
+        await store.append_activity(rc, user, event)
+        return {"status": "SUCCESS", "event": event}
+
+    @application.get("/api/telemetry/activity/{user}")
+    async def get_activity(
+        user: str, limit: int = Query(default=50, le=200), _: bool = Depends(require_internal)
+    ):
+        rc = _redis()
+        return {"status": "SUCCESS", "events": await store.list_activity(rc, user, limit)}
+
     @application.post("/api/telemetry/notify")
     async def notify(body: dict = Body(...), _: bool = Depends(require_internal)):
         """Send one notification to a user from another service (docs/PUSH.md)."""
