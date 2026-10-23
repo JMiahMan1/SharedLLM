@@ -17,6 +17,7 @@ import MobileShell from './components/layout/MobileShell';
 import ActivityBeacon from './components/layout/ActivityBeacon';
 import PhoneUsageSync from './components/layout/PhoneUsageSync';
 import MediaSessionSync from './components/layout/MediaSessionSync';
+import CommsSync from './components/layout/CommsSync';
 import AdminElevation from './components/auth/AdminElevation';
 import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
@@ -128,6 +129,7 @@ function App() {
           <ActivityBeacon />
           <PhoneUsageSync />
 <MediaSessionSync />
+<CommsSync />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<ProtectedRoute isMobile={isMobile}><Dashboard /></ProtectedRoute>} />

@@ -34,6 +34,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SystemBarsPlugin.class);
         registerPlugin(PhoneUsagePlugin.class);
 registerPlugin(MediaSessionPlugin.class);
+registerPlugin(CommsPlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

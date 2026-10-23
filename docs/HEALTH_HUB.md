@@ -346,8 +346,7 @@ point.
       foreground time now follows on the same engine (top twenty apps per day, merged per
       package, stored in the day record's `apps` array); the top-apps view lands on the
       parents' surface (step 7).
-- [ ] **Calls and SMS (Android).** The sideloaded app collects the call log and SMS content
-      with runtime permissions (the Qustodio feature Play-store apps cannot ship).
+- [x] **Calls and SMS (Android).** First brick: the sideloaded app reads the call log and SMS store with runtime permissions (READ_CALL_LOG, READ_SMS) and posts each new call and message to the activity feed (`feature: calls` / `sms`), with direction, duration (calls) and body (SMS), contacts resolved best-effort. A `CommsPlugin` + `CommsSync` (5-min poll) reuses the existing activity pipeline; a timestamp cursor keeps it incremental. Content monitoring and the parents' surface follow.
 - [ ] **Web activity.** The on-device filter reports domains visited and blocked attempts.
 
 **Guarding**
