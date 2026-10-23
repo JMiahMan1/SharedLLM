@@ -162,21 +162,28 @@ earned, only when `FAMILY_CHAT_TOKEN` names a room.
 kit the Jarvis bot runs inside a conversation, with no model in the loop, so it
 never wanders off mid-game:
 
-- **Trivia**: gentle multiple choice, forgiving answer matching (case, articles,
-  punctuation). One star per correct answer.
-- **Bible trivia**: the same engine with a Bible question pool, started from the
-  chat composer's **Bible trivia** action.
+- **Trivia**: a ten-question session. Questions start easy and the difficulty
+  climbs every three correct answers; it never falls, so a struggling kid keeps
+  their ground. One guess per player per question; the first correct answer wins
+  the round and moves everyone on, and if every player locked into the session
+  misses, the answer is revealed and the round moves on too (a quiet round
+  expires after two minutes). Matching stays forgiving (case, articles,
+  punctuation). One star per round won.
+- **Bible trivia**: the same session engine with a Bible question pool, started
+  from the chat composer's **Bible trivia** action.
 - **Memory**: pick the words, then duplicate them, shuffle, and flip two at a
   time. A pair stays up; a miss flips back.
 
-One game per room, a leaderboard in every card, and `FAMILY_GAMES_ENABLED` must
-be set or the bot refuses to start; compose enables it by default
-(`FAMILY_GAMES_ENABLED=1`) and an operator can set `0` to turn games off.
-Gateway: `POST /api/communication/talk/game` with `game_command`
-(start/answer/flip/stop).
-Correct answers are banked in geo's star ledger (`reason: "game"`) so stars
-outlive the round; a geo outage is logged and never breaks a game in progress.
-Tests: `services/execution/tests/test_family_games.py`, `test_talk_games.py`.
+The roster is locked when a session starts, taken from the room's participant
+list — the bot and anyone joining later sit the session out, and a display name
+and an account id resolve to the same player. One game per room, a leaderboard
+in every card, and `FAMILY_GAMES_ENABLED` must be set or the bot refuses to
+start; compose enables it by default (`FAMILY_GAMES_ENABLED=1`) and an operator
+can set `0` to turn games off. Gateway: `POST /api/communication/talk/game`
+with `game_command` (start/answer/flip/stop). Correct answers are banked in
+geo's star ledger (`reason: "game"`) once per round, so stars outlive the
+round; a geo outage is logged and never breaks a game in progress. Tests:
+`services/execution/tests/test_family_games.py`, `test_talk_games.py`.
 
 ## Draw together (shipped, single-device first)
 
