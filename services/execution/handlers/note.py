@@ -39,6 +39,19 @@ PREVIEW_CONCURRENCY = 4
 #: modified time and size it was read at. A list only re-reads notes that
 #: changed; every write through this handler forgets the note it touched.
 _PREVIEW_CACHE_MAX = 512
+_SPAN_TAG = re.compile(r'</?span(?: style="[^"]*")?>')
+
+
+def _item_matches(item_text: str, target: str) -> bool:
+    """A checklist row matches its raw text or the plain words shown to people.
+
+    The notes editor stores colour/highlight/size as an inline ``<span>``;
+    widgets and chat show only the words, so both forms must find the row.
+    """
+    raw = item_text.strip()
+    return raw == target or _SPAN_TAG.sub("", raw).strip() == target
+
+
 _preview_cache: "OrderedDict[str, tuple[str, str]]" = OrderedDict()
 
 #: Ask only for what the list shows. Nextcloud's default property set includes
@@ -464,11 +477,11 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             lines = r_resp["text"].splitlines()
             changed = False
             for idx, line in enumerate(lines):
-                if line.startswith("- [ ] ") and line[6:].strip() == target:
+                if line.startswith("- [ ] ") and _item_matches(line[6:], target):
                     lines[idx] = "- [x] " + line[6:]
                     changed = True
                     break
-                if line.lower().startswith("- [x] ") and line[6:].strip() == target:
+                if line.lower().startswith("- [x] ") and _item_matches(line[6:], target):
                     lines[idx] = "- [ ] " + line[6:]
                     changed = True
                     break

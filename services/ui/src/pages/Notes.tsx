@@ -27,6 +27,9 @@ import toast from 'react-hot-toast';
 import Modal from '../components/ui/Modal';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
+import RichNoteEditor, { type RichNoteEditorHandle } from '../components/notes/RichNoteEditor';
+import { richEditable } from '../lib/noteRichText';
+import { remarkNoteSpans } from '../lib/remarkNoteSpans';
 import { errorText } from '../lib/errorText';
 import {
   ARCHIVE_PREFIX,
@@ -115,7 +118,7 @@ function NotePreview({ text, className = '' }: { text: string; className?: strin
   return (
     <div className={`text-xs text-slate-300 ${className}`} data-testid="note-preview">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkNoteSpans]}
         components={{
           p: (props) => <p className="mt-1 first:mt-0 leading-snug" {...props} />,
           h1: (props) => <h1 className="mt-2 first:mt-0 text-sm font-bold text-slate-100" {...props} />,
@@ -1156,7 +1159,10 @@ function NoteEditor({
 }) {
   const [draft, setDraft] = useState<DraftState>(initial);
   const [labelDraft, setLabelDraft] = useState('');
-  const [preview, setPreview] = useState(false);
+  // Chosen once per open: notes the visual editor could not save back
+  // unchanged (tables, code, links …) are edited as text instead.
+  const [rich] = useState(() => richEditable(initial.content));
+  const richRef = useRef<RichNoteEditorHandle>(null);
   return (
     <div className="space-y-3">
       <input
@@ -1166,48 +1172,39 @@ function NoteEditor({
         aria-label="Note title"
         className="glass-input min-h-11 w-full text-base font-semibold"
       />
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => setPreview(false)}
-          aria-pressed={!preview}
-          className={`min-h-9 rounded-full px-3 text-[11px] ${!preview ? 'bg-purple-500/20 text-purple-100' : 'text-slate-400 hover:bg-white/5'}`}
-        >
-          Write
-        </button>
-        <button
-          type="button"
-          onClick={() => setPreview(true)}
-          aria-pressed={preview}
-          className={`min-h-9 rounded-full px-3 text-[11px] ${preview ? 'bg-purple-500/20 text-purple-100' : 'text-slate-400 hover:bg-white/5'}`}
-        >
-          Preview
-        </button>
-      </div>
-      {preview ? (
-        <div className="glass-input min-h-48 overflow-y-auto p-3" data-testid="note-preview-pane">
-          <NotePreview text={noteDisplayBody(draft.content, draft.title)} className="text-base sm:text-sm" />
-        </div>
-      ) : (
-        <textarea
-          value={draft.content}
-          onChange={(e) => setDraft({ ...draft, content: e.target.value })}
-          placeholder="Write something…  Use - [ ] for a checklist item and #label to tag it"
-          aria-label="Note content"
-          rows={12}
-          className="glass-input w-full text-base sm:text-sm font-mono resize-y"
+      {rich ? (
+        <RichNoteEditor
+          ref={richRef}
+          initialMarkdown={initial.content}
+          onChange={(content) => setDraft((d) => ({ ...d, content }))}
         />
+      ) : (
+        <>
+          <p className="text-[11px] text-slate-400" role="note">
+            This note uses formatting the visual editor cannot keep exactly, so it is open as text.
+          </p>
+          <textarea
+            value={draft.content}
+            onChange={(e) => setDraft({ ...draft, content: e.target.value })}
+            placeholder="Write something…  Use - [ ] for a checklist item and #label to tag it"
+            aria-label="Note content"
+            rows={12}
+            className="glass-input w-full text-base sm:text-sm font-mono resize-y"
+          />
+        </>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          className="glass-button min-h-11 px-3 py-1.5 text-xs"
-          onClick={() =>
-            setDraft({ ...draft, content: `${draft.content}${draft.content.endsWith('\n') || !draft.content ? '' : '\n'}- [ ] ` })
-          }
-        >
-          <CheckSquare size={13} /> Checklist item
-        </button>
+        {!rich && (
+          <button
+            type="button"
+            className="glass-button min-h-11 px-3 py-1.5 text-xs"
+            onClick={() =>
+              setDraft({ ...draft, content: `${draft.content}${draft.content.endsWith('\n') || !draft.content ? '' : '\n'}- [ ] ` })
+            }
+          >
+            <CheckSquare size={13} /> Checklist item
+          </button>
+        )}
         <label className="text-xs text-slate-400 flex items-center gap-2">
           Folder
           <input
@@ -1232,6 +1229,11 @@ function NoteEditor({
             onClick={() => {
               const tag = labelDraft.trim().replace(/^#+/, '').replace(/\s+/g, '-');
               if (!tag) return;
+              if (rich) {
+                richRef.current?.appendLabel(tag);
+                setLabelDraft('');
+                return;
+              }
               // Nextcloud Notes reads #labels straight out of the markdown.
               const needsBreak = draft.content.length > 0 && !draft.content.endsWith('\n');
               setDraft({ ...draft, content: `${draft.content}${needsBreak ? '\n' : ''}#${tag} ` });

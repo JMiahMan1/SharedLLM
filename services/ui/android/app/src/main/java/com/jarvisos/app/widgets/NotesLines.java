@@ -24,6 +24,8 @@ final class NotesLines {
     private static final Pattern HEADER_TITLE = Pattern.compile("^#\\s+.*$");
     private static final Pattern HEADER_CATEGORY = Pattern.compile("^Category:\\s*.*$");
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
+    /** The editor's colour/highlight/size wrapper; the widget shows only the words. */
+    private static final Pattern SPAN_TAG = Pattern.compile("</?span(?: style=\"[^\"]*\")?>");
 
     static final class Line {
         final String path;
@@ -108,7 +110,7 @@ final class NotesLines {
     /** Collapse whitespace and truncate on a word boundary. */
     static String oneLine(String text, int max) {
         if (text == null) return "";
-        String collapsed = WHITESPACE.matcher(text).replaceAll(" ").trim();
+        String collapsed = WHITESPACE.matcher(SPAN_TAG.matcher(text).replaceAll("")).replaceAll(" ").trim();
         if (collapsed.length() <= max) return collapsed;
         String cut = collapsed.substring(0, max);
         int space = cut.lastIndexOf(' ');
