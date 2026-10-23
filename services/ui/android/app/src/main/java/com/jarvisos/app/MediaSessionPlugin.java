@@ -75,7 +75,7 @@ public class MediaSessionPlugin extends Plugin {
         try {
             String enabled = Settings.Secure.getString(
                     bridge.getContext().getContentResolver(),
-                    Settings.Secure.ENABLED_NOTIFICATION_LISTENERS);
+                    "enabled_notification_listeners");
             if (TextUtils.isEmpty(enabled)) {
                 return false;
             }

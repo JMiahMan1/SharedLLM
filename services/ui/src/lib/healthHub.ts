@@ -63,7 +63,22 @@ export function formatMinutes(minutes: number | null | undefined): string {
 export function formatClockTime(value: string | null | undefined): string {
   if (!value) return '—';
   const bare = /^\d{1,2}:\d{2}(:\d{2})?$/.test(value);
-  const parsed = new Date(bare ? `2000-01-01T${value}` : value);
+  if (bare) {
+    const parsed = new Date(`2000-01-01T${value}`);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+  // ISO instant: format in the wall-clock time of the offset embedded in the
+  // string, not the runtime's local zone (so CI in UTC matches the user's day).
+  const m = value.match(/T(\d{1,2}):(\d{2})/);
+  if (m) {
+    const h = parseInt(m[1], 10);
+    const min = m[2];
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${min} ${ampm}`;
+  }
+  const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }

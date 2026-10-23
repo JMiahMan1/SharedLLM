@@ -319,8 +319,7 @@ video themes get the same treatment — redeemed or redirected).
 The guarding mechanics are the collection substrate; the profile and the guidance are the
 point.
 
-**Collection**
-- [ ] **The digital profile (the point of all of it).** Every signal below — device usage,
+### Collection- [ ] **The digital profile (the point of all of it).** Every signal below — device usage,
       music, media sessions, calls and SMS, web, in-app activity — lands on one per-person
       profile: a living picture of what they listen to, play, watch and browse, when and for
       how long, and the week's patterns. This is the data model Jarvis reads for
@@ -351,8 +350,7 @@ point.
 - [x] **Calls and SMS (Android).** First brick: the sideloaded app reads the call log and SMS store with runtime permissions (READ_CALL_LOG, READ_SMS) and posts each new call and message to the activity feed (`feature: calls` / `sms`), with direction, duration (calls) and body (SMS), contacts resolved best-effort. A `CommsPlugin` + `CommsSync` (5-min poll) reuses the existing activity pipeline; a timestamp cursor keeps it incremental. Content monitoring and the parents' surface follow.
 - [ ] **Web activity.** The on-device filter reports domains visited and blocked attempts.
 
-**Guarding**
-- [ ] **Time budgets and routines (Family Link / Qustodio).** Daily limits per device, bedtime
+### Guarding- [ ] **Time budgets and routines (Family Link / Qustodio).** Daily limits per device, bedtime
       and school weekly schedules, pause/grace, bonus time, child extension requests a parent
       grants — with Qustodio's semantics (midnight reset, "always allowed" list, lock
       navigation vs lock device).
@@ -369,8 +367,7 @@ point.
       (`BootReceiver` exists), split-screen/multi-user detection, tamper alerts to parents —
       with a parent access code as the offline unlock/verify escape hatch.
 
-**Watching (Bark parity)**
-- [ ] **Content monitoring, local models only.** Analyze the collected streams (messages,
+### Watching (Bark parity)- [ ] **Content monitoring, local models only.** Analyze the collected streams (messages,
       calls, web, music, app usage) for what a parent needs to know — self-harm, bullying,
       isolation, secret-keeping patterns — classified by concern level with per-child
       sensitivity (all / severe / none); serious categories always on.
@@ -378,8 +375,7 @@ point.
       weekly recap (telemetry's report pipeline) with top apps, contacts, sites and standout
       moments; Jarvis chat answers "how was Emma's week?" the way Bark Assistant does.
 
-**Discipleship (what those apps do not have)**
-- [ ] **Recommendations and positive, Biblical direction.** Jarvis reads the digital profile
+### Discipleship (what those apps do not have)- [ ] **Recommendations and positive, Biblical direction.** Jarvis reads the digital profile
       and suggests rather than scolds: an artist whose lyrics are not appropriate maps to a
       Christian artist with a similar style (genre, era, energy); a **YouTube video or
       creator** with a negative theme is first *redeemed* — the same theme told well, by a

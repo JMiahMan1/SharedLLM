@@ -84,7 +84,7 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
       ingredient units): scaled `- [ ] 2 lb chicken` lines (×7/servings), numbered
       steps, source/licence line, and a per-serving nutrition block tagged
       `foodcom`.
-- [x] Guarantee unique note titles (`Title.md`; suffix ` (2)` on collision).
+- [x] Guarantee unique note titles (`Title.md`; suffix `(2)` on collision).
 - [ ] Wikibooks Cookbook (bonus): the `Category:Slow cooker recipes` set (~26 pages) through
       the MediaWiki API, converted to markdown with the CC BY-SA credit line.
 - [x] Dry-run report first: funnel + sample notes printed before anything is

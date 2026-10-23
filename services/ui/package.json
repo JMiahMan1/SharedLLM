@@ -55,6 +55,7 @@
     "axios": "^1.16.0",
     "clsx": "^2.1.1",
     "docx-preview": "^0.3.2",
+    "exceljs": "^4.4.0",
     "framer-motion": "^12.38.0",
     "jszip": "^3.10.1",
     "leaflet": "^1.9.4",
@@ -71,7 +72,6 @@
     "recharts": "^3.8.1",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.5.0",
-    "xlsx": "^0.18.5",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

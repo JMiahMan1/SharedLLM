@@ -38,36 +38,36 @@ public class CommsPlugin extends Plugin {
     @PluginMethod
     public void hasAccess(PluginCall call) {
         JSObject ret = new JSObject();
-        ret.put("calls", hasPermission(Manifest.permission.READ_CALL_LOG));
-        ret.put("sms", hasPermission(Manifest.permission.READ_SMS));
+        ret.put("calls", hasPerm(Manifest.permission.READ_CALL_LOG));
+        ret.put("sms", hasPerm(Manifest.permission.READ_SMS));
         call.resolve(ret);
     }
 
     @PluginMethod
     public void requestAccess(PluginCall call) {
         List<String> needed = new ArrayList<>();
-        if (!hasPermission(Manifest.permission.READ_CALL_LOG)) {
+        if (!hasPerm(Manifest.permission.READ_CALL_LOG)) {
             needed.add(Manifest.permission.READ_CALL_LOG);
         }
-        if (!hasPermission(Manifest.permission.READ_SMS)) {
+        if (!hasPerm(Manifest.permission.READ_SMS)) {
             needed.add(Manifest.permission.READ_SMS);
         }
-        if (!hasPermission(Manifest.permission.READ_CONTACTS)) {
+        if (!hasPerm(Manifest.permission.READ_CONTACTS)) {
             needed.add(Manifest.permission.READ_CONTACTS);
         }
         if (!needed.isEmpty() && getActivity() != null) {
             getActivity().requestPermissions(needed.toArray(new String[0]), 0x10C0);
         }
         JSObject ret = new JSObject();
-        ret.put("calls", hasPermission(Manifest.permission.READ_CALL_LOG));
-        ret.put("sms", hasPermission(Manifest.permission.READ_SMS));
+        ret.put("calls", hasPerm(Manifest.permission.READ_CALL_LOG));
+        ret.put("sms", hasPerm(Manifest.permission.READ_SMS));
         call.resolve(ret);
     }
 
     @PluginMethod
     public void getNewCalls(PluginCall call) {
         JSArray calls = new JSArray();
-        if (!hasPermission(Manifest.permission.READ_CALL_LOG)) {
+        if (!hasPerm(Manifest.permission.READ_CALL_LOG)) {
             JSObject ret = new JSObject();
             ret.put("calls", calls);
             call.resolve(ret);
@@ -129,7 +129,7 @@ public class CommsPlugin extends Plugin {
     @PluginMethod
     public void getNewSms(PluginCall call) {
         JSArray messages = new JSArray();
-        if (!hasPermission(Manifest.permission.READ_SMS)) {
+        if (!hasPerm(Manifest.permission.READ_SMS)) {
             JSObject ret = new JSObject();
             ret.put("messages", messages);
             call.resolve(ret);
@@ -179,7 +179,7 @@ public class CommsPlugin extends Plugin {
         call.resolve(ret);
     }
 
-    private boolean hasPermission(String perm) {
+    private boolean hasPerm(String perm) {
         return bridge.getContext().checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED;
     }
 
@@ -213,7 +213,7 @@ public class CommsPlugin extends Plugin {
 
     private String lookupContactName(String number) {
         if (number == null || number.isEmpty()) return "";
-        if (!hasPermission(Manifest.permission.READ_CONTACTS)) return "";
+        if (!hasPerm(Manifest.permission.READ_CONTACTS)) return "";
         try {
             Uri uri = Uri.withAppendedPath(
                     ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number));
