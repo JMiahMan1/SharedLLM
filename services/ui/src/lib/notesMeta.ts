@@ -118,6 +118,21 @@ export function notePreview(content: string, max = 220): string {
   return body.length > max ? `${body.slice(0, max)}…` : body;
 }
 
+/**
+ * The body as a person should read it: the stored header and a leading heading
+ * that repeats the title are removed, the way Keep treats the first line as the
+ * title rather than part of the body.
+ */
+export function noteDisplayBody(content: string, title?: string): string {
+  let body = noteBody(content).trim();
+  const wanted = title?.trim();
+  if (wanted) {
+    const escaped = wanted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    body = body.replace(new RegExp(`^#{1,6}\\s*${escaped}\\s*\\n+`, 'i'), '').trim();
+  }
+  return body;
+}
+
 export interface ChecklistItem {
   text: string;
   checked: boolean;
@@ -317,10 +332,19 @@ export function isTrashedPath(path: string): boolean {
   return path.startsWith(TRASH_PREFIX);
 }
 
-/** Where a note lives when it is archived/trashed, keeping its filename. */
+/**
+ * Where a note lives when it is archived/trashed.
+ *
+ * A folder inside Notes/ is kept inside the archive/trash: two notes both
+ * called "Plan.md" in different folders used to flatten to the same path and
+ * the second move overwrote the first. A note already archived (or trashed)
+ * stays where it is.
+ */
 export function archivedPathFor(path: string, prefix: string = ARCHIVE_PREFIX): string {
-  const base = path.split('/').pop() ?? path;
-  return `${prefix}${base}`;
+  const clean = path.replace(/^\/+/, '');
+  if (clean.startsWith(prefix)) return clean;
+  const relative = clean.startsWith('Notes/') ? clean.slice('Notes/'.length) : (clean.split('/').pop() ?? clean);
+  return `${prefix}${relative}`;
 }
 
 /**

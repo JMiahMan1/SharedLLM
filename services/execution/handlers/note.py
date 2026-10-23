@@ -192,6 +192,23 @@ def _in_archive_or_trash(path: str) -> bool:
     return path.startswith(ARCHIVE_DIR + "/") or path.startswith(TRASH_DIR + "/")
 
 
+#: One lock per account while a note mutation reads and writes the shared
+#: index. Bulk archive/trash/delete taps arrive as parallel requests; without
+#: this each one read the same index and the last writer won, so entries for
+#: the other moves vanished. Nextcloud writes stay the slow part; the lock
+#: covers only the read-modify-write of the small dotfile.
+_note_index_locks: dict[str, asyncio.Lock] = {}
+
+
+def _note_index_lock(provider) -> asyncio.Lock:
+    key = getattr(provider, "username", "") or "unknown"
+    lock = _note_index_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _note_index_locks[key] = lock
+    return lock
+
+
 async def _index_after_move(provider, source: str, destination: str) -> None:
     """Keep pin/colour/reminder state attached to a moved note, best effort.
 
@@ -199,36 +216,38 @@ async def _index_after_move(provider, source: str, destination: str) -> None:
     restored; moving back out clears that pointer. The note itself has already
     moved, so a failed index write only costs the extra metadata.
     """
-    meta = await _read_meta(provider)
-    if meta is None:
-        return
-    notes = meta["notes"]
-    entry = notes.pop(source, None)
-    if entry is None and not _in_archive_or_trash(destination):
-        return
-    entry = dict(entry or {})
-    if _in_archive_or_trash(destination):
-        entry["previousPath"] = source
-    else:
-        entry.pop("previousPath", None)
-    notes[destination] = entry
-    ok, reason = await _write_meta(provider, meta)
-    if not ok:
-        log.warning("Could not update the notes index after moving %s: %s", source, reason)
+    async with _note_index_lock(provider):
+        meta = await _read_meta(provider)
+        if meta is None:
+            return
+        notes = meta["notes"]
+        entry = notes.pop(source, None)
+        if entry is None and not _in_archive_or_trash(destination):
+            return
+        entry = dict(entry or {})
+        if _in_archive_or_trash(destination):
+            entry["previousPath"] = source
+        else:
+            entry.pop("previousPath", None)
+        notes[destination] = entry
+        ok, reason = await _write_meta(provider, meta)
+        if not ok:
+            log.warning("Could not update the notes index after moving %s: %s", source, reason)
 
 
 async def _index_forget(provider, *paths: str) -> None:
-    meta = await _read_meta(provider)
-    if meta is None:
-        return
-    notes = meta["notes"]
-    if not any(path in notes for path in paths):
-        return
-    for path in paths:
-        notes.pop(path, None)
-    ok, reason = await _write_meta(provider, meta)
-    if not ok:
-        log.warning("Could not update the notes index after deleting a note: %s", reason)
+    async with _note_index_lock(provider):
+        meta = await _read_meta(provider)
+        if meta is None:
+            return
+        notes = meta["notes"]
+        if not any(path in notes for path in paths):
+            return
+        for path in paths:
+            notes.pop(path, None)
+        ok, reason = await _write_meta(provider, meta)
+        if not ok:
+            log.warning("Could not update the notes index after deleting a note: %s", reason)
 
 
 async def _path_exists(provider, path: str) -> bool:
@@ -542,7 +561,8 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             meta = dict(meta)
             meta.setdefault("version", META_VERSION)
             meta.setdefault("notes", {})
-            ok, reason = await _write_meta(provider, meta)
+            async with _note_index_lock(provider):
+                ok, reason = await _write_meta(provider, meta)
             if not ok:
                 return ExecutionResult(status="FAILURE", message=reason, service="note_meta_write")
             return ExecutionResult(
@@ -559,6 +579,14 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 return ExecutionResult(status="FAILURE", message="move requires path and destination.", service="note_move")
             if source == destination:
                 return ExecutionResult(status="SUCCESS", message="The note is already there.", service="note_move", detail={"path": destination})
+            # A move never overwrites an existing note. Flattening used to let
+            # "Notes/Work/Plan.md" replace "Notes/Archive/Plan.md", and a
+            # restore could replace whatever took the old name. A collision
+            # gets a numbered name instead.
+            if await _path_exists(provider, destination):
+                directory = destination.rsplit("/", 1)[0] if "/" in destination else "Notes"
+                stem = destination.rsplit("/", 1)[-1].removesuffix(".md")
+                destination, _ = await _unique_note_path(provider, directory, stem)
             ok, reason = await _move_note(provider, source, destination)
             if not ok:
                 return ExecutionResult(status="FAILURE", message=reason, service="note_move")

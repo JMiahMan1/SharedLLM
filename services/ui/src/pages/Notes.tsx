@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
 import {
@@ -43,7 +45,7 @@ import {
   matchesNoteQuery,
   mergeLegacyMeta,
   noteBody,
-  notePreview,
+  noteDisplayBody,
   parseChecklist,
   parseNoteQuery,
   parseNotesIndex,
@@ -103,6 +105,41 @@ function categoryFor(folder: string): string {
 }
 
 /**
+ * The visual form of a markdown note.
+ *
+ * The stored file stays plain markdown for Nextcloud Notes; this only decides
+ * how it looks in Jarvis. Tailwind has no typography plugin here, so every
+ * element carries its own classes instead of relying on `prose`.
+ */
+function NotePreview({ text, className = '' }: { text: string; className?: string }) {
+  return (
+    <div className={`text-xs text-slate-300 ${className}`} data-testid="note-preview">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: (props) => <p className="mt-1 first:mt-0 leading-snug" {...props} />,
+          h1: (props) => <h1 className="mt-2 first:mt-0 text-sm font-bold text-slate-100" {...props} />,
+          h2: (props) => <h2 className="mt-2 first:mt-0 text-sm font-semibold text-slate-100" {...props} />,
+          h3: (props) => <h3 className="mt-2 first:mt-0 text-xs font-semibold text-slate-100" {...props} />,
+          ul: (props) => <ul className="mt-1 list-disc space-y-0.5 pl-4" {...props} />,
+          ol: (props) => <ol className="mt-1 list-decimal space-y-0.5 pl-4" {...props} />,
+          li: (props) => <li className="leading-snug" {...props} />,
+          a: (props) => <a className="text-purple-300 underline" {...props} />,
+          strong: (props) => <strong className="font-semibold text-slate-100" {...props} />,
+          em: (props) => <em className="italic" {...props} />,
+          code: (props) => <code className="rounded bg-black/40 px-1 py-0.5 font-mono text-[11px]" {...props} />,
+          pre: (props) => <pre className="mt-1 overflow-x-auto rounded-lg bg-black/40 p-2 font-mono text-[11px]" {...props} />,
+          blockquote: (props) => <blockquote className="mt-1 border-l-2 border-white/20 pl-2 text-slate-400" {...props} />,
+          hr: (props) => <hr className="my-2 border-white/10" {...props} />,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+/**
  * Notes: a Keep-style surface over the Nextcloud markdown notes the rest of
  * Jarvis already uses. Note text stays plain markdown; pins, colours and the
  * archive/trash origin live in Notes/.jarvis-notes.json, a dotfile the
@@ -115,6 +152,9 @@ export default function Notes() {
   /** The open editor: `draft` is null while the note is being read. */
   const [editing, setEditing] = useState<{ draft: DraftState | null; title: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
 
@@ -172,7 +212,12 @@ export default function Notes() {
   }, [listRes, notes, index, indexQuery.isSuccess, scope]);
 
   const persistIndex = useCallback(
-    async (next: NotesIndex) => {
+    async (update: NotesIndex | ((current: NotesIndex) => NotesIndex)) => {
+      // Read the freshest cached index instead of a render-time closure:
+      // bulk archive/delete taps happen before React re-renders, and a stale
+      // base made each write drop the previous action's entry.
+      const current = queryClient.getQueryData<NotesIndex>(indexKey) ?? EMPTY_NOTES_INDEX;
+      const next = typeof update === 'function' ? update(current) : update;
       queryClient.setQueryData(indexKey, next);
       try {
         const res = await api.writeNotesMeta({
@@ -356,10 +401,12 @@ export default function Notes() {
         return;
       }
       const savedPath = saved.path ?? draft.path ?? '';
-      let next = index;
-      if (draft.path && savedPath !== draft.path) next = forgetIndexEntry(next, draft.path);
-      if (savedPath) next = setIndexEntry(next, savedPath, { pinned: draft.pinned, color: draft.color });
-      await persistIndex(next);
+      await persistIndex((current) => {
+        let next = current;
+        if (draft.path && savedPath !== draft.path) next = forgetIndexEntry(next, draft.path);
+        if (savedPath) next = setIndexEntry(next, savedPath, { pinned: draft.pinned, color: draft.color });
+        return next;
+      });
       if (saved.leftOldCopy) toast.error('Saved under the new name, but the old copy is still there');
       setEditing(null);
       toast.success('Note saved');
@@ -392,13 +439,17 @@ export default function Notes() {
     try {
       const res = await api.moveNote({ path: note.path, destination, storage: STORAGE, as_user: asUser });
       if (res.status !== 'SUCCESS') throw new Error(res.message || 'Could not move the note');
-      const existing = indexEntry(index, note.path);
-      let next = forgetIndexEntry(index, note.path);
-      // previousPath describes where this note came from; a fresh move sets its own.
-      const rest = { ...existing };
-      delete rest.previousPath;
-      next = setIndexEntry(next, destination, previousPath ? { ...rest, previousPath } : rest);
-      await persistIndex(next);
+      // The server can rename the destination when a file is already there,
+      // so use the path it reports as the note's new home.
+      const movedTo = (res.detail?.path as string | undefined) || destination;
+      await persistIndex((current) => {
+        const existing = indexEntry(current, note.path);
+        const next = forgetIndexEntry(current, note.path);
+        // previousPath describes where this note came from; a fresh move sets its own.
+        const rest = { ...existing };
+        delete rest.previousPath;
+        return setIndexEntry(next, movedTo, previousPath ? { ...rest, previousPath } : rest);
+      });
       // Reconcile in the background; the shelf is already showing the move.
       void refresh();
     } catch (err) {
@@ -417,13 +468,108 @@ export default function Notes() {
     void moveNote(note, archivedPathFor(note.path, TRASH_PREFIX), indexEntry(index, note.path).previousPath ?? note.path);
   };
 
-  const restoreNote = (note: NoteSummary) => {
+  const restoreDestinationFor = (note: NoteSummary) => {
     const entry = indexEntry(index, note.path);
     const base = note.path.split('/').pop() ?? note.title;
-    const destination = entry.previousPath && !isArchivedPath(entry.previousPath) && !isTrashedPath(entry.previousPath)
+    return entry.previousPath && !isArchivedPath(entry.previousPath) && !isTrashedPath(entry.previousPath)
       ? entry.previousPath
       : `${NOTES_DIR}/${base}`;
-    void moveNote(note, destination, null);
+  };
+
+  const exitSelection = () => {
+    setSelectMode(false);
+    setSelected(new Set());
+  };
+
+  const toggleSelected = (path: string) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  /**
+   * Move many notes in one pass: the moves run one after another, then a
+   * single index write records all of them, so a bulk action cannot lose the
+   * earlier entries the way a per-card write used to.
+   */
+  const bulkMove = async (
+    notes: NoteSummary[],
+    destinationFor: (note: NoteSummary) => string,
+    previousFor?: (note: NoteSummary) => string | null,
+  ) => {
+    if (!notes.length || bulkBusy) return;
+    setBulkBusy(true);
+    const moved: Array<{ from: string; to: string; previousPath?: string | null }> = [];
+    const failed: string[] = [];
+    for (const note of notes) {
+      try {
+        const destination = destinationFor(note);
+        const res = await api.moveNote({ path: note.path, destination, storage: STORAGE, as_user: asUser });
+        if (res.status !== 'SUCCESS') throw new Error(res.message || 'Could not move the note');
+        moved.push({
+          from: note.path,
+          to: (res.detail?.path as string | undefined) || destination,
+          previousPath: previousFor?.(note),
+        });
+      } catch {
+        failed.push(note.title);
+      }
+    }
+    if (moved.length) {
+      await persistIndex((current) => {
+        let next = current;
+        for (const move of moved) {
+          const existing = indexEntry(next, move.from);
+          next = forgetIndexEntry(next, move.from);
+          const rest = { ...existing };
+          delete rest.previousPath;
+          next = setIndexEntry(next, move.to, move.previousPath ? { ...rest, previousPath: move.previousPath } : rest);
+        }
+        return next;
+      });
+    }
+    setBulkBusy(false);
+    exitSelection();
+    if (failed.length) toast.error(`Could not move ${failed.length} note${failed.length === 1 ? '' : 's'}: ${failed.join(', ')}`);
+    else if (moved.length) toast.success(`Moved ${moved.length} note${moved.length === 1 ? '' : 's'}`);
+    void refresh();
+  };
+
+  const bulkDelete = async (notes: NoteSummary[]) => {
+    if (!notes.length || bulkBusy) return;
+    setBulkBusy(true);
+    const deleted: string[] = [];
+    const failed: string[] = [];
+    for (const note of notes) {
+      try {
+        const res = await api.deleteNote(note.title, STORAGE, note.path, asUser);
+        if (res.status !== 'SUCCESS') throw new Error(res.message || 'Delete failed');
+        deleted.push(note.path);
+      } catch {
+        failed.push(note.title);
+      }
+    }
+    if (deleted.length) {
+      await persistIndex((current) => {
+        let next = current;
+        for (const path of deleted) next = forgetIndexEntry(next, path);
+        return next;
+      });
+    }
+    setBulkBusy(false);
+    exitSelection();
+    if (failed.length) toast.error(`Could not delete ${failed.length} note${failed.length === 1 ? '' : 's'}: ${failed.join(', ')}`);
+    else if (deleted.length) toast.success(`Deleted ${deleted.length} note${deleted.length === 1 ? '' : 's'}`);
+    void refresh();
+  };
+
+  const selectedNotes = visible.filter((note) => selected.has(note.path));
+
+  const restoreNote = (note: NoteSummary) => {
+    void moveNote(note, restoreDestinationFor(note), null);
   };
 
   const destroyNote = async (note: NoteSummary) => {
@@ -434,7 +580,7 @@ export default function Notes() {
         toast.error(res.message || 'Delete failed');
         return;
       }
-      await persistIndex(forgetIndexEntry(index, note.path));
+      await persistIndex((current) => forgetIndexEntry(current, note.path));
       setEditing(null);
       toast.success('Note deleted');
       await refresh();
@@ -451,9 +597,11 @@ export default function Notes() {
         toast.error(res.message || 'Could not empty the trash');
         return;
       }
-      let next = index;
-      for (const note of trashedNotes) next = forgetIndexEntry(next, note.path);
-      await persistIndex(next);
+      await persistIndex((current) => {
+        let next = current;
+        for (const note of trashedNotes) next = forgetIndexEntry(next, note.path);
+        return next;
+      });
       toast.success('Trash emptied');
       await refresh();
     } catch {
@@ -476,12 +624,11 @@ export default function Notes() {
   };
 
   const togglePin = (note: NoteSummary) => {
-    const entry = indexEntry(index, note.path);
-    void persistIndex(setIndexEntry(index, note.path, { pinned: !entry.pinned }));
+    void persistIndex((current) => setIndexEntry(current, note.path, { pinned: !indexEntry(current, note.path).pinned }));
   };
 
   const setColor = (note: NoteSummary, color: NoteColor) => {
-    void persistIndex(setIndexEntry(index, note.path, { color }));
+    void persistIndex((current) => setIndexEntry(current, note.path, { color }));
   };
 
   const toggleChecklistItem = async (note: NoteSummary, item: string) => {
@@ -538,6 +685,17 @@ export default function Notes() {
               onChange={setSendAs}
               disabled={Boolean(editing)}
             />
+          )}
+          {visible.length > 0 && (
+            <button
+              type="button"
+              onClick={() => (selectMode ? exitSelection() : setSelectMode(true))}
+              aria-pressed={selectMode}
+              data-testid="select-notes"
+              className="glass-button min-h-11 px-3 py-2 text-xs"
+            >
+              {selectMode ? 'Done' : 'Select'}
+            </button>
           )}
           <div className="relative min-w-40 flex-1 sm:flex-none">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -606,6 +764,93 @@ export default function Notes() {
         )}
       </div>
 
+      {selectMode && (
+        <div
+          data-testid="bulk-bar"
+          className="sticky top-2 z-20 flex flex-wrap items-center gap-2 rounded-2xl border border-purple-500/30 bg-slate-900/95 px-3 py-2 backdrop-blur"
+        >
+          <span className="text-xs text-slate-300">{selectedNotes.length} selected</span>
+          <button
+            type="button"
+            onClick={() =>
+              setSelected(selectedNotes.length === visible.length ? new Set() : new Set(visible.map((note) => note.path)))
+            }
+            className="min-h-9 rounded-full px-3 text-[11px] text-slate-300 hover:bg-white/10"
+          >
+            {selectedNotes.length === visible.length ? 'Clear all' : 'Select all'}
+          </button>
+          {view === 'notes' && (
+            <>
+              <button
+                type="button"
+                disabled={!selectedNotes.length || bulkBusy}
+                onClick={() =>
+                  void bulkMove(
+                    selectedNotes,
+                    (note) => archivedPathFor(note.path, ARCHIVE_PREFIX),
+                    (note) => indexEntry(index, note.path).previousPath ?? note.path,
+                  )
+                }
+                className="min-h-9 rounded-full px-3 text-[11px] text-slate-200 hover:bg-white/10 disabled:opacity-50"
+              >
+                Archive
+              </button>
+              <button
+                type="button"
+                disabled={!selectedNotes.length || bulkBusy}
+                onClick={() =>
+                  void bulkMove(
+                    selectedNotes,
+                    (note) => archivedPathFor(note.path, TRASH_PREFIX),
+                    (note) => indexEntry(index, note.path).previousPath ?? note.path,
+                  )
+                }
+                className="min-h-9 rounded-full px-3 text-[11px] text-rose-300 hover:bg-white/10 disabled:opacity-50"
+              >
+                Trash
+              </button>
+            </>
+          )}
+          {view === 'archive' && (
+            <button
+              type="button"
+              disabled={!selectedNotes.length || bulkBusy}
+              onClick={() => void bulkMove(selectedNotes, (note) => archivedPathFor(note.path, TRASH_PREFIX), (note) => indexEntry(index, note.path).previousPath ?? note.path)}
+              className="min-h-9 rounded-full px-3 text-[11px] text-rose-300 hover:bg-white/10 disabled:opacity-50"
+            >
+              Trash
+            </button>
+          )}
+          {view !== 'notes' && (
+            <button
+              type="button"
+              disabled={!selectedNotes.length || bulkBusy}
+              onClick={() => void bulkMove(selectedNotes, restoreDestinationFor, () => null)}
+              className="min-h-9 rounded-full px-3 text-[11px] text-emerald-300 hover:bg-white/10 disabled:opacity-50"
+            >
+              Restore
+            </button>
+          )}
+          {view === 'trash' && (
+            <button
+              type="button"
+              disabled={!selectedNotes.length || bulkBusy}
+              onClick={() => void bulkDelete(selectedNotes)}
+              className="min-h-9 rounded-full px-3 text-[11px] text-rose-300 hover:bg-white/10 disabled:opacity-50"
+            >
+              Delete forever
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={exitSelection}
+            className="ml-auto min-h-9 rounded-full px-3 text-[11px] text-slate-400 hover:bg-white/10"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       {/* Labels: inline #tags, which Nextcloud Notes reads as tags too. */}
       {view === 'notes' && tagChips.length > 0 && (
         <div className="flex flex-wrap items-center gap-2" aria-label="Filter by label">
@@ -666,26 +911,45 @@ export default function Notes() {
               <article
                 key={note.path}
                 data-testid="note-card"
-                className="mb-4 break-inside-avoid rounded-2xl border border-white/10 p-4 hover:border-purple-500/40 transition-colors cursor-pointer relative group"
+                className={`mb-4 break-inside-avoid rounded-2xl border p-4 transition-colors cursor-pointer relative group ${
+                  selectMode && selected.has(note.path) ? 'border-purple-400/70 ring-2 ring-purple-500/40' : 'border-white/10 hover:border-purple-500/40'
+                }`}
                 style={{ background: NOTE_COLOR_BG[color] }}
-                onClick={() => void openEditor(note)}
+                onClick={() => {
+                  if (selectMode) {
+                    toggleSelected(note.path);
+                    return;
+                  }
+                  void openEditor(note);
+                }}
               >
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="font-semibold text-slate-100 text-sm leading-snug">{note.title}</h3>
                   <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      aria-label={meta.pinned ? 'Unpin note' : 'Pin note'}
-                      title={meta.pinned ? 'Unpin' : 'Pin'}
-                      // Hover-revealed only where there is hover: on a phone it is always there.
-                      className={`-mr-2 -mt-2 flex h-11 w-11 items-center justify-center rounded-xl hover:bg-white/10 ${meta.pinned ? 'text-amber-300' : 'text-slate-500 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100'}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        togglePin(note);
-                      }}
-                    >
-                      {meta.pinned ? <Pin size={14} /> : <PinOff size={14} />}
-                    </button>
+                    {selectMode ? (
+                      <span
+                        aria-hidden
+                        className={`flex h-6 w-6 items-center justify-center rounded-full border ${
+                          selected.has(note.path) ? 'border-purple-400 bg-purple-500 text-white' : 'border-white/30 text-transparent'
+                        }`}
+                      >
+                        <Check size={14} />
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={meta.pinned ? 'Unpin note' : 'Pin note'}
+                        title={meta.pinned ? 'Unpin' : 'Pin'}
+                        // Hover-revealed only where there is hover: on a phone it is always there.
+                        className={`-mr-2 -mt-2 flex h-11 w-11 items-center justify-center rounded-xl hover:bg-white/10 ${meta.pinned ? 'text-amber-300' : 'text-slate-500 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePin(note);
+                        }}
+                      >
+                        {meta.pinned ? <Pin size={14} /> : <PinOff size={14} />}
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -714,9 +978,13 @@ export default function Notes() {
                     )}
                   </ul>
                 ) : (
-                  <p className="mt-2 text-xs text-slate-400 whitespace-pre-wrap">
-                    {body !== undefined ? notePreview(body) : `${Math.max(1, Math.round(note.size / 1024))} KB`}
-                  </p>
+                  <div className="mt-2 max-h-32 overflow-hidden">
+                    {body !== undefined ? (
+                      <NotePreview text={noteDisplayBody(body, note.title)} />
+                    ) : (
+                      <p className="text-xs text-slate-400">{Math.max(1, Math.round(note.size / 1024))} KB</p>
+                    )}
+                  </div>
                 )}
 
                 {tags.length > 0 && (
@@ -741,7 +1009,8 @@ export default function Notes() {
                 <div className="mt-3 flex items-center justify-between text-[10px] text-slate-500">
                   <span>{new Date(note.modified).toLocaleDateString()}</span>
                   {/* Quick actions for mouse users; on a phone they live in the editor. */}
-                  <div className="flex items-center gap-1 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:transition-opacity [@media(hover:hover)]:group-hover:opacity-100">
+                  {!selectMode && (
+                    <div className="flex items-center gap-1 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:transition-opacity [@media(hover:hover)]:group-hover:opacity-100">
                     {view === 'notes' && (
                       <>
                         <div className="hidden items-center gap-1 [@media(hover:hover)]:flex">
@@ -829,7 +1098,8 @@ export default function Notes() {
                         <X size={14} />
                       </button>
                     )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </article>
             );
@@ -886,6 +1156,7 @@ function NoteEditor({
 }) {
   const [draft, setDraft] = useState<DraftState>(initial);
   const [labelDraft, setLabelDraft] = useState('');
+  const [preview, setPreview] = useState(false);
   return (
     <div className="space-y-3">
       <input
@@ -895,14 +1166,38 @@ function NoteEditor({
         aria-label="Note title"
         className="glass-input min-h-11 w-full text-base font-semibold"
       />
-      <textarea
-        value={draft.content}
-        onChange={(e) => setDraft({ ...draft, content: e.target.value })}
-        placeholder="Write something…  Use - [ ] for a checklist item and #label to tag it"
-        aria-label="Note content"
-        rows={12}
-        className="glass-input w-full text-base sm:text-sm font-mono resize-y"
-      />
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setPreview(false)}
+          aria-pressed={!preview}
+          className={`min-h-9 rounded-full px-3 text-[11px] ${!preview ? 'bg-purple-500/20 text-purple-100' : 'text-slate-400 hover:bg-white/5'}`}
+        >
+          Write
+        </button>
+        <button
+          type="button"
+          onClick={() => setPreview(true)}
+          aria-pressed={preview}
+          className={`min-h-9 rounded-full px-3 text-[11px] ${preview ? 'bg-purple-500/20 text-purple-100' : 'text-slate-400 hover:bg-white/5'}`}
+        >
+          Preview
+        </button>
+      </div>
+      {preview ? (
+        <div className="glass-input min-h-48 overflow-y-auto p-3" data-testid="note-preview-pane">
+          <NotePreview text={noteDisplayBody(draft.content, draft.title)} className="text-base sm:text-sm" />
+        </div>
+      ) : (
+        <textarea
+          value={draft.content}
+          onChange={(e) => setDraft({ ...draft, content: e.target.value })}
+          placeholder="Write something…  Use - [ ] for a checklist item and #label to tag it"
+          aria-label="Note content"
+          rows={12}
+          className="glass-input w-full text-base sm:text-sm font-mono resize-y"
+        />
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"

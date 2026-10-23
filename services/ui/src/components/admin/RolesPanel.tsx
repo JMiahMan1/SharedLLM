@@ -16,6 +16,9 @@ type Draft = { id?: number; name: string; description: string; permissions: stri
 
 const EMPTY: Draft = { name: '', description: '', permissions: [], members: [] };
 
+/** Household relationship roles; membership follows the family roster. */
+const FAMILY_BUILTINS = new Set(['father', 'mother', 'teen', 'adult_child', 'child']);
+
 const errorText = (err: unknown, fallback: string) => {
   const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
   return typeof detail === 'string' ? detail : fallback;
@@ -35,6 +38,10 @@ export const RolesPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
   const save = useMutation({
     mutationFn: async (d: Draft) => {
       const role = await api.saveRole(d);
+      // Household roles get their members from each person's family role, so
+      // the roster owns membership and this form only edits permissions.
+      const isFamilyRole = FAMILY_BUILTINS.has(roles.find((r) => r.id === d.id)?.builtin_key ?? '');
+      if (isFamilyRole) return role;
       // Membership is stored per user: re-save only the users whose roles change.
       const before = new Set(roles.find((r) => r.id === role.id)?.members ?? []);
       const after = new Set(d.members);
@@ -81,7 +88,9 @@ export const RolesPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
             Roles
           </h3>
           <p className="mt-1 text-sm text-slate-400">
-            What people can do beyond their own account. Admins can do everything without a role.
+            What people can do beyond their own account. Admins can do everything without a role. Household roles
+            (Father, Mother, Teen, Adult child, Child) live here too; their members follow each person&apos;s family
+            role.
           </p>
         </div>
         <button
@@ -109,6 +118,11 @@ export const RolesPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
                 {role.builtin && (
                   <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
                     Built-in
+                  </span>
+                )}
+                {FAMILY_BUILTINS.has(role.builtin_key ?? '') && (
+                  <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-sky-200">
+                    Family
                   </span>
                 )}
               </span>
@@ -170,21 +184,28 @@ export const RolesPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
             ))}
           </fieldset>
 
-          <fieldset className="space-y-2">
-            <legend className="mb-1 text-xs font-semibold text-slate-300">People with this role</legend>
-            {assignable.length === 0 && <p className="text-xs text-slate-500">Everyone here is an admin.</p>}
-            {assignable.map((u) => (
-              <label key={u.username} className="flex min-h-11 items-center gap-3 rounded-xl bg-white/5 px-3 text-sm text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={draft.members.includes(u.username)}
-                  onChange={() => toggle('members', u.username)}
-                  className="h-4 w-4"
-                />
-                {u.full_name || u.display_name || u.username}
-              </label>
-            ))}
-          </fieldset>
+          {FAMILY_BUILTINS.has(roles.find((r) => r.id === draft.id)?.builtin_key ?? '') ? (
+            <p className="rounded-xl bg-white/5 px-3 py-3 text-xs text-slate-400">
+              Household roles are assigned from each person&apos;s family role in Admin → Users → Family or Settings →
+              Family roles. This form edits what the role allows.
+            </p>
+          ) : (
+            <fieldset className="space-y-2">
+              <legend className="mb-1 text-xs font-semibold text-slate-300">People with this role</legend>
+              {assignable.length === 0 && <p className="text-xs text-slate-500">Everyone here is an admin.</p>}
+              {assignable.map((u) => (
+                <label key={u.username} className="flex min-h-11 items-center gap-3 rounded-xl bg-white/5 px-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={draft.members.includes(u.username)}
+                    onChange={() => toggle('members', u.username)}
+                    className="h-4 w-4"
+                  />
+                  {u.full_name || u.display_name || u.username}
+                </label>
+              ))}
+            </fieldset>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             <button type="submit" disabled={save.isPending} className="glass-button px-4 min-h-11 text-[10px] font-black uppercase tracking-widest disabled:opacity-40">

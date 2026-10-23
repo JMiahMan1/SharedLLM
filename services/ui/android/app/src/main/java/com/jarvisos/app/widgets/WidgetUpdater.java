@@ -22,9 +22,13 @@ public final class WidgetUpdater {
     public static final String ACTION_TOGGLE = "com.jarvisos.app.widget.TOGGLE";
     public static final String ACTION_MEDIA = "com.jarvisos.app.widget.MEDIA";
     public static final String ACTION_CONFIRM_GARAGE = "com.jarvisos.app.widget.CONFIRM_GARAGE";
+    public static final String ACTION_NOTE_CHECK = "com.jarvisos.app.widget.NOTE_CHECK";
     public static final String EXTRA_ENTITY = "entity_id";
     public static final String EXTRA_SERVICE = "service";
     public static final String EXTRA_COMMAND = "command";
+    public static final String EXTRA_NOTE_PATH = "note_path";
+    public static final String EXTRA_NOTE_TITLE = "note_title";
+    public static final String EXTRA_NOTE_ITEM = "note_item";
     public static final float AWAY_THRESHOLD_M = 200f;
     public static final String GARAGE_HINT = "garage";
 
@@ -42,6 +46,7 @@ public final class WidgetUpdater {
         request(context, HealthWidget.class);
         request(context, VerseWidget.class);
         request(context, NotesWidget.class);
+        request(context, SingleNoteWidget.class);
     }
 
     public static void request(Context context, Class<?> cls) {
@@ -268,5 +273,56 @@ public final class WidgetUpdater {
                 }
             });
         });
+    }
+
+    /** Each single-note widget carries its own note, so push per widget id. */
+    public static void pushSingleNote(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, SingleNoteWidget.class));
+        if (ids == null || ids.length == 0) return;
+        final int[] widgetIds = ids;
+        onBackground(() -> {
+            final android.util.SparseArray<RemoteViews> out = new android.util.SparseArray<>();
+            for (int id : widgetIds) {
+                out.put(id, SingleNoteWidget.build(context, id));
+            }
+            onMain(() -> {
+                for (int i = 0; i < out.size(); i++) {
+                    mgr.updateAppWidget(out.keyAt(i), out.valueAt(i));
+                }
+            });
+        });
+    }
+
+    /** Tick one checklist item in a single-note widget, without opening the app. */
+    public static PendingIntent noteCheckOffPendingIntent(Context context, int appWidgetId,
+        String path, String title, String item) {
+        Intent i = new Intent(context, WidgetActionReceiver.class);
+        i.setAction(ACTION_NOTE_CHECK);
+        i.putExtra(EXTRA_NOTE_PATH, path);
+        i.putExtra(EXTRA_NOTE_TITLE, title);
+        i.putExtra(EXTRA_NOTE_ITEM, item);
+        i.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
+        return PendingIntent.getBroadcast(context, 7000 + appWidgetId * 31 + item.hashCode(), i,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    /** Open the widget's note in the app, at the note the widget shows. */
+    public static PendingIntent openSingleNotePendingIntent(Context context, int appWidgetId, String path) {
+        Intent i = new Intent(context, MainActivity.class);
+        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        i.putExtra(PushNotifier.EXTRA_OPEN_PATH, "/notes?note=" + Uri.encode(path));
+        return PendingIntent.getActivity(context, 6500 + appWidgetId, i,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    /** Re-pick the note a single-note widget shows. */
+    public static PendingIntent configureSingleNotePendingIntent(Context context, int appWidgetId) {
+        Intent i = new Intent(context, ConfigureSingleNoteActivity.class);
+        i.setAction(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE);
+        i.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
+        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        return PendingIntent.getActivity(context, 4500 + appWidgetId, i,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 }

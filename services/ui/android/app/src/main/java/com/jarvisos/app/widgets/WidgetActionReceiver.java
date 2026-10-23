@@ -67,6 +67,28 @@ public class WidgetActionReceiver extends BroadcastReceiver {
             return;
         }
 
+        if (WidgetUpdater.ACTION_NOTE_CHECK.equals(action)) {
+            final String path = intent.getStringExtra(WidgetUpdater.EXTRA_NOTE_PATH);
+            final String title = intent.getStringExtra(WidgetUpdater.EXTRA_NOTE_TITLE);
+            final String item = intent.getStringExtra(WidgetUpdater.EXTRA_NOTE_ITEM);
+            if (path == null || item == null) return;
+            WidgetUpdater.onBackground(() -> {
+                try {
+                    JSONObject body = new JSONObject();
+                    body.put("path", path);
+                    body.put("title", title != null ? title : "");
+                    body.put("item", item);
+                    body.put("storage", "nextcloud");
+                    WidgetApi.post(app, "/api/communication/notes/check_off", body);
+                    WidgetUpdater.pushSingleNote(app);
+                    postToast(app, "✓ " + item);
+                } catch (Exception e) {
+                    postToast(app, "✕ " + (e.getMessage() != null ? e.getMessage() : "Could not update the note"));
+                }
+            });
+            return;
+        }
+
         if (WidgetUpdater.ACTION_MEDIA.equals(action)) {
             final String command = intent.getStringExtra(WidgetUpdater.EXTRA_COMMAND);
             if (command == null) return;

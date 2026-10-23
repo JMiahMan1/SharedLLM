@@ -81,7 +81,16 @@ def test_default_roles_are_seeded_once(session: Session):
     roles.seed_default_roles(session)
     roles.seed_default_roles(session)
     names = sorted(r.name for r in session.exec(select(Role)).all())
-    assert names == ["Family member", "Guest", "Home manager"]
+    assert names == [
+        "Adult child",
+        "Child",
+        "Family member",
+        "Father (admin)",
+        "Guest",
+        "Home manager",
+        "Mother",
+        "Teen",
+    ]
 
 
 def test_only_admins_manage_roles(client: TestClient, session: Session):

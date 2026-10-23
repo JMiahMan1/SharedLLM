@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
 
 import services.identity.main as identity_main
+from services.identity import roles as identity_roles
 from services.identity.main import app, get_session, require_api_key, require_internal
 from services.identity.models import EntityProtection, User
 
@@ -62,6 +63,9 @@ def _act_as(session: Session, client: TestClient, username: str) -> None:
 def client_fixture(session: Session):
     identity_main.engine = session.bind
     SQLModel.metadata.create_all(identity_main.engine)
+    # Startup seeds the built-in roles; the test fixture mirrors that so the
+    # admin Roles panel and family-role sync have real rows to work with.
+    identity_roles.seed_default_roles(session)
     app.dependency_overrides[require_internal] = lambda: True
     client = TestClient(app)
     _act_as(session, client, ADMIN)

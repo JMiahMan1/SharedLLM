@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Notes from '../pages/Notes';
 import { EMPTY_NOTES_INDEX, readNotesSnapshot, writeNotesSnapshot } from '../lib/notesMeta';
@@ -238,6 +238,29 @@ describe('Notes (Keep-style)', () => {
       destination: 'Notes/Archive/Trip ideas.md',
     });
     await waitFor(() => {
+      expect(lastIndex('Notes/Archive/Trip ideas.md')?.previousPath).toBe('Notes/Trip ideas.md');
+    });
+  });
+
+  it('archives several selected notes in one pass', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByTestId('select-notes'));
+    await user.click(screen.getByText('Trip ideas'));
+    await user.click(screen.getByText('Shared Checklist'));
+
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('2 selected');
+    await user.click(within(screen.getByTestId('bulk-bar')).getByRole('button', { name: 'Archive' }));
+
+    await waitFor(() => expect(notesMoveCalls.length).toBe(2));
+    expect(notesMoveCalls.map((call) => call.destination).sort()).toEqual([
+      'Notes/Archive/Shared Checklist.md',
+      'Notes/Archive/Trip ideas.md',
+    ]);
+    await waitFor(() => {
+      expect(lastIndex('Notes/Archive/Shared Checklist.md')?.previousPath).toBe('Notes/Shared Checklist.md');
       expect(lastIndex('Notes/Archive/Trip ideas.md')?.previousPath).toBe('Notes/Trip ideas.md');
     });
   });

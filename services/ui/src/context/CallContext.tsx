@@ -20,6 +20,7 @@ import { AUTO_DROP_IN_EVENT, getAutoDropIn } from '../lib/callSettings';
 
 /** How often the app looks for a family drop-in call started elsewhere. */
 const ACTIVE_CALL_REFRESH_MS = 5_000;
+const RING_INTERVAL_MS = 2_500;
 
 export type CallStatus = 'connecting' | 'connected' | 'ended' | 'error';
 
@@ -101,6 +102,11 @@ function messageError(error: unknown): string {
 /** Best-effort drop-in chime. Browsers may keep audio suspended until a tap. */
 function playDropInChime(): void {
   try {
+    navigator.vibrate?.([180, 80, 180]);
+  } catch {
+    // Vibration is unavailable on desktop and some browsers.
+  }
+  try {
     const AudioContextClass = window.AudioContext;
     if (!AudioContextClass) return;
     const context = new AudioContextClass();
@@ -122,12 +128,7 @@ function playDropInChime(): void {
     });
     window.setTimeout(() => { void context.close().catch(() => {}); }, 1200);
   } catch {
-    // Sound is a nicety; vibration and the visible alert still work.
-  }
-  try {
-    navigator.vibrate?.([180, 80, 180]);
-  } catch {
-    // Vibration is unavailable on desktop and some browsers.
+    // Sound is a nicety; the alert still works without it.
   }
 }
 
@@ -924,15 +925,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
       try {
         const calls = await api.getActiveCalls();
         if (cancelled) return;
-        setActiveCalls(calls);
+        // A malformed answer must not take the banner down with it.
+        const list = Array.isArray(calls) ? calls : [];
+        setActiveCalls(list);
 
-        const tokens = new Set(calls.map((active) => active.token));
+        const tokens = new Set(list.map((active) => active.token));
         if (!primedRef.current) {
           // The first poll is the baseline: calls already running should show
           // in the banner, not trigger an automatic join.
           primedRef.current = true;
         } else if (!callRef.current) {
-          const fresh = calls.find((active) => !seenCallsRef.current.has(active.token));
+          const fresh = list.find((active) => !seenCallsRef.current.has(active.token));
           if (fresh && autoDropInRef.current && !autoTriedRef.current.has(fresh.token)) {
             const username = usernameRef.current;
             const alreadyOnCall = username
@@ -1098,6 +1101,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const bannerCall = call ? undefined : activeCalls.find((active) => !dismissed.includes(active.token));
+  const bannerToken = bannerCall?.token;
+
+  // Ring until the call is answered, dismissed or ended: the chime sounds once,
+  // then repeats so a phone in a pocket still gets attention.
+  useEffect(() => {
+    if (!bannerToken) return;
+    playDropInChime();
+    const timer = window.setInterval(playDropInChime, RING_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [bannerToken]);
 
   const value = useMemo<CallContextValue>(() => ({
     call,

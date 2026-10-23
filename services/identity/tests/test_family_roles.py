@@ -12,6 +12,7 @@ Policy:
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
+from services.identity import roles
 from services.identity.main import app
 from services.identity.models import User, UserActivitySharing
 from services.identity.tests.test_entity_protection import (  # noqa: F401 (fixtures)
@@ -26,7 +27,30 @@ def _set_role(session: Session, username: str, role: str):
     user.family_role = role
     session.add(user)
     session.commit()
+    # The relationship is kept as a real role row, so reconcile it the same
+    # way the API does when a family role is set.
+    if roles.sync_family_role(session, user):
+        session.commit()
     return user
+
+
+def test_family_roles_are_the_roles_the_admin_panel_shows(client: TestClient, session: Session):
+    """The household roles are ordinary rows in the Roles table."""
+    _set_role(session, "alice", "mother")
+    _as(session, client, "default")
+
+    catalog = client.get("/api/users/roles").json()
+    mother = next(r for r in catalog["roles"] if r["name"] == "Mother")
+    assert "family.manage" in mother["permissions"]
+    assert "alice" in mother["members"]
+
+    resp = client.patch("/api/users/bob/family", json={"family_role": "teen"})
+    assert resp.status_code == 200, resp.text
+    catalog = client.get("/api/users/roles").json()
+    teen = next(r for r in catalog["roles"] if r["name"] == "Teen")
+    child = next(r for r in catalog["roles"] if r["name"] == "Child")
+    assert "bob" in teen["members"]
+    assert "bob" not in child["members"]
 
 
 def test_mother_gets_household_permissions_without_admin(client: TestClient, session: Session):

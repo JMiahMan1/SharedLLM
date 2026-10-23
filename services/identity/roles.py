@@ -22,29 +22,58 @@ PERMISSIONS: dict[str, str] = {
     "family.manage": "Manage family roles, mother/child links and household sharing",
 }
 
-#: The family roles Identity understands. These are relationships, not roles in
-#: the RBAC table: an admin can still give a child an explicit role, but the
-#: household defaults below are derived from the relationship.
+#: The family roles Identity understands. These are relationships whose
+#: permissions come from the matching built-in role below, so the household
+#: roles live in the same table the admin Roles panel edits.
 FAMILY_ROLES: tuple[str, ...] = ("father", "mother", "child", "teen", "adult_child", "other")
 MINOR_FAMILY_ROLES = {"child", "teen"}
 
-#: Defaults a relationship contributes on top of any explicitly assigned role.
-#: "father" is deliberately absent: fatherhood is not an elevation path, the
-#: admin flag is. A mother runs the house but cannot administer accounts.
-FAMILY_ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "mother": {
-        "devices.use_all",
-        "devices.use_locked",
-        "devices.assign",
-        "devices.lock",
-        "family.manage",
-    },
-    "teen": {"devices.use_all"},
-    "adult_child": {"devices.use_all"},
+#: Relationship -> built-in role key. Each family role below is a real role in
+#: the Roles table, seeded on start and assigned when the relationship is set.
+FAMILY_ROLE_BUILTIN: dict[str, str] = {
+    "father": "father",
+    "mother": "mother",
+    "teen": "teen",
+    "adult_child": "adult_child",
+    "child": "child",
 }
+
+#: Every built-in key that represents a family relationship. Used by
+#: ``sync_family_role`` to replace at most one of them per person.
+FAMILY_BUILTINS = set(FAMILY_ROLE_BUILTIN.values())
 
 # Seeded on start when missing (matched by key, so a renamed one stays).
 DEFAULT_ROLES: list[dict] = [
+    {
+        "builtin": "father",
+        "name": "Father (admin)",
+        "description": "The admin account. The admin flag does the work; this role only labels the relationship.",
+        "permissions": [],
+    },
+    {
+        "builtin": "mother",
+        "name": "Mother",
+        "description": "Runs the household: every device, family links and family sharing. No account or server settings.",
+        "permissions": ["devices.use_all", "devices.use_locked", "devices.assign", "devices.lock", "family.manage"],
+    },
+    {
+        "builtin": "adult_child",
+        "name": "Adult child",
+        "description": "An adult in the household: every device that is not locked, with their own sharing choices.",
+        "permissions": ["devices.use_all"],
+    },
+    {
+        "builtin": "teen",
+        "name": "Teen",
+        "description": "A minor in the household: every device that is not locked. Family circle sharing stays on.",
+        "permissions": ["devices.use_all"],
+    },
+    {
+        "builtin": "child",
+        "name": "Child",
+        "description": "A minor in the household: only the devices assigned to them. Family circle sharing stays on.",
+        "permissions": [],
+    },
     {
         "builtin": "home_manager",
         "name": "Home manager",
@@ -92,19 +121,55 @@ def user_role_ids(session: Session, user: User) -> list[int]:
 def user_permissions(session: Session, user: User) -> set[str]:
     """Everything this user may do; an admin may do all of it.
 
-    Family relationships contribute household defaults (a mother can manage
-    devices and family links; teens can use unlocked devices) without adding
-    more built-in RBAC roles to the admin page. Explicit roles are still
-    unioned in, so an admin can grant a child a narrow extra permission.
+    Family relationships are ordinary roles in the table (Father, Mother,
+    Teen, Adult child, Child) and are kept in sync by ``sync_family_role``, so
+    there is one place permissions come from instead of a parallel system.
     """
     if user.is_admin:
         return set(PERMISSIONS)
-    granted = set(FAMILY_ROLE_PERMISSIONS.get(user.family_role or "other", set()))
+    granted: set[str] = set()
     ids = user_role_ids(session, user)
     if ids:
         held = session.exec(select(Role).where(Role.id.in_(ids))).all()  # type: ignore[union-attr]
         granted |= {key for role in held for key in role_permissions(role)}
     return granted
+
+
+def sync_family_role(session: Session, user: User) -> bool:
+    """Point this person's family built-in role at their relationship.
+
+    Called when a user is created, when a family role changes and once at
+    startup so existing households are reconciled. Explicit roles a person
+    holds are never touched. Returns True when a row changed.
+    """
+    wanted = FAMILY_ROLE_BUILTIN.get(user.family_role or "other")
+    builtins = {
+        role.builtin: role
+        for role in session.exec(select(Role).where(Role.builtin.in_(tuple(FAMILY_BUILTINS)))).all()  # type: ignore[union-attr]
+    }
+    if not builtins:
+        return False
+    held = set(user_role_ids(session, user))
+    changed = False
+    for key, role in builtins.items():
+        if role.id is None:
+            continue
+        should_hold = key == wanted
+        holds = role.id in held
+        if should_hold and not holds:
+            session.add(UserRole(user_id=user.id or 0, role_id=role.id))
+            changed = True
+        elif not should_hold and holds:
+            row = session.exec(
+                select(UserRole).where(
+                    UserRole.user_id == (user.id or 0),
+                    UserRole.role_id == role.id,
+                )
+            ).first()
+            if row is not None:
+                session.delete(row)
+                changed = True
+    return changed
 
 
 def has_permission(session: Session, user: User, permission: str) -> bool:

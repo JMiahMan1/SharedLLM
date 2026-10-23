@@ -66,10 +66,10 @@ final class NotesLines {
         return lines;
     }
 
-    /** One readable line from the note body: no header, no raw checklist. */
-    static String preview(String content) {
+    /** Drop the legacy stored header (`# Title` and `Category:`), keeping the body. */
+    static String stripHeader(String content) {
         if (content == null || content.isEmpty()) return "";
-        StringBuilder body = new StringBuilder();
+        StringBuilder out = new StringBuilder();
         boolean inHeader = true;
         for (String raw : content.split("\\r?\\n")) {
             String line = raw.trim();
@@ -78,6 +78,18 @@ final class NotesLines {
                 continue;
             }
             inHeader = false;
+            out.append(raw).append('\n');
+        }
+        return out.toString();
+    }
+
+    /** One readable line from the note body: no header, no raw checklist. */
+    static String preview(String content) {
+        String body = stripHeader(content);
+        if (body.isEmpty()) return "";
+        StringBuilder joined = new StringBuilder();
+        for (String raw : body.split("\\r?\\n")) {
+            String line = raw.trim();
             if (line.isEmpty()) continue;
             Matcher done = CHECK_DONE.matcher(line);
             Matcher open = CHECK_OPEN.matcher(line);
@@ -86,11 +98,11 @@ final class NotesLines {
             } else if (open.matches()) {
                 line = "\u2610 " + open.group(1);
             }
-            if (body.length() > 0) body.append(" \u00b7 ");
-            body.append(line);
-            if (body.length() >= MAX_BODY * 2) break;
+            if (joined.length() > 0) joined.append(" \u00b7 ");
+            joined.append(line);
+            if (joined.length() >= MAX_BODY * 2) break;
         }
-        return oneLine(body.toString(), MAX_BODY);
+        return oneLine(joined.toString(), MAX_BODY);
     }
 
     /** Collapse whitespace and truncate on a word boundary. */

@@ -598,6 +598,37 @@ async def test_move_sends_webdav_move_and_records_the_original_path(provider, mo
     assert written["notes"]["Notes/Archive/Old.md"]["previousPath"] == "Notes/Old.md"
 
 
+async def test_move_never_overwrites_an_existing_note(provider, monkeypatch):
+    import json as _json
+
+    import services.execution.http_client as http_client
+
+    moves: list[str] = []
+    written: dict = {}
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        if method == "PROPFIND":
+            status = 207 if url == "http://nextcloud.test/Notes/Archive/Plan.md" else 404
+            return {"status_code": status, "text": ""}
+        if method == "MOVE":
+            moves.append(headers["Destination"])
+            return {"status_code": 201, "text": ""}
+        if method == "PUT":
+            written.update(_json.loads(data))
+            return {"status_code": 204, "text": ""}
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(
+        request("move", path="Notes/Work/Plan.md", destination="Notes/Archive/Plan.md")
+    )
+
+    assert result.status == "SUCCESS"
+    assert result.detail["path"] == "Notes/Archive/Plan (copy).md"
+    assert moves == ["http://nextcloud.test/Notes/Archive/Plan (copy).md"]
+    assert written["notes"]["Notes/Archive/Plan (copy).md"]["previousPath"] == "Notes/Work/Plan.md"
+
+
 async def test_move_back_out_of_archive_restores_the_entry(provider, monkeypatch):
     import json as _json
 
