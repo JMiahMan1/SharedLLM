@@ -248,7 +248,7 @@ async def check_once(watcher: Watcher | None = None) -> int:
     if not creds.get("ha_url") or not creds.get("ha_token"):
         log.warning("[home_alerts] the system account has no Home Assistant login; no home notices")
         return 0
-    states = {s.get("entity_id"): s for s in await ha_client.get_all_states(creds["ha_url"], creds["ha_token"]) or []
+    states = {s.get("entity_id"): s for s in await ha_client.get_all_states(creds["ha_url"], creds["ha_token"], account="the system account") or []
               if isinstance(s, dict)}
     if not states:
         return 0
