@@ -417,6 +417,40 @@ def create_app():
         rc = _redis()
         return {"status": "SUCCESS", "events": await store.list_activity(rc, user, limit)}
 
+    @application.post("/api/telemetry/usage")
+    async def record_usage(body: dict = Body(...), _: bool = Depends(require_internal)):
+        """One phone's day of screen time and when the day started and stopped."""
+        user = str(body.get("user") or "").strip()
+        day = str(body.get("day") or "").strip()
+        if not user or not day:
+            raise HTTPException(status_code=422, detail="user and day required")
+        try:
+            millis = int(body.get("millis") or 0)
+            sessions = int(body.get("sessions") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="millis and sessions must be numbers")
+        if millis < 0 or sessions < 0:
+            raise HTTPException(status_code=422, detail="millis and sessions must not be negative")
+        entry = {
+            "day": day,
+            "millis": millis,
+            "first_use": body.get("first_use"),
+            "last_use": body.get("last_use"),
+            "sessions": sessions,
+            "source": (str(body.get("source") or "phone").strip() or "phone"),
+            "at": utcnow_iso(),
+        }
+        rc = _redis()
+        merged = await store.merge_usage(rc, user, entry)
+        return {"status": "SUCCESS", "usage": merged}
+
+    @application.get("/api/telemetry/usage/{user}")
+    async def get_usage_days(
+        user: str, days: int = Query(default=7, le=60), _: bool = Depends(require_internal)
+    ):
+        rc = _redis()
+        return {"status": "SUCCESS", "days": await store.get_usage(rc, user, days)}
+
     @application.post("/api/telemetry/notify")
     async def notify(body: dict = Body(...), _: bool = Depends(require_internal)):
         """Send one notification to a user from another service (docs/PUSH.md)."""

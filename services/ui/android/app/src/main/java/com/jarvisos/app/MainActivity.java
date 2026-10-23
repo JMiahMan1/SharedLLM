@@ -32,6 +32,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PushPlugin.class);
         registerPlugin(JarvisMediaPlugin.class);
         registerPlugin(SystemBarsPlugin.class);
+        registerPlugin(PhoneUsagePlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

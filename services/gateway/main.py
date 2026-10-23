@@ -5147,6 +5147,43 @@ async def post_activity(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/activity", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/usage")
+async def post_usage(request: Request):
+    """General phone usage: screen time and when the day started and stopped."""
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    payload = {
+        "user": user,
+        "day": body.get("day"),
+        "millis": body.get("millis"),
+        "first_use": body.get("first_use"),
+        "last_use": body.get("last_use"),
+        "sessions": body.get("sessions"),
+        "source": body.get("source") or "phone",
+    }
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.post(f"{TELEMETRY_SVC}/api/telemetry/usage", json=payload, headers=headers)
+    return await _proxy_json_response(resp)
+
+
+@app.get("/api/usage/{user}")
+async def get_usage(request: Request, user: str, days: int = 7):
+    """Screen time day by day for one person (parents' surfaces read this)."""
+    creds = await _resolve_identity_from_request(request)
+    if not (creds or {}).get("user"):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{TELEMETRY_SVC}/api/telemetry/usage/{user}", params={"days": days}, headers=headers
+        )
+    return await _proxy_json_response(resp)
+
+
 @app.post("/api/communication/notes/read")
 async def proxy_read_note(request: Request):
     body = await request.json()
