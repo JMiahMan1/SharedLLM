@@ -417,6 +417,17 @@ class NoteRequest(BaseRequest):
 
 
 # Recipes: paste-a-link import and TheMealDB search (corpus index arrives later)
+class ActivityRequest(BaseRequest):
+    """One light activity event from the app (usually a feature page opened)."""
+
+    user_context: UserContext
+    feature: str
+    item: str = ""
+    event: str = "view"
+    duration_s: float | None = None
+    detail: dict[str, Any] = {}
+
+
 class RecipeRequest(BaseRequest):
     user_context: UserContext
     action: Literal["url_import", "themealdb_search", "recipe_search", "shelf_fetch"]

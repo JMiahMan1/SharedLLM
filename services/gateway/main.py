@@ -5133,6 +5133,20 @@ async def proxy_recipe_import(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/recipes", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/activity")
+async def post_activity(request: Request):
+    """A light activity beacon from the app: what a person opened or did."""
+    body = await request.json()
+    payload = {
+        "feature": body.get("feature"),
+        "item": body.get("item", ""),
+        "event": body.get("event", "view"),
+        "duration_s": body.get("duration_s"),
+        "detail": body.get("detail") or {},
+    }
+    return await _proxy_execution_with_identity(request, "/execute/activity", payload, as_user=body.get("as_user"))
+
+
 @app.post("/api/communication/notes/read")
 async def proxy_read_note(request: Request):
     body = await request.json()

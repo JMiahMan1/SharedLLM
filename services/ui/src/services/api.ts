@@ -2201,6 +2201,18 @@ export const api = {
     return resp.data;
   },
 
+  async postActivity(payload: {
+    feature: string;
+    item?: string;
+    event?: string;
+    duration_s?: number;
+    detail?: Record<string, unknown>;
+  }): Promise<ExecutionResponse> {
+    // The activity beacon: a light page view for the family profile.
+    const resp = await apiClient.post('/api/activity', payload);
+    return resp.data;
+  },
+
   async importRecipe(url: string): Promise<ExecutionResponse> {
     // The server fetches the page (a slow site can take a while); 60s like notes.
     const resp = await apiClient.post('/api/recipes/import', { url }, { timeout: 60_000 });
