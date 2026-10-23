@@ -15,6 +15,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.Calendar;
@@ -54,6 +55,9 @@ public class PhoneUsagePlugin extends Plugin {
 
         long millis = 0;
         UsageWindow window = new UsageWindow();
+        // Per-app foreground time for the day, kept so the profile can show the
+        // top apps (the same UsageStatsManager reading, no extra permission).
+        java.util.ArrayList<UsageStats> appRows = new java.util.ArrayList<>();
         if (manager != null) {
             List<UsageStats> stats =
                     manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, now);
@@ -61,6 +65,9 @@ public class PhoneUsagePlugin extends Plugin {
                 for (UsageStats day : stats) {
                     if (day.getLastTimeUsed() >= start) {
                         millis += day.getTotalTimeInForeground();
+                        if (day.getTotalTimeInForeground() > 0) {
+                            appRows.add(day);
+                        }
                     }
                 }
             }
@@ -73,10 +80,25 @@ public class PhoneUsagePlugin extends Plugin {
             }
         }
 
+        // Sort by foreground time, descending, and keep the top twenty so a busy
+        // day does not ship hundreds of zero-ish rows.
+        appRows.sort((a, b) -> Long.compare(b.getTotalTimeInForeground(), a.getTotalTimeInForeground()));
+        JSONArray apps = new JSONArray();
+        int limit = Math.min(20, appRows.size());
+        for (int i = 0; i < limit; i++) {
+            UsageStats row = appRows.get(i);
+            JSONObject app = new JSONObject();
+            app.put("package", row.getPackageName());
+            app.put("millis", row.getTotalTimeInForeground());
+            app.put("lastUse", row.getLastTimeUsed());
+            apps.put(app);
+        }
+
         ret.put("millis", Math.max(0, millis));
         ret.put("firstUse", window.hasData() ? window.firstUse : JSONObject.NULL);
         ret.put("lastUse", window.hasData() ? window.lastUse : JSONObject.NULL);
         ret.put("sessions", window.sessions);
+        ret.put("apps", apps);
         call.resolve(ret);
     }
 

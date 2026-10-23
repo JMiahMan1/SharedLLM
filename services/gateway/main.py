@@ -5162,6 +5162,7 @@ async def post_usage(request: Request):
         "first_use": body.get("first_use"),
         "last_use": body.get("last_use"),
         "sessions": body.get("sessions"),
+        "apps": body.get("apps") if isinstance(body.get("apps"), list) else [],
         "source": body.get("source") or "phone",
     }
     headers = {"X-Internal-Secret": INTERNAL_SECRET}

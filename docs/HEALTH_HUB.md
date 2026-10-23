@@ -278,10 +278,14 @@ live search is the ecosystem-standard pattern.
 
 ### Phase 10 — digital wellbeing (planned 2026-10-23)
 
-- [ ] Phone usage on Android: the built `PhoneUsagePlugin` (mirroring `StepCounterPlugin`) reads
+- [x] Phone usage on Android: the built `PhoneUsagePlugin` (mirroring `StepCounterPlugin`) reads
       `UsageStatsManager` — the first brick is in (daily total, first and last use, session
       count land on the profile via the Usage Access permission, which the member grants once
-      in Android Settings). Per-app foreground time for the day follows on the same engine.
+      in Android Settings). Per-app foreground time for the day now follows on the same engine:
+      `getToday()` also returns the top twenty apps by foreground time, merged per package in
+      telemetry (`tel:usage:{user}` day records carry an `apps` array), posted by
+      `PhoneUsageSync` every five minutes. The top-apps view itself lands on the parents'
+      surface (step 7).
       Android-only: the card hides everywhere else, exactly like the steps sensor.
 - [ ] Ingestion mirrors the steps pipeline: the phone owns the day arithmetic, uploads batched,
       idempotent payloads (`source: phone`), coalesced — stored per user, every reading source-tagged.
@@ -339,7 +343,9 @@ point.
 - [x] **Device usage (Android).** First brick: daily screen time with when the day started and
       stopped (first and last use) and the session count land via the phone's Usage Access
       (`PhoneUsagePlugin` → `POST /api/usage` → telemetry `tel:usage:{user}`). Per-app
-      foreground time and the top-apps view follow on the same engine.
+      foreground time now follows on the same engine (top twenty apps per day, merged per
+      package, stored in the day record's `apps` array); the top-apps view lands on the
+      parents' surface (step 7).
 - [ ] **Calls and SMS (Android).** The sideloaded app collects the call log and SMS content
       with runtime permissions (the Qustodio feature Play-store apps cannot ship).
 - [ ] **Web activity.** The on-device filter reports domains visited and blocked attempts.

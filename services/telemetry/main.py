@@ -437,6 +437,7 @@ def create_app():
             "first_use": body.get("first_use"),
             "last_use": body.get("last_use"),
             "sessions": sessions,
+            "apps": body.get("apps") if isinstance(body.get("apps"), list) else [],
             "source": (str(body.get("source") or "phone").strip() or "phone"),
             "at": utcnow_iso(),
         }

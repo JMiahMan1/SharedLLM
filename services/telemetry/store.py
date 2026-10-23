@@ -256,6 +256,40 @@ async def merge_usage(rc, user: str, entry: dict[str, Any]) -> dict[str, Any]:
     merged["sessions"] = int(max(_num(merged.get("sessions")) or 0.0, sessions))
     merged["source"] = str(entry.get("source") or merged.get("source") or "phone")
     merged["updated_at"] = str(entry.get("at") or utcnow_iso())
+
+    # Per-app foreground time for the day, merged by package: keep the longest
+    # reading seen for each app so a re-report never shrinks a row.
+    incoming_apps = entry.get("apps")
+    if isinstance(incoming_apps, list):
+        by_pkg: dict[str, dict[str, Any]] = {}
+        for existing in (merged.get("apps") or []):
+            if isinstance(existing, dict) and existing.get("package"):
+                by_pkg[str(existing["package"])] = dict(existing)
+        for raw in incoming_apps:
+            if not isinstance(raw, dict):
+                continue
+            pkg = str(raw.get("package") or "").strip()
+            if not pkg:
+                continue
+            try:
+                amillis = int(raw.get("millis") or 0)
+            except (TypeError, ValueError):
+                amillis = 0
+            alast = raw.get("last_use")
+            try:
+                alast_i = int(alast) if alast is not None else None
+            except (TypeError, ValueError):
+                alast_i = None
+            prev = by_pkg.get(pkg)
+            if prev is None:
+                by_pkg[pkg] = {"package": pkg, "millis": max(0, amillis), "last_use": alast_i}
+            else:
+                prev["millis"] = max(int(prev.get("millis") or 0), max(0, amillis))
+                prev_last_app = prev.get("last_use")
+                if alast_i is not None and (prev_last_app is None or alast_i > prev_last_app):
+                    prev["last_use"] = alast_i
+        merged["apps"] = sorted(by_pkg.values(), key=lambda a: int(a.get("millis") or 0), reverse=True)
+
     await rc.hset(key, day, json.dumps(merged))
 
     if await rc.hlen(key) > USAGE_MAX_DAYS:
