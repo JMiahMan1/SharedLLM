@@ -39,6 +39,11 @@ async function syncPhoneUsage(): Promise<void> {
         first_use: today.firstUse,
         last_use: today.lastUse,
         sessions: today.sessions,
+        apps: (today.apps ?? []).map((app) => ({
+          package: app.package,
+          millis: app.millis,
+          last_use: app.lastUse,
+        })),
         source: 'phone',
       }),
     });
@@ -51,8 +56,8 @@ async function syncPhoneUsage(): Promise<void> {
 }
 
 /**
- * Posts the phone's own usage (screen time, when use started and stopped) as
- * it changes, so the family profile sees the day without any manual step.
+ * Posts the phone's own usage (screen time, when use started and stopped, and
+ * the day's top apps by foreground time) as it changes.
  */
 export default function PhoneUsageSync() {
   useEffect(() => {

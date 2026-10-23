@@ -97,5 +97,29 @@ def test_negative_millis_is_refused(client, rc):
     assert client.post("/api/telemetry/usage", headers=HEADERS, json=_usage(millis=-5)).status_code == 422
 
 
+def test_per_app_foreground_time_merges_by_package(client, rc):
+    client.post(
+        "/api/telemetry/usage",
+        headers=HEADERS,
+        json=_usage(apps=[{"package": "com.youtube", "millis": 1_800_000, "last_use": 1_700_003_000_000},
+                         {"package": "com.spotify", "millis": 900_000, "last_use": 1_700_002_000_000}]),
+    )
+    client.post(
+        "/api/telemetry/usage",
+        headers=HEADERS,
+        json=_usage(apps=[{"package": "com.youtube", "millis": 2_000_000, "last_use": 1_700_004_000_000},
+                         {"package": "com.chrome", "millis": 300_000, "last_use": 1_700_001_000_000}]),
+    )
+
+    day = client.get("/api/telemetry/usage/kiddo", headers=HEADERS).json()["days"][0]
+    by_pkg = {a["package"]: a for a in day["apps"]}
+    assert by_pkg["com.youtube"]["millis"] == 2_000_000  # longest wins
+    assert by_pkg["com.youtube"]["last_use"] == 1_700_004_000_000  # latest wins
+    assert by_pkg["com.spotify"]["millis"] == 900_000
+    assert by_pkg["com.chrome"]["millis"] == 300_000
+    # sorted by millis descending
+    assert [a["package"] for a in day["apps"]] == ["com.youtube", "com.spotify", "com.chrome"]
+
+
 def test_needs_the_internal_secret(client, rc):
     assert client.post("/api/telemetry/usage", json=_usage()).status_code == 401
