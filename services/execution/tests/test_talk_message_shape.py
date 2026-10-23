@@ -205,3 +205,48 @@ async def test_app_question_is_claimed_so_the_talk_monitor_does_not_answer_it_to
     claim.reset_mock()
     await talk_handler.handle_talk(TalkRequest(user_context={"user": "mom"}, action="send", token="room-1", message="hi"))
     claim.assert_not_awaited()
+
+
+async def test_a_jarvis_answer_reads_and_stores_the_room_transcript(monkeypatch):
+    """The room's short transcript rides with the question and the turn is stored."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import services.gateway.history as history
+    import services.gateway.orchestrator as orchestrator
+
+    room_history = [
+        {"role": "user", "content": "How did the fort turn out?"},
+        {"role": "assistant", "content": "It survived the night."},
+    ]
+    seen = {}
+
+    async def fake_orchestration(payload, chunk_callback=None):
+        seen["history"] = payload.get("history")
+        return "They are ripe."
+
+    posted = []
+
+    async def fake_request(provider, method, endpoint, **kwargs):
+        posted.append(kwargs.get("data"))
+        return True, {"id": 9}, ""
+
+    class Ctx:
+        def dict(self):
+            return {"user": "mom"}
+
+    monkeypatch.setattr(orchestrator, "process_full_orchestration", fake_orchestration)
+    monkeypatch.setattr(history, "get_room_history", AsyncMock(return_value=room_history))
+    monkeypatch.setattr(history, "update_room_history", AsyncMock())
+    monkeypatch.setattr(talk_handler, "_get_talk_model_from_settings", AsyncMock(return_value="some-model"))
+    monkeypatch.setattr(talk_handler, "_talk_request_with_retry", fake_request)
+    monkeypatch.setattr(talk_handler, "resolve_personal_data_provider", lambda ctx: SimpleNamespace(username="mom", password="x"))
+
+    await talk_handler.run_jarvis_orchestration("what's for dinner?", "room-1", Ctx())
+
+    assert seen["history"] == room_history
+    assert [tuple(call.args) for call in history.update_room_history.await_args_list] == [
+        ("room-1", "user", "what's for dinner?"),
+        ("room-1", "assistant", "They are ripe."),
+    ]
+    assert any('"kind": "assistant"' in str(data.get("message", "")) for data in posted if data)

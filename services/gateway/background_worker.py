@@ -46,7 +46,12 @@ async def _shared_http_client():
     from services.gateway.main import get_http_client
 
     yield get_http_client()
-from services.gateway.history import get_history, update_history  # noqa: E402
+from services.gateway.history import (  # noqa: E402
+    get_history,
+    get_room_history,
+    update_history,
+    update_room_history,
+)
 from services.gateway.messaging import TIER2_SEMAPHORE, TIER3_LOCK, InferenceJobQueue  # noqa: E402
 from services.gateway.orchestrator import process_full_orchestration  # noqa: E402
 
@@ -826,12 +831,19 @@ class RavenWorker:
             else:
                 log.info(f"[Worker] Acquiring TIER2 (Librarian) semaphore for job {job_id}")
                 async with TIER2_SEMAPHORE:
-                    if uses_chat_history and "history" not in payload:
-                        try:
-                            payload["history"] = await get_history(user_id)
-                        except Exception as e:
-                            log.warning(f"[Worker] Could not read chat history for {user_id}: {e}")
-                            payload["history"] = []
+                    if "history" not in payload:
+                        if uses_chat_history:
+                            try:
+                                payload["history"] = await get_history(user_id)
+                            except Exception as e:
+                                log.warning(f"[Worker] Could not read chat history for {user_id}: {e}")
+                                payload["history"] = []
+                        elif payload.get("_talk_token"):
+                            try:
+                                payload["history"] = await get_room_history(payload["_talk_token"])
+                            except Exception as e:
+                                log.warning(f"[Worker] Could not read room history for {payload['_talk_token']}: {e}")
+                                payload["history"] = []
 
                     started_ts = time.time()
                     started_iso = datetime.now(UTC).isoformat()
@@ -875,9 +887,11 @@ class RavenWorker:
 
             await self.job_queue.complete_job(job_id, ans)
 
-            # Persist the turn for the next queued request. Only chat jobs are
-            # part of the transcript: Raven missions are autonomous and Talk
-            # turns belong to their room, not the user's chat history.
+            # Persist the turn for the next queued request. Only chat jobs and
+            # Talk rooms keep a transcript: Raven missions are autonomous,
+            # personal chat stores per-user history, and a Talk turn belongs to
+            # its room, which keeps its own recent window for the next @Jarvis
+            # question asked there.
             if uses_chat_history:
                 try:
                     query = str(payload.get("query") or "")
@@ -885,6 +899,13 @@ class RavenWorker:
                     await update_history(user_id, "assistant", str(ans))
                 except Exception as e:
                     log.warning(f"[Worker] Could not store chat history for {user_id}: {e}")
+            elif payload.get("_talk_token"):
+                try:
+                    query = str(payload.get("query") or "")
+                    await update_room_history(payload["_talk_token"], "user", query)
+                    await update_room_history(payload["_talk_token"], "assistant", str(ans))
+                except Exception as e:
+                    log.warning(f"[Worker] Could not store room history for {payload['_talk_token']}: {e}")
 
             # --- TALK CALLBACK ---
             talk_token = payload.get("_talk_token")

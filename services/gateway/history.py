@@ -67,6 +67,46 @@ async def update_history(user_id: str, role: str, content: str):
     except Exception as e:
         log.warning(f"History write error: {e}")
 
+def _get_room_history_key(token: str) -> str:
+    """A Talk room's transcript is keyed to the room, not to any one user."""
+    return f"rag:room:{token}:history"
+
+async def get_room_history(token: str) -> list:
+    """Retrieves the recent turns of one Talk room as a list of dicts."""
+    try:
+        key = _get_room_history_key(token)
+        r = get_redis()
+        raw_msgs: list = r.lrange(key, 0, -1)  # type: ignore[misc]
+        if not raw_msgs:
+            return []
+
+        msgs = []
+        for m in raw_msgs:
+            try:
+                data = json.loads(m)
+                if isinstance(data, dict):
+                    msgs.append(data)
+            except Exception as e:
+                log.debug(f"Failed to parse room history message: {e}")
+        return msgs
+    except Exception as e:
+        log.warning(f"Room history read error: {e}")
+        return []
+
+async def update_room_history(token: str, role: str, content: str):
+    """Saves a message to the room's Redis history."""
+    if not content:
+        return
+    try:
+        key = _get_room_history_key(token)
+        msg = json.dumps({"role": role, "content": content})
+        r = get_redis()
+        r.rpush(key, msg)
+        r.ltrim(key, -10, -1) # Keep last 10 msgs (5 turns)
+        r.expire(key, 3600 * 2) # 2 hour TTL
+    except Exception as e:
+        log.warning(f"Room history write error: {e}")
+
 async def get_long_term_memory(user_id: str, query: str) -> str:
     """
     Retrieves relevant 'User Facts' from the RAG service to provide semantic memory.

@@ -41,7 +41,9 @@ itself on every save; its calendar only printed "Loaded N events").
   app is answered by execution's Talk `send` and claimed in Redis
   (`jarvis:talk:answered:<token>:<id>`); the gateway's Talk monitor answers
   `@jarvis` typed in other Talk apps (rooms the system account is in) and
-  skips claimed messages.
+  skips claimed messages. Either path carries the room's own short transcript
+  (the last ten messages, two hours) into the reply, so answers follow what
+  the room has been saying; personal chat history stays separate.
 - **Phone notifications** for new family messages (no outside push service):
   a gateway worker (`services/gateway/chat_notify.py`) reads each member's own
   Talk list and queues one notice per new, unread message from someone else;

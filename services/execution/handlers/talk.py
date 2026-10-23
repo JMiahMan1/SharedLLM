@@ -245,6 +245,7 @@ def _assistant_post(answer: str) -> str:
 async def run_jarvis_orchestration(query: str, token: str, user_context: Any, reply_to: int | None = None):
     """Invokes the execution loop orchestrator and delivers the result back to NextCloud Talk."""
     try:
+        from services.gateway.history import get_room_history, update_room_history
         from services.gateway.orchestrator import process_full_orchestration, strip_json_from_response
 
         provider = resolve_personal_data_provider(user_context)
@@ -275,6 +276,8 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any, re
 
         job_payload = {
             "query": query,
+            # The room's own short transcript, so answers follow the room.
+            "history": await get_room_history(token),
             "model": await _get_talk_model_from_settings(),
             "creds": creds,
             "system": system_prompt,
@@ -298,6 +301,10 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any, re
         if not ok:
             log.error(f"[Jarvis] Failed to post answer to Nextcloud Talk: {message}")
         else:
+            # Persist the exchange for the room's next question (and for the
+            # gateway's Talk monitor, which reads the same transcript).
+            await update_room_history(token, "user", query)
+            await update_room_history(token, "assistant", cleaned_ans)
             log.info(f"[Jarvis] Successfully posted answer to room {token}")
     except Exception as e:
         log.error(f"[Jarvis] Orchestration failed: {e}", exc_info=True)
