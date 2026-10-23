@@ -416,6 +416,13 @@ class NoteRequest(BaseRequest):
     meta: dict | None = None # meta_write: the shared notes index to store
 
 
+# Recipes: paste-a-link import (search and corpus index arrive in later slices)
+class RecipeRequest(BaseRequest):
+    user_context: UserContext
+    action: Literal["url_import"]
+    url: str | None = None  # url_import: the page to read
+
+
 # Timers / Alarms / Household Reminders
 class TimerRequest(BaseRequest):
     user_context: UserContext

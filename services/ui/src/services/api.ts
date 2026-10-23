@@ -2201,6 +2201,12 @@ export const api = {
     return resp.data;
   },
 
+  async importRecipe(url: string): Promise<ExecutionResponse> {
+    // The server fetches the page (a slow site can take a while); 60s like notes.
+    const resp = await apiClient.post('/api/recipes/import', { url }, { timeout: 60_000 });
+    return resp.data;
+  },
+
   async sendAnnouncement(payload: { entity_id: string; message: string; volume?: number }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/announcements', payload);
     return resp.data;
