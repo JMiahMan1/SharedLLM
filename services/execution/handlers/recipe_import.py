@@ -13,7 +13,7 @@ import json
 import logging
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import aiohttp
 
@@ -169,7 +169,89 @@ def extract_recipe(page: str, source_url: str) -> dict | None:
     return None
 
 
+# --- TheMealDB search (free API; content is shown with attribution: the saved
+# note's source line links back to the meal page on themealdb.com) ---
+_THEMEALDB_HOST = "https://www.themealdb.com"
+_THEMEALDB_SEARCH_PATH = "/api/json/v1/1/search.php"
+
+
+async def _themealdb_get(path: str) -> dict | None:
+    """One TheMealDB API call; None on a non-200 (callers answer plainly)."""
+    session = await get_session(_THEMEALDB_HOST)
+    async with session.get(
+        f"{_THEMEALDB_HOST}{path}", headers={"User-Agent": _UA}, timeout=_TIMEOUT
+    ) as resp:
+        if resp.status != 200:
+            return None
+        return await resp.json(content_type=None)
+
+
+def _themealdb_recipe(meal: dict) -> dict:
+    """Map a TheMealDB meal into the same shape the importer saves."""
+    ingredients: list[str] = []
+    for index in range(1, 21):
+        name = _text(meal.get(f"strIngredient{index}"))
+        if not name:
+            continue
+        measure = _text(meal.get(f"strMeasure{index}"))
+        ingredients.append(f"{measure} {name}".strip())
+    instructions = [
+        line.strip()
+        for line in (meal.get("strInstructions") or "").splitlines()
+        if line.strip()
+    ]
+    category = _text(meal.get("strCategory"))
+    area = _text(meal.get("strArea"))
+    return {
+        "title": _text(meal.get("strMeal")),
+        "description": " · ".join(part for part in (category, area) if part),
+        "ingredients": ingredients,
+        "instructions": instructions,
+        "prep_minutes": None,
+        "cook_minutes": None,
+        "total_minutes": None,
+        "yield": "",
+        "image": _text(meal.get("strMealThumb")) or None,
+        "source_url": f"{_THEMEALDB_HOST}/meal/{meal.get('idMeal')}",
+        "site": "themealdb.com",
+    }
+
+
+async def _themealdb_search(req: RecipeRequest) -> ExecutionResult:
+    query = (req.query or "").strip()
+    if len(query) < 2:
+        return ExecutionResult.fail(
+            "Type at least two letters to search.", service="recipe_import"
+        )
+    try:
+        data = await _themealdb_get(f"{_THEMEALDB_SEARCH_PATH}?s={quote(query)}")
+    except Exception as exc:  # noqa: BLE001 - a dead API must never 500 the route
+        log.warning(f"[recipe_import] themealdb search failed: {type(exc).__name__}: {exc}")
+        return ExecutionResult.fail(
+            "TheMealDB could not be reached right now; try again shortly.",
+            service="recipe_import",
+        )
+    meals = (data or {}).get("meals") or []
+    recipes = [
+        _themealdb_recipe(meal) for meal in meals if isinstance(meal, dict)
+    ]
+    recipes = [recipe for recipe in recipes if recipe["title"]][:12]
+    if not recipes:
+        return ExecutionResult.ok(
+            f"No recipes found for “{query}”.",
+            service="recipe_import",
+            detail={"recipes": []},
+        )
+    return ExecutionResult.ok(
+        f"Found {len(recipes)} recipe(s).",
+        service="recipe_import",
+        detail={"recipes": recipes},
+    )
+
+
 async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
+    if req.action == "themealdb_search":
+        return await _themealdb_search(req)
     if req.action != "url_import":
         return ExecutionResult.fail(
             f"Unknown recipe action: {req.action}", service="recipe_import"

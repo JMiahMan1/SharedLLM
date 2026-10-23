@@ -176,3 +176,79 @@ def test_prefers_the_full_yield_when_the_site_sends_two():
         "https://example.com/recipes/lemonade",
     )
     assert recipe["yield"] == "12 cookies"
+
+
+MEAL = {
+    "idMeal": "52772",
+    "strMeal": "Chocolate Gateau",
+    "strCategory": "Dessert",
+    "strArea": "French",
+    "strInstructions": "Preheat the oven.\r\n\r\nMelt the butter.\r\nBake.",
+    "strMealThumb": "https://www.themealdb.com/images/media/meals/tqtywx1468317395.jpg",
+    "strIngredient1": "Butter",
+    "strMeasure1": "175g",
+    "strIngredient2": "Dark Chocolate",
+    "strMeasure2": "200g",
+    "strIngredient3": "",
+    "strMeasure3": "",
+}
+
+
+def test_themealdb_maps_a_meal_into_the_import_shape():
+    recipe = recipe_import._themealdb_recipe(MEAL)
+    assert recipe["title"] == "Chocolate Gateau"
+    assert recipe["description"] == "Dessert · French"
+    assert recipe["ingredients"] == ["175g Butter", "200g Dark Chocolate"]
+    assert recipe["instructions"] == ["Preheat the oven.", "Melt the butter.", "Bake."]
+    assert recipe["source_url"] == "https://www.themealdb.com/meal/52772"
+    assert recipe["site"] == "themealdb.com"
+    assert recipe["image"].startswith("https://www.themealdb.com/images/")
+
+
+async def test_themealdb_search_returns_the_meals(monkeypatch):
+    async def fake_get(path):
+        assert "search.php?s=Gateau" in path
+        return {"meals": [MEAL]}
+
+    monkeypatch.setattr(recipe_import, "_themealdb_get", fake_get)
+    result = await recipe_import.handle_recipe(
+        _request(action="themealdb_search", query="Gateau", url=None)
+    )
+    assert result.status == "SUCCESS"
+    assert result.detail["recipes"][0]["title"] == "Chocolate Gateau"
+
+
+async def test_themealdb_search_with_no_matches_answers_plainly(monkeypatch):
+    async def fake_get(path):
+        return {"meals": None}
+
+    monkeypatch.setattr(recipe_import, "_themealdb_get", fake_get)
+    result = await recipe_import.handle_recipe(
+        _request(action="themealdb_search", query="zzzz", url=None)
+    )
+    assert result.status == "SUCCESS"
+    assert result.detail["recipes"] == []
+    assert "No recipes found" in result.message
+
+
+async def test_themealdb_search_requires_a_query(monkeypatch):
+    def boom(path):  # pragma: no cover - must never run
+        raise AssertionError("search must not run for a tiny query")
+
+    monkeypatch.setattr(recipe_import, "_themealdb_get", boom)
+    result = await recipe_import.handle_recipe(
+        _request(action="themealdb_search", query="a", url=None)
+    )
+    assert result.status == "FAILURE"
+
+
+async def test_themealdb_search_survives_a_dead_api(monkeypatch):
+    async def fake_get(path):
+        raise aiohttp.ClientError("down")
+
+    monkeypatch.setattr(recipe_import, "_themealdb_get", fake_get)
+    result = await recipe_import.handle_recipe(
+        _request(action="themealdb_search", query="Gateau", url=None)
+    )
+    assert result.status == "FAILURE"
+    assert "could not be reached" in result.message

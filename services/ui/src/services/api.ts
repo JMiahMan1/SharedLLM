@@ -2207,6 +2207,12 @@ export const api = {
     return resp.data;
   },
 
+  async searchRecipes(query: string): Promise<ExecutionResponse> {
+    // TheMealDB lookup through the execution handler (free API, family use).
+    const resp = await apiClient.post('/api/recipes/search', { query }, { timeout: 60_000 });
+    return resp.data;
+  },
+
   async sendAnnouncement(payload: { entity_id: string; message: string; volume?: number }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/announcements', payload);
     return resp.data;

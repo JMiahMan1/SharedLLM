@@ -416,11 +416,12 @@ class NoteRequest(BaseRequest):
     meta: dict | None = None # meta_write: the shared notes index to store
 
 
-# Recipes: paste-a-link import (search and corpus index arrive in later slices)
+# Recipes: paste-a-link import and TheMealDB search (corpus index arrives later)
 class RecipeRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["url_import"]
+    action: Literal["url_import", "themealdb_search"]
     url: str | None = None  # url_import: the page to read
+    query: str | None = None  # themealdb_search: what to look for
 
 
 # Timers / Alarms / Household Reminders

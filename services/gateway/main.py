@@ -5100,6 +5100,17 @@ async def proxy_create_note(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/recipes/search")
+async def proxy_recipe_search(request: Request):
+    """TheMealDB recipe search (free API, results preview and save like a link)."""
+    body = await request.json()
+    payload = {
+        "action": "themealdb_search",
+        "query": body.get("query"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/recipes", payload, as_user=body.get("as_user"))
+
+
 @app.post("/api/recipes/import")
 async def proxy_recipe_import(request: Request):
     """Paste-a-link recipe import: read a page's schema.org recipe."""
