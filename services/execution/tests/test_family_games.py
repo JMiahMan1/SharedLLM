@@ -9,6 +9,7 @@ from services.execution.handlers.family_games import (
     MEMORY_WORDS,
     TRIVIA_QUESTIONS,
     GameRegistry,
+    advance_trivia,
     apply_memory_flip,
     apply_trivia_answer,
     game_card,
@@ -39,20 +40,25 @@ def test_trivia_awards_a_star_per_correct_answer():
     result = apply_trivia_answer(state, "Kiddo", "phoenix")
     assert result["correct"] is True
     assert result["stars"] == 1
+    assert result["round_complete"] == "correct"
 
+    # One guess each: a repeat from the same player is ignored, not scored.
     again = apply_trivia_answer(state, "Kiddo", "Nope")
     assert again["correct"] is False
+    assert again.get("duplicate") is True
     assert again["stars"] == 1
-    assert state.player("Kiddo").attempts == 2
+    assert state.player("Kiddo").attempts == 1
 
 
 def test_trivia_leaderboard_is_sorted_by_stars():
-    state = GameRegistry().start_trivia("room", question=TRIVIA_QUESTIONS[0])
-    apply_trivia_answer(state, "A", "phoenix")
-    apply_trivia_answer(state, "B", "phoenix")
-    apply_trivia_answer(state, "B", "phoenix")
+    state = GameRegistry().start_trivia("room", questions=TRIVIA_QUESTIONS, session_length=3)
+    apply_trivia_answer(state, "A", state.answers[0])
+    advance_trivia(state)
+    apply_trivia_answer(state, "B", state.answers[0])
+    advance_trivia(state)
 
-    board = apply_trivia_answer(state, "C", "phoenix")["leaderboard"]
+    # B wins two questions to A's one; the board sorts by stars.
+    board = apply_trivia_answer(state, "B", state.answers[0])["leaderboard"]
     assert board[0][0] == "B"
     assert board[0][1] == 2
 
@@ -138,3 +144,70 @@ def test_registry_keeps_one_game_per_room():
     assert reg.get("room-2") is None
     reg.drop("room-1")
     assert reg.get("room-1") is None
+
+
+def _tiered_pool():
+    return [
+        {"question": f"T{tier}Q{n}", "answers": [f"ans{tier}{n}"], "hint": "hint", "difficulty": tier}
+        for tier in (1, 2, 3)
+        for n in range(6)
+    ]
+
+
+def test_trivia_session_serves_ten_unique_questions_and_rises():
+    state = GameRegistry().start_trivia(
+        "room",
+        questions=_tiered_pool(),
+        roster={"dad": "dad", "kiddo": "kiddo"},
+        roster_names={"dad": "Dad", "kiddo": "Kiddo"},
+    )
+    assert state.session_len == 10
+    assert state.question.startswith("T1")
+
+    seen: list[str] = []
+    finished = False
+    for _ in range(10):
+        seen.append(state.question)
+        # Someone who was not in the room when the session started is ignored.
+        assert apply_trivia_answer(state, "stranger", "ans11")["ignored"] is True
+        assert state.answered == set()
+        result = apply_trivia_answer(state, "Kiddo", state.answers[0])
+        assert result["round_complete"] == "correct"
+        finished = advance_trivia(state)["finished"]
+
+    assert finished is True
+    assert state.over is True
+    assert len(set(seen)) == 10  # no question repeats within a session
+    tiers = [int(q[1]) for q in seen]
+    assert tiers == sorted(tiers)  # the dial rises while they keep answering
+
+
+def test_trivia_roster_aliases_map_to_one_player():
+    state = GameRegistry().start_trivia(
+        "room",
+        question=TRIVIA_QUESTIONS[0],
+        roster={"dad": "dad", "dad summers": "dad", "kiddo": "kiddo"},
+    )
+    apply_trivia_answer(state, "dad", "wrong")
+    duplicate = apply_trivia_answer(state, "Dad Summers", "phoenix")
+    assert duplicate.get("duplicate") is True
+    assert duplicate["stars"] == 0
+
+
+def test_trivia_all_wrong_closes_the_round():
+    state = GameRegistry().start_trivia(
+        "room", questions=_tiered_pool(), roster={"dad": "dad", "kiddo": "kiddo"}
+    )
+    first = apply_trivia_answer(state, "Dad", "definitely wrong")
+    assert first["round_complete"] is None
+    second = apply_trivia_answer(state, "Kiddo", "definitely wrong")
+    assert second["round_complete"] == "all_wrong"
+
+
+def test_trivia_round_expires_when_a_player_stays_quiet():
+    state = GameRegistry().start_trivia(
+        "room", questions=_tiered_pool(), roster={"dad": "dad", "kiddo": "kiddo"}
+    )
+    state.question_started_at -= 999
+    result = apply_trivia_answer(state, "Dad", "definitely wrong")
+    assert result["round_complete"] == "timeout"

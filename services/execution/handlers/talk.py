@@ -407,6 +407,44 @@ async def _talk_call(token: str, provider: Any, action: str) -> ExecutionResult:
     )
 
 
+async def _trivia_roster(provider: Any, token: str) -> tuple[dict[str, str], dict[str, str]]:
+    """The players locked into a trivia session at its start.
+
+    Built from the room's participant list so a display name and an actor id
+    both resolve to the same person. Bots (including this one) never join;
+    late joiners are not in the roster and sit the session out. If the list
+    cannot be fetched the game starts open, exactly as before.
+    """
+    from services.execution.handlers import family_games as games
+
+    ok, data, _message = await _talk_request_with_retry(
+        provider,
+        "GET",
+        f"/ocs/v2.php/apps/spreed/api/v4/room/{urllib.parse.quote(token)}/participants",
+    )
+    if not ok or not isinstance(data, list):
+        return {}, {}
+    roster: dict[str, str] = {}
+    roster_names: dict[str, str] = {}
+    for person in data:
+        if not isinstance(person, dict):
+            continue
+        member = _participant_summary(person)
+        if (member["actor_type"] or "").strip().lower() == "bots":
+            continue
+        actor_id = str(member["actor_id"] or "").strip()
+        display = str(member["display_name"] or actor_id).strip()
+        canonical = games.normalize(actor_id or display)
+        if not canonical:
+            continue
+        for alias in {actor_id, display}:
+            alias_key = games.normalize(alias)
+            if alias_key:
+                roster[alias_key] = canonical
+        roster_names[canonical] = display or actor_id or canonical
+    return roster, roster_names
+
+
 async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
     """Family games in the room: trivia and memory, no model involved.
 
@@ -459,7 +497,10 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
             await say(games.memory_prompt(state))
         else:
             pool = games.BIBLE_TRIVIA_QUESTIONS if kind == "bible" else games.TRIVIA_QUESTIONS
-            state = games.registry.start_trivia(req.token, questions=pool)
+            roster, roster_names = await _trivia_roster(provider, req.token)
+            state = games.registry.start_trivia(
+                req.token, questions=pool, roster=roster, roster_names=roster_names
+            )
             await say(games.trivia_prompt(state))
         return ExecutionResult(
             status="SUCCESS",
@@ -524,21 +565,39 @@ async def _apply_game_answer(
 
     if state.kind == "trivia":
         result = games.apply_trivia_answer(state, who, text)
+
+        async def next_round() -> None:
+            outcome = games.advance_trivia(state)
+            if outcome.get("finished"):
+                board = ", ".join(f"{name} {stars} ⭐" for name, stars in outcome["leaderboard"])
+                await say(f"🏆 Game over! {board}" if board else "🏆 Game over!")
+            else:
+                await say(games.trivia_prompt(state))
+
+        if result.get("ignored"):
+            # Not in this session's locked roster (a late joiner, or the shared
+            # family account): the round carries on without them.
+            return {"kind": "trivia", "result": result}
+        if result.get("duplicate"):
+            await say(f"One guess each! Still waiting on the others, {result['player']}.")
+            return {"kind": "trivia", "result": result}
+
         if result["correct"]:
-            # Bank the win in the real star ledger, not just the in-memory game.
-            await _bank_game_stars(who, result["stars"], f"Trivia: {state.question}")
+            # Bank the win in the real star ledger, not just the in-memory
+            # game; capture the question before the session moves on.
+            question_text = state.question
+            await _bank_game_stars(who, result["stars"], f"Trivia: {question_text}")
             await say(
                 f"✅ {result['player']} got it!",
                 games.game_card(state, "Correct!", f"{result['player']} is on {result['stars']} ⭐"),
             )
+            await next_round()
             return {"kind": "trivia", "result": result}
 
-        # Wrong answers stay quiet unless everyone has had a go.
-        if all(p.attempts for p in state.players.values()) and len(state.players) > 1:
+        if result.get("round_complete") in ("all_wrong", "timeout"):
             await say(f"The answer was {state.answers[0]}. Next question coming.", None)
-            games.registry.start_trivia(token)
-            fresh = games.registry.get(token)
-            await say(games.trivia_prompt(fresh))
+            await next_round()
+        # A lone wrong answer stays quiet: the round keeps its secret.
         return {"kind": "trivia", "result": result}
 
     words = [w for w in (game_words or text).split() if w][:2]

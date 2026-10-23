@@ -53,7 +53,7 @@ def test_trivia_starts_and_answers(talk, monkeypatch):
         talk.handle_talk(_request(game_command="start", game_kind="trivia"))
     )
     assert start.status == "SUCCESS"
-    assert any("Trivia time" in p["message"] for p in talk.posted)
+    assert any("question 1 of 10" in p["message"] for p in talk.posted)
 
     right = asyncio.run(
         talk.handle_talk(_request(game_command="answer", message="phoenix", card_detail="Kiddo"))
@@ -74,7 +74,7 @@ def test_bible_trivia_uses_bible_questions(talk, monkeypatch):
     state = games.registry.get("room-1")
     assert state is not None
     assert state.question in {q["question"] for q in games.BIBLE_TRIVIA_QUESTIONS}
-    assert any("Trivia time" in p["message"] for p in talk.posted)
+    assert any("question 1 of 10" in p["message"] for p in talk.posted)
 
 
 def test_memory_flip_posts_a_card(talk, monkeypatch):
