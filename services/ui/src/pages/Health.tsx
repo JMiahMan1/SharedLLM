@@ -3,6 +3,7 @@ import { HeartPulse } from 'lucide-react';
 import HealthTabs, { type HealthTab } from '../components/health/HealthTabs';
 import HealthToday from '../components/health/HealthToday';
 import MusicRecommendationCard from '../components/health/MusicRecommendationCard';
+import VideoRecommendationCard from '../components/health/VideoRecommendationCard';
 import HealthSleep from '../components/health/HealthSleep';
 import HealthNutrition from '../components/health/HealthNutrition';
 import HealthProfilePanel from '../components/health/HealthProfilePanel';
@@ -48,6 +49,7 @@ const Health = () => {
         {tab === 'today' && (
           <>
             <MusicRecommendationCard />
+            <VideoRecommendationCard />
             <HealthToday onNavigate={setTab} />
           </>
         )}

@@ -393,6 +393,11 @@ point.
       First brick (music): a reviewed genre/artist map (`services/common/music_recommendations.py`)
       plus `GET /api/recommendations/music` returning a suggestion derived from the member's
       listening, and a `MusicRecommendationCard` on the Health page. Raw feed stays parents-only.
+      Second brick (video): a reviewed theme/creator map (`services/common/video_recommendations.py`)
+      plus `GET /api/recommendations/video` returning a suggestion derived from the member's
+      watching — themes first redeemed (wholesome creator, same kind of content), then
+      redirected to a wholesome activity when no redeemed equivalent exists — and a
+      `VideoRecommendationCard` on the Health page. Raw feed stays parents-only.
 - [ ] **Who sees what (the visibility rule).** The collected data is parents-only: a minor's
       profile — every raw section — is open to both parents (including the linked mother
       under `docs/ROLES.md`) and to no one else; a minor does not browse their own raw feed,
@@ -417,7 +422,7 @@ study-book reads, external media sessions, general phone usage, per-app foregrou
 calls and SMS all land on the profile); (2) the Android collection engine — usage,
 media sessions, calls and SMS DONE (video covered by media sessions + per-app foreground
 time); (3) Jarvis recommendations from the profile — IN PROGRESS (music style matching
-first, then video themes redeemed or redirected); (4) time budgets and routines;
+and video themes redeemed or redirected DONE; podcasts, books, games and activities follow); (4) time budgets and routines;
 (5) app control and the web filter;
 (6) monitoring alerts and the weekly recap; (7) the parents' page and the discipleship
 surfaces.
