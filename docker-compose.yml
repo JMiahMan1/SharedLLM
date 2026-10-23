@@ -139,6 +139,10 @@ services:
       - OLLAMA_URL=${OLLAMA_URL}
       - NETWORK_MODE=host
       - IDENTITY_SVC_URL=${HOST_IDENTITY_SVC_URL}
+      # Telemetry keeps a fixed bridge address (it publishes no host port);
+      # reachable from this host-networked container for the activity feed
+      # and every execution-origin notice.
+      - TELEMETRY_SVC_URL=${HOST_TELEMETRY_SVC_URL}
       - EXECUTION_SVC_URL=${HOST_EXECUTION_SVC_URL}
       - STORAGE_SVC_URL=${HOST_STORAGE_SVC_URL}
       - LOGGING_SVC_URL=${HOST_LOGGING_SVC_URL}
