@@ -30,6 +30,12 @@ vi.mock('../services/api', async (importOriginal) => {
   };
 });
 
+// Pin "today" so the day that flows into every save call stays deterministic.
+vi.mock('../lib/healthHub', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/healthHub')>()),
+  localDay: () => '2026-10-22',
+}));
+
 const getHealthSummary = vi.mocked(api.getHealthSummary);
 const getHealthFamily = vi.mocked(api.getHealthFamily);
 const getDailySteps = vi.mocked(api.getDailySteps);

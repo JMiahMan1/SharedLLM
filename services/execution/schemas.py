@@ -419,9 +419,10 @@ class NoteRequest(BaseRequest):
 # Recipes: paste-a-link import and TheMealDB search (corpus index arrives later)
 class RecipeRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["url_import", "themealdb_search"]
+    action: Literal["url_import", "themealdb_search", "recipe_search", "shelf_fetch"]
     url: str | None = None  # url_import: the page to read
-    query: str | None = None  # themealdb_search: what to look for
+    query: str | None = None  # themealdb_search / recipe_search: what to look for
+    id: int | None = None  # shelf_fetch: an offline index row
 
 
 # Timers / Alarms / Household Reminders

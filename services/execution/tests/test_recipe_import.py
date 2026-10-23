@@ -252,3 +252,186 @@ async def test_themealdb_search_survives_a_dead_api(monkeypatch):
     )
     assert result.status == "FAILURE"
     assert "could not be reached" in result.message
+
+
+# --- the offline index: recipe_search leads with it, shelf_fetch reads it ---
+
+
+class _FakeSeed:
+    """Stands in for RecipeSeed so the handler runs without a database."""
+
+    def __init__(self, present=True, hits=None, recipe=None):
+        self.present = present
+        self.hits = hits or []
+        self.recipe = recipe
+        self.queries: list[tuple[str, int]] = []
+        self.fetched: list[int] = []
+
+    def search(self, query, limit=12):
+        self.queries.append((query, limit))
+        return self.hits[:limit]
+
+    def fetch(self, recipe_id):
+        self.fetched.append(recipe_id)
+        return self.recipe
+
+
+def _seed_hit(**overrides):
+    hit = {
+        "id": 38,
+        "title": "Low-Fat Berry Blue Frozen Dessert",
+        "category": "Frozen Desserts",
+        "total_minutes": 255,
+        "servings": 4,
+        "rating": 4.5,
+        "image": None,
+        "source_url": "https://www.food.com/recipe/low-fat-berry-blue-frozen-dessert-38",
+        "site": "food.com",
+        "source": "foodcom",
+    }
+    hit.update(overrides)
+    return hit
+
+
+def _meal_hit(**overrides):
+    hit = {
+        "id": "52772",
+        "title": "Chocolate Gateau",
+        "description": "Dessert · French",
+        "image": None,
+        "ingredients": ["175g Butter"],
+        "instructions": ["Bake."],
+        "source_url": "https://www.themealdb.com/meal/52772",
+        "site": "themealdb.com",
+        "source": "themealdb",
+    }
+    hit.update(overrides)
+    return hit
+
+
+async def test_recipe_search_leads_with_the_offline_index(monkeypatch):
+    seed = _FakeSeed(hits=[_seed_hit()])
+    monkeypatch.setattr(recipe_import, "get_seed", lambda: seed)
+    seen = {}
+
+    async def fake_hits(query, limit):
+        seen["limit"] = limit
+        return [_meal_hit()]
+
+    monkeypatch.setattr(recipe_import, "_themealdb_hits", fake_hits)
+    result = await recipe_import.handle_recipe(
+        _request(action="recipe_search", query="berry", url=None)
+    )
+
+    assert result.status == "SUCCESS"
+    assert seen["limit"] == 11  # the seed filled one of the twelve slots
+    assert seed.queries == [("berry", 12)]
+    assert result.detail["seed"] == {"present": True, "results": 1}
+    assert result.detail["sources"] == ["foodcom", "themealdb"]
+    assert result.detail["offline_sources"] == []
+    assert [r["source"] for r in result.detail["results"]] == ["foodcom", "themealdb"]
+
+
+async def test_recipe_search_skips_themealdb_when_the_index_fills_the_page(monkeypatch):
+    seed = _FakeSeed(hits=[_seed_hit(id=i) for i in range(12)])
+    monkeypatch.setattr(recipe_import, "get_seed", lambda: seed)
+
+    async def boom(query, limit):  # pragma: no cover - must never run
+        raise AssertionError("themealdb should be skipped")
+
+    monkeypatch.setattr(recipe_import, "_themealdb_hits", boom)
+    result = await recipe_import.handle_recipe(
+        _request(action="recipe_search", query="berry", url=None)
+    )
+
+    assert result.status == "SUCCESS"
+    assert len(result.detail["results"]) == 12
+    assert result.detail["sources"] == ["foodcom"]
+    assert result.detail["seed"] == {"present": True, "results": 12}
+
+
+async def test_recipe_search_falls_back_to_themealdb_without_the_index(monkeypatch):
+    monkeypatch.setattr(recipe_import, "get_seed", lambda: _FakeSeed(present=False))
+
+    async def fake_hits(query, limit):
+        return [_meal_hit()]
+
+    monkeypatch.setattr(recipe_import, "_themealdb_hits", fake_hits)
+    result = await recipe_import.handle_recipe(
+        _request(action="recipe_search", query="gateau", url=None)
+    )
+
+    assert result.status == "SUCCESS"
+    assert result.detail["seed"] == {"present": False, "results": 0}
+    assert result.detail["sources"] == ["themealdb"]
+    assert result.detail["results"][0]["source"] == "themealdb"
+
+
+async def test_recipe_search_survives_a_dead_themealdb_when_the_index_answers(monkeypatch):
+    monkeypatch.setattr(recipe_import, "get_seed", lambda: _FakeSeed(hits=[_seed_hit()]))
+
+    async def dead(query, limit):
+        return None
+
+    monkeypatch.setattr(recipe_import, "_themealdb_hits", dead)
+    result = await recipe_import.handle_recipe(
+        _request(action="recipe_search", query="berry", url=None)
+    )
+
+    assert result.status == "SUCCESS"
+    assert result.detail["sources"] == ["foodcom"]
+    assert result.detail["offline_sources"] == ["themealdb"]
+
+
+async def test_recipe_search_fails_plainly_when_nothing_can_answer(monkeypatch):
+    monkeypatch.setattr(recipe_import, "get_seed", lambda: _FakeSeed(present=False))
+
+    async def dead(query, limit):
+        return None
+
+    monkeypatch.setattr(recipe_import, "_themealdb_hits", dead)
+    result = await recipe_import.handle_recipe(
+        _request(action="recipe_search", query="berry", url=None)
+    )
+
+    assert result.status == "FAILURE"
+    assert "could not be reached" in result.message
+
+
+async def test_shelf_fetch_returns_the_full_recipe(monkeypatch):
+    full = {
+        "title": "Low-Fat Berry Blue Frozen Dessert",
+        "description": "Frozen Desserts",
+        "ingredients": ["4 cups blueberries, fresh or frozen"],
+        "instructions": ["Mix everything."],
+        "prep_minutes": 15,
+        "cook_minutes": 240,
+        "total_minutes": 255,
+        "yield": "4 servings",
+        "image": None,
+        "source_url": "https://www.food.com/recipe/low-fat-berry-blue-frozen-dessert-38",
+        "site": "food.com",
+    }
+    seed = _FakeSeed(recipe=full)
+    monkeypatch.setattr(recipe_import, "get_seed", lambda: seed)
+    result = await recipe_import.handle_recipe(_request(action="shelf_fetch", id=38, url=None))
+
+    assert result.status == "SUCCESS"
+    assert result.detail["recipe"] == full
+    assert seed.fetched == [38]
+
+
+async def test_shelf_fetch_is_plain_when_the_index_or_row_is_missing(monkeypatch):
+    result = await recipe_import.handle_recipe(_request(action="shelf_fetch", url=None))
+    assert result.status == "FAILURE"
+    assert "Which recipe" in result.message
+
+    monkeypatch.setattr(recipe_import, "get_seed", lambda: _FakeSeed(present=False))
+    result = await recipe_import.handle_recipe(_request(action="shelf_fetch", id=38, url=None))
+    assert result.status == "FAILURE"
+    assert "not available" in result.message
+
+    monkeypatch.setattr(recipe_import, "get_seed", lambda: _FakeSeed(recipe=None))
+    result = await recipe_import.handle_recipe(_request(action="shelf_fetch", id=999, url=None))
+    assert result.status == "FAILURE"
+    assert "not in the offline index" in result.message

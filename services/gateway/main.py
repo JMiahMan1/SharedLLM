@@ -5102,11 +5102,22 @@ async def proxy_create_note(request: Request):
 
 @app.post("/api/recipes/search")
 async def proxy_recipe_search(request: Request):
-    """TheMealDB recipe search (free API, results preview and save like a link)."""
+    """Recipe search: the offline index first, then TheMealDB fills the page."""
     body = await request.json()
     payload = {
-        "action": "themealdb_search",
+        "action": "recipe_search",
         "query": body.get("query"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/recipes", payload, as_user=body.get("as_user"))
+
+
+@app.post("/api/recipes/fetch")
+async def proxy_recipe_fetch(request: Request):
+    """The full recipe behind an offline search card (served from the seed)."""
+    body = await request.json()
+    payload = {
+        "action": "shelf_fetch",
+        "id": body.get("id"),
     }
     return await _proxy_execution_with_identity(request, "/execute/recipes", payload, as_user=body.get("as_user"))
 

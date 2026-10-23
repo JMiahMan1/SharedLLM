@@ -11,7 +11,7 @@ import { useSendAsPref } from '../components/chat/sendAsPref';
 import ShareToChatSheet from '../components/bible/ShareToChatSheet';
 import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
 import { SHOPPING_PATH, SHOPPING_TITLE, buildShoppingList, ingredientLines, shoppingShareText } from '../lib/shoppingList';
-import { buildRecipeNote, type ImportedRecipe } from '../lib/recipeImport';
+import { buildRecipeNote, type ImportedRecipe, type RecipeSearchItem } from '../lib/recipeImport';
 import {
   buildMealPlan,
   emptyPlan,
@@ -76,7 +76,8 @@ export default function Recipes() {
   const [filter, setFilter] = useState('');
   const [mealQuery, setMealQuery] = useState('');
   const [mealSearching, setMealSearching] = useState(false);
-  const [mealResults, setMealResults] = useState<ImportedRecipe[]>([]);
+  const [mealResults, setMealResults] = useState<RecipeSearchItem[]>([]);
+  const [searchLoadingId, setSearchLoadingId] = useState<string | null>(null);
   const [planOpen, setPlanOpen] = useState(false);
   const [plan, setPlan] = useState<WeeklyPlan>(emptyPlan());
   const [planExists, setPlanExists] = useState(false);
@@ -415,7 +416,7 @@ export default function Recipes() {
     setMealSearching(true);
     try {
       const res = await api.searchRecipes(query);
-      const results = (res.detail?.recipes ?? []) as ImportedRecipe[];
+      const results = (res.detail?.results ?? res.detail?.recipes ?? []) as RecipeSearchItem[];
       setMealResults(results);
       if (res.status !== 'SUCCESS' || results.length === 0) {
         toast.error(res.message || 'No recipes found');
@@ -424,6 +425,26 @@ export default function Recipes() {
       toast.error('The search could not be completed');
     } finally {
       setMealSearching(false);
+    }
+  };
+
+  const openSearchResult = async (item: RecipeSearchItem) => {
+    if (item.source !== 'foodcom' || item.id === undefined || item.id === null) {
+      setImported(item as ImportedRecipe);
+      return;
+    }
+    setSearchLoadingId(item.source_url);
+    try {
+      const res = await api.fetchRecipe(Number(item.id));
+      if (res.status !== 'SUCCESS' || !res.detail?.recipe) {
+        toast.error(res.message || 'Could not read that recipe');
+        return;
+      }
+      setImported(res.detail.recipe as ImportedRecipe);
+    } catch {
+      toast.error('Could not read that recipe');
+    } finally {
+      setSearchLoadingId(null);
     }
   };
 
@@ -512,13 +533,13 @@ export default function Recipes() {
               Read the link
             </button>
           </div>
-          <div className="text-center text-[10px] uppercase tracking-wide text-slate-500">or search TheMealDB</div>
+          <div className="text-center text-[10px] uppercase tracking-wide text-slate-500">or search recipes</div>
           <div className="flex flex-wrap items-center gap-2">
             <input
               value={mealQuery}
               onChange={(event) => setMealQuery(event.target.value)}
-              placeholder="Search TheMealDB…"
-              aria-label="Search TheMealDB"
+              placeholder="Search recipes…"
+              aria-label="Search recipes"
               className="glass-input min-h-11 min-w-0 flex-1 px-2 py-1 text-base sm:text-sm"
             />
             <button
@@ -537,15 +558,27 @@ export default function Recipes() {
                 <button
                   key={result.source_url}
                   type="button"
-                  onClick={() => setImported(result)}
-                  className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-purple-400/40"
+                  onClick={() => void openSearchResult(result)}
+                  disabled={searchLoadingId === result.source_url}
+                  className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-purple-400/40 disabled:opacity-60"
                 >
                   {result.image ? (
                     <img src={result.image} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
                   ) : null}
                   <span className="min-w-0">
                     <span className="block truncate text-xs font-semibold text-slate-100">{result.title}</span>
-                    <span className="block truncate text-[10px] text-slate-400">{result.description}</span>
+                    <span className="block truncate text-[10px] text-slate-400">
+                      {[
+                        result.source === 'foodcom' ? 'Food.com' : 'TheMealDB',
+                        result.description,
+                        result.total_minutes ? `${result.total_minutes} min` : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                    {searchLoadingId === result.source_url ? (
+                      <span className="block text-[10px] text-slate-500">Reading the recipe…</span>
+                    ) : null}
                   </span>
                 </button>
               ))}

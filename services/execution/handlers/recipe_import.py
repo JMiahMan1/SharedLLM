@@ -18,6 +18,7 @@ from urllib.parse import quote, urlparse
 import aiohttp
 
 from services.execution.http_client import get_session, host_of
+from services.execution.handlers.recipe_seed import get_seed
 from services.execution.schemas import ExecutionResult, RecipeRequest
 
 log = logging.getLogger("execution.recipe_import")
@@ -214,7 +215,23 @@ def _themealdb_recipe(meal: dict) -> dict:
         "image": _text(meal.get("strMealThumb")) or None,
         "source_url": f"{_THEMEALDB_HOST}/meal/{meal.get('idMeal')}",
         "site": "themealdb.com",
+        "id": str(meal.get("idMeal") or ""),
+        "source": "themealdb",
     }
+
+
+async def _themealdb_hits(query: str, limit: int) -> list[dict] | None:
+    """TheMealDB results for a query, or ``None`` when the API cannot answer."""
+    if limit <= 0:
+        return []
+    try:
+        data = await _themealdb_get(f"{_THEMEALDB_SEARCH_PATH}?s={quote(query)}")
+    except Exception as exc:  # noqa: BLE001 - a dead API must never 500 the route
+        log.warning(f"[recipe_import] themealdb search failed: {type(exc).__name__}: {exc}")
+        return None
+    meals = (data or {}).get("meals") or []
+    recipes = [_themealdb_recipe(meal) for meal in meals if isinstance(meal, dict)]
+    return [recipe for recipe in recipes if recipe["title"]][:limit]
 
 
 async def _themealdb_search(req: RecipeRequest) -> ExecutionResult:
@@ -223,19 +240,12 @@ async def _themealdb_search(req: RecipeRequest) -> ExecutionResult:
         return ExecutionResult.fail(
             "Type at least two letters to search.", service="recipe_import"
         )
-    try:
-        data = await _themealdb_get(f"{_THEMEALDB_SEARCH_PATH}?s={quote(query)}")
-    except Exception as exc:  # noqa: BLE001 - a dead API must never 500 the route
-        log.warning(f"[recipe_import] themealdb search failed: {type(exc).__name__}: {exc}")
+    recipes = await _themealdb_hits(query, 12)
+    if recipes is None:
         return ExecutionResult.fail(
             "TheMealDB could not be reached right now; try again shortly.",
             service="recipe_import",
         )
-    meals = (data or {}).get("meals") or []
-    recipes = [
-        _themealdb_recipe(meal) for meal in meals if isinstance(meal, dict)
-    ]
-    recipes = [recipe for recipe in recipes if recipe["title"]][:12]
     if not recipes:
         return ExecutionResult.ok(
             f"No recipes found for “{query}”.",
@@ -249,9 +259,88 @@ async def _themealdb_search(req: RecipeRequest) -> ExecutionResult:
     )
 
 
+async def _recipe_search(req: RecipeRequest) -> ExecutionResult:
+    """Offline index first, then TheMealDB fills the rest of the page."""
+    query = (req.query or "").strip()
+    if len(query) < 2:
+        return ExecutionResult.fail(
+            "Type at least two letters to search.", service="recipe_import"
+        )
+    seed = get_seed()
+    seed_hits = seed.search(query, 12) if seed.present else []
+    offline: list[str] = []
+    meal_hits: list[dict] = []
+    remaining = 12 - len(seed_hits)
+    if remaining > 0:
+        fetched = await _themealdb_hits(query, remaining)
+        if fetched is None:
+            if not seed_hits:
+                return ExecutionResult.fail(
+                    "The recipe search could not be reached right now; "
+                    "try again shortly.",
+                    service="recipe_import",
+                )
+            offline.append("themealdb")
+        else:
+            meal_hits = fetched
+    results = seed_hits + meal_hits
+    sources: list[str] = []
+    if seed_hits:
+        sources.append("foodcom")
+    if meal_hits:
+        sources.append("themealdb")
+    if not results:
+        return ExecutionResult.ok(
+            f"No recipes found for “{query}”.",
+            service="recipe_import",
+            detail={
+                "results": [],
+                "sources": [],
+                "offline_sources": offline,
+                "seed": {"present": seed.present, "results": 0},
+            },
+        )
+    return ExecutionResult.ok(
+        f"Found {len(results)} recipe(s).",
+        service="recipe_import",
+        detail={
+            "results": results,
+            "sources": sources,
+            "offline_sources": offline,
+            "seed": {"present": seed.present, "results": len(seed_hits)},
+        },
+    )
+
+
+async def _shelf_fetch(req: RecipeRequest) -> ExecutionResult:
+    """The full offline recipe behind a picked search card."""
+    if not req.id:
+        return ExecutionResult.fail(
+            "Which recipe? Give its id.", service="recipe_import"
+        )
+    seed = get_seed()
+    if not seed.present:
+        return ExecutionResult.fail(
+            "The offline recipe index is not available on this server.",
+            service="recipe_import",
+        )
+    recipe = seed.fetch(int(req.id))
+    if not recipe:
+        return ExecutionResult.fail(
+            "That recipe is not in the offline index.", service="recipe_import"
+        )
+    return ExecutionResult.ok(
+        f"Found “{recipe['title']}”.", service="recipe_import", detail={"recipe": recipe}
+    )
+
+
 async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
     if req.action == "themealdb_search":
         return await _themealdb_search(req)
+    if req.action == "recipe_search":
+        return await _recipe_search(req)
+    if req.action == "shelf_fetch":
+        return await _shelf_fetch(req)
     if req.action != "url_import":
         return ExecutionResult.fail(
             f"Unknown recipe action: {req.action}", service="recipe_import"

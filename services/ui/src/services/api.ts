@@ -2208,8 +2208,14 @@ export const api = {
   },
 
   async searchRecipes(query: string): Promise<ExecutionResponse> {
-    // TheMealDB lookup through the execution handler (free API, family use).
+    // Recipe search: the offline index first, then TheMealDB fills the page.
     const resp = await apiClient.post('/api/recipes/search', { query }, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  async fetchRecipe(id: number): Promise<ExecutionResponse> {
+    // One full recipe out of the offline index (search cards carry no body).
+    const resp = await apiClient.post('/api/recipes/fetch', { id }, { timeout: 60_000 });
     return resp.data;
   },
 
