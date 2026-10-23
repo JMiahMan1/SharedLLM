@@ -16,6 +16,24 @@ export interface ImportedRecipe {
   site: string;
 }
 
+/** One card from recipe search: the offline index or TheMealDB. */
+export interface RecipeSearchItem {
+  id?: string | number | null;
+  source?: 'foodcom' | 'themealdb';
+  title: string;
+  description?: string;
+  image?: string | null;
+  total_minutes?: number | null;
+  servings?: number | null;
+  yield?: string;
+  site?: string;
+  ingredients?: string[];
+  instructions?: string[];
+  prep_minutes?: number | null;
+  cook_minutes?: number | null;
+  source_url: string;
+}
+
 /** Shelf labels for an imported recipe: level first, then the quick ones. */
 export function guessLabels(recipe: ImportedRecipe): string[] {
   const labels: string[] = [];

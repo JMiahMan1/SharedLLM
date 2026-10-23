@@ -26,6 +26,7 @@ API keys, HA token) from the environment; none are hard-coded.
 | `seed_ma_identity.py` | Seed Music Assistant credentials into Identity |
 | `build_fdc_seed.py` | Build the Health hub's USDA food seed: downloads the Foundation, SR Legacy and FNDDS bulk archives, asserts the known counts and writes `data/health/fdc-seed.db` (read-only and optional at runtime, `FDC_SEED_PATH`) |
 | `import_recipes.py` | Import the CC0 Food.com corpus into family recipe notes: scans `recipes.csv` (anonymous kagglehub cache by default), picks a balanced set per kid level, renders `- [ ]` markdown from each recipe's food.com JSON-LD with ingredients scaled to 7 servings and per-serving nutrition tagged `foodcom`; dry-run by default, `--write` renders the full set to `--out` (default `.tmp/recipes-notes`) |
+| `build_recipe_seed.py` | Build the offline recipe index for shelf search: reads the CC0 Food.com corpus (kagglehub cache) and joins the Karo8870 ingredient mirror (units included) on name + author, writing `data/recipes/recipe-seed.db` (SQLite + FTS5, read-only and optional at runtime, `RECIPE_SEED_PATH`) |
 
 ## Tests and CI
 

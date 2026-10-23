@@ -19,6 +19,7 @@ vi.mock('../services/api', async (importOriginal) => {
       syncNotesRag: vi.fn(),
       importRecipe: vi.fn(),
       searchRecipes: vi.fn(),
+      fetchRecipe: vi.fn(),
       getTalkConversations: vi.fn(),
       sendTalkMessage: vi.fn(),
     },
@@ -38,6 +39,7 @@ const deleteNote = vi.mocked(api.deleteNote);
 const syncNotesRag = vi.mocked(api.syncNotesRag);
 const importRecipe = vi.mocked(api.importRecipe);
 const searchRecipes = vi.mocked(api.searchRecipes);
+const fetchRecipe = vi.mocked(api.fetchRecipe);
 const getTalkConversations = vi.mocked(api.getTalkConversations);
 const sendTalkMessage = vi.mocked(api.sendTalkMessage);
 
@@ -303,7 +305,7 @@ describe('Recipes', () => {
     await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
-    fireEvent.change(screen.getByLabelText('Search TheMealDB'), { target: { value: 'gateau' } });
+    fireEvent.change(screen.getByLabelText('Search recipes'), { target: { value: 'gateau' } });
     fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
     const card = await screen.findByText('Chocolate Gateau');
@@ -317,5 +319,84 @@ describe('Recipes', () => {
     expect(body.title).toBe('Chocolate Gateau');
     expect(body.content).toContain('Source: https://www.themealdb.com/meal/52772');
     expect(body.content).toContain('- [ ] 175g Butter');
+  });
+
+  it('searches the shelf and reads a Food.com pick from the index', async () => {
+    searchRecipes.mockResolvedValue({
+      status: 'SUCCESS',
+      message: 'Found 2 recipe(s).',
+      service: 'recipe_import',
+      detail: {
+        results: [
+          {
+            id: 38,
+            source: 'foodcom',
+            title: 'Low-Fat Berry Blue Frozen Dessert',
+            description: 'Frozen Desserts',
+            image: null,
+            total_minutes: 255,
+            servings: 4,
+            source_url: 'https://www.food.com/recipe/low-fat-berry-blue-frozen-dessert-38',
+            site: 'food.com',
+          },
+          {
+            id: '52772',
+            source: 'themealdb',
+            title: 'Chocolate Gateau',
+            description: 'Dessert · French',
+            image: null,
+            source_url: 'https://www.themealdb.com/meal/52772',
+            site: 'themealdb.com',
+            ingredients: ['175g Butter'],
+            instructions: ['Bake.'],
+          },
+        ],
+      },
+      sources: ['foodcom', 'themealdb'],
+      offline_sources: [],
+      seed: { present: true, results: 1 },
+    } as never);
+    fetchRecipe.mockResolvedValue({
+      status: 'SUCCESS',
+      message: '',
+      service: 'recipe_import',
+      detail: {
+        recipe: {
+          title: 'Low-Fat Berry Blue Frozen Dessert',
+          description: 'Frozen Desserts',
+          ingredients: ['4 cups blueberries, fresh or frozen', '0.25 cup vanilla yogurt'],
+          instructions: ['Mix everything.', 'Freeze until firm.'],
+          prep_minutes: 10,
+          cook_minutes: 180,
+          total_minutes: 190,
+          yield: '4 servings',
+          image: null,
+          source_url: 'https://www.food.com/recipe/low-fat-berry-blue-frozen-dessert-38',
+          site: 'food.com',
+        },
+      },
+    } as never);
+
+    renderRecipes();
+    await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+    fireEvent.change(screen.getByLabelText('Search recipes'), { target: { value: 'berry' } });
+    fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
+
+    const card = await screen.findByText('Low-Fat Berry Blue Frozen Dessert');
+    fireEvent.click(card);
+
+    await waitFor(() => expect(fetchRecipe).toHaveBeenCalledWith(38));
+    expect(await screen.findByTestId('recipe-import-preview')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /save to recipes/i }));
+
+    await waitFor(() => expect(writeNote).toHaveBeenCalled());
+    const body = writeNote.mock.calls[0][0] as { title: string; content: string };
+    expect(body.title).toBe('Low-Fat Berry Blue Frozen Dessert');
+    expect(body.content).toContain(
+      'Source: https://www.food.com/recipe/low-fat-berry-blue-frozen-dessert-38',
+    );
+    expect(body.content).toContain('4 cups blueberries, fresh or frozen');
   });
 });
