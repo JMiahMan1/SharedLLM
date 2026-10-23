@@ -264,7 +264,12 @@ The first 120 imported recipes are level-tagged notes (`#level-1` … `#level-3`
 A recipe can be shared straight into a family chat — the message is a short
 `🍽 title: excerpt` with an optional note, sent through the same sheet the
 Bible reader uses. The header's **Teach Jarvis** button runs the notes RAG sync
-over `Recipes/` so Jarvis can answer from the shelf.
+over `Recipes/` so Jarvis can answer from the shelf. A **Week plan** button
+opens this week's dinners: seven day slots that pick from the shelf, a tick
+for *cooked*, a surprise-me fill and a repeat warning; **Save plan** writes
+`Recipes/Meal plan.md` as a checklist note (`#meal-plan`). **Build shopping list** turns the
+week's ingredients into `Recipes/Shopping list.md`, a tickable checklist that keeps what is
+already ticked when it is rebuilt.
 
 ## Voice signatures (shipped)
 

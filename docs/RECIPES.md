@@ -103,21 +103,25 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 - [x] "Teach Jarvis" RAG sync over `Recipes/` — a header button on the Recipes
       page calls the notes `sync_rag` route for the recipes folder.
 
-## Phase 3 — weekly meal plan
+## Phase 3 — weekly meal plan (shipped)
 
-- [ ] Format: `Recipes/Meal plan.md` — header + `#meal-plan` + one checklist line per day,
+- [x] Format: `Recipes/Meal plan.md` — header + `#meal-plan` + one checklist line per day,
       e.g. `- [ ] Mon · Chicken Chili`. Ticking a day marks it cooked.
-- [ ] Plan view (Recipes tab or Family card): 7 slots, pick a recipe per day from the
-      shelf; writes the note like any other edit.
-- [ ] Shows each pick's level and appliance; quick "surprise me" and repeat warnings.
+- [x] Plan view on the Recipes page (`Week plan`): 7 slots, pick a recipe per day from the
+      shelf; **Save plan** writes the note like any other edit.
+- [x] Shows each pick's level (from the note's `#level-N` tag); a quick "surprise me" fill
+      and a warning when a recipe repeats in the week. Appliance chips
+      (`#slow-cooker`/`#instant-pot`) still open.
 
-## Phase 4 — shopping list
+## Phase 4 — shopping list (shipped)
 
-- [ ] Generate from the plan's recipes: aggregate ingredients, merge duplicates, scale to 7,
-      optionally group by aisle.
-- [ ] Write `Recipes/Shopping list.md` as a `- [ ]` checklist note (tappable on cards).
-- [ ] Regenerate when the plan changes and **keep ticked items** (merge by item text).
-- [ ] Button on the meal plan; the list links back to the plan that made it.
+- [x] Generated from the plan's recipes: the ingredients of each planned dinner are
+      aggregated and duplicates are merged. Imported notes are already scaled to 7 servings.
+- [x] Written to `Recipes/Shopping list.md` as a `- [ ]` checklist note, tappable like any note.
+- [x] Regenerating keeps every ticked item (matched by item text); items ticked earlier that
+      are no longer planned stay ticked at the bottom.
+- [x] A **Build shopping list** button sits on the week plan and the list closes with a line
+      pointing back at the plan that made it.
 
 ## Phase 5 — Jarvis and sharing polish
 
