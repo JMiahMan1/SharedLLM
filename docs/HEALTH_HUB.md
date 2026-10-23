@@ -292,6 +292,48 @@ live search is the ecosystem-standard pattern.
 - [ ] Sharing follows the rest of Health: per-user by default, opt-in family sharing (a new
       `digital` scope), and kid mode keeps the card private.
 
+### Phase 11 — digital guardianship and family discipleship (planned 2026-10-23)
+
+The Family Link / Qustodio / Bark class of tools, kept on our own server and put to a
+different end: parents guide and pray for their children with clear eyes, children keep a
+voice, and mom and dad hold each other accountable. Nothing leaves the house — no cloud
+account, no subscription, no advertisement.
+
+- [ ] **Activity feed (music, games, pages, verses).** The web bundle already knows what each
+      person does inside Jarvis; log it as an activity stream (feature, item, started/stopped,
+      duration) into telemetry and surface it as recent activity on a profile. Music comes
+      from the media stack, games from the arcade and trivia engine, pages from the app's own
+      feature screens, verses and devotionals from the Bible service. Phase 10's device
+      usage covers app-level time; this adds *what* inside Jarvis.
+- [ ] **Guardianship profiles, three audiences.** Every member gets a profile page with three
+      audiences: the person themselves, each parent, and (for a minor) the mother linked to
+      their account — siblings never see each other. A father–mother shared parents' page
+      shows both parents' own activity side by side for accountability, mutual and revocable
+      by either side. Visibility is per section and auditable.
+- [ ] **Boundaries, not just watching (Family Link / Qustodio parity).** Daily time budgets
+      and bedtime or school schedules per child; app and site allows and limits through the
+      house DNS and the Android app; a pause/grace button; an extension request the child
+      sends and a parent grants. Every rule is visible to the child it applies to — no hidden
+      rules, no silent blocking.
+- [ ] **Guidance, not surveillance (Bark parity, gentler).** Watch for what a parent genuinely
+      needs to know — isolation, self-harm talk, bullying, secret-keeping patterns — with
+      local models only, classified into concern levels; only the highest level pages a
+      parent immediately. Alerts quote the minimum needed, suggest a next step, and the
+      default posture is a weekly conversation, never a siren.
+- [ ] **Prayer and discipleship surface.** A parent view pairing what the week actually shows
+      with Scripture: prayer prompts grounded in real activity ("she comes alive around
+      music; pray Psalm 33:3 over that joy"), conversation starters from the devotional
+      library, and a journal of how the talks went. Jarvis can draft a gentle note a parent
+      reviews before sending — never an automated message from a parent's account.
+- [ ] **A voice for the quiet ones.** One-tap "I need to talk" and burden/mood signals
+      (reusing check-ins) that quietly nudge the right parent; a private note lane between
+      mom and dad for accountability and between a parent and child for the hard talks —
+      built for the kids and spouses who struggle to say the need out loud.
+- [ ] **Sharing follows the family roles (`docs/ROLES.md`).** Parents reach child profiles
+      under the minor rules (circle-on and locked for minors); a child never sees a parent's
+      private sections; the spouse page is mutual and either can revoke; kid mode respected
+      throughout.
+
 ## Acceptance
 
 - [x] Each family member has a profile and their own Health day.
@@ -300,4 +342,6 @@ live search is the ecosystem-standard pattern.
 - [x] Sleep and readiness show from manual data now and are device-ready; check-ins cover the no-wearable case.
 - [x] Cycle tracking is opt-in, private, shown only when the profile is female, and minors can share it only with their linked mother account. An adult can share with a spouse, who also sees phase-aware support suggestions clearly labelled as general ideas.
 - [ ] A family challenge is visible, joinable and shared in chat. Only opt-in scope sharing exists.
+- [ ] A parent can open each child's profile and the shared parents' page; guidance and prayer
+      prompts cite real activity, and every alert names its concern level.
 - [x] Kid accounts never see calorie deficits or weight-loss framing.
