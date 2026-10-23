@@ -104,3 +104,19 @@ phone, so the old fingerprint button could never work.
 Lists README.md and every `docs/*.md` from the server (`GET /api/docs`) and
 renders the chosen one; on phones the list is a picker. The (?) help buttons
 on other pages open a section of one of these documents.
+
+## Defaults by family role
+
+A widget with no saved row for a person is visible or hidden according to the
+family role on their account (`services/identity/main.py`,
+`_default_widget_visibility`). Anything the person saves wins, and any hidden
+widget can be added back from the dashboard's widget list, so this only sets
+the starting board:
+
+- **Child**: chores progress, upcoming events, active media, quick notes,
+  verse of the day and device control for the devices they are assigned.
+- **Teen**: the child set plus climate control.
+- **Mother, adult child, other adults**: everything except Workspaces and the
+  assistant (the assistant has its own enabled flag), so a teen or adult can
+  still add their own and shared workspaces from the widget list.
+- **Admin**: everything, Workspaces included.
