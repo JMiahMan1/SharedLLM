@@ -15,6 +15,7 @@ import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
 import MobileShell from './components/layout/MobileShell';
 import ActivityBeacon from './components/layout/ActivityBeacon';
+import PhoneUsageSync from './components/layout/PhoneUsageSync';
 import AdminElevation from './components/auth/AdminElevation';
 import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
@@ -124,6 +125,7 @@ function App() {
         <Router>
           <NativeBridge />
           <ActivityBeacon />
+          <PhoneUsageSync />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<ProtectedRoute isMobile={isMobile}><Dashboard /></ProtectedRoute>} />

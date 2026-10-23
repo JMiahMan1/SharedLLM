@@ -278,11 +278,11 @@ live search is the ecosystem-standard pattern.
 
 ### Phase 10 — digital wellbeing (planned 2026-10-23)
 
-- [ ] Phone usage on Android: a `DigitalWellbeingPlugin` (mirroring `StepCounterPlugin`) reads
-      `UsageStatsManager` — usage sessions (start, stop, duration) from `UsageEvents`
-      (`ACTIVITY_RESUMED`/`ACTIVITY_PAUSED`) and per-app foreground time for the day. Needs the
-      Usage Access permission, which the member grants once in Android Settings (the card walks
-      them there). Android-only: the card hides everywhere else, exactly like the steps sensor.
+- [ ] Phone usage on Android: the built `PhoneUsagePlugin` (mirroring `StepCounterPlugin`) reads
+      `UsageStatsManager` — the first brick is in (daily total, first and last use, session
+      count land on the profile via the Usage Access permission, which the member grants once
+      in Android Settings). Per-app foreground time for the day follows on the same engine.
+      Android-only: the card hides everywhere else, exactly like the steps sensor.
 - [ ] Ingestion mirrors the steps pipeline: the phone owns the day arithmetic, uploads batched,
       idempotent payloads (`source: phone`), coalesced — stored per user, every reading source-tagged.
 - [ ] Digital wellbeing card in the hub: first use, last use, total screen time, the day's session
@@ -338,8 +338,10 @@ point.
       Creators are first-class entities: their themes are reviewed once and the review
       applies everywhere they appear. Metadata depth varies by app; we take what each one
       exposes and fill in from usage and domains.
-- [ ] **Device usage (Android).** `UsageStatsManager` foreground time and screen sessions per
-      app — the Phase 10 engine that the screen-time and top-apps views share.
+- [x] **Device usage (Android).** First brick: daily screen time with when the day started and
+      stopped (first and last use) and the session count land via the phone's Usage Access
+      (`PhoneUsagePlugin` → `POST /api/usage` → telemetry `tel:usage:{user}`). Per-app
+      foreground time and the top-apps view follow on the same engine.
 - [ ] **Calls and SMS (Android).** The sideloaded app collects the call log and SMS content
       with runtime permissions (the Qustodio feature Play-store apps cannot ship).
 - [ ] **Web activity.** The on-device filter reports domains visited and blocked attempts.

@@ -32,6 +32,11 @@ LOCK_PREFIX = "tel:lock:"
 ACTIVITY_PREFIX = "tel:activity:"
 ACTIVITY_MAX = 500
 
+# Screen time per day and when the day started and stopped (the phone's
+# UsageStatsManager reports it; the profile and the parents' views read it).
+USAGE_PREFIX = "tel:usage:"
+USAGE_MAX_DAYS = 90
+
 
 def new_id() -> str:
     return uuid.uuid4().hex
@@ -202,6 +207,77 @@ async def list_activity(rc, user: str, limit: int = 50) -> list[dict[str, Any]]:
         if isinstance(event, dict):
             events.append(event)
     return events
+
+
+async def merge_usage(rc, user: str, entry: dict[str, Any]) -> dict[str, Any]:
+    """Merge one day of device usage into the person's history.
+
+    The phone re-reports as the day goes on, so the stored day is the union of
+    what has been seen: the longest screen time, the earliest first use, the
+    latest last use, the most sessions.
+    """
+    key = f"{USAGE_PREFIX}{user}"
+    day = str(entry.get("day") or "").strip()
+    raw = await rc.hget(key, day)
+    merged: dict[str, Any] = {}
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            parsed = {}
+        if isinstance(parsed, dict):
+            merged = parsed
+
+    def _num(value: Any) -> float | None:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    millis = _num(entry.get("millis")) or 0.0
+    first = _num(entry.get("first_use"))
+    last = _num(entry.get("last_use"))
+    sessions = _num(entry.get("sessions")) or 0.0
+
+    merged["day"] = day
+    merged["millis"] = int(max(_num(merged.get("millis")) or 0.0, millis))
+    prev_first = _num(merged.get("first_use"))
+    if first is not None and (prev_first is None or first < prev_first):
+        merged["first_use"] = int(first)
+    elif "first_use" not in merged:
+        merged["first_use"] = None
+    prev_last = _num(merged.get("last_use"))
+    if last is not None and (prev_last is None or last > prev_last):
+        merged["last_use"] = int(last)
+    elif "last_use" not in merged:
+        merged["last_use"] = None
+    merged["sessions"] = int(max(_num(merged.get("sessions")) or 0.0, sessions))
+    merged["source"] = str(entry.get("source") or merged.get("source") or "phone")
+    merged["updated_at"] = str(entry.get("at") or utcnow_iso())
+    await rc.hset(key, day, json.dumps(merged))
+
+    if await rc.hlen(key) > USAGE_MAX_DAYS:
+        stale = sorted((await rc.hgetall(key)).keys())
+        for old_day in stale[: len(stale) - USAGE_MAX_DAYS]:
+            await rc.hdel(key, old_day)
+    return merged
+
+
+async def get_usage(rc, user: str, days: int = 7) -> list[dict[str, Any]]:
+    """The person's recent days of usage, newest day first."""
+    raw = await rc.hgetall(f"{USAGE_PREFIX}{user}")
+    out: list[dict[str, Any]] = []
+    for value in raw.values():
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(parsed, dict) and parsed.get("day"):
+            out.append(parsed)
+    out.sort(key=lambda item: str(item.get("day")), reverse=True)
+    return out[:days]
 
 
 def internal_headers() -> dict[str, str]:

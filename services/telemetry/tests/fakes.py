@@ -7,6 +7,7 @@ class FakeRedis:
         self.sets: dict[str, set] = {}
         self.zsets: dict[str, dict] = {}
         self.lists: dict[str, list] = {}
+        self.hashes: dict[str, dict[str, str]] = {}
 
     async def get(self, key):
         return self.strings.get(key)
@@ -22,6 +23,7 @@ class FakeRedis:
         self.sets.pop(key, None)
         self.zsets.pop(key, None)
         self.lists.pop(key, None)
+        self.hashes.pop(key, None)
         return 1
 
     async def sadd(self, key, *members):
@@ -67,6 +69,23 @@ class FakeRedis:
     async def lrange(self, key, start, end):
         items = self.lists.get(key, [])
         return items[start:] if end == -1 else items[start:end + 1]
+
+    async def hget(self, key, field):
+        return self.hashes.get(key, {}).get(field)
+
+    async def hset(self, key, field, value):
+        self.hashes.setdefault(key, {})[field] = value
+        return 1
+
+    async def hgetall(self, key):
+        return dict(self.hashes.get(key, {}))
+
+    async def hlen(self, key):
+        return len(self.hashes.get(key, {}))
+
+    async def hdel(self, key, field):
+        bucket = self.hashes.get(key, {})
+        return 1 if bucket.pop(field, None) is not None else 0
 
     async def scan_iter(self, match="*", count=100):
         prefix = match.rstrip("*")
