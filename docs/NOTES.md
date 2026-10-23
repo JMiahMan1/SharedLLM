@@ -52,6 +52,26 @@ that, every save of an opened note stacked another header on top.
 
 ## UI behaviour
 
+- **Visual editor (Keep-style)**: a note opens as formatted text, not
+  markdown. People tick real checkboxes (tap the box; Enter adds an unticked
+  row, Enter on an empty row ends the list), and a toolbar gives bold, italic,
+  strikethrough, heading, bulleted/numbered lists, text colour, highlight
+  colour and text size. `lib/noteRichText.ts` converts to and from the stored
+  markdown, so the file stays Nextcloud Notes compatible: bold `**`, italic
+  `*`, strikethrough `~~`, `#`..`###`, dash and numbered lists and `- [ ]` /
+  `- [x]` checklists are plain markdown. Colour, highlight and size have no
+  markdown form, so they are stored as an inline
+  `<span style="color:#dc2626;background-color:#fde047;font-size:1.25em">`
+  (only those three properties are ever read or written); Nextcloud clients
+  that do not render HTML show the tag around that text and nothing else
+  changes. Card previews render the spans (`lib/remarkNoteSpans.ts`); the
+  Android widgets and `check_off` ignore the tag, so ticking a styled row
+  from the home screen still works.
+- **Safe fallback**: a note is only opened visually when converting it to HTML
+  and back reproduces it exactly (`richEditable`). Notes with tables, code
+  fences, quotes, rules, images, links, nested lists, star bullets, `####`
+  headings or other HTML open as text with a short notice, so the visual
+  editor can never flatten them. Labels stay inline `#tags` in either mode.
 - **Quick capture**: the "Take a note…" bar opens an empty editor; the title
   falls back to the first line of the body, then `Untitled note`.
 - **Instant shelf**: each visit's list and index are kept in localStorage per
@@ -147,8 +167,8 @@ back on failure, and note calls allow a minute), dashboard and home-screen
 capture.
 
 Still open: reminders (time and place), attachments/images/drawings/audio,
-Nextcloud sharing, list/grid toggle, autosave and drafts, a formatting
-toolbar, keyboard shortcuts, per-item checklist editing and reordering, undo
+Nextcloud sharing, list/grid toggle, autosave and drafts, keyboard
+shortcuts, per-item checklist editing and reordering, undo
 toasts, versions, offline.
 
 ## Tests
@@ -162,6 +182,9 @@ toasts, versions, offline.
 - `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
 - `services/gateway/tests/test_notes_rag_sync.py`: indexing writes to RAG;
   the list route passes `previews` through
+- `services/ui/src/test/noteRichText.test.ts` / `RichNoteEditor.test.tsx`:
+  markdown round trips, the unsupported-note fallback, span whitelist, tick,
+  Enter and toolbar behaviour, span rendering in previews
 - `services/ui/src/test/notesMeta.test.ts`: checklist parsing, previews,
   sorting, pin/colour storage
 - `services/execution/tests/test_note_actions.py`: `write` replaces (single

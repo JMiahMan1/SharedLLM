@@ -63,7 +63,7 @@ describe('Notes (Keep-style)', () => {
     const content = await screen.findByLabelText('Note content');
     // The server writes "# title / Category:" itself; showing it here put a
     // second copy on top of the note with every save.
-    expect((content as HTMLTextAreaElement).value).toBe('Sedona in the fall, then the coast.');
+    expect(content.textContent).toBe('Sedona in the fall, then the coast.');
     await user.click(screen.getByRole('button', { name: /^save$/i }));
 
     await waitFor(() => expect(notesWriteCalls.length).toBe(1));
@@ -175,7 +175,7 @@ describe('Notes (Keep-style)', () => {
     renderWithProviders(<Notes />, { route: '/notes?note=Notes%2FTrip%20ideas.md' });
 
     const content = await screen.findByLabelText('Note content');
-    expect((content as HTMLTextAreaElement).value).toBe('Sedona in the fall, then the coast.');
+    expect(content.textContent).toBe('Sedona in the fall, then the coast.');
     expect(notesReadCalls).toEqual([expect.objectContaining({ path: 'Notes/Trip ideas.md' })]);
   });
 
@@ -184,7 +184,7 @@ describe('Notes (Keep-style)', () => {
 
     const title = await screen.findByLabelText('Note title');
     expect((title as HTMLInputElement).value).toBe('');
-    expect((screen.getByLabelText('Note content') as HTMLTextAreaElement).value).toBe('');
+    expect(screen.getByLabelText('Note content').textContent).toBe('');
     expect(notesReadCalls).toEqual([]);
   });
 
@@ -221,7 +221,7 @@ describe('Notes (Keep-style)', () => {
     await user.click(await screen.findByTestId('quick-capture'));
     await user.type(screen.getByLabelText('Note content'), 'a few words');
 
-    expect((screen.getByLabelText('Note content') as HTMLTextAreaElement).value).toBe('a few words');
+    expect(screen.getByLabelText('Note content').textContent).toBe('a few words');
     expect(lists).toBe(1);
   });
 
@@ -391,7 +391,7 @@ describe('Notes (Keep-style)', () => {
     await user.type(await screen.findByLabelText('Note label'), 'friends');
     await user.click(screen.getByRole('button', { name: 'Add label' }));
 
-    expect((screen.getByLabelText('Note content') as HTMLTextAreaElement).value).toContain('#friends');
+    expect(screen.getByLabelText('Note content').textContent).toContain('#friends');
   });
 
   it('paints the shelf from the last visit before the list answers', () => {
@@ -434,7 +434,7 @@ describe('Notes (Keep-style)', () => {
     await user.click(screen.getByText('Trip ideas'));
 
     // The stored text shows at once, then the read reconciles it.
-    expect(await screen.findByDisplayValue(/Sedona in the fall/)).toBeInTheDocument();
+    expect(await screen.findByText(/Sedona in the fall/, { selector: '[role="textbox"] *' })).toBeInTheDocument();
     await waitFor(() => expect(notesReadCalls.length).toBe(1));
   });
 });

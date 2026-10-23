@@ -752,3 +752,13 @@ async def test_new_actions_stay_unavailable_in_local_mode(monkeypatch):
     )
 
     assert result.status == "FAILURE"
+
+
+def test_item_matches_raw_or_plain_text_of_a_styled_row():
+    from services.execution.handlers.note import _item_matches
+
+    styled = 'buy <span style="color:#dc2626">milk</span>'
+    assert _item_matches(styled, "buy milk")
+    assert _item_matches(styled, styled)
+    assert _item_matches("  eggs ", "eggs")
+    assert not _item_matches(styled, "buy bread")

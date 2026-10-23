@@ -94,4 +94,10 @@ public class NotesLinesTest {
     public void oneLineKeepsShortTextIntact() {
         assertEquals("Buy milk", NotesLines.oneLine(" Buy   milk ", 96));
     }
+
+    @Test
+    public void oneLineDropsTheEditorsStyleSpansButKeepsTheWords() {
+        assertEquals("Buy red milk",
+                NotesLines.oneLine("Buy <span style=\"color:#dc2626\">red</span> milk", 96));
+    }
 }
