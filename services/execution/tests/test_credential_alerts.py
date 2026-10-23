@@ -114,4 +114,4 @@ async def test_a_rejection_during_the_quiet_window_stays_quiet(redis, caplog):
     quiet = [r for r in caplog.records if "within the quiet window" in r.getMessage()]
     assert len(quiet) == 1
     state = json.loads(redis.store[STATE_KEY])
-    assert KEY in state["flagged"]
+    assert KEY not in state["flagged"]
