@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Loader2, Plus, Save, Share2, Trash2, Users } from 'lucide-react';
+import { BookOpen, CalendarDays, Loader2, Plus, Save, Share2, ShoppingCart, Shuffle, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
@@ -10,6 +10,19 @@ import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
 import ShareToChatSheet from '../components/bible/ShareToChatSheet';
 import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
+import { SHOPPING_PATH, SHOPPING_TITLE, buildShoppingList, ingredientLines } from '../lib/shoppingList';
+import {
+  buildMealPlan,
+  emptyPlan,
+  parseMealPlan,
+  planLevel,
+  pickSurprise,
+  PLAN_DAYS,
+  PLAN_PATH,
+  PLAN_TITLE,
+  type PlanDay,
+  type WeeklyPlan,
+} from '../lib/mealPlan';
 
 export const RECIPES_DIR = 'Recipes';
 const STORAGE = 'nextcloud';
@@ -42,6 +55,12 @@ export default function Recipes() {
   const [share, setShare] = useState<{ recipe: RecipeSummary; body: string } | null>(null);
   const [sharePath, setSharePath] = useState<string | null>(null);
   const [teaching, setTeaching] = useState(false);
+  const [listing, setListing] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [plan, setPlan] = useState<WeeklyPlan>(emptyPlan());
+  const [planExists, setPlanExists] = useState(false);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planLevels, setPlanLevels] = useState<Record<string, string>>({});
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
@@ -148,6 +167,137 @@ export default function Recipes() {
     }
   };
 
+  const loadLevel = async (recipeTitle: string) => {
+    if (!recipeTitle || recipeTitle in planLevels) return;
+    const recipe = recipes.find((candidate) => candidate.title === recipeTitle);
+    if (!recipe) return;
+    // One attempt per title; the level chip is optional, never the point.
+    setPlanLevels((current) => ({ ...current, [recipeTitle]: '' }));
+    try {
+      const res = await api.readNote(recipe.title, STORAGE, recipe.path, asUser);
+      if (res.status === 'SUCCESS') {
+        const level = planLevel(res.message ?? '');
+        if (level) setPlanLevels((current) => ({ ...current, [recipeTitle]: level }));
+      }
+    } catch {
+      // The chip stays absent; the plan still works.
+    }
+  };
+
+  const openPlan = async () => {
+    if (planOpen) {
+      setPlanOpen(false);
+      return;
+    }
+    setPlanBusy(true);
+    try {
+      const res = await api.readNote(PLAN_TITLE, STORAGE, PLAN_PATH, asUser);
+      if (res.status === 'SUCCESS') {
+        setPlan(parseMealPlan(res.message ?? ''));
+        setPlanExists(true);
+      } else {
+        setPlan(emptyPlan());
+        setPlanExists(false);
+      }
+      setPlanOpen(true);
+    } catch {
+      toast.error('Could not open the week plan');
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  const setPlanDay = (day: PlanDay, recipeTitle: string) => {
+    setPlan((current) => ({ ...current, [day]: { ...current[day], title: recipeTitle || null } }));
+    void loadLevel(recipeTitle);
+  };
+
+  const toggleCooked = (day: PlanDay) => {
+    setPlan((current) => ({ ...current, [day]: { ...current[day], cooked: !current[day].cooked } }));
+  };
+
+  const planSurprise = () => {
+    const pool = recipes.map((recipe) => recipe.title).filter((candidate) => !plannedTitles.includes(candidate));
+    if (pool.length === 0) {
+      toast.error('Every recipe is already in the week');
+      return;
+    }
+    const next = { ...plan };
+    for (const day of PLAN_DAYS) {
+      if (next[day].title || pool.length === 0) continue;
+      const pick = pickSurprise(pool);
+      if (!pick) break;
+      next[day] = { ...next[day], title: pick };
+      void loadLevel(pick);
+    }
+    setPlan(next);
+  };
+
+  const savePlan = async () => {
+    setPlanBusy(true);
+    try {
+      const saved = await saveNote({
+        title: PLAN_TITLE,
+        content: buildMealPlan(plan),
+        category: RECIPES_DIR,
+        previous: planExists ? { title: PLAN_TITLE, category: RECIPES_DIR, path: PLAN_PATH } : undefined,
+        asUser,
+      });
+      if (saved.response.status === 'SUCCESS') {
+        toast.success('Week plan saved');
+        setPlanExists(true);
+        queryClient.invalidateQueries({ queryKey: ['recipes'] });
+      } else {
+        toast.error(saved.response.message || 'Could not save the week plan');
+      }
+    } catch {
+      toast.error('Could not save the week plan');
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  const buildList = async () => {
+    const planned = PLAN_DAYS.map((day) => plan[day].title).filter(Boolean) as string[];
+    if (planned.length === 0) {
+      toast.error('Pick some dinners first');
+      return;
+    }
+    setListing(true);
+    try {
+      const ingredients: string[] = [];
+      for (const recipeTitle of planned) {
+        const path = recipes.find((recipe) => recipe.title === recipeTitle)?.path ?? `${RECIPES_DIR}/${recipeTitle}.md`;
+        const res = await api.readNote(recipeTitle, STORAGE, path, asUser);
+        if (res.status === 'SUCCESS') ingredients.push(...ingredientLines(noteBody(res.message ?? '')));
+      }
+      const existing = await api.readNote(SHOPPING_TITLE, STORAGE, SHOPPING_PATH, asUser);
+      const existed = existing.status === 'SUCCESS';
+      const saved = await saveNote({
+        title: SHOPPING_TITLE,
+        content: buildShoppingList(existed ? existing.message ?? '' : '', ingredients),
+        category: RECIPES_DIR,
+        previous: existed ? { title: SHOPPING_TITLE, category: RECIPES_DIR, path: SHOPPING_PATH } : undefined,
+        asUser,
+      });
+      if (saved.response.status === 'SUCCESS') {
+        toast.success('Shopping list ready');
+        queryClient.invalidateQueries({ queryKey: ['recipes'] });
+      } else {
+        toast.error(saved.response.message || 'Could not build the shopping list');
+      }
+    } catch {
+      toast.error('Could not build the shopping list');
+    } finally {
+      setListing(false);
+    }
+  };
+
+  const plannedTitles = PLAN_DAYS.map((day) => plan[day].title).filter(Boolean) as string[];
+  const repeated = Array.from(
+    new Set(plannedTitles.filter((candidate, index) => plannedTitles.indexOf(candidate) !== index)),
+  );
+
   return (
     <div className="space-y-4" data-testid="recipes">
       <div className="glass-panel p-4 rounded-2xl border border-white/5 space-y-2">
@@ -167,6 +317,15 @@ export default function Recipes() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
+            onClick={() => void openPlan()}
+            disabled={planBusy}
+            className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+          >
+            {planBusy ? <Loader2 size={14} className="animate-spin" /> : <CalendarDays size={14} />}
+            {planOpen ? 'Back to recipes' : 'Week plan'}
+          </button>
+          <button
+            type="button"
             onClick={() => void teachJarvis()}
             disabled={teaching}
             className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
@@ -178,6 +337,78 @@ export default function Recipes() {
         </div>
       </div>
 
+      {planOpen && (
+        <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="meal-plan">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-semibold text-slate-200">This week&apos;s dinners</span>
+            <button type="button" onClick={planSurprise} className="glass-button min-h-11 px-3 text-xs">
+              <Shuffle size={14} /> Surprise me
+            </button>
+          </div>
+          {recipes.length === 0 && (
+            <p className="text-xs text-slate-500">Add a few recipes first, then pick one per day.</p>
+          )}
+          {PLAN_DAYS.map((day) => (
+            <div key={day} className="flex flex-wrap items-center gap-2">
+              <label className="flex h-11 w-24 shrink-0 items-center gap-2 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={plan[day].cooked}
+                  onChange={() => toggleCooked(day)}
+                  aria-label={`${day} cooked`}
+                  className="h-4 w-4 accent-purple-400"
+                />
+                {day}
+              </label>
+              <select
+                value={plan[day].title ?? ''}
+                onChange={(event) => setPlanDay(day, event.target.value)}
+                aria-label={`Plan for ${day}`}
+                className="glass-input min-h-11 min-w-0 flex-1 px-2 py-1 text-base sm:text-sm"
+              >
+                <option value="">Pick a recipe…</option>
+                {recipes.map((recipe) => (
+                  <option key={recipe.path} value={recipe.title}>
+                    {recipe.title}
+                  </option>
+                ))}
+              </select>
+              {plan[day].title && planLevels[plan[day].title as string] ? (
+                <span className="rounded-full border border-purple-400/40 bg-purple-400/10 px-2 py-0.5 text-[10px] text-purple-200">
+                  Level {planLevels[plan[day].title as string]}
+                </span>
+              ) : null}
+            </div>
+          ))}
+          {repeated.length > 0 && (
+            <p className="text-xs text-amber-300" data-testid="plan-repeat">
+              Heads up: {repeated.join(', ')} planned more than once this week.
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void buildList()}
+              disabled={listing}
+              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
+            >
+              {listing ? <Loader2 size={14} className="animate-spin" /> : <ShoppingCart size={14} />}
+              Build shopping list
+            </button>
+            <button
+              type="button"
+              onClick={() => void savePlan()}
+              disabled={planBusy}
+              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
+            >
+              {planBusy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save plan
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!planOpen && (
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
         <div className="space-y-2">
           {isLoading && <p className="text-xs text-slate-500">Loading recipes…</p>}
@@ -276,6 +507,7 @@ export default function Recipes() {
           </button>
         </div>
       </div>
+      )}
 
       {share && (
         <ShareToChatSheet

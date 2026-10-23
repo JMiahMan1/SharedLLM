@@ -18,6 +18,7 @@
 [data-site-theme-active] .bg-indigo-950\/5 { background-color: color-mix(in srgb, var(--site-accent) 5%, transparent) !important; }
 [data-site-theme-active] .bg-purple-300\/60 { background-color: color-mix(in srgb, var(--site-accent) 60%, transparent) !important; }
 [data-site-theme-active] .bg-purple-400 { background-color: var(--site-accent) !important; }
+[data-site-theme-active] .bg-purple-400\/10 { background-color: color-mix(in srgb, var(--site-accent) 10%, transparent) !important; }
 [data-site-theme-active] .bg-purple-400\/40 { background-color: color-mix(in srgb, var(--site-accent) 40%, transparent) !important; }
 [data-site-theme-active] .bg-purple-400\/70 { background-color: color-mix(in srgb, var(--site-accent) 70%, transparent) !important; }
 [data-site-theme-active] .bg-purple-500 { background-color: var(--site-accent) !important; }
