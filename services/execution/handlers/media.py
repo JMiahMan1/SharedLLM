@@ -5,7 +5,7 @@ import re
 from typing import cast
 
 from services.config import MASS_CONFIG_ENTRY_ID
-from services.execution import ha_client
+from services.execution import activity, ha_client
 from services.execution.media_links import media_file_url
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult, MediaPlayRequest
 from services.shared.ma_player import is_music_assistant_player
@@ -625,15 +625,33 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         # Route to appropriate handler
         log.info(f"[media/play] Routing playback to handler for media_type='{media_type}'")
         if media_type == "video":
-            return await play_video(req, entity_id, ctx)
+            result = await play_video(req, entity_id, ctx)
         elif media_type == "podcast":
-            return await play_podcast(req, entity_id, ctx)
+            result = await play_podcast(req, entity_id, ctx)
         elif media_type == "audiobook":
-            return await play_audiobook(req, entity_id, ctx)
+            result = await play_audiobook(req, entity_id, ctx)
         elif media_type == "url":
-            return await play_url(req, entity_id, ctx)
+            result = await play_url(req, entity_id, ctx)
         else:
-            return await play_music(req, entity_id, ctx)
+            result = await play_music(req, entity_id, ctx)
+
+        # Log the play on the person's activity feed (music, video, podcast,
+        # audiobook). Best effort: recording is never allowed to change the
+        # playback result and never raises.
+        if result.status == "SUCCESS":
+            feature = {
+                "video": "video",
+                "podcast": "podcast",
+                "audiobook": "audiobook",
+            }.get(media_type, "music")
+            await activity.record(
+                ctx.user,
+                feature,
+                item=req.query or req.media_content_id or "",
+                action="play",
+                detail={"entity_id": entity_id},
+            )
+        return result
     except Exception as e:
         log.error(f"[media/play] Error playing media for {ctx.user} on {entity_id}: {e}", exc_info=True)
         return ExecutionResult(status="FAILURE", message=f"Media play failed: {e!s}", service="media_play")

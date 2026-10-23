@@ -152,3 +152,41 @@ def test_direct_uri_enqueue_passes_through(monkeypatch):
     plays = recorder.by_service("play_media")
     assert len(plays) == 1
     assert plays[0]["service_data"]["enqueue"] == "add"
+
+
+def test_a_successful_play_lands_on_the_activity_feed(monkeypatch):
+    """The dispatcher records a successful play on the person's activity feed."""
+    recorder = _CallRecorder()
+    recorder.set("search", _track_search())
+    recorder.set("play_media", {"ok": True, "status_code": 200})
+    _patch_common(monkeypatch, recorder)
+    monkeypatch.setattr(media_handler, "resolve_entity", AsyncMock(return_value="media_player.office"))
+    monkeypatch.setattr(media_handler.ha_client, "get_state", AsyncMock(return_value={"state": "idle"}))
+    recorded = AsyncMock()
+    monkeypatch.setattr(media_handler.activity, "record", recorded)
+
+    result = asyncio.run(media_handler.handle_media_play(_req("nevermind")))
+
+    assert result.status == "SUCCESS"
+    recorded.assert_awaited_once()
+    args, kwargs = recorded.await_args
+    assert args == ("bug25", "music")
+    assert kwargs["action"] == "play"
+    assert kwargs["item"] == "nevermind"
+    assert kwargs["detail"] == {"entity_id": "media_player.office"}
+
+
+def test_a_failed_play_stays_off_the_activity_feed(monkeypatch):
+    """A failed play records nothing — the feed only holds what actually played."""
+    recorder = _CallRecorder()
+    recorder.set("search", _empty_search())
+    _patch_common(monkeypatch, recorder)
+    monkeypatch.setattr(media_handler, "resolve_entity", AsyncMock(return_value="media_player.office"))
+    monkeypatch.setattr(media_handler.ha_client, "get_state", AsyncMock(return_value={"state": "idle"}))
+    recorded = AsyncMock()
+    monkeypatch.setattr(media_handler.activity, "record", recorded)
+
+    result = asyncio.run(media_handler.handle_media_play(_req("bohemian rhapsody")))
+
+    assert result.status == "FAILURE"
+    recorded.assert_not_awaited()
