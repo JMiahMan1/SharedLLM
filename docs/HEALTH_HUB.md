@@ -292,47 +292,98 @@ live search is the ecosystem-standard pattern.
 - [ ] Sharing follows the rest of Health: per-user by default, opt-in family sharing (a new
       `digital` scope), and kid mode keeps the card private.
 
-### Phase 11 — digital guardianship and family discipleship (planned 2026-10-23)
+### Phase 11 — family guardianship and discipleship (full Bark / Qustodio / Family Link parity; planned 2026-10-23)
 
-The Family Link / Qustodio / Bark class of tools, kept on our own server and put to a
-different end: parents guide and pray for their children with clear eyes, children keep a
-voice, and mom and dad hold each other accountable. Nothing leaves the house — no cloud
-account, no subscription, no advertisement.
+The whole feature set of the parental-control apps — **surveillance included** — kept on our
+own server: no cloud account, no subscription, nothing leaves the house. On top of the
+watching sits a discipleship layer those apps do not have (prayer grounded in real life, a
+voice for the quiet ones): the goal is not just knowing what a child does but guiding and
+praying for them well. Our Android app is sideloaded, so calls, SMS, media sessions and
+usage stats are all ours to read — the mechanisms Qustodio gets from its sideloaded APK,
+without Play-policy limits.
 
-- [ ] **Activity feed (music, games, pages, verses).** The web bundle already knows what each
-      person does inside Jarvis; log it as an activity stream (feature, item, started/stopped,
-      duration) into telemetry and surface it as recent activity on a profile. Music comes
-      from the media stack, games from the arcade and trivia engine, pages from the app's own
-      feature screens, verses and devotionals from the Bible service. Phase 10's device
-      usage covers app-level time; this adds *what* inside Jarvis.
-- [ ] **Guardianship profiles, three audiences.** Every member gets a profile page with three
-      audiences: the person themselves, each parent, and (for a minor) the mother linked to
-      their account — siblings never see each other. A father–mother shared parents' page
-      shows both parents' own activity side by side for accountability, mutual and revocable
-      by either side. Visibility is per section and auditable.
-- [ ] **Boundaries, not just watching (Family Link / Qustodio parity).** Daily time budgets
-      and bedtime or school schedules per child; app and site allows and limits through the
-      house DNS and the Android app; a pause/grace button; an extension request the child
-      sends and a parent grants. Every rule is visible to the child it applies to — no hidden
-      rules, no silent blocking.
-- [ ] **Guidance, not surveillance (Bark parity, gentler).** Watch for what a parent genuinely
-      needs to know — isolation, self-harm talk, bullying, secret-keeping patterns — with
-      local models only, classified into concern levels; only the highest level pages a
-      parent immediately. Alerts quote the minimum needed, suggest a next step, and the
-      default posture is a weekly conversation, never a siren.
-- [ ] **Prayer and discipleship surface.** A parent view pairing what the week actually shows
-      with Scripture: prayer prompts grounded in real activity ("she comes alive around
-      music; pray Psalm 33:3 over that joy"), conversation starters from the devotional
-      library, and a journal of how the talks went. Jarvis can draft a gentle note a parent
-      reviews before sending — never an automated message from a parent's account.
-- [ ] **A voice for the quiet ones.** One-tap "I need to talk" and burden/mood signals
-      (reusing check-ins) that quietly nudge the right parent; a private note lane between
-      mom and dad for accountability and between a parent and child for the hard talks —
-      built for the kids and spouses who struggle to say the need out loud.
-- [ ] **Sharing follows the family roles (`docs/ROLES.md`).** Parents reach child profiles
-      under the minor rules (circle-on and locked for minors); a child never sees a parent's
-      private sections; the spouse page is mutual and either can revoke; kid mode respected
-      throughout.
+**The focus is the digital profile.** Everything below collects from the mobile devices
+first and lands in one living per-person profile — what they listen to, play, watch and
+browse, when and for how long, and the patterns across a week. Jarvis then reads that
+profile to make recommendations and give positive, Biblical direction (the music example:
+an artist whose lyrics are not appropriate becomes a Christian artist with a similar style).
+The guarding mechanics are the collection substrate; the profile and the guidance are the
+point.
+
+**Collection**
+- [ ] **The digital profile (the point of all of it).** Every signal below — device usage,
+      music, media sessions, calls and SMS, web, in-app activity — lands on one per-person
+      profile: a living picture of what they listen to, play, watch and browse, when and for
+      how long, and the week's patterns. This is the data model Jarvis reads for
+      recommendations and for the discipleship surfaces further down.
+- [ ] **Activity feed (music, games, pages, verses).** First brick landed: telemetry stores a
+      capped per-person stream (`POST/GET /api/telemetry/activity`) and execution records
+      through `activity.record` (trivia wins are wired). Recorders still to add: music played
+      through Jarvis (media stack), app feature pages, verses and devotionals.
+- [ ] **Music everywhere, not just Jarvis.** Baseline: everything played through the house
+      media stack (local library and `spotify://` through Music Assistant). If possible:
+      each member links their Spotify account (Web API `recently-played`, opt-in) so
+      listening in the Spotify app itself lands on the profile; for other services the
+      Android app reads media sessions (title, artist, package).
+- [ ] **Device usage (Android).** `UsageStatsManager` foreground time and screen sessions per
+      app — the Phase 10 engine that the screen-time and top-apps views share.
+- [ ] **Calls and SMS (Android).** The sideloaded app collects the call log and SMS content
+      with runtime permissions (the Qustodio feature Play-store apps cannot ship).
+- [ ] **Web activity.** The on-device filter reports domains visited and blocked attempts.
+
+**Guarding**
+- [ ] **Time budgets and routines (Family Link / Qustodio).** Daily limits per device, bedtime
+      and school weekly schedules, pause/grace, bonus time, child extension requests a parent
+      grants — with Qustodio's semantics (midnight reset, "always allowed" list, lock
+      navigation vs lock device).
+- [ ] **App control.** Block apps, per-app daily limits, install approvals, per-permission
+      gating; Accessibility-service enforcement on the device with Family Link's one-minute
+      grace warning before a block lands.
+- [ ] **Web filtering.** On-device VPN/DNS filter with category lists, allow/block lists,
+      safe-search enforcement, an "ask a parent" request flow, and Qustodio-style bypass
+      blocks (unsupported browsers, split-screen, safe mode).
+- [ ] **Location guardian.** The geo service already holds live location, history, zones and
+      trips; add parent-facing place alerts (arrive/leave), ring device and battery, and the
+      one-device-at-a-time live view.
+- [ ] **Tamper resistance.** Device-admin uninstall protection, restart on boot
+      (`BootReceiver` exists), split-screen/multi-user detection, tamper alerts to parents —
+      with a parent access code as the offline unlock/verify escape hatch.
+
+**Watching (Bark parity)**
+- [ ] **Content monitoring, local models only.** Analyze the collected streams (messages,
+      calls, web, music, app usage) for what a parent needs to know — self-harm, bullying,
+      isolation, secret-keeping patterns — classified by concern level with per-child
+      sensitivity (all / severe / none); serious categories always on.
+- [ ] **Alerts and reports.** Only the highest concern pages a parent immediately; a Sunday
+      weekly recap (telemetry's report pipeline) with top apps, contacts, sites and standout
+      moments; Jarvis chat answers "how was Emma's week?" the way Bark Assistant does.
+
+**Discipleship (what those apps do not have)**
+- [ ] **Recommendations and positive, Biblical direction.** Jarvis reads the digital profile
+      and suggests rather than scolds: an artist whose lyrics are not appropriate maps to a
+      Christian artist with a similar style (genre, era, energy), a show to a better-fit
+      alternative, a game to a family pick; the devotional library answers what the week
+      actually showed. Style matching starts with music (a small reviewed genre map) and the
+      same engine later covers podcasts, books, games and activities. Every suggestion says
+      why it was made, and a parent can bless or block a lane.
+- [ ] **Guardianship profiles, three audiences.** Every member's profile visible to
+      themselves, each parent, and (for a minor) the linked mother; siblings never see each
+      other; a mutual, revocable father–mother parents' page for accountability.
+- [ ] **Prayer and guidance.** The parent view pairs the week's real activity with Scripture:
+      prayer prompts grounded in what actually happened, conversation starters from the
+      devotional library, and a talk journal. Jarvis drafts gentle notes a parent reviews
+      before sending — never sent automatically.
+- [ ] **A voice for the quiet ones.** One-tap "I need to talk", burden signals (reusing
+      check-ins) and private note lanes (mom↔dad, parent↔child) so nobody has to say it out
+      loud first.
+- [ ] **Sharing follows the family roles (`docs/ROLES.md`).** Minor rules stay circle-on and
+      locked; children never see parents' private sections; kid mode respected throughout.
+
+**Build order (profile first):** (1) the digital profile store and the activity recorders
+around it; (2) the Android collection engine — usage, media sessions, calls and SMS;
+(3) Jarvis recommendations from the profile (music style matching first); (4) time budgets
+and routines; (5) app control and the web filter; (6) monitoring alerts and the weekly
+recap; (7) the parents' page and the discipleship surfaces.
 
 ## Acceptance
 
