@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { PLAN_DAYS, buildMealPlan, emptyPlan, parseMealPlan, planLevel } from '../lib/mealPlan';
+import { PLAN_DAYS, buildMealPlan, emptyPlan, parseMealPlan, planLevel, planShareText } from '../lib/mealPlan';
 
 const STORED = [
   '# Meal plan',
@@ -45,5 +45,19 @@ describe('mealPlan', () => {
     for (const day of PLAN_DAYS) {
       expect(plan[day]).toEqual({ title: null, cooked: false });
     }
+  });
+
+  it('writes a shareable week of dinners with an optional note', () => {
+    const plan = emptyPlan();
+    plan.Mon = { title: 'Chicken Chili', cooked: false };
+    plan.Tue = { title: 'Pancakes', cooked: true };
+
+    const text = planShareText(plan, 'dinner vote?');
+    expect(text.startsWith('dinner vote?\n\n')).toBe(true);
+    expect(text).toContain("🍽 This week's dinners:");
+    expect(text).toContain('- Mon · Chicken Chili');
+    expect(text).toContain('- Tue · Pancakes (cooked)');
+
+    expect(planShareText(emptyPlan())).toBe('🍽 This week has no dinners planned yet.');
   });
 });

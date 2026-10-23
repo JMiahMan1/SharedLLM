@@ -10,13 +10,14 @@ import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
 import ShareToChatSheet from '../components/bible/ShareToChatSheet';
 import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
-import { SHOPPING_PATH, SHOPPING_TITLE, buildShoppingList, ingredientLines } from '../lib/shoppingList';
+import { SHOPPING_PATH, SHOPPING_TITLE, buildShoppingList, ingredientLines, shoppingShareText } from '../lib/shoppingList';
 import {
   buildMealPlan,
   emptyPlan,
   parseMealPlan,
   planLevel,
   pickSurprise,
+  planShareText,
   PLAN_DAYS,
   PLAN_PATH,
   PLAN_TITLE,
@@ -31,6 +32,15 @@ interface RecipeSummary {
   title: string;
   path: string;
   modified?: string;
+}
+
+/** One pending share: what the sheet shows and the message it builds. */
+interface ShareRequest {
+  reference: string;
+  text: string;
+  heading: string;
+  previewIcon: string;
+  buildMessage: (note: string) => string;
 }
 
 function notesOf(response: ExecutionResponse | undefined): RecipeSummary[] {
@@ -52,8 +62,9 @@ export default function Recipes() {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [saving, setSaving] = useState(false);
-  const [share, setShare] = useState<{ recipe: RecipeSummary; body: string } | null>(null);
+  const [share, setShare] = useState<ShareRequest | null>(null);
   const [sharePath, setSharePath] = useState<string | null>(null);
+  const [sharingList, setSharingList] = useState(false);
   const [teaching, setTeaching] = useState(false);
   const [listing, setListing] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
@@ -143,7 +154,14 @@ export default function Recipes() {
     try {
       const res = await api.readNote(recipe.title, STORAGE, recipe.path, asUser);
       if (res.status === 'SUCCESS' && res.message) {
-        setShare({ recipe, body: noteBody(res.message) });
+        const recipeBody = noteBody(res.message);
+        setShare({
+          reference: recipe.title,
+          text: recipeSharePreview(recipeBody),
+          heading: `Share ${recipe.title} to chat`,
+          previewIcon: '🍽',
+          buildMessage: (note) => recipeShareText(recipe.title, recipeBody, note),
+        });
       } else {
         toast.error(res.message || 'Could not read that recipe');
       }
@@ -164,6 +182,39 @@ export default function Recipes() {
       toast.error('Could not sync the recipes');
     } finally {
       setTeaching(false);
+    }
+  };
+
+  const sharePlan = () => {
+    setShare({
+      reference: 'Meal plan',
+      text: planShareText(plan),
+      heading: 'Share the week plan to chat',
+      previewIcon: '🍽',
+      buildMessage: (note) => planShareText(plan, note),
+    });
+  };
+
+  const shareList = async () => {
+    setSharingList(true);
+    try {
+      const res = await api.readNote(SHOPPING_TITLE, STORAGE, SHOPPING_PATH, asUser);
+      if (res.status !== 'SUCCESS' || !res.message) {
+        toast.error('Build the shopping list first');
+        return;
+      }
+      const listBody = res.message;
+      setShare({
+        reference: 'Shopping list',
+        text: shoppingShareText(listBody),
+        heading: 'Share the shopping list to chat',
+        previewIcon: '🛒',
+        buildMessage: (note) => shoppingShareText(listBody, note),
+      });
+    } catch {
+      toast.error('Could not read the shopping list');
+    } finally {
+      setSharingList(false);
     }
   };
 
@@ -341,9 +392,14 @@ export default function Recipes() {
         <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="meal-plan">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-sm font-semibold text-slate-200">This week&apos;s dinners</span>
-            <button type="button" onClick={planSurprise} className="glass-button min-h-11 px-3 text-xs">
-              <Shuffle size={14} /> Surprise me
-            </button>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={planSurprise} className="glass-button min-h-11 px-3 text-xs">
+                <Shuffle size={14} /> Surprise me
+              </button>
+              <button type="button" onClick={sharePlan} className="glass-button min-h-11 px-3 text-xs">
+                <Share2 size={14} /> Share plan
+              </button>
+            </div>
           </div>
           {recipes.length === 0 && (
             <p className="text-xs text-slate-500">Add a few recipes first, then pick one per day.</p>
@@ -394,6 +450,15 @@ export default function Recipes() {
             >
               {listing ? <Loader2 size={14} className="animate-spin" /> : <ShoppingCart size={14} />}
               Build shopping list
+            </button>
+            <button
+              type="button"
+              onClick={() => void shareList()}
+              disabled={sharingList}
+              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
+            >
+              {sharingList ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}
+              Share list
             </button>
             <button
               type="button"
@@ -470,7 +535,16 @@ export default function Recipes() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setShare({ recipe: selected, body })}
+                  onClick={() => {
+                    const recipeBody = body;
+                    setShare({
+                      reference: selected.title,
+                      text: recipeSharePreview(recipeBody),
+                      heading: `Share ${selected.title} to chat`,
+                      previewIcon: '🍽',
+                      buildMessage: (note) => recipeShareText(selected.title, recipeBody, note),
+                    });
+                  }}
                   className="glass-button min-h-11 px-3 text-xs"
                 >
                   <Share2 size={14} /> Share to chat
@@ -511,11 +585,11 @@ export default function Recipes() {
 
       {share && (
         <ShareToChatSheet
-          reference={share.recipe.title}
-          text={recipeSharePreview(share.body)}
-          heading={`Share ${share.recipe.title} to chat`}
-          previewIcon="🍽"
-          buildMessage={(note) => recipeShareText(share.recipe.title, share.body, note)}
+          reference={share.reference}
+          text={share.text}
+          heading={share.heading}
+          previewIcon={share.previewIcon}
+          buildMessage={share.buildMessage}
           onClose={() => setShare(null)}
         />
       )}

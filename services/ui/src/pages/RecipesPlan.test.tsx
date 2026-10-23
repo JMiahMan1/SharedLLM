@@ -33,6 +33,8 @@ const getMe = vi.mocked(api.getMe);
 const listNotes = vi.mocked(api.listNotes);
 const readNote = vi.mocked(api.readNote);
 const writeNote = vi.mocked(api.writeNote);
+const getTalkConversations = vi.mocked(api.getTalkConversations);
+const sendTalkMessage = vi.mocked(api.sendTalkMessage);
 
 function listResponse(titles: string[]) {
   return {
@@ -75,6 +77,13 @@ describe('Recipes week plan', () => {
       (async (title: string) => (title === 'Meal plan' ? PLAN_RESPONSE : RECIPE_RESPONSE)) as never,
     );
     writeNote.mockResolvedValue({ status: 'SUCCESS', message: '', service: 'note_write' } as never);
+    getTalkConversations.mockResolvedValue({
+      status: 'SUCCESS',
+      message: '',
+      service: 'talk_conversations',
+      detail: { conversations: [{ token: 'room-1', display_name: 'Family' }] },
+    } as never);
+    sendTalkMessage.mockResolvedValue({ status: 'SUCCESS', message: '', service: 'talk_send' } as never);
   });
 
   it('picks a day, marks it cooked, and saves the plan', async () => {
@@ -157,5 +166,24 @@ describe('Recipes week plan', () => {
     expect(body.category).toBe(RECIPES_DIR);
     expect(body.content).toContain('#shopping-list');
     expect(body.content).toContain('- [ ] 2 cups flour');
+  });
+
+  it('shares the week plan to a family chat', async () => {
+    renderRecipes();
+
+    // Wait for the recipe list before opening the plan.
+    await screen.findByText('Pancakes');
+    fireEvent.click(await screen.findByRole('button', { name: /week plan/i }));
+    await screen.findByTestId('meal-plan');
+
+    fireEvent.click(screen.getByRole('button', { name: /share plan/i }));
+
+    fireEvent.click(await screen.findByTestId('bible-share-chat-target'));
+
+    await waitFor(() => expect(sendTalkMessage).toHaveBeenCalled());
+    const sent = sendTalkMessage.mock.calls[0][0];
+    expect(sent.token).toBe('room-1');
+    expect(sent.message).toContain("This week's dinners");
+    expect(sent.message).toContain('Mon · Chicken Chili');
   });
 });
