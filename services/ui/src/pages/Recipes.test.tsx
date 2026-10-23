@@ -258,4 +258,17 @@ describe('Recipes', () => {
     expect(body.content).toContain('Tags:');
     expect(body.content).toContain('- [ ] 4 cups water');
   });
+
+  it('filters the shelf by name', async () => {
+    listNotes.mockResolvedValue(listResponse(['Pancakes', 'Chicken Chili']));
+    renderRecipes();
+    await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText('Filter recipes'), { target: { value: 'chick' } });
+    expect(screen.queryByText('Pancakes')).toBeNull();
+    expect(screen.getByText('Chicken Chili')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Filter recipes'), { target: { value: 'zzz' } });
+    expect(screen.getByText('No recipes match “zzz”.')).toBeTruthy();
+  });
 });
