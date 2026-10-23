@@ -322,8 +322,8 @@ point.
 - [ ] **Activity feed (music, games, pages, verses).** Telemetry stores a capped per-person
       stream (`POST/GET /api/telemetry/activity`) and execution records through
       `activity.record`; trivia wins, media plays (music/video/podcast/audiobook) and app
-      feature pages (the route beacon, posted from the web bundle) are wired, and Bible
-      chapter reads land as a chapter opens in the reader; devotionals come next.
+      feature pages (the route beacon, posted from the web bundle) are wired; Bible chapter
+      reads and imported devotional or study-book pages land as they open in the reader.
 - [ ] **Music everywhere, not just Jarvis.** Baseline: everything played through the house
       media stack (local library and `spotify://` through Music Assistant). If possible:
       each member links their Spotify account (Web API `recently-played`, opt-in) so
