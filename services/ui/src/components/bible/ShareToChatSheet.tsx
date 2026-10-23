@@ -18,15 +18,25 @@ export default function ShareToChatSheet({
   reference,
   text,
   version,
+  heading,
+  previewIcon = '📖',
+  buildMessage,
   onClose,
   onSent,
 }: {
   reference: string;
   text: string;
   version?: string;
+  /** Sheet title; defaults to the verse phrasing. */
+  heading?: string;
+  /** Emoji for the preview line (a verse from the Bible reader, a plate from Recipes). */
+  previewIcon?: string;
+  /** Override for the outgoing message body. */
+  buildMessage?: (note: string) => string;
   onClose: () => void;
   onSent?: () => void;
 }) {
+  const sheetTitle = heading ?? `Share ${reference} to chat`;
   const navigate = useNavigate();
   const people = useFamilyDirectory();
   const [note, setNote] = useState('');
@@ -37,10 +47,11 @@ export default function ShareToChatSheet({
     select: (response) => detailList<TalkConversation>(response, 'conversations'),
   });
   const send = useMutation({
-    mutationFn: (token: string) => api.sendTalkMessage({ token, message: verseShareText(reference, text, version, note) }),
+    mutationFn: (token: string) =>
+      api.sendTalkMessage({ token, message: buildMessage ? buildMessage(note) : verseShareText(reference, text, version, note) }),
     onSuccess: (response, token) => {
       if (response.status && response.status !== 'SUCCESS') {
-        toast.error(response.message || 'The verse could not be sent');
+        toast.error(response.message || 'The message could not be sent');
         return;
       }
       const name = conversations.find((c) => c.token === token)?.display_name ?? 'the chat';
@@ -64,16 +75,16 @@ export default function ShareToChatSheet({
         ),
       );
     },
-    onError: (e) => toast.error(errorText(e, 'The verse could not be sent')),
+    onError: (e) => toast.error(errorText(e, 'The message could not be sent')),
   });
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={`Share ${reference} to chat`}>
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={sheetTitle}>
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div className="relative w-full sm:max-w-md bg-slate-950/97 border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-h-[85vh] flex flex-col" data-testid="bible-share-chat-sheet">
         <div className="flex items-center justify-between gap-3 mb-3">
           <p className="text-sm font-semibold text-white flex items-center gap-2">
-            <MessageCircle size={16} className="text-sky-300" /> Share {reference} to chat
+            <MessageCircle size={16} className="text-sky-300" /> {sheetTitle}
           </p>
           <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-slate-400 hover:text-white">
             <X size={16} />
@@ -81,7 +92,7 @@ export default function ShareToChatSheet({
         </div>
 
         <p className="text-xs text-slate-300 rounded-xl bg-white/5 border border-white/10 p-3 mb-3 line-clamp-4">
-          📖 <span className="font-semibold text-amber-200">{reference}</span>: “{text}”
+          {previewIcon} <span className="font-semibold text-amber-200">{reference}</span>: “{text}”
         </p>
         <input
           type="text"

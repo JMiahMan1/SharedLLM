@@ -258,6 +258,12 @@ Because notes resolve to the caller's own account, an admin can flip the same
 "Send as" control to the Admin identity to keep one house cookbook, and every
 other member keeps their own. Non-admins never see the control.
 
+The first 120 imported recipes are level-tagged notes (`#level-1` … `#level-3`).
+A recipe can be shared straight into a family chat — the message is a short
+`🍽 title: excerpt` with an optional note, sent through the same sheet the
+Bible reader uses. The header's **Teach Jarvis** button runs the notes RAG sync
+over `Recipes/` so Jarvis can answer from the shelf.
+
 ## Voice signatures (shipped)
 
 Each person enrolls under Identity -> Vocal Signature by reading three short

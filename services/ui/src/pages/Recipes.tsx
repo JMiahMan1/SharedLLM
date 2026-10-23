@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Loader2, Plus, Save, Trash2, Users } from 'lucide-react';
+import { BookOpen, Loader2, Plus, Save, Share2, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
@@ -8,6 +8,8 @@ import { noteBody } from '../lib/notesMeta';
 import type { ExecutionResponse } from '../types/api';
 import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
+import ShareToChatSheet from '../components/bible/ShareToChatSheet';
+import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
 
 export const RECIPES_DIR = 'Recipes';
 const STORAGE = 'nextcloud';
@@ -37,6 +39,9 @@ export default function Recipes() {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [saving, setSaving] = useState(false);
+  const [share, setShare] = useState<{ recipe: RecipeSummary; body: string } | null>(null);
+  const [sharePath, setSharePath] = useState<string | null>(null);
+  const [teaching, setTeaching] = useState(false);
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
@@ -114,6 +119,35 @@ export default function Recipes() {
     }
   };
 
+  const openShare = async (recipe: RecipeSummary) => {
+    setSharePath(recipe.path);
+    try {
+      const res = await api.readNote(recipe.title, STORAGE, recipe.path, asUser);
+      if (res.status === 'SUCCESS' && res.message) {
+        setShare({ recipe, body: noteBody(res.message) });
+      } else {
+        toast.error(res.message || 'Could not read that recipe');
+      }
+    } catch {
+      toast.error('Could not read that recipe');
+    } finally {
+      setSharePath(null);
+    }
+  };
+
+  const teachJarvis = async () => {
+    setTeaching(true);
+    try {
+      const res = await api.syncNotesRag({ directories: [RECIPES_DIR] });
+      if (res.status === 'SUCCESS') toast.success('Jarvis is learning the recipes');
+      else toast.error(res.message || 'Could not sync the recipes');
+    } catch {
+      toast.error('Could not sync the recipes');
+    } finally {
+      setTeaching(false);
+    }
+  };
+
   return (
     <div className="space-y-4" data-testid="recipes">
       <div className="glass-panel p-4 rounded-2xl border border-white/5 space-y-2">
@@ -130,7 +164,18 @@ export default function Recipes() {
           Saved in Nextcloud under <code className="text-slate-300">{RECIPES_DIR}/</code>: yours, or the house account
           when an admin switches.
         </p>
-        {isAdmin && <SendAsSelector value={sendAs} onChange={(next) => { startNew(); setSendAs(next); }} />}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void teachJarvis()}
+            disabled={teaching}
+            className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+          >
+            {teaching ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+            Teach Jarvis
+          </button>
+          {isAdmin && <SendAsSelector value={sendAs} onChange={(next) => { startNew(); setSendAs(next); }} />}
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
@@ -162,6 +207,19 @@ export default function Recipes() {
               </button>
               <button
                 type="button"
+                aria-label={`Share ${recipe.title}`}
+                onClick={() => void openShare(recipe)}
+                disabled={sharePath === recipe.path}
+                className="glass-button flex h-11 w-11 shrink-0 items-center justify-center p-0 disabled:opacity-60"
+              >
+                {sharePath === recipe.path ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Share2 size={14} />
+                )}
+              </button>
+              <button
+                type="button"
                 aria-label={`Delete ${recipe.title}`}
                 onClick={() => void remove(recipe)}
                 className="glass-button flex h-11 w-11 shrink-0 items-center justify-center p-0"
@@ -178,9 +236,18 @@ export default function Recipes() {
               {selected ? 'Editing' : 'New recipe'}
             </span>
             {selected && (
-              <button type="button" onClick={startNew} className="glass-button min-h-11 px-3 text-xs">
-                <Plus size={14} /> New recipe
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShare({ recipe: selected, body })}
+                  className="glass-button min-h-11 px-3 text-xs"
+                >
+                  <Share2 size={14} /> Share to chat
+                </button>
+                <button type="button" onClick={startNew} className="glass-button min-h-11 px-3 text-xs">
+                  <Plus size={14} /> New recipe
+                </button>
+              </div>
             )}
           </div>
           <input
@@ -209,6 +276,17 @@ export default function Recipes() {
           </button>
         </div>
       </div>
+
+      {share && (
+        <ShareToChatSheet
+          reference={share.recipe.title}
+          text={recipeSharePreview(share.body)}
+          heading={`Share ${share.recipe.title} to chat`}
+          previewIcon="🍽"
+          buildMessage={(note) => recipeShareText(share.recipe.title, share.body, note)}
+          onClose={() => setShare(null)}
+        />
+      )}
     </div>
   );
 }

@@ -94,10 +94,14 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 
 ## Phase 2 — Recipes page touchpoints
 
-- [ ] **Share to chat** on recipe cards and in the editor — reuse the existing
-      `ShareToChatSheet` the Bible reader uses (reference + text into a family chat).
-- [ ] Family tab: link/section to Recipes if it is not reachable from there today.
-- [ ] "Teach Jarvis" RAG sync over `Recipes/` if it is missing (and run it after import).
+- [x] **Share to chat** on recipe cards and in the editor — reuses the Bible
+      reader's `ShareToChatSheet`, generalized with an optional title, icon and
+      message builder. The chat message is a short `🍽 title: excerpt` with an
+      optional intro note, never the whole file.
+- [x] Family tab: Recipes is reachable today (Family → Create renders the
+      page); a dedicated link can come with the meal-plan view.
+- [x] "Teach Jarvis" RAG sync over `Recipes/` — a header button on the Recipes
+      page calls the notes `sync_rag` route for the recipes folder.
 
 ## Phase 3 — weekly meal plan
 
