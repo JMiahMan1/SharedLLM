@@ -329,15 +329,13 @@ point.
       each member links their Spotify account (Web API `recently-played`, opt-in) so
       listening in the Spotify app itself lands on the profile; every other music app is
       covered by the phone's media-session reader (title, artist, app package).
-- [ ] **YouTube and every external app (the phone pulls it).** A notification-listener
-      media-session reader on the phone pulls what YouTube and any other external app
-      publishes while playing — video title and creator where provided, tracks and artists
-      in music apps, podcast episodes, browser media — and `UsageStatsManager` says which
-      app and for how long, so external-app watching and listening land on the digital
-      profile next to Jarvis playback; the on-device filter adds plain-domain visits.
-      Creators are first-class entities: their themes are reviewed once and the review
-      applies everywhere they appear. Metadata depth varies by app; we take what each one
-      exposes and fill in from usage and domains.
+- [x] **YouTube and every external app (the phone pulls it).** First brick: a
+      notification-access media-session reader on the phone pulls what YouTube
+      and any other external app publishes while playing — title and creator
+      where provided, tracks and artists in music apps, podcast episodes,
+      browser media — and posts it to the activity feed (`feature: media`,
+      `source: external`) for the family profile. Deeper metadata and per-app
+      foreground time follow on the same engine.
 - [x] **Device usage (Android).** First brick: daily screen time with when the day started and
       stopped (first and last use) and the session count land via the phone's Usage Access
       (`PhoneUsagePlugin` → `POST /api/usage` → telemetry `tel:usage:{user}`). Per-app
