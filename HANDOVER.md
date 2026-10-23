@@ -5,13 +5,12 @@ Every claim below was verified against the live system unless marked **planned**
 
 ## 0. Snapshot
 
-- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`; the only
-  untracked file is this handover.
-- Live: `https://jarvis.sumemail.com` — version **1.5.1**, OTA bundle `git_sha`
-  **d766a19f** (verified 2026-10-23, with the USDA food seed answering search),
+- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
+- Live: `https://jarvis.sumemail.com` — version **1.5.2**, OTA bundle `git_sha`
+  **451e671b** (verified 2026-10-23, with Keep-style visual note editor and USDA food seed),
   APK available.
   - Containers were deployed per feature: identity **8e4e8a27**, execution
-    **091e5d85**, gateway **f5304149**, health and ui **d766a19f** (see the
+    **451e671b**, gateway **f5304149**, health **d766a19f**, ui **451e671b** (see the
     commit list below).
 - Check anytime:
   - `curl -fsS https://jarvis.sumemail.com/api/app-updates/version`
@@ -22,17 +21,20 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
-- **Keep-style visual note editor** (this session, see `docs/NOTES.md` "Visual editor"): notes
-  open as formatted text with tickable checkboxes and a toolbar (bold, italic, strike, heading,
-  lists, checklist, text colour, highlight, size); the stored file stays Nextcloud Notes
-  markdown (`lib/noteRichText.ts`). Colour/highlight/size are the only non-markdown pieces,
-  stored as a whitelisted inline `<span style>` (chosen by Jeremiah's brief; Nextcloud clients
-  without HTML rendering show the tag around that text). Notes the editor could not reproduce
-  exactly open as text instead. Widgets and `check_off` ignore the span. Verified in headless
-  Chromium (format, tick, Enter, clear colour); **not yet deployed** — needs `ui` and
-  `execution`.
+- `73ef660c` CI fix: **pin BIBLE_BOOKS_PATH in conftest** so full-suite test_config_env_isolation passes.
+- `7b5dc17e` CI fix: **give five service tests unique basenames** (`test_gateway_artifacts.py`,
+  `test_storage_artifacts.py`, `test_geo_activity_feed.py`, `test_telemetry_activity.py`,
+  `test_telemetry_api.py`) so pytest --collect-only in SOA Microservices CI succeeds without
+  duplicate module collisions.
+- `451e671b` Notes: **Keep-style visual note editor over Nextcloud markdown** (see `docs/NOTES.md`
+  "Visual editor") — notes open as formatted text with tickable checkboxes and a formatting
+  toolbar (bold, italic, strike, heading, bullet/number lists, checklist, text colour,
+  highlight, size); the stored file stays Nextcloud Notes compatible markdown (`lib/noteRichText.ts`).
+  Colour/highlight/size are stored as whitelisted inline `<span style>` tags; notes with
+  unsupported markdown (tables, code fences, etc.) open as text with a notice so they are
+  never flattened. Widgets and `check_off` ignore the spans. Deployed and verified live.
 - `cc816bdf` CI fix: Android `PhoneUsagePlugin` `JSONException` compile error and `HEALTH_HUB.md`
-  heading lint (all four workflows were red on `5234b416`; green again).
+  heading lint (all four workflows green again).
 
 - `07b8feb5` Family guard: **imported devotional and study-book pages land on the activity
   feed** — the shared imported-book reader posts one activity event as each page opens
