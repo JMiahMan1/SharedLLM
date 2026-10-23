@@ -4224,6 +4224,12 @@ export const api = {
     const resp = await apiClient.post('/api/bible/admin/library', { path: path ?? '' });
     return resp.data;
   },
+
+  /** A music suggestion for the signed-in member, derived from their listening. */
+  async getMusicRecommendation(): Promise<{ status: string; recommendation: { lane: string; artist: string; style: string; reason: string; matched_on: string; kind: string } | null }> {
+    const resp = await apiClient.get('/api/recommendations/music');
+    return resp.data;
+  },
 };
 
 /** Notice category to on/off; a category that is absent is on. */

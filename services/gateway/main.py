@@ -112,6 +112,7 @@ from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WOR
 from services.gateway.external_agent import run_external_agent
 from services.common.circuit_breaker import breaker_snapshots
 from services.common.entity_ids import usable_entity_id
+from services.common.music_recommendations import recommend_music
 from services.common.relay import until_either_ends
 from services.gateway import calls, drawing, family_safety, network_routes, notices, push_routes
 from services.shared import ma_library
@@ -5183,6 +5184,37 @@ async def get_usage(request: Request, user: str, days: int = 7):
             f"{TELEMETRY_SVC}/api/telemetry/usage/{user}", params={"days": days}, headers=headers
         )
     return await _proxy_json_response(resp)
+
+
+@app.get("/api/recommendations/music")
+async def get_music_recommendation(request: Request):
+    """A music suggestion for the signed-in member, derived from their listening.
+
+    The raw listening feed stays parents-only; only the derived suggestion
+    (a Christian artist with a similar style) is returned to the member.
+    """
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{TELEMETRY_SVC}/api/telemetry/activity/{user}", params={"limit": 50}, headers=headers
+        )
+    if resp.status != 200:
+        return {"status": "SUCCESS", "recommendation": None}
+    try:
+        data = await resp.json(content_type=None)
+    except Exception:
+        data = {}
+    events = (data or {}).get("events") or []
+    music_items = [
+        e for e in events
+        if str(e.get("feature") or "").lower() in ("media", "music")
+    ]
+    rec = recommend_music(music_items)
+    return {"status": "SUCCESS", "recommendation": rec}
 
 
 @app.post("/api/communication/notes/read")
