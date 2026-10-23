@@ -242,6 +242,41 @@ def _assistant_post(answer: str) -> str:
     return f"{answer.strip()}\n\n{ENVELOPE_FENCE}\n{body}\n{ENVELOPE_FENCE}"
 
 
+async def _room_context(provider: Any, token: str, limit: int = 20) -> list[dict[str, str]]:
+    """The room's own recent messages, so answers follow what was said.
+
+    The stored transcript only ever holds Jarvis Q&A; the family's chatter is
+    in the room itself, so it is read straight from the conversation. Jarvis's
+    own replies carry the envelope and are trimmed back to their text.
+    """
+    ok, data, _message = await _talk_request_with_retry(
+        provider,
+        "GET",
+        f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(token)}",
+        params={"lookIntoFuture": "0", "limit": str(limit)},
+    )
+    if not ok or not isinstance(data, list):
+        return []
+    turns: list[dict[str, str]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        summary = _message_summary(item)
+        if summary["deleted"] or summary["system_message"]:
+            continue
+        text = str(summary["message"] or "").strip()
+        if not text:
+            continue
+        if ENVELOPE_FENCE in text:
+            text = text.split(ENVELOPE_FENCE)[0].strip()
+            if text:
+                turns.append({"role": "assistant", "content": text})
+        else:
+            name = str(summary["actor_display_name"] or "family").strip()
+            turns.append({"role": "user", "content": f"{name}: {text}"})
+    return turns[-limit:]
+
+
 async def run_jarvis_orchestration(query: str, token: str, user_context: Any, reply_to: int | None = None):
     """Invokes the execution loop orchestrator and delivers the result back to NextCloud Talk."""
     try:
@@ -274,10 +309,13 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any, re
             "Always respond in a wise, warm, and helpful manner. Place the JSON block at the end of your response for tool executions."
         )
 
+        # The room's own recent messages lead; the stored transcript is the
+        # fallback when the conversation cannot be read.
+        room_context = await _room_context(provider, token) or await get_room_history(token)
+
         job_payload = {
             "query": query,
-            # The room's own short transcript, so answers follow the room.
-            "history": await get_room_history(token),
+            "history": room_context,
             "model": await _get_talk_model_from_settings(),
             "creds": creds,
             "system": system_prompt,

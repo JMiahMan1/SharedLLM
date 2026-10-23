@@ -638,7 +638,7 @@ class RavenWorker:
 
                 msg_resp = await client.post(
                     url,
-                    json={"user_context": creds, "action": "messages", "token": token, "limit": 5},
+                    json={"user_context": creds, "action": "messages", "token": token, "limit": 20},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
                 if msg_resp.status != 200:
@@ -676,6 +676,27 @@ class RavenWorker:
                         # Asked through the app: execution's send is already answering it.
                         if await r.exists(JARVIS_TALK_CLAIM_KEY.format(token=token, message_id=msg_id)):
                             continue
+                        # Everything said in the room before the question, so
+                        # the answer follows the conversation (the fields are
+                        # execution's messages summary, snake_case).
+                        context: list[dict[str, str]] = []
+                        for older in messages:
+                            try:
+                                older_id = int(older.get("id") or 0)
+                            except (TypeError, ValueError):
+                                continue
+                            if older_id >= int(msg_id):
+                                break
+                            older_text = str(older.get("message") or "").strip()
+                            if not older_text or older.get("deleted") or older.get("system_message"):
+                                continue
+                            if "```jarvis-envelope" in older_text:
+                                answer = older_text.split("```jarvis-envelope")[0].strip()
+                                if answer:
+                                    context.append({"role": "assistant", "content": answer})
+                            else:
+                                speaker = older.get("actor_display_name") or older.get("actor_id") or "family"
+                                context.append({"role": "user", "content": f"{speaker}: {older_text}"})
                         query = re.sub(r"@jarvis\b[,:]?", "", content, flags=re.I).strip()
                         log.info(f"[TalkMonitor] Detected @jarvis mention in room {token}: {query}")
 
@@ -684,6 +705,7 @@ class RavenWorker:
                             user_id=creds["user"],
                             payload={
                                 "query": query,
+                                "history": context[-20:],
                                 "model": model,
                                 "creds": creds,
                                 "_talk_token": token,
