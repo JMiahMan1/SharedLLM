@@ -4230,6 +4230,12 @@ export const api = {
     const resp = await apiClient.get('/api/recommendations/music');
     return resp.data;
   },
+
+  /** A video/creator suggestion for the signed-in member, derived from their watching. */
+  async getVideoRecommendation(): Promise<{ status: string; recommendation: { theme: string; creator: string | null; style: string; reason: string; matched_on: string; kind: string; redeemed: boolean; redirect_to?: string } | null }> {
+    const resp = await apiClient.get('/api/recommendations/video');
+    return resp.data;
+  },
 };
 
 /** Notice category to on/off; a category that is absent is on. */
