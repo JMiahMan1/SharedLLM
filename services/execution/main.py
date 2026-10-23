@@ -266,7 +266,7 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
                 if not entity_id:
                     continue
                 try:
-                    state = await ha_client.get_state(ha_url, ha_token, entity_id, account="the system account")
+                    state = await ha_client.get_state(ha_url, ha_token, entity_id, account="system account")
                     if not state:
                         continue
                     raw = state.get("state")

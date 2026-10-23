@@ -144,12 +144,12 @@ async def get_state(ha_url: str, ha_token: str, entity_id: str, account: str = "
                     return None
                 resp.raise_for_status()
                 payload = await resp.json()
-                await credential_alerts.auth_ok("home_assistant", account or "the stored login")
+                await credential_alerts.auth_ok("home_assistant", account or "stored login")
                 return payload
         except Exception as e:
             status = getattr(e, "status", None)
             if status in (401, 403):
-                await credential_alerts.auth_failed("home_assistant", account or "the stored login", f"HTTP {status}")
+                await credential_alerts.auth_failed("home_assistant", account or "stored login", f"HTTP {status}")
             log.error(f"[ha_client] get_state({entity_id}) failed: {type(e).__name__}: {e}")
             return None
 
@@ -214,12 +214,12 @@ async def get_states(ha_url: str, ha_token: str, account: str = "") -> list:
             async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 payload = await resp.json()
-                await credential_alerts.auth_ok("home_assistant", account or "the stored login")
+                await credential_alerts.auth_ok("home_assistant", account or "stored login")
                 return payload
         except Exception as e:
             status = getattr(e, "status", None)
             if status in (401, 403):
-                await credential_alerts.auth_failed("home_assistant", account or "the stored login", f"HTTP {status}")
+                await credential_alerts.auth_failed("home_assistant", account or "stored login", f"HTTP {status}")
             log.error(f"[ha_client] get_states failed: {type(e).__name__}: {e}")
             return []  # Ensure empty list on error
 
@@ -294,7 +294,7 @@ async def get_areas(ha_url: str, ha_token: str, account: str = "") -> dict:
             async with client.post(url, headers=headers, json={"template": template}, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 raw_data = await resp.json(content_type=None)
-                await credential_alerts.auth_ok("home_assistant", account or "the stored login")
+                await credential_alerts.auth_ok("home_assistant", account or "stored login")
                 # Convert list of dicts to a single mapping dict
                 if isinstance(raw_data, list):
                     return {item["eid"]: item["a"] for item in raw_data if item.get("a")}
@@ -302,7 +302,7 @@ async def get_areas(ha_url: str, ha_token: str, account: str = "") -> dict:
         except Exception as e:
             status = getattr(e, "status", None)
             if status in (401, 403):
-                await credential_alerts.auth_failed("home_assistant", account or "the stored login", f"HTTP {status}")
+                await credential_alerts.auth_failed("home_assistant", account or "stored login", f"HTTP {status}")
             log.error(f"[ha_client] get_areas failed: {e}")
             return {}
     return {}  # Fallback
