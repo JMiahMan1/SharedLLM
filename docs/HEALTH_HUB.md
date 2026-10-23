@@ -326,12 +326,17 @@ point.
 - [ ] **Music everywhere, not just Jarvis.** Baseline: everything played through the house
       media stack (local library and `spotify://` through Music Assistant). If possible:
       each member links their Spotify account (Web API `recently-played`, opt-in) so
-      listening in the Spotify app itself lands on the profile; for other services the
-      Android app reads media sessions (title, artist, package).
-- [ ] **Video and creators (YouTube and the like).** The same media-session reading catches
-      what video is playing (title, channel) and the on-device filter reports video domains,
-      so watching lands on the digital profile next to music. Creators are first-class
-      entities: their themes are reviewed once and the review applies everywhere they appear.
+      listening in the Spotify app itself lands on the profile; every other music app is
+      covered by the phone's media-session reader (title, artist, app package).
+- [ ] **YouTube and every external app (the phone pulls it).** A notification-listener
+      media-session reader on the phone pulls what YouTube and any other external app
+      publishes while playing — video title and creator where provided, tracks and artists
+      in music apps, podcast episodes, browser media — and `UsageStatsManager` says which
+      app and for how long, so external-app watching and listening land on the digital
+      profile next to Jarvis playback; the on-device filter adds plain-domain visits.
+      Creators are first-class entities: their themes are reviewed once and the review
+      applies everywhere they appear. Metadata depth varies by app; we take what each one
+      exposes and fill in from usage and domains.
 - [ ] **Device usage (Android).** `UsageStatsManager` foreground time and screen sessions per
       app — the Phase 10 engine that the screen-time and top-apps views share.
 - [ ] **Calls and SMS (Android).** The sideloaded app collects the call log and SMS content
