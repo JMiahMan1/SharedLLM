@@ -169,6 +169,52 @@ MyFitnessPal, plus UX award winners and published case studies.
   dashboard and the Android home screen.
 - **Family hub** — challenges, cheers and shared goals live where the family already is.
 
+## Food data sources (decided 2026-10-22)
+
+Nutrition today is live OpenFoodFacts only: one source, rate-limited (10 searches/min,
+15 product reads/min per IP) and weak on generic whole foods. The decided shape is
+**two sources, one door**, from the 2026-10-22 comparison research (12 candidates):
+
+| Source | Shape | Licence / cost | Local use | Verdict |
+| --- | --- | --- | --- | --- |
+| USDA FDC non-branded | 13,620 foods (measured), 22,046 FNDDS portion weights | CC0 public domain | bulk zips allowed | **mirror: the seed** |
+| USDA FDC Branded | 433,916 products | CC0 | allowed | skip (OFF covers brands) |
+| Open Food Facts | 4.83M products, barcodes | ODbL/DbCL, free | dumps + caching encouraged | **live search + barcode, permanent cache** |
+| Food.com dataset | 522k recipes + nutrition | CC0 | allowed | **recipe corpus** (see [RECIPES.md](RECIPES.md)) |
+| TheMealDB | 793 meals, no nutrition | dev key, attribution | cacheable | parser test set only |
+| Nutritionix | 1.27M items | $499/mo | caching prohibited | reject |
+| Edamam | per-ingredient analysis | $14–$299/mo | 4-macro cap, delete on cancel | reject |
+| FatSecret | food + diary | free 5k calls/day | 24 h / IDs only; bans private-network apps | reject |
+| Spoonacular | recipes + ingredients | $29–$149/mo | 1 h cache cap | reject |
+| API Ninjas (CalorieNinjas) | nutrition | $99/mo for storage | no caching below Business | reject |
+| CNF / CoFID / AFCD | national food tables | OGL / CC BY | allowed | optional, later |
+
+How it lands:
+
+- `scripts/build_fdc_seed.py` downloads the three bulk archives (~14 MB zipped),
+  verifies them, imports a read-only SQLite seed at `/data/fdc-seed.db` (beside
+  `health.db` on the existing `./data/health` mount), asserts the known counts
+  (395 / 7,793 / 5,432) and writes a `meta` table with release, source URLs,
+  licence and build time. FTS5 over names; the NDB number / FNDDS food code are
+  the stable keys (FDC_ID churns on every record change). Missing nutrients stay
+  NULL — rendered "not reported", never zero.
+- `/food/search` serves seed hits first (each with household portions, e.g.
+  "1 cup, chopped" → grams) then appends OpenFoodFacts results once per
+  submitted query; every result carries `source` (`usda_fdc` | `openfoodfacts`)
+  and the response says whether the seed is present. Seed missing → OFF only,
+  one log line, no error; OFF down → the seed still answers.
+- Barcodes: check the service's own permanent per-product cache, else read the
+  OFF product endpoint (still v2 there: it normalizes `*_100g` values and keeps
+  `serving_quantity`, which the v3 payload drops), then cache forever. OFF and
+  USDA rows are never mixed in one record. Unknown barcodes arrive as HTTP 200
+  with `status: 0` — the body decides, not the status.
+- Attribution "Contains data from Open Food Facts, ODbL" (and USDA FDC, public
+  domain) lives in the nutrition About surface.
+
+Self-hosting all of Open Food Facts (Product Opener: 8 GB RAM / 6 cores in its
+own dev guide, 16 GB dumps) is out for a family box; the per-product cache plus
+live search is the ecosystem-standard pattern.
+
 ## Phases
 
 ### Phase 0 — decisions
@@ -197,7 +243,8 @@ MyFitnessPal, plus UX award winners and published case studies.
 ### Phase 4 — nutrition logging
 
 - [ ] Recipe-first logging: a cooked planned meal logs its per-serving macros with a portion picker. `FoodEntry` carries `recipe_path`; the recipe import/one-tap flow is not built.
-- [x] Quick add: OpenFoodFacts search, barcode lookup and manual entry. Voice and photo logging remain future work.
+- [x] Quick add: USDA seed search (generic foods, household portions), OpenFoodFacts search, cached barcode lookup and manual entry. Voice and photo logging remain future work.
+- [x] Food data depth: the read-only USDA seed is mirrored on the server (13,620 foods, per-100 g plus portions like "1 cup, chopped" = 91 g) and searched before OpenFoodFacts; barcode results are cached permanently. The seed is optional at runtime (`FDC_SEED_PATH`): absent → OFF-only, one log line, never an error.
 - [x] Water tracking. Fasting window indicator is not built.
 
 ### Phase 5 — budget and day view
@@ -226,14 +273,14 @@ MyFitnessPal, plus UX award winners and published case studies.
 
 - [x] Pure tests: BMR/budget maths, scores, portion scaling, density mapping and water. Streaks are not built.
 - [x] UI tests: log a meal (search + manual), day view, check-in, water and cycle opt-in/log/share. Challenge join and kid-mode UI hiding are not built.
-- [x] `npm run typecheck`, `npm run lint`, full UI suite (189 files / 1525 tests), `npm run build`, backend health tests (87), identity family-role tests and docs.
+- [x] `npm run typecheck`, `npm run lint`, full UI suite (191 files / 1538 tests), `npm run build`, backend health tests (108), identity family-role tests and docs.
 - [ ] Deploy `health gateway ui`, then verify `/health/ready`, the version endpoint and an authenticated `/api/health/profile`.
 
 ## Acceptance
 
 - [x] Each family member has a profile and their own Health day.
 - [ ] A planned dinner logs with one tap and shows calories, macros and portions.
-- [ ] Barcode lookup works; photo and voice logging are not built.
+- [x] Barcode lookup works with a permanent per-product cache; photo and voice logging are not built.
 - [x] Sleep and readiness show from manual data now and are device-ready; check-ins cover the no-wearable case.
 - [x] Cycle tracking is opt-in, private, shown only when the profile is female, and minors can share it only with their linked mother account. An adult can share with a spouse, who also sees phase-aware support suggestions clearly labelled as general ideas.
 - [ ] A family challenge is visible, joinable and shared in chat. Only opt-in scope sharing exists.

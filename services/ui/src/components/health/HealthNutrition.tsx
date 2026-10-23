@@ -72,6 +72,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
   const [mode, setMode] = useState<AddMode>('search');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FoodSearchItem[] | null>(null);
+  const [offlineSources, setOfflineSources] = useState<string[]>([]);
   const [selected, setSelected] = useState<FoodSearchItem | null>(null);
   const [grams, setGrams] = useState('');
   const [servings, setServings] = useState('1');
@@ -98,6 +99,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
     setMode('search');
     setQuery('');
     setResults(null);
+    setOfflineSources([]);
     setSelected(null);
     setGrams('');
     setServings('1');
@@ -109,6 +111,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
     mutationFn: (text: string) => api.searchFood(text, 10),
     onSuccess: (data) => {
       setResults(data.results);
+      setOfflineSources(data.offline_sources ?? []);
       if (data.results.length === 0) toast('No matches. Try a different wording or add it by hand.');
     },
     onError: (error: Error) => toast.error(error.message || 'Food search failed'),
@@ -147,8 +150,8 @@ export default function HealthNutrition({ onNavigate }: Props) {
           sodium_mg: per100.sodium_mg !== null ? per100.sodium_mg * factor : null,
           servings: Number(servings) || 1,
           serving_grams: gramsValue,
-          barcode: selected.code,
-          source: 'openfoodfacts',
+          barcode: selected.source === 'usda_fdc' ? null : selected.code,
+          source: selected.source === 'usda_fdc' ? 'usda_fdc' : 'openfoodfacts',
         });
       }
       const name = manual.name.trim();
@@ -351,6 +354,11 @@ export default function HealthNutrition({ onNavigate }: Props) {
               </form>
               {results && (
                 <div className="mt-2 divide-y divide-white/5" data-testid="food-search-results">
+                  {offlineSources.includes('openfoodfacts') && (
+                    <p className="py-2 text-[10px] text-amber-300" data-testid="food-search-offline">
+                      Branded products are offline right now — generic foods still work.
+                    </p>
+                  )}
                   {results.length === 0 ? (
                     <p className="py-3 text-xs text-slate-500">
                       No matches. Try a different wording, or add it by hand.
@@ -377,7 +385,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-xs font-medium text-slate-200">{item.name}</span>
                           <span className="block truncate text-[10px] text-slate-500">
-                            {item.brand}
+                            {item.source === 'usda_fdc' ? (item.brand ? `USDA · ${item.brand}` : 'USDA') : item.brand}
                             {item.per_100g.calories !== null ? ` · ${Math.round(item.per_100g.calories)} kcal / 100g` : ' · no calorie data'}
                           </span>
                         </span>
@@ -397,6 +405,20 @@ export default function HealthNutrition({ onNavigate }: Props) {
                 {selected.brand}
                 {selected.per_100g.calories !== null ? ` · ${Math.round(selected.per_100g.calories)} kcal / 100g` : ''}
               </p>
+              {selected.portions && selected.portions.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5" data-testid="food-portion-chips">
+                  {selected.portions.slice(0, 8).map((portion) => (
+                    <button
+                      key={`${portion.label}-${portion.grams}`}
+                      type="button"
+                      onClick={() => setGrams(String(portion.grams))}
+                      className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] text-slate-300"
+                    >
+                      {portion.label}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <label className="text-[11px] text-slate-500">
                   Portion (g)

@@ -280,7 +280,9 @@ describe('HealthNutrition', () => {
     getNutritionDay.mockResolvedValue(emptyNutrition());
     vi.mocked(api.searchFood).mockResolvedValue({
       query: 'apple',
-      source: 'openfoodfacts',
+      sources: ['openfoodfacts'],
+      offline_sources: [],
+      seed: { present: false, results: 0 },
       results: [
         {
           code: '123',
@@ -322,6 +324,65 @@ describe('HealthNutrition', () => {
       source: 'openfoodfacts',
     });
     expect(addFood.mock.calls[0][0].calories).toBeCloseTo(94.64, 1);
+  });
+
+  it('logs a seed food with a portion chip and shows the offline note', async () => {
+    getNutritionDay.mockResolvedValue(emptyNutrition());
+    vi.mocked(api.searchFood).mockResolvedValue({
+      query: 'broccoli',
+      sources: ['usda_fdc'],
+      offline_sources: ['openfoodfacts'],
+      seed: { present: true, results: 1 },
+      results: [
+        {
+          code: 'sr_legacy:11090',
+          name: 'Broccoli, raw',
+          brand: '',
+          image: null,
+          serving_size: null,
+          serving_grams: null,
+          source: 'usda_fdc',
+          portions: [
+            { label: '1 cup, chopped', grams: 91 },
+            { label: '1 stalk', grams: 151 },
+          ],
+          per_100g: {
+            calories: 34,
+            protein_g: 2.8,
+            carbs_g: 6.6,
+            fat_g: 0.4,
+            fiber_g: 2.6,
+            sugar_g: 1.7,
+            sodium_mg: 33,
+          },
+        },
+      ],
+    });
+    addFood.mockResolvedValue({} as never);
+
+    renderWithClient(<HealthNutrition onNavigate={() => {}} />);
+
+    const breakfast = await screen.findByTestId('meal-breakfast');
+    fireEvent.click(within(breakfast).getByText('Add'));
+    fireEvent.change(screen.getByLabelText('Search foods'), { target: { value: 'broccoli' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    expect(await screen.findByTestId('food-search-offline')).toBeTruthy();
+    fireEvent.click(await screen.findByText('Broccoli, raw'));
+    fireEvent.click(screen.getByRole('button', { name: '1 cup, chopped' }));
+    fireEvent.click(screen.getByTestId('confirm-add-food'));
+
+    await waitFor(() => expect(addFood).toHaveBeenCalled());
+    const body = addFood.mock.calls[0][0];
+    expect(body).toMatchObject({
+      day: '2026-10-22',
+      meal: 'breakfast',
+      name: 'Broccoli, raw',
+      servings: 1,
+      serving_grams: 91,
+      source: 'usda_fdc',
+    });
+    expect(body.barcode).toBeNull();
+    expect(body.calories).toBeCloseTo(30.94, 1);
   });
 
   it('adds food by hand', async () => {

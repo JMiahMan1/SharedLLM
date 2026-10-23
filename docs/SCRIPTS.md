@@ -24,6 +24,7 @@ API keys, HA token) from the environment; none are hard-coded.
 | `net_path_test.py` | Network path test to the server |
 | `wol_device.py` | Wake-on-LAN helper |
 | `seed_ma_identity.py` | Seed Music Assistant credentials into Identity |
+| `build_fdc_seed.py` | Build the Health hub's USDA food seed: downloads the Foundation, SR Legacy and FNDDS bulk archives, asserts the known counts and writes `data/health/fdc-seed.db` (read-only and optional at runtime, `FDC_SEED_PATH`) |
 
 ## Tests and CI
 

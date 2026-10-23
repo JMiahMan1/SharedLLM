@@ -34,6 +34,23 @@ in title or keywords → `#instant-pot`; `30-minutes-or-less` or total time ≤ 
 chicken · ground beef or turkey · rice · pasta · canned tomatoes · beans · cheese ·
 tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 
+## Food and nutrition data (decided 2026-10-22)
+
+- **The Food.com corpus already carries per-recipe nutrition** (Calories, Fat,
+  SaturatedFat, Cholesterol, Sodium, Carbohydrate, Fiber, Sugar, Protein, plus
+  RecipeServings), so the import writes a per-serving nutrition line into each
+  note, tagged `foodcom` — "as stated by the submitter", not lab ground truth.
+  Confirm on first download whether those panels are per-serving or per-recipe
+  and rescale to the note's 7 servings.
+- **Computed nutrition is the fallback** (paste-a-link imports, edited recipes,
+  future per-ingredient breakdowns): recipe-scrapers parses, ingredient-parser-NLP
+  splits, an FTS match finds the ingredient in the health hub's USDA seed
+  ([HEALTH_HUB.md](HEALTH_HUB.md) → Food data sources), FNDDS portion weights
+  convert volume to grams (N = V × W / 100), and an override table keeps a fixed
+  match fixed. The 2026 `recipe-macros-scraper` project runs this exact pipeline.
+- TheMealDB stays a search/preview source (no nutrition; dev-key terms);
+  schema.org `nutrition` from pasted links is best-effort only.
+
 ---
 
 ## Phase 0 — decisions
@@ -41,8 +58,10 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 - [ ] Importer home: one-off `tools/import_recipes.py` run from a workstation (proposed),
       or an Admin › Recipes button.
 - [ ] Dataset access: Hugging Face mirror or Kaggle CLI token for
-      `irkaal/foodcom-recipes-and-reviews` (522k recipes, **CC0**); fallback
-      `shuyangli94/food-com-recipes-with-search-terms-and-tags` for tags/search terms.
+      `irkaal/foodcom-recipes-and-reviews` (522k recipes, **CC0**; dataset docs
+      describe the nutrition columns — verify on first download whether they are
+      per-serving or per-recipe). Fallback `shuyangli94/food-com-recipes-with-search-terms-and-tags`
+      for tags/search terms — that older set is **not** CC0.
 - [ ] Confirm the level rules, staple list and household serving count (7).
 - [ ] Confirm the meal-plan note format below.
 
@@ -191,8 +210,9 @@ account is connected, everything above still works.
 ## Phase 10 — Health tab connection
 
 - [ ] Carry per-serving nutrition from the dataset into each imported recipe note
-      (calories, protein, carbs, fat, fiber, sugar, sodium) and show it on the recipe
-      preview/editor.
+      (calories, protein, carbs, fat, fiber, sugar, sodium — rescaling the corpus
+      panel to the note's 7 servings) and show it on the recipe preview/editor.
+      Edited or computed recipes fall back to the USDA-seed pipeline.
 - [ ] Health tab: a **Meals** card showing today's planned meals from
       `Recipes/Meal plan.md` with an estimated total, scaled to the household servings.
 - [ ] Ticking a meal cooked logs it for the day, so Health shows planned vs. eaten.
