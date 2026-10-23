@@ -2718,6 +2718,28 @@ async def secure_logging_middleware(request: Request, call_next):
             status_code=e.status_code,
             content={"status": "ERROR", "message": str(e.detail)}
         )
+    except TimeoutError as e:
+        # A slow dependency timed out (or the client gave up mid-flight).
+        # One line, no traceback: a burst of concurrent timeouts used to
+        # fill the log with hundreds of ERROR lines for one slow minute.
+        error_id = uuid.uuid4().hex[:12]
+        log.error(
+            "[error_id=%s] Middleware timeout: %s %s: %s",
+            error_id,
+            request.method,
+            request.url.path,
+            e,
+        )
+        _ = asyncio.create_task(emit_log("ERROR", f"RESPONSE {request.method} {request.url.path} -> 500 (TimeoutError) [error_id={error_id}]", {}))
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "ERROR",
+                "message": "Internal Gateway Error",
+                "error_id": error_id,
+            },
+            headers={"X-Error-Id": error_id},
+        )
     except Exception as e:
         error_id = uuid.uuid4().hex[:12]
         log.error(
