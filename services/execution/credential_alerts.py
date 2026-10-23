@@ -124,19 +124,21 @@ async def auth_failed(service: str, account: str, detail: str = "") -> None:
         if key in state.get("flagged", {}):
             return
         now = time.time()
-        state["flagged"][key] = {"since": now}
         quiet_until = float(state.setdefault("quiet", {}).get(key, 0))
-        await _flush(state)
         label = _label(service)
         suffix = f" for the {account}" if _named_account(account) else ""
+        await _flush(state)
         if now < quiet_until:
-            # It was just working again; let the phones rest until it settles.
+            # Flapping during the quiet window: stay quiet and do not re-arm the
+            # flag, so a later accepted call does not fire another "works again"
+            # notice. The login is proving itself; the phones already know.
             log.info(
                 f"[credentials] {label} login rejected again{suffix} "
                 f"({detail or 'unauthorized'}) within the quiet window"
             )
             await _save(r, state)
             return
+        state["flagged"][key] = {"since": now}
         log.warning(f"[credentials] {label} login rejected{suffix} ({detail or 'unauthorized'}); admins notified")
         payload = notify.notice(
             "@admins",
