@@ -401,3 +401,58 @@ def test_unknown_widget_and_bad_values_are_refused(client: TestClient, session: 
     assert client.put("/api/widgets/settings/climate", json={"size": "huge"}).status_code == 400
     assert client.put("/api/widgets/settings/climate", json={"visibility": "maybe"}).status_code == 400
     assert session.exec(select(UserWidget).where(UserWidget.widget_key == "not_a_widget")).first() is None
+
+
+def _acting_as(session: Session, role: str, is_admin: bool = False) -> User:
+    """Swap the authenticated user for a role, in place of the admin fixture."""
+    user = User(username=f"{role}-widgets", display_name=role, family_role=role, is_admin=is_admin)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    main.app.dependency_overrides[require_api_key] = lambda: user
+    return user
+
+
+def _visibility(client: TestClient) -> dict:
+    return {
+        w["widget_key"]: w["visibility"]
+        for w in client.get("/api/widgets/settings").json()["widgets"]
+    }
+
+
+def test_a_child_starts_with_the_kid_dashboard(client: TestClient, session: Session):
+    _acting_as(session, "child")
+    vis = _visibility(client)
+    for key in ("chores_progress", "upcoming_events", "active_media", "quick_notes", "bible_daily", "device_control"):
+        assert vis[key] == "visible", key
+    for key in ("climate", "workspaces", "health_activity", "presence", "energy_insights", "ambient_timer", "quick_assistant"):
+        assert vis[key] == "hidden", key
+
+
+def test_a_teen_adds_climate_to_the_kid_dashboard(client: TestClient, session: Session):
+    _acting_as(session, "teen")
+    vis = _visibility(client)
+    assert vis["climate"] == "visible"
+    assert vis["chores_progress"] == "visible"
+    assert vis["workspaces"] == "hidden"
+    assert vis["health_activity"] == "hidden"
+
+
+def test_a_non_admin_parent_sees_everything_but_workspaces(client: TestClient, session: Session):
+    _acting_as(session, "mother")
+    vis = _visibility(client)
+    for key in ("climate", "chores_progress", "health_activity", "presence", "upcoming_events"):
+        assert vis[key] == "visible", key
+    assert vis["workspaces"] == "hidden"
+    assert vis["quick_assistant"] == "hidden"
+
+
+def test_an_admin_sees_workspaces_by_default(client: TestClient, session: Session):
+    _acting_as(session, "father", is_admin=True)
+    assert _visibility(client)["workspaces"] == "visible"
+
+
+def test_a_saved_choice_wins_over_the_role_default(client: TestClient, session: Session):
+    _acting_as(session, "teen")
+    client.put("/api/widgets/settings/climate", json={"visibility": "hidden"})
+    assert _visibility(client)["climate"] == "hidden"

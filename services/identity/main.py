@@ -3477,6 +3477,37 @@ _WIDGET_ORDER = {key: index for index, key in enumerate(WIDGET_DEFAULT_SIZES)}
 WIDGET_SIZES = frozenset({'small', 'medium', 'wide', 'tall'})
 WIDGET_VISIBILITIES = frozenset({'visible', 'hidden', 'removed'})
 
+#: Widgets a child sees before they touch the dashboard: chores, calendar,
+#: music/media, notes, the verse of the day and device control for the devices
+#: they are assigned.
+CHILD_WIDGETS = frozenset({
+    'chores_progress', 'upcoming_events', 'active_media', 'quick_notes',
+    'bible_daily', 'device_control',
+})
+#: Teens get the child set plus climate control.
+TEEN_WIDGETS = CHILD_WIDGETS | {'climate'}
+#: Adults see everything except these: Workspaces is opt-in for anyone who is
+#: not an admin, and the assistant is governed by its own enabled flag.
+ADULT_HIDDEN_WIDGETS = frozenset({'workspaces', 'quick_assistant'})
+
+
+def _default_widget_visibility(widget_key: str, user: User) -> str:
+    """The default for one widget when the person has no saved row for it.
+
+    Only a default: any row the person saves wins, and Workspaces can be added
+    back from the dashboard's widget sheet by anyone.
+    """
+    if widget_key == 'quick_assistant':
+        return 'hidden'
+    if user.is_admin:
+        return 'visible'
+    role = user.family_role or 'other'
+    if role == 'child':
+        return 'visible' if widget_key in CHILD_WIDGETS else 'hidden'
+    if role == 'teen':
+        return 'visible' if widget_key in TEEN_WIDGETS else 'hidden'
+    return 'hidden' if widget_key in ADULT_HIDDEN_WIDGETS else 'visible'
+
 
 @app.get("/api/widgets/settings", response_model=WidgetSettingsRead)
 def get_widget_settings(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
@@ -3524,7 +3555,7 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
         else:
             result.append(UserWidgetRead(
                 widget_key=key,
-                visibility='visible' if key != 'quick_assistant' else 'hidden',
+                visibility=_default_widget_visibility(key, user),
                 order_index=index,
                 size=WIDGET_DEFAULT_SIZES[key],
                 is_pinned=False,
