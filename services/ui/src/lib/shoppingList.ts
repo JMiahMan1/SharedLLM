@@ -92,3 +92,19 @@ export function buildShoppingList(previousBody: string, ingredientTexts: string[
   lines.push("Made from the week's plan (`Meal plan`).");
   return lines.join('\n');
 }
+
+/** The chat message a shared shopping list becomes (short by design). */
+export function shoppingShareText(body: string, note?: string): string {
+  const items = parseShoppingList(body);
+  const shown = items.slice(0, 25).map((item) => `- [${item.checked ? 'x' : ' '}] ${item.text}`);
+  const more = items.length - shown.length;
+  let list: string;
+  if (items.length === 0) {
+    list = '🛒 The shopping list is empty.';
+  } else {
+    list = `🛒 Shopping list:\n${shown.join('\n')}`;
+    if (more > 0) list += `\n…and ${more} more.`;
+  }
+  const intro = (note ?? '').trim();
+  return intro ? `${intro}\n\n${list}` : list;
+}

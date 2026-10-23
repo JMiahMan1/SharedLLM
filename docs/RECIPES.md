@@ -125,9 +125,12 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 
 ## Phase 5 — Jarvis and sharing polish
 
-- [ ] Share the plan and the shopping list to a family chat in one tap.
+- [x] Share the plan and the shopping list to a family chat in one tap — Share plan and
+      Share list buttons on the week plan open the same chat sheet recipes use; the message
+      is a short summary (`🍽 This week's dinners:` / `🛒 Shopping list:`, capped at 25 items).
 - [ ] Jarvis answers from the set: "what can a 12-year-old make tonight?", "add a slow-cooker
-      meal to Tuesday".
+      meal to Tuesday". Reading works through Teach Jarvis (the notes RAG sync over
+      `Recipes/`); the write action needs assistant tooling and is still open.
 
 ## Phase 6 — tests, docs, deploy
 

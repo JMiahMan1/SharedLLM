@@ -60,3 +60,19 @@ export function pickSurprise(pool: string[]): string | undefined {
   if (pool.length === 0) return undefined;
   return pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
 }
+
+/** The chat message a shared week plan becomes: one line per planned day. */
+export function planShareText(plan: WeeklyPlan, note?: string): string {
+  const lines: string[] = [];
+  for (const day of PLAN_DAYS) {
+    const title = plan[day].title;
+    if (!title) continue;
+    lines.push(`- ${day} · ${plan[day].cooked ? `${title} (cooked)` : title}`);
+  }
+  const body =
+    lines.length === 0
+      ? '🍽 This week has no dinners planned yet.'
+      : `🍽 This week's dinners:\n${lines.join('\n')}`;
+  const intro = (note ?? '').trim();
+  return intro ? `${intro}\n\n${body}` : body;
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildShoppingList, ingredientLines, parseShoppingList } from '../lib/shoppingList';
+import { buildShoppingList, ingredientLines, parseShoppingList, shoppingShareText } from '../lib/shoppingList';
 
 const RECIPE = `## Ingredients
 - [ ] 2 cups flour
@@ -44,5 +44,23 @@ describe('shoppingList', () => {
     const body = buildShoppingList('', []);
     expect(body).toContain('Nothing to buy yet');
     expect(parseShoppingList(body)).toEqual([]);
+  });
+
+  it('writes a short shareable list with an optional note', () => {
+    const body = buildShoppingList('', ['2 cups flour', '1 tsp salt']);
+    const text = shoppingShareText(body, 'shopping run?');
+    expect(text.startsWith('shopping run?\n\n')).toBe(true);
+    expect(text).toContain('🛒 Shopping list:');
+    expect(text).toContain('- [ ] 2 cups flour');
+    expect(shoppingShareText('')).toBe('🛒 The shopping list is empty.');
+  });
+
+  it('caps very long lists at 25 items', () => {
+    const many = Array.from({ length: 30 }, (_, index) => `item ${index + 1}`);
+    const body = buildShoppingList('', many);
+    const text = shoppingShareText(body);
+    expect(text).toContain('- [ ] item 25');
+    expect(text).not.toContain('- [ ] item 26');
+    expect(text).toContain('…and 5 more.');
   });
 });
