@@ -454,6 +454,11 @@ async def lifespan(app: FastAPI):
         await _ensure_default_settings(session)
         _migrate_api_key_material(session)
         roles.seed_default_roles(session)
+        family_synced = False
+        for existing in session.exec(select(User)).all():
+            family_synced = roles.sync_family_role(session, existing) or family_synced
+        if family_synced:
+            session.commit()
     yield
 
 app = FastAPI(title="Jarvis OS Identity Service", lifespan=lifespan)
@@ -1677,6 +1682,7 @@ def _role_read(session: Session, role: Role) -> RoleRead:
         description=role.description,
         permissions=roles.role_permissions(role),
         builtin=role.builtin is not None,
+        builtin_key=role.builtin,
         members=sorted(members),
     )
 
@@ -1760,6 +1766,9 @@ def set_user_roles(username: str, body: UserRolesUpdate, request: Request, sessi
             session.delete(row)
     for role_id in wanted - set(before):
         session.add(UserRole(user_id=user.id or 0, role_id=role_id))
+    # A person's family built-in role mirrors their relationship; re-assert it
+    # so a role edit cannot silently strip a Mother/Teen of the household role.
+    roles.sync_family_role(session, user)
     session.commit()
     _audit(request, session, "user.roles", user.username, actor=admin,
            before={"role_ids": before}, after={"role_ids": sorted(wanted)})
@@ -1957,6 +1966,7 @@ def update_family(
     if target.family_role in roles.MINOR_FAMILY_ROLES:
         _force_minor_activity_sharing(session, target)
 
+    roles.sync_family_role(session, target)
     session.add(target)
     session.commit()
     session.refresh(target)
@@ -2035,6 +2045,8 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
     session.refresh(user)
     if user.family_role in roles.MINOR_FAMILY_ROLES:
         _force_minor_activity_sharing(session, user)
+        session.commit()
+    if roles.sync_family_role(session, user):
         session.commit()
     _audit(request, session, "user.create", user.username, actor=admin, before={}, after=audit.snapshot(user))
     return user

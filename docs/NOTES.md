@@ -123,11 +123,21 @@ that, every save of an opened note stacked another header on top.
   Tapping a row opens `/notes?note=<path>`; the add icon opens
   `/notes?new=1` for quick capture. Both use the `jarvis_open_path` deep link,
   and the page drops the query once consumed so closing the editor stays put.
+- `SingleNoteWidget` is the other way round: pick one note in its configure
+  screen and it shows that note alone. Checklist rows are their own tap
+  targets, so a box can be ticked straight from the home screen through
+  `/api/communication/notes/check_off` without opening the app; the note on
+  disk is the same markdown Nextcloud sees. A note without checkboxes shows
+  its first lines and opens in the app when tapped. Archives and Trash are
+  never offered in the picker, and moving or trashing the note leaves the
+  widget on its last state with an error line until it is re-picked.
 
 ## Keep parity
 
 Shipped: pin and colour in the shared index, archive, trash with restore and
-empty trash, duplicate, move without copy, checklists, search, labels as inline
+empty trash, duplicate, move without copy, checklists, search, bulk
+multi-select (archive, trash, restore, delete forever), a Keep-style markdown
+preview in cards and the editor, labels as inline
 `#tags` (with per-label chips, a label filter, an editor "Add label" button and
 `tag:`/`label:`, `colour:`/`color:` and `type:` search operators), the instant shelf (the last visit's list is cached
 per account and revalidated in the background, and a note whose text came with
@@ -136,9 +146,9 @@ back on failure, and note calls allow a minute), dashboard and home-screen
 capture.
 
 Still open: reminders (time and place), attachments/images/drawings/audio,
-Nextcloud sharing, bulk multi-select, list/grid toggle, autosave and drafts,
-markdown preview and a formatting toolbar, keyboard shortcuts, per-item
-checklist editing and reordering, undo toasts, versions, offline.
+Nextcloud sharing, list/grid toggle, autosave and drafts, a formatting
+toolbar, keyboard shortcuts, per-item checklist editing and reordering, undo
+toasts, versions, offline.
 
 ## Tests
 

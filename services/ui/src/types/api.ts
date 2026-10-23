@@ -254,6 +254,8 @@ export interface Role {
   permissions: string[];
   /** Seeded by Jarvis: can be edited, not deleted. */
   builtin: boolean;
+  /** Seed key for a built-in role, e.g. `mother` or `teen`; null otherwise. */
+  builtin_key?: string | null;
   members: string[];
 }
 

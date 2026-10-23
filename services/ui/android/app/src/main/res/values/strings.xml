@@ -16,4 +16,7 @@
     <string name="notes_widget_description">Recent notes from your Nextcloud Notes folder</string>
     <string name="notes_widget_refresh_description">Refresh notes</string>
     <string name="notes_widget_add_description">New note</string>
+    <string name="single_note_widget_description">One note with tickable checkboxes</string>
+    <string name="single_note_widget_refresh_description">Refresh this note</string>
+    <string name="single_note_widget_configure_description">Choose a different note</string>
 </resources>

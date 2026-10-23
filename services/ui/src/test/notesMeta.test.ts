@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   EMPTY_NOTES_INDEX,
+  TRASH_PREFIX,
   archivedPathFor,
   clearLegacyMeta,
   extractTags,
@@ -98,7 +99,9 @@ describe('notesMeta', () => {
 
   it('recognises archive and trash paths and targets their folders', () => {
     expect(archivedPathFor('Notes/Trip ideas.md')).toBe('Notes/Archive/Trip ideas.md');
+    expect(archivedPathFor('Notes/Work/Plan.md')).toBe('Notes/Archive/Work/Plan.md');
     expect(archivedPathFor('Notes/Archive/Trip ideas.md')).toBe('Notes/Archive/Trip ideas.md');
+    expect(archivedPathFor('Notes/Trip ideas.md', TRASH_PREFIX)).toBe('Notes/Trash/Trip ideas.md');
     expect(isArchivedPath('Notes/Archive/Trip ideas.md')).toBe(true);
     expect(isTrashedPath('Notes/Trash/Trip ideas.md')).toBe(true);
     expect(isArchivedPath('Notes/Trip ideas.md')).toBe(false);

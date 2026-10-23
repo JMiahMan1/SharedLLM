@@ -59,6 +59,11 @@ get their powers from `is_admin` and `family.manage` respectively.
   An adult child can opt out like any other adult.
 - Cycle tracking stays private even inside the circle. A minor can share it
   only with the mother linked to their account.
+- Each family role is also a built-in role in the role list (`Father (admin)`,
+  `Mother`, `Teen`, `Adult child`, `Child`), seeded at startup. Setting a
+  person's family role adds the matching role and removes their other family
+  roles, so the role list always shows who is a mother, a teen and so on, and
+  changing what a family role allows changes it for every member of that role.
 - Manage relationships in **Admin > Users > Family** (admins) or in
   **Settings** for a Home manager / mother.
 
@@ -74,6 +79,11 @@ changed, but not deleted.
 
 | Role | Permissions |
 |---|---|
+| Father (admin) | none by itself; the account is normally an admin |
+| Mother | every device permission plus `family.manage` |
+| Adult child | `devices.use_all` |
+| Teen | `devices.use_all` |
+| Child | none |
 | Home manager | every device permission plus `family.manage`: who uses which device, locks, and family roles/links. No accounts or server settings. |
 | Family member | `devices.use_all` |
 | Guest | none: only the devices assigned to them |

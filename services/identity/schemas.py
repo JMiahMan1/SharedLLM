@@ -299,6 +299,7 @@ class RoleRead(BaseModel):
     description: str
     permissions: list[str]
     builtin: bool
+    builtin_key: str | None = None
     members: list[str]
 
 

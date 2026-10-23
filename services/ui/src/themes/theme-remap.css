@@ -236,6 +236,7 @@
 [data-theme-scheme="light"] .border-white\/10 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-white\/15 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-white\/20 { border-color: var(--color-border-soft) !important; }
+[data-theme-scheme="light"] .border-white\/30 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-white\/5 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-white\/60 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .focus\:bg-black\/40:focus { background-color: var(--site-card-bg) !important; }
