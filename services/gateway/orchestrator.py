@@ -518,16 +518,18 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
 
     # 1. Retrieve Memory
     # A queued chat turn has no request transcript to carry: the worker
-    # attaches the recent turns to the payload. Jobs dispatched directly, and
-    # jobs queued before the worker started attaching history, fall back to the
-    # per-user history store. Missions and Nextcloud Talk turns are not part of
-    # the chat transcript, so they keep an empty short-term history.
-    if grounded:
-        short_term = []
-    elif is_autonomous or job_payload.get("_talk_token"):
+    # attaches the recent turns to the payload — per-user history for chat
+    # jobs, the room's own transcript for Nextcloud Talk turns. Jobs dispatched
+    # directly, and jobs queued before the worker started attaching history,
+    # fall back to the per-user history store. Missions are autonomous and keep
+    # an empty short-term history; a Talk turn without an attached transcript
+    # stays empty too rather than borrowing the speaker's personal history.
+    if grounded or is_autonomous:
         short_term = []
     elif "history" in job_payload:
         short_term = job_payload.get("history") or []
+    elif job_payload.get("_talk_token"):
+        short_term = []
     else:
         short_term = await get_history(user_id)
 

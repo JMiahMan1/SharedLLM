@@ -3,8 +3,8 @@
 The queued chat path in ``main.py`` does not pass the request transcript and
 does not write history itself. The worker therefore attaches the per-user
 history to a chat job and stores the completed turn; the orchestrator consumes
-that list. Missions and Nextcloud Talk turns are not part of the chat
-transcript and must stay unaffected.
+that list. Missions stay unaffected; Nextcloud Talk turns keep a transcript of
+their own, scoped to the room instead of the user.
 """
 
 import asyncio
@@ -19,6 +19,11 @@ import services.gateway.orchestrator as orchestrator
 HISTORY = [
     {"role": "user", "content": "how is the greenhouse doing?"},
     {"role": "assistant", "content": "The soil sensor reads 42 percent."},
+]
+
+ROOM_HISTORY = [
+    {"role": "user", "content": "How did the fort turn out?"},
+    {"role": "assistant", "content": "It survived the night."},
 ]
 
 
@@ -177,3 +182,83 @@ async def test_the_orchestrator_uses_history_attached_to_the_job(monkeypatch):
     )
 
     assert seen["history"] == HISTORY
+
+
+async def test_a_talk_room_job_reads_and_stores_the_room_transcript(monkeypatch):
+    """@Jarvis in a room keeps the room's own memory, not the user's."""
+    monkeypatch.setattr(background_worker, "get_history", AsyncMock(return_value=HISTORY))
+    monkeypatch.setattr(background_worker, "update_history", AsyncMock())
+    monkeypatch.setattr(background_worker, "get_room_history", AsyncMock(return_value=ROOM_HISTORY))
+    monkeypatch.setattr(background_worker, "update_room_history", AsyncMock())
+    monkeypatch.setattr(background_worker.RavenWorker, "_trigger_talk_callback", AsyncMock())
+    seen = {}
+
+    async def fake_orchestration(payload, chunk_callback=None):
+        seen["history"] = payload.get("history")
+        return "They are ripe."
+
+    monkeypatch.setattr(background_worker, "process_full_orchestration", fake_orchestration)
+    queue = FakeJobQueue()
+    worker = background_worker.RavenWorker()
+    worker.job_queue = queue
+
+    await worker._process_inference_job(_job(_talk_token="room-1"))
+
+    assert seen["history"] == ROOM_HISTORY
+    background_worker.get_room_history.assert_awaited_once_with("room-1")
+    background_worker.get_history.assert_not_awaited()
+    background_worker.update_history.assert_not_awaited()
+    assert queue.completed == [("job-1", "They are ripe.")]
+    assert [tuple(c.args) for c in background_worker.update_room_history.await_args_list] == [
+        ("room-1", "user", "and the tomatoes?"),
+        ("room-1", "assistant", "They are ripe."),
+    ]
+
+
+async def test_the_orchestrator_uses_the_room_transcript_when_attached(monkeypatch):
+    monkeypatch.setattr(orchestrator, "_fetch_rag_context", AsyncMock(return_value=""))
+    seen = {}
+
+    async def fake_single_turn(*args, **kwargs):
+        seen["history"] = args[4]
+        return "SINGLE ANSWER"
+
+    monkeypatch.setattr(orchestrator, "_single_turn_inference", fake_single_turn)
+
+    await orchestrator.process_full_orchestration(
+        {
+            "query": "what about the basil?",
+            "model": "some-model",
+            "system": "SYSTEM",
+            "creds": {"user": "alice"},
+            "_talk_token": "room-1",
+            "history": ROOM_HISTORY,
+        }
+    )
+
+    assert seen["history"] == ROOM_HISTORY
+
+
+async def test_a_talk_job_without_attached_history_stays_empty(monkeypatch):
+    monkeypatch.setattr(orchestrator, "get_history", AsyncMock(return_value=HISTORY))
+    monkeypatch.setattr(orchestrator, "_fetch_rag_context", AsyncMock(return_value=""))
+    seen = {}
+
+    async def fake_single_turn(*args, **kwargs):
+        seen["history"] = args[4]
+        return "SINGLE ANSWER"
+
+    monkeypatch.setattr(orchestrator, "_single_turn_inference", fake_single_turn)
+
+    await orchestrator.process_full_orchestration(
+        {
+            "query": "and the basil?",
+            "model": "some-model",
+            "system": "SYSTEM",
+            "creds": {"user": "alice"},
+            "_talk_token": "room-1",
+        }
+    )
+
+    assert seen["history"] == []
+    orchestrator.get_history.assert_not_awaited()
