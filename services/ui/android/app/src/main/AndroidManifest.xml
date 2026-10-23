@@ -18,6 +18,10 @@
     <!-- Screen-time totals come from UsageStatsManager; the grant is a
          Settings toggle (Usage access), not a runtime prompt. -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+<!-- Media sessions of other apps (YouTube, Spotify, ...) come from
+     MediaSessionManager, which Android only exposes to an app granted
+     Notification access. The grant is a Settings toggle, not a prompt. -->
+<uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
@@ -318,6 +322,17 @@
             android:exported="false"
             android:foregroundServiceType="dataSync"
             android:stopWithTask="false" />
+
+        <!-- Granted Notification access lets us read other apps' media sessions
+             (YouTube, Spotify, podcasts, browser media) for the digital profile. -->
+        <service
+            android:name=".MediaSessionListenerService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
     </application>
 
