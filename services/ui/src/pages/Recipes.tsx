@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, CalendarDays, Loader2, Plus, Save, Share2, ShoppingCart, Shuffle, Trash2, Users } from 'lucide-react';
+import { BookOpen, CalendarDays, Link2, Loader2, Plus, Save, Share2, ShoppingCart, Shuffle, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
@@ -11,6 +11,7 @@ import { useSendAsPref } from '../components/chat/sendAsPref';
 import ShareToChatSheet from '../components/bible/ShareToChatSheet';
 import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
 import { SHOPPING_PATH, SHOPPING_TITLE, buildShoppingList, ingredientLines, shoppingShareText } from '../lib/shoppingList';
+import { buildRecipeNote, type ImportedRecipe } from '../lib/recipeImport';
 import {
   buildMealPlan,
   emptyPlan,
@@ -67,6 +68,11 @@ export default function Recipes() {
   const [sharingList, setSharingList] = useState(false);
   const [teaching, setTeaching] = useState(false);
   const [listing, setListing] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importUrl, setImportUrl] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState<ImportedRecipe | null>(null);
+  const [savingImport, setSavingImport] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [plan, setPlan] = useState<WeeklyPlan>(emptyPlan());
   const [planExists, setPlanExists] = useState(false);
@@ -344,6 +350,58 @@ export default function Recipes() {
     }
   };
 
+  const readLink = async () => {
+    const url = importUrl.trim();
+    if (!url) {
+      toast.error('Paste a recipe link first');
+      return;
+    }
+    setImporting(true);
+    try {
+      const res = await api.importRecipe(url);
+      if (res.status === 'SUCCESS' && res.detail?.recipe) {
+        setImported(res.detail.recipe as ImportedRecipe);
+      } else {
+        setImported(null);
+        toast.error(res.message || 'That link could not be read');
+      }
+    } catch {
+      toast.error('That link could not be read');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const saveImported = async () => {
+    if (!imported) return;
+    if (recipes.some((recipe) => recipe.title === imported.title)) {
+      toast.error('A recipe with that name is already on the shelf');
+      return;
+    }
+    setSavingImport(true);
+    try {
+      const saved = await saveNote({
+        title: imported.title,
+        content: buildRecipeNote(imported),
+        category: RECIPES_DIR,
+        asUser,
+      });
+      if (saved.response.status === 'SUCCESS') {
+        toast.success('Recipe saved');
+        queryClient.invalidateQueries({ queryKey: ['recipes'] });
+        setImported(null);
+        setImportUrl('');
+        setImportOpen(false);
+      } else {
+        toast.error(saved.response.message || 'Could not save the recipe');
+      }
+    } catch {
+      toast.error('Could not save the recipe');
+    } finally {
+      setSavingImport(false);
+    }
+  };
+
   const plannedTitles = PLAN_DAYS.map((day) => plan[day].title).filter(Boolean) as string[];
   const repeated = Array.from(
     new Set(plannedTitles.filter((candidate, index) => plannedTitles.indexOf(candidate) !== index)),
@@ -384,9 +442,66 @@ export default function Recipes() {
             {teaching ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
             Teach Jarvis
           </button>
+          <button
+            type="button"
+            onClick={() => setImportOpen((open) => !open)}
+            className="glass-button min-h-11 px-3 text-xs"
+          >
+            <Link2 size={14} /> {importOpen ? 'Close import' : 'Import a link'}
+          </button>
           {isAdmin && <SendAsSelector value={sendAs} onChange={(next) => { startNew(); setSendAs(next); }} />}
         </div>
       </div>
+
+      {importOpen && (
+        <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="recipe-import">
+          <span className="text-sm font-semibold text-slate-200">Import from a link</span>
+          <p className="text-xs text-slate-400">Paste a recipe page — Jarvis reads its published recipe data.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={importUrl}
+              onChange={(event) => setImportUrl(event.target.value)}
+              placeholder="https://…"
+              aria-label="Recipe link"
+              className="glass-input min-h-11 min-w-0 flex-1 px-2 py-1 text-base sm:text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => void readLink()}
+              disabled={importing}
+              className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+            >
+              {importing ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+              Read the link
+            </button>
+          </div>
+          {imported && (
+            <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-3" data-testid="recipe-import-preview">
+              <div className="text-sm font-semibold text-slate-100">{imported.title}</div>
+              <div className="text-xs text-slate-400">
+                {imported.site}
+                {imported.total_minutes ? ` · ${imported.total_minutes} min total` : ''}
+                {imported.yield ? ` · ${imported.yield}` : ''}
+                {` · ${imported.ingredients.length} ingredients · ${imported.instructions.length} steps`}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void saveImported()}
+                  disabled={savingImport}
+                  className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+                >
+                  {savingImport ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  Save to Recipes
+                </button>
+                <button type="button" onClick={() => setImported(null)} className="glass-button min-h-11 px-3 text-xs">
+                  Discard
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {planOpen && (
         <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="meal-plan">

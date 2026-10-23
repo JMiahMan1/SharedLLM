@@ -5100,6 +5100,17 @@ async def proxy_create_note(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/recipes/import")
+async def proxy_recipe_import(request: Request):
+    """Paste-a-link recipe import: read a page's schema.org recipe."""
+    body = await request.json()
+    payload = {
+        "action": "url_import",
+        "url": body.get("url"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/recipes", payload, as_user=body.get("as_user"))
+
+
 @app.post("/api/communication/notes/read")
 async def proxy_read_note(request: Request):
     body = await request.json()

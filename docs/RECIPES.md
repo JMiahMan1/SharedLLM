@@ -182,23 +182,31 @@ account is connected, everything above still works.
       the connector optional, conservative on rate, and never block the local
       flows on it.
 
-## Phase 8 — search and import
+## Phase 8 — search and import (paste-a-link import shipped)
 
 - [ ] Search sources: the seeded CC0 set itself (a SQLite FTS index over title,
       ingredients and tags, so search stays offline and instant), TheMealDB's free API for
       a quick lookup with photos, and "paste a link" import that reads a page's schema.org
-      `Recipe` JSON-LD.
-- [ ] Backend: a small search service or execution handler that builds the index from the
-      imported dataset, with `search`, `fetch` and `url-import` endpoints behind
-      `/api/recipes/*`; conservative rate limits; never block on a dead source.
-- [ ] UI: a search box on Recipes with results (photo, title, time, servings, source), a
-      preview sheet (ingredients + steps), and **Save to Recipes** writing the note with the
-      standard header, guessed labels (`#level-…` from time and ingredient count,
-      `#slow-cooker`/`#instant-pot` from the title, `#30-minutes`, `#5-ingredients`) and
-      the source URL + licence line.
-- [ ] Duplicate guard: skip a result whose source URL is already imported.
-- [ ] Tests: index search and JSON-LD parsing (pytest, fixture page), search → preview →
-      save (vitest).
+      `Recipe` JSON-LD. **Paste-a-link is built** (`/execute/recipes` + `/api/recipes/import`);
+      the offline corpus index and TheMealDB lookups are still open.
+- [x] Backend: `url_import` lives in `services/execution/handlers/recipe_import.py` — it
+      fetches the page (http/https only, 25 s timeout, 1.5 MB cap) and reads the first
+      `Recipe` node (arrays and `@graph` included), returning title, ingredients, ordered
+      steps (sections flattened), prep/cook/total minutes, yield, image and the source URL;
+      pages without recipe data get a plain message instead of a guess. `search` and
+      `fetch` endpoints still to come.
+- [x] UI: **Import a link** on the Recipes page — paste, read, preview (title, site, time,
+      yield, counts) and **Save to Recipes** writes the note with the standard header, guessed
+      labels (`#level-…` from time and ingredient count, `#slow-cooker`/`#instant-pot` from
+      the title, `#30-minutes`, `#5-ingredients`) and the source URL line. The search box
+      with photos and servings waits for the search sources.
+- [ ] Duplicate guard: skip a result whose source URL is already imported. (The paste-a-link
+      save stamps the source URL into the note and refuses a same-title save; the search
+      results guard arrives with the search slice.)
+- [x] Tests: JSON-LD parsing and the handler (pytest, fixture page —
+      `services/execution/tests/test_recipe_import.py`), label guessing and note rendering
+      (`src/test/recipeImport.test.ts`) and paste → read → preview → save
+      (`src/pages/Recipes.test.tsx`). Index search tests come with the index.
 
 ## Phase 9 — photo and handwriting import
 

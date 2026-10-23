@@ -17,6 +17,7 @@ vi.mock('../services/api', async (importOriginal) => {
       writeNote: vi.fn(),
       deleteNote: vi.fn(),
       syncNotesRag: vi.fn(),
+      importRecipe: vi.fn(),
       getTalkConversations: vi.fn(),
       sendTalkMessage: vi.fn(),
     },
@@ -34,6 +35,7 @@ const readNote = vi.mocked(api.readNote);
 const writeNote = vi.mocked(api.writeNote);
 const deleteNote = vi.mocked(api.deleteNote);
 const syncNotesRag = vi.mocked(api.syncNotesRag);
+const importRecipe = vi.mocked(api.importRecipe);
 const getTalkConversations = vi.mocked(api.getTalkConversations);
 const sendTalkMessage = vi.mocked(api.sendTalkMessage);
 
@@ -64,6 +66,7 @@ describe('Recipes', () => {
     writeNote.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'note_write' });
     deleteNote.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'note_delete' });
     syncNotesRag.mockResolvedValue({ status: 'SUCCESS', message: 'queued', service: 'notes_sync_rag' });
+    importRecipe.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'recipe_import' });
     getTalkConversations.mockResolvedValue({
       status: 'SUCCESS',
       message: '',
@@ -210,5 +213,49 @@ describe('Recipes', () => {
     await waitFor(() =>
       expect(syncNotesRag).toHaveBeenCalledWith({ directories: [RECIPES_DIR] }),
     );
+  });
+
+  it('imports a recipe from a pasted link', async () => {
+    importRecipe.mockResolvedValue({
+      status: 'SUCCESS',
+      message: 'Found “Best Lemonade”.',
+      service: 'recipe_import',
+      detail: {
+        recipe: {
+          title: 'Best Lemonade',
+          description: 'Cold and tart.',
+          ingredients: ['4 cups water', '1 cup lemon juice', '1/2 cup sugar'],
+          instructions: ['Juice the lemons.', 'Stir and chill.'],
+          prep_minutes: 15,
+          cook_minutes: null,
+          total_minutes: 75,
+          yield: '6 servings',
+          image: null,
+          source_url: 'https://example.com/recipes/lemonade',
+          site: 'example.com',
+        },
+      },
+    } as never);
+
+    renderRecipes();
+    await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+    fireEvent.change(screen.getByLabelText('Recipe link'), {
+      target: { value: 'https://example.com/recipes/lemonade' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /read the link/i }));
+
+    expect(await screen.findByTestId('recipe-import-preview')).toBeTruthy();
+    expect(screen.getByText('Best Lemonade')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /save to recipes/i }));
+
+    await waitFor(() => expect(writeNote).toHaveBeenCalled());
+    const body = writeNote.mock.calls[0][0] as { title: string; content: string; category: string };
+    expect(body.title).toBe('Best Lemonade');
+    expect(body.category).toBe(RECIPES_DIR);
+    expect(body.content).toContain('Tags:');
+    expect(body.content).toContain('- [ ] 4 cups water');
   });
 });

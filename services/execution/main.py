@@ -55,6 +55,7 @@ from services.execution.handlers import (
     light,
     media,
     note,
+    recipe_import,
     redis_inspect,
     security,
     storage,
@@ -108,6 +109,7 @@ from services.execution.schemas import (
     ImageEditRequest,
     ListVoicesRequest,
     PodcastRenderRequest,
+    RecipeRequest,
     RedisInspectRequest,
     SpeakerIdentifyRequest,
     ResolveStreamRequest,
@@ -950,6 +952,10 @@ async def execute_calendar(req: CalendarRequest):
 @app.post("/execute/note", response_model=ExecutionResult)
 async def execute_note(req: NoteRequest):
     return await note.handle_note(req)
+
+@app.post("/execute/recipes", response_model=ExecutionResult)
+async def execute_recipes(req: RecipeRequest):
+    return await recipe_import.handle_recipe(req)
 
 @app.post("/execute/timer", response_model=ExecutionResult)
 async def execute_timer(req: TimerRequest):
