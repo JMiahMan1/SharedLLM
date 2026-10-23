@@ -1652,6 +1652,10 @@ export interface FoodSearchItem {
   image: string | null;
   serving_size: string | null;
   serving_grams: number | null;
+  /** 'usda_fdc' for generic foods from the local seed, 'openfoodfacts' for branded. */
+  source?: 'usda_fdc' | 'openfoodfacts';
+  /** Household measures from the seed ("1 cup, chopped" = 91 g). */
+  portions?: Array<{ label: string; grams: number }>;
   per_100g: {
     calories: number | null;
     protein_g: number | null;

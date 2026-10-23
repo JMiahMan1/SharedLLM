@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.config import INTERNAL_SECRET
-from services.health import cycle, scoring
+from services.health import cycle, food_seed, scoring
 from services.health.models import (
     Checkin,
     CycleLog,
@@ -45,6 +45,7 @@ from services.health.models import (
     HealthProfile,
     HealthShare,
     MetricSample,
+    OffProduct,
     SleepSession,
     utcnow,
 )
@@ -94,6 +95,31 @@ def _engine():
     if url.startswith("sqlite"):
         kwargs = {"connect_args": {"check_same_thread": False, "timeout": 30}}
     return create_engine(url, pool_pre_ping=True, **kwargs)
+
+
+FDC_SEED_FILENAME = "fdc-seed.db"
+_SEED_CACHE: dict[str, food_seed.FoodSeed] = {}
+
+
+def _seed_path() -> str:
+    """Where the USDA seed lives: FDC_SEED_PATH, else beside the database."""
+    explicit = os.getenv("FDC_SEED_PATH")
+    if explicit:
+        return explicit
+    url = _database_url()
+    if url.startswith("sqlite:///"):
+        folder = os.path.dirname(url[len("sqlite:///") :]) or "."
+        return os.path.join(folder, FDC_SEED_FILENAME)
+    return f"/data/{FDC_SEED_FILENAME}"
+
+
+def _seed() -> food_seed.FoodSeed:
+    path = _seed_path()
+    seed = _SEED_CACHE.get(path)
+    if seed is None:
+        seed = food_seed.FoodSeed(path)
+        _SEED_CACHE[path] = seed
+    return seed
 
 
 @asynccontextmanager
@@ -1428,6 +1454,13 @@ def nutrition_day(
 
 
 def _off_product(product: dict) -> dict | None:
+    """One OpenFoodFacts product -> the result shape the UI logs from.
+
+    The v2 endpoint is deliberate: it normalizes nutrient keys per 100 g
+    (``*_100g``), while the v3 payload reports ``source_per`` (not always
+    100 g) and no longer carries ``serving_quantity``, which would silently
+    degrade serving weights.
+    """
     nutriments = product.get("nutriments") or {}
     calories = _num(nutriments.get("energy-kcal_100g"))
     if calories is None:
@@ -1445,6 +1478,7 @@ def _off_product(product: dict) -> dict | None:
         "image": product.get("image_front_small_url") or product.get("image_url"),
         "serving_size": product.get("serving_size"),
         "serving_grams": serving_grams,
+        "source": "openfoodfacts",
         "per_100g": {
             "calories": calories,
             "protein_g": _num(nutriments.get("proteins_100g")),
@@ -1469,25 +1503,58 @@ async def _off_get(path: str, params: dict | None = None) -> dict:
         raise HTTPException(status_code=503, detail="OpenFoodFacts is unreachable; try again or add the food by hand.") from exc
 
 
-@app.get("/food/search")
-async def search_food(q: str = Query(min_length=1, max_length=120), limit: int = Query(10, ge=1, le=25)):
-    """Search OpenFoodFacts. Results are per 100 g plus a serving weight when known."""
+async def _off_search(query: str, limit: int) -> list[dict]:
+    """OpenFoodFacts branded search. OFF allows roughly ten searches a minute
+    per IP, so this runs for a submitted search only, never for type-ahead."""
     data = await _off_get(
         "/api/v2/search",
         {
-            "search_terms": q,
+            "search_terms": query,
             "fields": "code,product_name,brands,serving_size,serving_quantity,image_front_small_url,nutriments",
             "page_size": str(limit),
         },
     )
-    results = [item for item in (_off_product(p) for p in data.get("products", [])) if item]
-    return {"query": q, "source": "openfoodfacts", "results": results}
+    return [item for item in (_off_product(p) for p in data.get("products", [])) if item]
+
+
+@app.get("/food/search")
+async def search_food(q: str = Query(min_length=1, max_length=120), limit: int = Query(10, ge=1, le=25)):
+    """Search foods for logging: the USDA seed first, then OpenFoodFacts.
+
+    The seed answers generic whole foods and ships household portions; OFF adds
+    branded products. A missing seed or an unreachable OFF degrades to the
+    other source instead of failing the search.
+    """
+    seed = _seed()
+    seed_hits = seed.search(q, limit)
+    remaining = limit - len(seed_hits)
+    off_hits: list[dict] = []
+    offline: list[str] = []
+    if remaining > 0:
+        try:
+            off_hits = await _off_search(q, remaining)
+        except HTTPException:
+            if not seed_hits:
+                raise
+            offline.append("openfoodfacts")
+            log.info("OpenFoodFacts search unavailable; answered %d USDA seed hits for %r", len(seed_hits), q)
+    sources = (["usda_fdc"] if seed_hits else []) + (["openfoodfacts"] if off_hits else [])
+    return {
+        "query": q,
+        "sources": sources,
+        "offline_sources": offline,
+        "seed": {"present": seed.present, "results": len(seed_hits)},
+        "results": seed_hits + off_hits,
+    }
 
 
 @app.get("/food/barcode/{code}")
-async def barcode_food(code: str):
+async def barcode_food(code: str, session: Session = Depends(get_session)):
     if not re.match(r"^[0-9A-Za-z-]{4,32}$", code):
         raise HTTPException(status_code=422, detail="Not a valid barcode")
+    cached = session.get(OffProduct, code)
+    if cached is not None:
+        return json.loads(cached.payload_json)
     data = await _off_get(
         f"/api/v2/product/{code}.json",
         {"fields": "code,product_name,brands,serving_size,serving_quantity,image_front_small_url,nutriments"},
@@ -1497,6 +1564,10 @@ async def barcode_food(code: str):
     product = _off_product(data["product"])
     if product is None:
         raise HTTPException(status_code=404, detail="That barcode has no usable nutrition data")
+    # Cache permanently: OFF rate-limits product reads and the family scans the
+    # same packages repeatedly; a packaged food's label does not change.
+    session.merge(OffProduct(code=code, payload_json=json.dumps(product), fetched_at=utcnow()))
+    session.commit()
     return product
 
 

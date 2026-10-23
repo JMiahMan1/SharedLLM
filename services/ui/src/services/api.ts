@@ -1601,8 +1601,17 @@ export const api = {
     return resp.data;
   },
 
-  /** OpenFoodFacts search; results are per 100 g plus serving weight when known. */
-  async searchFood(q: string, limit = 10): Promise<{ query: string; source: string; results: FoodSearchItem[] }> {
+  /** USDA seed + OpenFoodFacts search; results are per 100 g plus portion options. */
+  async searchFood(
+    q: string,
+    limit = 10,
+  ): Promise<{
+    query: string;
+    sources: string[];
+    offline_sources: string[];
+    seed: { present: boolean; results: number };
+    results: FoodSearchItem[];
+  }> {
     const params = new URLSearchParams({ q, limit: String(limit) });
     const resp = await apiClient.get(`/api/health/food/search?${params.toString()}`);
     return resp.data;

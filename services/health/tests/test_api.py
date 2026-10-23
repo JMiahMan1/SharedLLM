@@ -316,6 +316,154 @@ class TestNutrition:
         assert response.status_code == 422
 
 
+def _off_item(name: str = "Broccoli Soup") -> dict:
+    return {
+        "code": "123",
+        "name": name,
+        "brand": "Brand",
+        "image": None,
+        "serving_size": None,
+        "serving_grams": None,
+        "source": "openfoodfacts",
+        "per_100g": {
+            "calories": 50,
+            "protein_g": 1.0,
+            "carbs_g": 9.0,
+            "fat_g": 1.0,
+            "fiber_g": 1.0,
+            "sugar_g": 2.0,
+            "sodium_mg": 100,
+        },
+    }
+
+
+class TestFoodSearch:
+    def test_merges_seed_then_openfoodfacts(self, client, mini_seed_path, monkeypatch):
+        monkeypatch.setenv("FDC_SEED_PATH", str(mini_seed_path))
+
+        async def fake_search(query, limit):
+            assert query == "broccoli"
+            assert limit == 4  # appended after the single seed hit
+            return [_off_item()]
+
+        monkeypatch.setattr(health_main, "_off_search", fake_search)
+        resp = client.get("/food/search", params={"q": "broccoli", "limit": 5})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["query"] == "broccoli"
+        assert body["sources"] == ["usda_fdc", "openfoodfacts"]
+        assert body["offline_sources"] == []
+        assert body["seed"] == {"present": True, "results": 1}
+        assert [item["source"] for item in body["results"]] == ["usda_fdc", "openfoodfacts"]
+        assert body["results"][0]["code"] == "foundation:1111"
+        assert body["results"][1]["name"] == "Broccoli Soup"
+
+    def test_seed_filling_the_limit_skips_openfoodfacts(self, client, mini_seed_path, monkeypatch):
+        monkeypatch.setenv("FDC_SEED_PATH", str(mini_seed_path))
+
+        async def boom(query, limit):
+            raise AssertionError("OFF must not be called when the seed fills the limit")
+
+        monkeypatch.setattr(health_main, "_off_search", boom)
+        resp = client.get("/food/search", params={"q": "broccoli", "limit": 1})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["sources"] == ["usda_fdc"]
+        assert len(body["results"]) == 1
+
+    def test_openfoodfacts_failure_degrades_to_seed(self, client, mini_seed_path, monkeypatch):
+        monkeypatch.setenv("FDC_SEED_PATH", str(mini_seed_path))
+
+        async def fail(query, limit):
+            raise health_main.HTTPException(status_code=503, detail="down")
+
+        monkeypatch.setattr(health_main, "_off_search", fail)
+        resp = client.get("/food/search", params={"q": "broccoli"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["sources"] == ["usda_fdc"]
+        assert body["offline_sources"] == ["openfoodfacts"]
+        assert body["seed"] == {"present": True, "results": 1}
+
+    def test_missing_seed_answers_from_openfoodfacts(self, client, tmp_path, monkeypatch):
+        monkeypatch.setenv("FDC_SEED_PATH", str(tmp_path / "nope.db"))
+
+        async def fake_search(query, limit):
+            return [_off_item()]
+
+        monkeypatch.setattr(health_main, "_off_search", fake_search)
+        resp = client.get("/food/search", params={"q": "soup"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["sources"] == ["openfoodfacts"]
+        assert body["seed"] == {"present": False, "results": 0}
+        assert len(body["results"]) == 1
+
+    def test_both_sources_down_is_an_error(self, client, tmp_path, monkeypatch):
+        monkeypatch.setenv("FDC_SEED_PATH", str(tmp_path / "nope.db"))
+
+        async def fail(query, limit):
+            raise health_main.HTTPException(status_code=503, detail="OpenFoodFacts is unreachable")
+
+        monkeypatch.setattr(health_main, "_off_search", fail)
+        resp = client.get("/food/search", params={"q": "soup"})
+        assert resp.status_code == 503
+
+
+class TestFoodBarcode:
+    def test_barcode_is_cached_after_the_first_lookup(self, client, monkeypatch):
+        calls = []
+
+        async def fake_get(path, params=None):
+            calls.append(path)
+            return {
+                "status": 1,
+                "product": {
+                    "code": "3017620422003",
+                    "product_name": "Nutella",
+                    "brands": "Ferrero",
+                    "serving_size": "15 g",
+                    "serving_quantity": "15",
+                    "nutriments": {"energy-kcal_100g": 539, "proteins_100g": 6.3, "sodium_100g": 0.0428},
+                },
+            }
+
+        monkeypatch.setattr(health_main, "_off_get", fake_get)
+        first = client.get("/food/barcode/3017620422003")
+        second = client.get("/food/barcode/3017620422003")
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json() == second.json()
+        body = second.json()
+        assert body["name"] == "Nutella"
+        assert body["source"] == "openfoodfacts"
+        assert body["serving_grams"] == 15
+        assert body["per_100g"]["sodium_mg"] == pytest.approx(42.8)
+        assert len(calls) == 1  # the second lookup came from the cache
+
+    def test_unknown_barcode_is_a_404(self, client, monkeypatch):
+        async def fake_get(path, params=None):
+            return {"status": 0, "status_verbose": "product not found"}
+
+        monkeypatch.setattr(health_main, "_off_get", fake_get)
+        resp = client.get("/food/barcode/00000000000000")
+        assert resp.status_code == 404
+        assert "not in OpenFoodFacts" in resp.json()["detail"]
+
+    def test_product_without_a_name_is_unusable(self, client, monkeypatch):
+        async def fake_get(path, params=None):
+            return {"status": 1, "product": {"code": "1234", "nutriments": {"energy-kcal_100g": 20}}}
+
+        monkeypatch.setattr(health_main, "_off_get", fake_get)
+        resp = client.get("/food/barcode/1234")
+        assert resp.status_code == 404
+        assert "no usable nutrition data" in resp.json()["detail"]
+
+    def test_invalid_barcode_is_rejected(self, client):
+        resp = client.get("/food/barcode/ab")
+        assert resp.status_code == 422
+
+
 class TestSummary:
     def test_summary_composes_sleep_checkin_and_readiness(self, client):
         client.put(

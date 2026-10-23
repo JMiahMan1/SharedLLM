@@ -246,3 +246,17 @@ class HealthShare(SQLModel, table=True):  # type: ignore
     viewer: str = Field(index=True)
     scope: str = Field(index=True)
     created_at: str = Field(default_factory=utcnow)
+
+
+class OffProduct(SQLModel, table=True):  # type: ignore
+    """Permanent cache of an OpenFoodFacts product read.
+
+    OFF rate-limits per-product reads and the family rescans the same packages,
+    so a barcode lookup stores its transformed payload here once and answers
+    from the cache afterwards. A packaged food's label does not change, so a
+    stored row never needs to expire.
+    """
+
+    code: str = Field(primary_key=True)
+    payload_json: str
+    fetched_at: str = Field(default_factory=utcnow)
