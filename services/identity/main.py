@@ -4140,6 +4140,23 @@ def may_view_raw_data(viewer: User | None, subject: User | None) -> bool:
     return viewer.username == subject.username
 
 
+def may_view_technical_data(viewer: User | None, subject: User | None) -> bool:
+    """Whether ``viewer`` may also see the technical side of ``subject``'s data
+    (devices, app versions, guard and permission states, sync times; the
+    family member page, docs/FAMILY_MEMBER_PAGE.md).
+
+    Narrower than :func:`may_view_raw_data`: of the people who may see a
+    child's data, only an admin and the father see the technical side. The
+    mother sees every personal detail and every control, without it. A member
+    always sees their own.
+    """
+    if viewer is None or subject is None:
+        return False
+    if viewer.username == subject.username:
+        return True
+    return may_view_raw_data(viewer, subject) and (bool(viewer.is_admin) or viewer.family_role == "father")
+
+
 # --- screen time: budgets, routines, more-time requests (Phase 11 step 4) ---
 
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -4218,6 +4235,15 @@ def _clean_screen_rules(body: dict) -> dict:
             if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 1440:
                 raise HTTPException(status_code=422, detail=f"{key} must be whole minutes from 0 to 1440")
             out[key] = value
+    # The weekly schedule (Family Link's "a limit per day"): {weekday: minutes},
+    # each day overriding the daily and weekend limits.
+    if body.get("day_limits") is not None:
+        days = body["day_limits"]
+        if not isinstance(days, dict) or any(
+            d not in _WEEKDAYS or not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 1440 for d, v in days.items()
+        ):
+            raise HTTPException(status_code=422, detail="day_limits must map mon..sun to whole minutes from 0 to 1440")
+        out["day_limits"] = {d: days[d] for d in _WEEKDAYS if d in days}
     for key in ("bedtime_start", "bedtime_end", "school_start", "school_end"):
         if body.get(key):
             if not isinstance(body[key], str) or not _HHMM.match(body[key]):
@@ -4320,6 +4346,9 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         "rules": _screen_rules(session, subject.username),
         "bonus_min": _granted_minutes(session, subject.username, day) if day else 0,
         "can_manage": _may_manage_screen_time(caller, subject),
+        # Whether the caller sees the technical side (the gateway strips it
+        # for the mother; docs/FAMILY_MEMBER_PAGE.md).
+        "technical": may_view_technical_data(caller, subject),
         # A minor's phone keeps Jarvis protected (no uninstall, no switching
         # the guard off) whether or not any time rules are set.
         "protected": (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES,
@@ -4841,6 +4870,64 @@ def internal_guard_parents(username: str, session: Session = Depends(get_session
     return {"parents": _parents_of(session, subject), "display_name": subject.display_name or subject.username}
 
 
+#: Tamper reports kept on a child's record for the father's Devices section.
+GUARD_TAMPER_LIMIT = 50
+
+
+@app.post("/api/internal/guard/tamper/{username}")
+def internal_guard_tamper(username: str, body: dict, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: keep a child's tamper report (protection switched off or worked
+    around) and say who to tell. The gateway checked the event name."""
+    subject = session.exec(select(User).where(User.username == username.strip().lower())).first()
+    if subject is None:
+        return {"parents": [], "display_name": username}
+    event = str((body or {}).get("event") or "")[:40]
+    session.add(DeviceEvent(
+        device_key=str((body or {}).get("device_key") or "")[:128],
+        username=subject.username,
+        event="guard_tamper",
+        extra=json.dumps({"event": event}),
+    ))
+    session.commit()
+    return {"parents": _parents_of(session, subject), "display_name": subject.display_name or subject.username}
+
+
+@app.get("/api/family/devices/{username}")
+def family_member_devices(username: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A child's devices with their technical side, for the family member
+    page's Devices section: model, OS, app version and build, last seen and
+    address, battery, the guard state the phone reported, recent tamper
+    reports, and which parents have an offline unlock code.
+
+    Technical data is the father's and an admin's only (the mother sees every
+    personal detail, not this): :func:`may_view_technical_data`.
+    """
+    child = _screen_subject(session, username)
+    if caller.username == child.username or not may_view_technical_data(caller, child):
+        raise HTTPException(status_code=403, detail="Only the father or an admin can see device details")
+    devices = session.exec(select(Device).where(Device.owner_username == child.username, Device.revoked == False)).all()  # noqa: E712
+    batteries = _latest_batteries(session, [d.device_key for d in devices])
+    out = []
+    for d in sorted(devices, key=lambda d: d.last_seen_at or "", reverse=True):
+        read = _device_to_read(d)
+        read.battery = batteries.get(d.device_key)
+        out.append({**read.model_dump(), "os_build": d.os_build})
+    tamper = session.exec(
+        select(DeviceEvent)
+        .where(DeviceEvent.username == child.username, DeviceEvent.event == "guard_tamper")
+        .order_by(DeviceEvent.at.desc())
+        .limit(GUARD_TAMPER_LIMIT)
+    ).all()
+    parents = _parents_of(session, child)
+    coded = {r.username for r in session.exec(select(GuardOfflineCode).where(GuardOfflineCode.username.in_(parents))).all()} if parents else set()
+    return {
+        "username": child.username,
+        "devices": out,
+        "tamper": [{**_device_event_to_read(t).model_dump(), "device_key": t.device_key or None} for t in tamper],
+        "offline_code": {p: p in coded for p in parents},
+    }
+
+
 def _journal_out(row: GuardianNote) -> dict:
     return {"id": row.id, "author": row.author, "child": row.child, "text": row.text, "shared": row.shared, "created_at": row.created_at}
 
@@ -4927,7 +5014,8 @@ def internal_may_view_raw(
     def find(username: str) -> User | None:
         return session.exec(select(User).where(User.username == username.strip().lower())).first()
 
-    return {"allowed": may_view_raw_data(find(viewer), find(subject))}
+    who, whose = find(viewer), find(subject)
+    return {"allowed": may_view_raw_data(who, whose), "technical": may_view_technical_data(who, whose)}
 
 
 @app.get("/api/internal/activity-sharing")

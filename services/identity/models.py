@@ -339,6 +339,7 @@ NO_OPT_IN_EVENTS = frozenset(
         "feature_use",  # a feature was used
         "capability_miss",  # asked for something that does not exist
         "battery",  # the device's own charge: voltage, percent, on USB (a watch's discharge log)
+        "guard_tamper",  # a child's phone reported its protection switched off or worked around
     }
 )
 

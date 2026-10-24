@@ -104,6 +104,7 @@ from services.gateway.media_models import (
     MediaLibraryResponse,
     MediaSearchResponse,
 )
+from services.gateway.member_page import strip_technical
 from services.gateway.messaging import InferenceJobQueue, JobStatus
 from services.gateway.orchestrator import (
     _get,
@@ -5312,6 +5313,45 @@ async def post_usage(request: Request):
     return await _proxy_json_response(resp)
 
 
+async def _raw_data_access(request: Request, subject: str) -> bool:
+    """Whether the caller may read ``subject``'s collected data (identity's
+    visibility rule: a minor's is the parents', an adult's is their own);
+    refused with 401/403 otherwise. Returns whether they also see its
+    technical side (only an admin and the father do; member_page.py)."""
+    creds = await _resolve_identity_from_request(request)
+    viewer = str((creds or {}).get("user") or "").strip()
+    if not viewer:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    async with borrow_http_client() as client:
+        rule = await client.get(
+            f"{IDENTITY_SVC}/api/internal/may-view-raw",
+            params={"viewer": viewer, "subject": subject},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        answer = (await rule.json(content_type=None) or {}) if rule.status == 200 else {}
+    if not answer.get("allowed"):
+        raise HTTPException(status_code=403, detail="Only a parent can see this")
+    return bool(answer.get("technical"))
+
+
+async def _member_json(resp, technical: bool) -> JSONResponse:
+    """An upstream answer about a member, with the technical side stripped
+    for a viewer who may not see it (docs/FAMILY_MEMBER_PAGE.md)."""
+    if technical or resp.status != 200:
+        return await _proxy_json_response(resp)
+    return JSONResponse(status_code=resp.status, content=strip_technical(await resp.json(content_type=None)))
+
+
+async def _parents_only_telemetry(request: Request, subject: str, path: str, params: dict | None = None):
+    """A child's collected data from telemetry, for the people identity's
+    visibility rule allows (a minor's parents; an adult themselves), without
+    the technical side unless the viewer is an admin or the father."""
+    technical = await _raw_data_access(request, subject)
+    async with borrow_http_client() as client:
+        resp = await client.get(f"{TELEMETRY_SVC}{path}", params=params or {}, headers={"X-Internal-Secret": INTERNAL_SECRET})
+        return await _member_json(resp, technical)
+
+
 @app.get("/api/usage/{user}")
 async def get_usage(request: Request, user: str, days: int = 7):
     """Screen time day by day for one person (parents' surfaces read this).
@@ -5320,41 +5360,7 @@ async def get_usage(request: Request, user: str, days: int = 7):
     parents', an adult's is their own. Any signed-in member could read anyone's
     before, a child a parent's and a sibling a sibling's.
     """
-    creds = await _resolve_identity_from_request(request)
-    viewer = str((creds or {}).get("user") or "").strip()
-    if not viewer:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    headers = {"X-Internal-Secret": INTERNAL_SECRET}
-    async with borrow_http_client() as client:
-        rule = await client.get(
-            f"{IDENTITY_SVC}/api/internal/may-view-raw", params={"viewer": viewer, "subject": user}, headers=headers
-        )
-        allowed = rule.status == 200 and bool((await rule.json(content_type=None) or {}).get("allowed"))
-        if not allowed:
-            raise HTTPException(status_code=403, detail="Only a parent can see this")
-        resp = await client.get(
-            f"{TELEMETRY_SVC}/api/telemetry/usage/{user}", params={"days": days}, headers=headers
-        )
-    return await _proxy_json_response(resp)
-
-
-async def _parents_only_telemetry(request: Request, subject: str, path: str, params: dict | None = None):
-    """A child's collected data from telemetry, for the people identity's
-    visibility rule allows (a minor's parents; an adult themselves)."""
-    creds = await _resolve_identity_from_request(request)
-    viewer = str((creds or {}).get("user") or "").strip()
-    if not viewer:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    headers = {"X-Internal-Secret": INTERNAL_SECRET}
-    async with borrow_http_client() as client:
-        rule = await client.get(
-            f"{IDENTITY_SVC}/api/internal/may-view-raw", params={"viewer": viewer, "subject": subject}, headers=headers
-        )
-        allowed = rule.status == 200 and bool((await rule.json(content_type=None) or {}).get("allowed"))
-        if not allowed:
-            raise HTTPException(status_code=403, detail="Only a parent can see this")
-        resp = await client.get(f"{TELEMETRY_SVC}{path}", params=params or {}, headers=headers)
-    return await _proxy_json_response(resp)
+    return await _parents_only_telemetry(request, user, f"/api/telemetry/usage/{user}", {"days": days})
 
 
 @app.get("/api/guardian/recap/{user}")
@@ -5377,17 +5383,9 @@ async def guardian_guidance(request: Request, user: str):
     """Prayer prompts, a verse and a conversation starter for each thing that
     happened in the child's week (``services/common/guidance.py``). Parents
     only; nothing is sent to the child."""
-    creds = await _resolve_identity_from_request(request)
-    viewer = str((creds or {}).get("user") or "").strip()
-    if not viewer:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    await _raw_data_access(request, user)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
-        rule = await client.get(
-            f"{IDENTITY_SVC}/api/internal/may-view-raw", params={"viewer": viewer, "subject": user}, headers=headers
-        )
-        if rule.status != 200 or not bool((await rule.json(content_type=None) or {}).get("allowed")):
-            raise HTTPException(status_code=403, detail="Only a parent can see this")
         who = await client.get(f"{IDENTITY_SVC}/api/internal/guard/parents/{user}", headers=headers)
         name = ((await who.json(content_type=None)) or {}).get("display_name") if who.status == 200 else None
         resp = await client.get(f"{TELEMETRY_SVC}/api/telemetry/recap/{user}", headers=headers)
@@ -5452,7 +5450,7 @@ async def guardian_talk(request: Request):
             await _notify.send(_notify.notice(
                 parent, "family_safety", f"{name} would like to talk",
                 note or "No note, just a request to talk. A quiet moment together would mean a lot.",
-                url="/guardian", tag=f"talk:{me}", priority=4,
+                url=f"/family/member/{me}", tag=f"talk:{me}", priority=4,
             ))
         except Exception as exc:
             log.warning("[guardian] talk request to %s failed: %s", parent, exc)
@@ -5463,6 +5461,16 @@ async def guardian_talk(request: Request):
 async def guardian_activity(request: Request, user: str, limit: int = 100):
     """A child's activity feed (music, videos, pages, verses, calls, messages, sites)."""
     return await _parents_only_telemetry(request, user, f"/api/telemetry/activity/{user}", {"limit": max(1, min(limit, 200))})
+
+
+@app.get("/api/family/member/{user}/devices")
+async def family_member_devices(request: Request, user: str):
+    """A child's devices with their technical side (model, OS, app version and
+    build, last seen, battery, guard state, tamper reports, offline codes):
+    the family member page's Devices section. Identity refuses anyone but
+    the father and an admin with 403, the mother included."""
+    status, body = await _identity_as_caller(request, "GET", f"/api/family/devices/{user}")
+    return JSONResponse(status_code=status, content=body)
 
 
 @app.post("/api/usage/night")
@@ -5765,7 +5773,7 @@ async def screen_time_status(request: Request, username: str):
         if isinstance(a, dict) and a.get("package")
     }
     state = evaluate_screen_time(body.get("rules"), used_ms, body.get("bonus_min") or 0, now, apps_ms)
-    return {
+    answer = {
         "status": "SUCCESS",
         "username": username,
         "day": day,
@@ -5778,6 +5786,9 @@ async def screen_time_status(request: Request, username: str):
         "permission_approvals": (body.get("approvals") or {}).get("permissions") or {},
         **state,
     }
+    # The phone and the father read it all; the mother reads it without the
+    # technical side (identity says which; docs/FAMILY_MEMBER_PAGE.md).
+    return answer if body.get("technical", True) else strip_technical(answer)
 
 
 _TAMPER_EVENTS = {
@@ -5848,18 +5859,25 @@ async def guard_tamper(request: Request):
     child = str((creds or {}).get("user") or "").strip()
     if not child:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    event = str((await request.json() or {}).get("event") or "")
+    body = await request.json() or {}
+    event = str(body.get("event") or "")
     if event not in _TAMPER_EVENTS:
         raise HTTPException(status_code=422, detail="Unknown event")
+    # Identity keeps the report on the child's record (the father's Devices
+    # section lists them) and says who to tell.
     async with borrow_http_client() as client:
-        resp = await client.get(f"{IDENTITY_SVC}/api/internal/guard/parents/{child}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/internal/guard/tamper/{child}",
+            json={"event": event, "device_key": str(body.get("device_key") or "")},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
         info = await resp.json(content_type=None) if resp.status == 200 else {}
     name = (info or {}).get("display_name") or child
     await _screen_time_notice(
         (info or {}).get("parents") or [],
         "Phone protection changed",
         f"{name}'s phone {_TAMPER_EVENTS[event]}.",
-        "/health",
+        f"/family/member/{child}",
     )
     return {"status": "SUCCESS"}
 
@@ -5895,7 +5913,7 @@ async def ask_a_parent(request: Request, payload: dict) -> tuple[int, dict]:
         title, line = _GUARD_ASK_TITLES[str(asked.get("kind"))]
         note = f" \u2014 \u201c{asked['note']}\u201d" if asked.get("note") else ""
         await _screen_time_notice(
-            body["notify"], title, line.format(name=child, what=_guard_request_words(asked), note=note), f"/guardian?child={child}"
+            body["notify"], title, line.format(name=child, what=_guard_request_words(asked), note=note), f"/family/member/{child}"
         )
     return status, {k: v for k, v in (body or {}).items() if k != "notify"}
 
@@ -13300,7 +13318,7 @@ async def _burden_check(request: Request) -> None:
             await _notify.send(_notify.notice(
                 parent, "family_safety", f"{name} has had a few hard days",
                 "From their own morning check-ins. A gentle word or some time together may help.",
-                url=f"/guardian?child={me}", tag=f"burden:{me}", once=f"burden:{me}:{week}", priority=3,
+                url=f"/family/member/{me}", tag=f"burden:{me}", once=f"burden:{me}:{week}", priority=3,
             ))
     except Exception as exc:
         log.warning("[guardian] burden check skipped: %s", exc)

@@ -8,7 +8,8 @@ answer, and every case is testable without a clock or a device.
 
 Semantics follow Family Link and Qustodio:
 - the daily limit resets at local midnight; a weekend limit replaces it on
-  Saturday and Sunday when set; bonus minutes extend today's limit only;
+  Saturday and Sunday when set, and a day of the weekly schedule
+  (``day_limits``) replaces both on that day; bonus minutes extend today's limit only;
 - bedtime and school time are windows (bedtime may cross midnight) during
   which the phone is locked whatever is left of the limit;
 - a parent's pause locks the phone until it is lifted or runs out;
@@ -172,6 +173,9 @@ def evaluate(
     limit = rules.get("daily_limit_min")
     if weekend and rules.get("weekend_limit_min") is not None:
         limit = rules.get("weekend_limit_min")
+    # The weekly schedule names a day's own limit, which wins over both.
+    if (rules.get("day_limits") or {}).get(weekday) is not None:
+        limit = rules["day_limits"][weekday]
     used_min = max(0, int(used_ms or 0)) // 60000
     bonus = max(0, int(bonus_min or 0))
     remaining = None if limit is None else max(0, int(limit) + bonus - used_min)

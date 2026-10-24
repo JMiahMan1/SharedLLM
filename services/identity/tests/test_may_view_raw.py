@@ -1,7 +1,7 @@
 """The collected-data visibility rule: a minor's raw data is the parents'."""
 import pytest
 
-from services.identity.main import may_view_raw_data
+from services.identity.main import may_view_raw_data, may_view_technical_data
 from services.identity.models import User
 
 
@@ -40,3 +40,21 @@ GROWN = _u("grown", "adult_child")
 )
 def test_who_may_see_collected_data(viewer, subject, allowed):
     assert may_view_raw_data(viewer, subject) is allowed
+
+
+@pytest.mark.parametrize(
+    ("viewer", "subject", "allowed"),
+    [
+        (DAD, KID, True),
+        (ADMIN, KID, True),
+        (MOM, KID, False),  # every personal detail, but not the technical side
+        (OTHER_MOM, TEEN, False),
+        (SIB, KID, False),
+        (KID, KID, True),  # their own phone's details are their own
+        (DAD, GROWN, False),  # an adult's devices are not the father's
+        (GROWN, GROWN, True),
+        (None, KID, False),
+    ],
+)
+def test_who_may_see_the_technical_side(viewer, subject, allowed):
+    assert may_view_technical_data(viewer, subject) is allowed
