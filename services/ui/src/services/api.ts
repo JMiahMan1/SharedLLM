@@ -156,6 +156,8 @@ import type {
   HealthFast,
   HealthStreaks,
   HealthGoalsWeek,
+  HealthCheer,
+  HealthCheersDay,
   HealthFastingState,
   HealthCycleSummary,
   HealthCyclePeriod,
@@ -1899,6 +1901,16 @@ export const api = {
   /** The week's active minutes from steps, workouts, heart rate and device totals. */
   async getHealthActiveMinutes(day?: string): Promise<HealthActiveMinutes> {
     const resp = await apiClient.get('/api/health/active-minutes', { params: day ? { day } : {} });
+    return resp.data;
+  },
+
+  async getHealthCheers(day?: string): Promise<HealthCheersDay> {
+    const resp = await apiClient.get('/api/health/cheers', { params: day ? { day } : {} });
+    return resp.data;
+  },
+
+  async sendHealthCheer(body: { to_user: string; kind: string; day: string }): Promise<HealthCheer & { duplicate: boolean }> {
+    const resp = await apiClient.post('/api/health/cheers', body);
     return resp.data;
   },
 

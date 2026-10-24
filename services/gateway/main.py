@@ -13282,6 +13282,26 @@ async def get_health_active_minutes(request: Request, day: str | None = None):
     return await _active_minutes_week(request, day)
 
 
+@app.get("/api/health/cheers")
+async def get_health_cheers(request: Request, day: str | None = None):
+    return await _health_json("GET", "/cheers", request, params={"day": day})
+
+
+@app.post("/api/health/cheers")
+async def post_health_cheer(request: Request):
+    """Send a cheer, then tell the person (a ``health`` notice; never fails the cheer)."""
+    sent = await _health_json("POST", "/cheers", request, body=await request.json())
+    if isinstance(sent, dict) and sent.get("duplicate") is False:
+        try:
+            await _notify.send(_notify.notice(
+                sent["to_user"], "health", f"{sent['from_user'].title()} cheered your day",
+                f"{sent['emoji']} {sent['label']}", url="/health", tag=f"cheer:{sent['id']}",
+            ))
+        except Exception as exc:
+            log.warning("[health] cheer notice skipped: %s", exc)
+    return sent
+
+
 @app.get("/api/health/goals")
 async def get_health_goals(request: Request, day: str | None = None):
     return await _health_json("GET", "/goals", request, params={"day": day})

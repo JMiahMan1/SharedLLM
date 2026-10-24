@@ -9,6 +9,7 @@ import {
   Moon,
   Sparkles,
   Sun,
+  Share2,
   Utensils,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -29,6 +30,8 @@ import { isKidMode, metricOn } from '../../lib/healthSwitches';
 import { pedometerQueryOptions, stepsQueryKey } from '../../lib/healthQueries';
 import type { HealthTab } from './HealthTabs';
 import SharedWithYouCard from './SharedWithYouCard';
+import ShareToChatSheet from '../bible/ShareToChatSheet';
+import { healthDayLines, healthDayShareText } from '../../lib/healthShare';
 
 interface Props {
   onNavigate: (tab: HealthTab) => void;
@@ -92,6 +95,7 @@ export default function HealthToday({ onNavigate }: Props) {
     soreness?: number | null;
   }>({});
   const [waterDraft, setWaterDraft] = useState('');
+  const [sharing, setSharing] = useState(false);
 
   const summaryQuery = useQuery({
     queryKey: ['health-summary', day],
@@ -196,7 +200,27 @@ export default function HealthToday({ onNavigate }: Props) {
 
   return (
     <div className="space-y-3 sm:space-y-4" data-testid="health-today">
-      <p className="px-1 text-[11px] text-slate-500">{formatDayLabel(day)}</p>
+      <div className="flex items-center justify-between gap-2 px-1">
+        <p className="text-[11px] text-slate-500">{formatDayLabel(day)}</p>
+        <button
+          type="button"
+          onClick={() => setSharing(true)}
+          data-testid="share-my-day"
+          className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-[11px] font-semibold text-purple-300 hover:text-white"
+        >
+          <Share2 size={13} /> Share my day
+        </button>
+      </div>
+      {sharing && (
+        <ShareToChatSheet
+          reference="My day"
+          text={healthDayLines({ summary, steps: steps.hasData ? steps.today : null }).join(' · ') || 'Just getting started today.'}
+          heading="Share your day to chat"
+          previewIcon="💚"
+          buildMessage={(note) => healthDayShareText({ summary, steps: steps.hasData ? steps.today : null }, note)}
+          onClose={() => setSharing(false)}
+        />
+      )}
 
       {!summary.profile.exists && (
         <button

@@ -66,6 +66,40 @@ def test_routes_forward_as_the_caller(client, calls, method, path, body, upstrea
         assert kw["json"] == body
 
 
+def test_a_new_cheer_sends_one_health_notice(client, monkeypatch):
+    async def _ident(_request):
+        return {"user": "mom", "is_admin": False}
+
+    monkeypatch.setattr(gateway_main, "_acting_identity", _ident)
+    answers = [
+        {"id": 5, "from_user": "mom", "to_user": "sam", "emoji": "👏", "label": "Well done", "duplicate": False},
+        {"id": 5, "from_user": "mom", "to_user": "sam", "emoji": "👏", "label": "Well done", "duplicate": True},
+    ]
+
+    class _Health:
+        async def request(self, method, url, **kw):
+            return _Resp(answers.pop(0))
+
+    @asynccontextmanager
+    async def fake():
+        yield _Health()
+
+    notices: list[dict] = []
+
+    async def _send(payload, **_kw):
+        notices.append(payload)
+        return True
+
+    monkeypatch.setattr(gateway_main, "shared_http_client", fake)
+    monkeypatch.setattr(gateway_main._notify, "send", _send)
+    body = {"to_user": "sam", "kind": "well_done", "day": "2026-10-22"}
+    client.post("/api/health/cheers", json=body)
+    client.post("/api/health/cheers", json=body)
+    assert len(notices) == 1
+    assert notices[0]["user"] == "sam" and notices[0]["category"] == "health"
+    assert notices[0]["title"] == "Mom cheered your day"
+
+
 def _coach_store(monkeypatch, summary):
     seen: list[tuple[str, dict]] = []
 

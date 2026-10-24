@@ -35,10 +35,11 @@ from pydantic import BaseModel, Field, StrictBool, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.config import INTERNAL_SECRET
-from services.health import challenges, cycle, fasting, food_seed, goals, preferences, scoring, streaks, weekly
+from services.health import challenges, cheers, cycle, fasting, food_seed, goals, preferences, scoring, streaks, weekly
 from services.health.models import (
     ChallengeMember,
     Checkin,
+    Cheer,
     CycleLog,
     CyclePeriod,
     CycleSettings,
@@ -2298,6 +2299,98 @@ def delete_goal(goal_id: int, request: Request, session: Session = Depends(get_s
     return {"deleted": goal_id}
 
 
+# --- cheers ----------------------------------------------------------------
+
+
+class CheerIn(BaseModel):
+    to_user: str = Field(min_length=1, max_length=80)
+    kind: str
+    day: str
+
+    @field_validator("kind")
+    @classmethod
+    def _kind(cls, value: str) -> str:
+        if value not in cheers.KINDS:
+            raise ValueError(f"kind must be one of {', '.join(cheers.KINDS)}")
+        return value
+
+
+def _cheerable(session: Session, user: str, day: date) -> list[str]:
+    """Whom ``user`` may cheer: people sharing a scope with them, and this
+    week's challenge co-members."""
+    people = {row.owner for row in session.exec(select(HealthShare).where(HealthShare.viewer == user)).all()}
+    start = challenges.week_start(day).isoformat()
+    mine = {
+        member.challenge_id
+        for member in session.exec(select(ChallengeMember).where(ChallengeMember.user_id == user)).all()
+    }
+    if mine:
+        week_ids = {
+            row.id
+            for row in session.exec(select(FamilyChallenge).where(FamilyChallenge.week_start == start)).all()
+            if row.id in mine
+        }
+        for member in session.exec(select(ChallengeMember)).all():
+            if member.challenge_id in week_ids:
+                people.add(member.user_id)
+    people.discard(user)
+    return sorted(people)
+
+
+def _cheer_out(row: Cheer) -> dict:
+    emoji, label = cheers.KINDS.get(row.kind, ("", row.kind))
+    return {
+        "id": row.id,
+        "from_user": row.from_user,
+        "to_user": row.to_user,
+        "day": row.day,
+        "kind": row.kind,
+        "emoji": emoji,
+        "label": label,
+        "created_at": row.created_at,
+    }
+
+
+@app.get("/cheers")
+def list_cheers(request: Request, day: str | None = None, session: Session = Depends(get_session)):
+    """Cheers the caller received and sent for ``day``, and whom they may cheer."""
+    user = _user(request)
+    day = _day(day or date.today().isoformat())
+    received = session.exec(select(Cheer).where(Cheer.to_user == user, Cheer.day == day).order_by(Cheer.created_at.asc())).all()
+    sent = session.exec(select(Cheer).where(Cheer.from_user == user, Cheer.day == day).order_by(Cheer.created_at.asc())).all()
+    return {
+        "day": day,
+        "kinds": cheers.catalog(),
+        "can_cheer": _cheerable(session, user, date.fromisoformat(day)),
+        "received": [_cheer_out(row) for row in received],
+        "sent": [_cheer_out(row) for row in sent],
+    }
+
+
+@app.post("/cheers")
+def send_cheer(body: CheerIn, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    day = _day(body.day)
+    to_user = body.to_user.strip().lower()
+    if to_user == user:
+        raise HTTPException(status_code=422, detail="Cheer someone else's day")
+    if to_user not in _cheerable(session, user, date.fromisoformat(day)):
+        raise HTTPException(
+            status_code=403,
+            detail="You can cheer someone who shares health with you or is in a challenge with you this week.",
+        )
+    existing = session.exec(
+        select(Cheer).where(Cheer.from_user == user, Cheer.to_user == to_user, Cheer.day == day, Cheer.kind == body.kind)
+    ).first()
+    if existing is not None:
+        return {**_cheer_out(existing), "duplicate": True}
+    row = Cheer(from_user=user, to_user=to_user, day=day, kind=body.kind)
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return {**_cheer_out(row), "duplicate": False}
+
+
 # --- streaks ---------------------------------------------------------------
 
 
@@ -2523,6 +2616,14 @@ def export_data(request: Request, session: Session = Depends(get_session)):
             for row in session.exec(
                 select(FastingSession).where(FastingSession.user_id == user).order_by(FastingSession.started_at.asc())
             ).all()
+        ],
+        "goals": [
+            {"week_start": row.week_start, "kind": row.kind, "target_days": row.target_days}
+            for row in session.exec(select(HealthGoal).where(HealthGoal.user_id == user)).all()
+        ],
+        "cheers_received": [
+            {"from_user": row.from_user, "day": row.day, "kind": row.kind}
+            for row in session.exec(select(Cheer).where(Cheer.to_user == user)).all()
         ],
         "challenges_joined": [
             {"challenge_id": row.challenge_id, "joined_at": row.joined_at}
