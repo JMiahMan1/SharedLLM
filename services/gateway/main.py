@@ -13182,6 +13182,29 @@ async def export_health(request: Request):
     return await _health_json("GET", "/export", request)
 
 
+# Fasting window: adults only (the health service refuses a minor's profile).
+
+
+@app.get("/api/health/fasting")
+async def get_health_fasting(request: Request):
+    return await _health_json("GET", "/fasting", request)
+
+
+@app.post("/api/health/fasting/start")
+async def start_health_fast(request: Request):
+    return await _health_json("POST", "/fasting/start", request, body=await request.json())
+
+
+@app.post("/api/health/fasting/stop")
+async def stop_health_fast(request: Request):
+    return await _health_json("POST", "/fasting/stop", request, body=await request.json())
+
+
+@app.delete("/api/health/fasting/{fast_id}")
+async def delete_health_fast(fast_id: int, request: Request):
+    return await _health_json("DELETE", f"/fasting/{fast_id}", request)
+
+
 async def _health_minor_flag(user: str) -> str:
     """``true``/``false`` for whether ``user``'s family role is a minor's, else ``unknown``.
 

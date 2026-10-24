@@ -23,6 +23,7 @@ import {
   targetLabel,
   type Meal,
 } from '../../lib/healthHub';
+import { isKidMode } from '../../lib/healthSwitches';
 import type { FoodEntry, FoodSearchItem } from '../../types/api';
 import type { HealthTab } from './HealthTabs';
 
@@ -84,6 +85,9 @@ export default function HealthNutrition({ onNavigate }: Props) {
     queryFn: () => api.getNutritionDay(day),
     staleTime: 30_000,
   });
+  // Kid mode never shows calorie numbers, ranges or density colours.
+  const profileQuery = useQuery({ queryKey: ['health-profile'], queryFn: () => api.getHealthProfile() });
+  const kid = isKidMode(profileQuery.data);
   const nutrition = nutritionQuery.data;
   const target = nutrition?.target;
   const progress = nutritionProgress(nutrition?.totals.calories ?? 0, target);
@@ -237,32 +241,52 @@ export default function HealthNutrition({ onNavigate }: Props) {
               className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400"
             >
               <Utensils size={13} className="text-emerald-300" />
-              {target?.kind === 'teen_guidance' ? 'Guidance for today' : 'Today'}
+              {target?.kind === 'teen_guidance' && !kid ? 'Guidance for today' : 'Today'}
             </h2>
-            <p className="mt-1 text-3xl font-bold tabular-nums text-white">
-              {Math.round(nutrition?.totals.calories ?? 0).toLocaleString()}
-              <span className="ml-1 text-sm font-medium text-slate-500">kcal</span>
-            </p>
-            <p className="text-[11px] text-slate-500">{nutrition ? calorieSummary(nutrition) : 'Loading…'}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-[11px] text-slate-400">{targetLabel(target)}</p>
-            {target?.kind === 'teen_guidance' && (
-              <p className="mt-1 max-w-[11rem] text-[10px] text-slate-500">
-                A wide range for growing bodies. No deficit, ever.
+            {kid ? (
+              <p className="mt-1 text-2xl font-bold text-white" data-testid="nutrition-kid-summary">
+                {!nutrition
+                  ? 'Loading…'
+                  : nutrition.logged
+                    ? `${nutrition.entries_count} ${nutrition.entries_count === 1 ? 'thing' : 'things'} logged`
+                    : 'Nothing logged yet'}
               </p>
+            ) : (
+              <>
+                <p className="mt-1 text-3xl font-bold tabular-nums text-white">
+                  {Math.round(nutrition?.totals.calories ?? 0).toLocaleString()}
+                  <span className="ml-1 text-sm font-medium text-slate-500">kcal</span>
+                </p>
+                <p className="text-[11px] text-slate-500">{nutrition ? calorieSummary(nutrition) : 'Loading…'}</p>
+              </>
             )}
           </div>
+          {!kid && (
+            <div className="text-right">
+              <p className="text-[11px] text-slate-400">{targetLabel(target)}</p>
+              {target?.kind === 'teen_guidance' && (
+                <p className="mt-1 max-w-[11rem] text-[10px] text-slate-500">
+                  A wide range for growing bodies. No deficit, ever.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-white/[0.06]">
-          <div
-            className={`h-full rounded-full ${progress.over ? 'bg-amber-500' : 'bg-emerald-500'}`}
-            style={{ width: `${progress.percent ?? 0}%` }}
-          />
-        </div>
+        {!kid && (
+          <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-white/[0.06]">
+            <div
+              className={`h-full rounded-full ${progress.over ? 'bg-amber-500' : 'bg-emerald-500'}`}
+              style={{ width: `${progress.percent ?? 0}%` }}
+            />
+          </div>
+        )}
 
-        {target?.kind === 'unavailable' ? (
+        {kid ? (
+          <p className="mt-3 text-xs text-slate-400">
+            Eat a rainbow, drink water, and stop when you feel full. Logging is just for noticing.
+          </p>
+        ) : target?.kind === 'unavailable' ? (
           <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
             <p className="text-xs text-slate-300">
               A range needs {target.missing.length ? target.missing.join(', ') : 'profile details'}.
@@ -386,7 +410,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
                           <span className="block truncate text-xs font-medium text-slate-200">{item.name}</span>
                           <span className="block truncate text-[10px] text-slate-500">
                             {item.source === 'usda_fdc' ? (item.brand ? `USDA · ${item.brand}` : 'USDA') : item.brand}
-                            {item.per_100g.calories !== null ? ` · ${Math.round(item.per_100g.calories)} kcal / 100g` : ' · no calorie data'}
+                            {kid ? '' : item.per_100g.calories !== null ? ` · ${Math.round(item.per_100g.calories)} kcal / 100g` : ' · no calorie data'}
                           </span>
                         </span>
                         <Plus size={15} className="shrink-0 text-purple-300" />
@@ -403,7 +427,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
               <p className="text-sm font-semibold text-white">{selected.name}</p>
               <p className="text-[11px] text-slate-500">
                 {selected.brand}
-                {selected.per_100g.calories !== null ? ` · ${Math.round(selected.per_100g.calories)} kcal / 100g` : ''}
+                {!kid && selected.per_100g.calories !== null ? ` · ${Math.round(selected.per_100g.calories)} kcal / 100g` : ''}
               </p>
               {selected.portions && selected.portions.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5" data-testid="food-portion-chips">
@@ -444,7 +468,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
               </div>
               <div className="mt-2 flex items-center justify-between">
                 <span className="text-xs text-slate-400">
-                  {selectedPreview !== null ? `≈ ${selectedPreview} kcal` : 'No calorie data'}
+                  {kid ? '' : selectedPreview !== null ? `≈ ${selectedPreview} kcal` : 'No calorie data'}
                 </span>
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setSelected(null)} className="text-[11px] text-slate-400">
@@ -612,12 +636,14 @@ export default function HealthNutrition({ onNavigate }: Props) {
                         {entry.brand ? <span className="ml-1 text-slate-500">· {entry.brand}</span> : null}
                       </p>
                       <p className="text-[10px] text-slate-500">
-                        {Math.round(entry.calories * entry.servings)} kcal
-                        {entry.servings !== 1 ? ` · ${entry.servings} servings` : ''}
-                        {` · P ${Math.round(entry.protein_g * entry.servings)}g C ${Math.round(entry.carbs_g * entry.servings)}g F ${Math.round(entry.fat_g * entry.servings)}g`}
+                        {kid
+                          ? entry.servings !== 1
+                            ? `${entry.servings} servings`
+                            : '1 serving'
+                          : `${Math.round(entry.calories * entry.servings)} kcal${entry.servings !== 1 ? ` · ${entry.servings} servings` : ''} · P ${Math.round(entry.protein_g * entry.servings)}g C ${Math.round(entry.carbs_g * entry.servings)}g F ${Math.round(entry.fat_g * entry.servings)}g`}
                       </p>
                     </div>
-                    {entry.density && (
+                    {entry.density && !kid && (
                       <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${densityTone(entry.density.band)}`}>
                         {entry.density.band}
                       </span>

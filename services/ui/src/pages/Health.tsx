@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { HeartPulse } from 'lucide-react';
 import HealthTabs, { type HealthTab } from '../components/health/HealthTabs';
 import HealthToday from '../components/health/HealthToday';
@@ -9,12 +10,16 @@ import HealthCycle from '../components/health/HealthCycle';
 import DigitalWellbeingCard from '../components/health/DigitalWellbeingCard';
 import WeeklyDigestCard from '../components/health/WeeklyDigestCard';
 import FamilyChallengeCard from '../components/health/FamilyChallengeCard';
+import FastingCard from '../components/health/FastingCard';
 import ScreenTimeCard from '../components/health/ScreenTimeCard';
 import PhoneProtectionCard from '../components/health/PhoneProtectionCard';
 import HealthConnectCard from '../components/health/HealthConnectCard';
 import TalkRequestCard from '../components/guardian/TalkRequestCard';
 import GuardianLink from '../components/guardian/GuardianLink';
 import HealthFitness from './HealthFitness';
+import { api } from '../services/api';
+import { metricOn } from '../lib/healthSwitches';
+import type { HealthMetricSwitch } from '../types/api';
 
 /**
  * The Health hub.
@@ -27,6 +32,10 @@ import HealthFitness from './HealthFitness';
  */
 const Health = () => {
   const [tab, setTab] = useState<HealthTab>('today');
+  // The per-metric switches (Health → Health → Cards). A card the person
+  // turned off is not rendered at all; while the profile loads, none are.
+  const profileQuery = useQuery({ queryKey: ['health-profile'], queryFn: () => api.getHealthProfile() });
+  const on = (key: HealthMetricSwitch) => metricOn(profileQuery.data, key);
 
   return (
     <div className="mx-auto max-w-6xl space-y-3 px-1 pb-12 sm:space-y-4 sm:px-0" data-testid="health-page">
@@ -59,8 +68,9 @@ const Health = () => {
             <PhoneProtectionCard />
             <TalkRequestCard />
             <HealthToday onNavigate={setTab} />
-            <WeeklyDigestCard />
-            <FamilyChallengeCard />
+            {on('fasting') && <FastingCard />}
+            {on('weekly_digest') && <WeeklyDigestCard />}
+            {on('family_challenge') && <FamilyChallengeCard />}
             <DigitalWellbeingCard />
           </div>
         )}

@@ -1577,8 +1577,28 @@ export interface HealthProfile {
   sleep_need_minutes: number | null;
   water_goal_ml: number | null;
   weekly_active_minutes: number | null;
+  /** Which hub cards are on (services/health/preferences.py); fasting starts off, adults only. */
+  metrics: Record<HealthMetricSwitch, boolean>;
+  /** The switches this person may change, in settings order. */
+  metric_catalog: Array<{ key: HealthMetricSwitch; label: string; default: boolean }>;
   updated_at?: string;
 }
+
+export type HealthMetricSwitch =
+  | 'readiness'
+  | 'checkin'
+  | 'sleep'
+  | 'nutrition'
+  | 'water'
+  | 'steps'
+  | 'active_minutes'
+  | 'streaks'
+  | 'weekly_digest'
+  | 'family_challenge'
+  | 'cheers'
+  | 'lessons'
+  | 'coach'
+  | 'fasting';
 
 export interface SleepSession {
   id: number;
@@ -3227,3 +3247,23 @@ export type WorkspaceChatEvent =
   | { type: 'mission'; mission_id: number }
   | { type: 'done'; message: WorkspaceChatMessage | null }
   | { type: 'error'; text: string; message?: WorkspaceChatMessage | null };
+
+/** One fast as the health service reports it (adults only). */
+export interface HealthFast {
+  id: number;
+  started_at: string;
+  ended_at: string | null;
+  target_hours: number | null;
+  elapsed_minutes: number;
+  target_minutes: number | null;
+  percent: number | null;
+  remaining_minutes: number | null;
+  reached: boolean;
+}
+
+export interface HealthFastingState {
+  allowed: boolean;
+  active: HealthFast | null;
+  recent: HealthFast[];
+  presets: number[];
+}

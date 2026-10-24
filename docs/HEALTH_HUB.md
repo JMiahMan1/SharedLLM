@@ -237,7 +237,14 @@ live search is the ecosystem-standard pattern.
 ### Phase 1 — people and profiles
 
 - [x] Health profile per user (age, height, sex, activity level, goal, units), stored in the health service; kid mode flags.
-- [ ] Health settings page: turn metrics on/off, family sharing toggles. Profile and sharing toggles are built; per-metric on/off is not.
+- [x] Health settings page: turn metrics on/off, family sharing toggles. **Cards on your Health page**
+  (Health → Health) switches each card on or off: readiness, check-in, sleep, food, water, steps,
+  active minutes, streaks, weekly digest, family challenge, cheers, lessons, coach and fasting
+  (`services/health/preferences.py`, kept in `HealthPreferences` so an existing database needs no
+  migration; `PUT /profile` takes a partial `metrics` map, `GET /profile` returns every switch
+  resolved plus the catalogue). Off hides the card on the person's own screens and keeps the chat
+  coach off the subject; data and family grants are untouched. Fasting starts off and is adults
+  only: a profile in kid mode or under 18 cannot turn it on and always reads it as off.
 
 ### Phase 2 — data in
 
@@ -330,7 +337,14 @@ live search is the ecosystem-standard pattern.
   `<input type="file" accept="image/*" capture>` into the camera (the app holds `CAMERA` and a
   `FileProvider`), so the web flow only has to add that input when photo logging is built.
 - [x] Food data depth: the read-only USDA seed is mirrored on the server (13,620 foods, per-100 g plus portions like "1 cup, chopped" = 91 g) and searched before OpenFoodFacts; barcode results are cached permanently. The seed is optional at runtime (`FDC_SEED_PATH`): absent → OFF-only, one log line, never an error.
-- [x] Water tracking. Fasting window indicator is not built.
+- [x] Water tracking.
+- [x] Fasting window indicator (adults only, off until switched on in Cards). The person starts a
+  fast (now, or at a time earlier today/last night) with an optional 12/14/16 h or any 8–24 h
+  target and ends it; nothing is inferred from food logs, whose times are when they were typed.
+  `FastingCard` on Health → Today shows the elapsed time, the time left to the target and the
+  last week's fasts, with neutral copy. `GET /fasting`, `POST /fasting/start`, `POST
+  /fasting/stop`, `DELETE /fasting/{id}` (`services/health/fasting.py`, `FastingSession`;
+  gateway `/api/health/fasting…`). A profile in kid mode or under 18 gets `allowed: false` and 403s.
 
 ### Phase 5 — budget and day view
 
@@ -392,7 +406,11 @@ live search is the ecosystem-standard pattern.
 ### Phase 9 — tests, docs, deploy
 
 - [x] Pure tests: BMR/budget maths, scores, portion scaling, density mapping and water. Streaks are not built.
-- [x] UI tests: log a meal (search + manual), day view, check-in, water and cycle opt-in/log/share. Challenge standings, join, start and share are tested (`FamilyChallengeCard.test.tsx`, `services/health/tests/test_challenges.py`, `services/gateway/tests/test_health_challenges_gateway.py`); kid-mode UI hiding is not built.
+- [x] UI tests: log a meal (search + manual), day view, check-in, water and cycle opt-in/log/share. Challenge standings, join, start and share are tested (`FamilyChallengeCard.test.tsx`, `services/health/tests/test_challenges.py`, `services/gateway/tests/test_health_challenges_gateway.py`).
+- [x] Kid-mode UI hiding: with kid mode on, Today's food card and the Nutrition day show what was
+  logged (and the macros) but no calorie number, range, progress bar, per-food calories or density
+  colour; the profile hides weight and the "lose" goal; fasting is off; a kid-mode viewer of a
+  shared food day gets "food logged" without a number. Tested in `src/test/HealthHub.test.tsx`.
 - [x] `npm run typecheck`, `npm run lint`, full UI suite (191 files / 1538 tests), `npm run build`, backend health tests (108), identity family-role tests and docs.
 - [x] Deploy `health gateway ui`, then verify `/health/ready`, the version endpoint and an authenticated `/api/health/profile` (health live since `d766a19f`).
 

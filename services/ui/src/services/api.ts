@@ -152,6 +152,8 @@ import type {
   HealthShare,
   HealthFamilyPerson,
   HealthCycleState,
+  HealthFast,
+  HealthFastingState,
   HealthCycleSummary,
   HealthCyclePeriod,
   HealthCycleLog,
@@ -1889,6 +1891,27 @@ export const api = {
 
   async deleteHealthCycleLog(day: string): Promise<void> {
     await apiClient.delete(`/api/health/cycle/logs/${encodeURIComponent(day)}`);
+  },
+
+  /** The running fast and the last week's (adults only; `allowed: false` for a minor). */
+  async getHealthFasting(): Promise<HealthFastingState> {
+    const resp = await apiClient.get('/api/health/fasting');
+    return resp.data;
+  },
+
+  async startHealthFast(body: { started_at?: string; target_hours?: number | null }): Promise<HealthFast> {
+    const resp = await apiClient.post('/api/health/fasting/start', body);
+    return resp.data;
+  },
+
+  async stopHealthFast(body: { ended_at?: string } = {}): Promise<HealthFast> {
+    const resp = await apiClient.post('/api/health/fasting/stop', body);
+    return resp.data;
+  },
+
+  async deleteHealthFast(id: number): Promise<{ deleted: number }> {
+    const resp = await apiClient.delete(`/api/health/fasting/${id}`);
+    return resp.data;
   },
 
   async exportHealth(): Promise<Record<string, unknown>> {

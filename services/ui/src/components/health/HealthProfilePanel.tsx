@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, HeartPulse, Loader2, Save, Scale, Share2, UserRound, X } from 'lucide-react';
+import { Download, HeartPulse, LayoutGrid, Loader2, Save, Scale, Share2, UserRound, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { formatDayLabel, localDay } from '../../lib/healthHub';
-import type { HealthProfile, HealthShare } from '../../types/api';
+import { isKidMode } from '../../lib/healthSwitches';
+import type { HealthMetricSwitch, HealthProfile, HealthShare } from '../../types/api';
 
 const ACTIVITY_OPTIONS: Array<[HealthProfile['activity_level'], string]> = [
   ['sedentary', 'Mostly sitting'],
@@ -185,6 +186,18 @@ export default function HealthProfilePanel() {
     onError: (error: Error) => toast.error(error.message || 'Could not update sharing'),
   });
 
+  const switchMetric = useMutation({
+    mutationFn: ({ key, value }: { key: HealthMetricSwitch; value: boolean }) =>
+      api.updateHealthProfile({ metrics: { [key]: value } as HealthProfile['metrics'] }),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(['health-profile'], saved);
+      void queryClient.invalidateQueries({ queryKey: ['health-summary'] });
+    },
+    onError: (error: Error) => toast.error(error.message || 'Could not change that card'),
+  });
+
+  // Kid mode as saved, not as half-edited: hiding follows the stored profile.
+  const kid = isKidMode(profile);
   const latestWeight = summaryQuery.data?.metrics.weight;
   const latestRhr = summaryQuery.data?.metrics.resting_hr;
   const shares = sharesQuery.data?.shares ?? [];
@@ -287,7 +300,7 @@ export default function HealthProfilePanel() {
               onChange={(event) => setEdits((prev) => ({ ...prev, goal: event.target.value as HealthProfile['goal'] }))}
               className="glass-input mt-1 h-10 w-full px-2 text-xs pointer-coarse:h-11"
             >
-              {GOAL_OPTIONS.map(([value, label]) => (
+              {GOAL_OPTIONS.filter(([value]) => !(form.kid_mode && value === 'lose')).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
@@ -360,23 +373,64 @@ export default function HealthProfilePanel() {
         </button>
       </section>
 
+      <section
+        className="glass-panel rounded-2xl border border-white/5 p-4"
+        aria-labelledby="cards-heading"
+        data-testid="health-metric-switches"
+      >
+        <h3 id="cards-heading" className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+          <LayoutGrid size={13} className="text-purple-300" />
+          Cards on your Health page
+        </h3>
+        <p className="mt-1 text-[11px] text-slate-500">
+          Turn off anything you do not want to see. Your data is kept, family sharing is unchanged, and
+          the coach stops bringing it up.
+        </p>
+        {profileQuery.isLoading ? (
+          <div className="mt-2 h-20 skeleton rounded-xl" aria-hidden />
+        ) : profileQuery.isError || !profile ? (
+          <p className="mt-2 text-xs text-amber-300">Your card settings could not be loaded.</p>
+        ) : (
+          <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+            {profile.metric_catalog.map((entry) => (
+              <label
+                key={entry.key}
+                className="flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 text-xs text-slate-300"
+              >
+                <input
+                  type="checkbox"
+                  checked={profile.metrics[entry.key] === true}
+                  disabled={switchMetric.isPending}
+                  onChange={(event) => switchMetric.mutate({ key: entry.key, value: event.target.checked })}
+                  data-testid={`metric-switch-${entry.key}`}
+                  className="h-4 w-4 accent-purple-500"
+                />
+                {entry.label}
+              </label>
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="glass-panel rounded-2xl border border-white/5 p-4" aria-labelledby="measures-heading">
         <h3 id="measures-heading" className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
           <Scale size={13} className="text-emerald-300" />
           Measurements
         </h3>
         <div className="mt-2 grid grid-cols-2 gap-3">
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-slate-500">Weight</p>
-            <p className="mt-0.5 text-sm font-semibold text-white">
-              {latestWeight ? `${latestWeight.value.toFixed(1)} ${latestWeight.unit}` : 'No reading'}
-            </p>
-            {latestWeight && (
-              <p className="text-[10px] text-slate-500">
-                {formatDayLabel(latestWeight.recorded_at.slice(0, 10))} · {latestWeight.source}
+          {!kid && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">Weight</p>
+              <p className="mt-0.5 text-sm font-semibold text-white">
+                {latestWeight ? `${latestWeight.value.toFixed(1)} ${latestWeight.unit}` : 'No reading'}
               </p>
-            )}
-          </div>
+              {latestWeight && (
+                <p className="text-[10px] text-slate-500">
+                  {formatDayLabel(latestWeight.recorded_at.slice(0, 10))} · {latestWeight.source}
+                </p>
+              )}
+            </div>
+          )}
           <div>
             <p className="text-[10px] uppercase tracking-wider text-slate-500">Resting heart rate</p>
             <p className="mt-0.5 text-sm font-semibold text-white">
@@ -394,43 +448,47 @@ export default function HealthProfilePanel() {
         </div>
 
         <div className="mt-3 flex flex-wrap items-end gap-2">
-          <label className="text-[11px] text-slate-500">
-            Log weight
-            <div className="mt-1 flex gap-1">
-              <input
-                type="number"
-                min={1}
-                step={0.1}
-                value={weight}
-                onChange={(event) => setWeight(event.target.value)}
-                className="glass-input h-10 w-24 px-2 text-xs pointer-coarse:h-11"
-              />
-              <select
-                value={weightUnit}
-                onChange={(event) => setWeightUnit(event.target.value as 'kg' | 'lb')}
-                aria-label="Weight unit"
-                className="glass-input h-10 px-1 text-xs pointer-coarse:h-11"
+          {!kid && (
+            <>
+              <label className="text-[11px] text-slate-500">
+                Log weight
+                <div className="mt-1 flex gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    step={0.1}
+                    value={weight}
+                    onChange={(event) => setWeight(event.target.value)}
+                    className="glass-input h-10 w-24 px-2 text-xs pointer-coarse:h-11"
+                  />
+                  <select
+                    value={weightUnit}
+                    onChange={(event) => setWeightUnit(event.target.value as 'kg' | 'lb')}
+                    aria-label="Weight unit"
+                    className="glass-input h-10 px-1 text-xs pointer-coarse:h-11"
+                  >
+                    <option value="lb">lb</option>
+                    <option value="kg">kg</option>
+                  </select>
+                </div>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  const value = Number(weight);
+                  if (!Number.isFinite(value) || value <= 0) {
+                    toast.error('Enter a weight');
+                    return;
+                  }
+                  logMetric.mutate({ metric: 'weight', value, unit: weightUnit });
+                }}
+                disabled={logMetric.isPending}
+                className="glass-button min-h-10 px-3 text-xs font-semibold disabled:opacity-50 pointer-coarse:min-h-11"
               >
-                <option value="lb">lb</option>
-                <option value="kg">kg</option>
-              </select>
-            </div>
-          </label>
-          <button
-            type="button"
-            onClick={() => {
-              const value = Number(weight);
-              if (!Number.isFinite(value) || value <= 0) {
-                toast.error('Enter a weight');
-                return;
-              }
-              logMetric.mutate({ metric: 'weight', value, unit: weightUnit });
-            }}
-            disabled={logMetric.isPending}
-            className="glass-button min-h-10 px-3 text-xs font-semibold disabled:opacity-50 pointer-coarse:min-h-11"
-          >
-            Save
-          </button>
+                Save
+              </button>
+            </>
+          )}
           <label className="text-[11px] text-slate-500">
             Log resting HR
             <div className="mt-1 flex gap-1">
