@@ -15925,6 +15925,22 @@ async def resolve_ma_library_uri(req: MALibraryURIRequest, request: Request):
     }
 
 
+@app.get("/api/media/podcast-episodes")
+async def podcast_episodes(request: Request, abs_item_id: str, title: str = ""):
+    """An Audiobookshelf podcast's episodes, newest first, each with the Music
+    Assistant URI that plays it (``services/shared/ma_library.py``)."""
+    abs_item_id = (abs_item_id or "").strip()
+    if not abs_item_id:
+        raise HTTPException(status_code=422, detail="abs_item_id is required")
+    await _require_authenticated(request)
+    mass_url, mass_token = await _resolve_ma_credentials(request)
+    try:
+        episodes = await ma_library.list_podcast_episodes(mass_url, mass_token, abs_item_id, title)
+    except ma_library.MALibraryLookupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return {"status": "SUCCESS", "episodes": episodes}
+
+
 class FavoriteRequest(BaseModel):
     uri: str
     favorite: bool

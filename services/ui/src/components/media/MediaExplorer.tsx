@@ -41,6 +41,14 @@ function SectionTitle({ icon, children }: { icon: ReactNode; children: ReactNode
   );
 }
 
+/** "12 Oct 2026 • 42 min" for an episode, from what MA knows. */
+function episodeSubtitle(e: { published: number | null; duration: number | null }): string | undefined {
+  const parts: string[] = [];
+  if (e.published) parts.push(new Date(e.published).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }));
+  if (e.duration) parts.push(`${Math.round(e.duration / 60)} min`);
+  return parts.join(' • ') || undefined;
+}
+
 /** A playable row: icon (or spinner while it starts), title, subtitle, badge. */
 function PlayRow({
   icon, title, subtitle, badge, busy, disabled, onClick,
@@ -67,7 +75,9 @@ function PlayRow({
 export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClose: () => void; onPlay: PlayHandler }) {
   const [tab, setTab] = useState<'ma' | 'abs'>('ma');
   const [search, setSearch] = useState('');
-  const [library, setLibrary] = useState<{ id: string; name: string } | null>(null);
+  const [library, setLibrary] = useState<{ id: string; name: string; mediaType?: string } | null>(null);
+  // An open podcast: its episodes replace the list until Back (BUG-43).
+  const [podcast, setPodcast] = useState<{ id: string; title: string } | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const q = search.trim();
   const searching = q.length >= 2;
@@ -82,7 +92,7 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
   useEffect(() => {
     if (open) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset when closed
-    setSearch(''); setLibrary(null); setTab('ma'); setBusyKey(null);
+    setSearch(''); setLibrary(null); setPodcast(null); setTab('ma'); setBusyKey(null);
   }, [open]);
 
   const maSearch = useQuery({
@@ -122,6 +132,13 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
     staleTime: 60_000,
   });
 
+  const episodes = useQuery({
+    queryKey: ['podcast-episodes', podcast?.id],
+    queryFn: () => api.getPodcastEpisodes(podcast!.id, podcast!.title),
+    enabled: open && tab === 'abs' && !!podcast,
+    staleTime: 5 * 60_000,
+  });
+
   if (!open) return null;
 
   const play = (req: PlayRequest, key: string) => {
@@ -141,6 +158,19 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
       />
     </li>
   );
+  const podcastRow = (id: string, title: string, subtitle?: string) => (
+    <li key={`p-${id}`}>
+      <button type="button" onClick={() => { setPodcast({ id, title }); setSearch(''); }} className={ROW_CLASS} data-testid={`podcast-${id}`}>
+        <Mic2 size={18} className="text-blue-400 shrink-0" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-white text-sm font-medium truncate">{title}</span>
+          {subtitle ? <span className="block text-xs text-slate-400 truncate">{subtitle}</span> : null}
+        </span>
+        <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/10 text-slate-300 shrink-0">podcast</span>
+        <ChevronRight size={16} className="text-slate-500 shrink-0" />
+      </button>
+    </li>
+  );
   const absNotice = (data?: { notice?: string }) => (data?.notice ? `Audiobookshelf is unavailable (${data.notice}).` : null);
 
   const tabButton = (id: 'ma' | 'abs', label: string, icon: ReactNode) => (
@@ -148,7 +178,7 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
       type="button"
       role="tab"
       aria-selected={tab === id}
-      onClick={() => { setTab(id); setLibrary(null); setSearch(''); }}
+      onClick={() => { setTab(id); setLibrary(null); setPodcast(null); setSearch(''); }}
       className={`flex-1 min-h-11 py-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
         tab === id ? 'text-cyan-300 border-b-2 border-cyan-400 bg-cyan-500/5' : 'text-slate-400 hover:text-white'
       }`}
@@ -190,7 +220,7 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="search"
-              placeholder={tab === 'abs' ? (library ? `Filter ${library.name}…` : 'Search books & podcasts') : 'Search music…'}
+              placeholder={tab === 'abs' ? (podcast ? 'Filter episodes…' : library ? `Filter ${library.name}…` : 'Search books & podcasts') : 'Search music…'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full glass-input pl-9 pr-11 h-11 text-base sm:text-sm rounded-xl"
@@ -254,7 +284,27 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
             </>
           )}
 
-          {tab === 'abs' && !library && searching && (
+          {tab === 'abs' && podcast && (
+            <section>
+              <button type="button" onClick={() => setPodcast(null)} className="min-h-11 text-sm text-amber-300 hover:text-amber-200 mb-1 flex items-center gap-1">
+                <ChevronLeft size={16} />Back
+              </button>
+              <SectionTitle icon={<Mic2 size={12} />}>{podcast.title}</SectionTitle>
+              {episodes.isLoading ? <Loading /> : episodes.isError ? (
+                <Failed message={`Could not load episodes: ${errorText(episodes.error, 'Music Assistant is unreachable')}`} onRetry={() => void episodes.refetch()} />
+              ) : !episodes.data?.episodes?.length ? <Empty>No episodes yet</Empty> : (
+                <ul className="space-y-1.5" aria-label="Episodes">
+                  {episodes.data.episodes.filter((e) => !q || e.name.toLowerCase().includes(q.toLowerCase())).map((e) =>
+                    row(`e-${e.uri}`, { kind: 'uri', uri: e.uri, title: e.name },
+                      <Mic2 size={18} className="text-blue-400" />,
+                      episodeSubtitle(e), e.fully_played ? 'played' : undefined),
+                  )}
+                </ul>
+              )}
+            </section>
+          )}
+
+          {tab === 'abs' && !podcast && !library && searching && (
             <section>
               <SectionTitle icon={<Search size={12} />}>Results</SectionTitle>
               {absSearch.isLoading ? <Loading /> : absSearch.isError ? (
@@ -268,10 +318,7 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
                       <BookOpen size={18} className="text-amber-400" />,
                       [b.author || b.narrator, b.duration_formatted].filter(Boolean).join(' • ') || undefined, 'book'),
                   )}
-                  {absSearch.data!.podcasts.map((p) =>
-                    row(`p-${p.id}`, { kind: 'abs', id: p.id, title: p.title },
-                      <Mic2 size={18} className="text-blue-400" />, p.author || undefined, 'podcast'),
-                  )}
+                  {absSearch.data!.podcasts.map((p) => podcastRow(p.id, p.title, p.author || undefined))}
                   {absSearch.data!.authors.map((a) => (
                     <li key={`a-${a.id}`}>
                       <button type="button" onClick={() => setSearch(a.name)} className={ROW_CLASS}>
@@ -289,7 +336,7 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
             </section>
           )}
 
-          {tab === 'abs' && !library && !searching && (
+          {tab === 'abs' && !podcast && !library && !searching && (
             <section>
               <SectionTitle icon={<Library size={12} />}>Libraries</SectionTitle>
               {absLibraries.isLoading ? <Loading /> : absLibraries.isError || absNotice(absLibraries.data) ? (
@@ -298,7 +345,7 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
                 <ul className="space-y-1.5">
                   {absLibraries.data.libraries.map((lib) => (
                     <li key={lib.id}>
-                      <button type="button" onClick={() => { setLibrary({ id: lib.id, name: lib.name }); setSearch(''); }} className={ROW_CLASS}>
+                      <button type="button" onClick={() => { setLibrary({ id: lib.id, name: lib.name, mediaType: lib.media_type }); setSearch(''); }} className={ROW_CLASS}>
                         <Library size={18} className="text-amber-400 shrink-0" />
                         <span className="min-w-0 flex-1">
                           <span className="block text-white text-sm font-medium truncate">{lib.name}</span>
@@ -313,7 +360,7 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
             </section>
           )}
 
-          {tab === 'abs' && library && (
+          {tab === 'abs' && !podcast && library && (
             <section>
               <button type="button" onClick={() => { setLibrary(null); setSearch(''); }} className="min-h-11 text-sm text-amber-300 hover:text-amber-200 mb-1 flex items-center gap-1">
                 <ChevronLeft size={16} />All libraries
@@ -324,8 +371,10 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
               ) : !absBooks.data?.books?.length ? <Empty>This library is empty</Empty> : (
                 <ul className="space-y-1.5">
                   {absBooks.data.books.filter(bookFilter).map((b) =>
-                    row(`b-${b.id}`, { kind: 'abs', id: b.id, title: b.title },
-                      <BookOpen size={18} className="text-amber-400" />, b.author || undefined),
+                    library.mediaType === 'podcast'
+                      ? podcastRow(b.id, b.title, b.author || undefined)
+                      : row(`b-${b.id}`, { kind: 'abs', id: b.id, title: b.title },
+                        <BookOpen size={18} className="text-amber-400" />, b.author || undefined),
                   )}
                 </ul>
               )}
