@@ -370,7 +370,13 @@ live search is the ecosystem-standard pattern.
 
 ### Phase 6 — habits and coaching
 
-- [ ] Micro-lessons: a small library (nutrition basics, sleep, movement, stress) shown one card at a time.
+- [x] Micro-lessons: a small library (nutrition basics, sleep, movement, stress) shown one card at a time.
+  `src/lib/healthLessons.ts` holds 24 reviewed cards across food, sleep, movement, calm and water,
+  each ending with one small thing to try today. Every card is written for the whole family: nothing
+  about calories, weight or dieting and no food called bad (a test enforces the wording), labelled
+  general ideas rather than medical advice. `MicroLessonCard` on Health → Today shows the card of
+  the day (the same for everyone on a day, so the family can talk about it) with arrows through the
+  rest.
 - [ ] Chat coach grounded in the user's health data; gentle weekly goal setting; reminders for bedtime, water and movement breaks.
 
 ### Phase 7 — family
