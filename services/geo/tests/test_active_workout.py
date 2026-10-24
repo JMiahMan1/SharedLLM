@@ -111,7 +111,7 @@ def test_no_running_workout_is_404(client):
 
 
 def test_it_requires_the_internal_secret(client):
-    test_client, store = client
+    _test_client, store = client
     store["geo:active_workout:michele"] = _active("michele")
     bare = TestClient(geo.app)
     assert bare.get(

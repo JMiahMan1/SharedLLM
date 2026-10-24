@@ -32,23 +32,11 @@ from pathlib import Path
 import aiohttp
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlmodel import Session, SQLModel, create_engine, select
+from starlette.concurrency import run_in_threadpool
 
-from services.config import (
-    BIBLE_DATABASE_URL,
-    BIBLE_DEVOTIONAL_DIR,
-    BLB_BASE_URL,
-    EXECUTION_SVC_URL,
-    GATEWAY_INTERNAL_URL,
-    GEO_SVC_URL,
-    IDENTITY_SVC_URL,
-    INTERNAL_SECRET,
-    TELEMETRY_SVC_URL,
-)
 from services.bible import achievements as ach
-from services.bible import books as book_table
 from services.bible import (
     blb_links,
     book_import,
@@ -61,7 +49,6 @@ from services.bible import (
     metrics,
     migrations,
     plans,
-    narration as narration_mod,
     provider_cache,
     providers,
     reminders,
@@ -70,10 +57,13 @@ from services.bible import (
     verse_context,
     votd,
 )
+from services.bible import books as book_table
+from services.bible import (
+    narration as narration_mod,
+)
 from services.bible.corpus import CorpusError
 from services.bible.devotionals import registry as devotional_registry
 from services.bible.models import (
-    utcnow,
     AchievementEarned,
     Devotional,
     GameScore,
@@ -84,9 +74,21 @@ from services.bible.models import (
     ReadingEvent,
     UserBibleState,
     VerseMark,
+    utcnow,
 )
 from services.bible.providers import ProviderError, ProviderUnavailable
 from services.bible.refs import ReferenceError, format_reference, parse_reference
+from services.config import (
+    BIBLE_DATABASE_URL,
+    BIBLE_DEVOTIONAL_DIR,
+    BLB_BASE_URL,
+    EXECUTION_SVC_URL,
+    GATEWAY_INTERNAL_URL,
+    GEO_SVC_URL,
+    IDENTITY_SVC_URL,
+    INTERNAL_SECRET,
+    TELEMETRY_SVC_URL,
+)
 from services.shared.info_endpoint import info_router
 
 log = logging.getLogger(__name__)
@@ -208,7 +210,7 @@ def health(session: Session = Depends(get_session)):
         summary = corpus.corpus_summary(session)
         summary["devotionals"] = corpus.count_rows(session, Devotional)
         editions = corpus.list_editions(session)
-    except Exception as exc:  # noqa: BLE001 - health must not raise
+    except Exception as exc:
         log.exception("[Bible] corpus summary failed")
         summary = {"error": str(exc)}
         editions = []
@@ -440,7 +442,7 @@ class StudyAskPayload(BaseModel):
     depth: str = Field(default="adult", pattern="^(child|teen|adult)$")
 
 
-def _study_context(session: Session, payload: "StudyAskPayload") -> dict:
+def _study_context(session: Session, payload: StudyAskPayload) -> dict:
     """The passage, its notes and the assembled prompt for a study question.
 
     Raises the reader's mistakes as 400s (a bad reference, an empty or
@@ -645,14 +647,13 @@ async def voices():
             ),
         )
     try:
-        async with aiohttp.ClientSession() as client:
-            async with client.get(
-                f"{EXECUTION_SVC_URL}/execute/tts/voices",
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=10.0),
-            ) as resp:
-                raw = await resp.text()
-    except Exception as exc:  # noqa: BLE001 - the reader is told, not just the log
+        async with aiohttp.ClientSession() as client, client.get(
+            f"{EXECUTION_SVC_URL}/execute/tts/voices",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        ) as resp:
+            raw = await resp.text()
+    except Exception as exc:
         raise HTTPException(
             status_code=503, detail=f"The speech engine could not be reached: {exc}"
         ) from exc
@@ -891,7 +892,7 @@ def devotional(
         try:
             book_id = int(work.split(":", 1)[1])
         except ValueError:
-            raise HTTPException(status_code=400, detail="Book work ids look like book:12")
+            raise HTTPException(status_code=400, detail="Book work ids look like book:12") from None
         entry = book_import.devotional_for_day(session, book_id, _doy(when or date.today()))
         if entry:
             return {"source": "library", "entry": entry, "stored": True}
@@ -2041,9 +2042,9 @@ async def _award_stars(username: str, grants: list[dict]) -> dict:
                             failures.append(f"{grant['detail']}: HTTP {resp.status}")
                         else:
                             granted += int(grant["stars"])
-                except Exception as exc:  # noqa: BLE001 - reported, not hidden
+                except Exception as exc:
                     failures.append(f"{grant['detail']}: {exc}")
-    except Exception as exc:  # noqa: BLE001 - reported, not hidden
+    except Exception as exc:
         failures.append(str(exc))
     status = f"{granted} star(s) banked" if not failures else "; ".join(failures)
     return {"granted": granted, "status": status}
@@ -2087,9 +2088,9 @@ async def _post_cards(cards: list[dict]) -> dict:
                             failures.append(f"{card.get('card_title')}: {result.get('message')}")
                         else:
                             posted += 1
-                except Exception as exc:  # noqa: BLE001 - reported, never fatal
+                except Exception as exc:
                     failures.append(f"{card.get('card_title')}: {exc}")
-    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+    except Exception as exc:
         failures.append(str(exc))
     status = f"{posted} card(s) posted" if not failures else "; ".join(failures)
     return {"posted": posted, "status": status}
@@ -2226,17 +2227,16 @@ async def _sharing_rows() -> list[dict] | None:
         log.warning("[Bible] IDENTITY_SVC_URL is not resolved; sharing is unavailable")
         return None
     try:
-        async with aiohttp.ClientSession() as client:
-            async with client.get(
-                f"{IDENTITY_SVC_URL}/api/internal/activity-sharing",
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=10.0),
-            ) as resp:
-                if resp.status >= 400:
-                    log.warning("[Bible] sharing lookup failed: HTTP %s", resp.status)
-                    return None
-                data = await resp.json()
-    except Exception as exc:  # noqa: BLE001 - an unreachable consent service is not consent
+        async with aiohttp.ClientSession() as client, client.get(
+            f"{IDENTITY_SVC_URL}/api/internal/activity-sharing",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        ) as resp:
+            if resp.status >= 400:
+                log.warning("[Bible] sharing lookup failed: HTTP %s", resp.status)
+                return None
+            data = await resp.json()
+    except Exception as exc:
         log.warning("[Bible] sharing lookup errored: %s", exc)
         return None
     rows = data.get("users") if isinstance(data, dict) else None
@@ -2483,17 +2483,16 @@ async def _live_settings() -> dict[str, str]:
         log.warning("[Bible] IDENTITY_SVC_URL is not resolved; runtime settings are unavailable")
         return {}
     try:
-        async with aiohttp.ClientSession() as client:
-            async with client.get(
-                f"{IDENTITY_SVC_URL}/api/settings",
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=10.0),
-            ) as resp:
-                if resp.status >= 400:
-                    log.warning("[Bible] runtime settings lookup failed: HTTP %s", resp.status)
-                    return {}
-                data = await resp.json()
-    except Exception as exc:  # noqa: BLE001 - the boot-time value is the fallback
+        async with aiohttp.ClientSession() as client, client.get(
+            f"{IDENTITY_SVC_URL}/api/settings",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        ) as resp:
+            if resp.status >= 400:
+                log.warning("[Bible] runtime settings lookup failed: HTTP %s", resp.status)
+                return {}
+            data = await resp.json()
+    except Exception as exc:
         log.warning("[Bible] runtime settings lookup errored: %s", exc)
         return {}
     rows = data.get("settings") if isinstance(data, dict) else data

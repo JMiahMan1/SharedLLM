@@ -34,7 +34,7 @@ def ids(spans):
         ("John 3:16-4", [("John", 3, 16, None)]),
         ("Acts 2:38,39", [("Acts", 2, 38, 38), ("Acts", 2, 39, 39)]),
         ("Deut 8:2-6, 10, 17-18", [("Deut", 8, 2, 6), ("Deut", 8, 10, 10), ("Deut", 8, 17, 18)]),
-        ("John 3–18", [("John", 3, 1, None)]),
+        ("John 3\u201318", [("John", 3, 1, None)]),
         ("Zephaniah 3:17 ESV", [("Zeph", 3, 17, 17)]),
         ("2 Thess 1:1-1:2", [("2Thess", 1, 1, 2)]),
         ("song of songs 2:1", [("Song", 2, 1, 1)]),

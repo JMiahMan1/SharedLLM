@@ -433,7 +433,7 @@ def pick(pool: list[Candidate], per_level: int) -> list[Candidate]:
 
 def fetch_jsonld(rid: int, name: str, retries: int = 1) -> dict | None:
     url = f"https://www.food.com/recipe/{slugify(name)}-{rid}"
-    for attempt in range(retries + 1):
+    for _attempt in range(retries + 1):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=25) as resp:
@@ -478,10 +478,7 @@ def step_lines(jsonld: dict, fallback: tuple[str, ...]) -> list[str]:
     steps: list[str] = []
     if isinstance(raw, list):
         for item in raw:
-            if isinstance(item, dict):
-                text = item.get("text") or ""
-            else:
-                text = str(item)
+            text = (item.get("text") or "") if isinstance(item, dict) else str(item)
             text = re.sub(r"<[^>]+>", "", text)
             text = re.sub(r"^\s*\d+[.)]\s*", "", text)
             text = re.sub(r"\s+", " ", text).strip()
@@ -544,9 +541,9 @@ def render_note(cand: Candidate, level: int, jsonld: dict | None) -> str:
     if jsonld:
         blob += " " + " ".join(str(i) for i in jsonld.get("recipeIngredient") or [])
     tags = " ".join(tags_for(cand, level, blob))
-    prep = jsonld.get("prepTime") and dur_minutes(jsonld.get("prepTime")) or cand.prep_minutes
-    cook = jsonld.get("cookTime") and dur_minutes(jsonld.get("cookTime")) or cand.cook_minutes
-    total = jsonld.get("totalTime") and dur_minutes(jsonld.get("totalTime")) or cand.total_minutes
+    prep = (jsonld.get("prepTime") and dur_minutes(jsonld.get("prepTime"))) or cand.prep_minutes
+    cook = (jsonld.get("cookTime") and dur_minutes(jsonld.get("cookTime"))) or cand.cook_minutes
+    total = (jsonld.get("totalTime") and dur_minutes(jsonld.get("totalTime"))) or cand.total_minutes
     source_url = jsonld.get("_url") or f"https://www.food.com/recipe/{slugify(cand.name)}-{cand.rid}"
     ings = ingredient_lines(jsonld, factor) if jsonld else [
         f"- [ ] {' '.join(x for x in (scale_quantity(q, factor, count=not u.strip()), u, p) if x)}".strip()

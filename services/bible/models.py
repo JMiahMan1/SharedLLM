@@ -33,16 +33,15 @@ docs/BIBLE_STUDY.md "Reading is offline-first".
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
-from sqlalchemy import LargeBinary
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import LargeBinary, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
 def utcnow() -> datetime:
     """Now, in UTC, with its zone attached (sqlmodel refuses naive datetimes)."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class BibleVersion(SQLModel, table=True):

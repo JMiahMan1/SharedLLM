@@ -1,6 +1,6 @@
 import json
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -199,7 +199,9 @@ async def test_storage_status_returns_real_data():
     """Verify /status endpoint returns structured data with real fields."""
     import os
     from contextlib import asynccontextmanager
+
     from fastapi.testclient import TestClient
+
     from services.config import INTERNAL_SECRET
     from services.storage.main import app
 
@@ -242,7 +244,9 @@ async def test_storage_status_paused_state():
     """Verify /status endpoint includes indexer state field."""
     import os
     from contextlib import asynccontextmanager
+
     from fastapi.testclient import TestClient
+
     from services.config import INTERNAL_SECRET
     from services.storage.main import app
 
@@ -275,7 +279,9 @@ async def test_storage_status_rag_unavailable():
     """Verify /status still works when RAG service is unreachable."""
     import os
     from contextlib import asynccontextmanager
+
     from fastapi.testclient import TestClient
+
     from services.config import INTERNAL_SECRET
     from services.storage.main import app
 

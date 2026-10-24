@@ -20,12 +20,12 @@ import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from services.bible.books import BOOKS, BOOK_BY_OSIS, resolve_book
+from services.bible.books import BOOK_BY_OSIS, BOOKS, resolve_book
 from services.bible.corpus import CorpusError
 
 _CHAPTER_LINE = re.compile(r"^(?:chapter\s+)?(\d{1,3})\b[\s.:—-]*(.*)$", re.IGNORECASE)
 _VERSE_LINE = re.compile(r"^(\d{1,3})\s+(.+)$", re.DOTALL)
-_PAGE_NUMBER = re.compile(r"^\s*(?:page\s+)?[-–—•\s]*\d{1,4}\s*[-–—•]?\s*$", re.IGNORECASE)
+_PAGE_NUMBER = re.compile(r"^\s*(?:page\s+)?[-\u2013—•\s]*\d{1,4}\s*[-\u2013—•]?\s*$", re.IGNORECASE)
 _CHAPTER_WORD = re.compile(r"^chapter\s+(\d{1,3})\s*$", re.IGNORECASE)
 _BOOK_SUFFIX = re.compile(r"^(.*?)\s+(\d{1,3})$")
 
@@ -109,7 +109,6 @@ def extract_lines(path: Path) -> tuple[list[PageLine], list[str]]:
         lines: list[PageLine] = []
         for page_number, page in enumerate(document, start=1):
             data = page.get_text("dict")
-            page_rect = page.rect
             for block in data.get("blocks", []):
                 for line in block.get("lines", []):
                     spans = [s for s in line.get("spans", []) if s.get("text", "").strip()]
@@ -119,7 +118,7 @@ def extract_lines(path: Path) -> tuple[list[PageLine], list[str]]:
                     if not text.strip():
                         continue
                     weights = [len(s["text"].strip()) for s in spans]
-                    size = sum(s["size"] * w for s, w in zip(spans, weights)) / max(sum(weights), 1)
+                    size = sum(s["size"] * w for s, w in zip(spans, weights, strict=True)) / max(sum(weights), 1)
                     bbox = line["bbox"]
                     lines.append(
                         PageLine(
@@ -173,11 +172,11 @@ def reading_order(lines: list[PageLine], cutoff: float, columns: int) -> list[st
         if line.size >= cutoff * 0.9 and not _PAGE_NUMBER.match(line.text)
     ]
     if columns == 1:
-        ordered = sorted(kept, key=lambda l: (l.page, l.y0, l.x0))
+        ordered = sorted(kept, key=lambda ln: (ln.page, ln.y0, ln.x0))
         return [_tidy(line.text) for line in ordered if _tidy(line.text)]
 
     half = statistics.median((line.x0 + line.x1) / 2 for line in kept) if kept else 0
-    ordered = sorted(kept, key=lambda l: (l.page, 0 if l.x1 <= half + 40 else 1, l.y0, l.x0))
+    ordered = sorted(kept, key=lambda ln: (ln.page, 0 if ln.x1 <= half + 40 else 1, ln.y0, ln.x0))
     return [_tidy(line.text) for line in ordered if _tidy(line.text)]
 
 
@@ -189,7 +188,7 @@ def _tidy(text: str) -> str:
 
 def _match_book_heading(line: str) -> tuple[str, int | None] | None:
     """A line that is (only) a book name, optionally followed by a chapter."""
-    stripped = line.strip().strip("·•—–-— ")
+    stripped = line.strip().strip("·•—\u2013-— ")  # noqa: B005 - strips a set of dash and bullet characters
     if not stripped:
         return None
     suffix = _BOOK_SUFFIX.match(stripped)

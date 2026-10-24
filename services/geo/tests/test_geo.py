@@ -7,6 +7,7 @@ MapLibre client being served at "/".
 from unittest.mock import patch
 
 import pytest
+
 from services.config import INTERNAL_SECRET
 
 
@@ -86,8 +87,9 @@ def test_index_serves_client(client):
 
 def test_see_requires_secret(monkeypatch):
     """A request with no internal secret is refused before it reaches the route."""
-    import services.geo.main as geo
     from fastapi.testclient import TestClient
+
+    import services.geo.main as geo
 
     monkeypatch.setattr(geo, "HA_URL", "https://ha.test")
     monkeypatch.setattr(geo, "HA_TOKEN", "tok")
@@ -132,9 +134,10 @@ def test_android_auto_endpoint(client, monkeypatch):
 
 
 async def test_steps_falls_back_to_ha_when_redis_empty(client, monkeypatch):
-    import services.geo.main as geo
-    from datetime import datetime, timedelta
+    from datetime import datetime
     from zoneinfo import ZoneInfo
+
+    import services.geo.main as geo
 
     # The reading must land inside the requested window, so date it relative to
     # now. A hardcoded date silently expires: this test started failing on its
@@ -275,6 +278,7 @@ async def test_resolve_place_name_zone_then_poi_then_street(monkeypatch):
 
 def test_telemetry_moving(client, monkeypatch):
     import time
+
     import services.geo.main as geo
 
     # Mock get_points_in_window to return moving points
@@ -308,7 +312,6 @@ def test_vehicles_empty_by_default(client):
 
 
 def test_vehicle_crud_with_internal_secret_header(client, monkeypatch):
-    import json
     import services.geo.main as geo
 
     # In-memory fake Redis

@@ -9,14 +9,12 @@ These tests verify that:
 4. The expected tool calls are extractable from the LLM response format
 """
 
-import os
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 
 from services.gateway.prompts import PROMPT_RAVEN_AUTONOMOUS_PROTOCOL
 

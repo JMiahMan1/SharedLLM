@@ -289,16 +289,15 @@ async def ask(
         system=system,
     )
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-            async with session.post(url, json=body, headers=headers) as resp:
-                if resp.status >= 400:
-                    raise await _refusal(resp)
-                try:
-                    data = await resp.json()
-                except Exception as exc:
-                    raise StudyAskUnavailable(
-                        "The model did not answer: the reply was not JSON."
-                    ) from exc
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session, session.post(url, json=body, headers=headers) as resp:
+            if resp.status >= 400:
+                raise await _refusal(resp)
+            try:
+                data = await resp.json()
+            except Exception as exc:
+                raise StudyAskUnavailable(
+                    "The model did not answer: the reply was not JSON."
+                ) from exc
     except aiohttp.ClientError as exc:
         raise StudyAskUnavailable(
             f"Study help could not reach the language model: {exc}"
@@ -336,26 +335,25 @@ async def ask_stream(
     )
     wrote = False
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-            async with session.post(url, json=body, headers=headers) as resp:
-                if resp.status >= 400:
-                    raise await _refusal(resp)
-                async for raw in resp.content:
-                    line = raw.decode("utf-8", errors="replace").strip()
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        delta = chunk["choices"][0].get("delta") or {}
-                    except (ValueError, KeyError, IndexError, TypeError):
-                        continue
-                    text = delta.get("content") or ""
-                    if text:
-                        wrote = True
-                        yield text
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session, session.post(url, json=body, headers=headers) as resp:
+            if resp.status >= 400:
+                raise await _refusal(resp)
+            async for raw in resp.content:
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                    delta = chunk["choices"][0].get("delta") or {}
+                except (ValueError, KeyError, IndexError, TypeError):
+                    continue
+                text = delta.get("content") or ""
+                if text:
+                    wrote = True
+                    yield text
     except aiohttp.ClientError as exc:
         raise StudyAskUnavailable(f"Study help could not reach the language model: {exc}") from exc
     if not wrote:

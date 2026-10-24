@@ -113,7 +113,7 @@ def test_exec_blocking_recreates_stale_container(monkeypatch):
 
     FakeContainer.exec_run = fake_exec
 
-    rc, out, err = ws._exec_blocking(
+    rc, out, _err = ws._exec_blocking(
         "test-ws", "/tmp/test-ws", ["/bin/sh", "-c", "echo hi"],
         cwd="/tmp/test-ws", env=None, uid=1000, gid=1000, image=None,
     )

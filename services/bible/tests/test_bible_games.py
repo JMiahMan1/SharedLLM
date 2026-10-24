@@ -13,7 +13,7 @@ from services.bible import corpus, games
 from services.bible import main as bible_main
 from services.bible.tests.conftest import _mini_source
 
-_WORDS = "faith grace mercy light shepherd kingdom river mountain garden morning strength wisdom".split()
+_WORDS = ["faith", "grace", "mercy", "light", "shepherd", "kingdom", "river", "mountain", "garden", "morning", "strength", "wisdom"]
 
 
 def _games_source() -> list[dict]:
@@ -184,7 +184,7 @@ def test_an_attempt_can_be_reviewed_by_its_player(game_client: TestClient, monke
     seed = date.today().isoformat()
     key = _key(game_client, "daily", seed)
     game_client.post("/games/daily/attempt", params={"username": "sam"},
-                     json={"seed": seed, "answers": key[:9] + ["wrong"]})
+                     json={"seed": seed, "answers": [*key[:9], "wrong"]})
     board = game_client.get("/games/leaderboard", params={"viewer": "sam"}).json()["entries"]
     review = game_client.get(f"/games/attempts/{board[0]['attempt_id']}", params={"viewer": "sam"}).json()
     assert review["correct"] == 9 and len(review["results"]) == 10

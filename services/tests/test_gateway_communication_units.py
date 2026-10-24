@@ -1,10 +1,8 @@
 import json
-import os
 from unittest.mock import AsyncMock
 
 import pytest
 from starlette.requests import Request
-
 
 import services.gateway.main as gateway_main
 

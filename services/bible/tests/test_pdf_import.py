@@ -4,11 +4,11 @@ import pytest
 
 pytest.importorskip("pymupdf", reason="PDF import needs PyMuPDF")
 
-from services.bible.books import BOOKS  # noqa: E402
-from services.bible.pdf_import import (  # noqa: E402
-    PdfImportError,
+from services.bible.books import BOOKS
+from services.bible.pdf_import import (
     _CHAPTER_WORD,
     _PAGE_NUMBER,
+    PdfImportError,
     _match_book_heading,
     _normalise,
     extract,
@@ -379,7 +379,7 @@ def complete_pdf(tmp_path_factory):
 
 
 def test_a_complete_pdf_installs_and_the_reader_can_fetch_from_it(complete_pdf, tmp_path, capsys):
-    from sqlmodel import SQLModel, Session, create_engine
+    from sqlmodel import Session, SQLModel, create_engine
 
     from services.bible import import_pdf
     from services.bible.corpus import fetch_passage, list_versions

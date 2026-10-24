@@ -16,10 +16,10 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from services.bible import corpus, importer, providers
-from services.bible.books import BOOKS
 from services.bible import main as bible_main
+from services.bible.books import BOOKS
 from services.bible.corpus import CorpusError
-from services.bible.models import BibleVerse, ImportRun
+from services.bible.models import BibleVerse
 from services.bible.providers import ProviderError, ProviderUnavailable
 
 
@@ -472,7 +472,6 @@ def test_an_unconfigured_import_directory_is_reported_on_the_post_too(loaded_cli
 
 
 def test_an_upload_is_stored_and_installed(loaded_client: TestClient, corpus_file, tmp_path, monkeypatch):
-    import services.config as cfg
 
     import services.bible.main as main_module
 

@@ -3,17 +3,17 @@
 Pure module, so no Redis and no server. Each test names the failure it prevents
 rather than the function it calls.
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from services.geo.event_feed import (
     EVENT_KINDS,
     TIMELINE_DOMAINS,
-    events_for_domain,
     Event,
     build_timeline,
     dedupe,
+    events_for_domain,
     events_from_achievements,
     events_from_trips,
     events_from_workouts,
@@ -21,7 +21,7 @@ from services.geo.event_feed import (
     timeline_payload,
 )
 
-TZ = timezone.utc
+TZ = UTC
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=TZ).timestamp()
 
 

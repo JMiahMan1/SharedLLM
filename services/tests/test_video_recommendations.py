@@ -1,4 +1,4 @@
-from services.common.video_recommendations import recommend_video, all_themes
+from services.common.video_recommendations import all_themes, recommend_video
 
 
 def test_recommend_video_matches_creator_theme():

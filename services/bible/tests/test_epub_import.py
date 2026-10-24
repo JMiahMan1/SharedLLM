@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from services.bible import epub_import, importer
+from services.bible import importer
 from services.bible.books import BOOKS
 from services.bible.corpus import fetch_passage, list_versions
 from services.bible.epub_import import (
@@ -43,11 +43,11 @@ def path_documents(path: Path) -> dict[str, str]:
 
 
 def anchor(book: int, chapter: int, verse: int) -> str:
-    return "v{:02d}{:03d}{:04d}".format(book, chapter, verse)
+    return f"v{book:02d}{chapter:03d}{verse:04d}"
 
 
 def commentary_id(book: int, chapter: int, verse: int) -> str:
-    return "com{:02d}{:03d}{:03d}".format(book, chapter, verse)
+    return f"com{book:02d}{chapter:03d}{verse:03d}"
 
 
 def build_epub(
@@ -389,7 +389,7 @@ def test_an_unreadable_epub_says_so(tmp_path: Path) -> None:
 
 def test_to_source_refuses_a_partial_bible(tmp_path: Path) -> None:
     path = build_epub(tmp_path / "short.epub", book_filter={"Gen"})
-    with pytest.raises(EpubImportError, match="Exodus|Exodus"):
+    with pytest.raises(EpubImportError, match="Exodus"):
         to_source(extract(str(path)))
 
 
@@ -455,13 +455,6 @@ def test_the_cli_names_the_database_url_it_needs(tmp_path: Path, capsys, monkeyp
 
 
 def test_the_cli_imports_text_and_notes(tmp_path: Path, db_url: str, capsys) -> None:
-    path = _study_epub(
-        tmp_path,
-        "install.epub",
-        f'<p class="sl1" id="{anchor(43, 3, 16)}">For God so loved '
-        f'<a href="notes.html#{commentary_id(43, 3, 16)}"><sup>a</sup></a> the world.</p>',
-        f'<p class="com" id="{commentary_id(43, 3, 16)}">Commentary body.</p>',
-    )
     complete = build_epub(tmp_path / "install-full.epub")
     assert epub_main(
         [

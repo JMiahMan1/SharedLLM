@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Literal, Optional
+from typing import Literal
 
 from services.geo.step_history import RANGE_DAYS, RANGE_LABELS, bucket_windows
 
@@ -74,7 +74,7 @@ class MetricSeries:
     #: to say someone averages 0.4 workouts is not a useful thing to say.
     per_active_day: float = 0
     active_days: int = 0
-    best: Optional[MetricBucket] = None
+    best: MetricBucket | None = None
     #: True when the window contains no events at all -- "no workouts recorded"
     #: is different from "workouts, averaging one a month".
     empty: bool = False
@@ -85,7 +85,7 @@ def _day_of(ts: float, tz) -> str:
 
 
 def daily_from_workouts(
-    workouts: list[dict], tz, *, fields: Optional[dict[str, str]] = None
+    workouts: list[dict], tz, *, fields: dict[str, str] | None = None
 ) -> dict[str, dict[str, float]]:
     """Fold a list of workout dicts into per-day totals, keyed by metric.
 
@@ -193,7 +193,6 @@ def build_metric_series(
         best = None
     active_days = len(in_window)
     total = sum(in_window.values())
-    is_count = spec.get("format") == "count"
 
     return MetricSeries(
         range=rng,
