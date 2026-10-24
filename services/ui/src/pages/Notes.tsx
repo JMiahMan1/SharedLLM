@@ -8,6 +8,7 @@ import { useSendAsPref } from '../components/chat/sendAsPref';
 import {
   Archive,
   ArchiveRestore,
+  Bell,
   Check,
   CheckSquare,
   Copy,
@@ -32,6 +33,7 @@ import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
 import RichNoteEditor, { type RichNoteEditorHandle } from '../components/notes/RichNoteEditor';
 import NoteHistory from '../components/notes/NoteHistory';
+import ReminderPanel from '../components/notes/ReminderPanel';
 import { richEditable } from '../lib/noteRichText';
 import { remarkNoteSpans } from '../lib/remarkNoteSpans';
 import { errorText } from '../lib/errorText';
@@ -68,6 +70,8 @@ import {
   writeNotesSnapshot,
   type NoteColor,
   type NotesIndex,
+  type NoteReminder,
+  type NotesIndexEntry,
   type NotesLayout,
 } from '../lib/notesMeta';
 
@@ -186,6 +190,8 @@ export default function Notes() {
   const [tagFilter, setTagFilter] = useState('');
   const [view, setView] = useState<NotesView>('notes');
   const [layout, setLayout] = useState<NotesLayout>(readNotesLayout);
+  /** "Now" for this visit, to tell an upcoming reminder from one that went off. */
+  const [shelfNow] = useState(() => Date.now());
   const toggleLayout = () => {
     const next: NotesLayout = layout === 'grid' ? 'list' : 'grid';
     setLayout(next);
@@ -533,8 +539,16 @@ export default function Notes() {
       ) {
         await persistIndex((current) => {
           let next = current;
+          // A renamed note keeps its reminder (the timer itself is unchanged).
+          const carried = draft.path && savedPath !== draft.path ? indexEntry(current, draft.path).reminder : undefined;
           if (draft.path && savedPath !== draft.path) next = forgetIndexEntry(next, draft.path);
-          if (savedPath) next = setIndexEntry(next, savedPath, { pinned: draft.pinned, color: draft.color });
+          if (savedPath) {
+            next = setIndexEntry(next, savedPath, {
+              pinned: draft.pinned,
+              color: draft.color,
+              ...(carried ? { reminder: carried } : {}),
+            });
+          }
           return next;
         });
       }
@@ -542,6 +556,51 @@ export default function Notes() {
       return { status: 'saved', path: savedPath, title, etag: saved.etag };
     } catch (err) {
       return { status: 'failed', message: errorText(err, 'Save failed') };
+    }
+  };
+
+  /**
+   * Set, change or remove a note's timed reminder. It is an ordinary personal
+   * reminder on the timers (it rings and notifies like any other), titled
+   * after the note and opening it when tapped; the index records when it
+   * fires. A change schedules the new one before cancelling the old, so a
+   * failure never leaves the note without the reminder it had.
+   */
+  const setNoteReminder = async (path: string, title: string, at: Date | null): Promise<void> => {
+    const previous = indexEntry(queryClient.getQueryData<NotesIndex>(indexKey), path).reminder;
+    const label = `📝 ${title}`;
+    let reminder: NotesIndexEntry['reminder'];
+    if (at) {
+      const res = await api.createTimer({
+        title: label,
+        type: 'reminder',
+        time_str: at.toISOString(),
+        url: `/notes?note=${encodeURIComponent(path)}`,
+      });
+      const timerId = res.detail?.timer_id as string | undefined;
+      if (res.status !== 'SUCCESS' || !timerId) throw new Error(res.message || 'Could not set the reminder');
+      reminder = { at: (res.detail?.expires_at as string | undefined) ?? at.toISOString(), timerId };
+    }
+    if (previous) {
+      // Already fired is fine: there is nothing left to cancel.
+      const res = await api.deleteTimer(label, 'reminder', previous.timerId).catch(() => null);
+      if (res && res.status !== 'SUCCESS' && !/no matching timer/i.test(res.message ?? '')) {
+        toast.error('The earlier reminder could not be cancelled; remove it under Timers');
+      }
+    }
+    await persistIndex((current) => setIndexEntry(current, path, { reminder }));
+    toast.success(at ? `Reminder set for ${new Date(reminder!.at).toLocaleString()}` : 'Reminder removed');
+  };
+
+  /** A note deleted for good takes its pending reminder with it (best effort). */
+  const cancelReminders = (paths: string[]) => {
+    const current = queryClient.getQueryData<NotesIndex>(indexKey);
+    for (const path of paths) {
+      const reminder = indexEntry(current, path).reminder;
+      if (reminder && Date.parse(reminder.at) > Date.now()) {
+        const title = path.split('/').pop()?.replace(/\.md$/, '') ?? path;
+        void api.deleteTimer(`📝 ${title}`, 'reminder', reminder.timerId).catch(() => null);
+      }
     }
   };
 
@@ -739,6 +798,7 @@ export default function Notes() {
       }
     }
     if (deleted.length) {
+      cancelReminders(deleted);
       await persistIndex((current) => {
         let next = current;
         for (const path of deleted) next = forgetIndexEntry(next, path);
@@ -766,6 +826,7 @@ export default function Notes() {
         toast.error(res.message || 'Delete failed');
         return;
       }
+      cancelReminders([note.path]);
       await persistIndex((current) => forgetIndexEntry(current, note.path));
       setEditing(null);
       toast.success('Note deleted');
@@ -783,6 +844,7 @@ export default function Notes() {
         toast.error(res.message || 'Could not empty the trash');
         return;
       }
+      cancelReminders(trashedNotes.map((note) => note.path));
       await persistIndex((current) => {
         let next = current;
         for (const note of trashedNotes) next = forgetIndexEntry(next, note.path);
@@ -1240,6 +1302,12 @@ export default function Notes() {
                   </div>
                 )}
 
+                {meta.reminder && Date.parse(meta.reminder.at) > shelfNow && (
+                  <p className="mt-2 flex items-center gap-1 text-[10px] text-amber-200" data-testid="note-reminder-chip">
+                    <Bell size={11} /> {new Date(meta.reminder.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                  </p>
+                )}
+
                 {tags.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {tags.slice(0, 3).map((tag) => (
@@ -1380,6 +1448,15 @@ export default function Notes() {
               fresh={editing.fresh}
               scope={scope}
               asUser={asUser}
+              reminder={editing.draft.path ? indexEntry(index, editing.draft.path).reminder : undefined}
+              onSetReminder={
+                editing.draft.path
+                  ? (at) => {
+                      const path = editing.draft!.path!;
+                      return setNoteReminder(path, notes.find((n) => n.path === path)?.title ?? editing.title, at);
+                    }
+                  : undefined
+              }
               onPersist={persistDraft}
               onKeepBoth={keepBoth}
               onDone={finishEditing}
@@ -1458,9 +1535,18 @@ const NoteEditor = forwardRef<
     onTrash?: () => void;
     /** Whose Nextcloud the note is in, for its version history. */
     asUser?: 'admin';
+    /** The saved note's timed reminder, from the shared index. */
+    reminder?: NoteReminder;
+    /** Set (a time) or remove (null) the reminder; only a saved note can have one. */
+    onSetReminder?: (at: Date | null) => Promise<void>;
   }
->(function NoteEditor({ initial, fresh, scope, onPersist, onKeepBoth, onDone, onUseStored, onTrash, asUser }, handle) {
+>(function NoteEditor(
+  { initial, fresh, scope, onPersist, onKeepBoth, onDone, onUseStored, onTrash, asUser, reminder, onSetReminder },
+  handle,
+) {
   const [showHistory, setShowHistory] = useState(false);
+  const [showReminder, setShowReminder] = useState(false);
+  const [openedAt] = useState(() => Date.now());
   const [draft, setDraft] = useState<DraftState>(initial);
   const [labelDraft, setLabelDraft] = useState('');
   // Chosen per text: notes the visual editor could not save back unchanged
@@ -1817,6 +1903,9 @@ const NoteEditor = forwardRef<
           ))}
         </div>
       </div>
+      {showReminder && onSetReminder && (
+        <ReminderPanel reminder={reminder} onSet={(at) => onSetReminder(at)} onClear={() => onSetReminder(null)} />
+      )}
       {showHistory && initial.path && (
         <NoteHistory
           path={initial.path}
@@ -1853,6 +1942,16 @@ const NoteEditor = forwardRef<
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {onSetReminder && (
+            <button
+              type="button"
+              className={`glass-button min-h-11 px-3 py-2 text-xs ${reminder && Date.parse(reminder.at) > openedAt ? 'text-amber-300' : ''}`}
+              aria-pressed={showReminder}
+              onClick={() => setShowReminder(!showReminder)}
+            >
+              <Bell size={13} /> Remind me
+            </button>
+          )}
           {initial.path && (
             <button
               type="button"

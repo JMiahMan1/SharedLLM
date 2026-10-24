@@ -2131,6 +2131,8 @@ export const api = {
     tts_enabled?: boolean;
     esphome_script?: string;
     flash_screen?: boolean;
+    /** The app page the notice opens, e.g. a note's `/notes?note=…` (in-app paths only). */
+    url?: string;
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/timers', payload);
     return resp.data;

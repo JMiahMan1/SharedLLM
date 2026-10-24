@@ -35,7 +35,7 @@ with it — Notes lives here and in the nav.
 | `move` | move a note with one WebDAV `MOVE` (archive, trash, restore or rename) |
 | `duplicate` | copy a note to the first free `<title> (copy).md` in its folder |
 | `empty_trash` | permanently delete every note under `Notes/Trash` |
-| `meta_read` / `meta_write` | read or replace the shared index `Notes/.jarvis-notes.json` (pin, colour, archive origin) |
+| `meta_read` / `meta_write` | read or replace the shared index `Notes/.jarvis-notes.json` (pin, colour, archive origin, reminder) |
 | `check_off` | toggle one checklist item (`- [ ] x` ↔ `- [x] x`) by text |
 | `list` | list markdown files under the configured directories, newest first; with `previews: true` the newest 24 also carry their text in `content` |
 | `sync_rag` | read every note (execution); the gateway then indexes them (below) |
@@ -172,6 +172,25 @@ that, every save of an opened note stacked another header on top.
   "<title> (my copy)", numbered past existing titles in that folder),
   **Use the stored version** (drops yours and reopens the note) or
   **Overwrite with mine**. Autosave pauses until you choose.
+- **Reminders (time)**: a saved note's **Remind me** panel offers "This
+  evening 18:00" (while still ahead), "Tomorrow 9:00" or any date and time
+  (`components/notes/ReminderPanel.tsx`). Setting one makes an ordinary
+  personal reminder on the existing timers (`POST /api/communication/timers`,
+  `type: reminder`, titled "📝 <note title>"), so it rings, notifies and
+  snoozes exactly like reminders made on the Communication page, and is
+  listed there. Timers now take an optional `url` (in-app paths only;
+  execution's `app_link` drops anything with a scheme, `//host`, backslash or
+  control character), which the notice opens: `/notes?note=<path>`. A snooze
+  carries the link too. The shared index stores `reminder: {at, timerId}`
+  for the note, so cards show a bell with the time while it is ahead. A
+  change schedules the new timer before cancelling the old one; Remove
+  cancels it ("no matching timer" means it already went off, which is fine).
+  A rename keeps the reminder; archive and trash keep it too (the timer still
+  fires, and the deep link falls back to the note's title if the path
+  moved); delete forever and Empty trash cancel pending ones. A past time is
+  refused in the panel, because the timers read a past clock time as that
+  time tomorrow. Reminders are personal (the person who set it), not
+  household-wide.
 - **Version history**: an open, saved note has a **History** button that
   lists Nextcloud's earlier versions of the file (`components/notes/NoteHistory.tsx`).
   Nextcloud's Versions app (files_versions, on by default) keeps one each time
@@ -251,9 +270,10 @@ capture, a grid/list layout toggle remembered per device, undo toasts for
 archive/trash/restore, autosave with ETag conflict detection and on-device
 drafts that survive a closed app, desktop keyboard shortcuts, per-item
 checklist controls (drag, arrow-key and Alt+arrow reordering, delete),
-version history with read and restore from Nextcloud's Versions app.
+version history with read and restore from Nextcloud's Versions app, timed
+reminders on the existing timers whose notice opens the note.
 
-Still open: reminders (time and place), attachments/images/drawings/audio,
+Still open: place-based reminders, attachments/images/drawings/audio,
 Nextcloud sharing, offline.
 
 ## Tests
@@ -279,6 +299,15 @@ Nextcloud sharing, offline.
 - `services/ui/src/test/NotesShortcuts.test.tsx`: C and / on the shelf, not in
   a field or with a modifier; Ctrl+S saves from a field, Ctrl/Cmd+Enter saves
   and closes
+- `services/ui/src/test/NotesReminder.test.tsx`: a reminder becomes a
+  `reminder` timer with the note's link and lands in the index and on the
+  card; Remove cancels the timer by id; a past time and a refused timer show
+  an error and change nothing; no reminder on an unsaved note
+- `services/execution/tests/test_timer.py` (reminder part): a reminder stores
+  its in-app link and reports when it fires, an off-app link is dropped, the
+  notice opens the link and a snooze keeps it; `app_link` accepts only app
+  paths. `services/gateway/tests/test_push_callbacks_timers.py`: a snoozed
+  note reminder keeps its link
 - `services/ui/src/test/noteDrafts.test.ts`: per-account drafts, the newest-20
   cap, a damaged store, storage that throws
 - `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
@@ -291,8 +320,8 @@ Nextcloud sharing, offline.
   move by grip arrow keys (focus follows), by pointer drag and by Alt+arrow,
   and delete one at a time
 - `services/ui/src/test/notesMeta.test.ts`: checklist parsing, previews,
-  sorting, pin/colour storage, the layout preference (and its fallback when
-  storage throws)
+  sorting, pin/colour storage, reminders kept or dropped by shape, the layout
+  preference (and its fallback when storage throws)
 - `services/execution/tests/test_note_actions.py`: `write` replaces (single
   PUT) without stacking headers, `check_off` toggles and reports missing items,
   previews are read once and reused, a save forgets the cached text, reads run

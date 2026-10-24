@@ -261,6 +261,13 @@ export interface NotesIndexEntry {
   color?: NoteColor;
   /** Where an archived/trashed note came from, for Restore. */
   previousPath?: string;
+  /** A timed reminder: when it fires (ISO) and the timer that fires it. */
+  reminder?: NoteReminder;
+}
+
+export interface NoteReminder {
+  at: string;
+  timerId: string;
 }
 
 export interface NotesIndex {
@@ -296,6 +303,15 @@ export function parseNotesIndex(raw: unknown): NotesIndex | null {
     if (typeof source.pinned === 'boolean') clean.pinned = source.pinned;
     if (typeof source.color === 'string') clean.color = source.color;
     if (typeof source.previousPath === 'string') clean.previousPath = source.previousPath;
+    const reminder = source.reminder as Partial<NoteReminder> | undefined;
+    if (
+      reminder &&
+      typeof reminder.at === 'string' &&
+      typeof reminder.timerId === 'string' &&
+      !Number.isNaN(Date.parse(reminder.at))
+    ) {
+      clean.reminder = { at: reminder.at, timerId: reminder.timerId };
+    }
     notes[path] = clean;
   }
   return { version: typeof candidate.version === 'number' ? candidate.version : 1, notes };
@@ -308,8 +324,10 @@ export function indexEntry(index: NotesIndex | undefined, path: string): NotesIn
 /** Pure patch, matching setNoteMeta: an empty entry is dropped. */
 export function setIndexEntry(index: NotesIndex, path: string, patch: NotesIndexEntry): NotesIndex {
   const next = { ...indexEntry(index, path), ...patch };
+  // `reminder: undefined` in a patch clears it; leave no empty key behind.
+  if (!next.reminder) delete next.reminder;
   const notes = { ...index.notes };
-  if (!next.pinned && (!next.color || next.color === 'default') && !next.previousPath) {
+  if (!next.pinned && (!next.color || next.color === 'default') && !next.previousPath && !next.reminder) {
     delete notes[path];
   } else {
     notes[path] = next;
