@@ -13,7 +13,9 @@ sensitivity decides what pages them: ``all`` (high and severe), ``severe``
 (the default) or ``off`` — severe self-harm and exploitation always page.
 
 Phrases match on word boundaries, case-insensitively; a hit returns a short
-excerpt around it so a parent sees the context, not just a label.
+excerpt around it so a parent sees the context, not just a label. A local
+model then reads each hit in context before anyone is paged
+(``concern_review``); without it the phrase list decides alone.
 """
 
 from __future__ import annotations
@@ -103,6 +105,11 @@ def _texts(event: dict[str, Any]) -> Iterable[str]:
             yield value
 
 
+def event_text(event: dict[str, Any]) -> str:
+    """All the human text of one event, for the local model's second look."""
+    return "\n".join(_texts(event))
+
+
 def scan_text(text: str) -> list[dict[str, Any]]:
     """Every category found in ``text`` (at most one hit per category)."""
     found = []
@@ -137,7 +144,13 @@ def scan_event(event: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def pages_parent(concern: dict[str, Any], sensitivity: str | None) -> bool:
-    """Whether this concern notifies the parents now (else it waits for the recap)."""
+    """Whether this concern notifies the parents now (else it waits for the recap).
+
+    One the local model dismissed in context (``concern_review``) pages no one;
+    self-harm and exploitation are never dismissed.
+    """
+    if (concern.get("review") or {}).get("verdict") == "dismissed" and concern.get("category") not in ALWAYS_ON:
+        return False
     if concern.get("category") in ALWAYS_ON:
         return True
     mode = sensitivity or "severe"

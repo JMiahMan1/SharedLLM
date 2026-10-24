@@ -703,7 +703,7 @@ point.
 
 ### Watching (Bark parity)
 
-- [ ] **Content monitoring, local models only.** Analyze the collected streams (messages,
+- [x] **Content monitoring, local models only.** Analyze the collected streams (messages,
       calls, web, music, app usage) for what a parent needs to know — self-harm, bullying,
       isolation, secret-keeping patterns — classified by concern level with per-child
       sensitivity (all / severe / none); serious categories always on.
@@ -716,8 +716,19 @@ point.
       (`tel:concerns:{child}`) with a short excerpt; the child's sensitivity
       (`monitoring` in their rules: `all`, `severe` (default), `off`) decides what pages both
       parents at once (`family_safety`, deduplicated per child, category and day; self-harm and
-      exploitation always page, at priority 5). Adults are never scanned. A local-model second
-      pass for context is not built.
+      exploitation always page, at priority 5). Adults are never scanned.
+      **Local-model second pass built (2026-10-24):** each phrase-list hit is read in context by
+      the household's own model before anyone is paged (`services/common/concern_review.py`,
+      called from telemetry's `guardian.second_pass`): the model at `llm_local_url` named by the
+      new setting `guardian_monitor_model` answers whether it is really a concern and how serious
+      (JSON: concern, level, reason). A "no" keeps the hit on record marked `dismissed`, pages
+      nobody and leaves it out of the recap; a "yes" may change its level, and its reason rides
+      along in the parents' notice and on the recap ("Checked by the local model: …"). Self-harm
+      and exploitation are never silenced by a model: a doubt is recorded beside the hit and both
+      parents are still paged. With no model configured, or when it is unreachable or answers
+      nonsense, the phrase list decides exactly as before; the reason is logged and kept on the
+      hit (`review: {by: "phrases", reason}`), nothing is dropped. Set `guardian_monitor_model`
+      in Settings → AI & Compute to turn it on.
 - [ ] **Alerts and reports.** Only the highest concern pages a parent immediately; a Sunday
       weekly recap (telemetry's report pipeline) with top apps, contacts, sites and standout
       moments; Jarvis chat answers "how was Emma's week?" the way Bark Assistant does.
@@ -826,7 +837,8 @@ bless/block per lane); (4) time budgets and routines;
 (5) app control and the web filter — app blocking, per-app limits, install approvals,
 per-permission gating, the one-minute warning, the DNS web filter and "ask a parent" for a
 blocked site DONE (needs the next APK and a device check);
-(6) monitoring alerts and the weekly recap — DONE (local phrase monitoring, Sunday recap);
+(6) monitoring alerts and the weekly recap — DONE (local phrase monitoring with a local-model
+second pass, Sunday recap);
 (7) the parents' page and the discipleship surfaces — DONE (parents' page, prayer and
 guidance, talk journal, "I need to talk", burden signals, the Jarvis chat recap).
 

@@ -51,6 +51,11 @@ export default function RecapCard({ username, name }: { username: string; name: 
                     <span className="ml-auto text-[10px] uppercase tracking-wider opacity-80">{c.level}{c.count > 1 ? ` · ${c.count}×` : ''}</span>
                   </span>
                   {c.latest?.excerpt && <span className="mt-1 block text-slate-300">“{c.latest.excerpt}”</span>}
+                  {c.latest?.review?.by === 'model' && c.latest.review.reason && (
+                    <span className="mt-1 block text-[10px] text-slate-400" data-testid="guardian-concern-review">
+                      {c.latest.review.verdict === 'doubted' ? 'Local model unsure' : 'Checked by the local model'}: {c.latest.review.reason}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
