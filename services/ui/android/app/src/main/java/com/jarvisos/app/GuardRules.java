@@ -83,9 +83,16 @@ public final class GuardRules {
         return Action.ALLOW;
     }
 
+    /** Android's VPN dialogs; the one that manages a running VPN can disconnect the web filter. */
+    static final String VPN_DIALOGS = "com.android.vpndialogs";
+
     /** A screen that would uninstall Jarvis or switch its protection off. */
     static boolean isTamperScreen(String pkg, String lowerCls, String lowerText) {
         boolean namesJarvis = lowerText.contains(APP_LABEL);
+        if (VPN_DIALOGS.equals(pkg)) {
+            // "Disconnect" on the web filter; the first-time consent dialog stays open.
+            return lowerCls.contains("manage") || lowerText.contains("disconnect");
+        }
         if (INSTALLERS.contains(pkg)) {
             // The uninstall dialog ("Do you want to uninstall Jarvis OS?").
             return namesJarvis || lowerCls.contains("uninstall");

@@ -44,7 +44,19 @@ public class GuardPlugin extends Plugin {
         out.put("adminActive", dpm != null && dpm.isAdminActive(admin()));
         out.put("deviceOwner", dpm != null && dpm.isDeviceOwnerApp(getContext().getPackageName()));
         out.put("guardEnabled", guardEnabled(getContext()));
+        out.put("webFilterAllowed", android.net.VpnService.prepare(getContext()) == null);
+        out.put("webFilterActive", WebFilterService.active);
         call.resolve(out);
+    }
+
+    /** Android's one-time "allow this VPN" prompt for the web filter; the guard starts it after. */
+    @PluginMethod
+    public void allowWebFilter(PluginCall call) {
+        Intent consent = android.net.VpnService.prepare(getContext());
+        if (consent != null) {
+            getActivity().startActivity(consent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        }
+        call.resolve();
     }
 
     @PluginMethod

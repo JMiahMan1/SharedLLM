@@ -4178,6 +4178,8 @@ def _granted_minutes(session: Session, username: str, day: str) -> int:
 
 # An Android package name: dotted segments of letters, digits and underscores.
 _PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
+# A domain the web filter matches (and every name under it).
+_DOMAIN = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\.?$")
 
 
 def _clean_screen_rules(body: dict) -> dict:
@@ -4219,6 +4221,25 @@ def _clean_screen_rules(body: dict) -> dict:
         ):
             raise HTTPException(status_code=422, detail="app_limits must map package names to whole minutes from 0 to 1440")
         out["app_limits"] = {k.strip(): v for k, v in list(limits.items())[:200]}
+    # The phone's web filter (step 5): on/off, the family-safe resolver for adult
+    # and malware sites, safe search, and the parent's own block and allow lists.
+    if body.get("web_filter") is not None:
+        wf = body["web_filter"]
+        if not isinstance(wf, dict):
+            raise HTTPException(status_code=422, detail="web_filter must be an object")
+        clean: dict = {}
+        for key in ("enabled", "adult", "safe_search"):
+            if wf.get(key) is not None:
+                if not isinstance(wf[key], bool):
+                    raise HTTPException(status_code=422, detail=f"web_filter.{key} must be true or false")
+                clean[key] = wf[key]
+        for key in ("block", "allow"):
+            if wf.get(key) is not None:
+                domains = wf[key]
+                if not isinstance(domains, list) or any(not isinstance(d, str) or not _DOMAIN.match(d.strip().lower()) for d in domains):
+                    raise HTTPException(status_code=422, detail=f"web_filter.{key} must be domain names")
+                clean[key] = list(dict.fromkeys(d.strip().lower().rstrip(".") for d in domains))[:500]
+        out["web_filter"] = clean
     return out
 
 

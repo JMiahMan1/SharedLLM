@@ -5562,6 +5562,7 @@ _TAMPER_EVENTS = {
     "guard_missing": "is running without Jarvis's screen guard",
     "uninstall_attempt": "tried to remove Jarvis",
     "offline_unlock": "was unlocked with a parent's offline code",
+    "filter_disabled": "turned off Jarvis's web filter",
 }
 
 

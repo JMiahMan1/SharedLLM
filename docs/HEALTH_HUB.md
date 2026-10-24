@@ -399,7 +399,9 @@ point.
       package, stored in the day record's `apps` array); the top-apps view lands on the
       parents' surface (step 7).
 - [x] **Calls and SMS (Android).** First brick: the sideloaded app reads the call log and SMS store with runtime permissions (READ_CALL_LOG, READ_SMS) and posts each new call and message to the activity feed (`feature: calls` / `sms`), with direction, duration (calls) and body (SMS), contacts resolved best-effort. A `CommsPlugin` + `CommsSync` (5-min poll) reuses the existing activity pipeline; a timestamp cursor keeps it incremental. Content monitoring and the parents' surface follow.
-- [ ] **Web activity.** The on-device filter reports domains visited and blocked attempts.
+- [x] **Web activity.** The on-device filter sums sites visited and blocked attempts per
+      domain and posts them every five minutes to the activity feed (`feature: web`, event
+      `visit` or `blocked`, counts in `detail`); parents-only like the rest of the feed.
 
 ### Guarding
 
@@ -435,6 +437,20 @@ point.
 - [ ] **Web filtering.** On-device VPN/DNS filter with category lists, allow/block lists,
       safe-search enforcement, an "ask a parent" request flow, and Qustodio-style bypass
       blocks (unsupported browsers, split-screen, safe mode).
+      **DNS filter built (2026-10-24, APK after 437, needs a device check):** a parent switches
+      the filter on under the child (`WebFilterControls`; rules `web_filter` with `enabled`,
+      `adult`, `safe_search`, `block`, `allow`). On the phone `WebFilterService` is a VPN that
+      routes only its own DNS address (10.111.222.2), so every other packet leaves as usual and a
+      fault can only stop names resolving. `WebFilterRules` decides each name: the allow list
+      wins (open resolver 1.1.1.1), then the block list ("no such site"), then safe search
+      (Google, YouTube, Bing and DuckDuckGo answered with their safe-search addresses), then
+      everything else through Cloudflare for Families (1.1.1.3: adult and malware). The guard
+      starts it once Android's one-time VPN prompt was accepted (Phone protection card → Web
+      filter → Allow), covers the VPN's Disconnect dialog, and reports `filter_disabled` if it
+      is revoked. DNS and packet framing are pure, JVM-tested classes (`DnsMessage`, `IpUdp`).
+      Known gaps: a browser set to its own secure DNS (DoH) or Android's strict Private DNS
+      bypasses a DNS filter; categories are Cloudflare's (no per-category choice); no "ask a
+      parent" flow yet.
 - [ ] **Location guardian.** The geo service already holds live location, history, zones and
       trips; add parent-facing place alerts (arrive/leave), ring device and battery, and the
       one-device-at-a-time live view.
@@ -556,8 +572,8 @@ media sessions, calls and SMS DONE (video covered by media sessions + per-app fo
 time); (3) Jarvis recommendations from the profile — DONE (music style matching,
 video themes redeemed or redirected, podcasts, books, games and activities, and a parent's
 bless/block per lane); (4) time budgets and routines;
-(5) app control and the web filter — app blocking and per-app limits DONE, the web filter
-next;
+(5) app control and the web filter — app blocking, per-app limits and the DNS web filter
+DONE (install approvals and "ask a parent" for a site still open);
 (6) monitoring alerts and the weekly recap; (7) the parents' page and the discipleship
 surfaces.
 

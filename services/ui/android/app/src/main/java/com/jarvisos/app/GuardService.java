@@ -38,6 +38,7 @@ public class GuardService extends AccessibilityService {
         refresher = Executors.newSingleThreadScheduledExecutor();
         refresher.scheduleWithFixedDelay(() -> {
             if (GuardApi.refreshStatus(this)) GuardApi.reportOfflineUnlockIfDue(this);
+            syncWebFilter();
             // A lock that starts while the child is already in an app.
             main.post(this::checkCurrentWindow);
         }, 0, REFRESH_SECONDS, TimeUnit.SECONDS);
@@ -83,6 +84,20 @@ public class GuardService extends AccessibilityService {
                                 : action == GuardRules.Action.BLOCK_APP ? GuardScreenActivity.MODE_APP
                                 : GuardScreenActivity.MODE_LOCKED);
         startActivity(cover);
+    }
+
+    /** Run the web filter while the parents want it (once Android's VPN consent was given). */
+    private void syncWebFilter() {
+        try {
+            boolean wanted = GuardApi.isProtected(this) && GuardApi.webFilterWanted(this);
+            if (wanted && !WebFilterService.active && android.net.VpnService.prepare(this) == null) {
+                startService(new Intent(this, WebFilterService.class));
+            } else if (!wanted && WebFilterService.active) {
+                startService(new Intent(this, WebFilterService.class).setAction(WebFilterService.ACTION_STOP));
+            }
+        } catch (Exception ignored) {
+            // Tried again at the next refresh.
+        }
     }
 
     /** Visible text of a window, depth-limited: enough to see "Jarvis OS" on a Settings page. */

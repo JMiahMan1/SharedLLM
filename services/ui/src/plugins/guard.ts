@@ -7,6 +7,10 @@ export interface GuardStatus {
   deviceOwner: boolean;
   /** The Accessibility screen guard is switched on. */
   guardEnabled: boolean;
+  /** Android's VPN consent for the web filter was given (APKs after 437). */
+  webFilterAllowed?: boolean;
+  /** The web filter is running now. */
+  webFilterActive?: boolean;
 }
 
 export interface GuardPluginInterface {
@@ -14,6 +18,7 @@ export interface GuardPluginInterface {
   enableAdmin(): Promise<void>;
   openGuardSettings(): Promise<void>;
   openAppInfo(): Promise<void>;
+  allowWebFilter(): Promise<void>;
 }
 
 // Off Android nothing is guarded: report it plainly, never a fake "on".
@@ -22,6 +27,7 @@ const webFallback: GuardPluginInterface = {
   enableAdmin: async () => undefined,
   openGuardSettings: async () => undefined,
   openAppInfo: async () => undefined,
+  allowWebFilter: async () => undefined,
 };
 
 const Guard = registerPlugin<GuardPluginInterface>('JarvisGuard', { web: () => webFallback });

@@ -307,6 +307,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- The web filter: a VPN that carries only DNS (Phase 11 step 5).
+             Started by the screen guard when the parents switch it on. -->
+        <service
+            android:name=".WebFilterService"
+            android:exported="false"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
         <service
             android:name=".GuardService"
             android:exported="true"

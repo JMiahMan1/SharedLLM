@@ -8,6 +8,7 @@ import type { ScreenRules } from '../../types/api';
 import { lockedLine } from '../../lib/screenTimeText';
 import AppControls from './AppControls';
 import OfflineCodeSetting from './OfflineCodeSetting';
+import WebFilterControls from './WebFilterControls';
 
 /**
  * A parent's screen-time controls for one child (Phase 11 step 4): daily and
@@ -49,6 +50,7 @@ function rulesFrom(draft: Draft, current: ScreenRules): ScreenRules {
     always_allowed: current.always_allowed,
     blocked_apps: current.blocked_apps,
     app_limits: current.app_limits,
+    web_filter: current.web_filter,
   };
 }
 
@@ -168,6 +170,7 @@ export default function ScreenTimeControls({ username, name }: { username: strin
       {failureText && <p className="text-xs text-amber-300">{failureText}</p>}
 
       <AppControls username={username} name={name} rules={status.rules} />
+      <WebFilterControls username={username} name={name} rules={status.rules} />
       <OfflineCodeSetting />
     </section>
   );

@@ -198,6 +198,34 @@ final class GuardApi {
         }).start();
     }
 
+    /** Sites visited and blocked since the last report, onto the activity feed (parents only). */
+    static void reportWeb(Context context, java.util.Map<String, int[]> counts) {
+        new Thread(() -> {
+            for (java.util.Map.Entry<String, int[]> e : counts.entrySet()) {
+                try {
+                    JSONObject body = new JSONObject();
+                    body.put("feature", "web");
+                    body.put("item", e.getKey());
+                    body.put("event", e.getValue()[1] > 0 ? "blocked" : "visit");
+                    JSONObject detail = new JSONObject();
+                    detail.put("visits", e.getValue()[0]);
+                    detail.put("blocked", e.getValue()[1]);
+                    body.put("detail", detail);
+                    send(context, "POST", "/api/activity", body.toString());
+                } catch (Exception ignored) {
+                    // Best effort: a missed batch is not retried.
+                }
+            }
+        }).start();
+    }
+
+    /** Whether the parents switched the web filter on for this phone. */
+    static boolean webFilterWanted(Context context) {
+        JSONObject rules = lastStatus(context).optJSONObject("rules");
+        JSONObject wf = rules == null ? null : rules.optJSONObject("web_filter");
+        return wf != null && wf.optBoolean("enabled", false);
+    }
+
     /** Tell the parents protection changed; best effort, never throws. */
     static void reportTamper(Context context, String event) {
         new Thread(() -> {
