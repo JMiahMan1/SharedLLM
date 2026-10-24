@@ -66,10 +66,6 @@ describe('MiniPlayer', () => {
 
   it('loads cover art through the gateway image proxy with a signed media token', async () => {
     localStorage.setItem('jarvis_api_key', 'key-1');
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ token: 'mt-1', user: 'alice', expires_at: Math.floor(Date.now() / 1000) + 3600 }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
-    )));
     try {
       const { container } = renderAt('/bible', player({ mediaImage: '/imageproxy/cover.jpg?size=512' }));
       await waitFor(() => expect(container.querySelector('img')).not.toBeNull());

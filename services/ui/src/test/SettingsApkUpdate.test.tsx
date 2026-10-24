@@ -53,11 +53,12 @@ const SHA = 'a'.repeat(64);
  * races them and fails intermittently under full-suite parallelism. Gating on
  * the notice first is what makes it stable.
  *
- * The per-query timeout is deliberately well under the 5s test timeout: a query
- * that waits longer than the test can survive just reports a bare "test timed
- * out" with no hint about what was missing.
+ * The per-query timeout is deliberately well under the 20s test timeout
+ * (vite.config.ts): a query that waits longer than the test can survive just
+ * reports a bare "test timed out" with no hint about what was missing. 2s was
+ * too tight for Settings to settle while the whole suite runs in parallel.
  */
-const CONTROL_TIMEOUT_MS = 2000;
+const CONTROL_TIMEOUT_MS = 8000;
 
 async function findControl(testId: string) {
   await screen.findByTestId('apk-update-notice', undefined, { timeout: CONTROL_TIMEOUT_MS });
@@ -405,7 +406,7 @@ describe('Settings APK verified download flow', () => {
 
     it('still offers the APK file, because that is the only way out', async () => {
       renderWithProviders(<Settings />);
-      const link = await screen.findByRole('link', { name: /this link/i }, { timeout: CONTROL_TIMEOUT_MS });
+      const link = await findControlByName(/this link/i, 'link');
       expect(link).toHaveAttribute('href', verified.apkUrl);
     });
 

@@ -17,6 +17,7 @@ import {
 import { useWidgetStore, defaultWidgetDefs } from '../../stores/widgetStore';
 import type { UserWidgetSettings, WidgetSize, WidgetVisibility } from '../../types/widget';
 import { api } from '../../services/api';
+import { focusableIn, trapTab } from '../../lib/focusTrap';
 
 interface DashboardSettingsPanelProps {
   isOpen: boolean;
@@ -245,14 +246,7 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
 
-    const focusable = () =>
-      Array.from(
-        panel?.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
-        ) ?? []
-      );
-
-    (focusable()[0] ?? panel)?.focus();
+    (focusableIn(panel)[0] ?? panel)?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -260,21 +254,7 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
         requestClose();
         return;
       }
-      if (e.key !== 'Tab') return;
-
-      const items = focusable();
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement;
-
-      if (e.shiftKey && (active === first || !panel?.contains(active))) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
+      trapTab(e, panel);
     };
 
     document.addEventListener('keydown', onKeyDown, true);
