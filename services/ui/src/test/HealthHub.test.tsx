@@ -14,6 +14,7 @@ vi.mock('../services/api', async (importOriginal) => {
     api: {
       ...(actual.api as Record<string, unknown>),
       getHealthSummary: vi.fn(),
+      getHealthProfile: vi.fn(),
       getHealthFamily: vi.fn(),
       getDailySteps: vi.fn(),
       saveCheckin: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('../lib/healthHub', async (importOriginal) => ({
 
 const getHealthSummary = vi.mocked(api.getHealthSummary);
 const getHealthFamily = vi.mocked(api.getHealthFamily);
+const getHealthProfile = vi.mocked(api.getHealthProfile);
 const getDailySteps = vi.mocked(api.getDailySteps);
 const saveCheckin = vi.mocked(api.saveCheckin);
 const addHealthMetrics = vi.mocked(api.addHealthMetrics);
@@ -45,6 +47,23 @@ const getSleep = vi.mocked(api.getSleep);
 const logSleep = vi.mocked(api.logSleep);
 const getNutritionDay = vi.mocked(api.getNutritionDay);
 const addFood = vi.mocked(api.addFood);
+
+const ALL_ON: HealthSummary['profile']['metrics'] = {
+  readiness: true,
+  checkin: true,
+  sleep: true,
+  nutrition: true,
+  water: true,
+  steps: true,
+  active_minutes: true,
+  streaks: true,
+  weekly_digest: true,
+  family_challenge: true,
+  cheers: true,
+  lessons: true,
+  coach: true,
+  fasting: false,
+};
 
 function summary(overrides: Partial<HealthSummary> = {}): HealthSummary {
   return {
@@ -64,6 +83,8 @@ function summary(overrides: Partial<HealthSummary> = {}): HealthSummary {
       sleep_need_minutes: 480,
       water_goal_ml: 2000,
       weekly_active_minutes: 150,
+      metrics: ALL_ON,
+      metric_catalog: [],
     },
     defaults_used: [],
     sleep: {
@@ -167,6 +188,7 @@ function renderWithClient(node: React.ReactNode) {
 beforeEach(() => {
   vi.clearAllMocks();
   getHealthFamily.mockResolvedValue({ viewer: 'jeremiah', day: '2026-10-22', people: [] });
+  getHealthProfile.mockResolvedValue(summary().profile);
   getDailySteps.mockResolvedValue({
     user_id: 'jeremiah',
     daily_steps: { '2026-10-22': 4200 },
@@ -482,5 +504,81 @@ describe('HealthToday family sharing', () => {
     expect(within(mom).getByText('Cycle: Follicular · next period in 19 days')).toBeInTheDocument();
     // A kid-mode viewer gets no number from the server, so none is drawn.
     expect(within(screen.getByTestId('shared-sam')).getByText('Food logged today')).toBeInTheDocument();
+  });
+});
+
+describe('Health cards switched off, and kid mode', () => {
+  it('does not render a card the person switched off', async () => {
+    const base = summary();
+    getHealthSummary.mockResolvedValue(
+      summary({ profile: { ...base.profile, metrics: { ...ALL_ON, water: false, readiness: false } } }),
+    );
+    renderWithClient(<HealthToday onNavigate={() => {}} />);
+
+    expect(await screen.findByTestId('today-sleep-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('today-water-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('readiness-card')).not.toBeInTheDocument();
+  });
+
+  it('shows a child what was logged and never a calorie number', async () => {
+    const base = summary();
+    getHealthSummary.mockResolvedValue(
+      summary({
+        profile: { ...base.profile, kid_mode: true },
+        nutrition: { ...emptyNutrition({ logged: true, entries_count: 2 }), totals: { calories: 640, protein_g: 20, carbs_g: 80, fat_g: 22, fiber_g: 4 } },
+      }),
+    );
+    renderWithClient(<HealthToday onNavigate={() => {}} />);
+
+    expect(await screen.findByTestId('today-nutrition-kid')).toHaveTextContent('2 things logged');
+    expect(screen.queryByText(/640/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/kcal/)).not.toBeInTheDocument();
+  });
+
+  it('keeps calories, ranges and density colours off the kid-mode food day', async () => {
+    getHealthProfile.mockResolvedValue({ ...summary().profile, kid_mode: true });
+    getNutritionDay.mockResolvedValue(
+      emptyNutrition({
+        logged: true,
+        entries_count: 1,
+        totals: { calories: 250, protein_g: 5, carbs_g: 40, fat_g: 8, fiber_g: 2 },
+        meals: {
+          breakfast: {
+            calories: 250,
+            entries: [
+              {
+                id: 7,
+                user_id: 'sam',
+                day: '2026-10-22',
+                meal: 'breakfast',
+                name: 'Granola',
+                brand: '',
+                calories: 250,
+                protein_g: 5,
+                carbs_g: 40,
+                fat_g: 8,
+                fiber_g: 2,
+                sugar_g: null,
+                sodium_mg: null,
+                servings: 1,
+                serving_grams: 60,
+                barcode: null,
+                recipe_path: null,
+                source: 'manual',
+                external_id: null,
+                created_at: '2026-10-22T08:00:00Z',
+                density: { band: 'orange', label: 'calorie dense', calories_per_100g: 416 },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    renderWithClient(<HealthNutrition onNavigate={() => {}} />);
+
+    expect(await screen.findByTestId('nutrition-kid-summary')).toHaveTextContent('1 thing logged');
+    expect(screen.getByText('Granola')).toBeInTheDocument();
+    expect(screen.queryByText(/kcal/)).not.toBeInTheDocument();
+    expect(screen.queryByText('orange')).not.toBeInTheDocument();
   });
 });

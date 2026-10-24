@@ -54,6 +54,38 @@ class HealthProfile(SQLModel, table=True):  # type: ignore
     updated_at: str = Field(default_factory=utcnow)
 
 
+class HealthPreferences(SQLModel, table=True):  # type: ignore
+    """Which hub cards a person turned on or off (``preferences.SWITCHES``).
+
+    A separate table rather than profile columns, so an existing database
+    gains it from ``create_all`` with no migration. ``metrics_json`` holds
+    only the switches the person changed; the rest keep their defaults.
+    """
+
+    __table_args__ = {"extend_existing": True}
+
+    user_id: str = Field(primary_key=True)
+    metrics_json: str = Field(default="{}")
+    updated_at: str = Field(default_factory=utcnow)
+
+
+class FastingSession(SQLModel, table=True):  # type: ignore
+    """One fast the person started (and, once over, stopped).
+
+    Adults only. ``ended_at`` is empty while the fast runs; at most one runs
+    at a time. Times are ISO-8601 instants, like every other reading.
+    """
+
+    __table_args__ = {"extend_existing": True}
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    started_at: str = Field(index=True)
+    ended_at: str | None = None
+    target_hours: int | None = None
+    created_at: str = Field(default_factory=utcnow)
+
+
 class MetricSample(SQLModel, table=True):  # type: ignore
     """One scalar reading, e.g. a weight or a resting heart rate.
 

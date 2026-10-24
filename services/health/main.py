@@ -31,11 +31,11 @@ from typing import Any
 import aiohttp
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.config import INTERNAL_SECRET
-from services.health import challenges, cycle, food_seed, scoring, weekly
+from services.health import challenges, cycle, fasting, food_seed, preferences, scoring, weekly
 from services.health.models import (
     ChallengeMember,
     Checkin,
@@ -43,7 +43,9 @@ from services.health.models import (
     CyclePeriod,
     CycleSettings,
     FamilyChallenge,
+    FastingSession,
     FoodEntry,
+    HealthPreferences,
     HealthProfile,
     HealthShare,
     MetricSample,
@@ -373,6 +375,8 @@ class ProfileUpdate(BaseModel):
     sleep_need_minutes: int | None = None
     water_goal_ml: int | None = None
     weekly_active_minutes: int | None = None
+    # Partial: only the switches being changed (``preferences.SWITCHES``).
+    metrics: dict[str, StrictBool] | None = None
 
     @field_validator("birth_year")
     @classmethod
@@ -592,7 +596,35 @@ class CycleLogIn(BaseModel):
 # --- profile ---------------------------------------------------------------
 
 
-def _profile_out(profile: HealthProfile | None, user: str) -> dict:
+def _is_minor(profile: HealthProfile | None) -> bool:
+    """Kid mode, or a known birth year under 18."""
+    if profile is None:
+        return False
+    age = _age_years(profile)
+    return bool(profile.kid_mode) or (age is not None and age < 18)
+
+
+def _stored_metrics(session: Session, user: str) -> dict:
+    row = session.get(HealthPreferences, user)
+    if row is None:
+        return {}
+    try:
+        stored = json.loads(row.metrics_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return stored if isinstance(stored, dict) else {}
+
+
+def _metrics_on(session: Session, user: str, profile: HealthProfile | None) -> dict[str, bool]:
+    return preferences.resolve(_stored_metrics(session, user), minor=_is_minor(profile))
+
+
+def _profile_out(session: Session, profile: HealthProfile | None, user: str) -> dict:
+    minor = _is_minor(profile)
+    switches = {
+        "metrics": preferences.resolve(_stored_metrics(session, user), minor=minor),
+        "metric_catalog": preferences.catalog(minor=minor),
+    }
     if profile is None:
         return {
             "user_id": user,
@@ -608,16 +640,17 @@ def _profile_out(profile: HealthProfile | None, user: str) -> dict:
             "sleep_need_minutes": None,
             "water_goal_ml": None,
             "weekly_active_minutes": None,
+            **switches,
         }
     data = profile.model_dump()
     data["exists"] = True
-    return data
+    return {**data, **switches}
 
 
 @app.get("/profile")
 def get_profile(request: Request, session: Session = Depends(get_session)):
     user = _user(request)
-    return _profile_out(session.get(HealthProfile, user), user)
+    return _profile_out(session, session.get(HealthProfile, user), user)
 
 
 @app.put("/profile")
@@ -627,12 +660,26 @@ def put_profile(body: ProfileUpdate, request: Request, session: Session = Depend
     if profile is None:
         profile = HealthProfile(user_id=user)
         session.add(profile)
-    for key, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    metric_changes = changes.pop("metrics", None)
+    for key, value in changes.items():
         setattr(profile, key, value)
     profile.updated_at = utcnow()
+    if metric_changes:
+        try:
+            clean = preferences.validate(metric_changes, minor=_is_minor(profile))
+        except ValueError as exc:
+            session.rollback()
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        row = session.get(HealthPreferences, user)
+        if row is None:
+            row = HealthPreferences(user_id=user)
+            session.add(row)
+        row.metrics_json = json.dumps({**_stored_metrics(session, user), **clean})
+        row.updated_at = utcnow()
     session.commit()
     session.refresh(profile)
-    return _profile_out(profile, user)
+    return _profile_out(session, profile, user)
 
 
 # --- cycle tracking --------------------------------------------------------
@@ -1770,7 +1817,7 @@ def summary(
     user = _user(request)
     day = _day(day or date.today().isoformat())
     profile = session.get(HealthProfile, user)
-    profile_out = _profile_out(profile, user)
+    profile_out = _profile_out(session, profile, user)
 
     defaults: list[str] = []
     sleep_need = profile.sleep_need_minutes if profile else None
@@ -2160,6 +2207,121 @@ def delete_challenge(challenge_id: int, request: Request, session: Session = Dep
     return {"deleted": challenge_id}
 
 
+# --- fasting window --------------------------------------------------------
+
+
+class FastStartIn(BaseModel):
+    # When the fast began; defaults to now (a person often starts after dinner).
+    started_at: str | None = None
+    target_hours: int | None = Field(default=None, ge=fasting.MIN_TARGET_HOURS, le=fasting.MAX_TARGET_HOURS)
+
+
+class FastStopIn(BaseModel):
+    ended_at: str | None = None
+
+
+def _fast_out(row: FastingSession, now: datetime) -> dict:
+    started = datetime.fromisoformat(row.started_at)
+    until = datetime.fromisoformat(row.ended_at) if row.ended_at else now
+    return {
+        "id": row.id,
+        "started_at": row.started_at,
+        "ended_at": row.ended_at,
+        "target_hours": row.target_hours,
+        **fasting.progress(started, until, row.target_hours),
+    }
+
+
+def _refuse_minor_fasting(session: Session, user: str) -> None:
+    """Fasting is adults only: a profile in kid mode or under 18 gets 403."""
+    if _is_minor(session.get(HealthProfile, user)):
+        raise HTTPException(status_code=403, detail="Fasting is for adults only.")
+
+
+def _active_fast(session: Session, user: str) -> FastingSession | None:
+    return session.exec(
+        select(FastingSession).where(FastingSession.user_id == user, FastingSession.ended_at.is_(None))  # type: ignore[union-attr]
+    ).first()
+
+
+@app.get("/fasting")
+def get_fasting(request: Request, session: Session = Depends(get_session)):
+    """The running fast (if any) and the last week of finished ones."""
+    user = _user(request)
+    if _is_minor(session.get(HealthProfile, user)):
+        return {"allowed": False, "active": None, "recent": [], "presets": list(fasting.PRESET_HOURS)}
+    now = datetime.now(UTC)
+    since = (now - timedelta(days=7)).isoformat()
+    recent = session.exec(
+        select(FastingSession)
+        .where(
+            FastingSession.user_id == user,
+            FastingSession.ended_at.is_not(None),  # type: ignore[union-attr]
+            FastingSession.started_at >= since,
+        )
+        .order_by(FastingSession.started_at.desc())
+    ).all()
+    active = _active_fast(session, user)
+    return {
+        "allowed": True,
+        "active": _fast_out(active, now) if active else None,
+        "recent": [_fast_out(row, now) for row in recent],
+        "presets": list(fasting.PRESET_HOURS),
+    }
+
+
+@app.post("/fasting/start")
+def start_fast(body: FastStartIn, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    _refuse_minor_fasting(session, user)
+    if _active_fast(session, user) is not None:
+        raise HTTPException(status_code=409, detail="A fast is already running. Stop it first.")
+    now = datetime.now(UTC)
+    started = _instant(body.started_at, field="started_at") if body.started_at else now.isoformat()
+    started_at = datetime.fromisoformat(started)
+    if started_at > now:
+        raise HTTPException(status_code=422, detail="started_at cannot be in the future")
+    if now - started_at > timedelta(hours=fasting.MAX_FAST_HOURS):
+        raise HTTPException(status_code=422, detail=f"A fast cannot have started more than {fasting.MAX_FAST_HOURS} hours ago")
+    row = FastingSession(user_id=user, started_at=started, target_hours=body.target_hours)
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _fast_out(row, now)
+
+
+@app.post("/fasting/stop")
+def stop_fast(body: FastStopIn, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    _refuse_minor_fasting(session, user)
+    row = _active_fast(session, user)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No fast is running")
+    now = datetime.now(UTC)
+    ended = _instant(body.ended_at, field="ended_at") if body.ended_at else now.isoformat()
+    ended_at = datetime.fromisoformat(ended)
+    if ended_at > now:
+        raise HTTPException(status_code=422, detail="ended_at cannot be in the future")
+    if ended_at <= datetime.fromisoformat(row.started_at):
+        raise HTTPException(status_code=422, detail="ended_at must be after the fast started")
+    row.ended_at = ended
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _fast_out(row, now)
+
+
+@app.delete("/fasting/{fast_id}")
+def delete_fast(fast_id: int, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    row = session.get(FastingSession, fast_id)
+    if row is None or row.user_id != user:
+        raise HTTPException(status_code=404, detail="Fast not found")
+    session.delete(row)
+    session.commit()
+    return {"deleted": fast_id}
+
+
 # --- export ----------------------------------------------------------------
 
 
@@ -2170,7 +2332,7 @@ def export_data(request: Request, session: Session = Depends(get_session)):
     return {
         "exported_at": utcnow(),
         "user_id": user,
-        "profile": _profile_out(session.get(HealthProfile, user), user),
+        "profile": _profile_out(session, session.get(HealthProfile, user), user),
         "metrics": [
             _sample_out(row)
             for row in session.exec(
@@ -2217,6 +2379,12 @@ def export_data(request: Request, session: Session = Depends(get_session)):
         "shares": [
             {"viewer": row.viewer, "scope": row.scope}
             for row in session.exec(select(HealthShare).where(HealthShare.owner == user)).all()
+        ],
+        "fasting": [
+            {"started_at": row.started_at, "ended_at": row.ended_at, "target_hours": row.target_hours}
+            for row in session.exec(
+                select(FastingSession).where(FastingSession.user_id == user).order_by(FastingSession.started_at.asc())
+            ).all()
         ],
         "challenges_joined": [
             {"challenge_id": row.challenge_id, "joined_at": row.joined_at}
