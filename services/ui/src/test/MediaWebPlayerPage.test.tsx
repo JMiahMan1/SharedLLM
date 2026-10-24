@@ -195,19 +195,22 @@ describe('Media page: when a provider is down', () => {
 });
 
 describe('Media page: browse', () => {
-  it('plays an Audiobookshelf podcast via the resolved URI', async () => {
+  it('opens an Audiobookshelf podcast to its episodes and plays the one picked (BUG-43)', async () => {
     server.use(
       http.get('/api/media/audiobookshelf/search', () => HttpResponse.json({
         status: 'SUCCESS', books: [], authors: [],
         podcasts: [{ id: 'pod-1', title: 'Daily Pod', author: 'Host' }],
       })),
     );
-    const resolved: string[] = [];
+    const asked: string[] = [];
+    const episodeUri = 'audiobookshelf--x://podcast_episode/pod-1 ep-9';
     server.use(
-      http.post('/api/media/ma-library-uri', async ({ request }) => {
-        const body = (await request.json()) as { abs_item_id: string };
-        resolved.push(body.abs_item_id);
-        return HttpResponse.json({ status: 'SUCCESS', ma_uri: 'library://podcast/16', title: 'Daily Pod' });
+      http.get('/api/media/podcast-episodes', ({ request }) => {
+        asked.push(new URL(request.url).searchParams.get('abs_item_id') || '');
+        return HttpResponse.json({
+          status: 'SUCCESS',
+          episodes: [{ uri: episodeUri, name: 'Monday news', duration: 1200, published: null, fully_played: null, resume_position_ms: null }],
+        });
       }),
     );
     renderWithProviders(<Media />);
@@ -216,7 +219,8 @@ describe('Media page: browse', () => {
     await userEvent.click(within(dialog).getByRole('tab', { name: /Audiobooks/i }));
     await userEvent.type(within(dialog).getByRole('searchbox', { name: 'Search' }), 'daily');
     await userEvent.click(await within(dialog).findByRole('button', { name: /Daily Pod/ }));
-    await waitFor(() => expect(p.state.play).toHaveBeenCalledWith('library://podcast/16'));
-    expect(resolved).toEqual(['pod-1']);
+    await userEvent.click(await within(dialog).findByRole('button', { name: /Monday news/ }));
+    await waitFor(() => expect(p.state.play).toHaveBeenCalledWith(episodeUri));
+    expect(asked).toEqual(['pod-1']);
   });
 });

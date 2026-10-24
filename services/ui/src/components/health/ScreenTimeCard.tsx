@@ -4,7 +4,7 @@ import { Hourglass, Moon, School, Pause } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { duration } from '../../lib/phoneUsageFormat';
+import { appName, duration } from '../../lib/phoneUsageFormat';
 import { lockedLine } from '../../lib/screenTimeText';
 
 /**
@@ -46,7 +46,8 @@ export default function ScreenTimeCard() {
 
   const rules = status?.rules || {};
   const hasRules = Boolean(
-    rules.daily_limit_min !== undefined || rules.bedtime_start || rules.school_start || status?.paused,
+    rules.daily_limit_min !== undefined || rules.bedtime_start || rules.school_start || status?.paused
+      || Object.keys(rules.app_limits || {}).length > 0,
   );
   if (!status || !hasRules) return null;
 
@@ -70,6 +71,16 @@ export default function ScreenTimeCard() {
         </p>
       ) : (
         <p className="mt-2 text-sm text-slate-300">No daily limit today.</p>
+      )}
+
+      {Object.keys(status.app_minutes_left || {}).length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-xs text-slate-300" data-testid="screen-time-apps">
+          {Object.entries(status.app_minutes_left || {}).map(([pkg, left]) => (
+            <li key={pkg}>
+              {appName(pkg)}: {left > 0 ? `${duration(left * 60000)} left today` : 'used up for today'}
+            </li>
+          ))}
+        </ul>
       )}
 
       {(rules.bedtime_start || rules.school_start) && !status.locked && (

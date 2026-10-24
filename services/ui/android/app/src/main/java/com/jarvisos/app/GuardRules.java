@@ -10,14 +10,15 @@ import java.util.Set;
  * What the screen guard does with the screen that just opened: let it be,
  * cover it because it would remove or switch off Jarvis's protection, or send
  * the child home because screen time is up (bedtime, school, the limit, a
- * parent's pause).
+ * parent's pause), or close one app a parent switched off or whose own
+ * minutes are used up (app control).
  *
  * Plain Java with no Android types, so every case is unit-tested on the JVM;
  * GuardService feeds it the window's package, class and visible text.
  */
 public final class GuardRules {
 
-    public enum Action { ALLOW, BLOCK_TAMPER, BLOCK_LOCKED }
+    public enum Action { ALLOW, BLOCK_TAMPER, BLOCK_LOCKED, BLOCK_APP }
 
     /** The app's own name as Settings and the uninstaller show it. */
     static final String APP_LABEL = "jarvis os";
@@ -54,10 +55,12 @@ public final class GuardRules {
      * @param text           the window's visible text, joined (may be empty)
      * @param alwaysAllowed  packages the screen-time lock never covers
      * @param launcher       the phone's home-screen package (going home is always allowed)
+     * @param blockedApps    apps blocked now: switched off by a parent, or past their own minutes
      */
     public static Action decide(boolean protectedPhone, boolean locked, boolean unlocked,
                                 String pkg, String cls, String text,
-                                Collection<String> alwaysAllowed, String launcher) {
+                                Collection<String> alwaysAllowed, String launcher,
+                                Collection<String> blockedApps) {
         if (pkg == null || pkg.isEmpty() || unlocked) return Action.ALLOW;
         String lowerText = text == null ? "" : text.toLowerCase(Locale.ROOT);
         String lowerCls = cls == null ? "" : cls.toLowerCase(Locale.ROOT);
@@ -69,6 +72,13 @@ public final class GuardRules {
                 && !pkg.equals(launcher)
                 && (alwaysAllowed == null || !alwaysAllowed.contains(pkg))) {
             return Action.BLOCK_LOCKED;
+        }
+        if (blockedApps != null
+                && blockedApps.contains(pkg)
+                && !NEVER_LOCKED.contains(pkg)
+                && !pkg.equals(launcher)
+                && (alwaysAllowed == null || !alwaysAllowed.contains(pkg))) {
+            return Action.BLOCK_APP;
         }
         return Action.ALLOW;
     }

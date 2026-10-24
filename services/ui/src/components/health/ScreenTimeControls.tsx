@@ -6,6 +6,8 @@ import { api } from '../../services/api';
 import { duration } from '../../lib/phoneUsageFormat';
 import type { ScreenRules } from '../../types/api';
 import { lockedLine } from '../../lib/screenTimeText';
+import AppControls from './AppControls';
+import OfflineCodeSetting from './OfflineCodeSetting';
 
 /**
  * A parent's screen-time controls for one child (Phase 11 step 4): daily and
@@ -45,6 +47,8 @@ function rulesFrom(draft: Draft, current: ScreenRules): ScreenRules {
     school_end: draft.schoolStart && draft.schoolEnd ? draft.schoolEnd : undefined,
     school_days: current.school_days,
     always_allowed: current.always_allowed,
+    blocked_apps: current.blocked_apps,
+    app_limits: current.app_limits,
   };
 }
 
@@ -162,6 +166,9 @@ export default function ScreenTimeControls({ username, name }: { username: strin
         Save rules
       </button>
       {failureText && <p className="text-xs text-amber-300">{failureText}</p>}
+
+      <AppControls username={username} name={name} rules={status.rules} />
+      <OfflineCodeSetting />
     </section>
   );
 }

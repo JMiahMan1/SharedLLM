@@ -15,7 +15,25 @@ public class GuardRulesTest {
     private static final String LAUNCHER = "com.google.android.apps.nexuslauncher";
 
     private static Action decide(boolean protectedPhone, boolean locked, boolean unlocked, String pkg, String cls, String text) {
-        return GuardRules.decide(protectedPhone, locked, unlocked, pkg, cls, text, ALLOWED, LAUNCHER);
+        return GuardRules.decide(protectedPhone, locked, unlocked, pkg, cls, text, ALLOWED, LAUNCHER, BLOCKED);
+    }
+
+    private static final List<String> BLOCKED = Arrays.asList("com.roblox.client", "com.google.android.dialer");
+
+    @Test
+    public void aBlockedAppIsClosedWhileTheRestOfThePhoneWorks() {
+        assertEquals(Action.BLOCK_APP, decide(true, false, false, "com.roblox.client", "", ""));
+        assertEquals(Action.ALLOW, decide(true, false, false, "com.android.chrome", "", ""));
+    }
+
+    @Test
+    public void anAlwaysAllowedAppIsNeverBlockedEvenIfListed() {
+        assertEquals(Action.ALLOW, decide(true, false, false, "com.google.android.dialer", "", ""));
+    }
+
+    @Test
+    public void aParentUnlockLiftsAppBlocksToo() {
+        assertEquals(Action.ALLOW, decide(true, false, true, "com.roblox.client", "", ""));
     }
 
     @Test

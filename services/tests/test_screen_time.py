@@ -58,3 +58,23 @@ def test_no_rules_means_no_limit_and_no_lock():
     s = evaluate(None, 600 * 60000, 0, WED(23))
     assert s["limit_min"] is None and s["remaining_min"] is None and s["locked"] is False
     assert "com.jarvisos.app" in s["always_allowed"]
+
+
+def test_a_blocked_app_is_blocked_all_day_but_the_phone_is_not():
+    s = evaluate({"blocked_apps": ["com.roblox.client"]}, used_ms=0, bonus_min=0, now=WED(16))
+    assert s["blocked_apps"] == ["com.roblox.client"]
+    assert s["locked"] is False
+
+
+def test_an_app_past_its_minutes_is_blocked_until_midnight():
+    rules = {"app_limits": {"com.google.android.youtube": 30, "com.spotify.music": 60}}
+    apps = {"com.google.android.youtube": 31 * 60000, "com.spotify.music": 20 * 60000}
+    s = evaluate(rules, used_ms=51 * 60000, bonus_min=0, now=WED(16), apps_used_ms=apps)
+    assert s["blocked_apps"] == ["com.google.android.youtube"]
+    assert s["app_minutes_left"] == {"com.google.android.youtube": 0, "com.spotify.music": 40}
+
+
+def test_always_allowed_apps_are_never_blocked():
+    rules = {"blocked_apps": ["com.google.android.dialer"], "app_limits": {"com.jarvisos.app": 0}}
+    s = evaluate(rules, used_ms=0, bonus_min=0, now=WED(16))
+    assert s["blocked_apps"] == [] and s["app_minutes_left"] == {}

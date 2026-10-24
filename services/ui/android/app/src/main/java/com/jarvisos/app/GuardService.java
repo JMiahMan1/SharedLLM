@@ -17,8 +17,9 @@ import java.util.concurrent.TimeUnit;
  * Jarvis's screen guard on a child's phone (Phase 11: time budgets, tamper
  * resistance). An Accessibility service sees each window that opens, so it can
  * (1) cover any screen that would uninstall Jarvis or switch its protection
- * off with a parent-login screen, and (2) send the child home while screen
- * time is up, except for the always-allowed apps (calls, texts, Jarvis).
+ * off with a parent-login screen, (2) send the child home while screen
+ * time is up, except for the always-allowed apps (calls, texts, Jarvis), and
+ * (3) close an app a parent blocked or whose own minutes are used up.
  *
  * The rules come from the server's status (refreshed every minute, kept for
  * offline); GuardRules makes every decision. On an adult's phone it does
@@ -36,7 +37,7 @@ public class GuardService extends AccessibilityService {
         super.onServiceConnected();
         refresher = Executors.newSingleThreadScheduledExecutor();
         refresher.scheduleWithFixedDelay(() -> {
-            GuardApi.refreshStatus(this);
+            if (GuardApi.refreshStatus(this)) GuardApi.reportOfflineUnlockIfDue(this);
             // A lock that starts while the child is already in an app.
             main.post(this::checkCurrentWindow);
         }, 0, REFRESH_SECONDS, TimeUnit.SECONDS);
@@ -64,7 +65,7 @@ public class GuardService extends AccessibilityService {
     private void act(String pkg, String cls, String text) {
         GuardRules.Action action = GuardRules.decide(
                 GuardApi.isProtected(this), GuardApi.isLocked(this), GuardApi.isUnlocked(this),
-                pkg, cls, text, GuardApi.alwaysAllowed(this), launcherPackage());
+                pkg, cls, text, GuardApi.alwaysAllowed(this), launcherPackage(), GuardApi.blockedApps(this));
         if (action == GuardRules.Action.ALLOW) return;
         long now = System.currentTimeMillis();
         if (now - lastCoverAt < 700) return; // one cover per screen change, not one per event
@@ -78,7 +79,9 @@ public class GuardService extends AccessibilityService {
         Intent cover = new Intent(this, GuardScreenActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra(GuardScreenActivity.EXTRA_MODE,
-                        action == GuardRules.Action.BLOCK_TAMPER ? GuardScreenActivity.MODE_TAMPER : GuardScreenActivity.MODE_LOCKED);
+                        action == GuardRules.Action.BLOCK_TAMPER ? GuardScreenActivity.MODE_TAMPER
+                                : action == GuardRules.Action.BLOCK_APP ? GuardScreenActivity.MODE_APP
+                                : GuardScreenActivity.MODE_LOCKED);
         startActivity(cover);
     }
 
