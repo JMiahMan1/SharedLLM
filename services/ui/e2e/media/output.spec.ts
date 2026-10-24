@@ -81,6 +81,12 @@ test('groups a speaker and changes its volume from the picker', async ({ page })
   const { ma, remote } = await setupPlayerMocks(page, {
     mediaStatus: OUTPUT_STATUS,
     ma: { players: [] },
+    // Music Assistant says Office can play in sync with this device; Kitchen cannot.
+    remotePlayers: [
+      { player_id: 'hermetic-web-player', name: 'Web Player', available: true, can_group_with: ['office'] },
+      { player_id: 'kitchen', name: 'Kitchen Speaker', available: true, state: 'playing', volume_level: 42 },
+      { player_id: 'office', name: 'Office Speaker', available: true, state: 'idle', volume_level: 20 },
+    ],
   });
   await startTrack(page, ma);
   await goToPage(page, 'home');
@@ -88,15 +94,15 @@ test('groups a speaker and changes its volume from the picker', async ({ page })
   await page.getByTestId('mini-player').getByRole('button', { name: 'Open now playing' }).click();
   const output = await openOutputPicker(page);
 
+  await expect(output.getByRole('checkbox', { name: /Group Kitchen Speaker/ })).toHaveCount(0);
   // A controlled checkbox stays unchecked until MA reports the new group;
   // click (rather than check) so the command, not the fixture echo, is asserted.
-  await output.getByRole('checkbox', { name: 'Group Office Speaker with Kitchen Speaker' }).click();
+  await output.getByRole('checkbox', { name: 'Group Office Speaker with This device' }).click();
   await expect.poll(() => remote.sentCommands.find(
-    (entry) => entry.command === 'players/cmd/group_many',
+    (entry) => entry.command === 'players/cmd/set_members',
   )).toBeTruthy();
-  const group = remote.sentCommands.find((entry) => entry.command === 'players/cmd/group_many');
-  expect(group?.args).toMatchObject({ target_player: 'kitchen' });
-  expect(group?.args?.child_player_ids).toEqual(['kitchen', 'office']);
+  const group = remote.sentCommands.find((entry) => entry.command === 'players/cmd/set_members');
+  expect(group?.args).toEqual({ target_player: 'hermetic-web-player', player_ids_to_add: ['office'], player_ids_to_remove: [] });
 
   const volume = output.getByRole('slider', { name: 'Volume for Kitchen Speaker' });
   await volume.fill('55');
