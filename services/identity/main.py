@@ -4089,6 +4089,43 @@ def update_activity_sharing(
     return {"status": "SUCCESS", "sharing_locked": minor, **data}
 
 
+def may_view_raw_data(viewer: User | None, subject: User | None) -> bool:
+    """Whether ``viewer`` may see ``subject``'s collected raw data (phone usage,
+    the activity stream) -- the Phase 11 visibility rule (docs/HEALTH_HUB.md).
+
+    A minor's raw data is open to the parents and no one else: an admin, the
+    father, and the linked mother (any mother when none is linked). The minor
+    sees their suggestions, not the stream behind them, and siblings never see
+    each other's. An adult's raw data is their own.
+    """
+    if viewer is None or subject is None:
+        return False
+    if (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES:
+        if viewer.username == subject.username:
+            return False
+        if viewer.is_admin or viewer.family_role == "father":
+            return True
+        if viewer.family_role == "mother":
+            return not subject.mother_username or subject.mother_username == viewer.username
+        return False
+    return viewer.username == subject.username
+
+
+@app.get("/api/internal/may-view-raw")
+def internal_may_view_raw(
+    viewer: str,
+    subject: str,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_internal),
+):
+    """Internal: may ``viewer`` read ``subject``'s collected raw data?"""
+
+    def find(username: str) -> User | None:
+        return session.exec(select(User).where(User.username == username.strip().lower())).first()
+
+    return {"allowed": may_view_raw_data(find(viewer), find(subject))}
+
+
 @app.get("/api/internal/activity-sharing")
 def internal_activity_sharing(
     session: Session = Depends(get_session),

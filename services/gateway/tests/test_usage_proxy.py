@@ -28,24 +28,28 @@ def client(monkeypatch):
     return TestClient(app, headers={"Authorization": "Bearer test-token"})
 
 
-def _patch_telemetry(monkeypatch, payload=None, status=200):
-    captured = {"calls": []}
+def _patch_telemetry(monkeypatch, payload=None, status=200, allowed=True):
+    captured = {"calls": [], "rule": []}
     telemetry_svc = str(gateway_main.TELEMETRY_SVC)
+    identity_svc = str(gateway_main.IDENTITY_SVC)
 
     class _Resp:
-        def __init__(self):
+        def __init__(self, body=None):
             self.status = status
-            self._payload = payload if payload is not None else {}
+            self._payload = body if body is not None else (payload if payload is not None else {})
             self._text = json.dumps(self._payload)
 
         async def text(self):
             return self._text
 
-        async def json(self):
+        async def json(self, content_type=None):
             return self._payload
 
     class _Client:
         async def _record(self, verb, url, **kwargs):
+            if url.startswith(identity_svc):
+                captured["rule"].append(kwargs.get("params"))
+                return _Resp({"allowed": allowed})
             if url.startswith(telemetry_svc):
                 captured["calls"].append(
                     {
@@ -106,3 +110,13 @@ def test_usage_history_forwards_days(client, monkeypatch):
     assert call["verb"] == "get"
     assert call["url"].endswith("/api/telemetry/usage/kiddo")
     assert call["params"] == {"days": 3}
+
+
+def test_usage_is_refused_to_anyone_the_rule_does_not_allow(client, monkeypatch):
+    cap = _patch_telemetry(monkeypatch, payload={"status": "SUCCESS", "days": []}, allowed=False)
+
+    r = client.get("/api/usage/kiddo")
+
+    assert r.status_code == 403
+    assert cap["rule"] == [{"viewer": "u1", "subject": "kiddo"}]
+    assert cap["calls"] == []  # telemetry is never asked
