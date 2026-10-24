@@ -120,6 +120,7 @@ from services.common.game_recommendations import recommend_game
 from services.common.activity_recommendations import recommend_activity
 from services.common.sleep_estimate import estimate_night
 from services.common.guidance import guidance as _guidance
+from services.common.burden import is_burdened
 from services.common import notify as _notify
 from services.common.screen_time import evaluate as evaluate_screen_time
 from services.common.relay import until_either_ends
@@ -12933,7 +12934,32 @@ async def get_health_checkin(day: str, request: Request):
 
 @app.put("/api/health/checkins/{day}")
 async def put_health_checkin(day: str, request: Request):
-    return await _health_json("PUT", f"/checkins/{day}", request, body=await request.json())
+    saved = await _health_json("PUT", f"/checkins/{day}", request, body=await request.json())
+    await _burden_check(request)
+    return saved
+
+
+async def _burden_check(request: Request) -> None:
+    """A child with several hard mornings in their own check-ins: tell their
+    parents gently, at most once a week, without the answers. Never fails the save."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+        me = str((creds or {}).get("user") or "").strip()
+        parents, name = await _my_parents(me) if me else ([], "")
+        if not parents:
+            return  # adults, and anyone without parents in the family
+        recent = await _health_json("GET", "/checkins", request, params={"days": 7})
+        if not is_burdened((recent or {}).get("checkins") or []):
+            return
+        week = _household_now().strftime("%G-W%V")
+        for parent in parents:
+            await _notify.send(_notify.notice(
+                parent, "family_safety", f"{name} has had a few hard days",
+                "From their own morning check-ins. A gentle word or some time together may help.",
+                url=f"/guardian?child={me}", tag=f"burden:{me}", once=f"burden:{me}:{week}", priority=3,
+            ))
+    except Exception as exc:
+        log.warning("[guardian] burden check skipped: %s", exc)
 
 
 @app.get("/api/health/nutrition/day")

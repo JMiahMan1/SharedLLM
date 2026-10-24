@@ -139,3 +139,22 @@ def test_guidance_follows_the_childs_week(monkeypatch):
     monkeypatch.setattr(gateway_main, "borrow_http_client", fake)
     body = TestClient(app).get("/api/guardian/guidance/kid").json()
     assert body["prompts"][0]["signal"] == "bullying" and "Emma" in body["prompts"][0]["prayer"]
+
+
+def test_a_childs_hard_mornings_tell_the_parents_gently(talk, monkeypatch):
+    client, sent = talk
+    recent = {"checkins": [{"day": f"2026-10-2{d}", "mood": 1} for d in range(3)]}
+
+    async def fake_health(method, path, request, *, params=None, body=None):
+        return recent if method == "GET" else {"day": "2026-10-23", "mood": 1}
+
+    monkeypatch.setattr(gateway_main, "_health_json", fake_health)
+    assert client.put("/api/health/checkins/2026-10-23", json={"mood": 1}).status_code == 200
+    assert [n["user"] for n in sent] == ["dad", "mom"]
+    assert sent[0]["title"] == "Emma has had a few hard days" and "mood" not in sent[0]["body"]
+    assert sent[0]["once"].startswith("burden:kid:")
+
+    sent.clear()
+    recent["checkins"] = [{"day": "2026-10-23", "mood": 4}]
+    client.put("/api/health/checkins/2026-10-24", json={"mood": 4})
+    assert sent == []

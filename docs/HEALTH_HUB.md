@@ -586,14 +586,16 @@ point.
       the child never sees it), the activity feed and every control. "Write … a note" turns a
       starter into an editable note the parent sends through the family chat themselves.
       The starters are reviewed text, not yet drawn from the devotional library.
-- [ ] **A voice for the quiet ones.** One-tap "I need to talk", burden signals (reusing
+- [x] **A voice for the quiet ones.** One-tap "I need to talk", burden signals (reusing
       check-ins) and private note lanes (mom↔dad, parent↔child) so nobody has to say it out
       loud first.
       **"I need to talk" built (2026-10-24):** a child's card on Health → Today picks one or both
       parents and an optional short note (`POST /api/guardian/talk`; only the caller's own
       parents can be reached); the parent gets a `family_safety` notice that opens the parents'
-      page. Private lanes are the family chat's direct conversations. Not yet: burden signals
-      from check-ins.
+      page. Private lanes are the family chat's direct conversations. **Burden signals:** when a
+      child's own morning check-ins show low mood or energy (1–2 of 5) on three of the last
+      five, both parents get one gentle notice that week ("… has had a few hard days"), never
+      the answers (`services/common/burden.py`, checked when a check-in is saved).
 - [ ] **Sharing follows the family roles (`docs/ROLES.md`).** Minor rules stay circle-on and
       locked; children never see parents' private sections; kid mode respected throughout.
 
@@ -609,7 +611,7 @@ bless/block per lane); (4) time budgets and routines;
 DONE (install approvals and "ask a parent" for a site still open);
 (6) monitoring alerts and the weekly recap — DONE (local phrase monitoring, Sunday recap);
 (7) the parents' page and the discipleship surfaces — DONE (parents' page, prayer and
-guidance, talk journal, "I need to talk"; burden signals and the Jarvis chat recap open).
+guidance, talk journal, "I need to talk", burden signals; the Jarvis chat recap is open).
 
 ## Acceptance
 
