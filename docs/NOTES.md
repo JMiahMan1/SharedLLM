@@ -95,6 +95,12 @@ that, every save of an opened note stacked another header on top.
   toggling one calls `check_off` and reloads the list. Non-checklist notes
   show a text preview with the stored `# title` / `Category:` header stripped.
 - **Search**: filters on title and (for the first 24 notes) body text.
+- **Grid or list**: the header's layout button switches the shelf between
+  Keep's masonry grid and one full-width column. The choice is a per-device
+  convenience in localStorage (`jarvis_notes_layout_v1`, read and written in
+  try/catch, so a private window just starts on the grid each visit); it is
+  not in the shared index because one person's phone wanting a list says
+  nothing about another's tablet.
 - **Pin, colour and location**: stored in a shared index,
   `Notes/.jarvis-notes.json`, so they follow the family's notes instead of one
   browser. The page reads it with the list and writes it back after a pin,
@@ -164,10 +170,10 @@ preview in cards and the editor, labels as inline
 per account and revalidated in the background, and a note whose text came with
 the list opens at once), prompt archive/trash/restore (cards move on tap, roll
 back on failure, and note calls allow a minute), dashboard and home-screen
-capture.
+capture, a grid/list layout toggle remembered per device.
 
 Still open: reminders (time and place), attachments/images/drawings/audio,
-Nextcloud sharing, list/grid toggle, autosave and drafts, keyboard
+Nextcloud sharing, autosave and drafts, keyboard
 shortcuts, per-item checklist editing and reordering, undo
 toasts, versions, offline.
 
@@ -178,7 +184,8 @@ toasts, versions, offline.
   failed read opens no editor, typing does not reload the list, save uses
   `write`, opens without the header, rename moves the file, pin writes the
   shared index, archive and trash move and restore, duplicate and empty trash
-  call their routes, search, failure surfacing
+  call their routes, search, failure surfacing, the grid/list toggle is
+  remembered across visits
 - `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
 - `services/gateway/tests/test_notes_rag_sync.py`: indexing writes to RAG;
   the list route passes `previews` through
@@ -186,7 +193,8 @@ toasts, versions, offline.
   markdown round trips, the unsupported-note fallback, span whitelist, tick,
   Enter and toolbar behaviour, span rendering in previews
 - `services/ui/src/test/notesMeta.test.ts`: checklist parsing, previews,
-  sorting, pin/colour storage
+  sorting, pin/colour storage, the layout preference (and its fallback when
+  storage throws)
 - `services/execution/tests/test_note_actions.py`: `write` replaces (single
   PUT) without stacking headers, `check_off` toggles and reports missing items,
   previews are read once and reused, a save forgets the cached text, reads run

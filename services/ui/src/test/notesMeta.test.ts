@@ -20,12 +20,14 @@ import {
   parseNoteQuery,
   parseNotesIndex,
   readNoteMetaMap,
+  readNotesLayout,
   readNotesSnapshot,
   setIndexEntry,
   setNoteMeta,
   sortNotes,
   sortNotesByIndex,
   topTags,
+  writeNotesLayout,
   writeNotesSnapshot,
 } from '../lib/notesMeta';
 
@@ -212,5 +214,22 @@ describe('notesMeta', () => {
 
     const snapshot = readNotesSnapshot('me');
     expect(snapshot?.notes).toEqual([{ title: 'A', path: 'Notes/A.md' }]);
+  });
+
+  it('remembers the shelf layout and falls back to grid when storage fails', () => {
+    expect(readNotesLayout()).toBe('grid');
+    writeNotesLayout('list');
+    expect(readNotesLayout()).toBe('list');
+
+    const get = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    const set = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    expect(readNotesLayout()).toBe('grid');
+    expect(() => writeNotesLayout('grid')).not.toThrow();
+    get.mockRestore();
+    set.mockRestore();
   });
 });
