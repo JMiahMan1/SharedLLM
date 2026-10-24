@@ -318,6 +318,7 @@
 [data-theme-scheme="light"] .text-amber-500\/80 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-blue-300 { color: oklch(48.8% 0.243 264.376) !important; }
 [data-theme-scheme="light"] .text-blue-400 { color: oklch(48.8% 0.243 264.376) !important; }
+[data-theme-scheme="light"] .text-cyan-100 { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .text-cyan-200 { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .text-cyan-200\/70 { color: color-mix(in srgb, oklch(52% 0.105 223.128) 70%, transparent) !important; }
 [data-theme-scheme="light"] .text-cyan-300 { color: oklch(52% 0.105 223.128) !important; }
