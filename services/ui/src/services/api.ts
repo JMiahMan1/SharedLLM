@@ -2435,8 +2435,44 @@ export const api = {
     return resp.data;
   },
 
-  async deleteNote(title: string, storage?: string, path?: string, as_user?: 'admin'): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/delete', { title, storage, path, as_user }, { timeout: 60_000 });
+  /**
+   * Delete a note, and the attachment folders it links to. `attachmentsTo`
+   * (a rename's old copy) hands those to the new path instead.
+   */
+  async deleteNote(
+    title: string,
+    storage?: string,
+    path?: string,
+    as_user?: 'admin',
+    attachmentsTo?: string,
+  ): Promise<ExecutionResponse> {
+    const resp = await apiClient.post(
+      '/api/communication/notes/delete',
+      { title, storage, path, as_user, ...(attachmentsTo ? { attachments_to: attachmentsTo } : {}) },
+      { timeout: 60_000 },
+    );
+    return resp.data;
+  },
+
+  /**
+   * A saved note's attachment, beside it in Nextcloud as Nextcloud Notes
+   * keeps them: `upload` (base64 `data`; `detail.link` is the relative link
+   * to put in the note), `read` (`detail.data` base64 and `detail.mime`) or
+   * `delete` one by its `attachment` link.
+   */
+  async noteAttachment(payload: {
+    action: 'upload' | 'read' | 'delete';
+    path: string;
+    attachment?: string;
+    filename?: string;
+    data?: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post(
+      '/api/communication/notes/attachment',
+      { storage: 'nextcloud', ...payload },
+      { timeout: 120_000 },
+    );
     return resp.data;
   },
 

@@ -14,6 +14,7 @@ grid of colour-coded cards with checklists, search, and a full editor.
 | Unsaved drafts on the device | `services/ui/src/lib/noteDrafts.ts` |
 | Visual editor, checklist item controls | `services/ui/src/components/notes/RichNoteEditor.tsx` |
 | Version history, reminder, sharing panels | `services/ui/src/components/notes/{NoteHistory,ReminderPanel,SharePanel}.tsx` |
+| Attachments row (photo, drawing, voice) and links | `services/ui/src/components/notes/NoteAttachments.tsx`, `services/ui/src/lib/noteAttachments.ts` |
 | Undo toast | `services/ui/src/lib/undoToast.tsx` |
 | API client | `services/ui/src/services/api.ts` (`*Note` methods) |
 | Gateway proxies | `services/gateway/main.py` (`/api/communication/notes/*`) |
@@ -45,6 +46,7 @@ with it — Notes lives here and in the nav.
 | `sync_rag` | read every note (execution); the gateway then indexes them (below) |
 | `shares` / `sharees` / `share_add` / `share_remove` | Nextcloud sharing of one note (OCS): who has it, who it could go to (`search`), share with `share_with` (read only, or `can_edit`), stop a share by `share_id`. Gateway: `POST /api/communication/notes/share` with `action: list\|people\|add\|remove` |
 | `versions` / `version_read` / `version_restore` | Nextcloud's own version history of one note (`path`): list (newest first, with label and author on Nextcloud 26+), read one (`version`), or restore one over the note. Gateway: `POST /api/communication/notes/versions` with `action: list\|read\|restore` |
+| `attachment_upload` / `attachment_read` / `attachment_delete` | one attachment of a saved note (`path`): upload `data` (base64, `filename`) into `.attachments.<fileid>/` beside it and get back the relative `link`; read one (`attachment`, the link) as base64 with its type; delete one. Gateway: `POST /api/communication/notes/attachment` with `action: upload\|read\|delete` |
 
 The stored header is the server's: `create`/`write` strip any leading
 `# title` + `Category:` header(s) from the content before adding one
@@ -88,6 +90,42 @@ that, every save of an opened note stacked another header on top.
   fences, quotes, rules, images, links, nested lists, star bullets, `####`
   headings or other HTML open as text with a short notice, so the visual
   editor can never flatten them. Labels stay inline `#tags` in either mode.
+  The one image or link it does draw is an attachment alone on its line
+  (below): it becomes a block the caret cannot enter that keeps its
+  markdown line verbatim (`data-attachment`), with the picture, player or
+  file drawn into it.
+- **Attachments (photos, files, drawings, voice notes)**: stored exactly as
+  Nextcloud Notes stores them, so both apps show the same files and the note
+  stays plain markdown. A file goes in a hidden folder beside the note named
+  after the note's Nextcloud file id (`Notes/Work/.attachments.4242/bed.png`),
+  and the note links to it relatively: `![bed.png](.attachments.4242/bed.png)`
+  for an image, `[voice-….webm](.attachments.4242/voice-….webm)` for anything
+  else. The editor's attachments row (`components/notes/NoteAttachments.tsx`,
+  `lib/noteAttachments.ts`) offers **Photo or file** (images, audio, PDF),
+  **Draw** (a finger or mouse canvas saved as a PNG) and **Voice note** (the
+  microphone, saved in the recorder's own format); each uploads through
+  `POST /api/communication/notes/attachment` (`action: upload`, base64, up
+  to 10 MB, execution `attachment_upload`), then adds its link at the end of
+  the note, which autosave writes. File names are made link-safe and never
+  overwrite one already there (`-2`, `-3`). Only a saved note takes
+  attachments (the folder is named after its file id); a new one says to
+  save first. Cards and the editor load a file with `action: read` (base64
+  through the note's own account, since an `<img>` cannot send the app's
+  token) and show it from an object URL: pictures inline (cards, editor and
+  the visual editor's blocks), voice notes as a player, other files as a
+  download link; a card only names a voice note or file instead of fetching
+  it. Each has a delete button that asks, deletes the file (`action: delete`)
+  and takes its link out of the text. Deleting the link by hand leaves the
+  file, as in Nextcloud Notes. Links are only followed when they are one
+  file directly inside an `.attachments.<digits>` folder; anything else
+  (`..`, absolute paths, URLs) never reaches WebDAV. The note's lifecycle
+  carries them: archive, trash, restore and folder moves move the linked
+  attachment folders beside the note; a rename (new file, then the old one
+  deleted) hands them to the new copy (`delete` with `attachments_to`);
+  duplicate copies the one linked folder under the copy's own file id and
+  relinks it; delete forever deletes them; Empty trash deletes every
+  attachment folder left in Trash. Listings skip anything inside an
+  attachment folder, so a `.md` file there is never a note.
 - **Quick capture**: the "Take a note…" bar opens an empty editor; the title
   falls back to the first line of the body, then `Untitled note`.
 - **Instant shelf**: each visit's list and index are kept in localStorage per
@@ -315,17 +353,11 @@ version history with read and restore from Nextcloud's Versions app, timed
 reminders on the existing timers whose notice opens the note, place
 reminders ("when I get home") fired by geo from the location the phone
 already shares, sharing with someone on the family's Nextcloud (view or
-edit).
+edit), attachments (photos, files, drawings, voice notes) stored the
+Nextcloud Notes way beside the note.
 
 Still open, and why:
 
-- **Attachments, images, drawings, audio**: Nextcloud Notes keeps
-  attachments as files beside the note, referenced by relative markdown
-  links (`![](.attachments.<id>/photo.jpg)`). Jarvis would need an upload
-  route into that folder, image rendering in cards and the editor, and the
-  visual editor's exact round trip extended to image links (today any note
-  with an image opens as text, by design, so it cannot be flattened).
-  Drawings and audio would ride on the same attachment path.
 - **Offline editing**: the shelf already paints the last list, and unsaved
   edits survive on the device, but an edit made with no connection is not
   queued and replayed when the network returns. That needs a write queue
@@ -388,6 +420,25 @@ Still open, and why:
   the list route passes `previews` through; the write route passes `if_match`;
   the versions and share routes map their actions and refuse anything else;
   a note reminder reaches the timers with its link
+- `services/ui/src/test/NotesAttachments.test.tsx`: a note's photo shows on
+  its card and inside the visual editor and saves back unchanged; a photo
+  upload goes beside the note and its link lands in the saved text; delete
+  asks, removes the file and the link; a voice note and a drawing upload and
+  link; a refused upload is shown and changes nothing; a new note asks to be
+  saved first. `noteAttachments.test.ts`: link parsing (relative attachment
+  links only), embed vs link, removal, base64, and the visual editor's exact
+  round trip of attachment lines (a link inside a sentence still opens as
+  text). `services/ui/src/pages/Recipes.test.tsx`: a rename hands its
+  attachments to the new path
+- `services/execution/tests/test_note_attachments.py`: upload lands in
+  `.attachments.<fileid>/` beside the note with a link-safe, never
+  overwriting name; unsaved, empty, garbled and oversized uploads are
+  refused; read follows only attachment links; delete removes one file;
+  delete forever drops the folders, a rename carries them (same folder:
+  untouched), archive moves them, duplicate copies them under its own id;
+  files inside an attachment folder are never listed as notes.
+  `services/gateway/tests/test_notes_rag_sync.py`: the attachment route maps
+  its actions and the delete route passes `attachments_to`
 - `services/ui/src/test/noteRichText.test.ts` / `RichNoteEditor.test.tsx`:
   markdown round trips, the unsupported-note fallback, span whitelist, tick,
   Enter and toolbar behaviour, span rendering in previews; checklist items

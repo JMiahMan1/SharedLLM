@@ -51,7 +51,9 @@ export async function saveNote(params: {
   const strip = (p: string) => p.replace(/^\/+/, '');
   let leftOldCopy = false;
   if (moved && previous && path && strip(path) !== strip(previous.path)) {
-    const old = await api.deleteNote(previous.title, STORAGE, previous.path, asUser);
+    // The new copy links to the same attachments: they follow it rather
+    // than being deleted with the old one.
+    const old = await api.deleteNote(previous.title, STORAGE, previous.path, asUser, strip(path));
     leftOldCopy = old.status !== 'SUCCESS';
   }
   return { response, path, leftOldCopy, etag: detail.etag ?? undefined, conflict: false };
