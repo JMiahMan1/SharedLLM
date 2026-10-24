@@ -58,7 +58,7 @@ function ranges(range: string) {
 async function mockHealth(page: Page, opts: { hourly?: boolean } = {}) {
   const unhandled: string[] = [];
   page.on('pageerror', (e) => console.log(`[pageerror] ${e.message}\n${(e.stack ?? '').split('\n').slice(0, 5).join('\n')}`));
-  await page.route('**/api/**', async (route: Route) => {
+  await page.route((url: URL) => url.pathname.startsWith('/api/'), async (route: Route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
     const json = (body: unknown) => route.fulfill({ json: body });

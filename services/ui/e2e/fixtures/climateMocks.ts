@@ -155,8 +155,8 @@ export async function mockClimateApi(page: Page, scenario: ClimateScenario): Pro
     return route.fulfill({ json: hit ? hit[1] : [] });
   };
 
-  await page.route('**/execute/**', catchAll);
-  await page.route('**/api/**', catchAll);
+  await page.route((url: URL) => url.pathname.startsWith('/execute/'), catchAll);
+  await page.route((url: URL) => url.pathname.startsWith('/api/'), catchAll);
 
   await page.route('**/api/widgets/settings', (route) =>
     route.fulfill({

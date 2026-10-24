@@ -23,6 +23,8 @@ import { parseMaPlayerList, type MaPlayerListEntry } from './deviceLabels';
 import { extractMaImage } from './maImage';
 import { proxiedImage } from './mediaImage';
 import { useMediaToken } from './mediaToken';
+import toast from 'react-hot-toast';
+import { MaRpc, eventIsForPlayer } from '../features/media/engine/maRpc';
 
 /**
  * UI-level playback state. Deliberately distinct from Sendspin's own
@@ -55,8 +57,6 @@ const API_KEY_STORAGE = 'jarvis_api_key' as const;
 /** The web player's Sendspin client id, kept so MA sees the same player across reloads. */
 const PLAYER_ID_STORAGE = 'sendspin_webplayer_id';
 const MAX_RECONNECT_ATTEMPTS = 10;
-const CONNECT_TIMEOUT_MS = 15_000;
-const RPC_TIMEOUT_MS = 10_000;
 /** How long a fresh connection waits for MA to list this player as available. */
 const PLAYER_READY_TIMEOUT_MS = 8_000;
 const PLAYER_READY_POLL_MS = 300;
@@ -135,21 +135,16 @@ export function clientName(): string {
   return `${userName ? userName + "'s " : ''}Web Player (${isMobile ? 'Mobile' : 'Desktop'})`;
 }
 
-const sameId = (a: string, b: string) => a === b || a.includes(b) || b.includes(a);
-
 /* Hook */
 
 export function useMAWebPlayer() {
   const playerRef = useRef<SendspinPlayer | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const jsonrpcWsRef = useRef<WebSocket | null>(null);
+  /** The control connection (JSON-RPC); one per connection attempt. */
+  const rpcRef = useRef<MaRpc | null>(null);
   const sendspinWsRef = useRef<WebSocket | null>(null);
   const playerIdRef = useRef<string>(storedPlayerId());
   const [playerId, setPlayerId] = useState<string>(() => storedPlayerId());
-  const msgIdRef = useRef(0);
-  // JSON-RPC calls still waiting for MA, so a closed connection can fail them
-  // at once instead of leaving each to its timeout (BUG-48).
-  const pendingRpcRef = useRef(new Map<string, (error: Error) => void>());
   /** The in-flight connection attempt, shared by concurrent callers. */
   const initPromiseRef = useRef<Promise<boolean> | null>(null);
   /** True once someone asked for the player; false after an explicit disconnect. */
@@ -235,17 +230,9 @@ export function useMAWebPlayer() {
   }, []);
 
   // MA JSON-RPC events for this player (queue_updated, player_updated).
-  const handleMaEvent = useCallback((eventType: string, data: Record<string, unknown>) => {
-    const myPid = playerIdRef.current;
-    if (myPid) {
-      const eventId =
-        eventType === 'player_updated'
-          ? String(data?.player_id ?? data?.id ?? '')
-          : eventType === 'queue_updated'
-            ? String(data?.queue_id ?? data?.player_id ?? '')
-            : '';
-      if (eventId && !sameId(eventId, myPid)) return;
-    }
+  const handleMaEvent = useCallback((eventType: string, data: Record<string, unknown>, objectId?: string) => {
+    // Only this player's events; strict ids (BUG-52).
+    if (!eventIsForPlayer(eventType, data ?? {}, playerIdRef.current, objectId)) return;
 
     setStateLocal(prev => {
       const next = { ...prev };
@@ -312,87 +299,36 @@ export function useMAWebPlayer() {
     });
   }, []);
 
-  // Send a JSON-RPC command; with expectResult, wait for MA's answer.
-  const sendJsonRpc = useCallback((command: string, args: Record<string, unknown>, expectResult: boolean = true): Promise<unknown> => {
-    return new Promise((resolve, reject) => {
-      const ws = jsonrpcWsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('Music Assistant is not connected'));
-        return;
-      }
-      msgIdRef.current += 1;
-      const id = `counter${msgIdRef.current}`;
-      const payload = JSON.stringify({ message_id: id, command, args });
-
-      if (!expectResult) {
-        ws.send(payload);
-        resolve(undefined);
-        return;
-      }
-
-      const pending = pendingRpcRef.current;
-      const settle = () => {
-        clearTimeout(timeout);
-        ws.removeEventListener('message', onMessage);
-        pending.delete(id);
-      };
-      const timeout = setTimeout(() => {
-        settle();
-        reject(new Error(`Music Assistant did not answer ${command}`));
-      }, RPC_TIMEOUT_MS);
-      pending.set(id, (error) => {
-        settle();
-        reject(error);
-      });
-
-      function onMessage(event: MessageEvent) {
-        let data: Record<string, unknown>;
-        try {
-          data = JSON.parse(event.data as string);
-        } catch {
-          return;
-        }
-        if (data?.message_id !== id) return;
-        if (data.result !== undefined) {
-          settle();
-          resolve(data.result);
-        } else if (data.error !== undefined || data.error_code !== undefined) {
-          settle();
-          const detail = data.details || (typeof data.error === 'string' ? data.error : JSON.stringify(data.error || `Error code ${data.error_code}`));
-          reject(new Error(`Music Assistant: ${detail}`));
-        }
-      }
-
-      ws.addEventListener('message', onMessage);
-      ws.send(payload);
-    });
+  // Send a JSON-RPC command on this player's control connection and wait for
+  // MA's answer, so its errors reach the person (BUG-53).
+  const sendJsonRpc = useCallback((command: string, args: Record<string, unknown>): Promise<unknown> => {
+    const rpc = rpcRef.current;
+    if (!rpc?.isOpen) return Promise.reject(new Error('Music Assistant is not connected'));
+    return rpc.call(command, args);
   }, []);
 
   /** Close both sockets and the audio element; safe to call repeatedly. */
   const teardown = useCallback((reason: string) => {
     const player = playerRef.current;
     const sendspinWs = sendspinWsRef.current;
-    const jsonrpcWs = jsonrpcWsRef.current;
+    const rpc = rpcRef.current;
     playerRef.current = null;
     sendspinWsRef.current = null;
-    jsonrpcWsRef.current = null;
+    rpcRef.current = null;
     try { player?.disconnect('shutdown'); } catch { /* already gone */ }
     try { sendspinWs?.close(1000, reason); } catch { /* already gone */ }
-    try { jsonrpcWs?.close(1000, reason); } catch { /* already gone */ }
+    // Closing fails every call still waiting at once (BUG-48).
+    rpc?.close(reason);
     try { audioRef.current?.remove(); } catch { /* already gone */ }
     audioRef.current = null;
-    // Nothing will answer on a closed socket: fail what is waiting now.
-    const waiting = [...pendingRpcRef.current.values()];
-    pendingRpcRef.current.clear();
-    for (const fail of waiting) fail(new Error(`Music Assistant connection closed (${reason})`));
   }, []);
 
   // `initPlayer` and the reconnect scheduler refer to each other.
   const scheduleReconnectRef = useRef<() => void>(() => {});
 
   /** A socket that belongs to the live connection closed without being asked to. */
-  const handleConnectionLost = useCallback((which: string, ws: WebSocket, event?: CloseEvent) => {
-    if (sendspinWsRef.current !== ws && jsonrpcWsRef.current !== ws) return; // an old socket
+  const handleConnectionLost = useCallback((which: string, conn: WebSocket | MaRpc, event?: { code?: number; reason?: string }) => {
+    if (sendspinWsRef.current !== conn && rpcRef.current !== conn) return; // an old connection
     console.warn(`[MAWebPlayer] ${which} connection lost`, event?.code ?? '', event?.reason ?? '');
     teardown('connection-lost');
     setStateLocal(s => ({ ...s, isConnected: false, isPlaying: false, connectionState: 'RECONNECTING' }));
@@ -401,7 +337,7 @@ export function useMAWebPlayer() {
 
   /** Open both sockets. Resolves true once the player is usable. */
   const openConnection = useCallback(async (): Promise<boolean> => {
-    if (playerRef.current && jsonrpcWsRef.current?.readyState === WebSocket.OPEN) return true;
+    if (playerRef.current && rpcRef.current?.isOpen) return true;
     teardown('reinit');
 
     const urlToken = new URLSearchParams(window.location.search).get('token')?.trim();
@@ -466,28 +402,11 @@ export function useMAWebPlayer() {
       const ss = sendspinWs;
       ss.onclose = (event) => handleConnectionLost('Sendspin', ss, event);
 
-      const jsonrpcWs = new WebSocket(gatewaySocketUrl('/api/ma-jsonrpc', apiToken));
-      jsonrpcWsRef.current = jsonrpcWs;
-      jsonrpcWs.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data as string);
-          if (data && typeof data === 'object' && 'event' in data) {
-            handleMaEvent(data.event as string, data.data as Record<string, unknown>);
-          }
-        } catch {
-          /* not JSON: ignore */
-        }
-      };
-      jsonrpcWs.onclose = (event) => handleConnectionLost('Control', jsonrpcWs, event);
-
-      await new Promise<void>((resolve, reject) => {
-        if (jsonrpcWs.readyState === WebSocket.OPEN) { resolve(); return; }
-        const timer = setTimeout(() => reject(new Error('Music Assistant did not answer in time')), CONNECT_TIMEOUT_MS);
-        jsonrpcWs.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
-        const fail = () => { clearTimeout(timer); reject(new Error('Could not reach Music Assistant')); };
-        jsonrpcWs.addEventListener('error', fail, { once: true });
-        jsonrpcWs.addEventListener('close', fail, { once: true });
-      });
+      const rpc = new MaRpc();
+      rpcRef.current = rpc;
+      rpc.onEvent(handleMaEvent);
+      rpc.onUnexpectedClose((event) => handleConnectionLost('Control', rpc, event));
+      await rpc.connect(gatewaySocketUrl('/api/ma-jsonrpc', apiToken));
       if (sendspinWs.readyState !== WebSocket.OPEN) throw new Error('The audio stream closed while connecting');
 
       // MA registers a new Sendspin player a moment after the handshake; a
@@ -587,18 +506,21 @@ export function useMAWebPlayer() {
 
   /** Connects if needed; throws a readable error when MA cannot be reached. */
   const ensureConnected = useCallback(async () => {
-    if (playerRef.current && jsonrpcWsRef.current?.readyState === WebSocket.OPEN) return;
+    if (playerRef.current && rpcRef.current?.isOpen) return;
     await initPlayer();
   }, [initPlayer]);
 
-  /** Run a queue/player command on this web player, surfacing failures. */
+  /** Run a queue/player command on this web player and wait for MA's answer;
+   *  a refusal is shown to the person rather than swallowed (BUG-53). */
   const runOwn = useCallback(async (label: string, command: string, args: Record<string, unknown>) => {
     const pid = playerIdRef.current;
     if (!pid) return;
     try {
-      await sendJsonRpc(command, args, false);
+      await sendJsonRpc(command, args);
     } catch (err) {
-      setError(`${label} failed: ${err instanceof Error ? err.message : String(err)}`, err);
+      const msg = `${label} failed: ${err instanceof Error ? err.message : String(err)}`;
+      setError(msg, err);
+      toast.error(msg, { id: `web-player-${command}` });
     }
   }, [sendJsonRpc, setError]);
 
@@ -621,7 +543,7 @@ export function useMAWebPlayer() {
       return;
     }
     try {
-      await sendJsonRpc('player_queues/play_media', { queue_id: pid, media: mediaUri, option: 'replace', radio_mode: false }, true);
+      await sendJsonRpc('player_queues/play_media', { queue_id: pid, media: mediaUri, option: 'replace', radio_mode: false });
       setStateLocal(s => ({ ...s, mediaUri, mediaFavorite: null, error: null }));
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
@@ -637,7 +559,7 @@ export function useMAWebPlayer() {
    *  ('next') or at the end ('add'), without interrupting what plays. */
   const enqueue = useCallback(async (mediaUri: string, option: 'next' | 'add') => {
     await ensureConnected();
-    await sendJsonRpc('player_queues/play_media', { queue_id: playerIdRef.current, media: mediaUri, option }, true);
+    await sendJsonRpc('player_queues/play_media', { queue_id: playerIdRef.current, media: mediaUri, option });
   }, [ensureConnected, sendJsonRpc]);
 
   const pause = useCallback(async () => {
@@ -657,8 +579,10 @@ export function useMAWebPlayer() {
   const seek = useCallback(async (position: number) => {
     const pos = Math.max(0, Math.round(position));
     const pid = playerIdRef.current;
-    await runOwn('Seek', 'player_queues/seek', { queue_id: pid, player_id: pid, position: pos });
+    // Move the clock now: the next seek (a held arrow key) starts from here,
+    // not from wherever the clock was before MA answered.
     setStateLocal(s => ({ ...s, position: pos }));
+    await runOwn('Seek', 'player_queues/seek', { queue_id: pid, player_id: pid, position: pos });
   }, [runOwn]);
 
   const next = useCallback(async () => {

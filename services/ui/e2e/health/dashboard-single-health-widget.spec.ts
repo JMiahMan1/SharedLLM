@@ -21,12 +21,12 @@ async function mockDashboard(page: Page) {
   const unhandled: string[] = [];
   page.on('pageerror', (e) => console.log(`[pageerror] ${e.message}`));
 
-  await page.route('**/execute/**', (route: Route) => {
+  await page.route((url: URL) => url.pathname.startsWith('/execute/'), (route: Route) => {
     unhandled.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
     return route.fulfill({ json: { status: 'SUCCESS' } });
   });
 
-  await page.route('**/api/**', (route: Route) => {
+  await page.route((url: URL) => url.pathname.startsWith('/api/'), (route: Route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
     const json = (body: unknown) => route.fulfill({ json: body });
