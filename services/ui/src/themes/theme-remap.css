@@ -36,6 +36,7 @@
 [data-site-theme-active] .bg-purple-600\/40 { background-color: color-mix(in srgb, var(--site-accent) 40%, transparent) !important; }
 [data-site-theme-active] .bg-purple-600\/80 { background-color: color-mix(in srgb, var(--site-accent) 80%, transparent) !important; }
 [data-site-theme-active] .bg-purple-900\/10 { background-color: color-mix(in srgb, var(--site-accent) 10%, transparent) !important; }
+[data-site-theme-active] .bg-violet-400\/10 { background-color: color-mix(in srgb, var(--site-accent) 10%, transparent) !important; }
 [data-site-theme-active] .bg-violet-400\/15 { background-color: color-mix(in srgb, var(--site-accent) 15%, transparent) !important; }
 [data-site-theme-active] .bg-violet-400\/25 { background-color: color-mix(in srgb, var(--site-accent) 25%, transparent) !important; }
 [data-site-theme-active] .bg-violet-600\/30 { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }

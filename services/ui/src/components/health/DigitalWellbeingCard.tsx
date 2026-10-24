@@ -8,6 +8,7 @@ import { useAuth } from '../../context/AuthContext';
 import PhoneUsage from '../../plugins/phoneUsage';
 import type { UsageDay } from '../../types/api';
 import ScreenTimeControls from './ScreenTimeControls';
+import SuggestionLanesControls from './SuggestionLanesControls';
 import { appName, duration } from '../../lib/phoneUsageFormat';
 
 /**
@@ -169,6 +170,7 @@ export default function DigitalWellbeingCard() {
       )}
     </section>
     {!viewingSelf && <ScreenTimeControls key={subject} username={subject} name={subjectName} />}
+    {!viewingSelf && <SuggestionLanesControls key={`lanes-${subject}`} username={subject} name={subjectName} />}
     </>
   );
 }

@@ -102,6 +102,42 @@ public class PhoneUsagePlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * The stretches the phone was in use between ``since`` and ``until``
+     * (epoch ms; the web side asks for 18:00 the evening before to now, up to
+     * noon), for the sleep estimate. Times only, no app names.
+     */
+    @PluginMethod
+    public void getNight(PluginCall call) {
+        long now = System.currentTimeMillis();
+        long until = Math.min(call.getLong("until", now), now);
+        long since = call.getLong("since", until - 18L * 60 * 60 * 1000);
+        JSONArray intervals = new JSONArray();
+        UsageStatsManager manager =
+                (UsageStatsManager) bridge.getContext().getSystemService(Context.USAGE_STATS_SERVICE);
+        if (manager != null && hasUsageAccess() && since < until) {
+            NightUse night = new NightUse();
+            UsageEvents events = manager.queryEvents(since, until);
+            if (events != null) {
+                UsageEvents.Event event = new UsageEvents.Event();
+                while (events.getNextEvent(event)) {
+                    night.accept(event.getEventType(), event.getTimeStamp());
+                }
+            }
+            for (long[] stretch : night.finish(until)) {
+                JSONArray pair = new JSONArray();
+                pair.put(stretch[0]);
+                pair.put(stretch[1]);
+                intervals.put(pair);
+            }
+        }
+        JSObject ret = new JSObject();
+        ret.put("since", since);
+        ret.put("until", until);
+        ret.put("intervals", intervals);
+        call.resolve(ret);
+    }
+
     private boolean hasUsageAccess() {
         try {
             AppOpsManager appOps =

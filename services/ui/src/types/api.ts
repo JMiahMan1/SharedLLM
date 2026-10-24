@@ -333,6 +333,16 @@ export interface ScreenTimeStatus {
   resets_at: string;
 }
 
+/** The kinds of suggestion Jarvis makes; a parent can switch each off for a child. */
+export type RecommendationLane = 'music' | 'video' | 'podcast' | 'book' | 'game' | 'activity';
+
+/** Which suggestion lanes are on for a member (true = blessed, false = blocked). */
+export interface RecommendationLanes {
+  username: string;
+  lanes: Record<RecommendationLane, boolean>;
+  can_manage?: boolean;
+}
+
 export interface ScreenTimeRequest {
   id: number;
   username: string;
@@ -1670,6 +1680,40 @@ export interface HealthMetricHistory {
   days: number;
   samples: HealthMetricSample[];
   latest: HealthMetricSample | null;
+}
+
+/** A night estimated from device use (ISO times with offset); the person corrects it before saving. */
+export interface SleepEstimate {
+  night: string;
+  bedtime: string;
+  wake_time: string;
+  duration_minutes: number;
+  wakeups: number;
+  awake_minutes: number;
+  devices: number;
+}
+
+export type HealthWeeklyMetric = 'sleep_minutes' | 'sleep_score' | 'calories' | 'water_ml' | 'energy' | 'mood';
+
+/** Seven days against the seven before; a metric nobody logged is null, never zero. */
+export interface HealthWeekly {
+  user_id: string;
+  start: string;
+  end: string;
+  /** Calories are absent for a profile in kid mode. */
+  metrics: HealthWeeklyMetric[];
+  days_logged: number;
+  averages: Partial<Record<HealthWeeklyMetric, number | null>>;
+  last_week: Partial<Record<HealthWeeklyMetric, number | null>>;
+  best_sleep: { day: string; minutes: number | null; score: number | null } | null;
+  changes: Array<{
+    metric: HealthWeeklyMetric;
+    this_week: number;
+    last_week: number;
+    delta: number;
+    direction: 'up' | 'down';
+  }>;
+  days: Array<{ day: string } & Partial<Record<HealthWeeklyMetric, number | null>>>;
 }
 
 export interface HealthSummary {

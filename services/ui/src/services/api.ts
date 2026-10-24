@@ -32,6 +32,8 @@ import type {
   ScreenRules,
   ScreenTimeStatus,
   ScreenTimeRequest,
+  RecommendationLane,
+  RecommendationLanes,
   FamilyRole,
   AiCapability,
   GlobalSetting,
@@ -131,6 +133,8 @@ import type {
   ActivityGoals,
   HealthProfile,
   HealthSummary,
+  HealthWeekly,
+  SleepEstimate,
   SleepSession,
   HealthCheckin,
   FoodEntry,
@@ -953,6 +957,18 @@ export const api = {
     return resp.data;
   },
 
+  /** Which suggestion lanes are on for a member (the member or their parents). */
+  async getRecommendationLanes(username: string): Promise<RecommendationLanes> {
+    const resp = await apiClient.get(`/api/recommendation-lanes/${encodeURIComponent(username)}`);
+    return resp.data;
+  },
+
+  /** A parent blesses (true) or blocks (false) lanes; lanes left out keep their setting. */
+  async setRecommendationLanes(username: string, lanes: Partial<Record<RecommendationLane, boolean>>): Promise<RecommendationLanes> {
+    const resp = await apiClient.put(`/api/recommendation-lanes/${encodeURIComponent(username)}`, { lanes });
+    return resp.data;
+  },
+
   /** Household roster with family roles; parent/household-manager only. */
   async getFamily(): Promise<FamilyRecord[]> {
     const resp = await apiClient.get('/api/users/family');
@@ -1562,6 +1578,12 @@ export const api = {
     return resp.data;
   },
 
+  /** The seven days ending on `end` (today by default) against the week before. */
+  async getHealthWeekly(end?: string): Promise<HealthWeekly> {
+    const resp = await apiClient.get('/api/health/weekly', { params: end ? { end } : {} });
+    return resp.data;
+  },
+
   async getHealthMetrics(metric: string, days = 30): Promise<HealthMetricHistory> {
     const resp = await apiClient.get(
       `/api/health/metrics/${encodeURIComponent(metric)}?days=${days}`,
@@ -1605,6 +1627,27 @@ export const api = {
     source?: string;
   }): Promise<SleepSession & { duplicate: boolean }> {
     const resp = await apiClient.post('/api/health/sleep', body);
+    return resp.data;
+  },
+
+  /** Correct a saved night in place. */
+  async updateSleep(sleepId: number, body: {
+    night: string;
+    bedtime?: string | null;
+    wake_time?: string | null;
+    duration_minutes?: number | null;
+    efficiency?: number | null;
+    quality?: number | null;
+    note?: string;
+    source?: string;
+  }): Promise<SleepSession> {
+    const resp = await apiClient.put(`/api/health/sleep/${sleepId}`, body);
+    return resp.data;
+  },
+
+  /** Sleep for `night`, estimated from when this person's phones and tablets were in use. */
+  async getSleepEstimate(night: string): Promise<{ estimate: SleepEstimate | null; devices: number }> {
+    const resp = await apiClient.get('/api/health/sleep/estimate', { params: { night } });
     return resp.data;
   },
 

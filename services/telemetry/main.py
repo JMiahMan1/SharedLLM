@@ -452,6 +452,25 @@ def create_app():
         rc = _redis()
         return {"status": "SUCCESS", "days": await store.get_usage(rc, user, days)}
 
+    @application.post("/api/telemetry/night")
+    async def record_night(body: dict = Body(...), _: bool = Depends(require_internal)):
+        """One device's screen-on stretches overnight (the sleep estimate reads them)."""
+        device = str(body.get("device") or "").strip()
+        night = str(body.get("night") or "").strip()
+        user = str(body.get("user") or "").strip()
+        if not device or not night or not user or not isinstance(body.get("intervals"), list):
+            raise HTTPException(status_code=422, detail="device, night, user and intervals required")
+        rc = _redis()
+        return {"status": "SUCCESS", "night": await store.merge_night(rc, device, night, body["intervals"], user)}
+
+    @application.get("/api/telemetry/night")
+    async def get_night(
+        night: str, devices: str = Query(default=""), _: bool = Depends(require_internal)
+    ):
+        keys = [d.strip() for d in devices.split(",") if d.strip()][:20]
+        rc = _redis()
+        return {"status": "SUCCESS", "nights": await store.get_nights(rc, keys, night)}
+
     @application.post("/api/telemetry/notify")
     async def notify(body: dict = Body(...), _: bool = Depends(require_internal)):
         """Send one notification to a user from another service (docs/PUSH.md)."""

@@ -118,6 +118,7 @@ from services.common.podcast_recommendations import podcast_events, recommend_po
 from services.common.book_recommendations import book_events, recommend_book
 from services.common.game_recommendations import recommend_game
 from services.common.activity_recommendations import recommend_activity
+from services.common.sleep_estimate import estimate_night
 from services.common import notify as _notify
 from services.common.screen_time import evaluate as evaluate_screen_time
 from services.common.relay import until_either_ends
@@ -5242,6 +5243,62 @@ async def get_usage(request: Request, user: str, days: int = 7):
             f"{TELEMETRY_SVC}/api/telemetry/usage/{user}", params={"days": days}, headers=headers
         )
     return await _proxy_json_response(resp)
+
+
+@app.post("/api/usage/night")
+async def post_usage_night(request: Request):
+    """One device's overnight screen-on stretches (18:00 to noon), for the sleep
+    estimate. The device must have registered; the estimate later credits it to
+    whoever the device is assigned to."""
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    device = str(body.get("device_key") or "").strip()
+    night = str(body.get("night") or "").strip()
+    intervals = body.get("intervals")
+    if len(device) < 16 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", night) or not isinstance(intervals, list):
+        raise HTTPException(status_code=422, detail="device_key, night (YYYY-MM-DD) and intervals required")
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        known = await client.get(f"{IDENTITY_SVC}/api/internal/device-registered/{device}", headers=headers)
+        if known.status != 200 or not ((await known.json(content_type=None)) or {}).get("registered"):
+            raise HTTPException(status_code=404, detail="This device has not registered")
+        resp = await client.post(
+            f"{TELEMETRY_SVC}/api/telemetry/night",
+            json={"device": device, "night": night, "user": user, "intervals": intervals[:1000]},
+            headers=headers,
+        )
+    return await _proxy_json_response(resp)
+
+
+@app.get("/api/health/sleep/estimate")
+async def get_sleep_estimate(request: Request, night: str):
+    """The signed-in person's sleep for ``night``, estimated from when the
+    phones and tablets assigned to them were in use. Only the estimate comes
+    back (bedtime, wake, minutes), never the raw stretches; it is offered for
+    the person to correct before saving."""
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", night):
+        raise HTTPException(status_code=422, detail="night must be YYYY-MM-DD")
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        owned = await client.get(f"{IDENTITY_SVC}/api/internal/owned-devices/{user}", headers=headers)
+        devices = ((await owned.json(content_type=None)) or {}).get("devices") or [] if owned.status == 200 else []
+        if not devices:
+            return {"status": "SUCCESS", "estimate": None, "devices": 0}
+        resp = await client.get(
+            f"{TELEMETRY_SVC}/api/telemetry/night",
+            params={"night": night, "devices": ",".join(devices)},
+            headers=headers,
+        )
+        nights = ((await resp.json(content_type=None)) or {}).get("nights") or [] if resp.status == 200 else []
+    estimate = estimate_night(nights, night, os.getenv("TIMEZONE") or "UTC")
+    return {"status": "SUCCESS", "estimate": estimate, "devices": len(devices)}
 
 
 async def _lane_blocked(user: str, lane: str) -> bool:
@@ -12584,6 +12641,11 @@ async def get_health_summary(request: Request, day: str | None = None):
     return await _health_json("GET", "/summary", request, params={"day": day})
 
 
+@app.get("/api/health/weekly")
+async def get_health_weekly(request: Request, end: str | None = None):
+    return await _health_json("GET", "/weekly", request, params={"end": end})
+
+
 @app.get("/api/health/metrics/catalog")
 async def get_health_metric_catalog(request: Request):
     return await _health_json("GET", "/metrics/catalog", request)
@@ -12612,6 +12674,11 @@ async def get_health_sleep(request: Request, days: int = 14):
 @app.post("/api/health/sleep")
 async def post_health_sleep(request: Request):
     return await _health_json("POST", "/sleep", request, body=await request.json())
+
+
+@app.put("/api/health/sleep/{sleep_id}")
+async def put_health_sleep(sleep_id: int, request: Request):
+    return await _health_json("PUT", f"/sleep/{sleep_id}", request, body=await request.json())
 
 
 @app.delete("/api/health/sleep/{sleep_id}")
