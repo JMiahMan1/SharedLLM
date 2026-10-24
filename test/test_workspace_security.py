@@ -1,15 +1,15 @@
 import os
 from pathlib import Path
 
+import httpx
+import pytest
+
 # Scratch state goes in the workspace .tmp/ (see CONTRIBUTING.md), never /tmp, which
 # is read-only in some sandboxes, leaving SQLite with no table to query.
 _TMP = Path(__file__).resolve().parents[1] / ".tmp"
 _TMP.mkdir(parents=True, exist_ok=True)
 
 os.environ["WORKSPACE_DATABASE_URL"] = f"sqlite:///{_TMP / 'test_ws_security.db'}"
-
-import httpx
-import pytest
 
 # Phase 4.2: Test Workspace Security
 # This test attempts a path traversal attack and asserts a 403 Forbidden.
@@ -46,7 +46,6 @@ async def test_workspace_path_traversal_blocked(monkeypatch):
         "forbidden_branches": ["main", "master"],
     })
 
-    from pathlib import Path
     tmp_root = _TMP / "test_ws_security_root"
     tmp_root.mkdir(exist_ok=True)
     monkeypatch.setattr(wsrt, "get_workspace_root", lambda: tmp_root)

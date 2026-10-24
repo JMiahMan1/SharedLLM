@@ -13,7 +13,9 @@ def test_gateway_extracts_bearer_token(monkeypatch):
     Test that the Gateway extracts the Bearer token from the Authorization header
     and passes it to the Identity service's /api/resolve endpoint.
     """
-    from services.gateway import cache as gateway_cache, history as gateway_history, main
+    from services.gateway import cache as gateway_cache
+    from services.gateway import history as gateway_history
+    from services.gateway import main
 
     class FakeRedis:
         def getdel(self, key): return None
