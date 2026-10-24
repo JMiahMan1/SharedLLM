@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useSyncExternalStore } from 'react';
 import { api } from '../services/api';
 import { storageGet, storageSet } from '../lib/storage';
-import SystemBars from '../plugins/systemBars';
+import SystemBars, { cssColorToHex } from '../plugins/systemBars';
 import { themeRegistry } from './registry';
 import { themeToCssVars, resolveScheme, type HealthThemeCssVars, type ThemePack, type ThemeScheme, type ThemeMotif } from './types';
 
@@ -177,9 +177,12 @@ function applyScheme(scheme: ThemeScheme): void {
     body.classList.toggle('night-mode', scheme === 'dark');
     body.classList.toggle('day-mode', scheme === 'light');
   }
-  // The Android bars are transparent over the page; their icons follow it.
-  // An APK built before the plugin existed rejects, which changes nothing.
-  SystemBars.setScheme({ scheme }).catch(() => undefined);
+  // The Android bars are transparent over the page; their icons follow it, and
+  // where an older WebView cannot draw behind them the strip takes the page's
+  // background instead of the window's white. An APK built before the plugin
+  // existed rejects, which changes nothing.
+  const background = body ? cssColorToHex(getComputedStyle(body).backgroundColor) : undefined;
+  SystemBars.setScheme({ scheme, ...(background ? { background } : {}) }).catch(() => undefined);
 }
 
 function applyVarsToRoot(vars: HealthThemeCssVars, scheme: ThemeScheme): void {

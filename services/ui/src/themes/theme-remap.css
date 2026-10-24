@@ -336,6 +336,7 @@
 [data-theme-scheme="light"] .text-fuchsia-400 { color: oklch(51.8% 0.253 323.949) !important; }
 [data-theme-scheme="light"] .text-green-300 { color: oklch(52.7% 0.154 150.069) !important; }
 [data-theme-scheme="light"] .text-green-400 { color: oklch(52.7% 0.154 150.069) !important; }
+[data-theme-scheme="light"] .text-lime-300 { color: oklch(53.2% 0.157 131.589) !important; }
 [data-theme-scheme="light"] .text-orange-300 { color: oklch(55.3% 0.195 38.402) !important; }
 [data-theme-scheme="light"] .text-orange-400 { color: oklch(55.3% 0.195 38.402) !important; }
 [data-theme-scheme="light"] .text-pink-200 { color: oklch(52.5% 0.223 3.958) !important; }

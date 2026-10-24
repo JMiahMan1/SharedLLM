@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app's dark background (the bg token in index.css), shown behind the system bars
+         before the page sets its own. -->
+    <color name="jarvis_background">#030711</color>
+</resources>

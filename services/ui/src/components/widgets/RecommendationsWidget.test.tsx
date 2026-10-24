@@ -19,6 +19,8 @@ vi.mock('../../services/api', async (importOriginal) => {
       getVideoRecommendation: vi.fn(),
       getPodcastRecommendation: vi.fn(),
       getBookRecommendation: vi.fn(),
+      getGameRecommendation: vi.fn(),
+      getActivityRecommendation: vi.fn(),
     },
   };
 });
@@ -52,6 +54,8 @@ describe('RecommendationsWidget', () => {
     vi.mocked(api.getVideoRecommendation).mockResolvedValue(none);
     vi.mocked(api.getPodcastRecommendation).mockResolvedValue(none);
     vi.mocked(api.getBookRecommendation).mockResolvedValue(none);
+    vi.mocked(api.getGameRecommendation).mockResolvedValue(none);
+    vi.mocked(api.getActivityRecommendation).mockResolvedValue(none);
   });
 
   it('says plainly when there is nothing to suggest yet', async () => {
@@ -90,10 +94,26 @@ describe('RecommendationsWidget', () => {
   });
 
   it('offers a retry when nothing could load', async () => {
-    for (const fn of [api.getMusicRecommendation, api.getVideoRecommendation, api.getPodcastRecommendation, api.getBookRecommendation]) {
+    for (const fn of [api.getMusicRecommendation, api.getVideoRecommendation, api.getPodcastRecommendation, api.getBookRecommendation, api.getGameRecommendation, api.getActivityRecommendation]) {
       vi.mocked(fn).mockRejectedValue(new Error('down'));
     }
     renderWidget();
     expect(await screen.findByTestId('recommendations-error', {}, { timeout: 4000 })).toHaveTextContent('Try again');
+  });
+
+  it('shows a game swap and an activity alongside the rest', async () => {
+    vi.mocked(api.getGameRecommendation).mockResolvedValue({
+      status: 'SUCCESS',
+      recommendation: { theme: 'shooter', game: 'Rocket League', style: 'fast team matches', reason: 'Same team play.', matched_on: 'Fortnite', kind: 'game', redeemed: true },
+    });
+    vi.mocked(api.getActivityRecommendation).mockResolvedValue({
+      status: 'SUCCESS',
+      recommendation: { theme: 'late nights', activity: 'A phone-free wind-down', style: 'a Psalm before sleep', reason: 'Rest is a gift.', matched_on: 'late nights on the phone this week', kind: 'activity' },
+    });
+    renderWidget();
+
+    expect(await screen.findByTestId('recommendation-game')).toHaveTextContent("Rocket League");
+    expect(screen.getByTestId('recommendation-game')).toHaveTextContent("Because you've been playing Fortnite");
+    expect(screen.getByTestId('recommendation-activity')).toHaveTextContent('A phone-free wind-down');
   });
 });

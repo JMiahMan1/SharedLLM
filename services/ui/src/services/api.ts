@@ -4262,6 +4262,16 @@ export const api = {
   },
 
   /** A book suggestion for the signed-in member, derived from their reading. */
+  async getGameRecommendation(): Promise<{ status: string; recommendation: { theme: string; game: string | null; style: string; reason: string; matched_on: string; kind: string; redeemed: boolean; redirect_to?: string } | null }> {
+    const resp = await apiClient.get('/api/recommendations/game');
+    return resp.data;
+  },
+
+  async getActivityRecommendation(): Promise<{ status: string; recommendation: { theme: string; activity: string; style: string; reason: string; matched_on: string; kind: string } | null }> {
+    const resp = await apiClient.get('/api/recommendations/activity');
+    return resp.data;
+  },
+
   async getBookRecommendation(): Promise<{ status: string; recommendation: { theme: string; title: string | null; author: string | null; style: string; reason: string; matched_on: string; kind: string; redeemed: boolean; redirect_to?: string } | null }> {
     const resp = await apiClient.get('/api/recommendations/book');
     return resp.data;

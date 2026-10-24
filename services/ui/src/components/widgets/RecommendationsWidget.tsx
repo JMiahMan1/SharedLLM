@@ -1,5 +1,5 @@
 import { useQueries } from '@tanstack/react-query';
-import { BookOpen, Film, Mic, Music2, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react';
+import { BookOpen, Film, Footprints, Gamepad2, Mic, Music2, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { IActiveMediaWidgetProps } from '../../types/widget';
@@ -78,6 +78,29 @@ const SOURCES = [
       };
     },
   },
+  {
+    kind: 'game',
+    load: async (): Promise<Suggestion | null> => {
+      const rec = (await api.getGameRecommendation()).recommendation;
+      if (!rec) return null;
+      return {
+        kind: 'game', icon: Gamepad2, tint: 'text-fuchsia-300', ...redeemOrRedirect(rec, rec.game, null),
+        reason: rec.reason, because: `Because you've been playing ${rec.matched_on}`,
+      };
+    },
+  },
+  {
+    kind: 'activity',
+    load: async (): Promise<Suggestion | null> => {
+      const rec = (await api.getActivityRecommendation()).recommendation;
+      if (!rec) return null;
+      return {
+        kind: 'activity', icon: Footprints, tint: 'text-lime-300',
+        pick: rec.activity, detail: rec.style, reason: rec.reason,
+        because: `Because of ${rec.matched_on}`,
+      };
+    },
+  },
 ] as const;
 
 export default function RecommendationsWidget({ settingsButton, userSettings }: IActiveMediaWidgetProps) {
@@ -134,7 +157,7 @@ export default function RecommendationsWidget({ settingsButton, userSettings }: 
         ) : suggestions.length === 0 ? (
           <div className="h-full flex items-center justify-center text-center py-3" data-testid="recommendations-empty">
             <p className="text-xs text-slate-500 leading-snug">
-              No suggestions yet. They appear here from what you listen to, watch and read.
+              No suggestions yet. They appear here from what you listen to, watch, read and play.
             </p>
           </div>
         ) : (
