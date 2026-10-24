@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Columns2, LayoutGrid, Minus, Plus, Settings2, Star, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Columns2, LayoutGrid, Minus, Plus, Rows2, Settings2, Star, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
 import { PAGE_TONES, PAGE_TONE_ORDER, toneOf } from './readingPage';
@@ -29,6 +29,15 @@ interface ReferenceBarProps {
 }
 
 const TEXT_STEPS = [0.85, 1, 1.15, 1.3, 1.5];
+
+/**
+ * How the comparison is laid out: a row per verse, or two whole chapters in
+ * panes that scroll together (`split_view`, saved with the reader's state).
+ */
+const SPLIT_VIEWS: Array<{ id: BiblePreferences['split_view']; label: string; icon: typeof Rows2 }> = [
+  { id: 'compare', label: 'Rows', icon: Rows2 },
+  { id: 'parallel', label: 'Panes', icon: Columns2 },
+];
 
 /**
  * Everything needed to point the reader somewhere, and to make the text
@@ -349,6 +358,30 @@ export default function ReferenceBar({
                 </option>
               ))}
             </select>
+          )}
+          {comparing && (
+            <div role="group" aria-label="How to lay out the comparison" className="flex gap-1 rounded-xl bg-black/25 p-0.5">
+              {SPLIT_VIEWS.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    void trigger('light');
+                    onPreferences({ split_view: id });
+                  }}
+                  aria-pressed={(preferences.split_view ?? 'compare') === id}
+                  data-testid={`bible-split-view-${id}`}
+                  className={`min-h-11 flex-1 rounded-lg px-2 text-[12px] flex items-center justify-center gap-1 ${
+                    (preferences.split_view ?? 'compare') === id
+                      ? 'bg-amber-500/15 text-amber-200'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Icon size={13} />
+                  {label}
+                </button>
+              ))}
+            </div>
           )}
         </div>
 

@@ -82,8 +82,9 @@ What differs from the plan below:
   a verse; bookmarks and notes show a glyph.
 - **Favourite translation** (`favorite_version`): the star marks the
   translation in hand; when reading another one, a "Back to …" button returns
-  to the favourite in one tap. `split_view` is stored but no layout reads it
-  yet; the comparison is always the per-verse `compare` layout.
+  to the favourite in one tap. `split_view` picks how a comparison is laid
+  out: `compare` (a row per verse) or `parallel` (two whole chapters in panes
+  that scroll together, `ParallelReader.tsx`).
 - **Offline**: besides the last 120 passages, the last answers for `/state`,
   `/versions` and `/books` are kept on the device (`withOfflineCopy` in
   `src/lib/bibleOffline.ts`, backed by `localStorage`), so a cold start with
@@ -628,8 +629,9 @@ comparison off must not move the reader's own text. `compare_version` blank
 means no comparison and is never guessed, and comparing a translation against
 itself is refused, because the same words twice reads as a bug rather than as
 a comparison. `split_view` is reserved for the *layout* of that second column
-(`compare` = a row per verse, `parallel` = the whole second chapter); only
-`compare` is built, and the UI does not read the field yet.
+(`compare` = a row per verse, `parallel` = the whole second chapter in its
+own pane, scrolled in step with the first). The Compare control's **Rows /
+Panes** switch writes it.
 `show_notes` is the reader saying they want the chapter's commentary on the
 reading surface rather than behind a tap; it defaults off so the reader opens
 as text, and turning it on fetches nothing extra because the chapter's notes
@@ -919,7 +921,7 @@ of Phase 1 explicitly rather than being quietly dropped.
 | **Read aloud** | bible `/narration*` via `/api/bible/narration*`; play/pause, voice picker, 0.75x-1.5x speed control, per-verse highlight while speaking, and a speaker picker that sends the passage through the authenticated announcement path (`BibleReadAloud.tsx`); audio cached in `NarrationAudio` on the server and per session in the client | 1 |
 | **Verse of the Day** | Deterministic by date, at the top of Today and in the `bible_daily` widget | 1 |
 | **Share a verse** | Verse image card (`src/lib/verseImage.ts`) → native share sheet or web share; share to Family chat; deep link back to the passage | 1 |
-| **Compare / parallel versions** | `compare_version` picks a second translation, fetched from `/passages` like any other. `ChapterReader` puts the two in one row per verse from `sm` up and stacks them on a phone, since a phone cannot show two readable columns. A verse the second translation does not have says "Not in this translation." rather than vanishing: NIV2011 genuinely omits Matthew 17:21, and an invisible gap reads as a rendering fault. The version picker never offers the translation being read, and the server refuses it too | 1 |
+| **Compare / parallel versions** | `compare_version` picks a second translation, fetched from `/passages` like any other. `ChapterReader` puts the two in one row per verse from `sm` up and stacks them on a phone, since a phone cannot show two readable columns. A verse the second translation does not have says "Not in this translation." rather than vanishing: NIV2011 genuinely omits Matthew 17:21, and an invisible gap reads as a rendering fault. The version picker never offers the translation being read, and the server refuses it too. **Panes** (`split_view = parallel`) shows each translation as its own whole chapter in a scrolling pane, side by side from `sm` up and stacked on a phone; while linked, scrolling either pane keeps the other on the same verse (see *Synced scroll* below), and a "Scrolling together / separately" toggle unlinks them. A comparison that fails to load says so with a retry, in either layout | 1 |
 | **Commentary beside the text** | `show_notes` puts the chapter's study material in a column next to the reader on `lg` and under the chapter on a phone; off by default, because the reader starts as text. The notes are already fetched to mark which verses carry study material, so this costs no extra request. Each note names its verse and tapping it moves the reader there. The commentary is never mixed into `BibleVerse.text` | 1 |
 | **Streak on screen** | App-open streak (offline-tolerant) and Guided-Scripture streak (resets on a skipped day, number hidden until earned again): YouVersion's two-streak model, not one generic counter | 1 |
 | **No network? Still read** | Last 120 passages plus the last `/state`, `/versions` and `/books` answers kept in `localStorage` (`src/lib/bibleOffline.ts`); reads never wait on an upstream | 1 |
@@ -1019,8 +1021,21 @@ marked *planned* are not built.
   it, never a button that does nothing. *Planned:* spoken-verse highlight,
   speed control, the HA `tts.piper` kitchen speaker.
 - **Compare**: the second translation in a row per verse from `sm` up,
-  stacked on a phone. *Planned:* synchronized scroll, per-pane font
-  control, a "diff" highlight for verses that differ textually.
+  stacked on a phone (**Rows**), or as two whole chapters in their own
+  scrolling panes (**Panes**).
+  - **Synced scroll** (`ParallelReader.tsx`, `verseAnchor.ts`): the panes are
+    matched by *verse*, not by scroll ratio, because two translations are
+    never the same height. The verse straddling the top of the pane being
+    scrolled, and how far into it the reader is, is put at the top of the
+    other pane; a verse the other translation lacks (NIV2011's Matthew
+    17:21) lands at the end of the verse before it. Only the pane the reader
+    is driving (last touched, wheeled, clicked or focused) moves the other,
+    so the programmatic scroll never echoes back. Relinking, or the second
+    translation arriving, lines it up with the reader's place. Each pane is a
+    focusable region, so arrow keys and Page Down scroll it from the
+    keyboard.
+  - *Planned:* per-pane font control, a "diff" highlight for verses that
+    differ textually.
 - **Reading position** saved with `PUT /state`; `chapter_read` +
   `chapter_complete` events recorded server-side so the streak and stats
   are not client-reported.
@@ -1117,6 +1132,8 @@ Built:
 ```
 src/pages/Bible.tsx                               # tabs, Read section, routing by ?ref= / ?tab=
 src/components/bible/ChapterReader.tsx            # verses, marks, compare column, chapter notes
+src/components/bible/ParallelReader.tsx           # two translations in panes, verse-synced scroll
+src/components/bible/verseAnchor.ts               # verse-anchored scroll arithmetic (pure)
 src/components/bible/ReferenceBar.tsx             # ref input, book/chapter steppers,
                                                   #   version, study Bible, compare, display;
                                                   #   one-line header + sheet on a phone
@@ -1157,8 +1174,13 @@ and an opt-in workspace export.
 Tests: `src/pages/Bible.test.tsx` (including comparing two translations: the
 picker never offers the translation being read, the second column renders, a
 verse the second translation lacks says so, and turning the comparison off
-leaves the reader's own text alone; and the Focus button opening the
-full-screen page),
+leaves the reader's own text alone; switching to **Panes** saving
+`split_view` and showing both whole chapters; a comparison that fails to load
+saying so; and the Focus button opening the full-screen page),
+`src/components/bible/ParallelReader.test.tsx` (the other pane following by
+verse rather than ratio, a missing verse landing at the end of the one before,
+either pane driving, unlinking and relinking, and the loading/failed/empty
+comparison states) and `verseAnchor.test.ts`,
 `src/components/bible/FocusReader.test.tsx` (chrome fades on a tap, prev/next,
 the loading line rather than a blank page, a highlight tinting its own verse
 and not its neighbour, and `ambienceFor` being a pure function of the hour),
@@ -1337,7 +1359,7 @@ parity with the Bible App" passes on desktop **and** phone.
 | Phase | Scope | Definition of done |
 |---|---|---|
 | **0** Config + corpus + reading + study (done) | `services/bible/` service (port 8010), compose + Caddy + `BRIDGE_BIBLE_SVC_URL` + Identity `GlobalSetting`s, reference resolver, `corpus_manifest.json`, PDF + EPUB importers, `StudyNote` table with the two-axis `BibleEdition` corpus, `migrations.py` for existing databases, `editions.py` CLI, gateway `/api/bible/*`, `/books`, `/versions`, `/passages`, `/search`, `/editions`, `/study/notes`, `/study/ask`, `/verse-of-day`, `/devotional`, `/marks`, `/state`, `/events`, `/stats`, `/streaks`, `/achievements`, `/activity/*`, `/blb/link`, `/daily`, `/narration`, `/voices`, `/admin/imports*`; `/bible` page, `bible_daily` dashboard widget, Android Verse-of-the-Day home-screen widget, `bible` sharing scope, Admin › Bible import surface, one primary translation, long-term per-chapter provider cache with cost estimate, request budget and one-book dry run; **the mobile reference sheet** (one-line passage header with prev/next, every other control in a sheet), **the `note` mark kind** with a verse-note glyph and read-back from Nextcloud, **Ask about this verse** (grounded Jarvis answers), **Focus mode** with hour-tinted chrome, `favorite_version`/`compare_version`/`show_notes` preferences; `bible` added to the image CI matrix | **Shipped.** Service boots in compose; corpus imported (KJV/ASV/WEB + NKJV with 44k study notes under the Nelson study Bible); multiple study Bibles per translation and opt-in notes from other translations both work end to end; every unconfigured path returns a message naming the setting; proxy is caller-scoped with the family 404 intact. Live-verified: `/study/ask` answered a John 3:16 question in 83s citing 1 verse and 3 notes |
-| **1** **The reader** (mostly done) | `BookPicker`, compare view, HA speaker playback (read-aloud itself ships in Phase 0 via `BibleReadAloud.tsx`), note editor → Nextcloud, Continue reading card, verse image share, reference popover, offline cache. **Shipped (2026-10-13):** opaque reading page in dark/sepia/light tones (AAA contrast), 66-book + chapter grid picker, swipe to turn the chapter, last 120 passages kept on the device for offline reading, verse image share card, Continue reading card. **Shipped (2026-10-20):** per-verse highlight while speaking and sending the reading to a chosen speaker. Not yet: synced-scroll compare view, reference popover | A user opens the app and is reading, where they left off, on desktop and phone; marks/notes/position sync; chapters read offline; read-aloud speaks a chapter and states its errors honestly |
+| **1** **The reader** (mostly done) | `BookPicker`, compare view, HA speaker playback (read-aloud itself ships in Phase 0 via `BibleReadAloud.tsx`), note editor → Nextcloud, Continue reading card, verse image share, reference popover, offline cache. **Shipped (2026-10-13):** opaque reading page in dark/sepia/light tones (AAA contrast), 66-book + chapter grid picker, swipe to turn the chapter, last 120 passages kept on the device for offline reading, verse image share card, Continue reading card. **Shipped (2026-10-20):** per-verse highlight while speaking and sending the reading to a chosen speaker. **Shipped (2026-10-24):** Panes comparison with verse-synced scroll. Not yet: reference popover | A user opens the app and is reading, where they left off, on desktop and phone; marks/notes/position sync; chapters read offline; read-aloud speaks a chapter and states its errors honestly |
 | **2** Plans + daily rhythm (plans done) | **Shipped (2026-10-13):** `services/bible/plans.py` (twelve plans in `games/plans.json` generated from the canonical chapter table, every chapter exactly once, side-by-side tracks), `PlanEnrollment` table, `/plans*` (start, complete/undo a day, catch me up, stop), plans on the Today tab, plan badges live. Plan line on the dashboard widget and a daily reading reminder (bible-service loop + telemetry notify with a per-day `once` key, the leave-by pattern; automation has no timer-create API and its daily recurrence drifts across DST) also shipped. Reading along: family members on the same plan, consent-gated | Completing a plan day advances the plan and the badges (tests); missed days are catchable (test) |
 | **3** Achievements + points | Rules engine already shipped in Phase 0 (reading/streak rules); plan, memory and quiz rules land with those features; banking to `POST /api/geo/stars`, Talk announcement cards, `AchievementsPanel` reuse in Progress | Unlock → points land in the one ledger, `earned_on` is stable across re-reads, family card posts when configured |
 | **4** Family sharing (mostly done) | Family plan board, per-day discussion cards in Talk, in-chat Bible trivia; the `bible` sharing scope already ships in Phase 0. **Shipped (2026-10-13):** consent now reads Identity's real `{users:[...]}` payload (it was always false before), reading along on a plan (no group table: following the same plan is the group), family chat cards for a daily quiz score, a finished plan and a mastered verse (sharers only), badge cards fixed to an accepted `card_kind`. Not yet: in-chat trivia (the Talk game API is unwired in the UI and off unless `FAMILY_GAMES_ENABLED`) | Non-consented user gets 404; feed omits; family plan board and Talk round work for members only |

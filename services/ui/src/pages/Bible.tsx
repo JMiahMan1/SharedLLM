@@ -16,6 +16,7 @@ import type {
 } from '../types/api';
 import ReferenceBar from '../components/bible/ReferenceBar';
 import ChapterReader from '../components/bible/ChapterReader';
+import ParallelReader from '../components/bible/ParallelReader';
 import FocusReader from '../components/bible/FocusReader';
 import { pageStyle, toneOf } from '../components/bible/readingPage';
 import { useSwipe } from '../lib/useSwipe';
@@ -148,13 +149,23 @@ function BibleReaderPane({
   // when it fails it reads as a comparison that could not load rather than as a
   // missing chapter: the primary passage is still on screen.
   const compareVersion = preferences.compare_version;
-  const { data: compareData } = useQuery({
+  const {
+    data: compareData,
+    isFetching: compareLoading,
+    error: compareError,
+    refetch: refetchCompare,
+  } = useQuery({
     queryKey: ['bible-passage', compareVersion, requestRef],
     queryFn: () => api.getBiblePassage(requestRef, compareVersion),
     enabled: Boolean(version) && Boolean(compareVersion) && !searching,
     retry: 0,
   });
   const compareName = versions.find((v) => v.code === compareVersion)?.name ?? compareVersion;
+  const primaryName = versions.find((v) => v.code === version)?.name ?? version;
+  // `parallel` is two whole chapters in panes that scroll together; `compare`
+  // (the default) is one row per verse. Either way the comparison must be on.
+  const parallel = Boolean(compareVersion) && preferences.split_view === 'parallel';
+  const compareFailure = compareError ? errorText(compareError) : null;
 
   // Position and chapter-complete both follow the chapter that was actually
   // shown, which is the requested ref when one came in from a link. The
@@ -378,21 +389,65 @@ function BibleReaderPane({
                 </button>
               </div>
             </div>
-            <ChapterReader
-              verses={passage?.verses ?? []}
-              marks={marks}
-              studiedVerses={studiedVerses}
-              compareVerses={compareData?.verses}
-              compareName={compareName}
-              speakingVerses={speakingVerses}
-              fontScale={preferences.font_scale}
-              lineHeight={preferences.line_height}
-              theme={preferences.theme}
-              loading={isFetching}
-              error={error instanceof Error ? error.message : null}
-              onVerseTap={setActiveVerse}
-              onRetry={() => void refetch()}
-            />
+            {compareFailure && !parallel && (
+              <div
+                className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-[var(--page-muted)]"
+                data-testid="bible-compare-error"
+              >
+                <span>{compareName} could not be loaded alongside: {compareFailure}</span>
+                <button
+                  type="button"
+                  onClick={() => void refetchCompare()}
+                  className="min-h-11 px-3 rounded-xl border border-[var(--page-rule)] hover:bg-[var(--page-hover)]"
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+            {parallel ? (
+              <ParallelReader
+                passageKey={`${version}|${requestRef}`}
+                primaryName={primaryName}
+                compareName={compareName}
+                compareVerses={compareData?.verses ?? []}
+                compareLoading={compareLoading}
+                compareError={compareFailure}
+                onCompareRetry={() => void refetchCompare()}
+                fontScale={preferences.font_scale}
+                lineHeight={preferences.line_height}
+                theme={preferences.theme}
+              >
+                <ChapterReader
+                  verses={passage?.verses ?? []}
+                  marks={marks}
+                  studiedVerses={studiedVerses}
+                  speakingVerses={speakingVerses}
+                  fontScale={preferences.font_scale}
+                  lineHeight={preferences.line_height}
+                  theme={preferences.theme}
+                  loading={isFetching}
+                  error={error instanceof Error ? error.message : null}
+                  onVerseTap={setActiveVerse}
+                  onRetry={() => void refetch()}
+                />
+              </ParallelReader>
+            ) : (
+              <ChapterReader
+                verses={passage?.verses ?? []}
+                marks={marks}
+                studiedVerses={studiedVerses}
+                compareVerses={compareData?.verses}
+                compareName={compareName}
+                speakingVerses={speakingVerses}
+                fontScale={preferences.font_scale}
+                lineHeight={preferences.line_height}
+                theme={preferences.theme}
+                loading={isFetching}
+                error={error instanceof Error ? error.message : null}
+                onVerseTap={setActiveVerse}
+                onRetry={() => void refetch()}
+              />
+            )}
           </section>
           {notesAlongside && (
             <div className="mt-4 lg:mt-0">

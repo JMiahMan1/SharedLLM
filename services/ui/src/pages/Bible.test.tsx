@@ -923,6 +923,45 @@ describe('comparing two translations', () => {
     await waitFor(() => expect(screen.queryByTestId('bible-compare-legend')).toBeNull());
     expect(screen.queryByTestId('bible-compare-select')).toBeNull();
   });
+
+  it('switches to two scrolling panes and saves the layout', async () => {
+    mocked.getBibleState.mockResolvedValue(
+      STATE({ preferences: { ...STATE().preferences, compare_version: 'asv' } }),
+    );
+    renderPage();
+
+    const panes = await screen.findByTestId('bible-split-view-parallel');
+    expect(screen.getByTestId('bible-split-view-compare')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(panes);
+
+    await waitFor(() => expect(mocked.putBibleState).toHaveBeenCalledWith({ split_view: 'parallel' }));
+    expect(await screen.findByTestId('bible-parallel')).toBeTruthy();
+    // Each translation is its own whole chapter, and the reader's own verses
+    // are still the tappable ones.
+    expect(await screen.findByTestId('bible-parallel-23-1')).toHaveTextContent(
+      'The Lord is my shepherd, I shall not want (1)',
+    );
+    expect(within(screen.getByTestId('bible-parallel-primary')).getByTestId('bible-verse-23-1')).toBeTruthy();
+    expect(screen.getByTestId('bible-parallel-link')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('says so when the second translation cannot be loaded', async () => {
+    mocked.getBibleState.mockResolvedValue(
+      STATE({ preferences: { ...STATE().preferences, compare_version: 'asv' } }),
+    );
+    const primary = mocked.getBiblePassage.getMockImplementation()!;
+    mocked.getBiblePassage.mockImplementation(async (ref: string, version?: string) => {
+      if (version === 'asv') throw new Error('Translation asv is not installed');
+      return primary(ref, version);
+    });
+    renderPage();
+
+    expect(await screen.findByTestId('bible-compare-error')).toHaveTextContent(
+      'American Standard Version could not be loaded alongside: Translation asv is not installed',
+    );
+    // The reader's own text is unaffected.
+    expect(screen.getByTestId('bible-verse-23-1')).toHaveTextContent('The LORD is my shepherd (1)');
+  });
 });
 
 describe('commentary alongside the text', () => {
