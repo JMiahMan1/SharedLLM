@@ -238,6 +238,15 @@ body {
     text-shadow: 0 0 10px var(--site-glow), 0 0 20px var(--color-purple-dim);
   }
 
+  /* The phone shell (MobileShell) owns the screen: the document cannot
+     scroll or bounce, so nothing can be dragged under the system bars. */
+  html.mobile-shell-lock,
+  html.mobile-shell-lock body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   /* Safe area padding for mobile notches */
   .safe-area-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0.5rem);
