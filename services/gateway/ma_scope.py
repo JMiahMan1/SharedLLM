@@ -36,7 +36,7 @@ _WEB_PLAYER_IDS: dict[str, str] = {}
 # Argument names that carry a single player/queue reference in MA's JSON-RPC.
 _PLAYER_REF_KEYS = ("player_id", "queue_id", "target_player", "source_queue_id", "target_queue_id")
 # Argument names that carry a list of player references.
-_PLAYER_REF_LIST_KEYS = ("child_player_ids",)
+_PLAYER_REF_LIST_KEYS = ("child_player_ids", "player_ids_to_add", "player_ids_to_remove")
 
 _SLUG_SAFE = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
 
@@ -66,7 +66,11 @@ def ma_entity_id(player_id: str) -> str:
     underscores), so "Office Display" and "sendspin-js" become
     ``media_player.mass_office_display`` / ``media_player.mass_sendspin_js``.
     """
-    slug = "".join(ch if ch in _SLUG_SAFE else "_" for ch in player_id.strip().lower())
+    player_id = player_id.strip()
+    # Music Assistant's Home Assistant players are named by their HA entity.
+    if player_id.startswith("media_player."):
+        return player_id
+    slug = "".join(ch if ch in _SLUG_SAFE else "_" for ch in player_id.lower())
     return f"media_player.mass_{slug}"
 
 

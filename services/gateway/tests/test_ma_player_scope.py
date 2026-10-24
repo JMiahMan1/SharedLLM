@@ -143,6 +143,36 @@ def test_group_with_one_foreign_child_denied(monkeypatch):
     assert json.loads(result)["message_id"] == "m8"
 
 
+def test_set_members_checks_every_added_and_removed_player(monkeypatch):
+    monkeypatch.setattr(
+        ma_scope,
+        "load_entity_permissions",
+        AsyncMock(return_value=_perms(assigned={"media_player.mass_kitchen", "media_player.mass_office"})),
+    )
+    allowed = asyncio.run(
+        ma_scope.check_ma_frame_scope(
+            _frame(command="players/cmd/set_members", target_player="kitchen",
+                   player_ids_to_add=["office"], player_ids_to_remove=[]),
+            user="michele",
+            is_admin=False,
+        )
+    )
+    assert allowed is None
+    denied = asyncio.run(
+        ma_scope.check_ma_frame_scope(
+            _frame(command="players/cmd/set_members", message_id="m9", target_player="kitchen",
+                   player_ids_to_add=[], player_ids_to_remove=["bedroom"]),
+            user="michele",
+            is_admin=False,
+        )
+    )
+    assert denied is not None and json.loads(denied)["message_id"] == "m9"
+
+
+def test_home_assistant_players_are_checked_as_their_own_entity():
+    assert ma_scope.ma_entity_id("media_player.loft_tv") == "media_player.loft_tv"
+
+
 def test_transfer_checks_both_queues(monkeypatch):
     monkeypatch.setattr(
         ma_scope,

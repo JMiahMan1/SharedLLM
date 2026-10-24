@@ -177,6 +177,10 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
   await page.route('**/api/admin/logs**', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/telemetry/notifications**', (route) => route.fulfill({ json: { notifications: [] } }));
 
+  // The shell's activity beacon and the active-calls banner run on every page too.
+  await page.route('**/api/activity', (route) => route.fulfill({ json: { status: 'ok' } }));
+  await page.route('**/api/communication/calls', (route) => route.fulfill({ json: { calls: [] } }));
+
   await page.route('**/api/raven/missions', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/admin/services/updates', (route) =>
     route.fulfill({ json: { checked: 0, updates_available: 0, services: [] } }),
@@ -244,6 +248,7 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
 
 const MA_ALLOWLIST = new Set([
   'players/all', 'players/get', 'players/cmd/play', 'players/cmd/pause',
+  'players/cmd/set_members', 'players/cmd/group_volume',
   'players/cmd/play_pause', 'players/cmd/stop', 'players/cmd/seek',
   'players/cmd/volume_set', 'players/cmd/volume_mute', 'players/cmd/group',
   'players/cmd/group_many', 'players/cmd/ungroup', 'player_queues/all',

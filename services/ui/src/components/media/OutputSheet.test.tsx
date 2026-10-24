@@ -173,34 +173,85 @@ describe('OutputSheet', () => {
     }));
   });
 
-  it('groups another speaker with the playing speaker', async () => {
+  function withMa(overrides: Record<string, Record<string, unknown>>) {
+    vi.mocked(sendMaRemoteCommand).mockImplementation(async (command: string) => {
+      if (command === 'players/all') {
+        return (maList() as Array<{ player_id: string }>)
+          .map((entry) => ({ ...entry, ...(overrides[entry.player_id] ?? {}) })) as never;
+      }
+      return {} as never;
+    });
+  }
+
+  it('offers grouping only with speakers Music Assistant can keep in sync', async () => {
+    withMa({ 'web-1': { can_group_with: ['office'] } });
     renderSheet();
     await screen.findByText('Office Speaker');
 
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Group Office Speaker with Kitchen Speaker' }));
+    expect(screen.queryByRole('checkbox', { name: /Group Kitchen Speaker/ })).toBeNull();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Group Office Speaker with This device' }));
 
-    await waitFor(() => expect(sendMaRemoteCommand).toHaveBeenCalledWith('players/cmd/group_many', {
-      target_player: 'kitchen',
-      child_player_ids: ['kitchen', 'office'],
+    await waitFor(() => expect(sendMaRemoteCommand).toHaveBeenCalledWith('players/cmd/set_members', {
+      target_player: 'web-1',
+      player_ids_to_add: ['office'],
+      player_ids_to_remove: [],
+    }));
+    expect(screen.getByText(/Only speakers that can play in sync with This device/)).toBeTruthy();
+  });
+
+  it('removes a speaker from the group from the member list', async () => {
+    withMa({ 'web-1': { group_members: ['web-1', 'office'], can_group_with: ['office'] } });
+    renderSheet();
+
+    const members = await screen.findByTestId('group-members');
+    expect(members.textContent).toContain('Office Speaker');
+    expect((screen.getByRole('checkbox', { name: 'Group Office Speaker with This device' }) as HTMLInputElement).checked).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Office Speaker from the group' }));
+
+    await waitFor(() => expect(sendMaRemoteCommand).toHaveBeenCalledWith('players/cmd/set_members', {
+      target_player: 'web-1',
+      player_ids_to_add: [],
+      player_ids_to_remove: ['office'],
     }));
   });
 
-  it('removes a speaker from the group when its checkbox is cleared', async () => {
+  it('sets one volume for the whole group', async () => {
+    withMa({ 'web-1': { group_members: ['web-1', 'office'], can_group_with: ['office'], group_volume: 40 } });
+    renderSheet();
+    const slider = await screen.findByRole('slider', { name: 'Group volume' });
+    expect((slider as HTMLInputElement).value).toBe('40');
+    fireEvent.change(slider, { target: { value: '65' } });
+    await waitFor(() => expect(sendMaRemoteCommand).toHaveBeenCalledWith('players/cmd/group_volume', {
+      player_id: 'web-1',
+      volume_level: 65,
+    }));
+  });
+
+  it('leads with a playing speaker when this device has nothing, and can end its group', async () => {
     vi.mocked(api.mediaStatus).mockResolvedValue(status([
-      { ...KITCHEN, group_members: ['media_player.office'] },
+      { ...KITCHEN, group_members: ['media_player.kitchen', 'media_player.office', 'media_player.den'] },
       OFFICE,
       TV,
     ]) as never);
+    withMa({
+      kitchen: { group_members: ['kitchen', 'office', 'den'], can_group_with: ['office', 'den'] },
+    });
+    renderSheet(player({ mediaTitle: null, isPlaying: false }));
+    await screen.findByTestId('group-members');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ungroup all' }));
+    await waitFor(() => expect(sendMaRemoteCommand).toHaveBeenCalledWith('players/cmd/set_members', {
+      target_player: 'kitchen',
+      player_ids_to_add: [],
+      player_ids_to_remove: ['office', 'den'],
+    }));
+  });
+
+  it('says so when nothing can play in sync with the leader', async () => {
     renderSheet();
     await screen.findByText('Office Speaker');
-
-    const checkbox = screen.getByRole('checkbox', { name: 'Group Office Speaker with Kitchen Speaker' });
-    expect((checkbox as HTMLInputElement).checked).toBe(true);
-    await userEvent.click(checkbox);
-
-    await waitFor(() => expect(sendMaRemoteCommand).toHaveBeenCalledWith('players/cmd/ungroup', {
-      player_id: 'office',
-    }));
+    expect(screen.queryByRole('checkbox', { name: /Group/ })).toBeNull();
+    expect(screen.getByText('No other speaker can play in sync with This device.')).toBeTruthy();
   });
 
   it('shows unavailable players dimmed and without actions', async () => {

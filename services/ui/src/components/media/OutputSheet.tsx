@@ -40,6 +40,9 @@ interface RawMaPlayer {
   volume_muted?: unknown;
   group_childs?: unknown;
   group_members?: unknown;
+  /** Players Music Assistant can play in sync with this one. */
+  can_group_with?: unknown;
+  group_volume?: unknown;
   current_item?: { name?: unknown } | null;
   current_media?: { title?: unknown } | null;
 }
@@ -110,6 +113,14 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
   }, []);
 
   const playerId = player?.playerId ?? null;
+  // MA's own view of each player: who it is synced with and who it can sync with.
+  const maById = useMemo(() => {
+    const map = new Map<string, RawMaPlayer>();
+    for (const entry of maPlayers) {
+      if (typeof entry.player_id === 'string') map.set(entry.player_id, entry);
+    }
+    return map;
+  }, [maPlayers]);
   const webPlaying = player?.isPlaying ?? false;
   const webTitle = player?.mediaTitle ?? null;
   const webVolume = player?.volume ?? 0;
@@ -189,7 +200,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
         maId: playerId,
         entityId: null,
         volume: webVolume,
-        groupMembers: [],
+        groupMembers: playerId ? stringList(maById.get(playerId)?.group_members) : [],
       });
     }
 
@@ -199,7 +210,8 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
       if (!entityId) continue;
       const maId = entry.ma_player_id || null;
       if (maId) coveredMaIds.add(maId);
-      const members = stringList(entry.group_members);
+      const maEntry = maId ? maById.get(maId) : undefined;
+      const members = maEntry ? stringList(maEntry.group_members) : stringList(entry.group_members);
       const online = entry.state !== 'unavailable' && entry.state !== 'unknown';
       const title = entry.media_title?.trim() || undefined;
       const section: Section = members.length > 0 ? 'group' : entry.icon_kind === 'tv' ? 'tv' : 'speaker';
@@ -244,18 +256,11 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
     }
 
     return list;
-  }, [hasPlayer, maPlayers, playerId, statusPlayers, webPlaying, webTitle, webVolume]);
+  }, [hasPlayer, maById, maPlayers, playerId, statusPlayers, webPlaying, webTitle, webVolume]);
 
   const speakers = rows.filter((row) => row.key !== 'web' && row.section === 'speaker');
   const tvs = rows.filter((row) => row.section === 'tv');
   const groups = rows.filter((row) => row.section === 'group');
-
-  // Grouping is always relative to a Music Assistant speaker that is either
-  // already a group or is playing right now. Without one there is no queue to
-  // sync, so the checkboxes stay hidden instead of pretending to work.
-  const groupLeader = rows.find((row) => row.key !== 'web' && row.maId && row.groupMembers.length > 0)
-    ?? rows.find((row) => row.key !== 'web' && row.maId && row.playing)
-    ?? null;
 
   const maIdByEntity = useMemo(() => {
     const map = new Map<string, string>();
@@ -264,6 +269,19 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
     }
     return map;
   }, [rows]);
+
+  const othersIn = (row: OutputRow): string[] => row.groupMembers
+    .map((member) => maIdByEntity.get(member) ?? member)
+    .filter((member) => member && member !== row.maId);
+
+  // Grouping is always relative to one Music Assistant player: one already
+  // playing in sync with others (this device included), else this device when
+  // it has something loaded, else a speaker that is playing. Without one there
+  // is no queue to share, so no grouping controls are shown.
+  const groupLeader = rows.find((row) => row.maId && othersIn(row).length > 0)
+    ?? rows.find((row) => row.key === 'web' && (webPlaying || webTitle))
+    ?? rows.find((row) => row.key !== 'web' && row.maId && row.playing)
+    ?? null;
 
   const leaderMembers = useMemo(() => {
     if (!groupLeader?.maId) return new Set<string>();
@@ -276,6 +294,15 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
 
   const isGrouped = (row: OutputRow): boolean =>
     Boolean(row.maId && groupLeader?.maId && row.maId !== groupLeader.maId && leaderMembers.has(row.maId));
+
+  // Only players Music Assistant can keep in sync with the leader may join it
+  // (it reports them as can_group_with); current members can always leave.
+  const syncable = useMemo(() => {
+    const ids = new Set(leaderMembers);
+    const leaderEntry = groupLeader?.maId ? maById.get(groupLeader.maId) : undefined;
+    for (const id of stringList(leaderEntry?.can_group_with)) ids.add(id);
+    return ids;
+  }, [groupLeader, leaderMembers, maById]);
 
   const transfer = async (row: OutputRow) => {
     if (!player || !row.maId || !playerId) return;
@@ -325,27 +352,103 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
     }, 200));
   };
 
-  const toggleGroup = async (row: OutputRow, checked: boolean) => {
-    if (!groupLeader?.maId || !row.maId) return;
-    setGroupBusy(row.key);
+  /** Add players to, or take them out of, the leader's synced group. */
+  const setMembers = async (busy: string, add: string[], remove: string[], done: string, failed: string) => {
+    if (!groupLeader?.maId) return;
+    setGroupBusy(busy);
     try {
-      if (checked) {
-        const children = [groupLeader.maId, ...leaderMembers, row.maId];
-        await sendMaRemoteCommand('players/cmd/group_many', {
-          target_player: groupLeader.maId,
-          child_player_ids: [...new Set(children)],
-        });
-        toast.success(`Added ${row.name} to ${groupLeader.name}`);
-      } else {
-        await sendMaRemoteCommand('players/cmd/ungroup', { player_id: row.maId });
-        toast.success(`Removed ${row.name} from ${groupLeader.name}`);
-      }
+      await sendMaRemoteCommand('players/cmd/set_members', {
+        target_player: groupLeader.maId,
+        player_ids_to_add: add,
+        player_ids_to_remove: remove,
+      });
+      toast.success(done);
       await refresh();
     } catch {
-      toast.error(checked ? 'Could not group that speaker' : 'Could not ungroup that speaker');
+      toast.error(failed);
     } finally {
       setGroupBusy(null);
     }
+  };
+
+  const toggleGroup = (row: OutputRow, checked: boolean) => {
+    if (!groupLeader || !row.maId) return Promise.resolve();
+    return checked
+      ? setMembers(row.key, [row.maId], [], `${row.name} now plays in sync with ${groupLeader.name}`, 'Could not group that speaker')
+      : setMembers(row.key, [], [row.maId], `Removed ${row.name} from the group`, 'Could not remove that speaker from the group');
+  };
+
+  const nameOf = (maId: string): string =>
+    rows.find((row) => row.maId === maId)?.name
+    ?? formatDeviceLabel(maById.get(maId)?.name, maById.get(maId)?.display_name, maId);
+
+  const groupVolumeTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (groupVolumeTimer.current !== null) window.clearTimeout(groupVolumeTimer.current);
+  }, []);
+  const [groupVolume, setGroupVolume] = useState<number | null>(null);
+  const leaderGroupVolume = groupLeader?.maId ? normalizeVolume(maById.get(groupLeader.maId)?.group_volume) : null;
+
+  /** One volume for every speaker in the group, kept in proportion by MA. */
+  const changeGroupVolume = (value: number) => {
+    if (!groupLeader?.maId) return;
+    const leaderId = groupLeader.maId;
+    setGroupVolume(value);
+    if (groupVolumeTimer.current !== null) window.clearTimeout(groupVolumeTimer.current);
+    groupVolumeTimer.current = window.setTimeout(() => {
+      groupVolumeTimer.current = null;
+      void sendMaRemoteCommand('players/cmd/group_volume', { player_id: leaderId, volume_level: value })
+        .catch(() => toast.error('Could not change the group volume'));
+    }, 200);
+  };
+
+  /** The leader's members, each removable, and a way to break the group up. */
+  const groupMembersPanel = () => {
+    if (!groupLeader || leaderMembers.size === 0) return null;
+    const members = [...leaderMembers];
+    return (
+      <div className="mt-2 space-y-1.5 pl-[52px]" data-testid="group-members">
+        <p className="text-[11px] text-slate-400">Playing in sync with</p>
+        <div className="flex items-center gap-2">
+          <Volume2 size={14} className="shrink-0 text-slate-500" aria-hidden />
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={groupVolume ?? leaderGroupVolume ?? 50}
+            onChange={(event) => changeGroupVolume(Number(event.target.value))}
+            aria-label="Group volume"
+            className="h-8 w-full cursor-pointer accent-cyan-400"
+          />
+          <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-slate-500">{groupVolume ?? leaderGroupVolume ?? 50}</span>
+        </div>
+        {members.map((id) => (
+          <div key={id} className="flex items-center gap-2 text-xs text-slate-200">
+            <span className="min-w-0 flex-1 truncate">{nameOf(id)}</span>
+            <button
+              type="button"
+              disabled={groupBusy !== null}
+              onClick={() => void setMembers(`remove:${id}`, [], [id], `Removed ${nameOf(id)} from the group`, 'Could not remove that speaker from the group')}
+              aria-label={`Remove ${nameOf(id)} from the group`}
+              className="min-h-11 rounded-lg px-2.5 text-xs font-medium text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-40"
+            >
+              {groupBusy === `remove:${id}` ? <Loader2 size={13} className="animate-spin" aria-hidden /> : 'Remove'}
+            </button>
+          </div>
+        ))}
+        {members.length > 1 ? (
+          <button
+            type="button"
+            disabled={groupBusy !== null}
+            onClick={() => void setMembers('ungroup-all', [], members, 'Group ended', 'Could not end the group')}
+            className="min-h-11 rounded-lg px-2.5 text-xs font-medium text-amber-200 hover:bg-white/10 disabled:opacity-40"
+          >
+            Ungroup all
+          </button>
+        ) : null}
+      </div>
+    );
   };
 
   const volumeFor = (row: OutputRow): number => volumeOverrides[row.key] ?? row.volume ?? 50;
@@ -355,7 +458,9 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
 
   const renderRow = (row: OutputRow) => {
     const Icon = row.section === 'tv' ? Tv : row.section === 'group' ? Speaker : Speaker;
-    const showGroup = Boolean(groupLeader && row.maId && row.key !== groupLeader.key && row.section !== 'group' && row.online);
+    const showGroup = Boolean(
+      groupLeader && row.maId && row.key !== groupLeader.key && row.online && syncable.has(row.maId),
+    );
     return (
       <div key={row.key} className={cn('rounded-xl border p-3', row.online ? 'border-white/10 bg-white/5' : 'border-white/5 bg-white/[0.02] opacity-60')}>
         <div className="flex items-center gap-3">
@@ -414,6 +519,8 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
             <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-slate-500">{volumeFor(row)}</span>
           </div>
         ) : null}
+
+        {groupLeader && row.key === groupLeader.key ? groupMembersPanel() : null}
 
         {showGroup ? (
           <label className="mt-2 flex min-h-11 cursor-pointer items-center gap-2 rounded-lg pl-[52px] text-xs text-slate-300">
@@ -490,6 +597,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
                   </span>
                 </div>
               ))}
+              {groupLeader?.key === 'web' ? groupMembersPanel() : null}
 
               {loading && rows.length === 1 ? (
                 <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-400" role="status">
@@ -531,6 +639,15 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
               {!groupLeader && speakers.length > 0 ? (
                 <p className="mt-3 text-[11px] text-slate-500">
                   Play on a Music Assistant speaker to group other speakers with it.
+                </p>
+              ) : null}
+              {groupLeader && syncable.size === 0 ? (
+                <p className="mt-3 text-[11px] text-slate-500">
+                  No other speaker can play in sync with {groupLeader.name}.
+                </p>
+              ) : groupLeader ? (
+                <p className="mt-3 text-[11px] text-slate-500">
+                  Only speakers that can play in sync with {groupLeader.name} can join its group.
                 </p>
               ) : null}
             </div>

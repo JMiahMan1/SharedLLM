@@ -27,6 +27,8 @@ MA_COMMAND_ALLOWLIST: frozenset[str] = frozenset(
         "players/cmd/group",
         "players/cmd/group_many",
         "players/cmd/ungroup",
+        "players/cmd/set_members",
+        "players/cmd/group_volume",
         "player_queues/all",
         "player_queues/get",
         "player_queues/items",
