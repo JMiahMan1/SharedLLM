@@ -25,6 +25,8 @@ import { proxiedImage } from './mediaImage';
 import { useMediaToken } from './mediaToken';
 import toast from 'react-hot-toast';
 import { MaRpc, eventIsForPlayer } from '../features/media/engine/maRpc';
+import { SendspinAudioOutput } from '../features/media/engine/sendspinEngine';
+import { sendspinSocket } from '../features/media/engine/sendspinInternals';
 
 /**
  * UI-level playback state. Deliberately distinct from Sendspin's own
@@ -139,7 +141,8 @@ export function clientName(): string {
 
 export function useMAWebPlayer() {
   const playerRef = useRef<SendspinPlayer | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  /** The one <audio> element the player plays through (BUG-49). */
+  const outputRef = useRef(new SendspinAudioOutput());
   /** The control connection (JSON-RPC); one per connection attempt. */
   const rpcRef = useRef<MaRpc | null>(null);
   const sendspinWsRef = useRef<WebSocket | null>(null);
@@ -179,22 +182,13 @@ export function useMAWebPlayer() {
   const playbackRateRef = useRef(state.playbackRate);
   useEffect(() => {
     playbackRateRef.current = state.playbackRate;
-    if (audioRef.current) audioRef.current.playbackRate = state.playbackRate;
+    outputRef.current.setPlaybackRate(state.playbackRate);
   }, [state.playbackRate]);
 
   /** Browsers only start audio from a user gesture: resume the element and
    *  Sendspin's AudioContext while we are inside one. */
   const unlockAudio = useCallback(() => {
-    try {
-      if (audioRef.current?.paused) void audioRef.current.play().catch(() => {});
-      const sched = (playerRef.current as unknown as {
-        scheduler?: { resumeAudioContext?: () => Promise<void>; audioContext?: AudioContext };
-      } | null)?.scheduler;
-      if (sched?.resumeAudioContext) void sched.resumeAudioContext();
-      else if (sched?.audioContext?.state === 'suspended') void sched.audioContext.resume();
-    } catch {
-      /* nothing to unlock yet */
-    }
+    outputRef.current.unlock(playerRef.current);
   }, []);
 
   useEffect(() => {
@@ -319,8 +313,7 @@ export function useMAWebPlayer() {
     try { sendspinWs?.close(1000, reason); } catch { /* already gone */ }
     // Closing fails every call still waiting at once (BUG-48).
     rpc?.close(reason);
-    try { audioRef.current?.remove(); } catch { /* already gone */ }
-    audioRef.current = null;
+    outputRef.current.dispose();
   }, []);
 
   // `initPlayer` and the reconnect scheduler refer to each other.
@@ -353,12 +346,10 @@ export function useMAWebPlayer() {
     setStateLocal(s => ({ ...s, connectionState: reconnectAttemptsRef.current > 0 ? 'RECONNECTING' : 'CONNECTING' }));
 
     let sendspinWs: WebSocket = new WebSocket(gatewaySocketUrl('/api/sendspin', apiToken));
-    const audio = new Audio();
-    audio.crossOrigin = 'anonymous';
-    audio.playbackRate = playbackRateRef.current;
-    document.body.appendChild(audio);
-    audioRef.current = audio;
-    audio.onerror = () => setError('Audio element error. Check browser audio permissions');
+    const audio = outputRef.current.create(
+      playbackRateRef.current,
+      () => setError('Audio element error. Check browser audio permissions'),
+    );
 
     try {
       const player = new SendspinPlayer({
@@ -388,14 +379,14 @@ export function useMAWebPlayer() {
       playerRef.current = player;
       await player.connect();
       // sendspin-js adopts the socket and may have replaced it.
-      sendspinWs = (player as unknown as { core: { wsManager: { ws: WebSocket } } }).core.wsManager.ws;
+      sendspinWs = sendspinSocket(player) ?? sendspinWs;
       sendspinWsRef.current = sendspinWs;
       const { volume, muted } = volumeRef.current;
       try {
         player.setVolume(volume);
         player.setMuted(muted);
-        audio.volume = Math.max(0, Math.min(1, volume / 100));
-        audio.muted = muted;
+        outputRef.current.setVolume(volume);
+        outputRef.current.setMuted(muted);
       } catch {
         /* volume sync is best-effort */
       }
@@ -641,10 +632,8 @@ export function useMAWebPlayer() {
 
   const setVolume = useCallback((volume: number) => {
     try {
-      if ((playerRef.current as unknown as { core?: { isConnected?: boolean } } | null)?.core?.isConnected) {
-        playerRef.current!.setVolume(volume);
-      }
-      if (audioRef.current) audioRef.current.volume = Math.max(0, Math.min(1, volume / 100));
+      if (playerRef.current?.isConnected) playerRef.current.setVolume(volume);
+      outputRef.current.setVolume(volume);
       setStateLocal(s => (s.volume === volume ? s : { ...s, volume }));
     } catch (err) {
       setError('setVolume failed: ' + (err instanceof Error ? err.message : String(err)), err);
@@ -653,10 +642,8 @@ export function useMAWebPlayer() {
 
   const setMuted = useCallback((muted: boolean) => {
     try {
-      if ((playerRef.current as unknown as { core?: { isConnected?: boolean } } | null)?.core?.isConnected) {
-        playerRef.current!.setMuted(muted);
-      }
-      if (audioRef.current) audioRef.current.muted = muted;
+      if (playerRef.current?.isConnected) playerRef.current.setMuted(muted);
+      outputRef.current.setMuted(muted);
       setStateLocal(s => (s.muted === muted ? s : { ...s, muted }));
     } catch (err) {
       setError('setMuted failed: ' + (err instanceof Error ? err.message : String(err)), err);
@@ -666,7 +653,7 @@ export function useMAWebPlayer() {
   /** Playback speed for books and podcasts; the audio element keeps it across tracks. */
   const setPlaybackRate = useCallback((rate: number) => {
     const next = Math.min(3, Math.max(0.5, rate));
-    if (audioRef.current) audioRef.current.playbackRate = next;
+    outputRef.current.setPlaybackRate(next);
     setStateLocal(s => (s.playbackRate === next ? s : { ...s, playbackRate: next }));
   }, []);
 
