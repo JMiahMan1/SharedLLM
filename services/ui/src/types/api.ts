@@ -1897,19 +1897,21 @@ export interface HealthFamilyPerson {
   };
   nutrition?: {
     logged: boolean;
-    calories: number;
+    /** Null when the viewer is in kid mode: no calorie numbers, not even a parent's. */
+    calories: number | null;
   };
-  /** Minimal phase summary only: never flow, symptoms or notes. */
+  /**
+   * Phase and next period only: never flow, symptoms, notes, period dates or
+   * the cycle day (today minus it would be the last period's start).
+   */
   cycle?: {
     applicable: boolean;
     enabled: boolean;
     phase: string | null;
     phase_label: string | null;
-    cycle_day: number | null;
     next_period_start: string | null;
     days_until_next_period: number | null;
     confidence: string | null;
-    detail: string | null;
     /** Practical partner ideas that travel with a shared phase. */
     support?: {
       phase: string;

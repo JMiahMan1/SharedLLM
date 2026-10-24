@@ -426,11 +426,9 @@ describe('HealthToday family sharing', () => {
             enabled: true,
             phase: 'luteal',
             phase_label: 'Luteal',
-            cycle_day: 20,
             next_period_start: '2026-10-30',
             days_until_next_period: 8,
             confidence: 'medium',
-            detail: 'Cycle day 20 of an estimated 28-day cycle.',
             support: {
               phase: 'luteal',
               title: 'Before the next period',
@@ -442,8 +440,47 @@ describe('HealthToday family sharing', () => {
     });
     renderWithClient(<HealthToday onNavigate={() => {}} />);
 
-    expect(await screen.findByText(/Cycle: Luteal/)).toBeInTheDocument();
+    expect(await screen.findByText('Cycle: Luteal · next period in 8 days')).toBeInTheDocument();
     expect(screen.getByText('Before the next period')).toBeInTheDocument();
     expect(screen.getByText('Keep the plans flexible.')).toBeInTheDocument();
+  });
+
+  it('gives every shared scope its own line', async () => {
+    getHealthSummary.mockResolvedValue(summary());
+    getHealthFamily.mockResolvedValue({
+      viewer: 'jeremiah',
+      day: '2026-10-22',
+      people: [
+        {
+          user_id: 'mom',
+          scopes: ['cycle', 'nutrition', 'sleep'],
+          sleep: { duration_minutes: 450, score: 81, label: 'good', logged: true },
+          nutrition: { logged: true, calories: 1420 },
+          cycle: {
+            applicable: true,
+            enabled: true,
+            phase: 'follicular',
+            phase_label: 'Follicular',
+            next_period_start: '2026-11-10',
+            days_until_next_period: 19,
+            confidence: 'medium',
+            support: null,
+          },
+        },
+        {
+          user_id: 'sam',
+          scopes: ['nutrition'],
+          nutrition: { logged: true, calories: null },
+        },
+      ],
+    });
+    renderWithClient(<HealthToday onNavigate={() => {}} />);
+
+    const mom = await screen.findByTestId('shared-mom');
+    expect(within(mom).getByText('Slept 7h 30m · 81/100')).toBeInTheDocument();
+    expect(within(mom).getByText('1,420 kcal logged')).toBeInTheDocument();
+    expect(within(mom).getByText('Cycle: Follicular · next period in 19 days')).toBeInTheDocument();
+    // A kid-mode viewer gets no number from the server, so none is drawn.
+    expect(within(screen.getByTestId('shared-sam')).getByText('Food logged today')).toBeInTheDocument();
   });
 });

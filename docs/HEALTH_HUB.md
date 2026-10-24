@@ -36,7 +36,11 @@ Built in this pass:
   observed 15–90 day gaps). Irregular cycles are described, not diagnosed.
   Fertile windows are deliberately not predicted: every surface says estimates
   only, not contraception or medical advice. The family projection shares at
-  most phase/next-period, never flow, symptoms, notes or periods. An adult can
+  most phase/next-period, never flow, symptoms, notes, period dates or the
+  cycle day (today minus it is the last period's start), and not the owner's
+  own estimate text; a test pins the projected keys. On Health → Today each
+  shared scope (sleep, food, cycle) gets its own line, and a viewer in kid
+  mode gets "food logged" without a calorie number. An adult can
   share with a spouse, who also sees short phase-aware suggestions for being
   supportive, labelled as general ideas rather than medical advice.
 - **Family roles and sharing**: `father`, `mother`, `child`, `teen`,
