@@ -44,6 +44,8 @@ function isUpstreamDown(scenario: MediaScenario, upstream: 'ma' | 'abs'): boolea
   return false;
 }
 
+const NO_ERRORS = { ma: null, abs: null };
+
 function emptyVariant(name: string): unknown {
   switch (name) {
     case 'ma-recent': return { status: 'ok', recent: [] };
@@ -53,10 +55,11 @@ function emptyVariant(name: string): unknown {
     case 'abs-library': return { status: 'ok', books: [] };
     case 'abs-search': return { status: 'ok', books: [] };
     case 'abs-last-played': return { status: 'ok', books: [] };
-    case 'media-home': return { recent: [], continue: [], playlists: [], favorites: [], radio: [], errors: {} };
-    case 'media-search': return { top: null, tracks: [], artists: [], albums: [], playlists: [], audiobooks: [], podcasts: [], authors: [] };
-    case 'media-library': return { items: [], total: 0 };
-    case 'media-favorites': return { favorites: [] };
+    case 'media-home': return { recent: [], continue: [], playlists: [], favorites: [], radio: [], errors: NO_ERRORS };
+    case 'media-search': return { top: null, tracks: [], artists: [], albums: [], playlists: [], audiobooks: [], podcasts: [], authors: [], errors: NO_ERRORS };
+    case 'media-library': return { tab: 'tracks', items: [], libraries: [], offset: 0, limit: 50, errors: NO_ERRORS };
+    case 'media-favorites': return { items: [], errors: NO_ERRORS };
+    case 'podcast-episodes': return { status: 'SUCCESS', episodes: [] };
     case 'entities': return { entities: [] };
     case 'media-status': return { status: 'SUCCESS', message: 'ok', service: 'media', detail: { active: null, available: [], all_players: [] } };
     default: return fixture(name);
@@ -193,6 +196,7 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
   await page.route('**/api/media/favorites', json('media-favorites'));
   await page.route('**/api/media/abs/progress', json('abs-progress'));
   await page.route('**/api/media/token', json('media-token'));
+  await page.route('**/api/media/podcast-episodes**', json('podcast-episodes', 'ma'));
   // Remote (non-web-player) MA commands are REST, not the player's JSON-RPC
   // socket. Default to an empty answer; output.spec overrides players/all.
   await page.route('**/api/media/ma-command', (route) =>

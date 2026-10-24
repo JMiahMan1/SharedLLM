@@ -1,5 +1,30 @@
 {
-  "favorites": [
-    { "name": "Midnight Drive", "artist": "The Synthwave Collective", "uri": "library://track/1", "library": "Music" }
-  ]
+  "items": [
+    {
+      "uri": "library://track/1",
+      "name": "Midnight Drive",
+      "media_type": "track",
+      "artist": "The Synthwave Collective",
+      "album": "Neon Nights",
+      "image": "http://ma.local:8095/imageproxy?path=track1",
+      "duration": 210.0,
+      "version": "",
+      "favorite": true
+    },
+    {
+      "uri": "library://album/1",
+      "name": "Neon Nights",
+      "media_type": "album",
+      "artist": "The Synthwave Collective",
+      "album": "",
+      "image": "http://ma.local:8095/imageproxy?path=album1",
+      "duration": null,
+      "version": "",
+      "favorite": null
+    }
+  ],
+  "errors": {
+    "ma": null,
+    "abs": null
+  }
 }

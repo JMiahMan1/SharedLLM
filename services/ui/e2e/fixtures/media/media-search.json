@@ -1,22 +1,119 @@
 {
-  "top": { "name": "Midnight Drive", "artist": "The Synthwave Collective", "uri": "library://track/1" },
+  "top": {
+    "uri": "library://track/1",
+    "name": "Midnight Drive",
+    "media_type": "track",
+    "artist": "The Synthwave Collective",
+    "album": "Neon Nights",
+    "image": "http://ma.local:8095/imageproxy?path=track1",
+    "duration": 210.0,
+    "version": "",
+    "favorite": true
+  },
   "tracks": [
-    { "name": "Midnight Drive", "artist": "The Synthwave Collective", "uri": "library://track/1", "library": "Music" }
+    {
+      "uri": "library://track/1",
+      "name": "Midnight Drive",
+      "media_type": "track",
+      "artist": "The Synthwave Collective",
+      "album": "Neon Nights",
+      "image": "http://ma.local:8095/imageproxy?path=track1",
+      "duration": 210.0,
+      "version": "",
+      "favorite": true
+    },
+    {
+      "uri": "library://track/2",
+      "name": "Neon Rain",
+      "media_type": "track",
+      "artist": "Vector Hold",
+      "album": "Neon Nights",
+      "image": "http://ma.local:8095/imageproxy?path=track2",
+      "duration": 187.0,
+      "version": "",
+      "favorite": false
+    }
   ],
   "artists": [
-    { "name": "The Synthwave Collective", "uri": "library://artist/1" }
+    {
+      "uri": "library://artist/1",
+      "name": "The Synthwave Collective",
+      "media_type": "artist",
+      "artist": "",
+      "album": "",
+      "image": "",
+      "duration": null,
+      "version": "",
+      "favorite": null
+    }
   ],
   "albums": [
-    { "name": "Neon Nights", "artist": "The Synthwave Collective", "uri": "library://album/1" }
+    {
+      "uri": "library://album/1",
+      "name": "Neon Nights",
+      "media_type": "album",
+      "artist": "The Synthwave Collective",
+      "album": "",
+      "image": "http://ma.local:8095/imageproxy?path=album1",
+      "duration": null,
+      "version": "",
+      "favorite": null
+    }
   ],
   "playlists": [
-    { "name": "Late Night Synth", "uri": "library://playlist/1" }
+    {
+      "uri": "library://playlist/1",
+      "name": "Late Night Synth",
+      "media_type": "playlist",
+      "artist": "",
+      "album": "",
+      "image": "http://ma.local:8095/imageproxy?path=pl1",
+      "duration": null,
+      "version": "",
+      "favorite": null
+    }
   ],
   "audiobooks": [
-    { "id": "book-1", "title": "Project Hail Mary", "author": "Andy Weir" }
+    {
+      "uri": "abs://book-1",
+      "name": "Project Hail Mary",
+      "media_type": "audiobook",
+      "artist": "Andy Weir",
+      "album": "",
+      "image": "/api/items/book-1/cover",
+      "duration": 58320.0,
+      "version": "",
+      "favorite": null
+    }
   ],
-  "podcasts": [],
+  "podcasts": [
+    {
+      "uri": "abs://pod-1",
+      "name": "The Quiet Hour",
+      "media_type": "podcast",
+      "artist": "Ada Lane",
+      "album": "",
+      "image": "/api/items/pod-1/cover",
+      "duration": null,
+      "version": "",
+      "favorite": null
+    }
+  ],
   "authors": [
-    { "name": "Andy Weir", "uri": "library://author/1" }
-  ]
+    {
+      "uri": "abs://author/aut-1",
+      "name": "Andy Weir",
+      "media_type": "author",
+      "artist": "",
+      "album": "",
+      "image": "",
+      "duration": null,
+      "version": "",
+      "favorite": null
+    }
+  ],
+  "errors": {
+    "ma": null,
+    "abs": null
+  }
 }

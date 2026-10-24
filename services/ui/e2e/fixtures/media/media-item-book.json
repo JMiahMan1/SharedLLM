@@ -1,0 +1,40 @@
+{
+  "uri": "abs://book-1",
+  "name": "Project Hail Mary",
+  "media_type": "audiobook",
+  "artist": "Andy Weir",
+  "album": "",
+  "image": "/api/items/book-1/cover",
+  "duration": 58320.0,
+  "description": "A lone astronaut wakes up on a ship with no memory.",
+  "children": [
+    {
+      "uri": "abs://book-1#chapter-0",
+      "name": "Chapter 1",
+      "media_type": "chapter",
+      "image": "",
+      "duration": 1800.0,
+      "index": 0
+    },
+    {
+      "uri": "abs://book-1#chapter-1",
+      "name": "Chapter 2",
+      "media_type": "chapter",
+      "image": "",
+      "duration": 2100.0,
+      "index": 1
+    },
+    {
+      "uri": "abs://book-1#chapter-2",
+      "name": "Chapter 3",
+      "media_type": "chapter",
+      "image": "",
+      "duration": 1950.0,
+      "index": 2
+    }
+  ],
+  "errors": {
+    "ma": null,
+    "abs": null
+  }
+}
