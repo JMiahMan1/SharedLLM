@@ -11,12 +11,14 @@ import {
   Check,
   CheckSquare,
   Copy,
+  LayoutGrid,
   Loader2,
   Palette,
   Pin,
   PinOff,
   Plus,
   RefreshCw,
+  Rows3,
   Search,
   Sparkles,
   Square,
@@ -55,10 +57,13 @@ import {
   readNotesSnapshot,
   setIndexEntry,
   sortNotesByIndex,
+  readNotesLayout,
   topTags,
+  writeNotesLayout,
   writeNotesSnapshot,
   type NoteColor,
   type NotesIndex,
+  type NotesLayout,
 } from '../lib/notesMeta';
 
 interface NoteSummary {
@@ -152,6 +157,12 @@ export default function Notes() {
   const [search, setSearch] = useState('');
   const [tagFilter, setTagFilter] = useState('');
   const [view, setView] = useState<NotesView>('notes');
+  const [layout, setLayout] = useState<NotesLayout>(readNotesLayout);
+  const toggleLayout = () => {
+    const next: NotesLayout = layout === 'grid' ? 'list' : 'grid';
+    setLayout(next);
+    writeNotesLayout(next);
+  };
   /** The open editor: `draft` is null while the note is being read. */
   const [editing, setEditing] = useState<{ draft: DraftState | null; title: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -721,6 +732,16 @@ export default function Notes() {
           </button>
           <button
             type="button"
+            onClick={toggleLayout}
+            data-testid="notes-layout"
+            className="glass-button flex min-h-11 min-w-11 items-center justify-center px-3 py-2 text-xs"
+            title={layout === 'grid' ? 'List view' : 'Grid view'}
+            aria-label={layout === 'grid' ? 'Show notes as a list' : 'Show notes as a grid'}
+          >
+            {layout === 'grid' ? <Rows3 size={14} /> : <LayoutGrid size={14} />}
+          </button>
+          <button
+            type="button"
             onClick={() => void refresh()}
             className="glass-button flex min-h-11 min-w-11 items-center justify-center px-3 py-2 text-xs"
             title="Refresh"
@@ -903,7 +924,11 @@ export default function Notes() {
           </p>
         </div>
       ) : (
-        <div className="columns-1 sm:columns-2 lg:columns-3 gap-4 [column-fill:_balance]">
+        <div
+          data-testid="notes-shelf"
+          data-layout={layout}
+          className={layout === 'grid' ? 'columns-1 sm:columns-2 lg:columns-3 gap-4 [column-fill:_balance]' : 'mx-auto max-w-2xl'}
+        >
           {visible.map((note) => {
             const body = contents[note.path];
             const meta = indexEntry(index, note.path);

@@ -426,6 +426,22 @@ describe('Notes (Keep-style)', () => {
     expect(typeof snapshot?.savedAt).toBe('number');
   });
 
+  it('switches between grid and list and remembers the choice on this device', async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    expect(screen.getByTestId('notes-shelf')).toHaveAttribute('data-layout', 'grid');
+    await user.click(screen.getByRole('button', { name: 'Show notes as a list' }));
+    expect(screen.getByTestId('notes-shelf')).toHaveAttribute('data-layout', 'list');
+    unmount();
+
+    renderWithProviders(<Notes />);
+    await screen.findByText('Trip ideas');
+    expect(screen.getByTestId('notes-shelf')).toHaveAttribute('data-layout', 'list');
+    expect(screen.getByRole('button', { name: 'Show notes as a grid' })).toBeInTheDocument();
+  });
+
   it('opens a note from the list text without a fresh read wait', async () => {
     const user = userEvent.setup();
     renderWithProviders(<Notes />);

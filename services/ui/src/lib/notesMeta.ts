@@ -430,3 +430,29 @@ export function writeNotesSnapshot(scope: string, notes: unknown[], index: Notes
     // Storage is full or unavailable: the page just loads from the network.
   }
 }
+
+/** How the shelf is laid out: Keep's masonry grid or one full-width column. */
+export type NotesLayout = 'grid' | 'list';
+
+const LAYOUT_KEY = 'jarvis_notes_layout_v1';
+
+/**
+ * This viewer's last chosen layout, or `grid` when none is stored (or storage
+ * is unavailable, e.g. a private window). It is a per-device convenience, so
+ * it never goes into the shared index.
+ */
+export function readNotesLayout(): NotesLayout {
+  try {
+    return localStorage.getItem(LAYOUT_KEY) === 'list' ? 'list' : 'grid';
+  } catch {
+    return 'grid';
+  }
+}
+
+export function writeNotesLayout(layout: NotesLayout): void {
+  try {
+    localStorage.setItem(LAYOUT_KEY, layout);
+  } catch {
+    // Storage unavailable: the choice lasts for this visit only.
+  }
+}
