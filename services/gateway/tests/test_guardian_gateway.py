@@ -190,3 +190,9 @@ def test_a_parent_asking_about_their_childs_week_gets_the_recap(monkeypatch):
     assert answer == "Nothing has been reported from Emma's phone yet this week."
     assert asyncio.run(gateway_main._child_week_answer("How was Zoe's week?", "dad")) is None  # not his child
     assert asyncio.run(gateway_main._child_week_answer("turn on the lights", "dad")) is None
+
+
+def test_note_routes_refuse_an_empty_body_cleanly():
+    client = TestClient(app)
+    for path in ("/api/communication/notes/versions", "/api/communication/notes/share"):
+        assert client.post(path, content=b"").status_code == 422

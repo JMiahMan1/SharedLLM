@@ -6006,10 +6006,21 @@ async def proxy_duplicate_note(request: Request):
 _NOTE_VERSION_ACTIONS = {"list": "versions", "read": "version_read", "restore": "version_restore"}
 
 
+async def _request_json_object(request: Request) -> dict:
+    """The request's JSON object; an empty or malformed body is a 422, not a 500."""
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Send a JSON object") from None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="Send a JSON object")
+    return body
+
+
 @app.post("/api/communication/notes/versions")
 async def proxy_note_versions(request: Request):
     """Earlier versions of one note from Nextcloud: list, read one, or restore one."""
-    body = await request.json()
+    body = await _request_json_object(request)
     action = _NOTE_VERSION_ACTIONS.get(str(body.get("action") or "list"))
     if action is None:
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "action must be list, read or restore"})
@@ -6028,7 +6039,7 @@ _NOTE_SHARE_ACTIONS = {"list": "shares", "people": "sharees", "add": "share_add"
 @app.post("/api/communication/notes/share")
 async def proxy_note_share(request: Request):
     """Share a note with someone on the family's Nextcloud (OCS sharing), or stop."""
-    body = await request.json()
+    body = await _request_json_object(request)
     action = _NOTE_SHARE_ACTIONS.get(str(body.get("action") or "list"))
     if action is None:
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "action must be list, people, add or remove"})
