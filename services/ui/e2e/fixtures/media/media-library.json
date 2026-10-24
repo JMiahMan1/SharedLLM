@@ -1,7 +1,34 @@
 {
+  "tab": "tracks",
   "items": [
-    { "name": "Midnight Drive", "artist": "The Synthwave Collective", "uri": "library://track/1", "library": "Music", "favorite": true },
-    { "name": "Neon Rain", "artist": "Vector Hold", "uri": "library://track/2", "library": "Music", "favorite": false }
+    {
+      "uri": "library://track/1",
+      "name": "Midnight Drive",
+      "media_type": "track",
+      "artist": "The Synthwave Collective",
+      "album": "Neon Nights",
+      "image": "http://ma.local:8095/imageproxy?path=track1",
+      "duration": 210.0,
+      "version": "",
+      "favorite": true
+    },
+    {
+      "uri": "library://track/2",
+      "name": "Neon Rain",
+      "media_type": "track",
+      "artist": "Vector Hold",
+      "album": "Neon Nights",
+      "image": "http://ma.local:8095/imageproxy?path=track2",
+      "duration": 187.0,
+      "version": "",
+      "favorite": false
+    }
   ],
-  "total": 2
+  "libraries": [],
+  "offset": 0,
+  "limit": 50,
+  "errors": {
+    "ma": null,
+    "abs": null
+  }
 }

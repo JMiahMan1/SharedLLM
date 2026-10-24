@@ -1,0 +1,21 @@
+{
+  "status": "SUCCESS",
+  "episodes": [
+    {
+      "uri": "audiobookshelf--abs1://podcast_episode/pod-1 ep-2",
+      "name": "Episode 2: Slow Mornings",
+      "duration": 2460,
+      "published": 1761300000000,
+      "fully_played": false,
+      "resume_position_ms": 600000
+    },
+    {
+      "uri": "audiobookshelf--abs1://podcast_episode/pod-1 ep-1",
+      "name": "Episode 1: Starting Over",
+      "duration": 2100,
+      "published": 1760700000000,
+      "fully_played": true,
+      "resume_position_ms": null
+    }
+  ]
+}

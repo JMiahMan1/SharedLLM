@@ -13,6 +13,8 @@ import { listRemoteMaPlayers, sendMaRemoteCommand } from '../lib/maRemotePlayer'
 import { proxiedImage } from '../lib/mediaImage';
 import { useMediaToken } from '../lib/mediaToken';
 import { formatTimeAgo, normalizePlayedAt } from '../features/media/format';
+import { mediaKeys } from '../features/media/api/keys';
+import { useBooksInProgress, usePlaylists, useRecent } from '../features/media/api/queries';
 import { DeviceSelector } from '../components/media/DeviceSelector';
 import { NowPlayingCard, type NowPlayingView } from '../components/media/NowPlayingCard';
 import { MediaExplorer } from '../components/media/MediaExplorer';
@@ -176,7 +178,7 @@ const Media = () => {
   }, [maConnected, listMaPlayers, isMaTarget]);
 
   const { data: entities = [] } = useQuery({
-    queryKey: ['media-entities'],
+    queryKey: mediaKeys.entities(),
     queryFn: () => api.getEntities(),
     select: (data) => data.filter((e) => e.domain === 'media_player'),
     staleTime: 60_000,
@@ -255,7 +257,7 @@ const Media = () => {
   const activeUri = isWebPlayer ? maPlayer.mediaUri : remoteStatus?.media_content_id || null;
   const maItemUri = activeUri && activeUri.includes('://') ? activeUri : null;
   const { data: detail } = useQuery({
-    queryKey: ['media-detail', maItemUri],
+    queryKey: mediaKeys.detail(maItemUri ?? ''),
     queryFn: async () => {
       const data = await api.getMediaDetail(maItemUri!);
       return ((data && (data as { result?: unknown }).result) || data) as {
@@ -445,9 +447,9 @@ const Media = () => {
 
   /* shelves */
 
-  const playlistsQ = useQuery({ queryKey: ['ma-playlists'], queryFn: () => api.getMusicAssistantPlaylists(), retry: 1, staleTime: 60_000 });
-  const recentQ = useQuery({ queryKey: ['ma-recent'], queryFn: () => api.getMusicAssistantRecent(), retry: 1, staleTime: 60_000 });
-  const lastPlayedQ = useQuery({ queryKey: ['abs-last-played'], queryFn: () => api.getAudiobookshelfLastPlayed(), retry: 1, staleTime: 60_000 });
+  const playlistsQ = usePlaylists();
+  const recentQ = useRecent();
+  const lastPlayedQ = useBooksInProgress();
 
   const jumpBackIn = useMemo<ShelfItem[]>(() => {
     const items: ShelfItem[] = [];

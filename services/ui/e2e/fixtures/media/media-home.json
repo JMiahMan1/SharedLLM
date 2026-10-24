@@ -1,14 +1,92 @@
 {
   "recent": [
-    { "name": "Midnight Drive", "artist": "The Synthwave Collective", "uri": "library://track/1", "last_played": "2026-09-25T22:14:00Z" }
+    {
+      "uri": "library://track/1",
+      "name": "Midnight Drive",
+      "media_type": "track",
+      "artist": "The Synthwave Collective",
+      "album": "Neon Nights",
+      "image": "http://ma.local:8095/imageproxy?path=track1",
+      "duration": 210.0,
+      "version": "",
+      "favorite": true
+    },
+    {
+      "uri": "library://track/2",
+      "name": "Neon Rain",
+      "media_type": "track",
+      "artist": "Vector Hold",
+      "album": "Neon Nights",
+      "image": "http://ma.local:8095/imageproxy?path=track2",
+      "duration": 187.0,
+      "version": "",
+      "favorite": false
+    },
+    {
+      "uri": "abs://book-1",
+      "name": "Project Hail Mary",
+      "media_type": "audiobook",
+      "artist": "Andy Weir",
+      "album": "",
+      "image": "/api/items/book-1/cover",
+      "duration": 58320.0,
+      "version": "",
+      "favorite": null
+    }
   ],
-  "continue": [
-    { "id": "book-1", "title": "Project Hail Mary", "author": "Andy Weir", "progress": 0.42, "last_played": "2026-09-25T08:30:00Z", "library_id": "lib-books" }
-  ],
+  "continue": [],
   "playlists": [
-    { "name": "Late Night Synth", "items": 12, "uri": "library://playlist/1" }
+    {
+      "uri": "library://playlist/1",
+      "name": "Late Night Synth",
+      "media_type": "playlist",
+      "artist": "",
+      "album": "",
+      "image": "http://ma.local:8095/imageproxy?path=pl1",
+      "duration": null,
+      "version": "",
+      "favorite": null
+    },
+    {
+      "uri": "library://playlist/2",
+      "name": "Focus Flow",
+      "media_type": "playlist",
+      "artist": "",
+      "album": "",
+      "image": "",
+      "duration": null,
+      "version": "",
+      "favorite": null
+    }
   ],
-  "favorites": [],
-  "radio": [],
-  "errors": {}
+  "favorites": [
+    {
+      "uri": "library://track/1",
+      "name": "Midnight Drive",
+      "media_type": "track",
+      "artist": "The Synthwave Collective",
+      "album": "Neon Nights",
+      "image": "http://ma.local:8095/imageproxy?path=track1",
+      "duration": 210.0,
+      "version": "",
+      "favorite": true
+    }
+  ],
+  "radio": [
+    {
+      "uri": "library://radio/1",
+      "name": "Night Owl Radio",
+      "media_type": "radio",
+      "artist": "",
+      "album": "",
+      "image": "",
+      "duration": null,
+      "version": "",
+      "favorite": null
+    }
+  ],
+  "errors": {
+    "ma": null,
+    "abs": null
+  }
 }

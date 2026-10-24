@@ -1,1 +1,6 @@
-{ "status": "ok", "progress": 0.42 }
+{
+  "status": "SUCCESS",
+  "item_id": "book-1",
+  "episode_id": null,
+  "message": "Progress saved"
+}

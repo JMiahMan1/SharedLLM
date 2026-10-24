@@ -6,6 +6,9 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
+import { useDebounce } from '../../hooks/useDebounce';
+import { mediaKeys } from '../../features/media/api/keys';
+import { MEDIA_QUERY_DEFAULTS, MIN_SEARCH_LENGTH, SEARCH_DEBOUNCE_MS, usePlaylists, useRecent } from '../../features/media/api/queries';
 import { ROW_CLASS, type PlayHandler, type PlayRequest, type QueueHandler, type QueueOption } from './types';
 
 function Loading() {
@@ -86,7 +89,10 @@ export function MediaExplorer({ open, onClose, onPlay, onQueue }: {
   const [podcast, setPodcast] = useState<{ id: string; title: string } | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const q = search.trim();
-  const searching = q.length >= 2;
+  // Requests follow the typing 250 ms behind (BUG-62); filtering a loaded
+  // list below still uses the live text.
+  const debouncedQ = useDebounce(q, SEARCH_DEBOUNCE_MS);
+  const searching = q.length >= MIN_SEARCH_LENGTH;
 
   // Close on Escape, and start fresh each time it opens.
   useEffect(() => {
@@ -102,44 +108,34 @@ export function MediaExplorer({ open, onClose, onPlay, onQueue }: {
   }, [open]);
 
   const maSearch = useQuery({
-    queryKey: ['ma-search', q],
-    queryFn: () => api.searchMusicAssistant(q, undefined, 30, false),
-    enabled: open && tab === 'ma' && searching,
-    staleTime: 60_000,
+    queryKey: mediaKeys.maSearch(debouncedQ),
+    queryFn: () => api.searchMusicAssistant(debouncedQ, undefined, 30, false),
+    enabled: open && tab === 'ma' && debouncedQ.length >= MIN_SEARCH_LENGTH,
+    ...MEDIA_QUERY_DEFAULTS,
   });
-  const maPlaylists = useQuery({
-    queryKey: ['ma-playlists'],
-    queryFn: () => api.getMusicAssistantPlaylists(),
-    enabled: open && tab === 'ma' && !searching,
-    staleTime: 60_000,
-  });
-  const maRecent = useQuery({
-    queryKey: ['ma-recent'],
-    queryFn: () => api.getMusicAssistantRecent(),
-    enabled: open && tab === 'ma' && !searching,
-    staleTime: 60_000,
-  });
+  const maPlaylists = usePlaylists(open && tab === 'ma' && !searching);
+  const maRecent = useRecent(open && tab === 'ma' && !searching);
   const absLibraries = useQuery({
-    queryKey: ['abs-libraries'],
+    queryKey: mediaKeys.absLibraries(),
     queryFn: () => api.getAudiobookshelfLibraries(),
     enabled: open && tab === 'abs' && !library,
-    staleTime: 60_000,
+    ...MEDIA_QUERY_DEFAULTS,
   });
   const absBooks = useQuery({
-    queryKey: ['abs-library-items', library?.id],
+    queryKey: mediaKeys.absLibrary(library?.id ?? ''),
     queryFn: () => api.getAudiobookshelfLibrary(library!.id, 200),
     enabled: open && tab === 'abs' && !!library,
-    staleTime: 60_000,
+    ...MEDIA_QUERY_DEFAULTS,
   });
   const absSearch = useQuery({
-    queryKey: ['abs-search', q],
-    queryFn: () => api.searchAudiobookshelf(q, 30),
-    enabled: open && tab === 'abs' && searching && !library,
-    staleTime: 60_000,
+    queryKey: mediaKeys.absSearch(debouncedQ),
+    queryFn: () => api.searchAudiobookshelf(debouncedQ, 30),
+    enabled: open && tab === 'abs' && debouncedQ.length >= MIN_SEARCH_LENGTH && !library,
+    ...MEDIA_QUERY_DEFAULTS,
   });
 
   const episodes = useQuery({
-    queryKey: ['podcast-episodes', podcast?.id],
+    queryKey: mediaKeys.podcastEpisodes(podcast?.id ?? ''),
     queryFn: () => api.getPodcastEpisodes(podcast!.id, podcast!.title),
     enabled: open && tab === 'abs' && !!podcast,
     staleTime: 5 * 60_000,
