@@ -4236,6 +4236,18 @@ export const api = {
     const resp = await apiClient.get('/api/recommendations/video');
     return resp.data;
   },
+
+  /** A podcast suggestion for the signed-in member, derived from their listening. */
+  async getPodcastRecommendation(): Promise<{ status: string; recommendation: { theme: string; show: string | null; host: string | null; style: string; reason: string; matched_on: string; kind: string; redeemed: boolean; redirect_to?: string } | null }> {
+    const resp = await apiClient.get('/api/recommendations/podcast');
+    return resp.data;
+  },
+
+  /** A book suggestion for the signed-in member, derived from their reading. */
+  async getBookRecommendation(): Promise<{ status: string; recommendation: { theme: string; title: string | null; author: string | null; style: string; reason: string; matched_on: string; kind: string; redeemed: boolean; redirect_to?: string } | null }> {
+    const resp = await apiClient.get('/api/recommendations/book');
+    return resp.data;
+  },
 };
 
 /** Notice category to on/off; a category that is absent is on. */

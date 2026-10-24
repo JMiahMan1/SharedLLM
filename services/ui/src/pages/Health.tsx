@@ -4,6 +4,8 @@ import HealthTabs, { type HealthTab } from '../components/health/HealthTabs';
 import HealthToday from '../components/health/HealthToday';
 import MusicRecommendationCard from '../components/health/MusicRecommendationCard';
 import VideoRecommendationCard from '../components/health/VideoRecommendationCard';
+import PodcastRecommendationCard from '../components/health/PodcastRecommendationCard';
+import BookRecommendationCard from '../components/health/BookRecommendationCard';
 import HealthSleep from '../components/health/HealthSleep';
 import HealthNutrition from '../components/health/HealthNutrition';
 import HealthProfilePanel from '../components/health/HealthProfilePanel';
@@ -47,11 +49,13 @@ const Health = () => {
         className="pt-1"
       >
         {tab === 'today' && (
-          <>
+          <div className="space-y-3 sm:space-y-4">
             <MusicRecommendationCard />
             <VideoRecommendationCard />
+            <PodcastRecommendationCard />
+            <BookRecommendationCard />
             <HealthToday onNavigate={setTab} />
-          </>
+          </div>
         )}
         {tab === 'fitness' && <HealthFitness />}
         {tab === 'sleep' && <HealthSleep />}

@@ -21,6 +21,25 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `HEAD` Family guard: **podcasts and books recommendations from the digital profile** —
+  Jarvis now reads recent podcast listening and reading activity from telemetry and suggests
+  redeemed alternatives. `services/common/podcast_recommendations.py` and `services/common/book_recommendations.py`
+  map themes to vetted Christian shows/authors (news worldview, theology study, church history,
+  parenting, audio dramas, classic apologetics, epic fantasy, etc.) or redirects when unredeemed.
+  New routes `GET /api/recommendations/podcast` and `GET /api/recommendations/book` return only the
+  derived suggestion (raw stream is parents-only). Rendered via `PodcastRecommendationCard` and
+  `BookRecommendationCard` on the Health page. Verified with unit & integration tests.
+- `HEAD` Fix: **chat trivia lag and location upload timeout storms** —
+  (1) Trivia chat lag: Server-side execution now decouples game answer processing (`_apply_game_answer`)
+  into background tasks (`asyncio.create_task`) when a short message arrives in a room with an active game,
+  so the user's `send` HTTP request returns immediately in <1.5s instead of 16s. Star banking and
+  telemetry activity run concurrently with Nextcloud Talk post via `asyncio.gather(..., return_exceptions=True)`.
+  Bot answer and next round prompt are merged into a single Talk message, halving OCS round trips.
+  Client-side `ChatPanel.tsx` now polls every 2s (instead of 10s) whenever a game is active in the room or
+  for 15s after sending a message.
+  (2) Location timeout storms: In `services/identity/main.py` (`update_user_location`), Home Assistant
+  and Geo location forwarding are offloaded to FastAPI `background.add_task` instead of being awaited
+  inline, preventing gateway middleware timeouts during phone reconnection bursts or HA token outages.
 - `73ef660c` CI fix: **pin BIBLE_BOOKS_PATH in conftest** so full-suite test_config_env_isolation passes.
 - `7b5dc17e` CI fix: **give five service tests unique basenames** (`test_gateway_artifacts.py`,
   `test_storage_artifacts.py`, `test_geo_activity_feed.py`, `test_telemetry_activity.py`,
@@ -405,9 +424,7 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
 - docs/PENDING_TASKS.md: RAG ingest of promoted notes and plan reflections.
 - Health: periodic cycle data never appears in family projections; the family
   cards render sleep/calories/cycle/support — watch for layout regressions.
-- Chat trivia: the session rework shipped in `0ea5a938` (ten-question
-  sessions, rising difficulty, locked roster). Ask Jeremiah to retry if
-  anything still looks off before digging further.
+- Chat trivia: lag eliminated (server game answers decoupled into background tasks, single OCS post for answer+next prompt, and UI brisk polling at 2s during active games).
 - Home Assistant: execution logs `ha_client` `get_areas` 401s about once a
   minute (`https://ha.sumemail.com/api/template`) — an expired per-user HA
   long-lived token. Ask Jeremiah to mint a fresh token and update it in
@@ -418,10 +435,10 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
 1. The Android collection engine is complete: usage, media sessions, calls and SMS all
    land on the digital profile (commits through `ac963b2c`). Video watching is covered by
    media sessions (YouTube title/creator/duration) plus per-app foreground time.
-2. Jarvis recommendations from the profile: music style matching (`8d5bc4f6`) and video
-   themes redeemed or redirected (`3de98f13`) are done — podcasts, books, games and
-   activities follow. Suggestions are the member's to see; the raw feed behind them stays
-   parents-only.
+2. Jarvis recommendations from the profile: music style matching (`8d5bc4f6`), video
+   themes redeemed or redirected (`3de98f13`), podcast recommendations, and book
+   recommendations are done — games and activities follow. Suggestions are the member's
+   to see; the raw feed behind them stays parents-only.
 3. Keep the plan docs (`docs/HEALTH_HUB.md`, this handover) updated in the same commit as
    the code when scope changes.
 

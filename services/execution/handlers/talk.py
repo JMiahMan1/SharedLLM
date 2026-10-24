@@ -20,6 +20,7 @@ log = logging.getLogger("execution.talk")
 
 TALK_UPLOAD_DIR = "Talk Uploads"
 _JARVIS_TASKS: set[asyncio.Task] = set()
+_GAME_TASKS: set[asyncio.Task] = set()
 _TALK_RETRIES = 3
 _TALK_RETRY_DELAY = 2
 
@@ -611,14 +612,6 @@ async def _apply_game_answer(
     if state.kind == "trivia":
         result = games.apply_trivia_answer(state, who, text)
 
-        async def next_round() -> None:
-            outcome = games.advance_trivia(state)
-            if outcome.get("finished"):
-                board = ", ".join(f"{name} {stars} ⭐" for name, stars in outcome["leaderboard"])
-                await say(f"🏆 Game over! {board}" if board else "🏆 Game over!")
-            else:
-                await say(games.trivia_prompt(state))
-
         if result.get("ignored"):
             # Not in this session's locked roster (a late joiner, or the shared
             # family account): the round carries on without them.
@@ -628,24 +621,41 @@ async def _apply_game_answer(
             return {"kind": "trivia", "result": result}
 
         if result["correct"]:
-            # Bank the win in the real star ledger, not just the in-memory
-            # game; capture the question before the session moves on.
+            # Bank the win in the real star ledger and record in activity feed,
+            # while announcing the win and advancing to the next round in one clean message.
             question_text = state.question
-            await _bank_game_stars(who, result["stars"], f"Trivia: {question_text}")
             from services.execution import activity
 
-            # The same win lands in the person's activity feed (profiles read it).
-            await activity.record(result["player"] or who, "game", item=question_text, action="win")
-            await say(
-                f"✅ {result['player']} got it!",
-                games.game_card(state, "Correct!", f"{result['player']} is on {result['stars']} ⭐"),
+            outcome = games.advance_trivia(state)
+            card = games.game_card(state, "Correct!", f"{result['player']} is on {result['stars']} ⭐")
+            if outcome.get("finished"):
+                board = ", ".join(f"{name} {stars} ⭐" for name, stars in outcome["leaderboard"])
+                over_msg = f"🏆 Game over! {board}" if board else "🏆 Game over!"
+                say_msg = f"✅ {result['player']} got it!\n\n{over_msg}"
+            else:
+                prompt = games.trivia_prompt(state)
+                say_msg = f"✅ {result['player']} got it!\n\n{prompt}"
+
+            await asyncio.gather(
+                say(say_msg, card),
+                _bank_game_stars(who, result["stars"], f"Trivia: {question_text}"),
+                activity.record(result["player"] or who, "game", item=question_text, action="win"),
+                return_exceptions=True,
             )
-            await next_round()
             return {"kind": "trivia", "result": result}
 
         if result.get("round_complete") in ("all_wrong", "timeout"):
-            await say(f"The answer was {state.answers[0]}. Next question coming.", None)
-            await next_round()
+            outcome = games.advance_trivia(state)
+            if outcome.get("finished"):
+                board = ", ".join(f"{name} {stars} ⭐" for name, stars in outcome["leaderboard"])
+                over_msg = f"🏆 Game over! {board}" if board else "🏆 Game over!"
+                say_msg = f"The answer was {state.answers[0]}.\n\n{over_msg}"
+            else:
+                prompt = games.trivia_prompt(state)
+                say_msg = f"The answer was {state.answers[0]}.\n\n{prompt}"
+            await say(say_msg, None)
+            return {"kind": "trivia", "result": result}
+
         # A lone wrong answer stays quiet: the round keeps its secret.
         return {"kind": "trivia", "result": result}
 
@@ -656,10 +666,11 @@ async def _apply_game_answer(
         "Pair found!" if result["matched"] else "Not a pair",
         f"{result['message']} {who} has {result['stars']} ⭐",
     )
-    await say(result["message"], card)
     if state.over:
         board = ", ".join(f"{p.name} {p.stars} ⭐" for p in state.leaderboard)
-        await say(f"🏆 All pairs found! {board}")
+        await say(f"{result['message']}\n\n🏆 All pairs found! {board}", card)
+    else:
+        await say(result["message"], card)
     return {"kind": "memory", "result": result}
 
 
@@ -988,8 +999,16 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 and not (req.message or "").strip().startswith("/")
             ):
                 # A short message can be an answer to a family game running in
-                # this room; nothing happens when no game is active.
-                await _apply_game_answer(provider, req.token, req.user_context.user, req.message.strip())
+                # this room; schedule as a background task so message delivery
+                # is not blocked by game state evaluation and bot speech.
+                from services.execution.handlers import family_games as games
+
+                if games.registry.get(req.token) is not None:
+                    task = asyncio.create_task(
+                        _apply_game_answer(provider, req.token, req.user_context.user, req.message.strip())
+                    )
+                    _GAME_TASKS.add(task)
+                    task.add_done_callback(_GAME_TASKS.discard)
 
             return ExecutionResult(
                 status="SUCCESS",

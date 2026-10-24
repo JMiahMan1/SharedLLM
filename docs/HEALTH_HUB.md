@@ -402,6 +402,16 @@ point.
       watching — themes first redeemed (wholesome creator, same kind of content), then
       redirected to a wholesome activity when no redeemed equivalent exists — and a
       `VideoRecommendationCard` on the Health page. Raw feed stays parents-only.
+      Third brick (podcasts): a reviewed theme/show map (`services/common/podcast_recommendations.py`)
+      plus `GET /api/recommendations/podcast` returning a suggestion derived from the member's
+      listening — themes first redeemed (wholesome Christian shows, similar topic/style), then
+      redirected to an audio drama or family walk when no redeemed equivalent exists — and a
+      `PodcastRecommendationCard` on the Health page. Raw feed stays parents-only.
+      Fourth brick (books): a reviewed theme/author map (`services/common/book_recommendations.py`)
+      plus `GET /api/recommendations/book` returning a suggestion derived from the member's
+      reading — themes first redeemed (wholesome/classic literature, similar genre), then
+      redirected to uplifting family reading when no redeemed equivalent exists — and a
+      `BookRecommendationCard` on the Health page. Raw feed stays parents-only.
 - [ ] **Who sees what (the visibility rule).** The collected data is parents-only: a minor's
       profile — every raw section — is open to both parents (including the linked mother
       under `docs/ROLES.md`) and to no one else; a minor does not browse their own raw feed,
@@ -425,8 +435,8 @@ around it — DONE (trivia wins, media plays, app pages, Bible chapters, importe
 study-book reads, external media sessions, general phone usage, per-app foreground time,
 calls and SMS all land on the profile); (2) the Android collection engine — usage,
 media sessions, calls and SMS DONE (video covered by media sessions + per-app foreground
-time); (3) Jarvis recommendations from the profile — IN PROGRESS (music style matching
-and video themes redeemed or redirected DONE; podcasts, books, games and activities follow); (4) time budgets and routines;
+time); (3) Jarvis recommendations from the profile — IN PROGRESS (music style matching,
+video themes redeemed or redirected, podcast recommendations, and book recommendations DONE; games and activities follow); (4) time budgets and routines;
 (5) app control and the web filter;
 (6) monitoring alerts and the weekly recap; (7) the parents' page and the discipleship
 surfaces.
