@@ -27,6 +27,7 @@ from starlette.datastructures import UploadFile
 
 from services.common import active_minutes as _active_minutes
 from services.common import guardian_recap as _recap
+from services.common import health_coach as _health_coach
 from services.common import notify as _notify
 from services.common.activity_recommendations import recommend_activity
 from services.common.book_recommendations import book_events, recommend_book
@@ -1551,6 +1552,36 @@ async def _child_week_answer(query: str, user_id: str) -> str | None:
     if recap is None:
         return None
     return _recap.spoken(child.get("display_name") or child["username"], recap)
+
+
+async def _health_coach_answer(query: str, user_id: str) -> str | None:
+    """A first-person health question ("how did I sleep?") answered from the
+    caller's own health store, before any model; anything else falls through.
+
+    Only the caller's own data is read (the health service acts as
+    ``user_id``), and a topic whose card is switched off is left to the chat.
+    """
+    name = _health_coach.topic(query)
+    if not name or not user_id:
+        return None
+    headers = {"X-Internal-Secret": INTERNAL_SECRET, "X-User-Id": user_id}
+    day = _household_now().date().isoformat()
+
+    async def read(path: str, params: dict) -> dict | None:
+        async with borrow_http_client() as client:
+            resp = await client.get(f"{HEALTH_SVC}{path}", params=params, headers=headers)
+            return await resp.json(content_type=None) if resp.status == 200 else None
+
+    try:
+        summary = await read("/summary", {"day": day})
+        if not summary or not _health_coach.allowed(name, summary):
+            return None
+        week = await read("/weekly", {"end": day}) if name in ("sleep", "week") else None
+        goals = await read("/goals", {"day": day}) if name in ("week", "goals") else None
+    except Exception as exc:
+        log.warning("[health] coach answer skipped: %s", exc)
+        return None
+    return _health_coach.answer(name, summary, week, goals)
 
 
 async def handle_workspace_creation(
@@ -3252,6 +3283,14 @@ async def chat_handler(request: Request, background_tasks=None):
         if is_openai:
             return _make_openai_response(recap_answer, selected_model, "guardian_recap")
         return _make_ollama_response(recap_answer, selected_model, "guardian_recap")
+
+    coach_answer = await _health_coach_answer(query, user_id)
+    if coach_answer:
+        await update_history(user_id, "user", query)
+        await update_history(user_id, "assistant", coach_answer)
+        if is_openai:
+            return _make_openai_response(coach_answer, selected_model, "health_coach")
+        return _make_ollama_response(coach_answer, selected_model, "health_coach")
 
     if wants_workspace_readme_generation(query):
         return await generate_workspace_readme_via_coding_model(
@@ -13241,6 +13280,21 @@ async def get_health_active_minutes(request: Request, day: str | None = None):
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD") from exc
     return await _active_minutes_week(request, day)
+
+
+@app.get("/api/health/goals")
+async def get_health_goals(request: Request, day: str | None = None):
+    return await _health_json("GET", "/goals", request, params={"day": day})
+
+
+@app.post("/api/health/goals")
+async def post_health_goal(request: Request):
+    return await _health_json("POST", "/goals", request, body=await request.json())
+
+
+@app.delete("/api/health/goals/{goal_id}")
+async def delete_health_goal(goal_id: int, request: Request):
+    return await _health_json("DELETE", f"/goals/{goal_id}", request)
 
 
 @app.get("/api/health/streaks")

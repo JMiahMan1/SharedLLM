@@ -47,6 +47,9 @@ def client():
     ("method", "path", "body", "upstream"),
     [
         ("GET", "/api/health/streaks", None, "/streaks"),
+        ("GET", "/api/health/goals", None, "/goals"),
+        ("POST", "/api/health/goals", {"kind": "water_days", "day": "2026-10-21", "target_days": 3}, "/goals"),
+        ("DELETE", "/api/health/goals/2", None, "/goals/2"),
         ("GET", "/api/health/fasting", None, "/fasting"),
         ("POST", "/api/health/fasting/start", {"target_hours": 14}, "/fasting/start"),
         ("POST", "/api/health/fasting/stop", {}, "/fasting/stop"),
@@ -61,6 +64,51 @@ def test_routes_forward_as_the_caller(client, calls, method, path, body, upstrea
     assert kw["headers"]["X-User-Id"] == "dad"
     if body is not None:
         assert kw["json"] == body
+
+
+def _coach_store(monkeypatch, summary):
+    seen: list[tuple[str, dict]] = []
+
+    class _Store:
+        async def get(self, url, **kw):
+            seen.append((url, kw))
+            if url.endswith("/summary"):
+                return _Resp(summary)
+            return _Resp({"averages": {"sleep_minutes": 420}, "goals": []})
+
+    @asynccontextmanager
+    async def fake():
+        yield _Store()
+
+    monkeypatch.setattr(gateway_main, "borrow_http_client", fake)
+    return seen
+
+
+def _summary(metrics_on=True):
+    on = {"coach": metrics_on, "sleep": True}
+    return {
+        "profile": {"kid_mode": False, "metrics": on},
+        "sleep": {"last_night": {"duration_minutes": 450}, "score": None, "need_minutes": 480},
+    }
+
+
+def test_the_coach_answers_from_the_callers_own_store(monkeypatch):
+    import asyncio
+
+    seen = _coach_store(monkeypatch, _summary())
+    text = asyncio.run(gateway_main._health_coach_answer("How did I sleep?", "dad"))
+    assert text.startswith("You slept 7 h 30 min last night.")
+    assert all(kw["headers"]["X-User-Id"] == "dad" for _url, kw in seen)
+
+
+def test_the_coach_stays_quiet_when_switched_off_or_off_topic(monkeypatch):
+    import asyncio
+
+    seen = _coach_store(monkeypatch, _summary(metrics_on=False))
+    assert asyncio.run(gateway_main._health_coach_answer("How did I sleep?", "dad")) is None
+    seen.clear()
+    assert asyncio.run(gateway_main._health_coach_answer("play some music", "dad")) is None
+    assert seen == []
 
 
 def test_active_minutes_composes_geo_and_the_health_store(client, monkeypatch):

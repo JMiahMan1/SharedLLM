@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field, StrictBool, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.config import INTERNAL_SECRET
-from services.health import challenges, cycle, fasting, food_seed, preferences, scoring, streaks, weekly
+from services.health import challenges, cycle, fasting, food_seed, goals, preferences, scoring, streaks, weekly
 from services.health.models import (
     ChallengeMember,
     Checkin,
@@ -45,6 +45,7 @@ from services.health.models import (
     FamilyChallenge,
     FastingSession,
     FoodEntry,
+    HealthGoal,
     HealthPreferences,
     HealthProfile,
     HealthShare,
@@ -2205,6 +2206,96 @@ def delete_challenge(challenge_id: int, request: Request, session: Session = Dep
     session.delete(row)
     session.commit()
     return {"deleted": challenge_id}
+
+
+# --- weekly goals (the coach) ---------------------------------------------
+
+
+class GoalIn(BaseModel):
+    kind: str
+    day: str
+    target_days: int = Field(ge=1, le=7)
+
+    @field_validator("kind")
+    @classmethod
+    def _kind(cls, value: str) -> str:
+        if value not in challenges.KINDS:
+            raise ValueError(f"kind must be one of {', '.join(challenges.KINDS)}")
+        return value
+
+
+def _week_counts(session: Session, user: str, start: date) -> tuple[dict[str, dict], dict]:
+    """Per kind, the days that counted in the week from ``start``, plus the goals used."""
+    days, measured = _challenge_member_days(session, user, start)
+    counts = {
+        kind: challenges.progress(
+            kind, days, water_goal_ml=measured["water_goal_ml"], sleep_need_minutes=measured["sleep_need_minutes"]
+        )
+        for kind in challenges.KINDS
+    }
+    return counts, measured
+
+
+@app.get("/goals")
+def list_goals(request: Request, day: str | None = None, session: Session = Depends(get_session)):
+    """This week's own goals with live progress, and one gentle suggestion."""
+    user = _user(request)
+    start = challenges.week_start(date.fromisoformat(_day(day or date.today().isoformat())))
+    rows = session.exec(
+        select(HealthGoal).where(HealthGoal.user_id == user, HealthGoal.week_start == start.isoformat()).order_by(HealthGoal.created_at.asc())
+    ).all()
+    counts, measured = _week_counts(session, user, start)
+    last_counts, _ = _week_counts(session, user, start - timedelta(days=7))
+    taken = {row.kind for row in rows}
+    out = []
+    for row in rows:
+        meta = challenges.KINDS[row.kind]
+        relevant = {"water_days": "water_goal_ml", "sleep_nights": "sleep_need_minutes"}.get(row.kind)
+        out.append({
+            "id": row.id,
+            "kind": row.kind,
+            "title": meta["title"],
+            "unit": meta["unit"],
+            "detail": meta["detail"],
+            "target_days": row.target_days,
+            **counts[row.kind],
+            "reached": counts[row.kind]["count"] >= row.target_days,
+            "guideline_goal": relevant in measured["guideline_goals"] if relevant else False,
+        })
+    room = len(rows) < goals.MAX_GOALS_PER_WEEK
+    return {
+        "week_start": start.isoformat(),
+        "week_end": (start + timedelta(days=6)).isoformat(),
+        "goals": out,
+        "max_goals": goals.MAX_GOALS_PER_WEEK,
+        "kinds": [{"kind": kind, **meta, "taken": kind in taken} for kind, meta in challenges.KINDS.items()],
+        "suggestion": goals.suggestion({kind: value["count"] for kind, value in last_counts.items()}, taken) if room else None,
+    }
+
+
+@app.post("/goals")
+def create_goal(body: GoalIn, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    start = challenges.week_start(date.fromisoformat(_day(body.day)))
+    rows = session.exec(select(HealthGoal).where(HealthGoal.user_id == user, HealthGoal.week_start == start.isoformat())).all()
+    if any(row.kind == body.kind for row in rows):
+        raise HTTPException(status_code=409, detail="You already have that goal this week.")
+    if len(rows) >= goals.MAX_GOALS_PER_WEEK:
+        raise HTTPException(status_code=409, detail="Two goals a week is plenty. Finish or remove one first.")
+    session.add(HealthGoal(user_id=user, week_start=start.isoformat(), kind=body.kind, target_days=body.target_days))
+    session.commit()
+    return list_goals(request, day=start.isoformat(), session=session)
+
+
+@app.delete("/goals/{goal_id}")
+def delete_goal(goal_id: int, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    row = session.get(HealthGoal, goal_id)
+    if row is None or row.user_id != user:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    session.delete(row)
+    session.commit()
+    return {"deleted": goal_id}
 
 
 # --- streaks ---------------------------------------------------------------
