@@ -12,7 +12,7 @@ import traceback
 import uuid
 import zipfile
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlsplit
@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from pydantic import BaseModel
 from starlette.datastructures import UploadFile
 
+from services.common import active_minutes as _active_minutes
 from services.common import guardian_recap as _recap
 from services.common import notify as _notify
 from services.common.activity_recommendations import recommend_activity
@@ -13180,6 +13181,66 @@ async def get_health_family(request: Request, day: str | None = None):
 @app.get("/api/health/export")
 async def export_health(request: Request):
     return await _health_json("GET", "/export", request)
+
+
+async def _geo_get(path: str, params: dict) -> dict | None:
+    """One read from geo for the active-minutes week; None when geo is down."""
+    try:
+        async with shared_http_client() as client:
+            resp = await client.request(
+                "GET",
+                f"{GEO_SVC}{path}",
+                params={k: v for k, v in params.items() if v is not None},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=8.0),
+            )
+            if resp.status == 200:
+                return await resp.json()
+    except Exception as exc:
+        log.warning("[health] geo %s unavailable: %s", path, exc)
+    return None
+
+
+async def _active_minutes_week(request: Request, day: str | None = None) -> dict:
+    """The caller's week of active minutes (``services/common/active_minutes.py``).
+
+    Steps and workouts come from geo, heart rate and device totals from the
+    health store; this composes them without copying anything into either.
+    A source that cannot be reached is named in ``unavailable``.
+    """
+    tz = ZoneInfo(os.getenv("TIMEZONE") or "UTC")
+    today = date.fromisoformat(day) if day else _household_now().date()
+    target, viewer, is_admin = await _read_target(request, None)
+    days_back = (today - _active_minutes.week_start(today)).days + 1
+    owner = {"user_id": target, "viewer": viewer, "is_admin": is_admin}
+    steps = await _geo_get("/steps/sources", {**owner, "days": days_back, "hourly": "true"})
+    workouts = await _geo_get("/workouts", {**owner, "limit": 50})
+    profile = await _health_json("GET", "/profile", request)
+    heart = await _health_json("GET", "/metrics/heart_rate", request, params={"days": days_back + 1})
+    device = await _health_json("GET", "/metrics/active_minutes", request, params={"days": days_back + 1})
+    birth_year = (profile or {}).get("birth_year")
+    result = _active_minutes.compute(
+        today=today,
+        tz=tz,
+        hourly_steps=(steps or {}).get("hourly"),
+        workouts=(workouts or {}).get("workouts"),
+        heart_rate=(heart or {}).get("samples"),
+        device_minutes=(device or {}).get("samples"),
+        age=today.year - birth_year if birth_year else None,
+        target_minutes=(profile or {}).get("weekly_active_minutes"),
+    )
+    result["unavailable"] = [name for name, got in (("steps", steps), ("workouts", workouts)) if got is None]
+    return result
+
+
+@app.get("/api/health/active-minutes")
+async def get_health_active_minutes(request: Request, day: str | None = None):
+    if day:
+        try:
+            date.fromisoformat(day)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD") from exc
+    return await _active_minutes_week(request, day)
 
 
 # Fasting window: adults only (the health service refuses a minor's profile).

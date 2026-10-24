@@ -152,6 +152,7 @@ import type {
   HealthShare,
   HealthFamilyPerson,
   HealthCycleState,
+  HealthActiveMinutes,
   HealthFast,
   HealthFastingState,
   HealthCycleSummary,
@@ -1891,6 +1892,12 @@ export const api = {
 
   async deleteHealthCycleLog(day: string): Promise<void> {
     await apiClient.delete(`/api/health/cycle/logs/${encodeURIComponent(day)}`);
+  },
+
+  /** The week's active minutes from steps, workouts, heart rate and device totals. */
+  async getHealthActiveMinutes(day?: string): Promise<HealthActiveMinutes> {
+    const resp = await apiClient.get('/api/health/active-minutes', { params: day ? { day } : {} });
+    return resp.data;
   },
 
   /** The running fast and the last week's (adults only; `allowed: false` for a minor). */

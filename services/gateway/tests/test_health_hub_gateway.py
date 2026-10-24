@@ -60,3 +60,36 @@ def test_routes_forward_as_the_caller(client, calls, method, path, body, upstrea
     assert kw["headers"]["X-User-Id"] == "dad"
     if body is not None:
         assert kw["json"] == body
+
+
+def test_active_minutes_composes_geo_and_the_health_store(client, monkeypatch):
+    async def _ident(_request):
+        return {"user": "dad", "is_admin": False}
+
+    monkeypatch.setattr(gateway_main, "_acting_identity", _ident)
+    monkeypatch.setenv("TIMEZONE", "UTC")
+    seen: list[tuple[str, dict]] = []
+
+    class _Routed:
+        async def request(self, method, url, **kw):
+            seen.append((url, kw))
+            if url.endswith("/steps/sources"):
+                return _Resp({"hourly": {"phone": {"2026-10-20:07": 4000}}})
+            if url.endswith("/workouts"):
+                return _Resp({"workouts": []})
+            if url.endswith("/profile"):
+                return _Resp({"birth_year": 1986, "weekly_active_minutes": 150})
+            return _Resp({"samples": []})
+
+    @asynccontextmanager
+    async def fake():
+        yield _Routed()
+
+    monkeypatch.setattr(gateway_main, "shared_http_client", fake)
+    body = client.get("/api/health/active-minutes", params={"day": "2026-10-21"}).json()
+    assert body["total_minutes"] == 30
+    assert body["target_minutes"] == 150 and body["percent"] == 20
+    assert body["unavailable"] == []
+    steps_call = next(kw for url, kw in seen if url.endswith("/steps/sources"))
+    assert steps_call["params"]["user_id"] == "dad" and steps_call["params"]["days"] == 3
+    assert client.get("/api/health/active-minutes", params={"day": "21-10-2026"}).status_code == 422
