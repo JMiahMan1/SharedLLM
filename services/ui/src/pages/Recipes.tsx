@@ -13,17 +13,14 @@ import LogRecipeSheet from '../components/health/LogRecipeSheet';
 import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
 import { SHOPPING_PATH, SHOPPING_TITLE, buildShoppingList, ingredientLines, shoppingShareText } from '../lib/shoppingList';
 import { buildRecipeNote, type ImportedRecipe, type RecipeSearchItem } from '../lib/recipeImport';
+import { readMealPlan, saveMealPlan } from '../lib/mealPlanStore';
 import {
-  buildMealPlan,
   emptyPlan,
-  parseMealPlan,
   planLevel,
   pickSurprise,
   planDayOf,
   planShareText,
   PLAN_DAYS,
-  PLAN_PATH,
-  PLAN_TITLE,
   type PlanDay,
   type WeeklyPlan,
 } from '../lib/mealPlan';
@@ -51,6 +48,8 @@ interface LogRequest {
   title: string;
   path: string;
   body: string;
+  /** Set when logging the week plan's dinner: the day to tick cooked. */
+  planDay?: PlanDay;
 }
 
 function notesOf(response: ExecutionResponse | undefined): RecipeSummary[] {
@@ -264,14 +263,9 @@ export default function Recipes() {
     }
     setPlanBusy(true);
     try {
-      const res = await api.readNote(PLAN_TITLE, STORAGE, PLAN_PATH, asUser);
-      if (res.status === 'SUCCESS') {
-        setPlan(parseMealPlan(res.message ?? ''));
-        setPlanExists(true);
-      } else {
-        setPlan(emptyPlan());
-        setPlanExists(false);
-      }
+      const stored = await readMealPlan(asUser);
+      setPlan(stored.plan);
+      setPlanExists(stored.exists);
       setPlanOpen(true);
     } catch {
       toast.error('Could not open the week plan');
@@ -313,7 +307,7 @@ export default function Recipes() {
     setLoggingPlanned(true);
     try {
       const res = await api.readNote(recipeTitle, STORAGE, path, asUser);
-      if (res.status === 'SUCCESS') setLogRequest({ title: recipeTitle, path, body: noteBody(res.message ?? '') });
+      if (res.status === 'SUCCESS') setLogRequest({ title: recipeTitle, path, body: noteBody(res.message ?? ''), planDay: planDayOf() });
       else toast.error(res.message || 'Could not read that recipe');
     } catch {
       toast.error('Could not read that recipe');
@@ -325,13 +319,7 @@ export default function Recipes() {
   const savePlan = async () => {
     setPlanBusy(true);
     try {
-      const saved = await saveNote({
-        title: PLAN_TITLE,
-        content: buildMealPlan(plan),
-        category: RECIPES_DIR,
-        previous: planExists ? { title: PLAN_TITLE, category: RECIPES_DIR, path: PLAN_PATH } : undefined,
-        asUser,
-      });
+      const saved = await saveMealPlan(plan, planExists, asUser);
       if (saved.response.status === 'SUCCESS') {
         toast.success('Week plan saved');
         setPlanExists(true);
@@ -347,9 +335,12 @@ export default function Recipes() {
   };
 
   const buildList = async () => {
-    const planned = PLAN_DAYS.map((day) => plan[day].title).filter(Boolean) as string[];
+    // A dinner already cooked needs no shopping: log -> plan -> list closes the loop.
+    const planned = PLAN_DAYS.filter((day) => !plan[day].cooked)
+      .map((day) => plan[day].title)
+      .filter(Boolean) as string[];
     if (planned.length === 0) {
-      toast.error('Pick some dinners first');
+      toast.error(PLAN_DAYS.some((day) => plan[day].title) ? 'Every planned dinner is already cooked' : 'Pick some dinners first');
       return;
     }
     setListing(true);
@@ -887,6 +878,9 @@ export default function Recipes() {
           title={logRequest.title}
           path={logRequest.path}
           body={logRequest.body}
+          planDay={logRequest.planDay}
+          asUser={asUser}
+          onMarkedCooked={(day) => setPlan((current) => ({ ...current, [day]: { ...current[day], cooked: true } }))}
           onClose={() => setLogRequest(null)}
         />
       )}

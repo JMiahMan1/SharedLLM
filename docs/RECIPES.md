@@ -257,7 +257,9 @@ account is connected, everything above still works.
       Logging is built, as a button rather than the tick: **Log tonight's dinner** on
       today's row of the week plan, and **Log to Health** on an open recipe, post the
       note's per-serving nutrition with a portion picker (see HEALTH_HUB.md Phase 4).
-      The tick and the log stay separate; a planned-vs-eaten card is still open.
+      Logging tonight's dinner from the plan now also ticks that day cooked in the plan (an
+      option in the log sheet, on by default), and the shopping list leaves cooked dinners out
+      (HEALTH_HUB.md Phase 8). A planned-vs-eaten card is still open.
 - [ ] Optional (decide with the family): daily calorie/protein targets, weekly averages,
       and per-person portions.
 - [ ] Stay out of the way when there is no plan or nutrition data: hide the card.

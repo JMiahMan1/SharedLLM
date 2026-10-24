@@ -4,6 +4,7 @@ import { Zap } from 'lucide-react';
 import { api } from '../../services/api';
 import { formatDayLabel, localDay } from '../../lib/healthHub';
 import { activeMinutesLine, SOURCE_LABELS } from '../../lib/activeMinutes';
+import PlanWorkoutForm from './PlanWorkoutForm';
 
 const RING = 96;
 const STROKE = 9;
@@ -108,6 +109,7 @@ export default function ActiveMinutesCard() {
           ))}
         </>
       )}
+      <PlanWorkoutForm />
     </section>
   );
 }
