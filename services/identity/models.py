@@ -733,3 +733,15 @@ class ScreenTimeRequest(SQLModel, table=True):  # type: ignore
     decided_by: str | None = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     decided_at: str | None = None
+
+
+class RecommendationLanes(SQLModel, table=True):  # type: ignore
+    """Which kinds of suggestion a parent has blocked for a member (Phase 11 step 3).
+
+    data JSON: {"blocked": ["game", ...]}; every lane not listed is blessed (on).
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    data: str = Field(default="{}")
+    updated_by: str | None = None
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

@@ -139,3 +139,20 @@ def test_guessing_locks_the_unlock_screen(family):
     # Even the right password waits now.
     assert kid.post("/api/guard/parent-unlock", json={"username": "mom", "password": "mom-pass"}).status_code == 429
     main._UNLOCK_FAILURES.clear()
+
+
+def test_a_parent_blocks_a_lane_and_the_child_sees_it_off(family):
+    assert family("kid").get("/api/recommendation-lanes/kid").json()["lanes"]["game"] is True
+    r = family("mom").put("/api/recommendation-lanes/kid", json={"lanes": {"game": False}})
+    assert r.status_code == 200 and r.json()["lanes"]["game"] is False and r.json()["lanes"]["music"] is True
+    assert family("kid").get("/api/recommendation-lanes/kid").json()["lanes"]["game"] is False
+    assert family("kid").get("/api/internal/recommendation-lanes/kid").json() == {"blocked": ["game"]}
+    family("dad").put("/api/recommendation-lanes/kid", json={"lanes": {"game": True}})
+    assert family("kid").get("/api/internal/recommendation-lanes/kid").json() == {"blocked": []}
+
+
+def test_only_parents_change_lanes_and_values_are_checked(family):
+    assert family("kid").put("/api/recommendation-lanes/kid", json={"lanes": {"game": True}}).status_code == 403
+    assert family("sib").get("/api/recommendation-lanes/kid").status_code == 403
+    assert family("dad").put("/api/recommendation-lanes/kid", json={"lanes": {"tiktok": False}}).status_code == 422
+    assert family("dad").put("/api/recommendation-lanes/grown", json={"lanes": {"game": False}}).status_code == 403

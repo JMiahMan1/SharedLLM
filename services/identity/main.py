@@ -49,6 +49,7 @@ from services.identity.models import (
     UserActivitySharing,
     ScreenRules,
     ScreenTimeRequest,
+    RecommendationLanes,
     UserAvatarImage,
     VoiceSignature,
     UserCalendarSetting,
@@ -4345,6 +4346,63 @@ def give_screen_time_bonus(username: str, body: dict, session: Session = Depends
     session.commit()
     session.refresh(bonus)
     return {"request": _request_read(bonus), "notify": [subject.username]}
+
+
+RECOMMENDATION_LANES = ("music", "video", "podcast", "book", "game", "activity")
+
+
+def _blocked_lanes(session: Session, username: str) -> list[str]:
+    row = session.get(RecommendationLanes, username)
+    try:
+        data = json.loads(row.data) if row and row.data else {}
+    except ValueError:
+        data = {}
+    return [lane for lane in data.get("blocked") or [] if lane in RECOMMENDATION_LANES]
+
+
+@app.get("/api/recommendation-lanes/{username}")
+def get_recommendation_lanes(username: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Which suggestion lanes are on for a member: theirs to read, a minor's
+    parents' to change."""
+    subject = _screen_subject(session, username)
+    if caller.username != subject.username and not _may_manage_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can see this")
+    blocked = _blocked_lanes(session, subject.username)
+    return {
+        "username": subject.username,
+        "lanes": {lane: lane not in blocked for lane in RECOMMENDATION_LANES},
+        "can_manage": _may_manage_screen_time(caller, subject),
+    }
+
+
+@app.put("/api/recommendation-lanes/{username}")
+def put_recommendation_lanes(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """``{"lanes": {"game": false, ...}}``: false blocks a lane, true blesses it."""
+    subject = _screen_subject(session, username)
+    if not _may_manage_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can change suggestions")
+    lanes = (body or {}).get("lanes")
+    if not isinstance(lanes, dict) or any(k not in RECOMMENDATION_LANES or not isinstance(v, bool) for k, v in lanes.items()):
+        raise HTTPException(status_code=422, detail="lanes must map music/video/podcast/book/game/activity to true or false")
+    blocked = set(_blocked_lanes(session, subject.username))
+    for lane, on in lanes.items():
+        if on:
+            blocked.discard(lane)
+        else:
+            blocked.add(lane)
+    row = session.get(RecommendationLanes, subject.username) or RecommendationLanes(username=subject.username)
+    row.data = json.dumps({"blocked": sorted(blocked)})
+    row.updated_by = caller.username
+    row.updated_at = datetime.now(UTC).isoformat()
+    session.add(row)
+    session.commit()
+    return {"username": subject.username, "lanes": {lane: lane not in blocked for lane in RECOMMENDATION_LANES}}
+
+
+@app.get("/api/internal/recommendation-lanes/{username}")
+def internal_recommendation_lanes(username: str, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: the lanes a member's parents blocked (the gateway skips them)."""
+    return {"blocked": _blocked_lanes(session, username.strip().lower())}
 
 
 # Wrong parent logins typed on a child's phone, per child: five within ten
