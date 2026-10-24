@@ -361,6 +361,19 @@ point.
       and school weekly schedules, pause/grace, bonus time, child extension requests a parent
       grants — with Qustodio's semantics (midnight reset, "always allowed" list, lock
       navigation vs lock device).
+      **4a built (server + app, 2026-10-24):** a parent sets a child's daily and weekend limits,
+      bedtime and school hours, pauses the phone and adds bonus minutes; the child asks for more
+      time (with a note) and both parents get a notice; a grant becomes today's bonus. The one rule
+      is `services/common/screen_time.py` (midnight reset in the household `TIMEZONE`, overnight
+      bedtime, weekday school hours, pause first, bonus extends only the limit, an always-allowed
+      list for the dialer, messages and Jarvis). Identity stores rules and requests
+      (`ScreenRules`, `ScreenTimeRequest`; only a minor's parents may change them, the child may
+      read theirs); the gateway serves `GET /api/screen-time/{user}/status` from the rules plus
+      today's reported use, and sends the notices. Screens: `ScreenTimeCard` (the child, Health →
+      Today) and `ScreenTimeControls` (a parent, under the child in the phone-use card).
+      **4b (next): enforcement on the phone** — the Android app reads the status and locks
+      everything but the always-allowed apps; this needs an Accessibility service and a device
+      check, and pairs with tamper resistance below.
 - [ ] **App control.** Block apps, per-app daily limits, install approvals, per-permission
       gating; Accessibility-service enforcement on the device with Family Link's one-minute
       grace warning before a block lands.

@@ -700,3 +700,36 @@ class UnifiedPushRegistration(SQLModel, table=True):  # type: ignore
     token: str
     topic: str = Field(index=True, unique=True)
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class ScreenRules(SQLModel, table=True):  # type: ignore
+    """A member's screen-time budget and routines, set by a parent (Phase 11 step 4).
+
+    data JSON keys (all optional; absent means no rule):
+      - daily_limit_min / weekend_limit_min: int minutes
+      - bedtime_start / bedtime_end, school_start / school_end: "HH:MM" local
+      - school_days: list of "mon".."sun" (default weekdays)
+      - always_allowed: list of Android packages never locked
+      - paused: bool; paused_until: ISO time the pause lifts
+    The evaluation lives in services/common/screen_time.py.
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    data: str = Field(default="{}")
+    updated_by: str | None = None
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class ScreenTimeRequest(SQLModel, table=True):  # type: ignore
+    """A member asking for more time today; a parent grants or declines it."""
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True, foreign_key="user.username")
+    day: str = Field(index=True)  # household-local YYYY-MM-DD
+    minutes: int
+    note: str = ""
+    status: str = Field(default="pending", index=True)  # pending | granted | declined
+    granted_minutes: int = 0
+    decided_by: str | None = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    decided_at: str | None = None

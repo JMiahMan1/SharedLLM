@@ -29,6 +29,9 @@ import type {
   ShareRecipient,
   FamilyRecord,
   UsageDay,
+  ScreenRules,
+  ScreenTimeStatus,
+  ScreenTimeRequest,
   FamilyRole,
   AiCapability,
   GlobalSetting,
@@ -905,6 +908,43 @@ export const api = {
   /** One person's recent days of phone usage (newest first); parents' or their own. */
   async getUsage(username: string, days = 7): Promise<{ status: string; days: UsageDay[] }> {
     const resp = await apiClient.get(`/api/usage/${encodeURIComponent(username)}`, { params: { days } });
+    return resp.data;
+  },
+
+  /** Time left today and whether the phone should be locked (the member or their parents). */
+  async getScreenTimeStatus(username: string): Promise<ScreenTimeStatus> {
+    const resp = await apiClient.get(`/api/screen-time/${encodeURIComponent(username)}/status`);
+    return resp.data;
+  },
+
+  async setScreenRules(username: string, rules: ScreenRules): Promise<{ rules: ScreenRules }> {
+    const resp = await apiClient.put(`/api/screen-time/${encodeURIComponent(username)}/rules`, rules);
+    return resp.data;
+  },
+
+  /** `{}` pauses until lifted, `{ until }` for a while, `{ resume: true }` lifts it. */
+  async pauseScreenTime(username: string, body: { until?: string; resume?: boolean }): Promise<{ rules: ScreenRules }> {
+    const resp = await apiClient.post(`/api/screen-time/${encodeURIComponent(username)}/pause`, body);
+    return resp.data;
+  },
+
+  async giveScreenTimeBonus(username: string, minutes: number): Promise<{ request: ScreenTimeRequest }> {
+    const resp = await apiClient.post(`/api/screen-time/${encodeURIComponent(username)}/bonus`, { minutes });
+    return resp.data;
+  },
+
+  async getScreenTimeRequests(status: 'pending' | 'granted' | 'declined' = 'pending'): Promise<{ requests: ScreenTimeRequest[] }> {
+    const resp = await apiClient.get('/api/screen-time/requests', { params: { status } });
+    return resp.data;
+  },
+
+  async askForScreenTime(minutes: number, note?: string): Promise<{ request: ScreenTimeRequest }> {
+    const resp = await apiClient.post('/api/screen-time/requests', { minutes, note });
+    return resp.data;
+  },
+
+  async decideScreenTimeRequest(id: number, grant: boolean, minutes?: number): Promise<{ request: ScreenTimeRequest }> {
+    const resp = await apiClient.post(`/api/screen-time/requests/${id}`, { grant, ...(minutes ? { minutes } : {}) });
     return resp.data;
   },
 

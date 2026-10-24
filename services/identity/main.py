@@ -47,6 +47,8 @@ from services.identity.models import (
     RavenMission,
     User,
     UserActivitySharing,
+    ScreenRules,
+    ScreenTimeRequest,
     UserAvatarImage,
     VoiceSignature,
     UserCalendarSetting,
@@ -4109,6 +4111,250 @@ def may_view_raw_data(viewer: User | None, subject: User | None) -> bool:
             return not subject.mother_username or subject.mother_username == viewer.username
         return False
     return viewer.username == subject.username
+
+
+# --- screen time: budgets, routines, more-time requests (Phase 11 step 4) ---
+
+_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+_WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def _may_manage_screen_time(viewer: User | None, subject: User | None) -> bool:
+    """Budgets are for minors, and set by their parents (the same rule as
+    their collected data)."""
+    return (
+        subject is not None
+        and (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES
+        and may_view_raw_data(viewer, subject)
+    )
+
+
+def _screen_subject(session: Session, username: str) -> User:
+    subject = session.exec(select(User).where(User.username == username.strip().lower())).first()
+    if subject is None:
+        raise HTTPException(status_code=404, detail="No such member")
+    return subject
+
+
+def _screen_rules(session: Session, username: str) -> dict:
+    row = session.get(ScreenRules, username)
+    try:
+        return json.loads(row.data) if row and row.data else {}
+    except ValueError:
+        return {}
+
+
+def _granted_minutes(session: Session, username: str, day: str) -> int:
+    rows = session.exec(
+        select(ScreenTimeRequest).where(
+            ScreenTimeRequest.username == username,
+            ScreenTimeRequest.day == day,
+            ScreenTimeRequest.status == "granted",
+        )
+    ).all()
+    return sum(r.granted_minutes for r in rows)
+
+
+def _clean_screen_rules(body: dict) -> dict:
+    """Only known keys, in range; a bad value is a 422, never silently kept."""
+    out: dict = {}
+    for key in ("daily_limit_min", "weekend_limit_min"):
+        if body.get(key) is not None:
+            value = body[key]
+            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 1440:
+                raise HTTPException(status_code=422, detail=f"{key} must be whole minutes from 0 to 1440")
+            out[key] = value
+    for key in ("bedtime_start", "bedtime_end", "school_start", "school_end"):
+        if body.get(key):
+            if not isinstance(body[key], str) or not _HHMM.match(body[key]):
+                raise HTTPException(status_code=422, detail=f"{key} must be HH:MM")
+            out[key] = body[key]
+    if body.get("school_days") is not None:
+        days = body["school_days"]
+        if not isinstance(days, list) or any(d not in _WEEKDAYS for d in days):
+            raise HTTPException(status_code=422, detail="school_days must be mon..sun")
+        out["school_days"] = list(dict.fromkeys(days))
+    if body.get("always_allowed") is not None:
+        apps = body["always_allowed"]
+        if not isinstance(apps, list) or any(not isinstance(a, str) or not a.strip() for a in apps):
+            raise HTTPException(status_code=422, detail="always_allowed must be package names")
+        out["always_allowed"] = [a.strip() for a in apps][:50]
+    return out
+
+
+def _parents_of(session: Session, subject: User) -> list[str]:
+    """Who hears a child's request: the people the rule lets manage them."""
+    return [u.username for u in session.exec(select(User)).all() if _may_manage_screen_time(u, subject)]
+
+
+@app.get("/api/screen-time/{username}/rules")
+def get_screen_rules(username: str, day: str = "", session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A member's rules: theirs to read, their parents' to read and change."""
+    subject = _screen_subject(session, username)
+    if caller.username != subject.username and not _may_manage_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can see this")
+    return {
+        "username": subject.username,
+        "rules": _screen_rules(session, subject.username),
+        "bonus_min": _granted_minutes(session, subject.username, day) if day else 0,
+        "can_manage": _may_manage_screen_time(caller, subject),
+    }
+
+
+@app.put("/api/screen-time/{username}/rules")
+def put_screen_rules(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    subject = _screen_subject(session, username)
+    if not _may_manage_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can set screen time")
+    rules = _clean_screen_rules(body or {})
+    current = _screen_rules(session, subject.username)
+    for key in ("paused", "paused_until"):  # a pause survives a rules edit
+        if key in current:
+            rules[key] = current[key]
+    row = session.get(ScreenRules, subject.username) or ScreenRules(username=subject.username)
+    row.data = json.dumps(rules)
+    row.updated_by = caller.username
+    row.updated_at = datetime.now(UTC).isoformat()
+    session.add(row)
+    session.commit()
+    return {"username": subject.username, "rules": rules}
+
+
+@app.post("/api/screen-time/{username}/pause")
+def pause_screen_time(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Lock the phone now: ``{"until": ISO}`` for a while, ``{}`` until lifted,
+    ``{"resume": true}`` to lift it."""
+    subject = _screen_subject(session, username)
+    if not _may_manage_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can pause a phone")
+    rules = _screen_rules(session, subject.username)
+    rules.pop("paused", None)
+    rules.pop("paused_until", None)
+    if not (body or {}).get("resume"):
+        until = (body or {}).get("until")
+        if until:
+            try:
+                datetime.fromisoformat(str(until))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="until must be an ISO time") from exc
+            rules["paused_until"] = str(until)
+        else:
+            rules["paused"] = True
+    row = session.get(ScreenRules, subject.username) or ScreenRules(username=subject.username)
+    row.data = json.dumps(rules)
+    row.updated_by = caller.username
+    row.updated_at = datetime.now(UTC).isoformat()
+    session.add(row)
+    session.commit()
+    return {"username": subject.username, "rules": rules}
+
+
+def _request_read(r: ScreenTimeRequest) -> dict:
+    return {
+        "id": r.id, "username": r.username, "day": r.day, "minutes": r.minutes, "note": r.note,
+        "status": r.status, "granted_minutes": r.granted_minutes, "decided_by": r.decided_by,
+        "created_at": r.created_at, "decided_at": r.decided_at,
+    }
+
+
+@app.post("/api/screen-time/requests")
+def ask_for_screen_time(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A member asks for more time today; the answer names who to tell."""
+    minutes = (body or {}).get("minutes")
+    day = str((body or {}).get("day") or "")
+    if not isinstance(minutes, int) or isinstance(minutes, bool) or not 5 <= minutes <= 240:
+        raise HTTPException(status_code=422, detail="minutes must be 5 to 240")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD")
+    pending = session.exec(
+        select(ScreenTimeRequest).where(
+            ScreenTimeRequest.username == caller.username,
+            ScreenTimeRequest.day == day,
+            ScreenTimeRequest.status == "pending",
+        )
+    ).first()
+    if pending is not None:
+        raise HTTPException(status_code=409, detail="You already asked; a parent will answer soon")
+    request = ScreenTimeRequest(
+        username=caller.username, day=day, minutes=minutes, note=str((body or {}).get("note") or "")[:200]
+    )
+    session.add(request)
+    session.commit()
+    session.refresh(request)
+    return {"request": _request_read(request), "notify": _parents_of(session, caller)}
+
+
+@app.get("/api/screen-time/requests")
+def list_screen_time_requests(status: str = "pending", session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """The caller's own requests and those of the children they manage."""
+    people = {u.username: u for u in session.exec(select(User)).all()}
+    rows = session.exec(select(ScreenTimeRequest).where(ScreenTimeRequest.status == status)).all()
+    visible = [
+        r for r in rows
+        if r.username == caller.username or _may_manage_screen_time(caller, people.get(r.username))
+    ]
+    visible.sort(key=lambda r: r.created_at, reverse=True)
+    return {"requests": [_request_read(r) for r in visible[:100]]}
+
+
+@app.post("/api/screen-time/requests/{request_id}")
+def decide_screen_time_request(request_id: int, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A parent grants (optionally fewer minutes) or declines a request."""
+    request = session.get(ScreenTimeRequest, request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="No such request")
+    subject = _screen_subject(session, request.username)
+    if not _may_manage_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can answer")
+    if request.status != "pending":
+        raise HTTPException(status_code=409, detail="Already answered")
+    grant = bool((body or {}).get("grant"))
+    minutes = (body or {}).get("minutes", request.minutes)
+    if grant and (not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= 240):
+        raise HTTPException(status_code=422, detail="minutes must be 1 to 240")
+    request.status = "granted" if grant else "declined"
+    request.granted_minutes = minutes if grant else 0
+    request.decided_by = caller.username
+    request.decided_at = datetime.now(UTC).isoformat()
+    session.add(request)
+    session.commit()
+    return {"request": _request_read(request), "notify": [request.username]}
+
+
+@app.post("/api/screen-time/{username}/bonus")
+def give_screen_time_bonus(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A parent adds minutes to today without being asked (Family Link's bonus time)."""
+    subject = _screen_subject(session, username)
+    if not _may_manage_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can add time")
+    minutes = (body or {}).get("minutes")
+    day = str((body or {}).get("day") or "")
+    if not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= 240:
+        raise HTTPException(status_code=422, detail="minutes must be 1 to 240")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD")
+    now = datetime.now(UTC).isoformat()
+    bonus = ScreenTimeRequest(
+        username=subject.username, day=day, minutes=minutes, note="Bonus time from a parent",
+        status="granted", granted_minutes=minutes, decided_by=caller.username, decided_at=now,
+    )
+    session.add(bonus)
+    session.commit()
+    session.refresh(bonus)
+    return {"request": _request_read(bonus), "notify": [subject.username]}
+
+
+@app.get("/api/internal/screen-time/{username}")
+def internal_screen_time(username: str, day: str, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: rules and today's granted minutes, for the live status."""
+    subject = session.exec(select(User).where(User.username == username.strip().lower())).first()
+    if subject is None:
+        return {"rules": {}, "bonus_min": 0, "managed": False}
+    return {
+        "rules": _screen_rules(session, subject.username),
+        "bonus_min": _granted_minutes(session, subject.username, day),
+        "managed": (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES,
+    }
 
 
 @app.get("/api/internal/may-view-raw")

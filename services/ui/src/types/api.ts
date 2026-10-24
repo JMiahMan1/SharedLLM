@@ -298,6 +298,50 @@ export interface UsageDay {
   apps?: Array<{ package: string; millis: number; last_use?: number | null }>;
 }
 
+/** A parent's screen-time rules for a member (all optional). */
+export interface ScreenRules {
+  daily_limit_min?: number;
+  weekend_limit_min?: number;
+  bedtime_start?: string;
+  bedtime_end?: string;
+  school_start?: string;
+  school_end?: string;
+  school_days?: string[];
+  always_allowed?: string[];
+  paused?: boolean;
+  paused_until?: string;
+}
+
+/** The live answer: time left and whether the phone should be locked now. */
+export interface ScreenTimeStatus {
+  username: string;
+  day: string;
+  rules: ScreenRules;
+  can_manage: boolean;
+  limit_min: number | null;
+  used_min: number;
+  bonus_min: number;
+  remaining_min: number | null;
+  bedtime_active: boolean;
+  school_active: boolean;
+  paused: boolean;
+  locked: boolean;
+  reason: 'paused' | 'bedtime' | 'school' | 'limit' | null;
+  until: string | null;
+  resets_at: string;
+}
+
+export interface ScreenTimeRequest {
+  id: number;
+  username: string;
+  day: string;
+  minutes: number;
+  note: string;
+  status: 'pending' | 'granted' | 'declined';
+  granted_minutes: number;
+  created_at: string;
+}
+
 export interface FamilyRecord {
   username: string;
   display_name: string;
