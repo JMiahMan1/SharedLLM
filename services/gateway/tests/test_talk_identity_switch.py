@@ -3,7 +3,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 # Mock dependencies before importing main (same preamble as test_calendar_proxy).
 mock_redis = MagicMock()
 sys.modules["redis"] = mock_redis

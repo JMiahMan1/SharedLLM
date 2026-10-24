@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-
 # Mock dependencies before importing main (same preamble as test_calendar_proxy).
 mock_redis = MagicMock()
 sys.modules["redis"] = mock_redis

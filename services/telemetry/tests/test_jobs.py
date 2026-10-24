@@ -1,17 +1,13 @@
-import json
 import time
-from datetime import UTC, datetime, timedelta
-
+from datetime import UTC, datetime
 
 import pytest
+from fakes import FakeRedis
 
 from services.telemetry import store
 from services.telemetry.alpaca import evaluate_slots
-from services.telemetry.config import BUSY_DEFER_SECONDS, MAX_ATTEMPTS
 from services.telemetry.main import process_job
 from services.telemetry.schedule import next_run_at, window_for
-
-from fakes import FakeRedis
 
 
 @pytest.fixture

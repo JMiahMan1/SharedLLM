@@ -99,7 +99,7 @@ def test_an_unsaved_buffer_travels_with_the_session(client: TestClient):
     client.put("/api/users/me/workspace-sessions/sermon", json=a_session())
 
     sessions = client.get("/api/users/me/workspace-sessions").json()["sessions"]
-    dirty = [t for t in sessions["sermon"]["tabs"] if t["path"] == "notes.txt"][0]
+    dirty = next(t for t in sessions["sermon"]["tabs"] if t["path"] == "notes.txt")
     assert dirty["dirty"] is True
     assert dirty["content"] == "half a thought"
 

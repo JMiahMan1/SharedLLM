@@ -95,7 +95,7 @@ def test_podcast_recommendation_returns_suggestion(client, monkeypatch):
 
 
 def test_podcast_recommendation_quiet_without_listening(client, monkeypatch):
-    cap, holder = _patch_telemetry(monkeypatch)
+    _cap, holder = _patch_telemetry(monkeypatch)
     holder["payload"] = {"status": "SUCCESS", "events": []}
     r = client.get("/api/recommendations/podcast")
     assert r.status_code == 200

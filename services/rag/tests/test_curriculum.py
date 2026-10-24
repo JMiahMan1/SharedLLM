@@ -4,7 +4,6 @@ filter, toolchain inventory sync, and resource inventory endpoints."""
 import json
 import time
 
-
 import pytest
 
 from services.rag import db
@@ -342,7 +341,7 @@ def test_the_library_protocol_lesson_teaches_calibre_before_the_web():
     every mission, so it is the lever that stops the repeat.
     """
     lesson = next(
-        (l for l in rag_main._PROTOCOL_LESSONS if l["id"] == "lesson-proto-library"),
+        (lesson for lesson in rag_main._PROTOCOL_LESSONS if lesson["id"] == "lesson-proto-library"),
         None,
     )
     assert lesson is not None, "lesson-proto-library is missing from the protocol curriculum"
@@ -361,7 +360,7 @@ def test_the_scripture_protocol_lesson_points_at_bible_request():
     when the corpus holds the verse.
     """
     lesson = next(
-        (l for l in rag_main._PROTOCOL_LESSONS if l["id"] == "lesson-proto-scripture"),
+        (lesson for lesson in rag_main._PROTOCOL_LESSONS if lesson["id"] == "lesson-proto-scripture"),
         None,
     )
     assert lesson is not None, "lesson-proto-scripture is missing from the protocol curriculum"

@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock
 import pytest
 import websockets
 
-import services.gateway.main as gateway_main
 import services.gateway.ma_scope as ma_scope
+import services.gateway.main as gateway_main
 from services.execution.entity_access import EntityPermissions
 
 
@@ -250,7 +250,7 @@ class _FakeMaWs:
                 return self.queue.get_nowait()
             except asyncio.QueueEmpty:
                 if self.close_event.is_set():
-                    raise RuntimeError("fake MA closed")
+                    raise RuntimeError("fake MA closed") from None
                 await asyncio.sleep(0.05)
 
     async def close(self) -> None:

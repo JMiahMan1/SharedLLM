@@ -3,15 +3,14 @@ import asyncio
 import json
 import logging
 import re
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, cast
-import uuid
 
 import aiohttp
 
 from services.common.circuit_breaker import CircuitOpenError, get_breaker
-from services.gateway.location_query import parse_location_query
 from services.gateway.config import (
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
@@ -24,7 +23,8 @@ from services.gateway.config import (
 )
 from services.gateway.history import get_history
 from services.gateway.intent_engine import is_raven_intent
-from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider, get_provider
+from services.gateway.llm_providers import get_provider
+from services.gateway.location_query import parse_location_query
 from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
 from services.gateway.tool_registry import single_turn_tools
@@ -159,10 +159,7 @@ def _collections_for_query(query: str, *, include_library: bool = False) -> list
     without standing up an HTTP client.
     """
     q = query.lower()
-    if any(token in q for token in _CODING_INTENT_TOKENS):
-        collections = list(_CODING_COLLECTIONS)
-    else:
-        collections = list(_BASE_COLLECTIONS)
+    collections = list(_CODING_COLLECTIONS) if any(token in q for token in _CODING_INTENT_TOKENS) else list(_BASE_COLLECTIONS)
     if include_library or _library_intent_asked(q):
         collections = ["calibre_files"] + [c for c in collections if c != "calibre_files"]
     return collections
@@ -642,7 +639,7 @@ async def _fetch_rag_context(
 
                 try:
                     resp = await breaker.call(
-                        lambda: client.post(
+                        lambda coll=coll: client.post(
                             f"{rag_svc}/rag/search",
                             json={
                                 "collection_name": coll,
@@ -660,7 +657,7 @@ async def _fetch_rag_context(
                         "RAG circuit is open; continuing without retrieved context"
                     )
                     break
-                except Exception as exc:  # noqa: BLE001 - RAG is optional context
+                except Exception as exc:  # RAG is optional context
                     log.warning("RAG search failed; continuing without context: %s", exc)
                     break
                 if resp.status == 200:
@@ -1428,7 +1425,7 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                         if "notes" in detail:
                             notes_list = detail["notes"]
                             lines = [f"- {n.get('title', 'Untitled')}: {n.get('content', '')[:100]}" for n in notes_list]
-                            return f"Notes:\n" + "\n".join(lines) if lines else "No notes found."
+                            return "Notes:\n" + "\n".join(lines) if lines else "No notes found."
                         if "content" in detail:
                             return f"Note '{detail.get('title', '')}':\n{detail['content']}"
                     if action == "ravenmissionrequest":
@@ -1474,10 +1471,7 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     try:
                         err_json = json.loads(err_body)
                         detail = err_json.get("detail", {})
-                        if isinstance(detail, dict):
-                            err_msg = detail.get("message") or detail.get("error") or err_body
-                        else:
-                            err_msg = str(detail) or err_body
+                        err_msg = (detail.get("message") or detail.get("error") or err_body) if isinstance(detail, dict) else (str(detail) or err_body)
                         return f"Sorry, I couldn't complete that action: {err_msg}"
                     except Exception:
                         return f"Sorry, I couldn't complete that action. The service returned an error (HTTP {resp.status})."
@@ -1659,9 +1653,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         if turn == 0:
             if show_thinking and chunk_callback:
                 async def turn_callback(chunk):
-                    if isinstance(chunk, dict) and chunk.get("type") == "thinking":
-                        await chunk_callback(chunk)
-                    elif isinstance(chunk, str) and chunk.startswith('{"type": "thinking"'):
+                    if (isinstance(chunk, dict) and chunk.get("type") == "thinking") or (isinstance(chunk, str) and chunk.startswith('{"type": "thinking"')):
                         await chunk_callback(chunk)
             else:
                 turn_callback = None
@@ -1716,7 +1708,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 import re as _re
                 _tc_inner = _re.search(r"<tool_code>\s*(.*?)\s*</tool_code>", ans, _re.DOTALL)
                 if not _tc_inner or not _tc_inner.group(1).strip():
-                    log.warning(f"[_single_turn_inference] Empty tool_code detected, retrying with explicit format reminder")
+                    log.warning("[_single_turn_inference] Empty tool_code detected, retrying with explicit format reminder")
                     messages.append({"role": "assistant", "content": ans})
                     messages.append({"role": "user", "content": "You output empty tool tags. You MUST emit a JSON object like {\"tool\": \"LightControlRequest\", \"entity_id\": \"light.hall_lamp\", \"action\": \"turn_off\"}. Do not output anything else."})
                     continue

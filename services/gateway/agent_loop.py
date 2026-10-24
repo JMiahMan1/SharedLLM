@@ -31,7 +31,6 @@ from services.gateway.config import (
 )
 from services.gateway.llm_providers import (
     BaseLLMProvider,
-    OpenRouterProvider,
     StreamingThinkingFilter,
     get_provider,
     strip_thinking_blocks,
@@ -346,7 +345,7 @@ class OllamaProvider(BaseLLMProvider):
         self, client: aiohttp.ClientSession, model: str, timeout: float = 120.0
     ) -> None:
         """Poll /api/ps until the target model appears in loaded models.
-        
+
         Prevents 404s when the model is cold-loaded: /api/chat returns 404
         until Ollama has finished loading the weights into VRAM.
         """
@@ -379,7 +378,7 @@ class OllamaProvider(BaseLLMProvider):
                             return
                     if isinstance(data.get("slots"), dict) and data["slots"].get("available", 0) > 0:
                         log.info(
-                            f"[OllamaProvider-Hardened] No active slots, but slot pool available; model may be preloaded"
+                            "[OllamaProvider-Hardened] No active slots, but slot pool available; model may be preloaded"
                         )
                         return
             except Exception:
@@ -4592,10 +4591,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     # mission history instead of degrading into "Unknown action"
                     # (which poisons the loop with a spurious error).
                     if not isinstance(payload, dict):
-                        if isinstance(payload, str) and payload.strip():
-                            payload = {"query": payload}
-                        else:
-                            payload = {}
+                        payload = {"query": payload} if isinstance(payload, str) and payload.strip() else {}
                     try:
                         _rk = max(1, min(int(payload.get("limit") or 15), 50))
                         _only = str(payload.get("only") or "").lower()

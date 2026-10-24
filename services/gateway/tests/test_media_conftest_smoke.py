@@ -1,6 +1,5 @@
 """Smoke test for the conftest_media fixtures (fake identity + aioresponses)."""
 import pytest
-
 from conftest_media import mock_upstream
 
 

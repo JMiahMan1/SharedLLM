@@ -119,7 +119,7 @@ def test_status_without_any_key_is_refused(monkeypatch):
 
 
 def test_an_upstream_failure_keeps_its_status(monkeypatch):
-    sess = _patch(monkeypatch, status_payload={"detail": "storage down"}, status_code=503)
+    _patch(monkeypatch, status_payload={"detail": "storage down"}, status_code=503)
     resp = client.get("/api/storage/status", headers=AUTH)
 
     assert resp.status_code == 503

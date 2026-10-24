@@ -4,10 +4,10 @@ import os
 from services.config import (
     GEO_SVC_URL,
     IDENTITY_SVC_URL,
-    INTERNAL_SECRET,
-    REDIS_URL,
     _net_url,
 )
+from services.config import INTERNAL_SECRET as INTERNAL_SECRET
+from services.config import REDIS_URL as REDIS_URL
 
 GATEWAY_INTERNAL_URL = (
     os.getenv("GATEWAY_INTERNAL_URL") or _net_url("GATEWAY", "http://gateway:11435")

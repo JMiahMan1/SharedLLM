@@ -105,8 +105,8 @@ async def ensure_vapid_keys() -> dict[str, str] | None:
             }
 
     try:
-        from cryptography.hazmat.primitives.asymmetric import ec
         from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
     except Exception as e:
         log.warning("VAPID key generation unavailable: %s", e)
         return None
@@ -190,7 +190,6 @@ async def _send_fcm(user: str, title: str, body: str) -> bool:
     # Project-specific send requires the Firebase Admin SDK; when it is present
     # this is the only path needed for the native app.
     try:
-        import firebase_admin
         from firebase_admin import messaging
     except Exception:
         log.info("FCM credentials configured but firebase-admin is not installed")
@@ -240,9 +239,9 @@ async def send_to_user(user: str, title: str, body: str, data: dict | None = Non
 
 __all__ = [
     "INTERNAL_SECRET",
-    "internal_headers",
     "aiohttp",
     "ensure_vapid_keys",
+    "internal_headers",
     "list_subscriptions",
     "remove_subscription",
     "save_subscription",

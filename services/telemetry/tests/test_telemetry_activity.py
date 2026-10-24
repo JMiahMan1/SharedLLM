@@ -1,12 +1,11 @@
 """The activity feed: what each person did inside Jarvis (a profile reads it back)."""
 import pytest
+from fakes import FakeRedis
 from fastapi.testclient import TestClient
 
 from services.telemetry import store
 from services.telemetry.config import INTERNAL_SECRET as EXPECTED_SECRET
 from services.telemetry.main import app
-
-from fakes import FakeRedis
 
 HEADERS = {"X-Internal-Secret": EXPECTED_SECRET}
 

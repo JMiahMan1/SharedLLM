@@ -131,7 +131,7 @@ def run_detached_self_recreate(payload_json: str) -> dict:
         backup_ctr = d.containers.get(backup)
 
         # Free IPs held by backup before connecting the new container
-        for net_name in list((snap.get("networks") or {})):
+        for net_name in list(snap.get("networks") or {}):
             with suppress(Exception):
                 d.networks.get(net_name).disconnect(backup_ctr)
 

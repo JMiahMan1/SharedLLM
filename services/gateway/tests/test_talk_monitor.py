@@ -95,33 +95,6 @@ async def test_monitor_skips_a_question_the_app_already_claimed(worker):
     assert r.store["jarvis:talk:last_msg:room1"] == "7"
 
 
-@pytest.mark.asyncio
-async def test_monitor_carries_the_room_context_into_the_job(worker):
-    w = worker(
-        [
-            {"id": 5, "actor_id": "kiddo", "actor_display_name": "Kiddo", "message": "the fort survived the night!"},
-            {
-                "id": 6,
-                "actor_id": "mom",
-                "actor_display_name": "Mom",
-                "message": (
-                    'It survived the night.\n\n```jarvis-envelope\n'
-                    '{"kind": "assistant", "title": "Jarvis"}\n```jarvis-envelope'
-                ),
-            },
-            {"id": 7, "actor_id": "michele", "actor_display_name": "Michele", "message": "@Jarvis, what's for dinner?"},
-        ]
-    )
-    r = _Redis()
-    r.store["jarvis:talk:last_msg:room1"] = "4"
-    await bw.RavenWorker._check_talk_once(w, r)
-    payload = w.job_queue.enqueue_job.await_args.kwargs["payload"]
-    assert payload["history"] == [
-        {"role": "user", "content": "Kiddo: the fort survived the night!"},
-        {"role": "assistant", "content": "It survived the night."},
-    ]
-
-
 async def test_monitor_carries_the_room_context_into_the_job(worker):
     messages = [
         {"id": 5, "actor_id": "kiddo", "actor_display_name": "Kiddo", "message": "the fort survived the night!"},

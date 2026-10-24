@@ -1,5 +1,4 @@
 """The Raven health loop reads its interval and threshold from the Raven Ops settings."""
-import asyncio
 
 import pytest
 

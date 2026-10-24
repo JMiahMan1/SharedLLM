@@ -15,7 +15,6 @@ or in ``X-Api-Key``.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from typing import Any
@@ -149,7 +148,7 @@ async def _relay(session: aiohttp.ClientSession, resp: aiohttp.ClientResponse):
     try:
         async for line in resp.content:
             yield line
-    except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+    except (TimeoutError, aiohttp.ClientError) as e:
         log.info("[push] ntfy stream ended (%s); the phone reconnects with since=", type(e).__name__)
     finally:
         resp.release()

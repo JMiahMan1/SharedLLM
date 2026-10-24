@@ -1,5 +1,5 @@
 """Extending the road map to where trips go, and deploying a rebuilt map."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from services.control_plane import osrm_map
 
@@ -44,7 +44,7 @@ def test_nothing_happens_without_config(monkeypatch):
 
 
 def test_deploy_only_after_a_newer_build():
-    built = datetime(2026, 10, 7, 6, 0, tzinfo=timezone.utc)
+    built = datetime(2026, 10, 7, 6, 0, tzinfo=UTC)
     assert osrm_map.needs_deploy("2026-10-07T05:00:00.123456789Z", built)
     assert not osrm_map.needs_deploy("2026-10-07T07:00:00.1Z", built)
     assert not osrm_map.needs_deploy("2026-10-07T05:00:00Z", None)

@@ -197,15 +197,14 @@ async def _user_for_token(token: str) -> dict[str, Any] | None:
         return None
     timeout = aiohttp.ClientTimeout(total=5)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(
-                f"{IDENTITY_SVC}/api/users/me",
-                headers={"Authorization": f"Bearer {token}"},
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
-                return data if isinstance(data, dict) else None
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(
+            f"{IDENTITY_SVC}/api/users/me",
+            headers={"Authorization": f"Bearer {token}"},
+        ) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json()
+            return data if isinstance(data, dict) else None
     except Exception as e:
         log.warning(f"[calls] identity lookup failed: {type(e).__name__}: {e}")
         return None

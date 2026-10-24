@@ -285,7 +285,7 @@ def _read_books(conn: sqlite3.Connection) -> dict[int, dict[str, Any]]:
 
     books: dict[int, dict[str, Any]] = {}
     for row in rows:
-        record = dict(zip(wanted, row))
+        record = dict(zip(wanted, row, strict=False))
         book_id = int(record["id"])
         path = str(record.get("path") or f"Book {book_id}")
         titles = [names_by_id.get(a) for a in authors_by_book.get(book_id, [])]

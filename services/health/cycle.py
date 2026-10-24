@@ -8,6 +8,7 @@ next-period date.
 """
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -105,7 +106,7 @@ def _median_int(values: list[int]) -> int | None:
     middle = len(clean) // 2
     if len(clean) % 2:
         return clean[middle]
-    return int(round((clean[middle - 1] + clean[middle]) / 2))
+    return round((clean[middle - 1] + clean[middle]) / 2)
 
 
 def _cycle_length(
@@ -114,7 +115,7 @@ def _cycle_length(
     starts = sorted({p.start for p in periods})
     gaps = [
         (later - earlier).days
-        for earlier, later in zip(starts, starts[1:])
+        for earlier, later in itertools.pairwise(starts)
         if 15 <= (later - earlier).days <= 90
     ]
     if average_cycle_length:

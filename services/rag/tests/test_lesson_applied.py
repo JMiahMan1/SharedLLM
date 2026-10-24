@@ -12,7 +12,6 @@ Integration tests for the HONEST Raven lessons feature:
 """
 import re
 
-
 import numpy as np
 import pytest
 

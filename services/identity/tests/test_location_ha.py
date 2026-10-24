@@ -1,15 +1,14 @@
-import os
-import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
 
-
 from services.identity import main as identity_main
-from services.identity.main import app, _forward_location_to_ha, LocationUpdate
-from services.identity.models import User, GlobalSetting
+from services.identity.main import LocationUpdate, _forward_location_to_ha, app
+from services.identity.models import User
 from services.identity.seed import seed_from_env
+
 
 @pytest.fixture(name="test_client")
 def client_fixture():

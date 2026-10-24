@@ -12,17 +12,15 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 import docker
 from services.config import GEO_SVC_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
 from services.control_plane import disk_alerts, network_routes, osrm_map, registry
+from services.control_plane.recreate import connect_container_networks as _connect_container_networks
+from services.control_plane.recreate import create_from_snapshot as _create_from_snapshot
+from services.control_plane.recreate import (
+    network_aliases as _network_aliases,  # noqa: F401 - test_pull_and_deploy checks the source for this name
+)
+from services.shared.info_endpoint import info_router
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
-
-from services.shared.info_endpoint import info_router
-from services.control_plane.recreate import (
-    connect_container_networks as _connect_container_networks,
-    create_from_snapshot as _create_from_snapshot,
-    network_aliases as _network_aliases,
-    run_detached_self_recreate,
-)
 
 TRACEBACK_RE = re.compile(r"^Traceback \(most recent call last\)|^\s+File ", re.MULTILINE)
 
@@ -411,7 +409,7 @@ def list_containers():
                 results.append(_get_container_info(c))
         return results
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/health", dependencies=[Depends(verify_internal_secret)])
@@ -458,7 +456,7 @@ def system_health():
             "services": services,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/status/{service_name}", dependencies=[Depends(verify_internal_secret)])
@@ -469,9 +467,9 @@ def get_service_status(service_name: str):
         container = client.containers.get(service_name)
         return _get_container_info(container)
     except NotFound:
-        raise HTTPException(status_code=404, detail="Service not found")
+        raise HTTPException(status_code=404, detail="Service not found") from None
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 def _resolve_container(service_name: str):
@@ -730,7 +728,7 @@ def restart_service(service_name: str, recreate: bool = False):
             container.restart()
             return {"status": "SUCCESS", "message": f"Container {container.name} restarted successfully"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.delete("/api/containers/{service_name}", dependencies=[Depends(verify_internal_secret)])
@@ -757,7 +755,7 @@ def delete_container(service_name: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 def _github_token() -> str:
@@ -905,7 +903,7 @@ def pull_image_update(service_name: str):
             "message": "Pull started in background. Poll pull/status for progress.",
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/containers/{service_name}/pull/status", dependencies=[Depends(verify_internal_secret)])
@@ -984,7 +982,7 @@ def pull_and_restart(service_name: str):
             "volumes_fixed": fixed_vols,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/containers/{service_name}/logs", dependencies=[Depends(verify_internal_secret)])
@@ -1011,7 +1009,7 @@ def get_container_logs(service_name: str, tail: int = 100):
             "traceback_count": len(tb_matches),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/containers/{service_name}/exec", dependencies=[Depends(verify_internal_secret)])
@@ -1063,7 +1061,7 @@ def exec_in_container(service_name: str, body: dict):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # Integration: DNS Sync Webhook
