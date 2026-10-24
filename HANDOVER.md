@@ -22,6 +22,8 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `HEAD` Family guard: **suggestion lanes, server side** — a parent blesses or blocks each kind of
+  suggestion per child; blocked lanes return nothing. App screen still to do (see §5 "Not done").
 - `HEAD` Family guard: **Jarvis protected on a child's phone + screen-time enforcement (Layer 1, 4b)**
   — device admin + the `GuardService` Accessibility guard, a parent-login cover screen, tamper
   alerts and screen-time locks; see `docs/HEALTH_HUB.md` "Tamper resistance". Compiles and the
@@ -590,6 +592,29 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
    error in `ConfigureActionButtonActivity.java:357` (`setTooltipText` needs API 26).
 5. Keep the plan docs (`docs/HEALTH_HUB.md`, this handover) updated in the same commit as
    the code when scope changes.
+
+### Not done in the 2026-10-24 session (for the next model or session)
+
+Each item is open; nothing below is half-built on the server.
+
+- **Suggestion lanes, app screen.** The server side is built and pushed (identity
+  `RecommendationLanes`, `GET/PUT /api/recommendation-lanes/{user}` through the gateway, every
+  `/api/recommendations/*` route returns `{"recommendation": null, "blocked": true}` for a blocked
+  lane). Still needed: `api.getRecommendationLanes` / `setRecommendationLanes` in
+  `services/ui/src/services/api.ts`, switches for each lane in the parent controls under a child
+  (next to `ScreenTimeControls`), tests, docs (`docs/HEALTH_HUB.md` Phase 11 step 3), deploy
+  `identity gateway ui`.
+- **Health weekly digest card** (`docs/HEALTH_HUB.md` Phase 5): averages, best day and what
+  changed over the week. The health service's `/summary` is per day; a weekly read and a card on
+  Health → Today are still to design and build.
+- **Additional device lock-down / anti-tamper work** beyond the built Layer 1 guard. The owner is
+  handing this to another tool; this session did not build or document it further. What exists is
+  described in `docs/HEALTH_HUB.md` "Tamper resistance" and the `Guard*` Android classes.
+- **Device check of the Jarvis guard (APK 437)** and the **first live trivia game** on the new
+  code: both are listed in the next steps above and need a person with the phones.
+- Everything else in "Open small items" (§4) and the remaining Phase 11 build-order steps
+  (app control and web filter, monitoring alerts and weekly recap, the parents' page and
+  discipleship surfaces) is untouched.
 
 ## 6. Where the details live
 
