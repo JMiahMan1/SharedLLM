@@ -40,10 +40,13 @@ graph TD
 | Mechanism | Where | Notes |
 | --- | --- | --- |
 | `Authorization: Bearer <api key>` | every REST route | Strict: invalid key → 401 |
-| `?mt=<token>&user=<user>` | ABS session streams, execution file server `:8888`, `/api/media/events` | `POST /api/media/token` issues it |
+| `?mt=<token>&user=<user>` | `/api/media/imageproxy`, `/api/media/stream/*` (ABS session, MA), execution file server `:8888`, `/api/media/events` | `POST /api/media/token` issues it. `?token=<api key>` is refused on every `/api/media/*` route |
 | `?token=<api key>` | `/api/ma-jsonrpc`, `/api/sendspin` WebSockets | WebSocket clients cannot set headers |
 
-`POST /api/media/token` returns `{token, expires_at}`. The token is
+`POST /api/media/token` returns `{token, expires_at, user}`; `user` goes next to
+`mt` in the URL because the token is bound to it. The UI holds it in memory only
+(`src/lib/mediaToken.ts`), refreshes it 5 minutes before expiry, drops it when
+the stored API key changes, and signs cover URLs with it (`proxiedImage`). The token is
 HMAC-SHA256 over `{user, scope:"media", exp}` signed with `MEDIA_TOKEN_SECRET`
 (falling back to `INTERNAL_SECRET`); TTL is 1 hour for UI use, 12 hours for
 device URLs embedded in HA/Cast/Roku playback (`services/shared/media_token.py`).
@@ -157,7 +160,7 @@ The pre-§7.5 routes remain for the widget and existing screens:
 * `GET /api/media/audiobookshelf/libraries|last-played|library/{id}|search|status`
 * `GET /api/media/detail?uri=`, `POST /api/media/favorite`,
   `POST /api/media/ma-library-uri` (ABS item → playable MA URI)
-* `GET /api/media/imageproxy?path=&token=` (per-user ABS/MA image fetch)
+* `GET /api/media/imageproxy?path=&user=&mt=` (per-user ABS/MA image fetch)
 
 ---
 
