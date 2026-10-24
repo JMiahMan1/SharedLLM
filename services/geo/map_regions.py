@@ -61,10 +61,7 @@ def _contains(geometry: dict, lat: float, lon: float) -> bool:
     polys = geometry.get("coordinates") or []
     if geometry.get("type") == "Polygon":
         polys = [polys]
-    for poly in polys:
-        if poly and _in_ring(lat, lon, poly[0]) and not any(_in_ring(lat, lon, hole) for hole in poly[1:]):
-            return True
-    return False
+    return any(poly and _in_ring(lat, lon, poly[0]) and not any(_in_ring(lat, lon, hole) for hole in poly[1:]) for poly in polys)
 
 
 def region_for(index: dict, lat: float, lon: float) -> dict | None:

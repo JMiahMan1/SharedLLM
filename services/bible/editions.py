@@ -20,7 +20,7 @@ import argparse
 import json
 import sys
 
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from services.bible import migrations
 from services.bible.corpus import (

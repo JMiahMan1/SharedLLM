@@ -1,4 +1,5 @@
 import os
+
 import requests
 
 RAG_URL = "http://localhost:8004"

@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from xml.etree import ElementTree as ET
 
-from services.bible.books import BOOKS, BOOK_BY_OSIS, BOOK_ORDER, resolve_book
+from services.bible.books import BOOK_BY_OSIS, BOOK_ORDER, BOOKS, resolve_book
 from services.bible.corpus import CorpusError
 
 EPUB_KIND = "jarvis.bible.epub"
@@ -939,9 +939,7 @@ class _NumberedHarvester(HTMLParser):
         """
         if css_class and css_class in self._headings:
             return True
-        if not self._headings and ident and not ident.lower().startswith("page"):
-            return True
-        return False
+        return bool(not self._headings and ident and not ident.lower().startswith("page"))
 
     def _place(self, chapter: int, book: int) -> None:
         self._flush_open()
@@ -1020,7 +1018,7 @@ def extract(path: str) -> dict:
     blocks: dict[str, str] = {}
     skipped: Counter[str] = Counter()
     documents = _documents(path)
-    for name, markup in documents:
+    for _name, markup in documents:
         harvester = _VerseHarvester()
         harvester.feed(markup)
         harvester.close()
@@ -1047,7 +1045,7 @@ def extract(path: str) -> dict:
 
     if not verses:
         commentary = _CommentaryHarvester()
-        for name, markup in documents:
+        for _name, markup in documents:
             commentary.feed(markup)
             commentary.close()
         if commentary.notes:
@@ -1069,7 +1067,7 @@ def extract(path: str) -> dict:
                 "mode": "commentary",
             }
         numbered = _NumberedHarvester(_heading_classes(path))
-        for name, markup in documents:
+        for _name, markup in documents:
             numbered.feed(markup)
             numbered.close()
         if numbered.verses:

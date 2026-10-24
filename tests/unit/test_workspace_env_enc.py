@@ -5,6 +5,7 @@ Fernet encryption at rest, and the public masking of values (only key names
 are exposed in list/get responses; the decrypted values are only returned by
 the trusted internal ``/workspace/resolve`` endpoint).
 """
+import json
 import os
 
 # conftest.py pins FERNET_KEY and INTERNAL_SECRET for the whole suite before any
@@ -12,6 +13,9 @@ import os
 # that is collection time, and whichever module ran first would decide the value
 # every other module then captured.
 from pathlib import Path
+
+import pytest
+from sqlmodel import Session
 
 # Scratch state goes in the workspace .tmp/ (see CONTRIBUTING.md), never /tmp.
 _TMP = Path(__file__).resolve().parents[2] / ".tmp"
@@ -23,15 +27,10 @@ os.environ.setdefault(
 # environment after each test, so read the value rather than asserting a literal
 # that another module could have changed.
 
-import json
-
-import pytest
-from sqlmodel import Session
-
-from services.workspace_runtime import main as wsrt
-from services.workspace_runtime.crypto import decrypt, encrypt
-from services.workspace_runtime.database import engine, init_db
-from services.workspace_runtime.models import Workspace
+from services.workspace_runtime import main as wsrt  # noqa: E402 - after WORKSPACE_DATABASE_URL is set
+from services.workspace_runtime.crypto import decrypt, encrypt  # noqa: E402 - after WORKSPACE_DATABASE_URL is set
+from services.workspace_runtime.database import engine, init_db  # noqa: E402 - after WORKSPACE_DATABASE_URL is set
+from services.workspace_runtime.models import Workspace  # noqa: E402 - after WORKSPACE_DATABASE_URL is set
 
 pytestmark = pytest.mark.unit
 SECRET = os.environ["INTERNAL_SECRET"]

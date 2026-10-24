@@ -6,6 +6,7 @@ TAGNT and TAHOT (CC BY 4.0), so the parser is tested on the real format.
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
@@ -20,19 +21,14 @@ HEBREW = DATA / "tahot_gen_1_1-2.txt"
 
 #: Every code below was fetched from blueletterbible.org as /kjv/{code}/1/1/
 #: and answered with that book's first chapter (2026-10).
-BLB_CODES = (
-    "gen exo lev num deu jos jdg rth 1sa 2sa 1ki 2ki 1ch 2ch ezr neh est job psa pro "
-    "ecc sng isa jer lam eze dan hos joe amo oba jon mic nah hab zep hag zec mal "
-    "mat mar luk jhn act rom 1co 2co gal eph phl col 1th 2th 1ti 2ti tit phm heb jas "
-    "1pe 2pe 1jo 2jo 3jo jde rev"
-).split()
+BLB_CODES = ["gen", "exo", "lev", "num", "deu", "jos", "jdg", "rth", "1sa", "2sa", "1ki", "2ki", "1ch", "2ch", "ezr", "neh", "est", "job", "psa", "pro", "ecc", "sng", "isa", "jer", "lam", "eze", "dan", "hos", "joe", "amo", "oba", "jon", "mic", "nah", "hab", "zep", "hag", "zec", "mal", "mat", "mar", "luk", "jhn", "act", "rom", "1co", "2co", "gal", "eph", "phl", "col", "1th", "2th", "1ti", "2ti", "tit", "phm", "heb", "jas", "1pe", "2pe", "1jo", "2jo", "3jo", "jde", "rev"]
 
 
 def test_every_book_has_its_blb_code_in_canonical_order():
     assert [blb_links.BLB_BOOK[b["osis"]] for b in BOOKS] == BLB_CODES
 
 
-@pytest.mark.parametrize("osis,code", [(b["osis"], c) for b, c in zip(BOOKS, BLB_CODES)])
+@pytest.mark.parametrize("osis,code", [(b["osis"], c) for b, c in zip(BOOKS, BLB_CODES, strict=False)])
 def test_each_book_links_to_its_blb_page(osis, code):
     assert blb_links.verse_path(osis, 1, 1) == f"/kjv/{code}/1/1/"
 
@@ -59,7 +55,7 @@ def test_a_whole_book_links_to_its_first_verse(monkeypatch):
 
 def test_an_unknown_tool_is_refused(monkeypatch):
     monkeypatch.setattr(bible_main, "BLB_BASE_URL", "https://bible.test")
-    with pytest.raises(Exception):
+    with pytest.raises(HTTPException):
         bible_main.blb_link("John 3:16", "lexicon", "")
 
 

@@ -32,7 +32,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlmodel import Session, delete, select
 
-from services.bible.books import BOOKS, BOOK_BY_OSIS, resolve_book
+from services.bible.books import BOOK_BY_OSIS, BOOKS, resolve_book
 from services.bible.models import (
     BibleBook,
     BibleEdition,
@@ -854,7 +854,7 @@ def edition_catalogue(session: Session, version: str | None = None) -> list[dict
         entry["install"] = edition_install_route(edition)
         entry["note"] = "" if row else edition_reader_note(edition)
         entries.append(entry)
-    for code, row in sorted(installed.items()):
+    for _code, row in sorted(installed.items()):
         if version and row["version"] != version:
             continue
         entry = dict(row)

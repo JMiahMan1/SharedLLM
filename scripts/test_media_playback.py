@@ -125,33 +125,46 @@ def main():
     fails = 0
 
     # 1. Office TV - Music
-    if run_test_strict("Play Brandon Lake on Office TV", "Office TV", "play"): passes += 1
-    else: fails += 1
+    if run_test_strict("Play Brandon Lake on Office TV", "Office TV", "play"):
+        passes += 1
+    else:
+        fails += 1
 
     time.sleep(5)
 
-    if run_test_strict("Stop Office TV", "Office TV", "stop"): passes += 1
-    else: fails += 1
+    if run_test_strict("Stop Office TV", "Office TV", "stop"):
+        passes += 1
+    else:
+        fails += 1
 
     # 2. Office TV - Video
-    if run_test_strict("Watch Big Buck Bunny on Office TV", "Office TV", "play"): passes += 1
-    else: fails += 1
+    if run_test_strict("Watch Big Buck Bunny on Office TV", "Office TV", "play"):
+        passes += 1
+    else:
+        fails += 1
 
     time.sleep(5)
 
-    if run_test_strict("Stop Office TV", "Office TV", "stop"): passes += 1
-    else: fails += 1
+    if run_test_strict("Stop Office TV", "Office TV", "stop"):
+        passes += 1
+    else:
+        fails += 1
 
     # 3. Gracie
-    if run_test_strict("Play generic music on Gracies TV", "Gracies TV", "play"): passes += 1
-    else: fails += 1
+    if run_test_strict("Play generic music on Gracies TV", "Gracies TV", "play"):
+        passes += 1
+    else:
+        fails += 1
 
     time.sleep(2)
-    if run_test_strict("Stop Gracies TV", "Gracies TV", "stop"): passes += 1
-    else: fails += 1
+    if run_test_strict("Stop Gracies TV", "Gracies TV", "stop"):
+        passes += 1
+    else:
+        fails += 1
 
     print(f"\nSummary: {passes} Passed, {fails} Failed.")
-    if fails > 0: sys.exit(1)
+    if fails > 0:
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

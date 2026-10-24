@@ -341,10 +341,7 @@ def devotional_for_day(
     if not entries:
         return None
     cadence = getattr(book, "cadence", "day") or "day"
-    if cadence == "week":
-        index = ((day_of_year - 1) // 7) % len(entries)
-    else:
-        index = (day_of_year - 1) % len(entries)
+    index = (day_of_year - 1) // 7 % len(entries) if cadence == "week" else (day_of_year - 1) % len(entries)
     chapter = entries[index]
     return {
         "source": "library",

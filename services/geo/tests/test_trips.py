@@ -2,7 +2,8 @@
 import fnmatch
 import json
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -32,9 +33,6 @@ class FakeRedis:
         if hname not in self.hashes:
             self.hashes[hname] = {}
         self.hashes[hname][key] = value
-
-    async def hgetall(self, hname):
-        return self.hashes.get(hname, {})
 
     async def zadd(self, zname, mapping):
         if zname not in self.zsets:
@@ -438,7 +436,6 @@ async def test_workout_start_stop_flow(client, fake_redis):
     assert resp_dup.json()["status"] == "already_active"
 
     # Backdate the workout start so breadcrumb timestamps fall inside the window
-    import asyncio
     base_t = time.time() - 600
     active = json.loads(await fake_redis.get("geo:active_workout:jeremiah"))
     active["start_time"] = base_t
@@ -585,7 +582,7 @@ def test_daily_steps_via_record_endpoint(client, fake_redis):
     raw = fake_redis.hashes.get("geo:steps:jeremiah", {})
     # day bucket written
     assert len(raw) == 1
-    assert list(raw.values())[0] == 5432
+    assert next(iter(raw.values())) == 5432
 
     # GET /steps returns it (and today's bucket)
     r = client.get("/steps?user_id=jeremiah")

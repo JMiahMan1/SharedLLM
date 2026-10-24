@@ -26,13 +26,10 @@ Additionally tests:
 import os
 import re
 import time
+from pathlib import Path
 
 import httpx
 import pytest
-
-
-from pathlib import Path
-
 from dotenv import dotenv_values
 
 from services.gateway.agent_loop import extract_action_json

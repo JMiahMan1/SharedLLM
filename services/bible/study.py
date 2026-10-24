@@ -420,9 +420,8 @@ def notes_for_span(
             continue
         if row.verse == 0:
             continue
-        if row.chapter == span.chapter_start and span.verse_end is not None:
-            if not span.verse_start <= row.verse <= span.verse_end:
-                continue
+        if row.chapter == span.chapter_start and span.verse_end is not None and not span.verse_start <= row.verse <= span.verse_end:
+            continue
         record = _record(row, names)
         if record.identity in seen:
             continue

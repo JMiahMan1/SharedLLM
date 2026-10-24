@@ -31,12 +31,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from services.bible.corpus import (
     CorpusError,
     catalogue,
-    file_sha256,
     import_corpus,
     load_manifest,
 )
@@ -68,10 +67,7 @@ def _download(url: str, destination: Path) -> None:
 
 
 def _install(session, version: dict, source: Path, sha256: str | None) -> dict:
-    if version["license_class"] == "public_domain" and version["sha256"]:
-        expected = sha256 or version["sha256"]
-    else:
-        expected = sha256
+    expected = (sha256 or version["sha256"]) if version["license_class"] == "public_domain" and version["sha256"] else sha256
     return import_corpus(
         session,
         code=version["code"],

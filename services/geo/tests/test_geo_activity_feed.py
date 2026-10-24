@@ -7,7 +7,6 @@ data.
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-
 import pytest
 from fastapi import HTTPException
 
