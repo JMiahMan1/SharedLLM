@@ -1,5 +1,7 @@
 """Tests for the execution container toolchain probe."""
 
+from typing import ClassVar
+
 import pytest
 
 from services.execution import toolchain
@@ -105,7 +107,7 @@ class _FakeSession:
     """aiohttp.ClientSession stand-in: each post() runs the next scripted step."""
 
     calls = 0
-    steps: list = []
+    steps: ClassVar[list] = []
     timeout = None
 
     def __init__(self, timeout=None):

@@ -4,8 +4,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, StaticPool, create_engine
 
-from services.workspace_runtime.models import Workspace
-
 _TEST_WS_ROOT = os.path.abspath(".tmp/workspaces")
 os.environ["WORKSPACE_RUNTIME_ROOT"] = _TEST_WS_ROOT
 os.makedirs(_TEST_WS_ROOT, exist_ok=True)
@@ -22,8 +20,8 @@ def session_fixture():
 
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
-    import services.workspace_runtime.main as main
     import services.workspace_runtime.database as database
+    import services.workspace_runtime.main as main
     from services.workspace_runtime.main import app
     original_engine = main.engine
     original_db_engine = database.engine
@@ -152,7 +150,7 @@ def test_list_entries_skips_git_tree(tmp_path):
     (tmp_path / ".git" / "objects" / "pack" / "pack-abc.pack").write_bytes(b"x" * 10)
     (tmp_path / "narration.wav").write_bytes(b"\x00" * 100)
 
-    root, entries, truncated = main._list_workspace_entries(
+    _root, entries, truncated = main._list_workspace_entries(
         workspace_path=tmp_path,
         relative_path=".",
         recursive=True,

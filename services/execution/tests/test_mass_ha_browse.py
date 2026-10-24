@@ -12,8 +12,6 @@ Verified against homeassistant/components/music_assistant on HA core dev
   never "tracks"/"playlists"/etc.
 """
 import os
-
-
 from unittest.mock import AsyncMock, patch
 
 import pytest

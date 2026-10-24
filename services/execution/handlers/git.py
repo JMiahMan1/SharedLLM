@@ -362,20 +362,22 @@ async def _create_github_repo(
     if description:
         payload["description"] = description
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
-            async with client.post(api_url, json=payload, headers=headers) as resp:
-                if resp.status in (201, 200):
-                    data = await resp.json()
-                    return (data.get("clone_url") or data.get("ssh_url") or "").replace(".git", "")
-                body = await resp.text()
-                # 422 often means the repo already exists; try to resolve it.
-                if resp.status == 422:
-                    log.warning(f"[Git] repo_create 422 for {repo_name}: {body[:200]}")
-                    existing = await _resolve_github_repo_url(token, repo_name)
-                    if existing:
-                        return existing
-                log.warning(f"[Git] repo_create failed ({resp.status}): {body[:200]}")
-                return None
+        async with (
+            aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client,
+            client.post(api_url, json=payload, headers=headers) as resp,
+        ):
+            if resp.status in (201, 200):
+                data = await resp.json()
+                return (data.get("clone_url") or data.get("ssh_url") or "").replace(".git", "")
+            body = await resp.text()
+            # 422 often means the repo already exists; try to resolve it.
+            if resp.status == 422:
+                log.warning(f"[Git] repo_create 422 for {repo_name}: {body[:200]}")
+                existing = await _resolve_github_repo_url(token, repo_name)
+                if existing:
+                    return existing
+            log.warning(f"[Git] repo_create failed ({resp.status}): {body[:200]}")
+            return None
     except Exception as e:
         log.error(f"[Git] repo_create exception: {e}")
         return None
@@ -512,8 +514,8 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         if r["returncode"] != 0:
             return _fail("status", r)
         lines = r["stdout"].splitlines()
-        branch_line = next((l for l in lines if l.startswith("##")), "")
-        porcelain = [l for l in lines if not l.startswith("##")]
+        branch_line = next((line for line in lines if line.startswith("##")), "")
+        porcelain = [line for line in lines if not line.startswith("##")]
         return _ok("status", {
             "branch_line": branch_line,
             "porcelain": porcelain,

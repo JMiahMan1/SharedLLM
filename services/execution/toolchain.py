@@ -18,7 +18,7 @@ a failed sync is logged as a warning.
 import logging
 import shutil
 import subprocess
-from typing import Callable
+from collections.abc import Callable
 
 log = logging.getLogger("workspace_runtime.toolchain")
 
@@ -138,18 +138,17 @@ async def sync_toolchain_to_rag() -> dict:
             # queued the same embed again. Wait as long as the work takes.
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=SYNC_TIMEOUT_SECONDS)
-            ) as client:
-                async with client.post(
-                    f"{rag_url}/rag/sync/capabilities",
-                    json={"capabilities": capabilities},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                ) as resp:
-                    body = await resp.json() if resp.status == 200 else {}
-                    if resp.status != 200:
-                        last_error = f"status {resp.status}"
-                        log.warning(f"[toolchain] sync attempt {attempt + 1}/6 failed: {resp.status}")
-                        await asyncio.sleep(5)
-                        continue
+            ) as client, client.post(
+                f"{rag_url}/rag/sync/capabilities",
+                json={"capabilities": capabilities},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            ) as resp:
+                body = await resp.json() if resp.status == 200 else {}
+                if resp.status != 200:
+                    last_error = f"status {resp.status}"
+                    log.warning(f"[toolchain] sync attempt {attempt + 1}/6 failed: {resp.status}")
+                    await asyncio.sleep(5)
+                    continue
             log.info(f"[toolchain] synced {len(capabilities)} binaries to RAG")
             return {"status": "SUCCESS", "count": len(capabilities), **body}
         except TimeoutError:  # aiohttp raises asyncio.TimeoutError, the same class

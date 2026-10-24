@@ -197,7 +197,7 @@ async def test_a_422_validation_detail_is_flattened_for_the_model(monkeypatch):
 
 async def test_a_500_keeps_its_status_and_detail(monkeypatch):
     _install(monkeypatch, _resp({"detail": "corpus locked"}, status=500))
-    with pytest.raises(bible_client.BibleUnavailable, match="answered 500.*corpus locked"):
+    with pytest.raises(bible_client.BibleUnavailable, match=r"answered 500.*corpus locked"):
         await _client().read(ref="John 3:16")
 
 
@@ -212,7 +212,7 @@ async def test_a_transport_failure_says_the_service_could_not_be_reached(monkeyp
         raise ConnectionError("no route to host")
 
     monkeypatch.setattr(bible_client.http_client, "request", boom)
-    with pytest.raises(bible_client.BibleUnavailable, match="could not be reached.*no route"):
+    with pytest.raises(bible_client.BibleUnavailable, match=r"could not be reached.*no route"):
         await _client().read(ref="John 3:16")
 
 

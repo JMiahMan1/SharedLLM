@@ -214,7 +214,7 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
             "source": "library",
         })
 
-    for lib, resp in zip(libraries, responses):
+    for lib, resp in zip(libraries, responses, strict=False):
         if isinstance(resp, BaseException):
             log.warning(f"[abs.search] library {lib.get('id')} search failed: {resp}")
             continue
@@ -644,11 +644,11 @@ def _progress_pct(record: dict) -> int:
     duration = record.get("duration") or 0
     current = record.get("currentTime") or 0
     if duration and duration > 0:
-        return max(0, min(100, int(round(current / duration * 100))))
+        return max(0, min(100, round(current / duration * 100)))
     progress = record.get("progress")
     if isinstance(progress, (int, float)):
         pct = progress * 100 if 0 < progress <= 1 else progress
-        return max(0, min(100, int(round(pct))))
+        return max(0, min(100, round(pct)))
     return 0
 
 
@@ -895,10 +895,12 @@ async def _roku_play_audiobook(roku_entity: str, stream_url: str, title: str, ha
         ecp_url = f"http://{roku_ip}:8060/launch/{roku_handler.MEDIA_ASSISTANT_CHANNEL_ID}"
         try:
             connector = aiohttp.TCPConnector(verify_ssl=False)
-            async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as client:
-                async with client.post(ecp_url, params=params) as resp:
-                    if resp.status in (200, 204):
-                        await asyncio.sleep(3)
+            async with (
+                aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as client,
+                client.post(ecp_url, params=params) as resp,
+            ):
+                if resp.status in (200, 204):
+                    await asyncio.sleep(3)
         except Exception as e:
             log.warning(f"[abs.roku] ECP launch failed: {e}")
 

@@ -253,7 +253,7 @@ async def test_an_oversize_fetch_points_at_the_ceiling(monkeypatch):
 
 async def test_a_storage_failure_keeps_its_status(monkeypatch):
     _install(monkeypatch, _identity(), _resp({"detail": "disk on fire"}, status=500))
-    with pytest.raises(calibre_client.CalibreUnavailable, match="answered 500.*disk on fire"):
+    with pytest.raises(calibre_client.CalibreUnavailable, match=r"answered 500.*disk on fire"):
         await _client().list_books()
 
 

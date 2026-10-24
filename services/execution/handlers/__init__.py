@@ -1,4 +1,5 @@
-try:
-    from . import roku, samsung
-except ImportError:
-    pass
+import contextlib
+
+with contextlib.suppress(ImportError):
+    from . import roku as roku
+    from . import samsung as samsung

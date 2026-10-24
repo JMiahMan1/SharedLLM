@@ -100,14 +100,14 @@ class EntityPermissions:
         return self.may_control(entity_id)
 
     @classmethod
-    def everything(cls) -> "EntityPermissions":
+    def everything(cls) -> EntityPermissions:
         """Admins are not filtered; nothing is protected *for* them."""
         return cls(unrestricted=True)
 
 
 # Last successful answer per username. Doubles as the degraded-mode source so
 # protection can fail closed while everything else keeps working.
-_PERMISSION_CACHE: "LastKnownGoodCache[EntityPermissions]" = LastKnownGoodCache(
+_PERMISSION_CACHE: LastKnownGoodCache[EntityPermissions] = LastKnownGoodCache(
     "entity_access", max_entries=512
 )
 

@@ -1,5 +1,4 @@
 """The activity recorder: best-effort posts to telemetry, never raises."""
-import pytest
 
 from services.execution import activity
 

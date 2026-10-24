@@ -20,7 +20,7 @@ log = logging.getLogger("execution.recipe_seed")
 
 DEFAULT_SEED_PATH = "/data/recipes/recipe-seed.db"
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
-_SEED_CACHE: dict[str, "RecipeSeed"] = {}
+_SEED_CACHE: dict[str, RecipeSeed] = {}
 
 
 def seed_path() -> str:
@@ -28,7 +28,7 @@ def seed_path() -> str:
     return os.environ.get("RECIPE_SEED_PATH") or DEFAULT_SEED_PATH
 
 
-def get_seed() -> "RecipeSeed":
+def get_seed() -> RecipeSeed:
     """The shared reader for the configured seed path."""
     path = seed_path()
     seed = _SEED_CACHE.get(path)

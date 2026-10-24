@@ -12,10 +12,10 @@ def mock_write(file, data, samplerate, **kwargs):
 
 mock_sf.write.side_effect = mock_write
 
-from services.config import DEFAULT_TTS_VOICE
-from services.execution.tts import (
-    PAUSE_STRUCTURE,
+from services.config import DEFAULT_TTS_VOICE  # noqa: E402 - soundfile must be mocked first
+from services.execution.tts import (  # noqa: E402 - soundfile must be mocked first
     _PAUSE_MARK,
+    PAUSE_STRUCTURE,
     KokoroTTSEngine,
     _translate_ssmd,
 )

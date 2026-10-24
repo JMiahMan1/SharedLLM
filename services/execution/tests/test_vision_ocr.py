@@ -1,5 +1,6 @@
 import os
 import sys
+
 import pytest
 import respx
 from httpx import Response
@@ -131,10 +132,9 @@ def test_get_cached_ocr_model():
         return_value=Response(200, json=settings_response)
     )
 
-    from tools.vision_ocr import _get_cached_ocr_model
-
     # Clear cache
     import tools.vision_ocr
+    from tools.vision_ocr import _get_cached_ocr_model
     tools.vision_ocr._VOCAB_MODEL_CACHE = None
 
     model1 = _get_cached_ocr_model()

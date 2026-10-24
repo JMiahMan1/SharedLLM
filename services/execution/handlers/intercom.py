@@ -17,6 +17,7 @@ from services.execution.schemas import ExecutionResult, UserContext
 from services.shared.rag_client import push_conversation
 
 log = logging.getLogger("execution/intercom")
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
 async def _call_identity(method: str, path: str, json_data: dict | None = None) -> dict | list:
@@ -271,9 +272,11 @@ async def handle_intercom_broadcast(req, user_context: UserContext) -> Execution
         result = await run_broadcast(req, user_context)
         msg = getattr(req, "message", "") or ""
         if msg and result.get("status") == "SUCCESS":
-            asyncio.ensure_future(
+            task = asyncio.ensure_future(
                 push_conversation(user_context.user, msg, room_id="broadcast", user_id=user_context.user)
             )
+            _BACKGROUND_TASKS.add(task)
+            task.add_done_callback(_BACKGROUND_TASKS.discard)
         return ExecutionResult(
             status=result.get("status", "FAILURE"),
             message=result.get("message", "Broadcast finished"),
@@ -293,9 +296,11 @@ async def handle_intercom_announcement(req, user_context: UserContext) -> Execut
         result = await run_announcement(req, user_context)
         msg = getattr(req, "message", "") or ""
         if msg and result.get("status") == "SUCCESS":
-            asyncio.ensure_future(
+            task = asyncio.ensure_future(
                 push_conversation(user_context.user, msg, room_id="announcement", user_id=user_context.user)
             )
+            _BACKGROUND_TASKS.add(task)
+            task.add_done_callback(_BACKGROUND_TASKS.discard)
         return ExecutionResult(
             status=result.get("status", "FAILURE"),
             message=result.get("message", "Announcement finished"),

@@ -131,7 +131,7 @@ async def _attach_previews(provider, notes: list[dict]) -> None:
                 resp = await http_client.request(
                     "GET", url, auth=(provider.username, provider.password), verify=False, timeout=20
                 )
-            except Exception as e:  # noqa: BLE001 - one unreadable note must not fail the list
+            except Exception as e:  # one unreadable note must not fail the list
                 log.warning("Note preview read failed for %s: %s", note["path"], str(e) or type(e).__name__)
                 return
         if resp["status_code"] == 200:
@@ -169,7 +169,7 @@ async def _read_meta(provider) -> dict | None:
                 auth=(provider.username, provider.password), verify=False,
             )
             break
-        except Exception as e:  # noqa: BLE001 - retry once, then report
+        except Exception as e:  # retry once, then report
             if attempt == 0:
                 log.info("Notes index read failed; retrying: %s", str(e) or type(e).__name__)
                 await asyncio.sleep(0.4)
@@ -1021,7 +1021,7 @@ async def _walk_webdav_dir(provider, base_dir: str) -> list[dict]:
 
         await walk(base_dir)
         return notes
-    except Exception as e:  # noqa: BLE001 - a broken listing shows as no notes, with the reason logged
+    except Exception as e:  # a broken listing shows as no notes, with the reason logged
         log.error("WebDAV listing error at %s: %s", base_dir, str(e) or type(e).__name__)
         return []
 

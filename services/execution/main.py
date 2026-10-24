@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 import traceback
 import warnings
@@ -13,8 +14,6 @@ from contextlib import asynccontextmanager, suppress
 from datetime import date as date_cls
 from datetime import timedelta
 from typing import Any
-
-# Suppress InsecureRequestWarning for internal self-signed certs (homelab)
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
@@ -24,20 +23,16 @@ from fastapi.responses import JSONResponse, Response
 from urllib3.exceptions import InsecureRequestWarning
 
 from services.common.http import get_client
-
-warnings.filterwarnings("ignore", category=InsecureRequestWarning)
-
-import threading
-
+from services.common.secrets import secret_matches
 from services.config import (
     IDENTITY_SVC_URL,
     INTERNAL_SECRET,
     OLLAMA_URL,
+    TEMP_MEDIA_DIR,
 )
 
 # Now import everything from sibling modules
-from services.execution import device_registry, ha_client
-from services.execution import hardware_router
+from services.execution import device_registry, ha_client, hardware_router
 from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
 from services.execution.artifacts import artifact_name, create_artifact
 from services.execution.handlers import (
@@ -76,11 +71,13 @@ from services.execution.media_playback_service import LOCAL_PLAYER_ALIASES, Medi
 from services.execution.schemas import (
     ActivityRequest,
     AnnouncementRequest,
+    AudiobookRegenerateRequest,
     AudiobookshelfRequest,
-    CalendarRequest,
     BibleRequest,
     BrowserAutomationRequest,
+    CalendarRequest,
     CalibreRequest,
+    CodeSearchRequest,
     DeploymentRequest,
     DiagnosticRequest,
     DiscoverySyncRequest,
@@ -97,7 +94,10 @@ from services.execution.schemas import (
     HAServiceRequest,
     IdentityManageRequest,
     IdentityRequest,
+    ImageEditInlineRequest,
+    ImageEditRequest,
     LightControlRequest,
+    ListVoicesRequest,
     LLMInfoRequest,
     LogbookRequest,
     MediaPlayRequest,
@@ -107,14 +107,11 @@ from services.execution.schemas import (
     NetworkDeviceScanRequest,
     NoteRequest,
     OcrRequest,
-    ImageEditInlineRequest,
-    ImageEditRequest,
-    ListVoicesRequest,
     PodcastRenderRequest,
     RecipeRequest,
     RedisInspectRequest,
-    SpeakerIdentifyRequest,
     ResolveStreamRequest,
+    SpeakerIdentifyRequest,
     StorageFileReadRequest,
     StorageFileWriteRequest,
     StorageTextToAudioRequest,
@@ -123,7 +120,6 @@ from services.execution.schemas import (
     TalkRequest,
     TimerRequest,
     TTSRequest,
-    AudiobookRegenerateRequest,
     TVCastRequest,
     UserContext,
     VideoPlayRequest,
@@ -131,7 +127,6 @@ from services.execution.schemas import (
     WebReadRequest,
     WebScraperRequest,
     WebSearchRequest,
-    CodeSearchRequest,
     WorkspaceFilePatchRequest,
     WorkspaceFileReadRequest,
     WorkspaceFileWriteRequest,
@@ -147,11 +142,14 @@ from services.execution.schemas_groups import (
 from services.execution.tts import text_to_speech as _text_to_speech
 from services.shared.info_endpoint import info_router
 from services.shared.rag_client import push_telemetry_alert
-from services.common.secrets import secret_matches
+
+# Suppress InsecureRequestWarning for internal self-signed certs (homelab)
+warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
 log = logging.getLogger("execution")
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 # Expose for test mocking
 text_to_speech = _text_to_speech
@@ -303,7 +301,7 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
                     now_ts = time.time()
                     if not is_available and (now_ts - _alert_last.get(entity_id, 0.0)) > 600:
                         _alert_last[entity_id] = now_ts
-                        asyncio.ensure_future(
+                        task = asyncio.ensure_future(
                             push_telemetry_alert(
                                 entity_id,
                                 "availability_loss",
@@ -313,6 +311,8 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
                                 user_id="default",
                             )
                         )
+                        _BACKGROUND_TASKS.add(task)
+                        task.add_done_callback(_BACKGROUND_TASKS.discard)
                     async with get_client() as session, session.post(
                         f"{IDENTITY_SVC_URL}/api/telemetry/snapshot",
                         headers={"X-Internal-Secret": INTERNAL_SECRET},
@@ -381,10 +381,8 @@ def _download_kokoro_files() -> tuple[list[str], list[str]]:
             results.append(f"Successfully downloaded {filename}")
         except Exception as e:
             if os.path.exists(path):
-                try:
+                with suppress(OSError):
                     os.remove(path)
-                except OSError:
-                    pass
             detail = f"Failed to download {filename}: {e}"
             results.append(detail)
             failures.append(detail)
@@ -394,6 +392,7 @@ def _download_kokoro_files() -> tuple[list[str], list[str]]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import subprocess  # always available for startup shell setup (gh auth, git config)
+
     # Resolve runtime config from Identity service
     from services.config import resolve_runtime_config
     await resolve_runtime_config()
@@ -567,8 +566,6 @@ async def global_exception_handler(request, exc):
 # Transient cache for locally-generated media (TTS announcements)
 TEMP_AUDIO_CACHE: dict[str, bytes] = {}
 # Persistent disk cache for TTS files (survives container restarts)
-from services.config import TEMP_MEDIA_DIR
-
 TEMP_AUDIO_DIR = os.path.join(TEMP_MEDIA_DIR, "tts")
 os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 os.makedirs(TEMP_MEDIA_DIR, exist_ok=True)
@@ -881,9 +878,8 @@ async def execute_esphome_pair(req: EsphomePairRequest):
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
     is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
-    if req.entity_id and not is_local:
-        if not await verify_entity_access(req.user_context, req.entity_id):
-            raise HTTPException(status_code=403, detail="Access denied to this device")
+    if req.entity_id and not is_local and not await verify_entity_access(req.user_context, req.entity_id):
+        raise HTTPException(status_code=403, detail="Access denied to this device")
     if not is_local:
         _ensure_ha_creds(req.user_context)
     return await MediaPlaybackService.play(req)
@@ -2123,9 +2119,8 @@ async def execute_announce(req: AnnouncementRequest):
             log.info(f"[announce] Dispatch result: {result}")
 
             if req.save_path:
-                from services.execution.schemas import StorageFileWriteRequest
-
                 from services.execution.handlers import storage as storage_handler
+                from services.execution.schemas import StorageFileWriteRequest
                 await storage_handler.handle_storage_write(StorageFileWriteRequest(
                     user_context=ctx, path=req.save_path, content=audio_bytes.decode('utf-8', errors='replace')
                 ))
@@ -3197,9 +3192,8 @@ async def execute_audiobookshelf(req: AudiobookshelfRequest):
     # execute_media_play does. Without this, any resolved user could name an
     # arbitrary media_player.* and make the house play audio on it.
     is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
-    if req.entity_id and not is_local:
-        if not await verify_entity_access(ctx, ha_client.sanitize_entity_id("media_player", req.entity_id)):
-            raise HTTPException(status_code=403, detail="Access denied to this device")
+    if req.entity_id and not is_local and not await verify_entity_access(ctx, ha_client.sanitize_entity_id("media_player", req.entity_id)):
+        raise HTTPException(status_code=403, detail="Access denied to this device")
     if not is_local:
         _ensure_ha_creds(ctx)
     return await audiobookshelf.handle_audiobookshelf(req)
@@ -4104,7 +4098,7 @@ async def _skylight_setting(key: str) -> str:
                 log.warning("[skylight] settings read failed: %s", resp.status)
                 return ""
             return {item["key"]: item.get("value") or "" for item in await resp.json()}.get(key, "")
-    except Exception as exc:  # noqa: BLE001 - reported to the caller as a failure
+    except Exception as exc:  # reported to the caller as a failure
         log.error("[skylight] settings read error: %s", exc)
         return ""
 

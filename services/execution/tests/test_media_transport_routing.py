@@ -1,11 +1,11 @@
 """BUG-28: media transport must prefer HA's media_player.* services when the
 entity advertises the matching supported_features bit, falling back to the
 brand remote endpoints only when the entity cannot serve the command."""
+import pytest
+
 from services.execution.handlers import android_tv, media
 from services.execution.handlers import roku as roku_handler
 from services.execution.schemas import MediaTransportRequest, UserContext
-
-import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

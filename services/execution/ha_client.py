@@ -3,17 +3,16 @@
 Asynchronous Home Assistant REST client using aiohttp.
 """
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 
 import aiohttp
 
-log = logging.getLogger("execution.ha_client")
-
-import re
-
 from services.execution import credential_alerts
 from services.execution.http_client import get_session, host_of
+
+log = logging.getLogger("execution.ha_client")
 
 _TIMEOUT = aiohttp.ClientTimeout(total=45.0, connect=15.0)
 
@@ -59,7 +58,8 @@ def sanitize_entity_id(domain: str, llm_target: str) -> str:
     Ensures the entity_id is well-formed for Home Assistant.
     Example: 'piano-lamp' -> 'light.piano_lamp'
     """
-    if not llm_target: return ""
+    if not llm_target:
+        return ""
 
     # If already has a dot, assume it's domain.name and sanitize the name part
     if "." in llm_target:
@@ -285,12 +285,11 @@ _TEMPLATE_DENIED_WARNED: set[str] = set()
 async def _render_areas(ha_url: str, ha_token: str) -> dict:
     """entity_id -> area name through HA's template API. Raises on HTTP errors."""
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
-    async with _ha_session(ha_url) as client:
-        async with client.post(
-            f"{ha_url.rstrip('/')}/api/template", headers=headers, json={"template": _AREA_TEMPLATE}, timeout=_TIMEOUT
-        ) as resp:
-            resp.raise_for_status()
-            raw_data = await resp.json(content_type=None)
+    async with _ha_session(ha_url) as client, client.post(
+        f"{ha_url.rstrip('/')}/api/template", headers=headers, json={"template": _AREA_TEMPLATE}, timeout=_TIMEOUT
+    ) as resp:
+        resp.raise_for_status()
+        raw_data = await resp.json(content_type=None)
     if isinstance(raw_data, list):
         return {item["eid"]: item["a"] for item in raw_data if item.get("a")}
     return {}
@@ -467,9 +466,8 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
                 name_score += 2
 
         # Penalty for numeric suffixes (e.g., "office_tv_3" when searching "office tv")
-        if search.replace(" ", "_") in eid_base and eid_base != search.replace(" ", "_"):
-            if any(c.isdigit() for c in eid_base.split("_")[-1:]):
-                name_score -= 5
+        if search.replace(" ", "_") in eid_base and eid_base != search.replace(" ", "_") and any(c.isdigit() for c in eid_base.split("_")[-1:]):
+            name_score -= 5
 
         # Capability bonuses break ties between equal name scores only.
         bonus = 0

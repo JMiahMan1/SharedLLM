@@ -2,7 +2,6 @@
 No mocks. These tests validate real HTTP communication with each service."""
 import os
 
-
 import httpx
 import pytest
 
