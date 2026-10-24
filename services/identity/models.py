@@ -521,6 +521,12 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "family_drawing_edit_model", "value": "qwen-image-edit-2511:q3_k_s", "description": "Image editing model for the Family drawing 'Make it way better' button. Default: qwen-image-edit-2511:q3_k_s, the newest Qwen edit model that runs on an 8 GB card. Change it in Settings > AI & Compute."},
     {"key": "image_edit_steps", "value": "", "description": "Sampling steps for image edits (1-100). Empty uses the model default (20). The rapid edit models are made for about 4 to 8 steps."},
 
+    # --- SPOTIFY LINKING (Phase 11, music everywhere; docs/HEALTH_HUB.md) ---
+    # The household's own app at developer.spotify.com. All three empty: linking says "not configured".
+    {"key": "spotify_client_id", "value": "", "description": "Client ID of the household's Spotify app (developer.spotify.com). With the secret and redirect URI set, each member can link their own Spotify so what they play lands on their activity feed."},
+    {"key": "spotify_client_secret", "value": "", "description": "Client secret of the household's Spotify app. Kept server-side; never shown to the UI."},
+    {"key": "spotify_redirect_uri", "value": "", "description": "The public address of /api/spotify/callback on this server (for example https://jarvis.example.com/api/spotify/callback), registered as a redirect URI in the Spotify app."},
+
     # --- ANTI-REFUSAL & AGENT PROTOCOLS ---
     {
         "key": "system_autonomous_protocols",
@@ -757,6 +763,26 @@ class GuardRequest(SQLModel, table=True):  # type: ignore
     decided_by: str | None = None
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     decided_at: str | None = None
+
+
+class LinkedAccount(SQLModel, table=True):  # type: ignore
+    """A member's own outside account, linked by them over OAuth (Phase 11:
+    Spotify's recently played). Tokens are kept encrypted; ``cursor_ms`` is
+    the newest play already copied to the activity feed.
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    provider: str = Field(primary_key=True)  # spotify
+    account_id: str = ""
+    account_name: str = ""
+    access_token_enc: str = ""
+    refresh_token_enc: str = ""
+    expires_at: int = 0  # epoch seconds
+    scope: str = ""
+    cursor_ms: int = 0
+    linked_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    last_sync_at: str | None = None
+    last_error: str | None = None
 
 
 class RecommendationLanes(SQLModel, table=True):  # type: ignore

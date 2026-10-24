@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 import traceback
@@ -30,6 +31,7 @@ from services.common import guardian_recap as _recap
 from services.common import health_coach as _health_coach
 from services.common import notify as _notify
 from services.common import nutrition_label as _nutrition_label
+from services.common import spotify
 from services.common.activity_recommendations import recommend_activity
 from services.common.book_recommendations import book_events, recommend_book
 from services.common.burden import is_burdened
@@ -5919,6 +5921,95 @@ async def guard_decide(request: Request, request_id: int):
             title, line = "Approved", f"A parent said yes to {what}."
         await _screen_time_notice(body.get("notify") or [], title, line, "/health")
     return JSONResponse(status_code=status, content={k: v for k, v in (body or {}).items() if k != "notify"})
+
+
+# --- Spotify linking (Phase 11, music everywhere; services/common/spotify.py) ---
+
+
+async def _spotify_settings() -> dict[str, str]:
+    """The household's Spotify app registration from identity's settings."""
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/settings", headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        rows = await resp.json(content_type=None) if resp.status == 200 else []
+    return {
+        r["key"]: str(r.get("value") or "").strip()
+        for r in rows or [] if isinstance(r, dict) and r.get("key") in spotify.SETTING_KEYS
+    }
+
+
+@app.get("/api/spotify/status")
+async def spotify_status(request: Request):
+    """Whether linking is set up on this server, and the caller's own link."""
+    missing = spotify.missing_settings(await _spotify_settings())
+    status, body = await _identity_as_caller(request, "GET", "/api/linked-accounts/spotify")
+    if status != 200:
+        return JSONResponse(status_code=status, content=body)
+    return {"configured": not missing, "missing": missing, **(body or {})}
+
+
+@app.post("/api/spotify/link")
+async def spotify_link(request: Request):
+    """Start linking the caller's own Spotify: the address to send the browser to."""
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    settings = await _spotify_settings()
+    missing = spotify.missing_settings(settings)
+    if missing:
+        raise HTTPException(status_code=409, detail="Spotify linking is not configured on this server (" + ", ".join(missing) + ")")
+    state = spotify.sign_state(INTERNAL_SECRET, user, nonce=secrets.token_urlsafe(8))
+    return {"url": spotify.authorize_url(settings["spotify_client_id"], settings["spotify_redirect_uri"], state)}
+
+
+@app.get("/api/spotify/callback")
+async def spotify_callback(state: str = "", code: str = "", error: str = ""):
+    """Spotify sends the browser back here; the signed state says whose account it is."""
+    try:
+        user = spotify.verify_state(INTERNAL_SECRET, state)
+    except Exception as exc:
+        log.warning("[spotify] callback refused: %s", exc)
+        return RedirectResponse(url="/identity?spotify=failed", status_code=303)
+    if error or not code:
+        return RedirectResponse(url="/identity?spotify=cancelled", status_code=303)
+    settings = await _spotify_settings()
+    if spotify.missing_settings(settings):
+        return RedirectResponse(url="/identity?spotify=failed", status_code=303)
+    try:
+        async with borrow_http_client() as client:
+            resp = await client.post(
+                spotify.TOKEN_URL,
+                data=spotify.code_form(code, settings["spotify_redirect_uri"]),
+                headers={"Authorization": spotify.basic_auth(settings["spotify_client_id"], settings["spotify_client_secret"])},
+                timeout=aiohttp.ClientTimeout(total=15.0),
+            )
+            token = spotify.parse_token(await resp.json(content_type=None))
+            me_resp = await client.get(
+                f"{spotify.API_URL}/me", headers={"Authorization": f"Bearer {token['access_token']}"},
+                timeout=aiohttp.ClientTimeout(total=15.0),
+            )
+            me = await me_resp.json(content_type=None) if me_resp.status == 200 else {}
+            stored = await client.put(
+                f"{IDENTITY_SVC}/api/internal/linked-accounts/spotify/{user}",
+                json={**token, "account_id": (me or {}).get("id") or "", "account_name": (me or {}).get("display_name") or (me or {}).get("id") or ""},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            if stored.status != 200:
+                raise RuntimeError(f"identity answered {stored.status}")
+    except Exception as exc:
+        log.warning("[spotify] linking %s failed: %s", user, exc)
+        return RedirectResponse(url="/identity?spotify=failed", status_code=303)
+    return RedirectResponse(url="/identity?spotify=linked", status_code=303)
+
+
+@app.delete("/api/spotify/link")
+async def spotify_unlink(request: Request):
+    status, body = await _identity_as_caller(request, "DELETE", "/api/linked-accounts/spotify")
+    return JSONResponse(status_code=status, content=body)
 
 
 @app.put("/api/screen-time/{username}/rules")

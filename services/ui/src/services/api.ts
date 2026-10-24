@@ -33,6 +33,7 @@ import type {
   ScreenTimeStatus,
   ScreenTimeRequest,
   GuardRequest,
+  SpotifyStatus,
   RecommendationLane,
   RecommendationLanes,
   FamilyRole,
@@ -970,6 +971,23 @@ export const api = {
 
   async decideScreenTimeRequest(id: number, grant: boolean, minutes?: number): Promise<{ request: ScreenTimeRequest }> {
     const resp = await apiClient.post(`/api/screen-time/requests/${id}`, { grant, ...(minutes ? { minutes } : {}) });
+    return resp.data;
+  },
+
+  /** Whether Spotify linking is set up here, and the caller's own link. */
+  async getSpotifyStatus(): Promise<SpotifyStatus> {
+    const resp = await apiClient.get('/api/spotify/status');
+    return resp.data;
+  },
+
+  /** Where to send the browser to link the caller's Spotify. */
+  async startSpotifyLink(): Promise<{ url: string }> {
+    const resp = await apiClient.post('/api/spotify/link');
+    return resp.data;
+  },
+
+  async unlinkSpotify(): Promise<{ linked: boolean }> {
+    const resp = await apiClient.delete('/api/spotify/link');
     return resp.data;
   },
 

@@ -48,6 +48,7 @@ from services.identity.models import (
     GuardianNote,
     GuardOfflineCode,
     GuardRequest,
+    LinkedAccount,
     RavenMission,
     RecommendationLanes,
     Role,
@@ -3220,6 +3221,8 @@ def get_settings(
         for s in settings:
             if s.key == "llm_cloud_api_key" and s.value:
                 s.value = "sk-***"
+            if s.key == "spotify_client_secret" and s.value:
+                s.value = "***"
     return settings
 
 # Keys that must never be written with a blank/empty value.
@@ -4584,6 +4587,101 @@ def decide_guard_request(request_id: int, body: dict, session: Session = Depends
     session.add(request)
     session.commit()
     return {"request": _guard_request_read(request), "notify": [request.username]}
+
+
+# --- linked outside accounts: Spotify's recently played (Phase 11, music everywhere) ---
+
+LINK_PROVIDERS = ("spotify",)
+
+
+def _linked_read(row: LinkedAccount | None) -> dict:
+    """What the member sees about their own link (never the tokens)."""
+    if row is None:
+        return {"linked": False}
+    return {
+        "linked": True, "account_name": row.account_name, "linked_at": row.linked_at,
+        "last_sync_at": row.last_sync_at, "last_error": row.last_error,
+    }
+
+
+def _link_provider(provider: str) -> str:
+    if provider not in LINK_PROVIDERS:
+        raise HTTPException(status_code=404, detail="No such provider")
+    return provider
+
+
+@app.get("/api/linked-accounts/{provider}")
+def get_my_linked_account(provider: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """The caller's own link: linked or not, the account's name, the last sync."""
+    return _linked_read(session.get(LinkedAccount, (caller.username, _link_provider(provider))))
+
+
+@app.delete("/api/linked-accounts/{provider}")
+def unlink_my_account(provider: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Unlink: the tokens are deleted and nothing more is read."""
+    row = session.get(LinkedAccount, (caller.username, _link_provider(provider)))
+    if row is not None:
+        session.delete(row)
+        session.commit()
+    return {"linked": False}
+
+
+@app.put("/api/internal/linked-accounts/{provider}/{username}")
+def store_linked_account(provider: str, username: str, body: dict, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal (the gateway's OAuth callback): keep a member's new tokens, encrypted."""
+    subject = _screen_subject(session, username)
+    if not (body or {}).get("access_token") or not (body or {}).get("refresh_token"):
+        raise HTTPException(status_code=422, detail="access_token and refresh_token required")
+    row = session.get(LinkedAccount, (subject.username, _link_provider(provider))) or LinkedAccount(
+        username=subject.username, provider=provider
+    )
+    row.access_token_enc = encrypt(str(body["access_token"]))
+    row.refresh_token_enc = encrypt(str(body["refresh_token"]))
+    row.expires_at = int(body.get("expires_at") or 0)
+    row.scope = str(body.get("scope") or "")
+    row.account_id = str(body.get("account_id") or "")[:120]
+    row.account_name = str(body.get("account_name") or "")[:120]
+    row.linked_at = datetime.now(UTC).isoformat()
+    row.last_error = None
+    session.add(row)
+    session.commit()
+    return _linked_read(row)
+
+
+@app.get("/api/internal/linked-accounts/{provider}")
+def list_linked_accounts(provider: str, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal (telemetry's sync): every link of this provider, with its tokens."""
+    rows = session.exec(select(LinkedAccount).where(LinkedAccount.provider == _link_provider(provider))).all()
+    return {"accounts": [
+        {
+            "username": r.username, "access_token": decrypt(r.access_token_enc), "refresh_token": decrypt(r.refresh_token_enc),
+            "expires_at": r.expires_at, "cursor_ms": r.cursor_ms,
+        }
+        for r in rows
+    ]}
+
+
+@app.patch("/api/internal/linked-accounts/{provider}/{username}")
+def update_linked_account(provider: str, username: str, body: dict, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal (telemetry's sync): a refreshed token, the new cursor, the sync's outcome."""
+    row = session.get(LinkedAccount, (username.strip().lower(), _link_provider(provider)))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Not linked")
+    body = body or {}
+    if body.get("access_token"):
+        row.access_token_enc = encrypt(str(body["access_token"]))
+        row.expires_at = int(body.get("expires_at") or 0)
+    if body.get("refresh_token"):
+        row.refresh_token_enc = encrypt(str(body["refresh_token"]))
+    if body.get("cursor_ms") is not None:
+        row.cursor_ms = max(row.cursor_ms, int(body["cursor_ms"]))
+    if "last_error" in body:
+        row.last_error = (str(body["last_error"])[:300] or None) if body["last_error"] else None
+    if body.get("synced"):
+        row.last_sync_at = datetime.now(UTC).isoformat()
+    session.add(row)
+    session.commit()
+    return _linked_read(row)
 
 
 RECOMMENDATION_LANES = ("music", "video", "podcast", "book", "game", "activity")

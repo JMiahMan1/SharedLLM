@@ -560,11 +560,27 @@ point.
       `activity.record`; trivia wins, media plays (music/video/podcast/audiobook) and app
       feature pages (the route beacon, posted from the web bundle) are wired; Bible chapter
       reads and imported devotional or study-book pages land as they open in the reader.
-- [ ] **Music everywhere, not just Jarvis.** Baseline: everything played through the house
+- [x] **Music everywhere, not just Jarvis.** Baseline: everything played through the house
       media stack (local library and `spotify://` through Music Assistant). If possible:
       each member links their Spotify account (Web API `recently-played`, opt-in) so
       listening in the Spotify app itself lands on the profile; every other music app is
       covered by the phone's media-session reader (title, artist, app package).
+      **Spotify linking built (2026-10-24, needs the household's Spotify app):** each member
+      links their own account, opt-in, from Accounts & Integrations (`/identity`,
+      `SpotifyLinkPanel`). The gateway runs the OAuth (`POST /api/spotify/link` gives the
+      authorize address with a state signed by the internal secret, ten minutes valid;
+      `GET /api/spotify/callback` exchanges the code, scope `user-read-recently-played` only);
+      identity keeps the tokens encrypted (`LinkedAccount`; the member sees only linked/name/last
+      sync/last error, `DELETE` unlinks and deletes the tokens). Every ten minutes telemetry
+      (`spotify_sync.py`) refreshes a token about to run out, reads recently played after the
+      last copied play and records each as a `media` play (`source: spotify`, artist, album), so
+      the profile, recap, music suggestions and content monitoring read it like any media
+      session; a child's feed stays parents-only. A failure is kept on that member's link and
+      shown to them; it never stops the others. **Not configured** until an admin registers an
+      app at developer.spotify.com and fills `spotify_client_id`, `spotify_client_secret` and
+      `spotify_redirect_uri` (the public `…/api/spotify/callback`, registered with the app); until
+      then the panel says which settings are missing and nothing is read. The client secret is
+      masked in settings reads from the UI, and OAuth codes are masked in request logs.
 - [x] **YouTube and every external app (the phone pulls it).** First brick: a
       notification-access media-session reader on the phone pulls what YouTube
       and any other external app publishes while playing — title and creator
