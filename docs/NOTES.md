@@ -12,6 +12,7 @@ grid of colour-coded cards with checklists, search, and a full editor.
 | Pin/colour/search/header helpers | `services/ui/src/lib/notesMeta.ts` |
 | Save / rename (shared with Recipes) | `services/ui/src/lib/noteSave.ts` |
 | Unsaved drafts on the device | `services/ui/src/lib/noteDrafts.ts` |
+| Offline edit queue (replay with If-Match) | `services/ui/src/lib/noteOutbox.ts` |
 | Visual editor, checklist item controls | `services/ui/src/components/notes/RichNoteEditor.tsx` |
 | Version history, reminder, sharing panels | `services/ui/src/components/notes/{NoteHistory,ReminderPanel,SharePanel}.tsx` |
 | Attachments row (photo, drawing, voice) and links | `services/ui/src/components/notes/NoteAttachments.tsx`, `services/ui/src/lib/noteAttachments.ts` |
@@ -304,6 +305,28 @@ that, every save of an opened note stacked another header on top.
   Drafts keep the version they started from, so saving a restored draft still
   detects a change made elsewhere since. Trashing a note from the editor drops
   its draft (Undo brings back the stored note).
+- **Offline editing** (`lib/noteOutbox.ts`): the drafts double as the
+  outbox. A save with no connection (the browser reports offline, or the
+  request fails with no answer: `ERR_NETWORK`, refused, host not found; a
+  timeout is not counted, since that write may have landed) is answered at
+  once instead of after a minute, and the draft is marked `queued`. The
+  editor says "Offline: kept on this device, saves when you are back
+  online", autosave stops retrying the same text, and the browser's `online`
+  event saves it again. Closing the sheet offline keeps the queued draft
+  ("Made offline: saves by itself…" in the Unsaved offer). The page replays
+  every queued draft, oldest first, through the ordinary save on load, on
+  `online` and when the app comes back to the front (not the one open in the
+  editor, which saves itself). Each replay carries the version its edit
+  started from as `If-Match` (or, without one, compares the stored text
+  first), so a note changed elsewhere meanwhile is never overwritten: the
+  draft becomes a conflict ("Changed somewhere else meanwhile"), and
+  restoring it opens straight on Keep both / Use the stored version /
+  Overwrite with mine. A refused replay whose stored note already holds the
+  same text (the first attempt landed but its answer was lost) counts as
+  saved. Other refusals keep the draft with the server's reason. Opening a
+  note offline from the shelf's cached text keeps it open (the background
+  read fails with a notice) instead of closing it; it has no version, so
+  its save is checked against the stored text first.
 - **WebDAV cost**: Nextcloud spends one to several seconds on every listing,
   so `list` makes one whole-tree PROPFIND (`Depth: infinity`, about 4 s for
   187 notes) instead of one per folder (nine in a row took over 20 s). If the
@@ -354,15 +377,12 @@ reminders on the existing timers whose notice opens the note, place
 reminders ("when I get home") fired by geo from the location the phone
 already shares, sharing with someone on the family's Nextcloud (view or
 edit), attachments (photos, files, drawings, voice notes) stored the
-Nextcloud Notes way beside the note.
+Nextcloud Notes way beside the note, offline editing with a queue that
+replays under the same If-Match rules.
 
-Still open, and why:
-
-- **Offline editing**: the shelf already paints the last list, and unsaved
-  edits survive on the device, but an edit made with no connection is not
-  queued and replayed when the network returns. That needs a write queue
-  that replays with the same If-Match rules (so a stale offline edit still
-  becomes a conflict, not an overwrite) and the app's network state.
+Still open: nothing from the Keep list above. Attachments themselves need a
+connection (an upload is not queued offline; the row shows the server's or
+the network's error).
 
 ## Tests
 
@@ -415,6 +435,12 @@ Still open, and why:
   note reminder keeps its link
 - `services/ui/src/test/noteDrafts.test.ts`: per-account drafts, the newest-20
   cap, a damaged store, storage that throws
+- `services/ui/src/test/NotesOffline.test.tsx`: an edit made offline is
+  queued (no write) and saved with its version once `online` fires; one
+  closed offline is saved by the shelf when the connection returns; a
+  replay over a note changed elsewhere becomes a conflict that opens on the
+  choice; a replay whose first attempt landed counts as saved; nothing is
+  replayed while still offline; a lost connection is told from a refusal
 - `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
 - `services/gateway/tests/test_notes_rag_sync.py`: indexing writes to RAG;
   the list route passes `previews` through; the write route passes `if_match`;

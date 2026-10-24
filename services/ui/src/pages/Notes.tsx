@@ -44,7 +44,8 @@ import { remarkNoteSpans } from '../lib/remarkNoteSpans';
 import { errorText } from '../lib/errorText';
 import { showUndoToast } from '../lib/undoToast';
 import { isTypingTarget } from '../lib/keyboard';
-import { clearNoteDraft, readNoteDraft, readNoteDrafts, writeNoteDraft } from '../lib/noteDrafts';
+import { clearNoteDraft, readNoteDraft, readNoteDrafts, writeNoteDraft, type NoteDraft } from '../lib/noteDrafts';
+import { deviceOnline, isOfflineError, replayQueuedDrafts } from '../lib/noteOutbox';
 import {
   ARCHIVE_PREFIX,
   EMPTY_NOTES_INDEX,
@@ -109,13 +110,18 @@ interface DraftState {
   draftKey?: string;
   /** Set when the editor opened a stored unsaved draft (when it was kept). */
   restoredAt?: number;
+  /** An offline edit whose replay found the note changed elsewhere: open on the choice. */
+  conflict?: boolean;
 }
 
 /** What a save came to: saved (with the new version), refused as a conflict, or failed. */
 type PersistResult =
   | { status: 'saved'; path: string; title: string; etag?: string }
   | { status: 'conflict' }
-  | { status: 'failed'; message: string };
+  /** `offline`: no connection; the edit is kept and saved when the device is back online. */
+  | { status: 'failed'; message: string; offline?: boolean };
+
+const OFFLINE_MESSAGE = 'You are offline';
 
 /** The stored text the page learned after the editor opened from the list's copy. */
 interface FreshNote {
@@ -439,6 +445,13 @@ export default function Notes() {
         };
         setEditing((current) => (current && current.draft?.path === note.path ? { ...current, fresh } : current));
       } catch (err) {
+        // Offline: keep showing this device's copy. It opened without a
+        // version, so any save (or its replay once back online) compares the
+        // stored text with it first and never overwrites a newer note.
+        if (isOfflineError(err)) {
+          toast('You are offline: showing the copy on this device. Changes save when you are back online.');
+          return;
+        }
         // The cache may be stale, so an untouched editor closes instead of
         // risking a save over a change made elsewhere. An edited one stays:
         // its save checks the stored text before writing.
@@ -565,6 +578,9 @@ export default function Notes() {
     const category = categoryFor(draft.folder);
     const previous = draft.path && draft.original ? { ...draft.original, path: draft.path } : undefined;
     const moving = Boolean(previous && (previous.title !== title || previous.category !== category));
+    // No connection: say so at once instead of waiting a minute for the
+    // request to fail. The edit stays on the device and is replayed later.
+    if (!deviceOnline()) return { status: 'failed', message: OFFLINE_MESSAGE, offline: true };
     try {
       if (!force && draft.path && draft.base !== undefined && (moving || !draft.etag)) {
         const res = await api.readNote(previous?.title ?? title, STORAGE, draft.path, asUser);
@@ -614,6 +630,7 @@ export default function Notes() {
       if (saved.leftOldCopy) toast.error('Saved under the new name, but the old copy is still there');
       return { status: 'saved', path: savedPath, title, etag: saved.etag };
     } catch (err) {
+      if (isOfflineError(err)) return { status: 'failed', message: OFFLINE_MESSAGE, offline: true };
       return { status: 'failed', message: errorText(err, 'Save failed') };
     }
   };
@@ -701,6 +718,54 @@ export default function Notes() {
       if (placeReminder) void api.removePlaceReminder(placeReminder.id).catch(() => null);
     }
   };
+
+  // Offline edits (lib/noteOutbox.ts): drafts saved with no connection are
+  // queued on the device and replayed through the ordinary save when the
+  // connection is back (on load, on the browser's `online`, and when the app
+  // comes back to the front). The note open in the editor is its own to save.
+  const replayRef = useRef({ persist: persistDraft, openKey: undefined as string | undefined, busy: false });
+  useEffect(() => {
+    replayRef.current.persist = persistDraft;
+    replayRef.current.openKey = editing?.draft ? (editing.draft.draftKey ?? editing.draft.path) : undefined;
+  });
+  useEffect(() => {
+    const replay = async () => {
+      const state = replayRef.current;
+      if (state.busy || !deviceOnline()) return;
+      if (!Object.values(readNoteDrafts(scope)).some((d) => d.queued)) return;
+      state.busy = true;
+      try {
+        const summary = await replayQueuedDrafts(
+          scope,
+          (d: NoteDraft) => state.persist({ ...d, draftKey: undefined }),
+          async (d: NoteDraft) => {
+            const res = await api.readNote(d.original?.title ?? d.title, STORAGE, d.path, asUser);
+            return res.status === 'SUCCESS' ? noteBody(res.message ?? '') : null;
+          },
+          state.openKey,
+        );
+        bumpDrafts();
+        if (summary.saved) {
+          toast.success(`Saved ${summary.saved} ${summary.saved === 1 ? 'note' : 'notes'} you changed offline`);
+          void refetch();
+        }
+        if (summary.conflicts) toast.error('A note you changed offline was also changed elsewhere: open it to choose');
+        if (summary.failed) toast.error('A note you changed offline could not be saved: see Unsaved above');
+      } finally {
+        state.busy = false;
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void replay();
+    };
+    void replay();
+    window.addEventListener('online', replay);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('online', replay);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [scope, asUser, refetch]);
 
   /** Save the editor's text as a new note beside the one that changed elsewhere. */
   const keepBoth = async (draft: DraftState): Promise<PersistResult> => {
@@ -1118,6 +1183,15 @@ export default function Notes() {
               <span className="min-w-0 flex-1">
                 Unsaved {draft.path ? 'changes to' : 'new note'} <strong className="text-slate-100">{draft.title.trim() || 'Untitled note'}</strong>
                 <span className="text-slate-500"> · kept {new Date(draft.savedAt).toLocaleString()}</span>
+                {draft.queued && (
+                  <span className="block text-sky-200" data-testid="note-draft-queued">
+                    Made offline: saves by itself when this device is back online
+                  </span>
+                )}
+                {draft.conflict && (
+                  <span className="block text-amber-200">Changed somewhere else meanwhile: restore it to choose what to keep</span>
+                )}
+                {draft.failure && <span className="block text-rose-300">Not saved: {draft.failure}</span>}
               </span>
               <button
                 type="button"
@@ -1613,7 +1687,9 @@ type SaveState =
   | { kind: 'saving' }
   | { kind: 'saved' }
   /** `snapshot` is the text that failed, so autosave waits for a new change before retrying. */
-  | { kind: 'error'; message: string; snapshot: string };
+  | { kind: 'error'; message: string; snapshot: string }
+  /** No connection: the edit is queued on the device and saved once back online. */
+  | { kind: 'offline'; snapshot: string };
 
 /** The parts of a draft a save writes; equal snapshots mean nothing to save. */
 function snapshotOf(draft: DraftState): string {
@@ -1691,7 +1767,8 @@ const NoteEditor = forwardRef<
   const [lastSaved, setLastSaved] = useState<string | null>(() => (initial.restoredAt ? null : snapshotOf(initial)));
   const [version, setVersion] = useState<{ etag?: string; base?: string }>({ etag: initial.etag, base: initial.base });
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
-  const [conflict, setConflict] = useState(false);
+  // An offline edit whose replay was refused opens straight on the choice.
+  const [conflict, setConflict] = useState(Boolean(initial.conflict));
   const [draftKey] = useState(() => initial.draftKey ?? initial.path ?? `new:${Date.now()}`);
   const [seenFresh, setSeenFresh] = useState(fresh);
   const richRef = useRef<RichNoteEditorHandle>(null);
@@ -1768,6 +1845,8 @@ const NoteEditor = forwardRef<
       } else if (result.status === 'conflict') {
         setConflict(true);
         setSaveState({ kind: 'idle' });
+      } else if (result.offline) {
+        setSaveState({ kind: 'offline', snapshot: snapshotOf(d) });
       } else {
         setSaveState({ kind: 'error', message: result.message, snapshot: snapshotOf(d) });
       }
@@ -1783,7 +1862,7 @@ const NoteEditor = forwardRef<
     dirty &&
     !conflict &&
     saveState.kind !== 'saving' &&
-    !(saveState.kind === 'error' && saveState.snapshot === snapshot);
+    !((saveState.kind === 'error' || saveState.kind === 'offline') && saveState.snapshot === snapshot);
   useEffect(() => {
     if (!canAutosave) return;
     const timer = window.setTimeout(() => void persist(draft), AUTOSAVE_MS);
@@ -1791,26 +1870,50 @@ const NoteEditor = forwardRef<
   }, [canAutosave, draft, persist]);
 
   // Keep what the server does not have on this device; forget it once saved.
+  // A save that found no connection marks it queued, so the page replays it
+  // when the connection is back even if this sheet is closed by then.
+  const offline = saveState.kind === 'offline';
+  const keepDraft = useCallback(
+    (d: DraftState, v: { etag?: string; base?: string }, queued: boolean) => {
+      writeNoteDraft(scope, draftKey, {
+        path: d.path,
+        title: d.title,
+        content: d.content,
+        folder: d.folder,
+        color: d.color,
+        pinned: d.pinned,
+        original: d.original,
+        etag: v.etag,
+        base: v.base,
+        ...(queued ? { queued: true } : {}),
+        ...(conflict ? { conflict: true } : {}),
+      });
+      wroteDraftRef.current = true;
+    },
+    [scope, draftKey, conflict],
+  );
   useEffect(() => {
     const blank = !draft.path && !draft.title.trim() && !draft.content.trim();
     if (dirty && !blank) {
-      writeNoteDraft(scope, draftKey, {
-        path: draft.path,
-        title: draft.title,
-        content: draft.content,
-        folder: draft.folder,
-        color: draft.color,
-        pinned: draft.pinned,
-        original: draft.original,
-        etag: version.etag,
-        base: version.base,
-      });
-      wroteDraftRef.current = true;
+      keepDraft(draft, version, offline);
     } else if (wroteDraftRef.current) {
       clearNoteDraft(scope, draftKey);
       wroteDraftRef.current = false;
     }
-  }, [dirty, draft, version, scope, draftKey]);
+  }, [dirty, draft, version, scope, draftKey, offline, keepDraft]);
+
+  // Back online with an edit that waited: save it now.
+  const retryRef = useRef(() => {});
+  useEffect(() => {
+    retryRef.current = () => {
+      if (dirty && !conflict && saveState.kind === 'offline') void persist(draftRef.current);
+    };
+  });
+  useEffect(() => {
+    const onOnline = () => retryRef.current();
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, []);
 
   const forgetDraft = () => {
     clearNoteDraft(scope, draftKey);
@@ -1838,6 +1941,11 @@ const NoteEditor = forwardRef<
     if (result.status === 'saved') {
       forgetDraft();
       onDone(true);
+    } else if (result.status === 'failed' && result.offline) {
+      // Queued now: the sheet closes before its own draft effect would run.
+      keepDraft(draft, versionRef.current, true);
+      toast('You are offline. Your changes are kept on this device and save when you are back online.');
+      onDone(savedAnyRef.current);
     } else if (result.status === 'failed') {
       toast.error(`Not saved: ${result.message}. Your changes are kept on this device.`);
       onDone(savedAnyRef.current);
@@ -1853,6 +1961,8 @@ const NoteEditor = forwardRef<
       forgetDraft();
       toast.success('Note saved');
       onDone(true);
+    } else if (result.status === 'failed' && result.offline) {
+      toast('You are offline. This note is kept on this device and saves when you are back online.');
     } else if (result.status === 'failed') {
       toast.error(result.message);
     }
@@ -1906,7 +2016,9 @@ const NoteEditor = forwardRef<
       ? 'Saving…'
       : saveState.kind === 'error' && saveState.snapshot === snapshot
         ? `Not saved: ${saveState.message}`
-        : !dirty
+        : saveState.kind === 'offline' && dirty
+          ? 'Offline: kept on this device, saves when you are back online'
+          : !dirty
           ? saveState.kind === 'saved' ? 'Saved' : ''
           : canAutosave
             ? 'Unsaved changes'

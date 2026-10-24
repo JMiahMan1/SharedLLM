@@ -29,6 +29,12 @@ export interface NoteDraft {
   base?: string;
   /** When the draft was last written (ms). */
   savedAt: number;
+  /** Saved while offline: replay it when the connection is back (lib/noteOutbox.ts). */
+  queued?: boolean;
+  /** Replayed, and the note had changed elsewhere meanwhile: waits for a choice. */
+  conflict?: boolean;
+  /** Replayed, and the server refused it: its reason. */
+  failure?: string;
 }
 
 /** A draft for a note never saved is kept under this id. */
