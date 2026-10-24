@@ -21,6 +21,7 @@ vi.mock('../services/api', async (importOriginal) => {
       syncNotesRag: vi.fn(),
       getTalkConversations: vi.fn(),
       sendTalkMessage: vi.fn(),
+      addFood: vi.fn(),
     },
   };
 });
@@ -217,6 +218,60 @@ describe('Recipes week plan', () => {
     expect(await screen.findByTestId('log-recipe-sheet')).toBeTruthy();
     expect(screen.getByTestId('log-recipe-per-serving')).toHaveTextContent('300 kcal');
     expect(readNote).toHaveBeenCalledWith('Pancakes', 'nextcloud', `${RECIPES_DIR}/Pancakes.md`, undefined);
+  });
+
+  it("ticks tonight's dinner cooked in the saved plan once it is logged", async () => {
+    const today = planDayOf();
+    readNote.mockImplementation(
+      (async (title: string) => {
+        if (title === 'Meal plan') {
+          return { status: 'SUCCESS' as const, message: `#meal-plan\n\n- [ ] ${today} · Pancakes`, service: 'note_read' };
+        }
+        return {
+          status: 'SUCCESS' as const,
+          message: '# Pancakes\nCategory: Recipes\n\n## Nutrition\n*Per serving — foodcom:* 300 kcal · 9 g fat · 45 g carbs · 8 g protein',
+          service: 'note_read',
+        };
+      }) as never,
+    );
+    vi.mocked(api.addFood).mockResolvedValue({} as never);
+    renderRecipes();
+    await screen.findByText('Pancakes');
+    fireEvent.click(await screen.findByRole('button', { name: /week plan/i }));
+    fireEvent.click(await screen.findByTestId('plan-log-today'));
+    expect(await screen.findByTestId('log-recipe-mark-cooked')).toBeChecked();
+    fireEvent.click(screen.getByTestId('log-recipe-submit'));
+
+    await waitFor(() => expect(writeNote).toHaveBeenCalled());
+    const saved = writeNote.mock.calls[0][0];
+    expect(saved.title).toBe('Meal plan');
+    expect(saved.content).toContain(`- [x] ${today} · Pancakes`);
+    expect(await screen.findByLabelText(`${today} cooked`)).toBeChecked();
+  });
+
+  it('leaves a cooked dinner off the shopping list', async () => {
+    readNote.mockImplementation(
+      (async (title: string) => {
+        if (title === 'Meal plan') {
+          return { status: 'SUCCESS' as const, message: '#meal-plan\n\n- [x] Mon · Chicken Chili\n- [ ] Tue · Pancakes', service: 'note_read' };
+        }
+        if (title === 'Chicken Chili') {
+          return { status: 'SUCCESS' as const, message: '# Chicken Chili\n\n- [ ] 1 tsp cumin', service: 'note_read' };
+        }
+        if (title === 'Shopping list') return { status: 'FAILURE' as const, message: 'Not found', service: 'note_read' };
+        return { status: 'SUCCESS' as const, message: '# Pancakes\n\n- [ ] 2 cups flour', service: 'note_read' };
+      }) as never,
+    );
+    renderRecipes();
+    await screen.findByText('Pancakes');
+    fireEvent.click(await screen.findByRole('button', { name: /week plan/i }));
+    await screen.findByTestId('meal-plan');
+    fireEvent.click(screen.getByRole('button', { name: /build shopping list/i }));
+
+    await waitFor(() => expect(writeNote).toHaveBeenCalled());
+    const body = writeNote.mock.calls[0][0].content;
+    expect(body).toContain('2 cups flour');
+    expect(body).not.toContain('cumin');
   });
 
   it('offers Log to Health from an open recipe', async () => {

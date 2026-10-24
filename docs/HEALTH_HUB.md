@@ -442,7 +442,14 @@ live search is the ecosystem-standard pattern.
   **Check on a real phone:** add *Health today* from the widget picker; signed out it says "Sign in
   to Jarvis OS"; signed in the four tiles match Health → Today (log water and press refresh: the
   water tile changes); at 3×2 and at the smallest resize nothing is cut off; a tap opens Health.
-- [ ] Recipes: plan ↔ log ↔ shopping list round trip; Calendar: workouts.
+- [x] Recipes: plan ↔ log ↔ shopping list round trip; Calendar: workouts. **Log tonight's dinner**
+  from the week plan now offers "Tick {day} cooked in the week plan" (on by default): after the
+  log is saved, the plan note is re-read and that day ticked only when its dinner is still that
+  recipe, so an unsaved edit is never written (`src/lib/mealPlanStore.ts`, now the one reader and
+  writer of `Recipes/Meal plan.md` for Recipes, Health and the dashboard). **Build shopping list**
+  leaves out dinners already cooked, so log → plan → list closes the loop. **Plan a workout** on the
+  Active minutes card puts "🏃 Run · 30 min" at a chosen day and time on the person's calendar
+  through the same add the Calendar page uses (`src/lib/workoutPlan.ts`).
 - [x] Family hub entry point: the existing Health nav item now opens the hub.
 
 ### Phase 9 — tests, docs, deploy

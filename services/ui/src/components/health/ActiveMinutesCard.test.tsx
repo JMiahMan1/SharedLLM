@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ActiveMinutesCard from './ActiveMinutesCard';
 import { api } from '../../services/api';
@@ -8,8 +8,16 @@ import type { HealthActiveMinutes } from '../../types/api';
 
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, api: { ...(actual.api as Record<string, unknown>), getHealthActiveMinutes: vi.fn() } };
+  return {
+    ...actual,
+    api: { ...(actual.api as Record<string, unknown>), getHealthActiveMinutes: vi.fn(), addCalendarEvent: vi.fn() },
+  };
 });
+
+vi.mock('../../lib/healthHub', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/healthHub')>()),
+  localDay: () => '2026-10-22',
+}));
 
 function week(overrides: Partial<HealthActiveMinutes> = {}): HealthActiveMinutes {
   return {
@@ -68,6 +76,19 @@ describe('ActiveMinutesCard', () => {
     vi.mocked(api.getHealthActiveMinutes).mockResolvedValue(week({ target_minutes: null, percent: null }));
     renderCard();
     expect(await screen.findByText(/Set a weekly target in Health/)).toBeInTheDocument();
+  });
+
+  it('puts a planned workout on the calendar', async () => {
+    vi.mocked(api.getHealthActiveMinutes).mockResolvedValue(week());
+    vi.mocked(api.addCalendarEvent).mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'calendar' });
+    renderCard();
+    await screen.findByTestId('active-minutes-line');
+    fireEvent.change(screen.getByLabelText('Workout'), { target: { value: 'run' } });
+    fireEvent.change(screen.getByLabelText('Workout time'), { target: { value: '07:00' } });
+    fireEvent.click(screen.getByText('Add to calendar'));
+    await waitFor(() =>
+      expect(api.addCalendarEvent).toHaveBeenCalledWith({ summary: '🏃 Run · 30 min', start_time: '2026-10-22 07:00' }),
+    );
   });
 
   it('says when geo could not be read', async () => {

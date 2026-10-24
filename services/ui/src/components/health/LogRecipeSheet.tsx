@@ -12,6 +12,8 @@ import {
   portionTotals,
   recipeFoodEntry,
 } from '../../lib/recipeNutrition';
+import { markPlanCooked } from '../../lib/mealPlanStore';
+import type { PlanDay } from '../../lib/mealPlan';
 import type { FoodEntry } from '../../types/api';
 
 const MEALS: FoodEntry['meal'][] = ['breakfast', 'lunch', 'dinner', 'snack'];
@@ -27,6 +29,9 @@ export default function LogRecipeSheet({
   title,
   path,
   body,
+  planDay,
+  asUser,
+  onMarkedCooked,
   onClose,
 }: {
   title: string;
@@ -34,6 +39,10 @@ export default function LogRecipeSheet({
   path: string;
   /** The recipe note body (header optional). */
   body: string;
+  /** Logging the week plan's dinner for this day: offer to tick it cooked in the plan. */
+  planDay?: PlanDay;
+  asUser?: 'admin';
+  onMarkedCooked?: (day: PlanDay) => void;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -42,6 +51,7 @@ export default function LogRecipeSheet({
   const [servings, setServings] = useState<number>(1);
   const [meal, setMeal] = useState<FoodEntry['meal']>('dinner');
   const [typed, setTyped] = useState(EMPTY_TYPED);
+  const [markCooked, setMarkCooked] = useState(Boolean(planDay));
 
   const typedCalories = Number(typed.calories);
   const typedValues =
@@ -67,8 +77,16 @@ export default function LogRecipeSheet({
         recipeFoodEntry({ title, path, perServing, servings, day, meal, typed: parsed.status !== 'ok' }),
       );
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success(`${title} logged to Health`);
+      if (planDay && markCooked) {
+        try {
+          if (await markPlanCooked(planDay, title, asUser)) onMarkedCooked?.(planDay);
+          else toast(`The week plan has a different dinner on ${planDay}, so it was left as it is.`);
+        } catch (error) {
+          toast.error(errorText(error, 'Logged, but the week plan could not be updated'));
+        }
+      }
       void queryClient.invalidateQueries({ queryKey: ['health-nutrition'] });
       void queryClient.invalidateQueries({ queryKey: ['health-summary'] });
       void queryClient.invalidateQueries({ queryKey: ['health-food'] });
@@ -169,6 +187,19 @@ export default function LogRecipeSheet({
             ))}
           </select>
         </label>
+
+        {planDay && (
+          <label className="mb-3 flex min-h-11 items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={markCooked}
+              onChange={(event) => setMarkCooked(event.target.checked)}
+              data-testid="log-recipe-mark-cooked"
+              className="h-4 w-4 accent-emerald-400"
+            />
+            Tick {planDay} cooked in the week plan (its ingredients leave the next shopping list)
+          </label>
+        )}
 
         {totals && (
           <p className="mb-3 text-xs text-slate-300" data-testid="log-recipe-totals">
