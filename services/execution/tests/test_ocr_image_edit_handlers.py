@@ -97,6 +97,31 @@ async def test_ocr_success_returns_extracted_text(tmpdir, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ocr_inline_image_needs_no_workspace_and_leaves_no_file(monkeypatch):
+    seen: dict = {}
+
+    async def fake_ocr(path, user_context=None, proxy_url=None, model=None, task="general"):
+        seen["path"], seen["task"] = path, task
+        assert Path(path).read_bytes() == b"label-bytes"
+        return {"full_text": "Calories 120", "headline": "", "subtext": "", "badge": ""}
+
+    monkeypatch.setattr(ocr_mod.vision_ocr, "vision_ocr_screenshot", fake_ocr)
+    req = _ocr_req(workspace_id=None, image_path=None, image_base64=base64.b64encode(b"label-bytes").decode(), task="document")
+    result = await ocr_mod.handle_ocr(req)
+    assert result.status == "SUCCESS" and result.detail["full_text"] == "Calories 120"
+    assert seen["task"] == "document"
+    assert not Path(seen["path"]).exists()
+
+
+@pytest.mark.asyncio
+async def test_ocr_inline_refuses_bad_or_missing_images():
+    bad = await ocr_mod.handle_ocr(_ocr_req(image_path=None, image_base64="not base64!!"))
+    assert bad.status == "FAILURE" and "base64" in bad.message
+    neither = await ocr_mod.handle_ocr(_ocr_req(image_path=None))
+    assert neither.status == "FAILURE" and "required" in neither.message
+
+
+@pytest.mark.asyncio
 async def test_ocr_missing_image_fails(tmpdir, monkeypatch):
     async def fake_resolve(ws, uc):
         return str(tmpdir), {}

@@ -3282,6 +3282,28 @@ export interface HealthActiveMinutes {
   unavailable: string[];
 }
 
+/** A nutrition label read from a photo (services/common/nutrition_label.py): a draft only. */
+export interface FoodLabelDraft {
+  /** The raw OCR transcription, shown beside the draft. */
+  text: string;
+  draft: {
+    calories: number | null;
+    protein_g: number | null;
+    carbs_g: number | null;
+    fat_g: number | null;
+    fiber_g: number | null;
+    sugar_g: number | null;
+    sodium_mg: number | null;
+    serving_label: string | null;
+    serving_grams: number | null;
+  };
+  found: string[];
+  /** Of calories, protein, carbs and fat, the ones not printed (left empty, never guessed). */
+  missing: string[];
+  /** The label gives values per 100 g and no serving size. */
+  per_100g: boolean;
+}
+
 /** A cheer for a family member's day (services/health/cheers.py): a fixed kind, never free text. */
 export interface HealthCheer {
   id: number;

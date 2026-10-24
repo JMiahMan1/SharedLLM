@@ -27,6 +27,7 @@ vi.mock('../services/api', async (importOriginal) => {
       lookupBarcode: vi.fn(),
       addFood: vi.fn(),
       deleteFood: vi.fn(),
+      readFoodLabelPhoto: vi.fn(),
     },
   };
 });
@@ -580,5 +581,75 @@ describe('Health cards switched off, and kid mode', () => {
     expect(screen.getByText('Granola')).toBeInTheDocument();
     expect(screen.queryByText(/kcal/)).not.toBeInTheDocument();
     expect(screen.queryByText('orange')).not.toBeInTheDocument();
+  });
+});
+
+describe('Photo and voice quick add', () => {
+  it('fills the By hand form from a label photo and saves only when added', async () => {
+    getNutritionDay.mockResolvedValue(emptyNutrition());
+    vi.mocked(api.readFoodLabelPhoto).mockResolvedValue({
+      text: 'Calories 230\nTotal Fat 8g\nTotal Carbohydrate 37g',
+      draft: {
+        calories: 230, protein_g: null, carbs_g: 37, fat_g: 8, fiber_g: 4, sugar_g: null, sodium_mg: 160,
+        serving_label: '2/3 cup', serving_grams: 55,
+      },
+      found: ['calories', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg'],
+      missing: ['protein_g'],
+      per_100g: false,
+    });
+    addFood.mockResolvedValue({} as never);
+    renderWithClient(<HealthNutrition onNavigate={() => {}} />);
+
+    fireEvent.click(within(await screen.findByTestId('meal-snack')).getByText('Add'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Photo' }));
+    const photo = new File(['jpeg'], 'label.jpg', { type: 'image/jpeg' });
+    fireEvent.change(screen.getByLabelText('Nutrition label photo'), { target: { files: [photo] } });
+
+    expect(await screen.findByTestId('photo-draft-note')).toHaveTextContent('Not on the label: protein');
+    expect(addFood).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByPlaceholderText('Food name'), { target: { value: 'Granola' } });
+    fireEvent.click(screen.getByText('Add food'));
+    await waitFor(() =>
+      expect(addFood).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Granola', calories: 230, protein_g: 0, fat_g: 8, serving_grams: 55, source: 'photo' }),
+      ),
+    );
+  });
+
+  it('turns a typed sentence into a draft of matches and logs only on request', async () => {
+    getNutritionDay.mockResolvedValue(emptyNutrition());
+    vi.mocked(api.searchFood).mockImplementation(async (query: string) => ({
+      query,
+      sources: ['usda_fdc'],
+      offline_sources: [],
+      seed: { present: true, results: 1 },
+      results: [
+        {
+          code: `fdc-${query}`,
+          name: query === 'eggs' ? 'Egg, whole, cooked' : 'Bread, toasted',
+          brand: '',
+          image: null,
+          serving_size: null,
+          serving_grams: null,
+          source: 'usda_fdc',
+          portions: [{ label: '1 large', grams: query === 'eggs' ? 50 : 30 }],
+          per_100g: { calories: query === 'eggs' ? 155 : 290, protein_g: 10, carbs_g: 1, fat_g: 10, fiber_g: null, sugar_g: null, sodium_mg: null },
+        },
+      ],
+    }));
+    addFood.mockResolvedValue({} as never);
+    renderWithClient(<HealthNutrition onNavigate={() => {}} />);
+
+    fireEvent.click(within(await screen.findByTestId('meal-breakfast')).getByText('Add'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Voice' }));
+    fireEvent.change(screen.getByLabelText('What you ate'), { target: { value: 'two eggs and a slice of toast' } });
+    fireEvent.click(screen.getByText('Find these foods'));
+
+    expect(await screen.findByTestId('voice-food-draft')).toBeInTheDocument();
+    expect(screen.getByLabelText('Servings for two eggs')).toHaveValue(2);
+    expect(addFood).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('voice-food-log'));
+    await waitFor(() => expect(addFood).toHaveBeenCalledTimes(2));
+    expect(addFood.mock.calls[0][0]).toMatchObject({ name: 'Egg, whole, cooked', servings: 2, serving_grams: 50, source: 'voice', meal: 'breakfast' });
   });
 });

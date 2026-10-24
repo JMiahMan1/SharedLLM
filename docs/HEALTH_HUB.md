@@ -65,9 +65,12 @@ Health Connect import of sleep, resting heart rate, HRV, weight and walks/runs/r
 
 Also built on Android (same caveat, Phase 8): the *Health today* home-screen widget.
 
-Not built yet, and not pretended otherwise: marking the plan cooked from a log, family cheers,
-step and veg challenges, the dashboard widget, photo/voice food logging, fasting windows,
-micro-lessons and the chat coach. Those remain the later phases below.
+Built since on the server and web (2026-10-24): per-metric switches, kid-mode hiding, the
+fasting window, weekly active minutes, streaks, micro-lessons, the coach (chat answers, weekly
+goals, daily reminders), cheers and share-my-day, the dashboard's Health today card, plan ↔ log
+↔ shopping list, calendar workouts, and photo and voice food logging.
+
+Not built yet, and not pretended otherwise: step and veg challenges.
 
 The goal: one local, family-first Health tab that pulls the strengths of the apps
 the family has used — Noom, Google Health (formerly Fitbit), MyFitnessPal and friends —
@@ -342,10 +345,24 @@ live search is the ecosystem-standard pattern.
   all be stated (fiber, sugar and sodium are kept when present). A note with no nutrition, or one
   missing any of the four, says so and offers manual entry instead (logged as source `manual`,
   still linked to the recipe). Entries show in the Nutrition day like any other.
-- [x] Quick add: USDA seed search (generic foods, household portions), OpenFoodFacts search, cached barcode lookup and manual entry. Voice and photo logging remain future work.
-  Phone camera for photo logging needs no native work: Capacitor's WebView already turns an
-  `<input type="file" accept="image/*" capture>` into the camera (the app holds `CAMERA` and a
-  `FileProvider`), so the web flow only has to add that input when photo logging is built.
+- [x] Quick add: USDA seed search (generic foods, household portions), OpenFoodFacts search, cached barcode lookup and manual entry.
+- [x] Photo and voice logging on the web, both as editable drafts that are never saved by
+  themselves. **Photo** (Nutrition → Add → Photo) reads a nutrition label: the picture goes through
+  the same vision OCR as workspaces and Raven (execution `/execute/ocr`, which now also takes inline
+  `image_base64` through a temp file it always removes; gateway `POST /api/health/food/photo`, 8 MB
+  cap), and `services/common/nutrition_label.py` reads only the printed numbers (calories, fat,
+  carbs, protein, fiber, sugars, sodium, serving size; "total" forms win over saturated fat or
+  added sugars). They fill the By hand form with the raw transcription beside it; what the label
+  did not print stays empty and is named; a per-100 g label says to set the servings. Saved as
+  source `photo`. A plate of food is not guessed at: no label, no numbers. **Voice** (Add → Voice)
+  records through the shared `useAudioRecorder` hook (also the chat composer's), transcribes with
+  the assistant's `/api/stt/transcribe`, keeps the transcript editable, splits it into foods and
+  spoken counts (`src/lib/voiceFood.ts`: "two eggs and a slice of toast" → eggs ×2, toast ×1),
+  looks each up in the food search and shows a draft row per food — match, portion and servings
+  all changeable, any row droppable — and logs only on "Log N foods" (source `voice`). Both
+  scale portions through the one `src/lib/foodEntry.ts` the search add uses. On the phone the
+  photo input (`accept="image/*" capture`) opens the camera through Capacitor's WebView (the
+  app holds `CAMERA` and a `FileProvider`), so no native work is needed.
 - [x] Food data depth: the read-only USDA seed is mirrored on the server (13,620 foods, per-100 g plus portions like "1 cup, chopped" = 91 g) and searched before OpenFoodFacts; barcode results are cached permanently. The seed is optional at runtime (`FDC_SEED_PATH`): absent → OFF-only, one log line, never an error.
 - [x] Water tracking.
 - [x] Fasting window indicator (adults only, off until switched on in Cards). The person starts a
@@ -775,7 +792,7 @@ guidance, talk journal, "I need to talk", burden signals, the Jarvis chat recap)
 
 - [x] Each family member has a profile and their own Health day.
 - [x] A planned dinner logs with one tap and shows calories, macros and portions (Recipes → Week plan → Log tonight's dinner).
-- [x] Barcode lookup works with a permanent per-product cache; photo and voice logging are not built.
+- [x] Barcode lookup works with a permanent per-product cache; photo (nutrition label) and voice logging produce editable drafts.
 - [x] Sleep and readiness show from manual data now and are device-ready; check-ins cover the no-wearable case.
 - [x] Cycle tracking is opt-in, private, shown only when the profile is female, and minors can share it only with their linked mother account. An adult can share with a spouse, who also sees phase-aware support suggestions clearly labelled as general ideas.
 - [x] A family challenge is visible, joinable and shared in chat (Health → Today → Family challenge).
