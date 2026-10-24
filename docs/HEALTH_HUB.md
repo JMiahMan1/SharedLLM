@@ -415,7 +415,17 @@ point.
       reading — themes first redeemed (wholesome/classic literature, similar genre), then
       redirected to uplifting family reading when no redeemed equivalent exists — and a
       suggestion in the dashboard's For You widget. Raw feed stays parents-only.
-      All four kinds render in one `recommendations` dashboard widget ("For You",
+      Fifth brick (games): `services/common/game_recommendations.py` places the week's games
+      (per-app foreground time plus media-session titles) into reviewed themes — shooter, horror,
+      mature open world, open sandbox, fighting, gambling-style — weighted by time played; the
+      most-played one gets a like-for-like swap (Fortnite → Rocket League, GTA → LEGO City
+      Undercover, Roblox → a family Minecraft world) or, for spins and loot boxes, a family board
+      game night. Games already in good shape get nothing. `GET /api/recommendations/game`.
+      Sixth brick (activities): `services/common/activity_recommendations.py` reads the week's
+      phone pattern in the household timezone — late nights (last use at or after 22:00 on two or
+      more days) suggest a phone-free wind-down, long days (four hours or more on three days)
+      suggest time outside — and never repeats the numbers. `GET /api/recommendations/activity`.
+      All six kinds render in one `recommendations` dashboard widget ("For You",
       `RecommendationsWidget`), on by default for every role; it shows only what the server
       derived, an explicit empty state when there is nothing yet, and per-kind failures.
 - [ ] **Who sees what (the visibility rule).** The collected data is parents-only: a minor's
@@ -442,7 +452,7 @@ study-book reads, external media sessions, general phone usage, per-app foregrou
 calls and SMS all land on the profile); (2) the Android collection engine — usage,
 media sessions, calls and SMS DONE (video covered by media sessions + per-app foreground
 time); (3) Jarvis recommendations from the profile — IN PROGRESS (music style matching,
-video themes redeemed or redirected, podcast recommendations, and book recommendations DONE; games and activities follow); (4) time budgets and routines;
+video themes redeemed or redirected, podcasts, books, games and activities DONE; a parent's bless/block per lane is still to come); (4) time budgets and routines;
 (5) app control and the web filter;
 (6) monitoring alerts and the weekly recap; (7) the parents' page and the discipleship
 surfaces.

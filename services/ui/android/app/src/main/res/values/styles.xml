@@ -12,6 +12,9 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <!-- What shows in the strip behind the bars until the page names its own
+             colour: the app's dark background, never the light theme's white. -->
+        <item name="android:windowBackground">@color/jarvis_background</item>
         <item name="android:statusBarColor">#030711</item>
         <item name="android:navigationBarColor">#030711</item>
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>

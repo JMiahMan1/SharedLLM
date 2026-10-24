@@ -21,6 +21,20 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `HEAD` Android: **white status and navigation bars fixed (needs the new APK).** Capacitor 8's core
+  `SystemBars` pads the window by the bar insets and paints the strip with the theme's
+  `windowBackground` whenever the WebView is older than 140 (`viewport-fit=cover` alone is not
+  enough), and under the `DayNight` theme in light mode that is white. The theme's window
+  background is now the app's dark colour, and the app's bar plugin (renamed
+  `JarvisSystemBars`: it collided with Capacitor's `SystemBars`) paints the strip with the page's
+  own background and re-applies after Capacitor's reset on configuration changes.
+- `HEAD` Family guard: **game and activity suggestions** (Phase 11 step 3 complete apart from a
+  parent's bless/block per lane). Games: reviewed themes over the week's per-app time and
+  media-session titles (`game_recommendations.py`; Fortnite → Rocket League, GTA → LEGO City
+  Undercover, Roblox → a family Minecraft world, casino/loot → a board game night; good fits get
+  nothing). Activities: late nights → a phone-free wind-down, long days → time outside
+  (`activity_recommendations.py`, household `TIMEZONE`). Both render in the For You widget;
+  routes read only the caller's own data and return only the suggestion.
 - Data repair 2026-10-24: trivia wins that were filed under display names
   (`tel:activity:Jeremiah`, `tel:activity:Michele`) were merged by time into the account feeds
   (`jeremiah` 65 events / 9 wins, `michele` 43 / 36) and the stray keys removed; backup on the
@@ -536,10 +550,9 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
 1. The Android collection engine is complete: usage, media sessions, calls and SMS all
    land on the digital profile (commits through `ac963b2c`). Video watching is covered by
    media sessions (YouTube title/creator/duration) plus per-app foreground time.
-2. Jarvis recommendations from the profile: music style matching (`8d5bc4f6`), video
-   themes redeemed or redirected (`3de98f13`), podcast recommendations, and book
-   recommendations are done — games and activities follow. Suggestions are the member's
-   to see; the raw feed behind them stays parents-only.
+2. Jarvis recommendations from the profile: music, video, podcasts, books, games and
+   activities are done and shown in the For You widget. Still open in step 3: a parent can
+   bless or block a lane. Next build-order step: (4) time budgets and routines.
 3. Keep the plan docs (`docs/HEALTH_HUB.md`, this handover) updated in the same commit as
    the code when scope changes.
 

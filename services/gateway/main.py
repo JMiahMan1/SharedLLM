@@ -116,6 +116,8 @@ from services.common.music_recommendations import recommend_music
 from services.common.video_recommendations import recommend_video
 from services.common.podcast_recommendations import podcast_events, recommend_podcast
 from services.common.book_recommendations import book_events, recommend_book
+from services.common.game_recommendations import recommend_game
+from services.common.activity_recommendations import recommend_activity
 from services.common.relay import until_either_ends
 from services.gateway import calls, drawing, family_safety, network_routes, notices, push_routes
 from services.shared import ma_library
@@ -5360,6 +5362,53 @@ async def get_book_recommendation(request: Request):
     events = (data or {}).get("events") or []
     rec = recommend_book(book_events(events))
     return {"status": "SUCCESS", "recommendation": rec}
+
+
+async def _own_telemetry(user: str, path: str, params: dict) -> list[dict]:
+    """The signed-in member's own collected data, read server-side only to derive
+    a suggestion; nothing raw is returned to the caller."""
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{TELEMETRY_SVC}/api/telemetry/{path}/{user}", params=params, headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status != 200:
+            return []
+        try:
+            data = await resp.json(content_type=None)
+        except Exception:
+            return []
+    key = "days" if path == "usage" else "events"
+    return [item for item in (data or {}).get(key) or [] if isinstance(item, dict)]
+
+
+@app.get("/api/recommendations/game")
+async def get_game_recommendation(request: Request):
+    """A game suggestion for the signed-in member, from the week's play.
+
+    A game whose content is not a good fit gets one that keeps the fun
+    (redeemed) or a redirect; games already in good shape get none.
+    """
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    usage, events = await asyncio.gather(
+        _own_telemetry(user, "usage", {"days": 7}),
+        _own_telemetry(user, "activity", {"limit": 100}),
+    )
+    media = [e for e in events if str(e.get("feature") or "").lower() == "media"]
+    return {"status": "SUCCESS", "recommendation": recommend_game(usage, media)}
+
+
+@app.get("/api/recommendations/activity")
+async def get_activity_recommendation(request: Request):
+    """A real-world activity for the signed-in member, from the week's phone pattern."""
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    usage = await _own_telemetry(user, "usage", {"days": 7})
+    return {"status": "SUCCESS", "recommendation": recommend_activity(usage, os.getenv("TIMEZONE") or "UTC")}
 
 
 @app.post("/api/communication/notes/read")
