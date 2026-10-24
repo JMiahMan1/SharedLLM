@@ -2355,6 +2355,23 @@ def internal_router(session: Session = Depends(get_session), _: None = Depends(r
     }
 
 
+@app.get("/api/internal/owned-devices/{username}")
+def internal_owned_devices(username: str, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: the phones and tablets assigned to a person (the sleep estimate
+    joins their overnight use)."""
+    rows = session.exec(
+        select(Device).where(Device.owner_username == username.strip().lower(), Device.kind == "phone")
+    ).all()
+    return {"devices": [row.device_key for row in rows]}
+
+
+@app.get("/api/internal/device-registered/{device_key}")
+def internal_device_registered(device_key: str, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: whether a phone or tablet with this key has registered."""
+    row = session.exec(select(Device).where(Device.device_key == device_key.strip())).first()
+    return {"registered": bool(row and row.kind == "phone"), "owner": row.owner_username if row else None}
+
+
 @app.get("/api/internal/user-device-assignments")
 def internal_user_device_assignments(
     username: str,

@@ -493,3 +493,20 @@ class TestBatteryReports:
         session.expire_all()
         left = session.exec(select(DeviceEvent).where(DeviceEvent.event == "battery")).all()
         assert len(left) == 1 and not left[0].at.startswith("2020")
+
+
+def test_internal_owned_devices_lists_a_persons_phones_and_tablets(client: TestClient, session: Session):
+    assert client.post(REGISTER, json=_phone_payload(device_key="phone-abc12345")).status_code == 200
+    assert client.post(REGISTER, json=_phone_payload(device_key="tablet-xyz98765")).status_code == 200
+    session.add(Device(device_key="assistant-kitchen-1", kind="assistant", registered_by="admin", owner_username="michele"))
+    session.commit()
+
+    owned = client.get("/api/internal/owned-devices/michele").json()["devices"]
+    assert sorted(owned) == ["phone-abc12345", "tablet-xyz98765"]
+    assert client.get("/api/internal/owned-devices/kate").json()["devices"] == []
+
+
+def test_internal_device_registered(client: TestClient, session: Session):
+    client.post(REGISTER, json=_phone_payload(device_key="phone-abc12345"))
+    assert client.get("/api/internal/device-registered/phone-abc12345").json() == {"registered": True, "owner": "michele"}
+    assert client.get("/api/internal/device-registered/never-seen-key-01").json()["registered"] is False

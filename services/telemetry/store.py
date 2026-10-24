@@ -37,6 +37,12 @@ ACTIVITY_MAX = 500
 USAGE_PREFIX = "tel:usage:"
 USAGE_MAX_DAYS = 90
 
+# Screen-on stretches overnight per device (18:00 to noon), for the sleep
+# estimate. Keyed by device so a tablet counts for whoever it is assigned to.
+NIGHT_PREFIX = "tel:night:"
+NIGHT_MAX = 14
+NIGHT_MAX_INTERVALS = 500
+
 
 def new_id() -> str:
     return uuid.uuid4().hex
@@ -297,6 +303,61 @@ async def merge_usage(rc, user: str, entry: dict[str, Any]) -> dict[str, Any]:
         for old_day in stale[: len(stale) - USAGE_MAX_DAYS]:
             await rc.hdel(key, old_day)
     return merged
+
+
+def _intervals(raw: Any) -> list[list[int]]:
+    out: list[list[int]] = []
+    for pair in raw if isinstance(raw, list) else []:
+        try:
+            start, end = int(pair[0]), int(pair[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if end >= start >= 0:
+            out.append([start, end])
+    return out
+
+
+async def merge_night(rc, device: str, night: str, intervals: list[Any], user: str) -> dict[str, Any]:
+    """Merge one device's overnight screen-on stretches into that night.
+
+    Re-reports through the morning only add stretches, never drop one, so a
+    later short reading cannot shrink what was seen.
+    """
+    key = f"{NIGHT_PREFIX}{device}"
+    raw = await rc.hget(key, night)
+    try:
+        existing = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        existing = {}
+    seen = {tuple(pair) for pair in _intervals(existing.get("intervals"))}
+    seen.update(tuple(pair) for pair in _intervals(intervals))
+    merged = {
+        "night": night,
+        "device": device,
+        "user": user,
+        "intervals": [list(pair) for pair in sorted(seen)][-NIGHT_MAX_INTERVALS:],
+        "updated_at": utcnow_iso(),
+    }
+    await rc.hset(key, night, json.dumps(merged))
+    if await rc.hlen(key) > NIGHT_MAX:
+        stale = sorted((await rc.hgetall(key)).keys())
+        for old in stale[: len(stale) - NIGHT_MAX]:
+            await rc.hdel(key, old)
+    return merged
+
+
+async def get_nights(rc, devices: list[str], night: str) -> list[dict[str, Any]]:
+    """The stored night for each device that reported one."""
+    out: list[dict[str, Any]] = []
+    for device in devices:
+        raw = await rc.hget(f"{NIGHT_PREFIX}{device}", night)
+        try:
+            parsed = json.loads(raw) if raw else None
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            out.append(parsed)
+    return out
 
 
 async def get_usage(rc, user: str, days: int = 7) -> list[dict[str, Any]]:

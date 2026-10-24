@@ -21,10 +21,19 @@ export interface PhoneUsageToday {
   apps: PhoneUsageApp[];
 }
 
+/** Stretches the screen was in use, as [start, end] epoch ms pairs (no app names). */
+export interface PhoneUsageNight {
+  since: number;
+  until: number;
+  intervals: Array<[number, number]>;
+}
+
 export interface PhoneUsagePluginInterface {
   hasAccess(): Promise<PhoneUsageAccess>;
   openSettings(): Promise<void>;
   getToday(): Promise<PhoneUsageToday>;
+  /** APKs after 437; older builds reject, and the sleep estimate simply has no data. */
+  getNight(options: { since: number; until: number }): Promise<PhoneUsageNight>;
 }
 
 /* On the web (and old APKs without the plugin) there is simply no reading to
@@ -33,6 +42,7 @@ const webFallback: PhoneUsagePluginInterface = {
   hasAccess: async () => ({ granted: false }),
   openSettings: async () => undefined,
   getToday: async () => ({ millis: 0, firstUse: null, lastUse: null, sessions: 0, apps: [] }),
+  getNight: async ({ since, until }) => ({ since, until, intervals: [] }),
 };
 
 const PhoneUsage = registerPlugin<PhoneUsagePluginInterface>('PhoneUsage', {

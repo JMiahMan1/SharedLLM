@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, Loader2, Moon, Trash2 } from 'lucide-react';
+import { AlertCircle, Loader2, Moon, Pencil, Smartphone, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import {
@@ -10,8 +10,24 @@ import {
   scoreTone,
   sleepWindowLabel,
 } from '../../lib/healthHub';
+import type { SleepEstimate, SleepSession } from '../../types/api';
 
 const QUALITY_WORDS = ['', 'Rough', 'Poor', 'Okay', 'Good', 'Great'];
+const ESTIMATE_SOURCE = 'usage_estimate';
+
+/** `HH:MM` on this device's clock for an ISO time, for the time inputs. */
+function clockTime(iso: string | null): string {
+  if (!iso) return '';
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+}
+
+function sourceLabel(source: string, long = false): string {
+  if (source === 'manual') return long ? 'Logged by hand' : 'hand logged';
+  if (source === ESTIMATE_SOURCE) return long ? 'Estimated from device use' : 'estimated from device use';
+  return long ? `Imported from ${source}` : source;
+}
 
 /**
  * Sleep: last night interpreted, a hand-log form, and the recent nights.
@@ -20,6 +36,11 @@ const QUALITY_WORDS = ['', 'Rough', 'Poor', 'Okay', 'Good', 'Great'];
  * a person who only remembers "about seven hours" should not be locked out of
  * their own history. The server computes the duration when times are given, so
  * the number shown is never a client-side guess.
+ *
+ * "Estimate from my devices" fills the form from when the phones and tablets
+ * assigned to the person were in use; it is only a starting point to correct
+ * before saving. Saved untouched it is kept as an estimate (a hand log or a
+ * wearable outranks it); any saved night can be edited later.
  */
 export default function HealthSleep() {
   const queryClient = useQueryClient();
@@ -30,6 +51,9 @@ export default function HealthSleep() {
   const [quality, setQuality] = useState<number | null>(null);
   const [efficiency, setEfficiency] = useState('');
   const [note, setNote] = useState('');
+  // The estimate the form was filled from, and the saved night being edited.
+  const [estimate, setEstimate] = useState<SleepEstimate | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
 
   const historyQuery = useQuery({
     queryKey: ['health-sleep', 14],
@@ -52,34 +76,91 @@ export default function HealthSleep() {
     void queryClient.invalidateQueries({ queryKey: ['health-summary'] });
   };
 
+  const resetForm = () => {
+    setBedtime('');
+    setWakeTime('');
+    setDuration('');
+    setQuality(null);
+    setEfficiency('');
+    setNote('');
+    setEstimate(null);
+    setEditingId(null);
+  };
+
   const logSleep = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const minutes = duration.trim() ? Number(duration) : null;
       if (!minutes && (!bedtime || !wakeTime)) {
         throw new Error('Add a bedtime and wake time, or a duration');
       }
-      return api.logSleep({
+      // Untouched, the estimate keeps its own minutes (wake-ups taken out) and
+      // stays marked as an estimate; any change makes the night the person's.
+      const untouched =
+        estimate !== null &&
+        !duration.trim() &&
+        bedtime === clockTime(estimate.bedtime) &&
+        wakeTime === clockTime(estimate.wake_time);
+      const body = {
         night,
         bedtime: bedtime || null,
         wake_time: wakeTime || null,
-        duration_minutes: minutes && Number.isFinite(minutes) ? Math.round(minutes) : null,
+        duration_minutes: untouched
+          ? estimate.duration_minutes
+          : minutes && Number.isFinite(minutes)
+            ? Math.round(minutes)
+            : null,
         quality,
         efficiency: efficiency.trim() ? Number(efficiency) : null,
         note,
-      });
+        source: untouched ? ESTIMATE_SOURCE : 'manual',
+      };
+      if (editingId !== null) {
+        return { ...(await api.updateSleep(editingId, body)), duplicate: false };
+      }
+      return api.logSleep(body);
     },
     onSuccess: (saved) => {
-      toast.success(saved.duplicate ? 'That night was already logged' : 'Sleep saved');
-      setBedtime('');
-      setWakeTime('');
-      setDuration('');
-      setQuality(null);
-      setEfficiency('');
-      setNote('');
+      toast.success(saved.duplicate ? 'That night was already logged' : editingId !== null ? 'Night updated' : 'Sleep saved');
+      resetForm();
       invalidate();
     },
     onError: (error: Error) => toast.error(error.message || 'Could not save sleep'),
   });
+
+  const estimateSleep = useMutation({
+    mutationFn: () => api.getSleepEstimate(night),
+    onSuccess: ({ estimate: found, devices }) => {
+      if (!found) {
+        toast(
+          devices
+            ? 'Not enough device use recorded for that night to estimate it.'
+            : 'No phone or tablet is assigned to you yet.',
+        );
+        return;
+      }
+      setBedtime(clockTime(found.bedtime));
+      setWakeTime(clockTime(found.wake_time));
+      setDuration('');
+      setEstimate(found);
+    },
+    onError: (error: Error) => toast.error(error.message || 'Could not estimate that night'),
+  });
+
+  const editNight = (session: SleepSession) => {
+    setEditingId(session.id);
+    setEstimate(null);
+    setNight(session.night);
+    const bed = clockTime(session.bedtime);
+    const wake = clockTime(session.wake_time);
+    setBedtime(bed);
+    setWakeTime(wake);
+    // With both times the server works the minutes out from them, so a fixed
+    // time is never overridden by a stale duration.
+    setDuration(bed && wake ? '' : String(session.duration_minutes));
+    setQuality(session.quality);
+    setEfficiency(session.efficiency !== null ? String(session.efficiency) : '');
+    setNote(session.note || '');
+  };
 
   const removeSleep = useMutation({
     mutationFn: (id: number) => api.deleteSleep(id),
@@ -130,7 +211,7 @@ export default function HealthSleep() {
                 {lastNight.quality ? ` · felt ${QUALITY_WORDS[lastNight.quality]}` : ''}
               </p>
               <p className="mt-1 text-[11px] text-slate-500">
-                {lastNight.source === 'manual' ? 'Logged by hand' : `Imported from ${lastNight.source}`}
+                {sourceLabel(lastNight.source, true)}
               </p>
               {score && <p className="mt-1 text-xs text-slate-300">{score.detail}</p>}
               {score && score.missing.length > 0 && (
@@ -153,9 +234,31 @@ export default function HealthSleep() {
       </section>
 
       <section className="glass-panel rounded-2xl border border-white/5 p-4" aria-labelledby="log-sleep-heading">
-        <h3 id="log-sleep-heading" className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-          Log a night
-        </h3>
+        <div className="flex items-center justify-between gap-2">
+          <h3 id="log-sleep-heading" className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            {editingId !== null ? `Edit ${formatDayLabel(night)}` : 'Log a night'}
+          </h3>
+          <button
+            type="button"
+            onClick={() => estimateSleep.mutate()}
+            disabled={estimateSleep.isPending}
+            data-testid="estimate-sleep"
+            className="glass-button flex min-h-11 items-center gap-1.5 px-3 text-[11px] font-semibold disabled:opacity-50"
+          >
+            {estimateSleep.isPending ? <Loader2 size={12} className="animate-spin" /> : <Smartphone size={12} />}
+            Estimate from my devices
+          </button>
+        </div>
+        {estimate && (
+          <p className="mt-2 text-[11px] text-sky-300" data-testid="sleep-estimate-note">
+            Estimated {formatMinutes(estimate.duration_minutes)} from {estimate.devices} device
+            {estimate.devices === 1 ? '' : 's'}
+            {estimate.wakeups > 0
+              ? `, ${estimate.wakeups} wake-up${estimate.wakeups === 1 ? '' : 's'} (${estimate.awake_minutes} min)`
+              : ''}
+            . Adjust the times if they are off, then save.
+          </p>
+        )}
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <label className="col-span-2 text-[11px] text-slate-500 sm:col-span-1">
             Woke on
@@ -249,8 +352,17 @@ export default function HealthSleep() {
           className="glass-button mt-3 flex min-h-11 w-full items-center justify-center gap-2 text-xs font-semibold disabled:opacity-50"
         >
           {logSleep.isPending ? <Loader2 size={13} className="animate-spin" /> : <Moon size={13} />}
-          Save night
+          {editingId !== null ? 'Save changes' : 'Save night'}
         </button>
+        {editingId !== null && (
+          <button
+            type="button"
+            onClick={resetForm}
+            className="mt-2 min-h-11 w-full text-xs text-slate-400 hover:text-white"
+          >
+            Cancel editing
+          </button>
+        )}
       </section>
 
       <section className="glass-panel rounded-2xl border border-white/5 p-4" aria-labelledby="sleep-history-heading">
@@ -279,9 +391,18 @@ export default function HealthSleep() {
                     {sleepWindowLabel(session.bedtime, session.wake_time) ?? 'Times not recorded'}
                     {session.quality ? ` · felt ${QUALITY_WORDS[session.quality]}` : ''}
                     {' · '}
-                    {session.source === 'manual' ? 'hand logged' : session.source}
+                    {sourceLabel(session.source)}
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => editNight(session)}
+                  aria-label={`Edit sleep for ${session.night}`}
+                  data-testid={`edit-sleep-${session.id}`}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-white pointer-coarse:h-11 pointer-coarse:w-11"
+                >
+                  <Pencil size={14} />
+                </button>
                 <button
                   type="button"
                   onClick={() => removeSleep.mutate(session.id)}

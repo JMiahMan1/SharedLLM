@@ -7,6 +7,7 @@ import HealthNutrition from '../components/health/HealthNutrition';
 import HealthProfilePanel from '../components/health/HealthProfilePanel';
 import HealthCycle from '../components/health/HealthCycle';
 import DigitalWellbeingCard from '../components/health/DigitalWellbeingCard';
+import WeeklyDigestCard from '../components/health/WeeklyDigestCard';
 import ScreenTimeCard from '../components/health/ScreenTimeCard';
 import PhoneProtectionCard from '../components/health/PhoneProtectionCard';
 import HealthFitness from './HealthFitness';
@@ -52,6 +53,7 @@ const Health = () => {
             <ScreenTimeCard />
             <PhoneProtectionCard />
             <HealthToday onNavigate={setTab} />
+            <WeeklyDigestCard />
             <DigitalWellbeingCard />
           </div>
         )}

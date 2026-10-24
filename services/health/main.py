@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.config import INTERNAL_SECRET
-from services.health import cycle, food_seed, scoring
+from services.health import cycle, food_seed, scoring, weekly
 from services.health.models import (
     Checkin,
     CycleLog,
@@ -1166,10 +1166,9 @@ def _clock(value: str, night: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
-@app.post("/sleep")
-def add_sleep(body: SleepIn, request: Request, session: Session = Depends(get_session)):
-    user = _user(request)
-    night = _day(body.night, field="night")
+def _sleep_times(body: SleepIn, night: str) -> tuple[str | None, str | None, int]:
+    """Bedtime, wake time and duration for a night, validated; the duration
+    comes from the times when it is not given."""
     duration = body.duration_minutes
     bedtime: str | None = None
     wake_time: str | None = None
@@ -1191,6 +1190,14 @@ def add_sleep(body: SleepIn, request: Request, session: Session = Depends(get_se
         raise HTTPException(status_code=422, detail="efficiency must be between 0 and 100")
     if body.quality is not None and not (1 <= body.quality <= 5):
         raise HTTPException(status_code=422, detail="quality must be between 1 and 5")
+    return bedtime, wake_time, duration
+
+
+@app.post("/sleep")
+def add_sleep(body: SleepIn, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    night = _day(body.night, field="night")
+    bedtime, wake_time, duration = _sleep_times(body, night)
     source = _source(body.source)
 
     if body.external_id:
@@ -1223,6 +1230,29 @@ def add_sleep(body: SleepIn, request: Request, session: Session = Depends(get_se
     return {**_sleep_out(row), "duplicate": False}
 
 
+@app.put("/sleep/{sleep_id}")
+def update_sleep(sleep_id: int, body: SleepIn, request: Request, session: Session = Depends(get_session)):
+    """Correct a saved night in place (an estimate a person fixed becomes theirs)."""
+    user = _user(request)
+    row = session.get(SleepSession, sleep_id)
+    if row is None or row.user_id != user:
+        raise HTTPException(status_code=404, detail="Sleep session not found")
+    night = _day(body.night, field="night")
+    bedtime, wake_time, duration = _sleep_times(body, night)
+    row.night = night
+    row.bedtime = _instant(bedtime, field="bedtime") if bedtime else None
+    row.wake_time = _instant(wake_time, field="wake_time") if wake_time else None
+    row.duration_minutes = duration
+    row.efficiency = body.efficiency
+    row.quality = body.quality
+    row.source = _source(body.source)
+    row.note = body.note
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _sleep_out(row)
+
+
 @app.get("/sleep")
 def get_sleep(
     request: Request,
@@ -1250,16 +1280,35 @@ def delete_sleep(sleep_id: int, request: Request, session: Session = Depends(get
     return {"deleted": sleep_id}
 
 
+# Saved from the device-use estimate: below a hand log, which is below a
+# wearable or other imported reading.
+USAGE_ESTIMATE_SOURCE = "usage_estimate"
+
+
+def _sleep_rank(row: SleepSession) -> int:
+    if row.source == USAGE_ESTIMATE_SOURCE:
+        return 0
+    return 1 if row.source == "manual" else 2
+
+
+def _best_night(rows: list[SleepSession]) -> SleepSession | None:
+    """From one night's rows (newest first): a device session wins over a hand
+    log, a hand log over a device-use estimate, and the newest wins a tie."""
+    best: SleepSession | None = None
+    for row in rows:
+        if best is None or _sleep_rank(row) > _sleep_rank(best):
+            best = row
+    return best
+
+
 def _sleep_for_night(session: Session, user: str, day: str) -> SleepSession | None:
-    """The night that ended on ``day``; a device session wins over a hand log."""
+    """The night that ended on ``day`` (see ``_best_night``)."""
     rows = session.exec(
         select(SleepSession)
         .where(SleepSession.user_id == user, SleepSession.night == day)
         .order_by(SleepSession.created_at.desc())
     ).all()
-    if not rows:
-        return None
-    return next((row for row in rows if row.source != "manual"), rows[0])
+    return _best_night(list(rows))
 
 
 # --- check-ins -------------------------------------------------------------
@@ -1827,6 +1876,74 @@ def summary(
         # part of the family projection, which only sees the explicit grant.
         "cycle": _cycle_summary(session, user, day),
         "alerts": alerts,
+    }
+
+
+def _week_days(session: Session, user: str, first: date, count: int, sleep_need: int) -> list[dict]:
+    """One record per day from ``first``: only what was logged, ``None`` otherwise."""
+    start, stop = first.isoformat(), (first + timedelta(days=count)).isoformat()
+    sleeps = session.exec(
+        select(SleepSession)
+        .where(SleepSession.user_id == user, SleepSession.night >= start, SleepSession.night < stop)
+        .order_by(SleepSession.created_at.desc())
+    ).all()
+    checkins = {
+        row.day: row
+        for row in session.exec(
+            select(Checkin).where(Checkin.user_id == user, Checkin.day >= start, Checkin.day < stop)
+        ).all()
+    }
+    calories: dict[str, float] = {}
+    for row in session.exec(
+        select(FoodEntry).where(FoodEntry.user_id == user, FoodEntry.day >= start, FoodEntry.day < stop)
+    ).all():
+        calories[row.day] = calories.get(row.day, 0.0) + row.calories * max(0.0, row.servings)
+    water: dict[str, float] = {}
+    for row in session.exec(
+        select(MetricSample).where(
+            MetricSample.user_id == user,
+            MetricSample.metric == "water",
+            MetricSample.recorded_at >= start,
+            MetricSample.recorded_at < stop,
+        )
+    ).all():
+        water[row.recorded_at[:10]] = water.get(row.recorded_at[:10], 0.0) + row.value
+
+    days = []
+    for offset in range(count):
+        day = (first + timedelta(days=offset)).isoformat()
+        night = _best_night([row for row in sleeps if row.night == day])
+        score = (
+            scoring.sleep_score(night.duration_minutes, sleep_need, night.efficiency, night.quality) if night else None
+        )
+        checkin = checkins.get(day)
+        days.append({
+            "day": day,
+            "sleep_minutes": night.duration_minutes if night else None,
+            "sleep_score": score.score if score else None,
+            "calories": round(calories[day], 1) if day in calories else None,
+            "water_ml": round(water[day], 1) if day in water else None,
+            "energy": checkin.energy if checkin else None,
+            "mood": checkin.mood if checkin else None,
+        })
+    return days
+
+
+@app.get("/weekly")
+def weekly_digest(
+    request: Request,
+    end: str | None = None,
+    session: Session = Depends(get_session),
+):
+    """The seven days ending on ``end`` (today by default) against the seven before."""
+    user = _user(request)
+    last = date.fromisoformat(_day(end or date.today().isoformat(), field="end"))
+    profile = session.get(HealthProfile, user)
+    sleep_need = (profile.sleep_need_minutes if profile else None) or DEFAULT_SLEEP_NEED
+    days = _week_days(session, user, last - timedelta(days=13), 14, sleep_need)
+    return {
+        "user_id": user,
+        **weekly.digest(days[7:], days[:7], kid_mode=bool(profile.kid_mode) if profile else False),
     }
 
 

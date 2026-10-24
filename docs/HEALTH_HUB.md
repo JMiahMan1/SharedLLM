@@ -232,6 +232,18 @@ live search is the ecosystem-standard pattern.
 
 - [ ] Health Connect import on Android (steps already sync; add sleep sessions, heart rate/HRV, weight and workouts) with a native bridge. The ingestion API and idempotent `external_id` replay are ready for it.
 - [x] Manual logs for sleep hours/quality, weight, resting heart rate and water. Workouts remain on Fitness/geo.
+  Saved nights can be corrected in place (`PUT /sleep/{id}`, the pencil on Sleep → Recent nights).
+- [x] Sleep estimated from device use. Each phone or tablet running Jarvis reports the stretches
+  its screen was in use between 18:00 and noon (`PhoneUsage.getNight`, native `NightUse`; times
+  only, no app names; needs the APK after 437) to `POST /api/usage/night` with its registered device key;
+  telemetry keeps them per device (`tel:night:{device}`, 14 nights). `GET
+  /api/health/sleep/estimate?night=` joins the devices **assigned to the person** (identity's
+  companion devices with that owner, so an admin can assign a tablet to a child) and takes the
+  longest stretch with every screen off as the night; a short check inside it (≤ 10 min, quiet
+  again after) is a wake-up, not the end (`services/common/sleep_estimate.py`). Sleep → "Estimate
+  from my devices" fills bedtime and wake time to correct before saving: saved untouched it is
+  stored as `usage_estimate` (below a hand log, which is below a wearable); changed, it is a hand
+  log. Too little data returns nothing rather than a guess.
 - [x] A health store the gateway can read per user, with every reading carrying its source.
 
 ### Phase 3 — scores and targets
@@ -251,7 +263,13 @@ live search is the ecosystem-standard pattern.
 
 - [x] Calorie range for adults (Mifflin-St Jeor with optional gentle deficit); guidance ranges for kids — never deficits.
 - [x] Day view: eaten vs range, protein/carbs/fat, per-meal breakdown, density colours.
-- [ ] Weekly digest card: averages, best day, what changed.
+- [x] Weekly digest card: averages, best night's sleep, what changed. `GET /weekly?end=` in the
+  health service (`services/health/weekly.py`, gateway `/api/health/weekly`) composes the seven
+  days ending on `end` against the seven before: sleep minutes and score, calories, water,
+  check-in energy and mood. Averages cover only the days with a value (a day with nothing logged
+  is missing, never zero); a change is named only past a threshold (15 min sleep, 5 score points,
+  150 kcal, 250 ml, half a point of energy or mood); calories are left out in kid mode. The card
+  (`WeeklyDigestCard`) sits on Health → Today.
 
 ### Phase 6 — habits and coaching
 
@@ -432,7 +450,12 @@ point.
       music first (a small reviewed genre map), then video (topic and creator themes), then
       podcasts, books, games and activities. Every suggestion says why it was made, the
       member it is for sees it (suggestions are theirs; the raw feed behind them is not),
-      and a parent can bless or block a lane.
+      and a parent can bless or block a lane: identity's `RecommendationLanes` keeps the
+      blocked lanes (`GET/PUT /api/recommendation-lanes/{user}`, a minor's parents change them,
+      the member reads theirs), each `/api/recommendations/*` route answers
+      `{"recommendation": null, "blocked": true}` without reading data for a blocked lane, and
+      the parent's switches sit under the child on Health → Today (`SuggestionLanesControls`,
+      next to the screen-time controls).
       First brick (music): a reviewed genre/artist map (`services/common/music_recommendations.py`)
       plus `GET /api/recommendations/music` returning a suggestion derived from the member's
       listening, and a suggestion in the dashboard's For You widget. Raw feed stays parents-only.
@@ -487,8 +510,9 @@ around it — DONE (trivia wins, media plays, app pages, Bible chapters, importe
 study-book reads, external media sessions, general phone usage, per-app foreground time,
 calls and SMS all land on the profile); (2) the Android collection engine — usage,
 media sessions, calls and SMS DONE (video covered by media sessions + per-app foreground
-time); (3) Jarvis recommendations from the profile — IN PROGRESS (music style matching,
-video themes redeemed or redirected, podcasts, books, games and activities DONE; a parent's bless/block per lane is still to come); (4) time budgets and routines;
+time); (3) Jarvis recommendations from the profile — DONE (music style matching,
+video themes redeemed or redirected, podcasts, books, games and activities, and a parent's
+bless/block per lane); (4) time budgets and routines;
 (5) app control and the web filter;
 (6) monitoring alerts and the weekly recap; (7) the parents' page and the discipleship
 surfaces.
