@@ -232,3 +232,49 @@ async def put_place(request: Request, zone_id: str):
         if resp.status != 200:
             raise HTTPException(status_code=resp.status, detail=str((answer or {}).get("detail") or "Could not save the place"))
     return answer
+
+
+# Place reminders ("remind me when I get home"): personal, so geo is always
+# asked for the caller's own reminders; a body can never name someone else.
+
+async def _geo_answer(method: str, path: str, user: str, json: Any = None) -> Any:
+    try:
+        async with get_client().request(method, f"{GEO_SVC}{path}", params={"user": user}, json=json,
+                                         headers=_HEADERS, timeout=_TIMEOUT) as resp:
+            answer = await resp.json(content_type=None)
+            status = resp.status
+    except Exception as e:
+        log.warning(f"[family-safety] geo {method} {path}: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail="Could not reach the places service") from None
+    if status != 200:
+        detail = (answer or {}).get("detail") if isinstance(answer, dict) else None
+        raise HTTPException(status_code=status if status in (404, 422, 503) else 502,
+                            detail=str(detail or "The places service refused that"))
+    return answer
+
+
+@router.get("/api/geo/place-reminders")
+async def list_place_reminders(request: Request):
+    """The caller's waiting place reminders."""
+    return await _geo_answer("GET", "/place-reminders", await _caller(request))
+
+
+@router.post("/api/geo/place-reminders")
+async def add_place_reminder(request: Request):
+    """Remind the caller when they arrive at or leave one of the family's
+    places: ``{zone, on: arrive|leave, title, url?}``."""
+    user = await _caller(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="The body must be an object")
+    payload = {k: body.get(k) for k in ("zone", "on", "title", "url")}
+    return await _geo_answer("POST", "/place-reminders", user, json=payload)
+
+
+@router.delete("/api/geo/place-reminders/{reminder_id}")
+async def remove_place_reminder(request: Request, reminder_id: str):
+    """Cancel one of the caller's place reminders (404 once it went off)."""
+    return await _geo_answer("DELETE", f"/place-reminders/{reminder_id}", await _caller(request))

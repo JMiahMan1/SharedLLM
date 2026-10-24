@@ -196,6 +196,30 @@ that, every save of an opened note stacked another header on top.
   refused in the panel, because the timers read a past clock time as that
   time tomorrow. Reminders are personal (the person who set it), not
   household-wide.
+- **Reminders (place)**: the same panel's **At a place** part sets a "when I
+  get home" reminder: pick one of the family's places (geo's `GET /zones`,
+  the Home Assistant zones Wander lists) and **arrive** or **leave**. Geo
+  keeps it (`services/geo/place_reminders.py`, Redis
+  `geo:place_reminders:<user>`) and fires it from the arrivals and
+  departures it already works out from every fix the phone posts
+  (`_presence_transition`), so nothing extra runs on the phone: the Android
+  shell's location service already posts with the app closed when location
+  is "Allow all the time". The person's own movement, and only theirs,
+  rings it once as a `timers` notice (`📍 Reminder: 📝 <note title>`,
+  "Arrived at Home") that opens the note; then it is gone. The first fix
+  after a quiet spell is not an arrival (geo cannot tell where they came
+  from), so a reminder set while already at home waits for the next time
+  they come back. The gateway (`GET/POST /api/geo/place-reminders`,
+  `DELETE /api/geo/place-reminders/{id}`, `services/gateway/family_safety.py`)
+  always acts for the caller; geo refuses a zone it does not have, a link
+  outside the app, and more than 50 waiting per person. The shared index
+  keeps `placeReminder: {id, zone, zoneName, on}` for the card's pin chip
+  ("Arriving at Home"); the page asks geo which are still waiting (only when
+  some note has one, and again on Refresh), so a reminder that went off
+  drops off the card and reads "went off" in the panel. A change sets the
+  new one before removing the old; rename, archive and trash keep it;
+  delete forever and Empty trash remove it. The panel shows loading, "no
+  places yet" and load failures as such.
 - **Sharing**: a saved note's **Share** panel (`components/notes/SharePanel.tsx`)
   shows who has it and shares it with someone on the family's Nextcloud,
   read only or with editing, through Nextcloud's own sharing (OCS
@@ -288,15 +312,13 @@ archive/trash/restore, autosave with ETag conflict detection and on-device
 drafts that survive a closed app, desktop keyboard shortcuts, per-item
 checklist controls (drag, arrow-key and Alt+arrow reordering, delete),
 version history with read and restore from Nextcloud's Versions app, timed
-reminders on the existing timers whose notice opens the note, sharing with
-someone on the family's Nextcloud (view or edit).
+reminders on the existing timers whose notice opens the note, place
+reminders ("when I get home") fired by geo from the location the phone
+already shares, sharing with someone on the family's Nextcloud (view or
+edit).
 
 Still open, and why:
 
-- **Place-based reminders**: the timers are time-only. A "when I get home"
-  reminder needs a geofence registered on the phone (the Android shell's
-  location services) and a place picker; geo already knows family places,
-  but nothing turns arriving at one into a notice yet.
 - **Attachments, images, drawings, audio**: Nextcloud Notes keeps
   attachments as files beside the note, referenced by relative markdown
   links (`![](.attachments.<id>/photo.jpg)`). Jarvis would need an upload
@@ -340,6 +362,20 @@ Still open, and why:
   `reminder` timer with the note's link and lands in the index and on the
   card; Remove cancels the timer by id; a past time and a refused timer show
   an error and change nothing; no reminder on an unsaved note
+- `services/ui/src/test/NotesPlaceReminder.test.tsx`: a place reminder goes to
+  geo with the note's link and lands in the index and on the card; changing
+  it sets the new one before cancelling the old, Remove cancels it; the chip
+  drops once geo no longer lists it; no places, a failed load and geo's
+  refusal are shown as such
+- `services/geo/tests/test_place_reminders.py`: arriving home rings the
+  person's reminder once (only them, then it is gone); someone else's
+  arrival and the wrong movement do not; a first sighting is not an
+  arrival; bad zones, movements, titles and off-app links are refused;
+  removal is by id and owner; the routes add, list and remove, and refuse
+  an unknown place or a missing secret.
+  `services/gateway/tests/test_place_reminders_proxy.py`: the gateway always
+  asks geo for the caller, whatever the body says, and passes geo's refusals
+  on
 - `services/execution/tests/test_timer.py` (reminder part): a reminder stores
   its in-app link and reports when it fires, an off-app link is dropped, the
   notice opens the link and a snooze keeps it; `app_link` accepts only app

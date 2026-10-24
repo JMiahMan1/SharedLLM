@@ -42,7 +42,18 @@ from services.config import (
     OSRM_URL,
     REDIS_URL,
 )
-from services.geo import achievements, event_feed, health_notices, map_match, map_regions, metric_history, safety, step_history, workout_import
+from services.geo import (
+    achievements,
+    event_feed,
+    health_notices,
+    map_match,
+    map_regions,
+    metric_history,
+    place_reminders,
+    safety,
+    step_history,
+    workout_import,
+)
 from services.geo.auto_workouts import detect_auto_workouts
 from services.shared.info_endpoint import info_router
 
@@ -367,6 +378,75 @@ async def put_place_settings(zone_id: str, body: dict):
     return {"zone": zone_id, **entry}
 
 
+# Place reminders ("remind me when I get home"): personal, fired by the
+# person's own arrivals and departures (services/geo/place_reminders.py).
+# The gateway pins ``user`` to the caller; these routes trust only it.
+
+def _place_reminder_user(user: str) -> str:
+    clean = (user or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9_.-]{1,64}", clean):
+        raise HTTPException(status_code=422, detail="user is required")
+    return clean
+
+
+@app.get("/place-reminders")
+async def get_place_reminders(
+    user: str,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    return {"reminders": await place_reminders.list_for(r, _place_reminder_user(user))}
+
+
+@app.post("/place-reminders")
+async def post_place_reminder(
+    user: str,
+    body: dict,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    owner = _place_reminder_user(user)
+    try:
+        reminder = place_reminders.validate(body)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    # Only a place the family actually has: a reminder on a zone that does
+    # not exist would wait forever.
+    zones = {z["entity_id"]: z for z in await _zones()}
+    zone = zones.get(reminder["zone"])
+    if not zone:
+        raise HTTPException(status_code=422, detail="That place is not one of the family's places")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    try:
+        entry = await place_reminders.add(r, owner, reminder, zone["name"])
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    return {"reminder": entry}
+
+
+@app.delete("/place-reminders/{reminder_id}")
+async def delete_place_reminder(
+    reminder_id: str,
+    user: str,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    if not await place_reminders.remove(r, _place_reminder_user(user), reminder_id):
+        raise HTTPException(status_code=404, detail="No such place reminder (it may have gone off already)")
+    return {"removed": reminder_id}
+
+
 @app.get("/people/{entity_id:path}/history")
 async def get_history(entity_id: str, samples: int = Query(200, ge=1, le=2000)):
     """Location history for a person/device_tracker from HA Recorder.
@@ -554,7 +634,22 @@ async def _presence_transition(r, user: str, lat: float, lon: float, ts: float, 
         events.append({"kind": "arrived", "zone": inside})
     for ev in events:
         await _notify_presence(r, user, ev["kind"], ev["zone"])
+        await _fire_place_reminders(r, user, ev["kind"], ev["zone"])
     return events
+
+
+async def _fire_place_reminders(r, user: str, kind: str, zone: dict) -> None:
+    """Ring the person's own "when I get home" reminders for this movement
+    (services/geo/place_reminders.py): one notice each, to them alone."""
+    for entry in await place_reminders.due(r, user, kind, zone["entity_id"]):
+        title, body = place_reminders.notice_text(entry)
+        url = entry.get("url") or "/communication"
+        await _send_notice(notify.notice(
+            user, "timers", title, body, url=url, kind="timer", priority=4,
+            tag=f"place-reminder:{entry['id']}", once=f"place-reminder:{entry['id']}",
+            data={"zone": zone["entity_id"], "event": kind, "place_reminder": entry["id"]},
+            actions=[notify.view_action(url)],
+        ))
 
 
 async def _safe_presence_transition(r, user, lat, lon, ts, acc=0.0) -> None:

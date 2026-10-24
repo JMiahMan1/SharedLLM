@@ -263,11 +263,27 @@ export interface NotesIndexEntry {
   previousPath?: string;
   /** A timed reminder: when it fires (ISO) and the timer that fires it. */
   reminder?: NoteReminder;
+  /** A place reminder ("when I get home"): geo's id, the place and the movement. */
+  placeReminder?: NotePlaceReminder;
 }
 
 export interface NoteReminder {
   at: string;
   timerId: string;
+}
+
+export interface NotePlaceReminder {
+  id: string;
+  /** The place's zone id (`zone.home`). */
+  zone: string;
+  /** Its name when the reminder was set, for the card. */
+  zoneName: string;
+  on: 'arrive' | 'leave';
+}
+
+/** "Arriving at Home" / "Leaving Work": how a place reminder reads on a card. */
+export function placeReminderText(reminder: NotePlaceReminder): string {
+  return `${reminder.on === 'arrive' ? 'Arriving at' : 'Leaving'} ${reminder.zoneName}`;
 }
 
 export interface NotesIndex {
@@ -312,6 +328,16 @@ export function parseNotesIndex(raw: unknown): NotesIndex | null {
     ) {
       clean.reminder = { at: reminder.at, timerId: reminder.timerId };
     }
+    const place = source.placeReminder as Partial<NotePlaceReminder> | undefined;
+    if (
+      place &&
+      typeof place.id === 'string' &&
+      typeof place.zone === 'string' &&
+      typeof place.zoneName === 'string' &&
+      (place.on === 'arrive' || place.on === 'leave')
+    ) {
+      clean.placeReminder = { id: place.id, zone: place.zone, zoneName: place.zoneName, on: place.on };
+    }
     notes[path] = clean;
   }
   return { version: typeof candidate.version === 'number' ? candidate.version : 1, notes };
@@ -326,8 +352,15 @@ export function setIndexEntry(index: NotesIndex, path: string, patch: NotesIndex
   const next = { ...indexEntry(index, path), ...patch };
   // `reminder: undefined` in a patch clears it; leave no empty key behind.
   if (!next.reminder) delete next.reminder;
+  if (!next.placeReminder) delete next.placeReminder;
   const notes = { ...index.notes };
-  if (!next.pinned && (!next.color || next.color === 'default') && !next.previousPath && !next.reminder) {
+  if (
+    !next.pinned &&
+    (!next.color || next.color === 'default') &&
+    !next.previousPath &&
+    !next.reminder &&
+    !next.placeReminder
+  ) {
     delete notes[path];
   } else {
     notes[path] = next;
