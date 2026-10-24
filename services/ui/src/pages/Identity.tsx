@@ -38,6 +38,7 @@ import HelpTooltip from '../components/ui/HelpTooltip';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
 import VoiceSignaturePanel from '../components/settings/VoiceSignaturePanel';
+import SpotifyLinkPanel from '../components/settings/SpotifyLinkPanel';
 import UserAvatar from '../components/UserAvatar';
 import AvatarPicker from '../components/AvatarPicker';
 import Modal from '../components/ui/Modal';
@@ -747,6 +748,21 @@ const Identity = () => {
                   }}
                 />
               )}
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-center gap-3 mb-8">
+              <div className="p-3 rounded-2xl bg-emerald-500/20 text-emerald-400">
+                <ListMusic size={24} />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white">Spotify</h3>
+                <p className="text-sm text-slate-400">Your own Spotify listening on your activity, if you choose</p>
+              </div>
+            </div>
+            <div className="max-w-3xl">
+              <SpotifyLinkPanel />
             </div>
           </section>
 

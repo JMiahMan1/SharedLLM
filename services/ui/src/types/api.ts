@@ -368,6 +368,18 @@ export interface ScreenTimeStatus {
   web_allow?: string[];
 }
 
+/** Linking the caller's own Spotify: set up on this server, and their link. */
+export interface SpotifyStatus {
+  configured: boolean;
+  /** Settings an admin still has to fill in when not configured. */
+  missing: string[];
+  linked: boolean;
+  account_name?: string;
+  linked_at?: string;
+  last_sync_at?: string | null;
+  last_error?: string | null;
+}
+
 /** A child asking a parent first: a new app, an app's permission, or a blocked site. */
 export interface GuardRequest {
   id: number;

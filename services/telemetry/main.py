@@ -25,7 +25,7 @@ import redis.asyncio as redis
 from fastapi import HTTPException
 
 from services.common.secrets import secret_matches
-from services.telemetry import guardian, notices, push, store
+from services.telemetry import guardian, notices, push, spotify_sync, store
 from services.telemetry.alpaca import is_busy
 from services.telemetry.config import (
     BUSY_DEFER_SECONDS,
@@ -265,6 +265,7 @@ async def lifespan(app):
         asyncio.create_task(scheduler_loop()),
         asyncio.create_task(worker_loop()),
         asyncio.create_task(guardian.recap_loop(_redis, _client, deliver_notice)),
+        asyncio.create_task(spotify_sync.sync_loop(_redis, _client, deliver_notice)),
     ]
     log.info("Telemetry scheduler + worker started")
     try:

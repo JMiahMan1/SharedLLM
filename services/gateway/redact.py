@@ -8,10 +8,11 @@ values are masked as ``***``.
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-SENSITIVE_QUERY_KEYS = frozenset({"token", "api_key", "access_token"})
+# "code": an OAuth authorization code (the Spotify link callback), single-use but a credential.
+SENSITIVE_QUERY_KEYS = frozenset({"token", "api_key", "access_token", "code"})
 
 _FALLBACK_RE = re.compile(
-    r"([?&](?:token|api_key|access_token)=)[^&#]*",
+    r"([?&](?:token|api_key|access_token|code)=)[^&#]*",
     re.IGNORECASE,
 )
 
