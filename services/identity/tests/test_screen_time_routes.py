@@ -192,3 +192,15 @@ def test_a_parents_offline_code_reaches_the_phone_only_through_a_parent_login(fa
     assert family("mom").delete("/api/guard/offline-code").json() == {"set": False}
     again = family("kid").post("/api/guard/parent-unlock", json={"username": "dad", "password": "dad-pass"}).json()
     assert again["offline_codes"] == []
+
+
+def test_a_parent_sets_the_web_filter(family):
+    r = family("dad").put("/api/screen-time/kid/rules", json={"web_filter": {
+        "enabled": True, "adult": True, "safe_search": True,
+        "block": ["TikTok.com", "tiktok.com", "reddit.com."], "allow": ["khanacademy.org"],
+    }})
+    assert r.status_code == 200
+    wf = family("kid").get("/api/screen-time/kid/rules").json()["rules"]["web_filter"]
+    assert wf == {"enabled": True, "adult": True, "safe_search": True, "block": ["tiktok.com", "reddit.com"], "allow": ["khanacademy.org"]}
+    assert family("mom").put("/api/screen-time/kid/rules", json={"web_filter": {"block": ["not a domain"]}}).status_code == 422
+    assert family("mom").put("/api/screen-time/kid/rules", json={"web_filter": {"enabled": "yes"}}).status_code == 422

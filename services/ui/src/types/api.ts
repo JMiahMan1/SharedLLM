@@ -298,6 +298,15 @@ export interface UsageDay {
   apps?: Array<{ package: string; millis: number; last_use?: number | null }>;
 }
 
+export interface WebFilterRules {
+  enabled?: boolean;
+  /** Adult and malware sites blocked by the family-safe resolver. */
+  adult?: boolean;
+  safe_search?: boolean;
+  block?: string[];
+  allow?: string[];
+}
+
 /** A parent's screen-time rules for a member (all optional). */
 export interface ScreenRules {
   daily_limit_min?: number;
@@ -311,6 +320,8 @@ export interface ScreenRules {
   /** App control: packages switched off, and per-app daily minutes. */
   blocked_apps?: string[];
   app_limits?: Record<string, number>;
+  /** The phone's web filter: on/off, family-safe resolver, safe search, own lists. */
+  web_filter?: WebFilterRules;
   paused?: boolean;
   paused_until?: string;
 }

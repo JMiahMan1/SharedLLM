@@ -40,7 +40,9 @@ export default function PhoneProtectionCard() {
   }, [android]);
 
   if (!android || !status?.protected || !guard) return null;
-  const allOn = guard.adminActive && guard.guardEnabled;
+  const filterWanted = Boolean(status.rules?.web_filter?.enabled);
+  const filterReady = !filterWanted || Boolean(guard.webFilterAllowed);
+  const allOn = guard.adminActive && guard.guardEnabled && filterReady;
 
   return (
     <section className="glass-panel rounded-2xl p-4 sm:p-5 space-y-3" data-testid="phone-protection-card">
@@ -51,6 +53,7 @@ export default function PhoneProtectionCard() {
       {allOn ? (
         <p className="text-xs text-slate-300" data-testid="phone-protection-on">
           Jarvis is protected on this phone{guard.deviceOwner ? ' (device owner)' : ''}. Removing it or switching this off needs a parent.
+          {filterWanted && (guard.webFilterActive ? ' The web filter is on.' : ' The web filter starts within a minute.')}
         </p>
       ) : (
         <>
@@ -85,6 +88,23 @@ export default function PhoneProtectionCard() {
                 </>
               )}
             </li>
+            {filterWanted && (
+              <li>
+                Web filter{' '}
+                {guard.webFilterAllowed ? (
+                  <span className="text-emerald-300">is allowed.</span>
+                ) : (
+                  <>
+                    <button type="button" className="glass-button ml-1 px-3 py-1.5 min-h-11" onClick={() => void Guard.allowWebFilter()}>
+                      Allow
+                    </button>
+                    <span className="block mt-1 text-slate-400">
+                      Android asks once whether Jarvis may filter websites (it shows as a VPN). Tap <b>OK</b>.
+                    </span>
+                  </>
+                )}
+              </li>
+            )}
           </ol>
         </>
       )}

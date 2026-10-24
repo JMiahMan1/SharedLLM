@@ -21,6 +21,14 @@ public class GuardRulesTest {
     private static final List<String> BLOCKED = Arrays.asList("com.roblox.client", "com.google.android.dialer");
 
     @Test
+    public void disconnectingTheWebFilterIsCoveredButSettingItUpIsNot() {
+        assertEquals(Action.BLOCK_TAMPER, decide(true, false, false,
+                "com.android.vpndialogs", "com.android.vpndialogs.ManageDialog", "Jarvis web filter Disconnect"));
+        assertEquals(Action.ALLOW, decide(true, false, false,
+                "com.android.vpndialogs", "com.android.vpndialogs.ConfirmDialog", "Connection request OK"));
+    }
+
+    @Test
     public void aBlockedAppIsClosedWhileTheRestOfThePhoneWorks() {
         assertEquals(Action.BLOCK_APP, decide(true, false, false, "com.roblox.client", "", ""));
         assertEquals(Action.ALLOW, decide(true, false, false, "com.android.chrome", "", ""));
