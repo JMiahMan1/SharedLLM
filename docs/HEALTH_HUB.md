@@ -377,7 +377,23 @@ live search is the ecosystem-standard pattern.
   general ideas rather than medical advice. `MicroLessonCard` on Health → Today shows the card of
   the day (the same for everyone on a day, so the family can talk about it) with arrows through the
   rest.
-- [ ] Chat coach grounded in the user's health data; gentle weekly goal setting; reminders for bedtime, water and movement breaks.
+- [x] Chat coach grounded in the user's health data; gentle weekly goal setting; reminders for bedtime, water and movement breaks.
+  **Chat:** before any model, Jarvis chat answers a first-person question about sleep ("how did I
+  sleep?"), food ("how much protein is left?"), water, readiness, the week ("how was my week?") or
+  this week's goals from the caller's own `/summary`, `/weekly` and `/goals` only
+  (`services/common/health_coach.py`, gateway `_health_coach_answer`, after the guardian recap so
+  "how was Emma's week?" still goes to a parent's recap). Nothing logged is said plainly, never
+  guessed; kid mode gets what was logged and protein, never calories; a topic whose card is
+  switched off, or the coach switched off, falls through to the ordinary chat.
+  **Goals:** `HealthGoal` (`services/health/goals.py`; `GET/POST /goals`, `DELETE /goals/{id}`,
+  gateway `/api/health/goals…`) holds at most two of the person's own goals a week, of the
+  challenge kinds the store can measure (water goal days, sleep goal nights, cook nights), with
+  progress computed from their logs on every read. The suggestion is one small step: last week's
+  count plus one, for the kind with the most room. **Reminders:** bedtime, water and movement-break
+  reminders are ordinary daily reminders in the timers pipeline (`/api/communication/timers`,
+  recurrence `daily`, opening `/health`), so they ring wherever reminders already do; the person
+  picks each time, nothing is preset. All three sit on `CoachCard` (Health → Today) with the chat
+  examples.
 
 ### Phase 7 — family
 

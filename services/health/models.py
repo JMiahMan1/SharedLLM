@@ -86,6 +86,45 @@ class FastingSession(SQLModel, table=True):  # type: ignore
     created_at: str = Field(default_factory=utcnow)
 
 
+class HealthGoal(SQLModel, table=True):  # type: ignore
+    """A person's own gentle goal for one week (``goals.py``): N days of one kind.
+
+    Progress is computed from their logs on every read, like a challenge.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "week_start", "kind", name="uq_goal_user_week_kind"),
+        {"extend_existing": True},
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    week_start: str = Field(index=True)
+    kind: str
+    target_days: int
+    created_at: str = Field(default_factory=utcnow)
+
+
+class Cheer(SQLModel, table=True):  # type: ignore
+    """A cheer one family member sent another for a day (Phase 7).
+
+    ``kind`` is one of a fixed set (``cheers.KINDS``): no free text, so a
+    cheer is always kind and needs no moderation, whoever sends it.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("from_user", "to_user", "day", "kind", name="uq_cheer_once"),
+        {"extend_existing": True},
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    from_user: str = Field(index=True)
+    to_user: str = Field(index=True)
+    day: str = Field(index=True)
+    kind: str
+    created_at: str = Field(default_factory=utcnow)
+
+
 class MetricSample(SQLModel, table=True):  # type: ignore
     """One scalar reading, e.g. a weight or a resting heart rate.
 

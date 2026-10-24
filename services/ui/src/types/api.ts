@@ -3282,6 +3282,29 @@ export interface HealthActiveMinutes {
   unavailable: string[];
 }
 
+/** One of this week's own gentle goals (services/health/goals.py). */
+export interface HealthGoal {
+  id: number;
+  kind: HealthChallengeKind;
+  title: string;
+  unit: string;
+  detail: string;
+  target_days: number;
+  count: number;
+  days: string[];
+  reached: boolean;
+  guideline_goal: boolean;
+}
+
+export interface HealthGoalsWeek {
+  week_start: string;
+  week_end: string;
+  goals: HealthGoal[];
+  max_goals: number;
+  kinds: Array<{ kind: HealthChallengeKind; title: string; unit: string; detail: string; taken: boolean }>;
+  suggestion: { kind: HealthChallengeKind; target_days: number; title: string; unit: string; reason: string } | null;
+}
+
 /** Forgiving streaks (services/health/streaks.py): one rest day a week. */
 export interface HealthStreaks {
   day: string;
