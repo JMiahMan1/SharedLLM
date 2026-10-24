@@ -1,12 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import JarvisStudyThread from './JarvisStudyThread';
 import type { BibleStudyStreamEvent } from '../../types/api';
 
 vi.mock('../../hooks/useHaptics', () => ({ useHaptics: () => ({ trigger: vi.fn() }) }));
 
-const apiMock = vi.hoisted(() => ({ streamBibleStudy: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ streamBibleStudy: vi.fn(), getBiblePassage: vi.fn() }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
   api: { ...(await importOriginal<typeof import('../../services/api')>()).api, ...apiMock },
@@ -43,7 +44,12 @@ function answering(text: string, opts: { verses?: number; notes?: number; refere
 
 function renderPanel(props: Partial<React.ComponentProps<typeof JarvisStudyThread>> = {}) {
   const onClose = vi.fn();
-  render(<JarvisStudyThread passage="John 3:16" version="nkjv" edition="nkjv-tmn" onClose={onClose} {...props} />);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <JarvisStudyThread passage="John 3:16" version="nkjv" edition="nkjv-tmn" onClose={onClose} {...props} />
+    </QueryClientProvider>,
+  );
   return { onClose };
 }
 
@@ -179,7 +185,30 @@ describe('depth and references', () => {
       expect.any(Function),
       expect.any(AbortSignal),
     );
+    apiMock.getBiblePassage.mockResolvedValue({
+      version: 'nkjv',
+      requested: 'Romans 5:8',
+      reference: 'Romans 5:8',
+      spans: [],
+      verses: [
+        {
+          version: 'nkjv',
+          osis: 'Rom',
+          book_name: 'Romans',
+          chapter: 5,
+          verse: 8,
+          reference: 'Romans 5:8',
+          text: 'But God demonstrates His own love toward us.',
+        },
+      ],
+      count: 1,
+    });
+    // A chip shows the passage first, in the translation being studied; the
+    // reader is one more tap away.
     await user.click(await screen.findByRole('button', { name: /Romans 5:8/ }));
+    expect(await screen.findByTestId('reference-popover-text')).toHaveTextContent('But God demonstrates');
+    expect(apiMock.getBiblePassage).toHaveBeenCalledWith('Romans 5:8', 'nkjv');
+    await user.click(screen.getByTestId('reference-popover-open'));
     expect(onOpenRef).toHaveBeenCalledWith('Romans 5:8');
   });
 });

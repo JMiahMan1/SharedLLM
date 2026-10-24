@@ -11,6 +11,3 @@ on 2026-10-21. When something here ships, delete it; history lives in git.
   mini player, now-playing, output picker, queue, shortcuts and sleep timer —
   has shipped; phases 3 and 5-9 remain).
 
-## Bible study
-
-- The reference-chip popover remains.
