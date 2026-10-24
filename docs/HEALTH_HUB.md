@@ -673,8 +673,8 @@ point.
       **"Ask a parent" built (2026-10-24, needs the next APK and a device check):** when the filter
       blocks a site — the parent's block list, or the family-safe resolver's 0.0.0.0 answer, now
       also counted as `blocked` in the web activity — the phone shows "… is blocked" with an "Ask
-      a parent" button (once per site every half hour; `AskParentReceiver` sends a `site`
-      request). A child can also ask from Health → Today (`AskForSiteCard`, shown when their
+      a parent" button (once per site every half hour; an ordinary Jarvis notice whose button is
+      the push callback `guard_ask`, the same path as the route). A child can also ask from Health → Today (`AskForSiteCard`, shown when their
       phone filters websites; it lists only their own waiting requests). A parent allows the site
       for an hour (`web_filter.allow_until`, `{domain: ISO end}`, pruned when it runs out) or
       always (moved from the block list to the allow list), or says no. The status carries

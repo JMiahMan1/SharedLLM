@@ -412,9 +412,8 @@ def create_app():
             "detail": body.get("detail") if isinstance(body.get("detail"), dict) else {},
         }
         rc = _redis()
-        await store.append_activity(rc, user, event)
         # A child's events are scanned for concerns as they land (never fails the record).
-        await guardian.on_activity(rc, _client(), event, deliver_notice)
+        await guardian.record_activity(rc, _client(), event, deliver_notice)
         return {"status": "SUCCESS", "event": event}
 
     @application.get("/api/telemetry/recap/{user}")

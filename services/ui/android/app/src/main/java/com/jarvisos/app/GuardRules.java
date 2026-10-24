@@ -79,27 +79,18 @@ public final class GuardRules {
 
         if (protectedPhone && isTamperScreen(pkg, lowerCls, lowerText)) return Action.BLOCK_TAMPER;
 
-        if (locked
-                && !NEVER_LOCKED.contains(pkg)
-                && !pkg.equals(launcher)
-                && (alwaysAllowed == null || !alwaysAllowed.contains(pkg))) {
-            return Action.BLOCK_LOCKED;
-        }
-        if (blockedApps != null
-                && blockedApps.contains(pkg)
-                && !NEVER_LOCKED.contains(pkg)
-                && !pkg.equals(launcher)
-                && (alwaysAllowed == null || !alwaysAllowed.contains(pkg))) {
-            return Action.BLOCK_APP;
-        }
-        if (protectedPhone
-                && awaitingApproval != null
-                && awaitingApproval.contains(pkg)
-                && !NEVER_LOCKED.contains(pkg)
-                && !pkg.equals(launcher)) {
-            return Action.BLOCK_INSTALL;
-        }
+        if (exempt(pkg, launcher, alwaysAllowed)) return Action.ALLOW;
+        if (locked) return Action.BLOCK_LOCKED;
+        if (blockedApps != null && blockedApps.contains(pkg)) return Action.BLOCK_APP;
+        if (protectedPhone && awaitingApproval != null && awaitingApproval.contains(pkg)) return Action.BLOCK_INSTALL;
         return Action.ALLOW;
+    }
+
+    /** Never closed by a lock or block: the guard and system screens, home, the always-allowed apps. */
+    static boolean exempt(String pkg, String launcher, Collection<String> alwaysAllowed) {
+        return NEVER_LOCKED.contains(pkg)
+                || pkg.equals(launcher)
+                || (alwaysAllowed != null && alwaysAllowed.contains(pkg));
     }
 
     /** Android's VPN dialogs; the one that manages a running VPN can disconnect the web filter. */

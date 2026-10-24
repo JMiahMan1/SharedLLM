@@ -131,6 +131,16 @@ async def _identity_get(session: aiohttp.ClientSession, path: str, params: dict 
         return await resp.json(content_type=None)
 
 
+async def identity_settings(session: aiohttp.ClientSession, keys) -> dict[str, str]:
+    """The named global settings from identity, trimmed (missing ones left out)."""
+    rows = await _identity_get(session, "/api/settings")
+    wanted = set(keys)
+    return {
+        r["key"]: str(r.get("value") or "").strip()
+        for r in rows or [] if isinstance(r, dict) and r.get("key") in wanted
+    }
+
+
 async def preferences(session: aiohttp.ClientSession, user: str) -> dict[str, bool] | None:
     cached = _prefs_cache.get(user)
     if cached and cached[0] > time.monotonic():

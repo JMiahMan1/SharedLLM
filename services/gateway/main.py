@@ -5884,20 +5884,26 @@ def _guard_request_words(asked: dict) -> str:
     return str(asked.get("label") or asked.get("target") or "")
 
 
-@app.post("/api/guard/requests")
-async def guard_ask_a_parent(request: Request):
-    """A child's phone (or the child in Jarvis) asks a parent first: a new app,
-    an app's permission, or a blocked site. Both parents hear once."""
-    status, body = await _identity_as_caller(request, "POST", "/api/guard/requests", json=await request.json())
+async def ask_a_parent(request: Request, payload: dict) -> tuple[int, dict]:
+    """A child asks a parent first (a new app, an app's permission, a blocked
+    site), as the caller; both parents hear once. Shared by the route and the
+    phone's "Ask a parent" notification button (push callback ``guard_ask``)."""
+    status, body = await _identity_as_caller(request, "POST", "/api/guard/requests", json=payload)
     if status == 200 and body.get("notify"):
         asked = body.get("request") or {}
         child = str(asked.get("username") or "")
         title, line = _GUARD_ASK_TITLES[str(asked.get("kind"))]
-        note = f" — “{asked['note']}”" if asked.get("note") else ""
+        note = f" \u2014 \u201c{asked['note']}\u201d" if asked.get("note") else ""
         await _screen_time_notice(
             body["notify"], title, line.format(name=child, what=_guard_request_words(asked), note=note), f"/guardian?child={child}"
         )
-    return JSONResponse(status_code=status, content={k: v for k, v in (body or {}).items() if k != "notify"})
+    return status, {k: v for k, v in (body or {}).items() if k != "notify"}
+
+
+@app.post("/api/guard/requests")
+async def guard_ask_a_parent(request: Request):
+    status, body = await ask_a_parent(request, await request.json())
+    return JSONResponse(status_code=status, content=body)
 
 
 @app.get("/api/guard/requests")
@@ -5927,17 +5933,9 @@ async def guard_decide(request: Request, request_id: int):
 
 
 async def _spotify_settings() -> dict[str, str]:
-    """The household's Spotify app registration from identity's settings."""
-    async with borrow_http_client() as client:
-        resp = await client.get(
-            f"{IDENTITY_SVC}/api/settings", headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=aiohttp.ClientTimeout(total=10.0),
-        )
-        rows = await resp.json(content_type=None) if resp.status == 200 else []
-    return {
-        r["key"]: str(r.get("value") or "").strip()
-        for r in rows or [] if isinstance(r, dict) and r.get("key") in spotify.SETTING_KEYS
-    }
+    """The household's Spotify app registration (the shared settings cache)."""
+    settings = await get_all_settings()
+    return {k: str(settings.get(k) or "").strip() for k in spotify.SETTING_KEYS}
 
 
 @app.get("/api/spotify/status")

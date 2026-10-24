@@ -282,11 +282,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- "Ask a parent" on the web filter's blocked-site notification. -->
-        <receiver
-            android:name=".AskParentReceiver"
-            android:exported="false" />
-
         <receiver
             android:name=".BootReceiver"
             android:exported="true">

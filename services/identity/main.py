@@ -4171,6 +4171,27 @@ def _screen_rules(session: Session, username: str) -> dict:
         return {}
 
 
+def _save_screen_rules(session: Session, username: str, rules: dict, by: str) -> None:
+    """Replace a member's rules (the caller commits)."""
+    row = session.get(ScreenRules, username) or ScreenRules(username=username)
+    row.data = json.dumps(rules)
+    row.updated_by = by
+    row.updated_at = datetime.now(UTC).isoformat()
+    session.add(row)
+
+
+def _visible_requests(session: Session, caller: User, rows: list) -> list:
+    """Of a list of requests (more time, ask-a-parent), the caller's own and
+    those of the children they manage, newest first, at most 100."""
+    people = {u.username: u for u in session.exec(select(User)).all()}
+    visible = [
+        r for r in rows
+        if r.username == caller.username or _may_manage_screen_time(caller, people.get(r.username))
+    ]
+    visible.sort(key=lambda r: r.created_at, reverse=True)
+    return visible[:100]
+
+
 def _granted_minutes(session: Session, username: str, day: str) -> int:
     rows = session.exec(
         select(ScreenTimeRequest).where(
@@ -4317,11 +4338,7 @@ def put_screen_rules(username: str, body: dict, session: Session = Depends(get_s
     for key in ("paused", "paused_until"):  # a pause survives a rules edit
         if key in current:
             rules[key] = current[key]
-    row = session.get(ScreenRules, subject.username) or ScreenRules(username=subject.username)
-    row.data = json.dumps(rules)
-    row.updated_by = caller.username
-    row.updated_at = datetime.now(UTC).isoformat()
-    session.add(row)
+    _save_screen_rules(session, subject.username, rules, caller.username)
     session.commit()
     return {"username": subject.username, "rules": rules}
 
@@ -4346,11 +4363,7 @@ def pause_screen_time(username: str, body: dict, session: Session = Depends(get_
             rules["paused_until"] = str(until)
         else:
             rules["paused"] = True
-    row = session.get(ScreenRules, subject.username) or ScreenRules(username=subject.username)
-    row.data = json.dumps(rules)
-    row.updated_by = caller.username
-    row.updated_at = datetime.now(UTC).isoformat()
-    session.add(row)
+    _save_screen_rules(session, subject.username, rules, caller.username)
     session.commit()
     return {"username": subject.username, "rules": rules}
 
@@ -4393,14 +4406,8 @@ def ask_for_screen_time(body: dict, session: Session = Depends(get_session), cal
 @app.get("/api/screen-time/requests")
 def list_screen_time_requests(status: str = "pending", session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
     """The caller's own requests and those of the children they manage."""
-    people = {u.username: u for u in session.exec(select(User)).all()}
     rows = session.exec(select(ScreenTimeRequest).where(ScreenTimeRequest.status == status)).all()
-    visible = [
-        r for r in rows
-        if r.username == caller.username or _may_manage_screen_time(caller, people.get(r.username))
-    ]
-    visible.sort(key=lambda r: r.created_at, reverse=True)
-    return {"requests": [_request_read(r) for r in visible[:100]]}
+    return {"requests": [_request_read(r) for r in _visible_requests(session, caller, rows)]}
 
 
 @app.post("/api/screen-time/requests/{request_id}")
@@ -4535,14 +4542,8 @@ def list_guard_requests(status: str = "pending", session: Session = Depends(get_
     """The caller's own requests and those of the children they manage."""
     if status not in ("pending", "approved", "denied"):
         raise HTTPException(status_code=422, detail="status must be pending, approved or denied")
-    people = {u.username: u for u in session.exec(select(User)).all()}
     rows = session.exec(select(GuardRequest).where(GuardRequest.status == status)).all()
-    visible = [
-        r for r in rows
-        if r.username == caller.username or _may_manage_screen_time(caller, people.get(r.username))
-    ]
-    visible.sort(key=lambda r: r.created_at, reverse=True)
-    return {"requests": [_guard_request_read(r) for r in visible[:100]]}
+    return {"requests": [_guard_request_read(r) for r in _visible_requests(session, caller, rows)]}
 
 
 @app.post("/api/guard/requests/{request_id}")
@@ -4576,11 +4577,7 @@ def decide_guard_request(request_id: int, body: dict, session: Session = Depends
             until[request.target] = request.until
         wf["allow_until"] = until
         rules["web_filter"] = wf
-        row = session.get(ScreenRules, subject.username) or ScreenRules(username=subject.username)
-        row.data = json.dumps(rules)
-        row.updated_by = caller.username
-        row.updated_at = now.isoformat()
-        session.add(row)
+        _save_screen_rules(session, subject.username, rules, caller.username)
     request.status = "approved" if approve else "denied"
     request.decided_by = caller.username
     request.decided_at = now.isoformat()
