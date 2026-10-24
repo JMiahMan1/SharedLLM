@@ -37,6 +37,13 @@ ACTIVITY_MAX = 500
 USAGE_PREFIX = "tel:usage:"
 USAGE_MAX_DAYS = 90
 
+# Content-monitoring hits per child (newest last), and the weekly recaps the
+# parents receive, kept by week start.
+CONCERNS_PREFIX = "tel:concerns:"
+CONCERNS_MAX = 300
+RECAP_PREFIX = "tel:recap:"
+RECAP_MAX_WEEKS = 12
+
 # Screen-on stretches overnight per device (18:00 to noon), for the sleep
 # estimate. Keyed by device so a tablet counts for whoever it is assigned to.
 NIGHT_PREFIX = "tel:night:"
@@ -358,6 +365,34 @@ async def get_nights(rc, devices: list[str], night: str) -> list[dict[str, Any]]
         if isinstance(parsed, dict):
             out.append(parsed)
     return out
+
+
+async def add_concerns(rc, user: str, concerns: list[dict[str, Any]]) -> None:
+    key = f"{CONCERNS_PREFIX}{user}"
+    for concern in concerns:
+        await rc.rpush(key, json.dumps(concern))
+    await rc.ltrim(key, -CONCERNS_MAX, -1)
+
+
+async def list_concerns(rc, user: str) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for raw in await rc.lrange(f"{CONCERNS_PREFIX}{user}", 0, -1):
+        try:
+            item = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(item, dict):
+            out.append(item)
+    return out
+
+
+async def save_recap(rc, user: str, week: str, recap: dict[str, Any]) -> None:
+    key = f"{RECAP_PREFIX}{user}"
+    await rc.hset(key, week, json.dumps(recap))
+    if await rc.hlen(key) > RECAP_MAX_WEEKS:
+        stale = sorted((await rc.hgetall(key)).keys())
+        for old in stale[: len(stale) - RECAP_MAX_WEEKS]:
+            await rc.hdel(key, old)
 
 
 async def get_usage(rc, user: str, days: int = 7) -> list[dict[str, Any]]:

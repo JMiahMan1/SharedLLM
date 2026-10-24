@@ -493,9 +493,28 @@ point.
       calls, web, music, app usage) for what a parent needs to know — self-harm, bullying,
       isolation, secret-keeping patterns — classified by concern level with per-child
       sensitivity (all / severe / none); serious categories always on.
+      **Built (2026-10-24), local and deterministic:** every activity event recorded for a minor
+      is scanned as it lands (`services/common/concern_monitor.py`, run from telemetry's
+      activity route): text messages sent and received, media titles, sites and page names,
+      against a small reviewed phrase list (whole words, case-insensitive) in levels — severe
+      (self-harm, sexual exploitation and grooming, threats), high (bullying, sexual content,
+      drugs, secrecy) and medium (alcohol and vaping, gambling). Hits are kept for the recap
+      (`tel:concerns:{child}`) with a short excerpt; the child's sensitivity
+      (`monitoring` in their rules: `all`, `severe` (default), `off`) decides what pages both
+      parents at once (`family_safety`, deduplicated per child, category and day; self-harm and
+      exploitation always page, at priority 5). Adults are never scanned. A local-model second
+      pass for context is not built.
 - [ ] **Alerts and reports.** Only the highest concern pages a parent immediately; a Sunday
       weekly recap (telemetry's report pipeline) with top apps, contacts, sites and standout
       moments; Jarvis chat answers "how was Emma's week?" the way Bark Assistant does.
+      **Weekly recap built (2026-10-24):** `services/common/guardian_recap.py` builds a child's
+      Monday–Sunday from what was reported — screen time (daily average, change from last week,
+      late nights after 22:00 household time), top apps, what they played and watched, sites
+      visited and blocked, how many calls and messages with how many people (never content),
+      Bible days and the week's concerns, plus a few highlights. Telemetry sends it to both
+      parents on Sunday from 18:00 household time (once per child and week, kept 12 weeks);
+      `GET /api/guardian/recap/{child}` builds it on demand for the parents' page. Not yet: the
+      Jarvis chat answer to "how was Emma's week?".
 
 ### Discipleship (what those apps do not have)
 
@@ -554,13 +573,27 @@ point.
       and act on, never the stream behind them. A father–mother shared parents' page stays
       mutual and revocable for accountability; an adult child's data is their own to share
       or hold.
-- [ ] **Prayer and guidance.** The parent view pairs the week's real activity with Scripture:
+- [x] **Prayer and guidance.** The parent view pairs the week's real activity with Scripture:
       prayer prompts grounded in what actually happened, conversation starters from the
       devotional library, and a talk journal. Jarvis drafts gentle notes a parent reviews
       before sending — never sent automatically.
+      **Built (2026-10-24):** the parents' page `/guardian` (Health → Family guardian; concern and
+      recap notices open it on the child) shows one child at a time: the week (`RecapCard`),
+      **Praying for …** (`services/common/guidance.py`: for each signal in the week — a concern,
+      late nights, more phone time, blocked sites, Bible reading — a prayer, a KJV verse and a
+      conversation starter, most important first; a quiet week gets a blessing), a **talk
+      journal** (identity `GuardianNote`, the writer's own unless shared with the other parent;
+      the child never sees it), the activity feed and every control. "Write … a note" turns a
+      starter into an editable note the parent sends through the family chat themselves.
+      The starters are reviewed text, not yet drawn from the devotional library.
 - [ ] **A voice for the quiet ones.** One-tap "I need to talk", burden signals (reusing
       check-ins) and private note lanes (mom↔dad, parent↔child) so nobody has to say it out
       loud first.
+      **"I need to talk" built (2026-10-24):** a child's card on Health → Today picks one or both
+      parents and an optional short note (`POST /api/guardian/talk`; only the caller's own
+      parents can be reached); the parent gets a `family_safety` notice that opens the parents'
+      page. Private lanes are the family chat's direct conversations. Not yet: burden signals
+      from check-ins.
 - [ ] **Sharing follows the family roles (`docs/ROLES.md`).** Minor rules stay circle-on and
       locked; children never see parents' private sections; kid mode respected throughout.
 
@@ -574,8 +607,9 @@ video themes redeemed or redirected, podcasts, books, games and activities, and 
 bless/block per lane); (4) time budgets and routines;
 (5) app control and the web filter — app blocking, per-app limits and the DNS web filter
 DONE (install approvals and "ask a parent" for a site still open);
-(6) monitoring alerts and the weekly recap; (7) the parents' page and the discipleship
-surfaces.
+(6) monitoring alerts and the weekly recap — DONE (local phrase monitoring, Sunday recap);
+(7) the parents' page and the discipleship surfaces — DONE (parents' page, prayer and
+guidance, talk journal, "I need to talk"; burden signals and the Jarvis chat recap open).
 
 ## Acceptance
 

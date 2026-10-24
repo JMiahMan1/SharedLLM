@@ -138,6 +138,10 @@ import type {
   HealthChallengeKind,
   HealthChallengeWeek,
   SleepEstimate,
+  GuardianRecap,
+  GuardianPrompt,
+  GuardianJournalNote,
+  ActivityEvent,
   SleepSession,
   HealthCheckin,
   FoodEntry,
@@ -985,6 +989,47 @@ export const api = {
 
   async clearOfflineCode(): Promise<{ set: boolean }> {
     const resp = await apiClient.delete('/api/guard/offline-code');
+    return resp.data;
+  },
+
+  /** A child's week (parents only). */
+  async getGuardianRecap(username: string, day?: string): Promise<{ recap: GuardianRecap }> {
+    const resp = await apiClient.get(`/api/guardian/recap/${encodeURIComponent(username)}`, { params: day ? { day } : {} });
+    return resp.data;
+  },
+
+  async getGuardianGuidance(username: string): Promise<{ week: { start: string; end: string }; prompts: GuardianPrompt[] }> {
+    const resp = await apiClient.get(`/api/guardian/guidance/${encodeURIComponent(username)}`);
+    return resp.data;
+  },
+
+  async getGuardianActivity(username: string, limit = 100): Promise<{ events: ActivityEvent[] }> {
+    const resp = await apiClient.get(`/api/guardian/activity/${encodeURIComponent(username)}`, { params: { limit } });
+    return resp.data;
+  },
+
+  async getGuardianJournal(username: string): Promise<{ notes: GuardianJournalNote[] }> {
+    const resp = await apiClient.get(`/api/guardian/journal/${encodeURIComponent(username)}`);
+    return resp.data;
+  },
+
+  async addGuardianJournal(username: string, text: string, shared: boolean): Promise<GuardianJournalNote> {
+    const resp = await apiClient.post(`/api/guardian/journal/${encodeURIComponent(username)}`, { text, shared });
+    return resp.data;
+  },
+
+  async deleteGuardianJournal(username: string, id: number): Promise<void> {
+    await apiClient.delete(`/api/guardian/journal/${encodeURIComponent(username)}/${id}`);
+  },
+
+  /** A child's own parents, for "I need to talk". */
+  async getMyParents(): Promise<{ parents: string[] }> {
+    const resp = await apiClient.get('/api/guardian/my-parents');
+    return resp.data;
+  },
+
+  async askToTalk(to: string[], note: string): Promise<{ told: string[] }> {
+    const resp = await apiClient.post('/api/guardian/talk', { to, note });
     return resp.data;
   },
 
