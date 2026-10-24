@@ -54,7 +54,7 @@ export default function ListenNowPage() {
       const duration = known?.duration ?? null;
       cards.push({
         key: uri,
-        item: known ?? { uri, name: book.title, media_type: 'audiobook', artist: book.author, album: '', image: `/api/items/${book.id}/cover`, duration: null, version: '', favorite: null },
+        item: known ?? { uri, name: book.title, media_type: 'audiobook', artist: book.author, artist_uri: '', album: '', album_uri: '', image: `/api/items/${book.id}/cover`, duration: null, version: '', favorite: null },
         progress,
         label: duration ? formatTimeLeft(progress * duration, duration) : `${Math.round(progress * 100)}% listened`,
       });
@@ -86,6 +86,7 @@ export default function ListenNowPage() {
         label={label}
         busy={playback.busy === busyKey}
         onPlay={req ? () => void playback.play(req, busyKey) : undefined}
+        menuItem={item}
       />
     );
   };

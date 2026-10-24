@@ -230,6 +230,34 @@ def test_item_ma_returns_children(client, ma):
     assert child_args == {"item_id": "6", "provider_instance_id_or_domain": "library"}
 
 
+def test_items_carry_artist_and_album_uris(client, ma):
+    """P5-T7: "Go to artist/album" needs the URIs MA sends, not just names."""
+    track = {
+        "uri": "library://track/1",
+        "name": "Track One",
+        "media_type": "track",
+        "duration": 120,
+        "artists": [{"name": "Band", "uri": "library://artist/4"}],
+        "album": {"name": "Debut", "uri": "library://album/9"},
+    }
+    ma["responses"]["music/item_by_uri"] = {
+        "uri": "library://playlist/6", "name": "Road Trip", "media_type": "playlist", "item_id": 6, "provider": "library",
+    }
+    ma["responses"]["music/playlists/playlist_tracks"] = [track]
+    ma["responses"]["music/favorites/library_items"] = []
+    ma["responses"]["music/tracks/library_items"] = [track]
+
+    child = client.get("/api/media/item", params={"uri": "library://playlist/6"}).json()["children"][0]
+    assert child["artist"] == "Band"
+    assert child["artist_uri"] == "library://artist/4"
+    assert child["album"] == "Debut"
+    assert child["album_uri"] == "library://album/9"
+
+    item = client.get("/api/media/library/tracks").json()["items"][0]
+    assert item["artist_uri"] == "library://artist/4"
+    assert item["album_uri"] == "library://album/9"
+
+
 def test_item_abs_podcast_detail(client, upstream, ma):
     from conftest_media import TEST_ABS_URL
 

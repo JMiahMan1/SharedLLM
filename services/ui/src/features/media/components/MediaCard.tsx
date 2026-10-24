@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Loader2, Play } from 'lucide-react';
 import { Artwork } from './Artwork';
+import { ItemContextMenu, type MenuItemSource } from './ItemContextMenu';
 import { muted, text } from './ui';
 import type { ItemKind } from '../items';
 
@@ -29,7 +30,7 @@ export function ProgressRing({ value, size = 36 }: { value: number; size?: numbe
  * (UX-24); for a collection it plays without opening.
  */
 export function MediaCard({
-  title, subtitle, image, kind, onPlay, to, busy, progress, label,
+  title, subtitle, image, kind, onPlay, to, busy, progress, label, menuItem,
 }: {
   title: string;
   subtitle?: string;
@@ -41,6 +42,8 @@ export function MediaCard({
   progress?: number;
   /** Extra line, e.g. "2h 13m left". */
   label?: string | null;
+  /** Adds the "…" menu (Play next, Add to queue, Go to, Favorite). */
+  menuItem?: MenuItemSource;
 }) {
   const body = (
     <>
@@ -91,6 +94,11 @@ export function MediaCard({
         >
           {busy ? <Loader2 size={18} className="animate-spin" aria-hidden /> : <Play size={18} aria-hidden />}
         </button>,
+      ) : null}
+      {menuItem ? (
+        <span className="absolute right-1 top-1 rounded-xl bg-black/40 backdrop-blur-sm">
+          <ItemContextMenu item={menuItem} />
+        </span>
       ) : null}
       {!to && busy ? overlay(<span className={disc}><Loader2 size={18} className="animate-spin" aria-hidden /></span>) : null}
     </div>

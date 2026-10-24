@@ -148,9 +148,19 @@
             "title": "Album",
             "type": "string"
           },
+          "album_uri": {
+            "default": "",
+            "title": "Album Uri",
+            "type": "string"
+          },
           "artist": {
             "default": "",
             "title": "Artist",
+            "type": "string"
+          },
+          "artist_uri": {
+            "default": "",
+            "title": "Artist Uri",
             "type": "string"
           },
           "duration": {
@@ -264,9 +274,19 @@
             "title": "Album",
             "type": "string"
           },
+          "album_uri": {
+            "default": "",
+            "title": "Album Uri",
+            "type": "string"
+          },
           "artist": {
             "default": "",
             "title": "Artist",
+            "type": "string"
+          },
+          "artist_uri": {
+            "default": "",
+            "title": "Artist Uri",
             "type": "string"
           },
           "duration": {
@@ -375,9 +395,19 @@
         "title": "Album",
         "type": "string"
       },
+      "album_uri": {
+        "default": "",
+        "title": "Album Uri",
+        "type": "string"
+      },
       "artist": {
         "default": "",
         "title": "Artist",
+        "type": "string"
+      },
+      "artist_uri": {
+        "default": "",
+        "title": "Artist Uri",
         "type": "string"
       },
       "duration": {
@@ -436,6 +466,26 @@
   "MediaItemChild": {
     "description": "A track, chapter, album or episode under a media item detail.",
     "properties": {
+      "album": {
+        "default": "",
+        "title": "Album",
+        "type": "string"
+      },
+      "album_uri": {
+        "default": "",
+        "title": "Album Uri",
+        "type": "string"
+      },
+      "artist": {
+        "default": "",
+        "title": "Artist",
+        "type": "string"
+      },
+      "artist_uri": {
+        "default": "",
+        "title": "Artist Uri",
+        "type": "string"
+      },
       "duration": {
         "anyOf": [
           {
@@ -520,6 +570,26 @@
       "MediaItemChild": {
         "description": "A track, chapter, album or episode under a media item detail.",
         "properties": {
+          "album": {
+            "default": "",
+            "title": "Album",
+            "type": "string"
+          },
+          "album_uri": {
+            "default": "",
+            "title": "Album Uri",
+            "type": "string"
+          },
+          "artist": {
+            "default": "",
+            "title": "Artist",
+            "type": "string"
+          },
+          "artist_uri": {
+            "default": "",
+            "title": "Artist Uri",
+            "type": "string"
+          },
           "duration": {
             "anyOf": [
               {
@@ -695,9 +765,19 @@
             "title": "Album",
             "type": "string"
           },
+          "album_uri": {
+            "default": "",
+            "title": "Album Uri",
+            "type": "string"
+          },
           "artist": {
             "default": "",
             "title": "Artist",
+            "type": "string"
+          },
+          "artist_uri": {
+            "default": "",
+            "title": "Artist Uri",
             "type": "string"
           },
           "duration": {
@@ -855,9 +935,19 @@
             "title": "Album",
             "type": "string"
           },
+          "album_uri": {
+            "default": "",
+            "title": "Album Uri",
+            "type": "string"
+          },
           "artist": {
             "default": "",
             "title": "Artist",
+            "type": "string"
+          },
+          "artist_uri": {
+            "default": "",
+            "title": "Artist Uri",
             "type": "string"
           },
           "duration": {

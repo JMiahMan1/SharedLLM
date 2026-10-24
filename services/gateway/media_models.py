@@ -28,7 +28,10 @@ class MediaItem(BaseModel):
     name: str = ""
     media_type: str = ""
     artist: str = ""
+    # The first artist's and the album's MA URIs, for "Go to artist/album".
+    artist_uri: str = ""
     album: str = ""
+    album_uri: str = ""
     image: str = ""
     duration: float | None = None
     version: str = ""
@@ -76,6 +79,10 @@ class MediaItemChild(BaseModel):
     uri: str = ""
     name: str = ""
     media_type: str = ""
+    artist: str = ""
+    artist_uri: str = ""
+    album: str = ""
+    album_uri: str = ""
     image: str = ""
     duration: float | None = None
     index: int | None = None

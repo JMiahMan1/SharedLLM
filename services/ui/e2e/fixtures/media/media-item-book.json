@@ -12,6 +12,10 @@
       "uri": "abs://book-1#chapter-0",
       "name": "Chapter 1",
       "media_type": "chapter",
+      "artist": "",
+      "artist_uri": "",
+      "album": "",
+      "album_uri": "",
       "image": "",
       "duration": 1800.0,
       "index": 0
@@ -20,6 +24,10 @@
       "uri": "abs://book-1#chapter-1",
       "name": "Chapter 2",
       "media_type": "chapter",
+      "artist": "",
+      "artist_uri": "",
+      "album": "",
+      "album_uri": "",
       "image": "",
       "duration": 2100.0,
       "index": 1
@@ -28,6 +36,10 @@
       "uri": "abs://book-1#chapter-2",
       "name": "Chapter 3",
       "media_type": "chapter",
+      "artist": "",
+      "artist_uri": "",
+      "album": "",
+      "album_uri": "",
       "image": "",
       "duration": 1950.0,
       "index": 2
