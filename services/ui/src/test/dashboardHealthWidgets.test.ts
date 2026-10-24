@@ -23,9 +23,12 @@ const SKELETONS = read('components/widgets/skeletons/WidgetSkeletons.tsx');
  * is labelled, so the duplicate cannot come back under a new name.
  */
 describe('dashboard health widgets', () => {
-  it('has exactly one health widget registered', () => {
+  it('has the step widget and the hub today card, and no other health widget', () => {
+    // `health_today` is the hub's today card (readiness, sleep, water, food,
+    // tonight's dinner). It is allowed only because it never reads steps: the
+    // step-reader test below still finds exactly one step widget.
     const keys = defaultWidgetDefs.map((d) => d.key);
-    expect(keys.filter((k) => k.includes('health'))).toEqual(['health_activity']);
+    expect(keys.filter((k) => k.includes('health'))).toEqual(['health_activity', 'health_today']);
   });
 
   it('has no widget labelled "Today"', () => {

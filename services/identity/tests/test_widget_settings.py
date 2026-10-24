@@ -48,7 +48,7 @@ def test_get_widget_settings_returns_all_known_widgets(client: TestClient, sessi
     resp = client.get("/api/widgets/settings")
     assert resp.status_code == 200
     settings = resp.json()
-    assert len(settings["widgets"]) == 14  # 14 known widget keys
+    assert len(settings["widgets"]) == 15  # 15 known widget keys
 
     widget_keys = [w["widget_key"] for w in settings["widgets"]]
     assert "energy_insights" in widget_keys

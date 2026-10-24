@@ -3499,6 +3499,7 @@ WIDGET_DEFAULT_SIZES: dict[str, str] = {
     'device_control': 'tall',
     'workspaces': 'medium',
     'health_activity': 'medium',
+    'health_today': 'medium',
     'climate': 'medium',
     'presence': 'medium',
     'bible_daily': 'medium',

@@ -64,6 +64,11 @@ allow sound after a tap, so audio is unlocked by the first tap on the page and
 again when a timer is set. A speaker picked in the widget still gets the
 spoken alert, and the phone still gets its notice.
 
+Health today (`components/widgets/HealthTodayWidget.tsx`) is the Health hub's today card:
+readiness, last night, water, food, active minutes and tonight's planned dinner, following the
+person's own card switches and kid mode. Steps stay on the Health widget, the only dashboard
+widget allowed to read step data.
+
 Active Media (`components/widgets/ActiveMediaWidget.tsx`) shows whatever
 player execution reports as active (`api.mediaStatus()`). When that player is
 this app's own web player (entity id `web_player`), play, pause, next,

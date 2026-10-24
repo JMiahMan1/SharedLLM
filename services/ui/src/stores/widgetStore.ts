@@ -9,7 +9,7 @@ import type {
   WidgetInstance,
 } from '../types/widget';
 import { api } from '../services/api';
-import { Activity, BookOpen, CalendarDays, Compass, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap } from 'lucide-react';
+import { Activity, BookOpen, HeartPulse, CalendarDays, Compass, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap } from 'lucide-react';
 
 export interface WidgetStateItem {
   id: string;
@@ -53,6 +53,10 @@ export const defaultWidgetDefs: WidgetDef[] = [
   { key: 'device_control', label: 'Device Control', icon: LayoutGrid, minSize: 'small', defaultSize: 'tall' },
   { key: 'workspaces', label: 'Workspaces', icon: LayoutDashboard, minSize: 'small', defaultSize: 'medium' },
   { key: 'health_activity', label: 'Health', icon: Activity, minSize: 'small', defaultSize: 'medium' },
+  // The hub's today card: readiness, sleep, water, food, active minutes and
+  // tonight's dinner. It never reads steps (those stay on `health_activity`),
+  // so the two never show the same number.
+  { key: 'health_today', label: 'Health today', icon: HeartPulse, minSize: 'small', defaultSize: 'medium' },
   { key: 'climate', label: 'Climate', icon: Thermometer, minSize: 'small', defaultSize: 'medium' },
   { key: 'presence', label: 'Family Presence', icon: Compass, minSize: 'small', defaultSize: 'medium' },
   // The reading app's front door. `small` is enough for the verse text, and the

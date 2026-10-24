@@ -428,9 +428,16 @@ live search is the ecosystem-standard pattern.
 
 ### Phase 8 — integrations everywhere
 
-- [ ] Dashboard widget and Android home-screen widget (today card). The existing activity widget is unchanged.
-  **Android home-screen widget built 2026-10-24, not yet confirmed on a phone; the dashboard
-  widget is not built.** *Health today* (`HealthTodayWidget`, 3×2, resizable) shows four tiles —
+- [x] Dashboard widget (today card). **Health today** (`health_today`, `HealthTodayWidget`) shows
+  readiness, last night, water, food (kid mode: what was logged, never calories), the week's
+  active minutes and tonight's planned dinner from the week plan, each only when its card is
+  switched on, from the same queries as the Health page; a tap opens the hub. It never reads
+  steps, so the existing Health (`health_activity`) widget stays the dashboard's one step card
+  (`dashboardHealthWidgets.test.ts` still enforces a single step reader). Registered in the UI and
+  identity's `WIDGET_DEFAULT_SIZES`; not in `CHILD_WIDGETS`, so a child's starting board is
+  unchanged and they can add it themselves.
+- [ ] Android home-screen widget (today card). **Built 2026-10-24, not yet confirmed on a phone.**
+  *Health today* (`HealthTodayWidget`, 3×2, resizable) shows four tiles —
   steps (geo, against the goal), readiness, last night's sleep score with its length, and water
   in the profile's units (fl oz for imperial, litres otherwise) — from the same reads the Today tab
   uses (`/api/geo/steps?days=1`, `/api/health/summary`), with the signed-in person's own key the
