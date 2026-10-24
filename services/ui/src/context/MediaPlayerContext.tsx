@@ -6,6 +6,8 @@ import type { MAWebPlayerState } from '../lib/maWebPlayer';
 import JarvisMedia from '../plugins/jarvisMedia';
 import { api } from '../services/api';
 import { TabLock } from '../features/media/engine/tabLock';
+import { applySessionMetadata, applySessionPosition, bindSessionHandlers } from '../features/media/engine/mediaSession';
+import { useMediaToken } from '../lib/mediaToken';
 import { useMediaStore } from '../features/media/store/mediaStore';
 
 import { MediaPlayerContext } from './webPlayerContext';
@@ -109,6 +111,40 @@ function useTabLock(player: SharedPlayer) {
 }
 
 /**
+ * The lock screen, notification and media keys follow this device's playback
+ * (§6.7). Metadata changes with the track; the scrubber with the position.
+ */
+function useOsMediaSession(player: SharedPlayer) {
+  // Artwork URLs are signed with the media token; re-apply once it arrives.
+  const token = useMediaToken();
+  const { mediaTitle, mediaArtist, mediaImage, isPlaying, position, duration, playbackRate } = player;
+  useEffect(() => {
+    applySessionMetadata(mediaTitle
+      ? { title: mediaTitle, artist: mediaArtist, image: mediaImage, isPlaying, position: 0, duration: 0, playbackRate: 1 }
+      : null);
+  }, [mediaTitle, mediaArtist, mediaImage, isPlaying, token]);
+  useEffect(() => {
+    applySessionPosition(mediaTitle
+      ? { title: mediaTitle, artist: mediaArtist, image: mediaImage, isPlaying, position, duration, playbackRate }
+      : null);
+  }, [mediaTitle, mediaArtist, mediaImage, isPlaying, position, duration, playbackRate]);
+
+  const playerRef = useRef(player);
+  useEffect(() => {
+    playerRef.current = player;
+  }, [player]);
+  useEffect(() => bindSessionHandlers({
+    play: () => { void playerRef.current.play().catch(() => {}); },
+    pause: () => { void playerRef.current.pause(); },
+    stop: () => { void playerRef.current.stop(); },
+    next: () => { void playerRef.current.next(); },
+    previous: () => { void playerRef.current.previous(); },
+    seekTo: (seconds) => { void playerRef.current.seek(seconds); },
+    position: () => playerRef.current.position,
+  }), []);
+}
+
+/**
  * The one web player for the whole app, mounted above the router.
  *
  * It used to belong to the Media page, whose unmount disconnected it -- so
@@ -126,6 +162,7 @@ export function MediaPlayerProvider({ children }: { children: ReactNode }) {
 
   useReportWebPlayerState(player);
   useTabLock(player);
+  useOsMediaSession(player);
 
   const native = Capacitor.isNativePlatform();
   const { mediaTitle, mediaArtist, isPlaying, playerId, volume } = player;
