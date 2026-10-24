@@ -1,16 +1,18 @@
 # Jarvis OS / SharedLLM — session handover
 
-Updated 2026-10-23 for the next AI assistant taking over this repo.
+Updated 2026-10-24 for the next AI assistant taking over this repo.
 Every claim below was verified against the live system unless marked **planned**.
 
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
-- Live: `https://jarvis.sumemail.com` — version **1.5.2**, OTA bundle `git_sha`
-  **5bdaea9b**, APK **437** (verified 2026-10-24, no errors since restart).
-  - Containers: identity/gateway/ui **5bdaea9b**, execution **fc7ba693**, storage **8fc73700**,
-    health **d766a19f**.
-  - Phones need APK 437 for the native changes (white-bar fix, Jarvis guard).
+- Live: `https://jarvis.sumemail.com` — version **1.5.2**, OTA bundle `git_sha` **317efc50**,
+  APK **442** (verified 2026-10-24 after the last deploy: no new errors on touched services).
+  - Containers: ui, execution, bible **317efc50**; identity, telemetry **f26d3d0f**; health
+    **ede92227**; gateway at the commit that added this handover (an empty-body 500 on the new
+    notes routes, now a 422). Each deploy pins the touched services to the branch tip.
+  - APK 442 (built by CI from this session's code) carries this session's native work (the screen fix, the night
+    reader for sleep estimates, app blocking, the offline parent code, the web filter).
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
 - Check anytime:
@@ -22,8 +24,39 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
-- `HEAD` Family guard: **suggestion lanes, server side** — a parent blesses or blocks each kind of
-  suggestion per child; blocked lanes return nothing. App screen still to do (see §5 "Not done").
+- `2026-10-24 session` Everything below up to "Suggestion lanes (server)" landed in this session; all
+  deployed and smoke-checked unless noted. Details live in the docs named.
+  - **Phone app: the screen no longer drifts under the bars** — the phone shell is `fixed inset-0`
+    and locks the document (`mobile-shell-lock` on `<html>`), so only `<main>` scrolls; native: the
+    legacy `windowTranslucent*` theme flags are gone and Capacitor's `SystemBars` gets
+    `initialViewportFitValueHint: 'cover'`. Hermetic spec `e2e/layout/mobile-viewport.spec.ts`.
+    The web half is live in the OTA bundle; the native half needs the new APK. **Not confirmed on
+    a real phone** — ask Jeremiah whether dragging still moves the app.
+  - **Health:** suggestion-lane switches for parents (`SuggestionLanesControls`); the **weekly
+    digest** card (`GET /weekly`, `services/health/weekly.py`); **sleep estimated from device
+    use** (phones/tablets report overnight screen-on stretches per device; the estimate joins the
+    devices assigned to the person; editable before saving, saved untouched as `usage_estimate`);
+    saved nights are editable (`PUT /sleep/{id}`); **recipe ↔ Health logging** (log a recipe or
+    tonight's planned dinner with a portion picker); a **weekly family challenge** (water days,
+    sleep nights, cook nights; leaderboard; share to chat). See `docs/HEALTH_HUB.md`.
+  - **Family guard (Phase 11) steps 5–7:** app blocking and per-app minutes; a parent's **offline
+    unlock code** (PBKDF2 verifier delivered only inside an online parent unlock); the **web
+    filter** (`WebFilterService`, a DNS-only VPN: family-safe resolver, safe search, own lists,
+    web activity on the feed); **content monitoring** (reviewed phrase list, severe concerns page
+    both parents); the **Sunday weekly recap**; the parents' page **`/guardian`** (week, prayer
+    and guidance with KJV verses, talk journal, activity, all controls); a child's **"I need to
+    talk"**; **burden signals** from a child's own check-ins; Jarvis chat answers a parent's
+    "how was Emma's week?" from the recap. See `docs/HEALTH_HUB.md` Phase 11.
+    Guard, web filter and app blocking **need a device check** (no phone was available).
+  - **Media:** podcast **episode lists** (BUG-43, `GET /api/media/podcast-episodes`); pending MA
+    JSON-RPC calls fail at once on close (BUG-48).
+  - **Notes:** list/grid toggle, undo toasts, autosave with on-device drafts and If-Match conflict
+    handling, desktop shortcuts, checklist drag/reorder, version history, timed reminders,
+    Nextcloud sharing. See `docs/NOTES.md`.
+  - **Bible:** plan reflections and promoted verse notes go into study memory (RAG, citable ids).
+  - Android lint error at `ConfigureActionButtonActivity.java:357` fixed (API-26 guard).
+- `15865192` Family guard: **suggestion lanes, server side** — a parent blesses or blocks each kind of
+  suggestion per child; blocked lanes return nothing (app screen added 2026-10-24).
 - `HEAD` Family guard: **Jarvis protected on a child's phone + screen-time enforcement (Layer 1, 4b)**
   — device admin + the `GuardService` Accessibility guard, a parent-login cover screen, tamper
   alerts and screen-time locks; see `docs/HEALTH_HUB.md` "Tamper resistance". Compiles and the
@@ -388,12 +421,12 @@ Every claim below was verified against the live system unless marked **planned**
   `-x`), then confirm it is gone. Never leave seeded artists/creators/calls in a real feed.
 - **UI gates**, run in `services/ui`: `npm run typecheck`, `npm run lint`
   (baseline 0 errors / 11 pre-existing warnings), `npx vitest run`
-  (204 files / 1602 tests), `npm run build` (also packages the OTA bundle).
+  (229 files / 1730 tests), `npm run build` (also packages the OTA bundle).
   After adding Tailwind colour classes run `npm run gen:theme-css` or
   `src/themes/themeRemap.test.ts` fails.
 - **Backend tests**: `.venv/bin/python -m pytest <paths>` — `python` is not on
-  PATH. Current baselines: health **108**, identity **416**, gateway **1532**,
-  execution **914 passed / 60 skipped** (ignore
+  PATH. Current baselines: health **137**, identity **448**, gateway **1597**, telemetry
+  **91**, bible **712**, common **56**, execution **1016 passed / 60 skipped** (ignore
   `services/execution/tests/test_calendar_window_and_uid.py`; it needs the
   optional `vobject` package).
 - **Deploy**: `./scripts/deploy_remote.sh jeremiah@192.168.2.205 /home/jeremiah/SharedLLM <services>`
@@ -546,75 +579,37 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
 
 ## 4. Open small items
 
-- Notes "Still open" (docs/NOTES.md): reminders time/place, attachments/images/
-  drawings/audio, Nextcloud sharing, list/grid toggle, autosave/drafts, toolbar,
-  keyboard shortcuts, per-item checklist editing/reordering, undo toasts,
-  versions, offline.
-- Media leftovers (docs/MEDIA_OVERHAUL.md): BUG-43 podcast episode list,
-  BUG-48 pending JSON-RPC calls on close, P8-T2 native Android background audio.
-- docs/PENDING_TASKS.md: RAG ingest of promoted notes and plan reflections.
-- Health: periodic cycle data never appears in family projections; the family
-  cards render sleep/calories/cycle/support — watch for layout regressions.
-- Chat latency: players still see a new question up to one poll apart (2 s in a game). Talk long-polling
-  (`lookIntoFuture=1`) or Nextcloud notify_push would make it near-instant; see the `HEAD` latency entry.
-- Home Assistant `get_areas` 401s: resolved — not an expired token. HA serves `/api/template`
-  to admins only; see the `HEAD` chat + trivia entry.
+- Notes still open (docs/NOTES.md, with reasons): place-based reminders, attachments/images/
+  drawings/audio, offline edit queue.
+- Media (docs/MEDIA_OVERHAUL.md, docs/PENDING_TASKS.md): **P8-T2 native background audio** —
+  playback stops when the app is swiped from recents because the WebView (and the Sendspin
+  `<audio>`) dies; surviving that needs a native player following MA's stream. Not attempted
+  without a phone to verify. Media phases 3 and 5–9 remain.
+- Bible (docs/PENDING_TASKS.md): synced-scroll comparison and the reference-chip popover.
+- Health: periodic cycle data never appears in family projections; watch family-card layout.
+- The family challenge measures a member with no water goal or sleep need against the app's
+  guideline defaults, labelled "guideline goal" on the card (same defaults `/summary` uses) —
+  confirm with Jeremiah that this is acceptable under the no-fallback rule.
 
 ## 5. Immediate next steps
 
-- The Android collection engine is complete: usage, media sessions, calls and SMS all
-  land on the digital profile (commits through `ac963b2c`). Video watching is covered by
-  media sessions (YouTube title/creator/duration) plus per-app foreground time.
-- Jarvis recommendations from the profile: music, video, podcasts, books, games and
-  activities are done and shown in the For You widget. Still open in step 3: a parent can
-  bless or block a lane.
-- Screen time: 4a (rules, status, requests) is live; next is **4b, enforcement on the phone**
-  (an Accessibility service that locks all but the always-allowed apps while `locked`), together
-  with **tamper resistance** (Jarvis cannot be removed from a child's phone without a parent's
-  login): device admin + a parent PIN screen, or device-owner provisioning for a hard block.
-  (Layer 1 of this is built in `5bdaea9b`; the full how-to, including device-owner steps, is in
-  `docs/HEALTH_HUB.md` "Tamper resistance".)
-
-1. **Device check of the Jarvis guard (APK 437)** on one child's phone: set it up from the
-   Health page's Phone protection card, then confirm an uninstall attempt shows the parent-login
-   screen, a parent login unlocks it and a wrong one does not, a bedtime or pause sends games
-   home, and calls and texts still work. OEM Settings layouts vary; `GuardRules` is where a
-   missed screen is taught.
-2. **First live trivia game on the new code**: confirm questions and verdicts post from the
-   `jarvis` account in a group room, answers count in arrival order, and late answers are not
-   burned.
-3. Phase 11 still open: a parent can bless or block a recommendation lane; the offline parent
-   unlock; app control and the web filter (build order 5); monitoring alerts and the weekly
-   recap (6); the parents' page and discipleship surfaces (7). Additional device lock-down
-   features beyond the built guard were not built in this session.
-4. Other open work: Health weekly digest and family challenge; recipes ↔ Health logging;
-   Notes items in §4; media BUG-43 and Android background audio; the pre-existing Android lint
-   error in `ConfigureActionButtonActivity.java:357` (`setTooltipText` needs API 26).
-5. Keep the plan docs (`docs/HEALTH_HUB.md`, this handover) updated in the same commit as
-   the code when scope changes.
-
-### Not done in the 2026-10-24 session (for the next model or session)
-
-Each item is open; nothing below is half-built on the server.
-
-- **Suggestion lanes, app screen.** The server side is built and pushed (identity
-  `RecommendationLanes`, `GET/PUT /api/recommendation-lanes/{user}` through the gateway, every
-  `/api/recommendations/*` route returns `{"recommendation": null, "blocked": true}` for a blocked
-  lane). Still needed: `api.getRecommendationLanes` / `setRecommendationLanes` in
-  `services/ui/src/services/api.ts`, switches for each lane in the parent controls under a child
-  (next to `ScreenTimeControls`), tests, docs (`docs/HEALTH_HUB.md` Phase 11 step 3), deploy
-  `identity gateway ui`.
-- **Health weekly digest card** (`docs/HEALTH_HUB.md` Phase 5): averages, best day and what
-  changed over the week. The health service's `/summary` is per day; a weekly read and a card on
-  Health → Today are still to design and build.
-- **Additional device lock-down / anti-tamper work** beyond the built Layer 1 guard. The owner is
-  handing this to another tool; this session did not build or document it further. What exists is
-  described in `docs/HEALTH_HUB.md` "Tamper resistance" and the `Guard*` Android classes.
-- **Device check of the Jarvis guard (APK 437)** and the **first live trivia game** on the new
-  code: both are listed in the next steps above and need a person with the phones.
-- Everything else in "Open small items" (§4) and the remaining Phase 11 build-order steps
-  (app control and web filter, monitoring alerts and weekly recap, the parents' page and
-  discipleship surfaces) is untouched.
+1. **Device checks (need a person with the phones; install the newest APK first):**
+   - the screen fix: the app must not drag under the status bar or the Android buttons;
+   - the Jarvis guard: uninstall attempt → parent-login screen; parent login and the **offline
+     code** (airplane mode) unlock; bedtime/pause sends games home; calls and texts still work;
+   - app blocking: a blocked app closes with "That app is off for now";
+   - the **web filter**: Phone protection card → Web filter → Allow; a blocked site fails, Google
+     search is SafeSearch, ordinary browsing keeps working (DNS-only VPN), Disconnect is covered;
+   - sleep estimate: after a night with the new APK, Sleep → "Estimate from my devices".
+2. **First live trivia game** on the new code (questions/verdicts from the `jarvis` account,
+   arrival-order answers, late answers not burned).
+3. Phase 11 still open: install approvals, per-permission gating and the one-minute warning (app
+   control); an "ask a parent" flow for a blocked site; Spotify linking; a local-model second
+   pass for content monitoring.
+   Device-owner provisioning (Layer 2) and further anti-tamper work belong to the other tool.
+4. Health phases still documented as open: Health Connect import, photo/voice logging, fasting
+   windows, micro-lessons and the chat coach, the weekly cardio ring.
+5. Keep the plan docs and this handover updated in the same commit as the code.
 
 ## 6. Where the details live
 
