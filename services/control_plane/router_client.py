@@ -43,9 +43,8 @@ def certificate_fingerprint(url: str, timeout: float = 10) -> str:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    with socket.create_connection((host, port), timeout=timeout) as sock:
-        with ctx.wrap_socket(sock, server_hostname=host) as tls:
-            der = tls.getpeercert(binary_form=True) or b""
+    with socket.create_connection((host, port), timeout=timeout) as sock, ctx.wrap_socket(sock, server_hostname=host) as tls:
+        der = tls.getpeercert(binary_form=True) or b""
     return hashlib.sha256(der).hexdigest()
 
 

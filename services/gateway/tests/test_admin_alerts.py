@@ -201,7 +201,7 @@ class _MediaClient(_Client):
             return super().get(url, **kw)
         if url == "https://abs.local/ping":
             if self.abs_down:
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             return _Resp(200)
         if url == "http://ma.local":
             if self.ma_down:
@@ -209,7 +209,7 @@ class _MediaClient(_Client):
             return _Resp(200)
         if url == "https://cloud.local/status.php":
             if self.nc_down:
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             return _Resp(200)
         raise ConnectionError(url)
 

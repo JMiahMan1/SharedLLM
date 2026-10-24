@@ -45,7 +45,7 @@ def client_fixture(session: Session):
     assert main.engine is not None
     SQLModel.metadata.create_all(main.engine)
 
-    jeremiah = _make_user(session, "jeremiah", is_admin=True)
+    _make_user(session, "jeremiah", is_admin=True)
     _make_user(session, "michele")
     session.commit()
 

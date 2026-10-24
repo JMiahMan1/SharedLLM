@@ -1,15 +1,14 @@
 import json
-import pytest
+
 from services.gateway.llm_providers import (
     StreamingThinkingFilter,
     extract_thinking_and_content,
-    strip_thinking_blocks,
 )
 from services.gateway.main import (
-    _make_openai_chunk,
     _make_ollama_chunk,
-    _make_openai_response,
     _make_ollama_response,
+    _make_openai_chunk,
+    _make_openai_response,
 )
 
 

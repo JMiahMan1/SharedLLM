@@ -4,13 +4,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
+from fakes import FakeRedis
 from fastapi.testclient import TestClient
 
 from services.telemetry import guardian
 from services.telemetry.config import INTERNAL_SECRET as EXPECTED_SECRET
 from services.telemetry.main import app
-
-from fakes import FakeRedis
 
 HEADERS = {"X-Internal-Secret": EXPECTED_SECRET}
 KIDS = {"kid": {"username": "kid", "display_name": "Emma", "parents": ["dad", "mom"], "monitoring": "severe"}}
@@ -40,7 +39,7 @@ def _sms(user, body, at="2026-10-21T10:00:00Z"):
 
 
 def test_a_severe_message_pages_both_parents_once_a_day(wired):
-    client, fake, sent = wired
+    client, _fake, sent = wired
     client.post("/api/telemetry/activity", headers=HEADERS, json=_sms("kid", "i want to die"))
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert sent[0]["priority"] == 5 and sent[0]["title"] == "Self-harm or suicide on Emma's phone"
@@ -57,7 +56,7 @@ def test_high_concerns_wait_for_the_recap_at_default_sensitivity(wired):
 
 
 def test_an_adults_messages_are_never_scanned(wired):
-    client, fake, sent = wired
+    client, _fake, sent = wired
     client.post("/api/telemetry/activity", headers=HEADERS, json=_sms("dad", "i want to die of embarrassment"))
     assert sent == [] and client.get("/api/telemetry/concerns/dad", headers=HEADERS).json()["concerns"] == []
 

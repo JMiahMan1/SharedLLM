@@ -210,10 +210,7 @@ def sleep_score(
     ratio = duration_minutes / need_minutes
     # Under-sleep costs more than over-sleep: 8 h against a 7 h need is a
     # better night than 5 h against a 7 h need, and the score should say so.
-    if ratio < 1.0:
-        duration_points = 50.0 * clamp(ratio / 0.9, 0.0, 1.0)
-    else:
-        duration_points = 50.0 * clamp(1.0 - (ratio - 1.1) * 0.8, 0.0, 1.0)
+    duration_points = 50.0 * clamp(ratio / 0.9, 0.0, 1.0) if ratio < 1.0 else 50.0 * clamp(1.0 - (ratio - 1.1) * 0.8, 0.0, 1.0)
     points += duration_points
     possible += 50.0
 
@@ -231,7 +228,7 @@ def sleep_score(
         missing.append("how rested you felt")
 
     raw = 100.0 * points / possible if possible else 0.0
-    score = int(round(clamp(raw, 0.0, 100.0)))
+    score = round(clamp(raw, 0.0, 100.0))
     band = next((b for b in SLEEP_BANDS if score >= b[0]), SLEEP_BANDS[-1])
     confidence = "high" if len(missing) == 0 else ("medium" if len(missing) == 1 else "low")
     hours = duration_minutes / 60.0
@@ -319,7 +316,7 @@ def readiness(
 
     total_weight = sum(weights.values())
     raw = sum(components[key] * weights[key] for key in weights) / total_weight
-    score = int(round(clamp(raw, 0.0, 100.0)))
+    score = round(clamp(raw, 0.0, 100.0))
     band = next((b for b in READINESS_BANDS if score >= b[0]), READINESS_BANDS[-1])
     confidence = "high" if total_weight >= 0.9 else ("medium" if total_weight >= 0.55 else "low")
 
@@ -446,10 +443,10 @@ def calorie_target(
         low = max(bmr * 1.1, tdee * 0.9)
         high = max(low, tdee * 1.1)
         return CalorieTarget(
-            min=int(round(low)),
-            max=int(round(high)),
-            bmr=int(round(bmr)),
-            tdee=int(round(tdee)),
+            min=round(low),
+            max=round(high),
+            bmr=round(bmr),
+            tdee=round(tdee),
             kind="teen_guidance",
             goal="balance",
             note="A guidance range for growing bodies. No deficit is applied.",
@@ -474,10 +471,10 @@ def calorie_target(
         deficit = False
 
     return CalorieTarget(
-        min=int(round(low)),
-        max=int(round(high)),
-        bmr=int(round(bmr)),
-        tdee=int(round(tdee)),
+        min=round(low),
+        max=round(high),
+        bmr=round(bmr),
+        tdee=round(tdee),
         kind="adult_range",
         goal=goal,
         note=note,
@@ -501,9 +498,9 @@ def macro_targets(calories: int, split: tuple[float, float, float] = (0.25, 0.45
     """
     protein, carbs, fat = split
     return MacroTarget(
-        protein_g=int(round(calories * protein / 4.0)),
-        carbs_g=int(round(calories * carbs / 4.0)),
-        fat_g=int(round(calories * fat / 9.0)),
+        protein_g=round(calories * protein / 4.0),
+        carbs_g=round(calories * carbs / 4.0),
+        fat_g=round(calories * fat / 9.0),
     )
 
 

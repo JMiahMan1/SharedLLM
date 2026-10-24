@@ -1,7 +1,7 @@
 # services/gateway/main.py
 import asyncio
-import hashlib
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -12,7 +12,7 @@ import traceback
 import uuid
 import zipfile
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlsplit
@@ -21,19 +21,33 @@ from zoneinfo import ZoneInfo
 import aiohttp
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect  # pyright: ignore[reportUnusedImport]
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse, FileResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from starlette.datastructures import UploadFile
 
-from services.gateway.location_query import parse_location_query
+from services.common import guardian_recap as _recap
+from services.common import notify as _notify
+from services.common.activity_recommendations import recommend_activity
+from services.common.book_recommendations import book_events, recommend_book
+from services.common.burden import is_burdened
+from services.common.circuit_breaker import breaker_snapshots
+from services.common.entity_ids import usable_entity_id
+from services.common.game_recommendations import recommend_game
+from services.common.guidance import guidance as _guidance
+from services.common.music_recommendations import recommend_music
+from services.common.podcast_recommendations import podcast_events, recommend_podcast
+from services.common.relay import until_either_ends
+from services.common.screen_time import evaluate as evaluate_screen_time
+from services.common.secrets import secret_matches
+from services.common.sleep_estimate import estimate_night
+from services.common.video_recommendations import recommend_video
+from services.gateway import calls, drawing, family_safety, network_routes, notices, push_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
 from services.gateway.agent_loop import (
-    extract_action_json,
-    get_dynamic_llm_settings,
-    sd_proxy_base_url,
     get_vram_safe_params,
+    sd_proxy_base_url,
 )
 from services.gateway.apk_manifest import clear_cache as clear_apk_version_cache
 from services.gateway.apk_manifest import read_apk_digest, read_apk_version
@@ -41,10 +55,10 @@ from services.gateway.background_worker import worker as raven_worker
 from services.gateway.config import (
     ABS_PROBE_TIMEOUT,
     ABS_TIMEOUT,
-    BIBLE_SVC,
     ALPACA_ARCADE_PUBLIC_URL,
     ALPACA_ARCADE_URL,
     ALPACA_AUDIO_URL,
+    BIBLE_SVC,
     CONFIG,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
@@ -60,20 +74,19 @@ from services.gateway.config import (
     WORKSPACE_RUNTIME_SVC,
 )
 from services.gateway.config_validator import validate_config
+from services.gateway.external_agent import run_external_agent
 from services.gateway.history import get_history, get_long_term_memory, ping_redis, update_history
 from services.gateway.intent_engine import engine, is_raven_intent
 from services.gateway.llm_providers import (
-    BaseLLMProvider,
     OllamaProvider,
-    OpenRouterProvider,
     extract_thinking_and_content,
     get_provider,
-    strip_thinking_blocks,
 )
-from services.gateway.ma_ws_client import MAWebSocketClient
-from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
+from services.gateway.location_query import parse_location_query
 from services.gateway.ma_allowlist import MA_COMMAND_ALLOWLIST
 from services.gateway.ma_scope import check_ma_frame_scope, record_web_player_id
+from services.gateway.ma_ws_client import MAWebSocketClient
+from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
 from services.gateway.media_events import acquire_media_hub, stop_all_media_hubs
 from services.gateway.media_models import (
     AbsProgressRequest,
@@ -89,7 +102,7 @@ from services.gateway.media_models import (
 from services.gateway.messaging import InferenceJobQueue, JobStatus
 from services.gateway.orchestrator import (
     _get,
-    call_ollama,
+    call_ollama,  # noqa: F401 - tests patch main.call_ollama
     get_all_settings,
     get_llm_settings,
     is_watch_calendar_query,
@@ -99,7 +112,6 @@ from services.gateway.orchestrator import (
 )
 from services.gateway.prompts import (
     PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION,
-    PROMPT_MEDIA_TROUBLESHOOTING,
     PROMPT_RAVEN_AUTONOMOUS_PROTOCOL,
     PROMPT_SINGLE_TURN_TOOL_GUIDE,
     load_prompt,
@@ -109,27 +121,9 @@ from services.gateway.redact import redact_url
 from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, StorageListRequest
 from services.gateway.skylight_scope import ChoreScopeError, resolve_chore_scope
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas, tool_catalog
-from services.gateway.external_agent import run_external_agent
-from services.common.circuit_breaker import breaker_snapshots
-from services.common.entity_ids import usable_entity_id
-from services.common.music_recommendations import recommend_music
-from services.common.video_recommendations import recommend_video
-from services.common.podcast_recommendations import podcast_events, recommend_podcast
-from services.common.book_recommendations import book_events, recommend_book
-from services.common.game_recommendations import recommend_game
-from services.common.activity_recommendations import recommend_activity
-from services.common.sleep_estimate import estimate_night
-from services.common.guidance import guidance as _guidance
-from services.common.burden import is_burdened
-from services.common import guardian_recap as _recap
-from services.common import notify as _notify
-from services.common.screen_time import evaluate as evaluate_screen_time
-from services.common.relay import until_either_ends
-from services.gateway import calls, drawing, family_safety, network_routes, notices, push_routes
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
 from services.shared.media_token import sign, verify
-from services.common.secrets import secret_matches
 
 START_TIME = time.time()
 
@@ -841,7 +835,7 @@ async def lifespan(app: FastAPI):
     # Warm RAG's embedding model in the background so the FIRST Raven mission's
     # lesson injection doesn't hit RAG's ~25s cold start and silently skip lessons.
     try:
-        asyncio.create_task(_warm_rag_lesson_cache())
+        _run_in_background(_warm_rag_lesson_cache())
     except Exception as e:  # non-fatal
         log.warning(f"[Raven] RAG warmup scheduling failed (non-fatal): {e}")
 
@@ -2806,7 +2800,7 @@ async def secure_logging_middleware(request: Request, call_next):
             request.url.path,
             e,
         )
-        _ = asyncio.create_task(emit_log("ERROR", f"RESPONSE {request.method} {request.url.path} -> 500 (TimeoutError) [error_id={error_id}]", {}))
+        _run_in_background(emit_log("ERROR", f"RESPONSE {request.method} {request.url.path} -> 500 (TimeoutError) [error_id={error_id}]", {}))
         return JSONResponse(
             status_code=500,
             content={
@@ -2825,7 +2819,7 @@ async def secure_logging_middleware(request: Request, call_next):
             e,
             exc_info=True,
         )
-        _ = asyncio.create_task(emit_log("ERROR", f"RESPONSE {request.method} {request.url.path} -> 500 ({type(e).__name__}) [error_id={error_id}]", {}))
+        _run_in_background(emit_log("ERROR", f"RESPONSE {request.method} {request.url.path} -> 500 ({type(e).__name__}) [error_id={error_id}]", {}))
         return JSONResponse(
             status_code=500,
             content={
@@ -2843,7 +2837,7 @@ async def secure_logging_middleware(request: Request, call_next):
     # request lines; everything used to be INFO.
     level = _response_log_level(status_code)
     if level != "INFO" or not _is_routine_poll(request.url.path):
-        _ = asyncio.create_task(emit_log(level, f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
+        _run_in_background(emit_log(level, f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
     return response
 
 # --- Core Handlers ---
@@ -4290,7 +4284,7 @@ async def _get_arcade_featured_slugs() -> list[str]:
             if resp.status == 404:
                 return []
             data = await _safe_json(resp)
-    except Exception as exc:  # noqa: BLE001 - curation is optional, never fatal
+    except Exception as exc:  # curation is optional, never fatal
         log.warning("arcade: featured-settings lookup failed: %s", exc)
         return []
     value = (data or {}).get("value")
@@ -4434,7 +4428,7 @@ async def proxy_arcade_scoreboard(request: Request):
             players = await asyncio.gather(*(one(m) for m in members if m.get("username")))
         players.sort(key=lambda p: (-p["best_score"], p["display_name"].lower()))
         return {"success": True, "arcade_available": True, "players": players}
-    except (aiohttp.ClientError, ValueError, asyncio.TimeoutError) as exc:
+    except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
         log.warning("arcade: scoreboard fetch failed: %s", exc)
         return {"success": False, "arcade_available": False, "players": [], "error": str(exc)}
 
@@ -4508,7 +4502,7 @@ async def proxy_arcade_highscores(request: Request):
             "players": players,
             "games": payload.get("games") or [],
         }
-    except (aiohttp.ClientError, ValueError, asyncio.TimeoutError) as exc:
+    except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
         log.warning("arcade: highscores fetch failed: %s", exc)
         return {
             "success": False,
@@ -4536,7 +4530,7 @@ async def proxy_arcade_games(request: Request = None):
         featured_slugs = await _get_arcade_featured_slugs()
         ranked = _rank_arcade_games(games, featured_slugs, sort)
         return {"success": True, "arcade_available": True, **payload, **ranked, "count": len(games)}
-    except Exception as exc:  # noqa: BLE001 - report the failure, never swallow it
+    except Exception as exc:  # report the failure, never swallow it
         log.warning("arcade: games fetch failed: %s", exc)
         return {
             "success": False,
@@ -7099,7 +7093,7 @@ async def music_song_start(request: Request):
             f"{ALPACA_AUDIO_URL}/api/music/jobs", json=payload, timeout=aiohttp.ClientTimeout(total=30.0)
         )
         result = await resp.json()
-    except Exception as exc:  # noqa: BLE001 - reported to the caller
+    except Exception as exc:  # reported to the caller
         return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"})
     user = await _user_id_from_request(request)
     if resp.status < 400 and isinstance(result, dict) and result.get("id") and user:
@@ -7120,7 +7114,7 @@ async def music_song_status(request: Request, job_id: str):
             f"{ALPACA_AUDIO_URL}/api/music/jobs/{job_id}", timeout=aiohttp.ClientTimeout(total=30.0)
         )
         result = await resp.json()
-    except Exception as exc:  # noqa: BLE001 - reported to the caller
+    except Exception as exc:  # reported to the caller
         return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"})
     return _music_job_answer(resp.status, result)
 
@@ -7136,7 +7130,7 @@ async def music_song_cancel(request: Request, job_id: str):
             f"{ALPACA_AUDIO_URL}/api/music/jobs/{job_id}", timeout=aiohttp.ClientTimeout(total=30.0)
         )
         result = await resp.json()
-    except Exception as exc:  # noqa: BLE001 - reported to the caller
+    except Exception as exc:  # reported to the caller
         return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"})
     await notices.song_forgotten(job_id)
     return _music_job_answer(resp.status, result)
@@ -9524,7 +9518,7 @@ async def kill_mission(request: Request, id_or_slug: str):
     caller_ip = getattr(request.client, "host", "unknown")
     log.warning(
         f"[AUDIT] KILL requested for mission '{id_or_slug}' by user="
-        f"{creds.get('user')} from {caller_ip} at {datetime.now(timezone.utc).isoformat()}"
+        f"{creds.get('user')} from {caller_ip} at {datetime.now(UTC).isoformat()}"
     )
 
     async with borrow_http_client() as client:
@@ -9557,7 +9551,6 @@ async def kill_mission(request: Request, id_or_slug: str):
                 raise HTTPException(status_code=resp.status, detail="Failed to update mission status")
 
         # 2. Publish kill signal to Redis
-        import redis.asyncio as redis
 
         log.warning(f"[AUDIT] Setting kill flag raven:mission:kill:{real_id}=KILL (ttl=3600) for mission '{id_or_slug}'")
         await _signal_mission(real_id, "kill", "KILL")
@@ -9589,7 +9582,7 @@ async def cancel_mission(request: Request, id_or_slug: str):
     caller_ip = getattr(request.client, "host", "unknown")
     log.warning(
         f"[AUDIT] CANCEL requested for mission '{id_or_slug}' by user="
-        f"{creds.get('user')} from {caller_ip} at {datetime.now(timezone.utc).isoformat()}"
+        f"{creds.get('user')} from {caller_ip} at {datetime.now(UTC).isoformat()}"
     )
 
     async with borrow_http_client() as client:
@@ -9609,7 +9602,6 @@ async def cancel_mission(request: Request, id_or_slug: str):
                 log.warning(f"Failed to drop Redis job for cancelled mission {real_id}: {e}")
 
         # 2. Publish kill signal for safety (in case it is currently running).
-        import redis.asyncio as redis
 
         log.warning(f"[AUDIT] Setting kill flag raven:mission:kill:{real_id}=KILL (ttl=3600) for mission '{id_or_slug}'")
         await _signal_mission(real_id, "kill", "KILL")
@@ -9639,7 +9631,6 @@ async def pause_mission(request: Request, id_or_slug: str):
         real_id = mission_data["id"]
         _ensure_mission_owner(creds, mission_data)
 
-        import redis.asyncio as redis
 
         await _signal_mission(real_id, "pause", "PAUSED")
 
@@ -9659,7 +9650,6 @@ async def resume_mission(request: Request, id_or_slug: str):
         real_id = mission_data["id"]
         _ensure_mission_owner(creds, mission_data)
 
-        import redis.asyncio as redis
 
         await _signal_mission(real_id, "pause", "RESUMED", clear=True)
 
@@ -10845,7 +10835,7 @@ async def _upstream_detail(resp) -> Any:
     """
     try:
         body = await resp.json()
-    except Exception:  # noqa: BLE001 - a non-JSON error body is not fatal
+    except Exception:  # a non-JSON error body is not fatal
         return None
     if isinstance(body, dict):
         return body.get("detail")
@@ -11069,9 +11059,7 @@ async def start_geo_workout(request: Request):
             },
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
-        if resp.status == 200:
-            return await resp.json()
-        elif resp.status == 409:
+        if resp.status == 200 or resp.status == 409:
             return await resp.json()
     await _raise_scoped_failure(resp, "Failed to start workout")
 
@@ -12137,7 +12125,7 @@ async def proxy_bible_achievements(request: Request):
 @app.get("/api/bible/activity/summary")
 async def proxy_bible_activity_summary(request: Request, user_id: str | None = None):
     """Bible-specific reading summary; cross-user reads need the bible scope."""
-    target, viewer, is_admin = await _read_target(request, user_id)
+    target, viewer, _is_admin = await _read_target(request, user_id)
     return await _bible_json(
         "GET",
         "/activity/summary",
@@ -13324,7 +13312,7 @@ async def wait_telemetry_notifications(request: Request, since: str = "", timeou
         items = [n for n in (data or {}).get("notifications") or [] if isinstance(n, dict)]
         newest = max((str(n.get("created_at") or "") for n in items), default="")
         if not since:
-            return {"notifications": [], "cursor": newest or datetime.now(timezone.utc).isoformat()}
+            return {"notifications": [], "cursor": newest or datetime.now(UTC).isoformat()}
         fresh = [n for n in items if str(n.get("created_at") or "") > since]
         if fresh:
             return {"notifications": fresh, "cursor": max(newest, since)}
@@ -13436,7 +13424,7 @@ async def get_app_update_version(request: Request):
         version_data = {
             "version": "1.2.0",
             "git_sha": os.getenv("GIT_SHA", "unknown"),
-            "build_timestamp": datetime.now(timezone.utc).isoformat(),
+            "build_timestamp": datetime.now(UTC).isoformat(),
             "release_notes": "Jarvis OS Over-The-Air Update",
         }
 
@@ -13712,7 +13700,7 @@ async def publish_app_update(request: Request):
         meta.update({
             "version": str(version),
             "git_sha": str(git_sha),
-            "build_timestamp": datetime.now(timezone.utc).isoformat(),
+            "build_timestamp": datetime.now(UTC).isoformat(),
             "release_notes": str(notes),
         })
     if apk_code is not None:
@@ -13776,7 +13764,7 @@ async def transcribe_audio(request: Request):
         # "Whisper not installed" reaches the caller instead of a generic 502.
         try:
             body = await resp.json()
-        except Exception:  # noqa: BLE001 - a non-JSON error body is not fatal
+        except Exception:  # a non-JSON error body is not fatal
             body = {}
         detail = body.get("message") or body.get("detail") or ""
     raise HTTPException(

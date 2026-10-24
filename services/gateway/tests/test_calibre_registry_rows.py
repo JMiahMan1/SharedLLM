@@ -20,7 +20,7 @@ from services.execution.schemas import CalibreRequest
 from services.gateway.agent_loop import ALLOWED_TOOLS
 from services.gateway.orchestrator import SINGLE_TURN_TOOL_ENDPOINTS
 from services.gateway.tool_builder import _TOOLS
-from services.gateway.tool_registry import SVC_EXECUTION, _RAVEN_TOOL_TABLE
+from services.gateway.tool_registry import _RAVEN_TOOL_TABLE, SVC_EXECUTION
 
 GATEWAY = Path(__file__).resolve().parents[1]
 

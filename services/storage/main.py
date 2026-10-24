@@ -2,13 +2,16 @@
 import asyncio
 import base64
 import logging
+import os
 import re
+import time
 from contextlib import asynccontextmanager
 
 import aiohttp
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query
 
 from services.common.http import get_client
+from services.common.secrets import secret_matches
 from services.config import INTERNAL_SECRET, RAG_SVC_URL, resolve_runtime_config
 from services.shared.info_endpoint import info_router
 from services.storage import artifacts as artifact_store
@@ -70,10 +73,6 @@ app.include_router(info_router)
 app.include_router(artifacts_router)
 
 RAG_SVC = RAG_SVC_URL
-
-import os
-import time
-from services.common.secrets import secret_matches
 
 START_TIME = time.time()
 
@@ -399,7 +398,7 @@ async def list_provider_entries(req: IndexScanRequest):
         return {"status": "SUCCESS", "count": len(result_entries), "entries": result_entries}
     except Exception as e:
         log.error(f"List failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @app.post("/providers/fetch", dependencies=[Depends(_require_internal_secret)])
 async def fetch_provider_file(req: ProviderFetchRequest):
@@ -455,7 +454,7 @@ async def fetch_provider_file(req: ProviderFetchRequest):
         raise
     except Exception as e:
         log.error(f"Fetch failed for {req.path}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/providers/search", dependencies=[Depends(_require_internal_secret)])
@@ -475,7 +474,8 @@ async def search_provider(query: str = Query(...), req: IndexScanRequest = Body(
 
             if q_lower in name_lower or (q_words & name_words):
                 matches.append(e)
-                if len(matches) >= 20: break # Limit
+                if len(matches) >= 20:
+                    break  # Limit
 
         return {"status": "SUCCESS", "matches": [e.model_dump() for e in matches]}
     except Exception as e:
@@ -508,7 +508,7 @@ async def write_provider_content(req: ProviderWriteRequest):
         return {"status": "SUCCESS", "result": result}
     except Exception as e:
         log.error(f"Provider write failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/providers/mirror", dependencies=[Depends(_require_internal_secret)])
@@ -523,4 +523,4 @@ async def mirror_provider_directory(req: ProviderMirrorRequest):
         return {"status": "SUCCESS", "result": result}
     except Exception as e:
         log.error(f"Provider mirror failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

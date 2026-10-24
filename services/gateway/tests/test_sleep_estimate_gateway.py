@@ -86,7 +86,7 @@ def test_posting_a_night_records_the_poster(client, monkeypatch):
     calls = _services(monkeypatch)
     r = client.post("/api/usage/night", json={"device_key": DEVICE, "night": "2026-10-21", "intervals": [[1, 2]]})
     assert r.status_code == 200
-    post = [c for c in calls if c[0] == "POST"][0]
+    post = next(c for c in calls if c[0] == "POST")
     assert post[2]["json"] == {"device": DEVICE, "night": "2026-10-21", "user": "kid", "intervals": [[1, 2]]}
 
 

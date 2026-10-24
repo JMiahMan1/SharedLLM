@@ -1,7 +1,5 @@
 """Tests for media detail and favorite endpoints."""
 import sys
-
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

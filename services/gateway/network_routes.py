@@ -31,11 +31,10 @@ async def _call(method: str, url: str, *, params: dict | None = None, json: dict
     """One internal call; 502 unless the service answered 200."""
     from services.gateway.main import shared_http_client
 
-    async with shared_http_client() as client:
-        async with client.request(method, url, params=params, json=json, headers=_HEADERS, timeout=_TIMEOUT) as resp:
-            if resp.status != 200:
-                raise HTTPException(status_code=502, detail="The network monitor did not answer")
-            return await resp.json()
+    async with shared_http_client() as client, client.request(method, url, params=params, json=json, headers=_HEADERS, timeout=_TIMEOUT) as resp:
+        if resp.status != 200:
+            raise HTTPException(status_code=502, detail="The network monitor did not answer")
+        return await resp.json()
 
 
 async def _control_plane(method: str, path: str, params: dict | None = None) -> Any:

@@ -22,8 +22,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from services.rag import main as rag_main
 from services.rag import db
+from services.rag import main as rag_main
 from services.rag.main import require_internal
 from services.rag.store import NumpyVecAdapter
 

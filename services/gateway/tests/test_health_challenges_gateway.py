@@ -69,7 +69,7 @@ def test_listing_sends_the_adult_flag(client, calls):
 def test_a_minor_is_flagged(client, calls):
     calls["managed"] = True
     client.post("/api/health/challenges", json={"kind": "water_days", "day": "2026-10-21", "target_days": 3})
-    method, url, kw = calls["health"][0]
+    method, _url, kw = calls["health"][0]
     assert method == "POST" and kw["json"]["kind"] == "water_days"
     assert kw["headers"]["X-User-Is-Minor"] == "true"
 

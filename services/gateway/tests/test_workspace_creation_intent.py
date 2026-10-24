@@ -1,12 +1,13 @@
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from services.gateway.main import (
-    wants_workspace_creation,
     extract_workspace_name_from_query,
     wants_direct_code_orchestration,
+    wants_workspace_creation,
 )
-from services.gateway.orchestrator import _execute_single_tool, SINGLE_TURN_TOOL_ENDPOINTS, _TOOL_SERVICE_MAP
+from services.gateway.orchestrator import _TOOL_SERVICE_MAP, SINGLE_TURN_TOOL_ENDPOINTS, _execute_single_tool
 from services.gateway.schemas import ResolvedCredentials
 
 
@@ -90,7 +91,7 @@ async def test_orchestrator_execute_workspace_create():
         assert "home-work" in result
 
         # Verify posted payload
-        called_args, called_kwargs = mock_client.post.call_args
+        _called_args, called_kwargs = mock_client.post.call_args
         payload = called_kwargs.get("json")
         assert payload["id"] == "home-work"
         assert payload["display_name"] == "Home Work"
@@ -123,7 +124,7 @@ async def test_orchestrator_execute_media_play_podcast():
         )
 
         assert "Playing podcast 'Bright Heart'." in result
-        called_args, called_kwargs = mock_client.post.call_args
+        _called_args, called_kwargs = mock_client.post.call_args
         payload = called_kwargs.get("json")
         assert payload["media_type"] == "podcast"
         assert payload["device_name"] == "Office Speaker"
@@ -163,7 +164,7 @@ async def test_orchestrator_execute_workspace_file_read_auto_resolve():
 
         assert "File content of 'summary.md':" in result
         assert "# Homework\nDone." in result
-        called_args, called_kwargs = mock_client.post.call_args
+        _called_args, called_kwargs = mock_client.post.call_args
         payload = called_kwargs.get("json")
         assert payload["workspace_id"] == "home-work"
 

@@ -10,8 +10,6 @@ the model looped on TTSRequest and the workspace stayed empty.
 import asyncio
 import json
 
-import pytest
-
 from services.gateway import agent_loop
 
 
@@ -96,7 +94,7 @@ def test_save_b64_artifact_success_returns_parsed_json(monkeypatch):
 
 
 def test_save_b64_artifact_non_200_returns_error_detail(monkeypatch):
-    client = _patch_client(
+    _patch_client(
         monkeypatch,
         [_FakeResponse(400, "User context is required for this workspace")],
     )
@@ -110,7 +108,7 @@ def test_save_b64_artifact_non_200_returns_error_detail(monkeypatch):
 
 
 def test_save_b64_artifact_500_json_fallback(monkeypatch):
-    client = _patch_client(
+    _patch_client(
         monkeypatch,
         [_FakeResponse(500, {"status": "ERROR", "detail": "boom"})],
     )
@@ -123,7 +121,7 @@ def test_save_b64_artifact_500_json_fallback(monkeypatch):
 
 
 def test_save_b64_artifact_bad_json_body_returns_empty_dict(monkeypatch):
-    client = _patch_client(monkeypatch, [_FakeResponse(200, Exception("not json"))])
+    _patch_client(monkeypatch, [_FakeResponse(200, Exception("not json"))])
     monkeypatch.setattr(agent_loop, "WORKSPACE_RUNTIME_SVC", "http://ws:8007")
 
     status, data = asyncio.run(agent_loop._save_b64_artifact("ws-1", "e.wav", "AA==", {"user": "default"}))

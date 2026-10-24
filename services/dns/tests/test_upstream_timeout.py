@@ -11,6 +11,7 @@ running; the symptom had nothing to do with either service.
 The fix makes the timeout ``DNS_UPSTREAM_TIMEOUT`` (env-overridable, like the
 other knobs in that file) with a 5s default.
 """
+import contextlib
 import importlib
 import os
 import socket
@@ -60,14 +61,12 @@ class _SlowUpstream:
         while not self._stop.is_set():
             try:
                 data, addr = self.sock.recvfrom(512)
-            except (socket.timeout, OSError):
+            except (TimeoutError, OSError):
                 continue
             self.queries.append(data)
             time.sleep(self.delay)
-            try:
+            with contextlib.suppress(OSError):
                 self.sock.sendto(self._response(data), addr)
-            except OSError:
-                pass
 
     def _response(self, query: bytes) -> bytes:
         # Echo the transaction id and question, then one A record.
@@ -201,6 +200,7 @@ class TestInternalNamesNeverTouchUpstream:
 
     def test_host_docker_internal_is_answered_without_upstream(self):
         dns = _load_dns({"DNS_UPSTREAM_TIMEOUT": "5.0"})
-        src = open(dns.__file__).read()
+        with open(dns.__file__) as f:
+            src = f.read()
         assert "'host.docker.internal'" in src
         assert "172.26.0.1" in src

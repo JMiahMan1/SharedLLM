@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import ClassVar
 
 import pytest
 
@@ -100,7 +101,7 @@ class TestReadiness:
 
 
 class TestCalorieTarget:
-    PROFILE = dict(
+    PROFILE: ClassVar[dict] = dict(
         birth_year=1985,
         height_cm=180.0,
         weight_kg=80.0,

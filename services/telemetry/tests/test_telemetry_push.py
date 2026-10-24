@@ -1,11 +1,9 @@
-import json
 
 
 import pytest
+from fakes import FakeRedis
 
 from services.telemetry import push
-
-from fakes import FakeRedis
 
 
 @pytest.fixture(autouse=True)

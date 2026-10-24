@@ -2,7 +2,6 @@
 
 import json
 
-
 import pytest
 
 from services.rag import db

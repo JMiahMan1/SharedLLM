@@ -44,7 +44,7 @@ class TestFoodSeed:
 
     def test_portions_are_capped(self, mini_seed_path):
         seed = FoodSeed(mini_seed_path)
-        sr_hit = [hit for hit in seed.search("rice", 5) if hit["code"] == "sr_legacy:3333"][0]
+        sr_hit = next(hit for hit in seed.search("rice", 5) if hit["code"] == "sr_legacy:3333")
         assert len(sr_hit["portions"]) == 12
         assert sr_hit["portions"][0] == {"label": "1 cup, cooked", "grams": 158.0}
         assert sr_hit["portions"][-1]["label"] == "1 item 11"

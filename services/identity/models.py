@@ -2,7 +2,7 @@
 """
 SQLModel database models for the Identity & Profile Service.
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
@@ -662,7 +662,7 @@ class VoiceSignature(SQLModel, table=True):  # type: ignore
     username: str = Field(primary_key=True)
     model: str
     samples: str = "[]"
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class UserAvatarImage(SQLModel, table=True):  # type: ignore
@@ -671,7 +671,7 @@ class UserAvatarImage(SQLModel, table=True):  # type: ignore
     username: str = Field(primary_key=True)
     mime: str
     data: bytes
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class UserNotificationPreference(SQLModel, table=True):  # type: ignore
@@ -699,7 +699,7 @@ class UnifiedPushRegistration(SQLModel, table=True):  # type: ignore
     app: str
     token: str
     topic: str = Field(index=True, unique=True)
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 class ScreenRules(SQLModel, table=True):  # type: ignore
@@ -717,7 +717,7 @@ class ScreenRules(SQLModel, table=True):  # type: ignore
     username: str = Field(primary_key=True, foreign_key="user.username")
     data: str = Field(default="{}")
     updated_by: str | None = None
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 class ScreenTimeRequest(SQLModel, table=True):  # type: ignore
@@ -731,7 +731,7 @@ class ScreenTimeRequest(SQLModel, table=True):  # type: ignore
     status: str = Field(default="pending", index=True)  # pending | granted | declined
     granted_minutes: int = 0
     decided_by: str | None = None
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     decided_at: str | None = None
 
 
@@ -744,7 +744,7 @@ class RecommendationLanes(SQLModel, table=True):  # type: ignore
     username: str = Field(primary_key=True, foreign_key="user.username")
     data: str = Field(default="{}")
     updated_by: str | None = None
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 class GuardOfflineCode(SQLModel, table=True):  # type: ignore
@@ -758,7 +758,7 @@ class GuardOfflineCode(SQLModel, table=True):  # type: ignore
     salt: str  # hex
     iterations: int
     hash: str  # hex
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 class GuardianNote(SQLModel, table=True):  # type: ignore
@@ -772,4 +772,4 @@ class GuardianNote(SQLModel, table=True):  # type: ignore
     child: str = Field(index=True, foreign_key="user.username")
     text: str
     shared: bool = Field(default=False)
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())

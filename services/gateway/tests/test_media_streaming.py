@@ -10,8 +10,6 @@ lives on /api/media/stream/abs-session/... (see test_abs_session_stream.py).
 """
 import sys
 from contextlib import asynccontextmanager
-
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

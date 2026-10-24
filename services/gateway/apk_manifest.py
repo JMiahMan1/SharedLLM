@@ -13,7 +13,6 @@ import logging
 import struct
 import zipfile
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -143,7 +142,7 @@ def parse_manifest(data: bytes) -> dict:
     }
 
 
-def read_apk_version(apk_path: Path) -> Optional[dict]:
+def read_apk_version(apk_path: Path) -> dict | None:
     """Version info for a published APK, or None if it cannot be determined.
 
     None is a real answer, not a default: it means "we do not know what we are
@@ -157,7 +156,7 @@ def read_apk_version(apk_path: Path) -> Optional[dict]:
     if key in _cache:
         return _cache[key]
 
-    result: Optional[dict] = None
+    result: dict | None = None
     try:
         with zipfile.ZipFile(apk_path) as zf:
             data = zf.read("AndroidManifest.xml")
@@ -172,7 +171,7 @@ def read_apk_version(apk_path: Path) -> Optional[dict]:
     return result
 
 
-def read_apk_digest(apk_path: Path) -> Optional[str]:
+def read_apk_digest(apk_path: Path) -> str | None:
     """SHA-256 of the APK we are actually serving, hex-encoded, or None.
 
     The client verifies the download against this before handing the file to
@@ -188,7 +187,7 @@ def read_apk_digest(apk_path: Path) -> Optional[str]:
     if key in _cache:
         return _cache[key]
 
-    digest: Optional[str] = None
+    digest: str | None = None
     try:
         h = hashlib.sha256()
         with open(apk_path, "rb") as fh:

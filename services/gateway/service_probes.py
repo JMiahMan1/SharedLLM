@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 import aiohttp
 
@@ -105,7 +106,7 @@ async def probe_http(
             if expected is None or code in expected:
                 return ProbeResult(name, clean, OK, f"HTTP {code}", code, ms, expected)
             return ProbeResult(name, clean, ERROR, f"HTTP {code}", code, ms, expected)
-    except (asyncio.TimeoutError, TimeoutError):
+    except TimeoutError:
         return ProbeResult(name, clean, UNREACHABLE, f"No answer within {timeout:g}s", None, None, expected)
     except (aiohttp.ClientConnectionError, OSError) as e:
         return ProbeResult(name, clean, UNREACHABLE, type(e).__name__, None, None, expected)

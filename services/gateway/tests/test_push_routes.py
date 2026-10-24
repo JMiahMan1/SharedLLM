@@ -142,14 +142,13 @@ def test_stream_without_a_server_token_is_503(client, identity, monkeypatch):
 
 
 async def test_relay_ends_quietly_when_ntfy_goes_silent():
-    import asyncio
 
     class _Silent:
         def __aiter__(self):
             return self
 
         async def __anext__(self):
-            raise asyncio.TimeoutError
+            raise TimeoutError
 
     resp, session = _FakeResp([]), _FakeSession()
     resp.content = _Silent()
@@ -251,7 +250,7 @@ def test_preferences_are_read_and_written_through_identity_as_the_caller(client,
     assert client.get("/api/users/me/notification-preferences", headers=KEY).json()["preferences"] == {"chat": True}
     resp = client.put("/api/users/me/notification-preferences", headers=KEY, json={"bible": False})
     assert resp.json()["preferences"] == {"chat": True, "bible": False}
-    method, path, _, body, headers = identity[-1]
+    method, _path, _, body, headers = identity[-1]
     assert (method, body, headers) == ("PUT", {"bible": False}, {"Authorization": "Bearer michele-key"})
 
 

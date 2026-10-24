@@ -13,7 +13,7 @@ wrong day for anyone not in the server's timezone.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
@@ -21,7 +21,7 @@ from sqlmodel import Field, SQLModel
 
 def utcnow() -> str:
     """Current UTC instant as an ISO-8601 string with an explicit offset."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class HealthProfile(SQLModel, table=True):  # type: ignore

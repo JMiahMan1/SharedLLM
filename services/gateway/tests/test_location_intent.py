@@ -2,6 +2,7 @@
 Tests for location tool routing and single-turn execution in Gateway.
 """
 import pytest
+
 from services.gateway.orchestrator import SINGLE_TURN_TOOL_ENDPOINTS, _execute_single_tool
 from services.gateway.schemas import ResolvedCredentials
 

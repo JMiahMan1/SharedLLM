@@ -1,7 +1,5 @@
 """Tests for gateway media proxy routes."""
 import sys
-
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

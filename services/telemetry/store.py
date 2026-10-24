@@ -418,9 +418,10 @@ __all__ = [
     "GEO_SVC",
     "IDENTITY_SVC",
     "INTERNAL_SECRET",
+    "_client",
     "acquire_lock",
-    "dequeue_due",
     "delete_job",
+    "dequeue_due",
     "enqueue",
     "get_job",
     "get_report",
@@ -435,5 +436,4 @@ __all__ = [
     "save_job",
     "save_report",
     "utcnow_iso",
-    "_client",
 ]

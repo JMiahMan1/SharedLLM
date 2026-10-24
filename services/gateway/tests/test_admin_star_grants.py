@@ -168,7 +168,7 @@ class TestAdminGrantWithMirror:
         Skylight account rather than the admin's."""
         calls = _patch_upstreams(monkeypatch)
         _post(admin_client, stars=2, reason="chore")
-        mirror = [c for c in calls if c["svc"] == "execution"][0]
+        mirror = next(c for c in calls if c["svc"] == "execution")
         assert mirror["json"]["user"] == "michele"
         assert mirror["json"]["member"] == "michele"
 

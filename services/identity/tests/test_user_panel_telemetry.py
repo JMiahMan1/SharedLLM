@@ -19,12 +19,12 @@ from services.identity.models import (
     ADVANCED_DEVICE_KINDS,
     DEVICE_KINDS,
     NO_OPT_IN_EVENTS,
+    AssistantConversation,
     CapabilityGap,
     CapabilityInventory,
     Device,
     DeviceEvent,
     FeatureUsage,
-    AssistantConversation,
     UserActivitySharing,
 )
 
@@ -92,7 +92,7 @@ class TestConsentBoundary:
 class TestNoOptInEventAllowlist:
     def test_every_allowed_event_is_a_known_device_or_usage_event(self):
         # If a new event name appears it has to be one of these concepts.
-        assert NO_OPT_IN_EVENTS == frozenset(
+        assert frozenset(
             {
                 "device_seen",
                 "app_open",
@@ -102,7 +102,7 @@ class TestNoOptInEventAllowlist:
                 "capability_miss",
                 "battery",
             }
-        )
+        ) == NO_OPT_IN_EVENTS
 
     @pytest.mark.parametrize(
         "event",
