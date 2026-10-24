@@ -28,6 +28,7 @@ import type {
   EntityProtection,
   ShareRecipient,
   FamilyRecord,
+  UsageDay,
   FamilyRole,
   AiCapability,
   GlobalSetting,
@@ -899,6 +900,12 @@ export const api = {
   async getSharingRecipients(): Promise<ShareRecipient[]> {
     const resp = await apiClient.get('/api/users/sharing-recipients');
     return resp.data ?? [];
+  },
+
+  /** One person's recent days of phone usage (newest first); parents' or their own. */
+  async getUsage(username: string, days = 7): Promise<{ status: string; days: UsageDay[] }> {
+    const resp = await apiClient.get(`/api/usage/${encodeURIComponent(username)}`, { params: { days } });
+    return resp.data;
   },
 
   /** Household roster with family roles; parent/household-manager only. */

@@ -646,6 +646,44 @@ def get_http_client() -> aiohttp.ClientSession:
     return client
 
 
+_MEDIA_SESSIONS: dict[asyncio.AbstractEventLoop, aiohttp.ClientSession] = {}
+
+
+class _PooledMediaSession:
+    """A media proxy's view of one pooled session per event loop.
+
+    The audiobook/HLS and Music Assistant proxies opened a fresh
+    ``ClientSession`` -- a new connection and TLS handshake -- for every track
+    and every HLS segment. This keeps their code shape (``await get``, then
+    ``close`` on every exit path) while the connections stay pooled: ``close``
+    releases the responses this view handed out, never the shared session. No
+    cookie jar, so nothing one listener's stream sets reaches another's.
+    """
+
+    def __init__(self, timeout: aiohttp.ClientTimeout):
+        self._timeout = timeout
+        self._responses: list[aiohttp.ClientResponse] = []
+
+    async def get(self, url: str, **kwargs: Any) -> aiohttp.ClientResponse:
+        loop = asyncio.get_running_loop()
+        session = _MEDIA_SESSIONS.get(loop)
+        if session is None or session.closed:
+            session = aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(limit=0, ttl_dns_cache=60),
+                cookie_jar=aiohttp.DummyCookieJar(),
+            )
+            _MEDIA_SESSIONS[loop] = session
+        kwargs.setdefault("timeout", self._timeout)
+        resp = await session.get(url, **kwargs)
+        self._responses.append(resp)
+        return resp
+
+    async def close(self) -> None:
+        for resp in self._responses:
+            resp.release()
+        self._responses.clear()
+
+
 @asynccontextmanager
 async def shared_http_client():
     """Yield the shared, pooled global HTTP client WITHOUT closing it on exit.
@@ -5178,12 +5216,24 @@ async def post_usage(request: Request):
 
 @app.get("/api/usage/{user}")
 async def get_usage(request: Request, user: str, days: int = 7):
-    """Screen time day by day for one person (parents' surfaces read this)."""
+    """Screen time day by day for one person (parents' surfaces read this).
+
+    Collected data follows the visibility rule identity owns: a minor's is the
+    parents', an adult's is their own. Any signed-in member could read anyone's
+    before, a child a parent's and a sibling a sibling's.
+    """
     creds = await _resolve_identity_from_request(request)
-    if not (creds or {}).get("user"):
+    viewer = str((creds or {}).get("user") or "").strip()
+    if not viewer:
         raise HTTPException(status_code=401, detail="Not authenticated")
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
+        rule = await client.get(
+            f"{IDENTITY_SVC}/api/internal/may-view-raw", params={"viewer": viewer, "subject": user}, headers=headers
+        )
+        allowed = rule.status == 200 and bool((await rule.json(content_type=None) or {}).get("allowed"))
+        if not allowed:
+            raise HTTPException(status_code=403, detail="Only a parent can see this")
         resp = await client.get(
             f"{TELEMETRY_SVC}/api/telemetry/usage/{user}", params={"days": days}, headers=headers
         )
@@ -14141,7 +14191,7 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
 
     track_url = f"{abs_url}/public/session/{session_id}/track/{track_index}"
     playlist_url: str | None = None
-    client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0, connect=15.0))
+    client = _PooledMediaSession(aiohttp.ClientTimeout(total=60.0, connect=15.0))
     try:
         resp = await client.get(
             track_url,
@@ -14280,9 +14330,7 @@ async def stream_abs_session_segment(session_id: str, track_index: int, segment:
 
     seg_url = f"{abs_url}/hls/{session_id}/{segment}"
     range_header = request.headers.get("range")
-    client = aiohttp.ClientSession(
-        timeout=aiohttp.ClientTimeout(total=None, connect=15.0, sock_read=60.0),
-    )
+    client = _PooledMediaSession(aiohttp.ClientTimeout(total=None, connect=15.0, sock_read=60.0))
     try:
         req_headers = {"User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)"}
         if range_header:
@@ -15083,10 +15131,8 @@ async def _ma_proxy_bytes(request: Request, stream_url: str) -> StreamingRespons
 
     range_header = request.headers.get("range")
     log.info(f"[stream/ma] Client requested range: {range_header}")
-    proxy_client = aiohttp.ClientSession(
-        # No total deadline: a long MA stream must not be cut at 5 min.
-        timeout=aiohttp.ClientTimeout(total=None, connect=15.0, sock_read=600.0),
-    )
+    # No total deadline: a long MA stream must not be cut at 5 min.
+    proxy_client = _PooledMediaSession(aiohttp.ClientTimeout(total=None, connect=15.0, sock_read=600.0))
     # BUG-22: close proxy_client on every exit except the streaming hand-off,
     # where stream_generator_ma's finally owns it. Covers HTTPException
     # (upstream 404/5xx), generic errors, and cancellation alike.

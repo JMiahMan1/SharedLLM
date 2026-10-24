@@ -21,6 +21,17 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `HEAD` Health + privacy: **digital wellbeing card; usage is parents-only on the server;
+  media proxies pool connections.** `GET /api/usage/{user}` let any signed-in member read anyone's
+  phone usage (a child a parent's, siblings each other's); identity now owns the rule
+  (`may_view_raw_data`, `GET /api/internal/may-view-raw`) and the gateway refuses with 403.
+  `DigitalWellbeingCard` (Health → Today) shows screen time, first/last use, sessions, top apps and
+  the week, for yourself (adults) or each child (parents). The ABS/HLS and Music Assistant
+  stream proxies borrowed a new `ClientSession` per track and per HLS segment; they now share one
+  pooled session per event loop (`_PooledMediaSession`, no cookie jar). Left as-is on purpose:
+  execution's MA search websocket (LAN, token auth, tens of ms) and webOS/ha_config websockets
+  (per-command, admin/TV paths). The gateway's one "Unclosed connection" (to `rag`) at every
+  restart is pre-existing and harmless.
 - `HEAD` Chat + trivia: **instant, fair, and Jarvis speaks as Jarvis.** Reviewed the live
   "Jeremiah & Michele's Chat" game (18:39–18:42 MST, which ran *before* the 18:44 deploy):
   Michele won all ten rounds because (1) late answers burned the next question's guess (fixed

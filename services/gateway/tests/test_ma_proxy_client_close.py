@@ -4,9 +4,9 @@ raises instead of returning a StreamingResponse.
 Previously only the generic ``except Exception`` path closed ``proxy_client``;
 an ``HTTPException`` (upstream 404/5xx readiness failure) leaked the session.
 """
+import asyncio
 import re
 
-import aiohttp
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -30,25 +30,28 @@ def _request() -> Request:
 
 
 def _track_sessions(monkeypatch):
-    """Replace aiohttp.ClientSession with a factory that records close() calls."""
-    real_cls = aiohttp.ClientSession
+    """Record close() on the proxy's pooled-session view.
+
+    The proxy now borrows one pooled session; ``close`` is what releases the
+    upstream response back to the pool, so a path that skips it still leaks.
+    """
+    from services.gateway import main
+
     created = []
+    real_init = main._PooledMediaSession.__init__
+    real_close = main._PooledMediaSession.close
 
-    def factory(*args, **kwargs):
-        session = real_cls(*args, **kwargs)
-        original_close = session.close
-        state = {"closed": 0}
+    def init(self, *args, **kwargs):
+        real_init(self, *args, **kwargs)
+        self.close_calls = {"closed": 0}
+        created.append(self)
 
-        async def close():
-            state["closed"] += 1
-            await original_close()
+    async def close(self):
+        self.close_calls["closed"] += 1
+        await real_close(self)
 
-        session.close = close
-        session.close_calls = state
-        created.append(session)
-        return session
-
-    monkeypatch.setattr(aiohttp, "ClientSession", factory)
+    monkeypatch.setattr(main._PooledMediaSession, "__init__", init)
+    monkeypatch.setattr(main._PooledMediaSession, "close", close)
     return created
 
 
@@ -67,3 +70,20 @@ async def test_http_exception_path_closes_proxy_client(monkeypatch, upstream):
     assert created[0].close_calls["closed"] == 1, (
         f"proxy_client leaked: close() called {created[0].close_calls['closed']} times"
     )
+    assert created[0]._responses == []  # the upstream response went back to the pool
+
+
+@pytest.mark.asyncio
+async def test_media_proxies_share_one_pooled_session(upstream):
+    """A new track or HLS segment must not open a new connection pool."""
+    from services.gateway import main
+
+    upstream.get(re.compile(re.escape(STREAM_URL)), status=200, body=b"x", repeat=True)
+    loop = asyncio.get_running_loop()
+    first, second = main._PooledMediaSession(None), main._PooledMediaSession(None)
+    await first.get(STREAM_URL)
+    pooled = main._MEDIA_SESSIONS[loop]
+    await second.get(STREAM_URL)
+    await first.close()
+    await second.close()
+    assert main._MEDIA_SESSIONS[loop] is pooled and not pooled.closed

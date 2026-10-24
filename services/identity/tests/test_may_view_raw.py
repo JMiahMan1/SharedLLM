@@ -1,0 +1,42 @@
+"""The collected-data visibility rule: a minor's raw data is the parents'."""
+import pytest
+
+from services.identity.main import may_view_raw_data
+from services.identity.models import User
+
+
+def _u(name, role="other", admin=False, mother=None):
+    return User(username=name, family_role=role, is_admin=admin, mother_username=mother)
+
+
+DAD = _u("dad", "father")
+MOM = _u("mom", "mother")
+OTHER_MOM = _u("aunt", "mother")
+ADMIN = _u("admin", admin=True)
+KID = _u("kid", "child", mother="mom")
+TEEN = _u("teen", "teen")  # no linked mother
+SIB = _u("sib", "child", mother="mom")
+GROWN = _u("grown", "adult_child")
+
+
+@pytest.mark.parametrize(
+    ("viewer", "subject", "allowed"),
+    [
+        (DAD, KID, True),
+        (MOM, KID, True),
+        (ADMIN, KID, True),
+        (OTHER_MOM, KID, False),  # not the linked mother
+        (OTHER_MOM, TEEN, True),  # no mother linked: a mother counts
+        (KID, KID, False),  # a minor does not browse their own stream
+        (SIB, KID, False),  # siblings never see each other's
+        (GROWN, KID, False),
+        (DAD, GROWN, False),  # an adult's data is their own
+        (GROWN, GROWN, True),
+        (MOM, DAD, False),
+        (DAD, DAD, True),
+        (None, KID, False),
+        (DAD, None, False),
+    ],
+)
+def test_who_may_see_collected_data(viewer, subject, allowed):
+    assert may_view_raw_data(viewer, subject) is allowed

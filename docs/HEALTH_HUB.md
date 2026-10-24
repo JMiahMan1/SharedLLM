@@ -1,6 +1,6 @@
 # Health Hub: the best of the health apps in one
 
-Status: **partially built (2026-10-22): phases 1–5 core plus opt-in cycle tracking, family sharing/export and tests are in code; deploy pending.** Last live app commit `152451cf`.
+Status: **live, partially built (updated 2026-10-24): phases 1–5 core, opt-in cycle tracking, family sharing/export and the USDA food seed are deployed; Phases 10–11 (digital wellbeing, guardianship) are in progress.** See HANDOVER.md for the live commit.
 Companion plans: `docs/RECIPES.md` (Phases 10–11 carry the recipe-nutrition and
 calorie-budget work that this hub consumes), `docs/HEALTH_STEPS.md` (step counting,
 already live).
@@ -274,7 +274,7 @@ live search is the ecosystem-standard pattern.
 - [x] Pure tests: BMR/budget maths, scores, portion scaling, density mapping and water. Streaks are not built.
 - [x] UI tests: log a meal (search + manual), day view, check-in, water and cycle opt-in/log/share. Challenge join and kid-mode UI hiding are not built.
 - [x] `npm run typecheck`, `npm run lint`, full UI suite (191 files / 1538 tests), `npm run build`, backend health tests (108), identity family-role tests and docs.
-- [ ] Deploy `health gateway ui`, then verify `/health/ready`, the version endpoint and an authenticated `/api/health/profile`.
+- [x] Deploy `health gateway ui`, then verify `/health/ready`, the version endpoint and an authenticated `/api/health/profile` (health live since `d766a19f`).
 
 ### Phase 10 — digital wellbeing (planned 2026-10-23)
 
@@ -291,14 +291,17 @@ live search is the ecosystem-standard pattern.
       idempotent payloads (`source: phone`), coalesced — stored per user, every reading source-tagged.
       Phone usage (`PhoneUsageSync`, 5-min) and per-app foreground time land this way; media
       sessions, calls and SMS reuse the activity pipeline.
-- [ ] Digital wellbeing card in the hub: first use, last use, total screen time, the day's session
-      timeline, and the top apps by foreground time.
+- [x] Digital wellbeing card in the hub (`DigitalWellbeingCard`, Health → Today): first use, last
+      use, total screen time, sessions, the top five apps by foreground time and a seven-day bar.
+      An adult sees their own; a parent switches to each child; a minor sees no card. A per-session
+      timeline needs the phone to report sessions (it reports first/last use and a count today).
 - [ ] Jarvis itself: log feature events from the web bundle (chat, recipes, notes, timers, games,
       verses) — no permission needed — and show what each person does most inside Jarvis.
-- [ ] Visibility follows Phase 11's rule: a minor's usage data is parents-only (the raw card
-      lives on the parents' view, not the child's), an adult's is their own unless they opt
-      into family sharing (a new `digital` scope), and suggestions derived from the data are
-      visible to the member they are for.
+- [x] Visibility follows Phase 11's rule, enforced on the server: identity's
+      `may_view_raw_data` (`GET /api/internal/may-view-raw`) opens a minor's usage to an admin,
+      the father and the linked mother (any mother when none is linked) and to no one else, an
+      adult's to themselves; `GET /api/usage/{user}` answers 403 otherwise (any signed-in member
+      could read anyone's before). An adult's opt-in `digital` family scope is still to come.
 
 ### Phase 11 — family guardianship and discipleship (full Bark / Qustodio / Family Link parity; planned 2026-10-23)
 

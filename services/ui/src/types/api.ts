@@ -287,6 +287,17 @@ export interface ShareRecipient {
 }
 
 /** A safe household-roster entry for the family-role editor. */
+/** One day of phone usage as the phone reported it (times are epoch ms). */
+export interface UsageDay {
+  day: string;
+  millis: number;
+  first_use: number | null;
+  last_use: number | null;
+  sessions: number;
+  source?: string;
+  apps?: Array<{ package: string; millis: number; last_use?: number | null }>;
+}
+
 export interface FamilyRecord {
   username: string;
   display_name: string;
