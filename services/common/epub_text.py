@@ -87,7 +87,7 @@ _LABEL_JOIN = ": "
 class _Section:
     """A labelled run of prose collected from one spine document."""
 
-    __slots__ = ("label", "blocks")
+    __slots__ = ("blocks", "label")
 
     def __init__(self, label: str) -> None:
         self.label = label
@@ -252,9 +252,7 @@ def _read_document(markup: str, fallback: str) -> list[tuple[str, str]]:
     for section in _split_sections(prose.blocks, fallback):
         text = section.text()
         label = section.label.strip() or fallback
-        if len(text) < _MIN_SECTION_CHARS and not pairs:
-            pairs.append((label, text))
-        elif text:
+        if (len(text) < _MIN_SECTION_CHARS and not pairs) or text:
             pairs.append((label, text))
     return pairs
 

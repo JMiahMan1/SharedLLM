@@ -2,7 +2,6 @@
 import json
 
 import aiohttp
-import pytest
 
 from services.execution.handlers import recipe_import
 from services.execution.schemas import RecipeRequest

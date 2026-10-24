@@ -294,7 +294,7 @@ async def test_the_clip_is_signed_here_and_only_the_signature_goes_to_identity(w
     http = _install_aiohttp(monkeypatch, [_Resp(200, _identified())])
     await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav"))
     assert signed == [b"RIFFclip"]
-    verb, url, kwargs = http.calls[0]
+    _verb, url, kwargs = http.calls[0]
     assert url == f"{H.IDENTITY_SVC_URL}/api/voice/identify"
     assert kwargs["headers"]["X-Internal-Secret"] == H.INTERNAL_SECRET
     assert kwargs["json"] == {"embedding": SIGNATURE["embedding"], "model": SIGNATURE["model"]}

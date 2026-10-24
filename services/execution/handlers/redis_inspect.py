@@ -13,6 +13,7 @@ service's own Redis client and exposes a small read-only surface:
 
 Deliberately no write operations (no set/del/flush/expire).
 """
+import contextlib
 import logging
 import os
 
@@ -80,7 +81,5 @@ async def handle_redis_inspect(req: RedisInspectRequest) -> ExecutionResult:
         log.error(f"Redis inspect failed: {e}")
         return ExecutionResult(status="FAILURE", message=str(e)[:300], service="redis_inspect")
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await client.close()
-        except Exception:
-            pass

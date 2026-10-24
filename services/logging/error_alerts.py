@@ -104,16 +104,15 @@ async def notify_admins(notice: dict[str, Any]) -> bool:
     """Send one admin notice through telemetry; True once telemetry accepted it."""
     payload = {"kind": "admin", **notice, "user": "@admins", "category": "admin"}
     try:
-        async with get_client() as client:
-            async with client.post(
-                f"{TELEMETRY_SVC_URL.rstrip('/')}/api/telemetry/notify",
-                json=payload,
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                if resp.status == 200:
-                    return True
-                log.warning(f"[error-alerts] telemetry refused {notice.get('tag')}: HTTP {resp.status}")
+        async with get_client() as client, client.post(
+            f"{TELEMETRY_SVC_URL.rstrip('/')}/api/telemetry/notify",
+            json=payload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
+            if resp.status == 200:
+                return True
+            log.warning(f"[error-alerts] telemetry refused {notice.get('tag')}: HTTP {resp.status}")
     except Exception as e:
         log.warning(f"[error-alerts] telemetry unreachable: {type(e).__name__}: {e}")
     return False

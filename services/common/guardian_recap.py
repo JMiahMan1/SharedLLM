@@ -157,7 +157,7 @@ def summary_line(name: str, recap: dict[str, Any]) -> str:
 def asked_about(query: str, children: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The child a parent's question is about ("how was Emma's week?", "how is
     Sam doing", "Emma's recap"), or None. Only children passed in can match."""
-    q = " " + (query or "").lower().replace("’", "'") + " "
+    q = " " + (query or "").lower().replace("\u2019", "'") + " "
     if not any(cue in q for cue in ("week", "doing", "recap", "how's", "how is", "how was")):
         return None
     for child in children:

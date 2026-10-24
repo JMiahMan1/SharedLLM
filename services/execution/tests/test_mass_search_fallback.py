@@ -76,17 +76,15 @@ def test_mass_client_search_raises_typed_error_on_connect_failure():
     def _boom(_url):
         raise aiohttp.ClientConnectionError("nope")
 
-    with patch(P + "_mass_session", new=_boom):
-        with pytest.raises(MASearchError):
-            asyncio.run(mass_client.search(MA_URL, MA_TOKEN, "hobbit"))
+    with patch(P + "_mass_session", new=_boom), pytest.raises(MASearchError):
+        asyncio.run(mass_client.search(MA_URL, MA_TOKEN, "hobbit"))
 
 
 def test_mass_client_search_raises_on_ma_error_code():
     """An MA `error_code` response is a failure, not an empty result set."""
     ws = _FakeWS({"message_id": "mass_search", "error_code": "error", "details": "boom"})
-    with patch(P + "_mass_session", new=lambda _url: _FakeSession(ws)):
-        with pytest.raises(MASearchError):
-            asyncio.run(mass_client.search(MA_URL, MA_TOKEN, "hobbit"))
+    with patch(P + "_mass_session", new=lambda _url: _FakeSession(ws)), pytest.raises(MASearchError):
+        asyncio.run(mass_client.search(MA_URL, MA_TOKEN, "hobbit"))
 
 
 def test_search_ma_falls_back_to_ha_when_direct_search_raises():

@@ -15,6 +15,7 @@ retried on the next pass.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 
@@ -158,10 +159,8 @@ async def auth_failed(service: str, account: str, detail: str = "") -> None:
     finally:
         _inflight.discard(key)
         if r is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await r.aclose()
-            except Exception:
-                pass
 
 
 async def auth_ok(service: str, account: str) -> None:
@@ -201,7 +200,5 @@ async def auth_ok(service: str, account: str) -> None:
     finally:
         _inflight.discard(key)
         if r is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await r.aclose()
-            except Exception:
-                pass

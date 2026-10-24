@@ -5,12 +5,11 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Any
 
 try:
-    from schemas import ExecutionResult, CodeSearchRequest
+    from schemas import CodeSearchRequest, ExecutionResult
 except ImportError:
-    from ..schemas import ExecutionResult, CodeSearchRequest
+    from ..schemas import CodeSearchRequest, ExecutionResult
 
 log = logging.getLogger("execution.code_search")
 
@@ -28,7 +27,7 @@ async def handle_code_search(req: CodeSearchRequest) -> ExecutionResult:
     ]
 
     # Add sources
-    cmd.extend(["--sources"] + req.sources)
+    cmd.extend(["--sources", *req.sources])
 
     # Optional language filter
     if req.language:
@@ -106,7 +105,7 @@ async def handle_code_search(req: CodeSearchRequest) -> ExecutionResult:
             detail={"output": output_text[:15000], "output_length": len(output_text)},
         )
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         log.error("[code_search] command timed out")
         return ExecutionResult(
             status="FAILURE",

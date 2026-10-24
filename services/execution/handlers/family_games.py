@@ -433,7 +433,7 @@ def draw_trivia_question(state: GameState) -> None:
         near = [q for q in remaining if int(q.get("difficulty", 1)) in tiers]
         if near:
             break
-    picked = random.choice(near)  # noqa: S311 - game content, not security
+    picked = random.choice(near)  # game content, not security
     state.previous_answers = list(state.answers)
     state.question = picked["question"]
     state.answers = list(picked["answers"])
@@ -518,9 +518,9 @@ class GameRegistry:
         count = max(2, min(int(pairs), 6))
         # Pick the words first, then duplicate them: sampling 2n distinct words
         # would produce a deck with no pairs at all.
-        chosen = random.sample(MEMORY_WORDS, count)  # noqa: S311
+        chosen = random.sample(MEMORY_WORDS, count)
         board = chosen + chosen
-        random.shuffle(board)  # noqa: S311
+        random.shuffle(board)
         state = GameState(
             kind="memory",
             token=token,

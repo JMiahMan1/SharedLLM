@@ -6,6 +6,7 @@ per-user allow_insecure_tls identity flag exists, so env
 MEDIA_ALLOW_INSECURE_TLS=false (opt-out) is the gate. Unit test on the
 session factory (http_client.get_session).
 """
+import contextlib
 import inspect
 import logging
 import ssl as ssl_mod
@@ -22,10 +23,8 @@ async def _isolated_session_cache():
     async def _drain():
         for key in list(http_client._SESSION_CACHE):
             session, _ = http_client._SESSION_CACHE.pop(key)
-            try:
+            with contextlib.suppress(Exception):
                 await session.close()
-            except Exception:
-                pass
 
     await _drain()
     yield

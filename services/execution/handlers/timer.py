@@ -381,10 +381,7 @@ def synthesize_alarm_wav(
             else:
                 raw = math.sin(phase)
 
-            if i < attack:
-                env = i / attack
-            else:
-                env = math.exp(-2.8 * ((i - attack) / max(1, n_samples - attack)))
+            env = i / attack if i < attack else math.exp(-2.8 * ((i - attack) / max(1, n_samples - attack)))
             val = max(-1.0, min(1.0, raw * env * 0.45))
             samples.append(int(val * 32767))
 
