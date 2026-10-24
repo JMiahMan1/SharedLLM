@@ -560,6 +560,19 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
 
 ## 5. Immediate next steps
 
+- The Android collection engine is complete: usage, media sessions, calls and SMS all
+  land on the digital profile (commits through `ac963b2c`). Video watching is covered by
+  media sessions (YouTube title/creator/duration) plus per-app foreground time.
+- Jarvis recommendations from the profile: music, video, podcasts, books, games and
+  activities are done and shown in the For You widget. Still open in step 3: a parent can
+  bless or block a lane.
+- Screen time: 4a (rules, status, requests) is live; next is **4b, enforcement on the phone**
+  (an Accessibility service that locks all but the always-allowed apps while `locked`), together
+  with **tamper resistance** (Jarvis cannot be removed from a child's phone without a parent's
+  login): device admin + a parent PIN screen, or device-owner provisioning for a hard block.
+  (Layer 1 of this is built in `5bdaea9b`; the full how-to, including device-owner steps, is in
+  `docs/HEALTH_HUB.md` "Tamper resistance".)
+
 1. **Device check of the Jarvis guard (APK 437)** on one child's phone: set it up from the
    Health page's Phone protection card, then confirm an uninstall attempt shows the parent-login
    screen, a parent login unlocks it and a wrong one does not, a bedtime or pause sends games
