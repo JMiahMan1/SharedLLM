@@ -154,6 +154,7 @@ import type {
   HealthCycleState,
   HealthActiveMinutes,
   HealthFast,
+  HealthStreaks,
   HealthFastingState,
   HealthCycleSummary,
   HealthCyclePeriod,
@@ -1897,6 +1898,11 @@ export const api = {
   /** The week's active minutes from steps, workouts, heart rate and device totals. */
   async getHealthActiveMinutes(day?: string): Promise<HealthActiveMinutes> {
     const resp = await apiClient.get('/api/health/active-minutes', { params: day ? { day } : {} });
+    return resp.data;
+  },
+
+  async getHealthStreaks(day?: string): Promise<HealthStreaks> {
+    const resp = await apiClient.get('/api/health/streaks', { params: day ? { day } : {} });
     return resp.data;
   },
 

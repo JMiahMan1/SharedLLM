@@ -13243,6 +13243,11 @@ async def get_health_active_minutes(request: Request, day: str | None = None):
     return await _active_minutes_week(request, day)
 
 
+@app.get("/api/health/streaks")
+async def get_health_streaks(request: Request, day: str | None = None):
+    return await _health_json("GET", "/streaks", request, params={"day": day})
+
+
 # Fasting window: adults only (the health service refuses a minor's profile).
 
 
