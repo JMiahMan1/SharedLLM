@@ -492,6 +492,13 @@ live search is the ecosystem-standard pattern.
   logged (and the macros) but no calorie number, range, progress bar, per-food calories or density
   colour; the profile hides weight and the "lose" goal; fasting is off; a kid-mode viewer of a
   shared food day gets "food logged" without a number. Tested in `src/test/HealthHub.test.tsx`.
+- [x] **Kid mode is forced on for every minor** (decided 2026-10-24). The gateway sends
+  `X-User-Is-Minor` (the family role, from Identity; cached five minutes, an outage is not cached)
+  on every health call; a `true` stores `kid_mode` on the profile and the profile reports
+  `kid_mode_locked`, as does a birth year under 18. The profile's switch shows on and disabled
+  ("Always on for anyone under 18."); a save cannot turn it off. `unknown` never changes a saved
+  choice. Tests: `services/health/tests/test_kid_mode_forced.py`,
+  `services/gateway/tests/test_health_challenges_gateway.py`, `HealthProfilePanel.test.tsx`.
 - [x] `npm run typecheck`, `npm run lint`, full UI suite (191 files / 1538 tests), `npm run build`, backend health tests (108), identity family-role tests and docs.
 - [x] Deploy `health gateway ui`, then verify `/health/ready`, the version endpoint and an authenticated `/api/health/profile` (health live since `d766a19f`).
 

@@ -354,11 +354,15 @@ export default function HealthProfilePanel() {
           <label className="col-span-2 flex items-center gap-2 self-end rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-xs text-slate-300 sm:col-span-2">
             <input
               type="checkbox"
-              checked={form.kid_mode}
+              checked={form.kid_mode || profile?.kid_mode_locked === true}
+              disabled={profile?.kid_mode_locked === true}
               onChange={(event) => setEdits((prev) => ({ ...prev, kid_mode: event.target.checked }))}
-              className="h-4 w-4 accent-purple-500"
+              className="h-4 w-4 accent-purple-500 disabled:opacity-60"
             />
-            Kid mode — guidance ranges only, never deficits or weight-loss targets
+            <span>
+              Kid mode — guidance ranges only, never deficits or weight-loss targets
+              {profile?.kid_mode_locked && <span className="block text-[11px] text-slate-500">Always on for anyone under 18.</span>}
+            </span>
           </label>
         </div>
 

@@ -12999,7 +12999,6 @@ async def _health_json(
     *,
     params: dict | None = None,
     body: dict | None = None,
-    minor_check: bool = False,
     ident: dict | None = None,
 ):
     """Call the health service as one person: the request's caller, or ``ident``
@@ -13011,9 +13010,10 @@ async def _health_json(
         "X-Internal-Secret": INTERNAL_SECRET,
         "X-User-Id": ident["user"],
         "X-User-Is-Admin": "true" if ident.get("is_admin") else "false",
+        # Every call: the health service keeps a minor's profile in kid mode and
+        # refuses minors a family challenge on this flag.
+        "X-User-Is-Minor": await _health_minor_flag(ident["user"]),
     }
-    if minor_check:
-        headers["X-User-Is-Minor"] = await _health_minor_flag(ident["user"])
     clean_params = {key: value for key, value in (params or {}).items() if value is not None}
     async with shared_http_client() as client:
         resp = await client.request(
@@ -13390,6 +13390,12 @@ async def delete_health_fast(fast_id: int, request: Request):
     return await _health_json("DELETE", f"/fasting/{fast_id}", request)
 
 
+# user -> (flag, monotonic time). Only a definite answer is cached, so an
+# Identity outage is retried on the next call rather than remembered.
+_HEALTH_MINOR_CACHE: dict[str, tuple[str, float]] = {}
+_HEALTH_MINOR_TTL_S = 300.0
+
+
 async def _health_minor_flag(user: str) -> str:
     """``true``/``false`` for whether ``user``'s family role is a minor's, else ``unknown``.
 
@@ -13398,6 +13404,9 @@ async def _health_minor_flag(user: str) -> str:
     explicit ``false`` as a minor, so an unreachable Identity can never let a
     child start a family challenge.
     """
+    cached = _HEALTH_MINOR_CACHE.get(user)
+    if cached and time.monotonic() - cached[1] < _HEALTH_MINOR_TTL_S:
+        return cached[0]
     try:
         async with borrow_http_client() as client:
             resp = await client.get(
@@ -13411,7 +13420,11 @@ async def _health_minor_flag(user: str) -> str:
     except Exception as exc:
         log.warning("[health] family role lookup failed: %s", exc)
         return "unknown"
-    return ("true" if managed else "false") if isinstance(managed, bool) else "unknown"
+    if not isinstance(managed, bool):
+        return "unknown"
+    flag = "true" if managed else "false"
+    _HEALTH_MINOR_CACHE[user] = (flag, time.monotonic())
+    return flag
 
 
 # Weekly family challenges: an adult starts one, anyone joins, progress comes
@@ -13420,12 +13433,12 @@ async def _health_minor_flag(user: str) -> str:
 
 @app.get("/api/health/challenges")
 async def get_health_challenges(request: Request, day: str | None = None):
-    return await _health_json("GET", "/challenges", request, params={"day": day}, minor_check=True)
+    return await _health_json("GET", "/challenges", request, params={"day": day})
 
 
 @app.post("/api/health/challenges")
 async def post_health_challenge(request: Request):
-    return await _health_json("POST", "/challenges", request, body=await request.json(), minor_check=True)
+    return await _health_json("POST", "/challenges", request, body=await request.json())
 
 
 @app.post("/api/health/challenges/{challenge_id}/join")
