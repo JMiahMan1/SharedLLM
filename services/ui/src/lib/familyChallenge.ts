@@ -7,6 +7,7 @@
 
 import type { HealthChallenge } from '../types/api';
 import { formatDayLabel } from './healthHub';
+import { withShareNote } from './verseShare';
 
 /** Who a username is in the family directory, falling back to the username itself. */
 export type NameOf = (userId: string) => string;
@@ -27,8 +28,7 @@ export function challengeShareText(challenge: HealthChallenge, nameOf: NameOf = 
   );
   const body = lines.length > 0 ? `${head}\n${lines.join('\n')}` : `${head}\nNobody has joined yet.`;
   const withJoin = `${body}\nJoin it on Health → Today.`;
-  const intro = (note ?? '').trim();
-  return intro ? `${intro}\n\n${withJoin}` : withJoin;
+  return withShareNote(withJoin, note);
 }
 
 /** The short preview line the share sheet shows. */

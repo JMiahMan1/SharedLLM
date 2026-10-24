@@ -7,6 +7,8 @@
  * other note in the shelf stays a recipe.
  */
 
+import { withShareNote } from './verseShare';
+
 export const PLAN_TITLE = 'Meal plan';
 export const PLAN_PATH = 'Recipes/Meal plan.md';
 export const PLAN_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
@@ -78,6 +80,5 @@ export function planShareText(plan: WeeklyPlan, note?: string): string {
     lines.length === 0
       ? '🍽 This week has no dinners planned yet.'
       : `🍽 This week's dinners:\n${lines.join('\n')}`;
-  const intro = (note ?? '').trim();
-  return intro ? `${intro}\n\n${body}` : body;
+  return withShareNote(body, note);
 }

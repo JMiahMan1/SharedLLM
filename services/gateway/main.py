@@ -1565,13 +1565,11 @@ async def _health_coach_answer(query: str, user_id: str) -> str | None:
     name = _health_coach.topic(query)
     if not name or not user_id:
         return None
-    headers = {"X-Internal-Secret": INTERNAL_SECRET, "X-User-Id": user_id}
+    ident = {"user": user_id, "is_admin": False}
     day = _household_now().date().isoformat()
 
     async def read(path: str, params: dict) -> dict | None:
-        async with borrow_http_client() as client:
-            resp = await client.get(f"{HEALTH_SVC}{path}", params=params, headers=headers)
-            return await resp.json(content_type=None) if resp.status == 200 else None
+        return await _health_json("GET", path, None, params=params, ident=ident)
 
     try:
         summary = await read("/summary", {"day": day})
@@ -12997,13 +12995,16 @@ async def proxy_bible_devotional_cadence(request: Request, book_id: int):
 async def _health_json(
     method: str,
     path: str,
-    request: Request,
+    request: Request | None,
     *,
     params: dict | None = None,
     body: dict | None = None,
     minor_check: bool = False,
+    ident: dict | None = None,
 ):
-    ident = await _acting_identity(request)
+    """Call the health service as one person: the request's caller, or ``ident``
+    when the gateway already knows who is asking (the chat coach)."""
+    ident = ident or (await _acting_identity(request) if request is not None else None)
     if not ident:
         raise HTTPException(status_code=401, detail="Authentication required")
     headers = {

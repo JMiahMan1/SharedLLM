@@ -141,7 +141,7 @@ def _coach_store(monkeypatch, summary):
     seen: list[tuple[str, dict]] = []
 
     class _Store:
-        async def get(self, url, **kw):
+        async def request(self, method, url, **kw):
             seen.append((url, kw))
             if url.endswith("/summary"):
                 return _Resp(summary)
@@ -151,7 +151,7 @@ def _coach_store(monkeypatch, summary):
     async def fake():
         yield _Store()
 
-    monkeypatch.setattr(gateway_main, "borrow_http_client", fake)
+    monkeypatch.setattr(gateway_main, "shared_http_client", fake)
     return seen
 
 

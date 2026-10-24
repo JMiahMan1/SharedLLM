@@ -6,6 +6,8 @@
  * an optional intro note and a short excerpt, never the whole file.
  */
 
+import { withShareNote } from './verseShare';
+
 const EXCERPT_CHARS = 220;
 const HEADER_KEYS = ['Category:', 'Tags:', 'Times:', 'Source:'];
 
@@ -48,6 +50,5 @@ export function recipeSharePreview(body: string): string {
 export function recipeShareText(title: string, body: string, note?: string): string {
   const excerptText = excerpt(recipeBodyText(body));
   const line = excerptText ? `🍽 ${title}: ${excerptText}` : `🍽 ${title}`;
-  const intro = (note ?? '').trim();
-  return intro ? `${intro}\n\n${line}` : line;
+  return withShareNote(line, note);
 }

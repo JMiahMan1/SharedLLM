@@ -374,6 +374,7 @@
 [data-theme-scheme="light"] .text-stone-500 { color: var(--site-text-muted) !important; }
 [data-theme-scheme="light"] .text-teal-300 { color: oklch(51.1% 0.096 186.391) !important; }
 [data-theme-scheme="light"] .text-white { color: var(--site-text) !important; }
+[data-theme-scheme="light"] .text-white\/\[0\.06\] { color: color-mix(in srgb, var(--site-text) 6%, transparent) !important; }
 [data-theme-scheme="light"] .text-white\/50 { color: color-mix(in srgb, var(--site-text) 50%, transparent) !important; }
 [data-theme-scheme="light"] .text-white\/60 { color: color-mix(in srgb, var(--site-text) 60%, transparent) !important; }
 [data-theme-scheme="light"] .text-white\/70 { color: color-mix(in srgb, var(--site-text) 70%, transparent) !important; }
