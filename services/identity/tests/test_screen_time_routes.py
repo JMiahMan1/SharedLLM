@@ -99,3 +99,43 @@ def test_internal_status_read(family):
     family("dad").put("/api/screen-time/kid/rules", json={"daily_limit_min": 60})
     body = family("dad").get(f"/api/internal/screen-time/kid?day={DAY}").json()
     assert body["rules"]["daily_limit_min"] == 60 and body["managed"] is True
+
+
+def _with_passwords(family):
+    from services.identity.seed import hash_password
+
+    with Session(main.engine) as s:
+        for name in ("dad", "mom", "sib", "grown"):
+            u = s.get(User, name) or next(x for x in s.query(User).all() if x.username == name)
+            u.password_hash = hash_password(f"{name}-pass")
+            s.add(u)
+        s.commit()
+    main._UNLOCK_FAILURES.clear()
+
+
+def test_a_parent_login_unlocks_their_childs_phone(family):
+    _with_passwords(family)
+    r = family("kid").post("/api/guard/parent-unlock", json={"username": "Mom", "password": "mom-pass"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["parent"] == "mom" and body["until"] and set(body["notify"]) == {"dad", "mom"}
+    assert family("kid").get("/api/screen-time/kid/rules").json()["protected"] is True
+    assert family("grown").get("/api/screen-time/grown/rules").json()["protected"] is False
+
+
+def test_only_this_childs_parents_with_the_right_password_unlock(family):
+    _with_passwords(family)
+    kid = family("kid")
+    assert kid.post("/api/guard/parent-unlock", json={"username": "mom", "password": "wrong"}).status_code == 401
+    assert kid.post("/api/guard/parent-unlock", json={"username": "sib", "password": "sib-pass"}).status_code == 401
+    assert kid.post("/api/guard/parent-unlock", json={"username": "grown", "password": "grown-pass"}).status_code == 401
+
+
+def test_guessing_locks_the_unlock_screen(family):
+    _with_passwords(family)
+    kid = family("kid")
+    for _ in range(5):
+        assert kid.post("/api/guard/parent-unlock", json={"username": "mom", "password": "guess"}).status_code == 401
+    # Even the right password waits now.
+    assert kid.post("/api/guard/parent-unlock", json={"username": "mom", "password": "mom-pass"}).status_code == 429
+    main._UNLOCK_FAILURES.clear()

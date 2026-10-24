@@ -5456,7 +5456,66 @@ async def screen_time_status(request: Request, username: str):
     usage = await _own_telemetry(username, "usage", {"days": 1})
     used_ms = next((d.get("millis") or 0 for d in usage if d.get("day") == day), 0)
     state = evaluate_screen_time(body.get("rules"), used_ms, body.get("bonus_min") or 0, now)
-    return {"status": "SUCCESS", "username": username, "day": day, "rules": body.get("rules") or {}, "can_manage": bool(body.get("can_manage")), **state}
+    return {
+        "status": "SUCCESS",
+        "username": username,
+        "day": day,
+        "rules": body.get("rules") or {},
+        "can_manage": bool(body.get("can_manage")),
+        "protected": bool(body.get("protected")),
+        **state,
+    }
+
+
+_TAMPER_EVENTS = {
+    "admin_disabled": "turned off Jarvis's device protection",
+    "guard_disabled": "turned off Jarvis's screen guard",
+    "guard_missing": "is running without Jarvis's screen guard",
+    "uninstall_attempt": "tried to remove Jarvis",
+}
+
+
+@app.post("/api/guard/parent-unlock")
+async def guard_parent_unlock(request: Request):
+    """A parent's own login, typed on the child's phone, lifts the guard briefly.
+
+    Identity checks the login and that it is one of this child's parents; the
+    parents are told it happened, so an unlock is never silent.
+    """
+    status, body = await _identity_as_caller(request, "POST", "/api/guard/parent-unlock", json=await request.json())
+    if status == 200:
+        creds = await _resolve_identity_from_request(request)
+        child = str((creds or {}).get("user") or "")
+        await _screen_time_notice(
+            body.get("notify") or [],
+            "Phone protection unlocked",
+            f"{body.get('parent')} unlocked Jarvis's protection on {child}'s phone for 10 minutes.",
+            "/health",
+        )
+    return JSONResponse(status_code=status, content={k: v for k, v in (body or {}).items() if k != "notify"})
+
+
+@app.post("/api/guard/tamper")
+async def guard_tamper(request: Request):
+    """The phone reports protection being switched off or worked around."""
+    creds = await _resolve_identity_from_request(request)
+    child = str((creds or {}).get("user") or "").strip()
+    if not child:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    event = str((await request.json() or {}).get("event") or "")
+    if event not in _TAMPER_EVENTS:
+        raise HTTPException(status_code=422, detail="Unknown event")
+    async with borrow_http_client() as client:
+        resp = await client.get(f"{IDENTITY_SVC}/api/internal/guard/parents/{child}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        info = await resp.json(content_type=None) if resp.status == 200 else {}
+    name = (info or {}).get("display_name") or child
+    await _screen_time_notice(
+        (info or {}).get("parents") or [],
+        "Phone protection changed",
+        f"{name}'s phone {_TAMPER_EVENTS[event]}.",
+        "/health",
+    )
+    return {"status": "SUCCESS"}
 
 
 @app.put("/api/screen-time/{username}/rules")

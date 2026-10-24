@@ -90,3 +90,50 @@ def test_a_refused_request_tells_nobody(wired):
     answers[("POST", "/screen-time/requests")] = (409, {"detail": "You already asked"})
     assert client.post("/api/screen-time/requests", json={"minutes": 30}).status_code == 409
     assert sent == []
+
+
+def test_tamper_reports_tell_the_parents(wired, monkeypatch):
+    client, calls, sent, _ = wired
+
+    async def _who(_request):
+        return {"user": "kid"}
+
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _who)
+
+    class _Resp:
+        status = 200
+
+        async def json(self, content_type=None):
+            return {"parents": ["dad", "mom"], "display_name": "Zachary"}
+
+    class _Client:
+        async def get(self, url, **kw):
+            calls.append({"url": url})
+            return _Resp()
+
+    @asynccontextmanager
+    async def fake():
+        yield _Client()
+
+    monkeypatch.setattr(gateway_main, "borrow_http_client", fake)
+
+    assert client.post("/api/guard/tamper", json={"event": "admin_disabled"}).status_code == 200
+    assert calls[-1]["url"].endswith("/api/internal/guard/parents/kid")
+    assert [n["user"] for n in sent] == ["dad", "mom"]
+    assert "Zachary's phone turned off Jarvis's device protection" in sent[0]["body"]
+    assert client.post("/api/guard/tamper", json={"event": "nonsense"}).status_code == 422
+
+
+def test_a_parent_unlock_is_never_silent(wired, monkeypatch):
+    client, _, sent, answers = wired
+
+    async def _who(_request):
+        return {"user": "kid"}
+
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _who)
+    answers[("POST", "/guard/parent-unlock")] = (200, {"ok": True, "parent": "mom", "until": "x", "notify": ["dad", "mom"]})
+
+    r = client.post("/api/guard/parent-unlock", json={"username": "mom", "password": "p"})
+
+    assert r.status_code == 200 and "notify" not in r.json()
+    assert [n["user"] for n in sent] == ["dad", "mom"] and "mom unlocked" in sent[0]["body"]

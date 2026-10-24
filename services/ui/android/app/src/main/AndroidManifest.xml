@@ -291,6 +291,43 @@
             </intent-filter>
         </activity>
 
+        <!-- Jarvis's protection on a child's phone: device admin (no plain
+             uninstall), the screen guard (covers uninstall/Settings pages for
+             Jarvis with a parent login, and enforces screen time) and the
+             screen the guard shows. See GuardService. -->
+        <receiver
+            android:name=".GuardAdminReceiver"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/guard_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".GuardService"
+            android:exported="true"
+            android:label="Jarvis screen guard"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/guard_accessibility" />
+        </service>
+
+        <activity
+            android:name=".GuardScreenActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=".guard"
+            android:theme="@style/AppTheme.NoActionBar" />
+
         <service
             android:name=".MediaPlaybackService"
             android:exported="false"

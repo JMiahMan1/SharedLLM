@@ -21,6 +21,13 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `HEAD` Family guard: **Jarvis protected on a child's phone + screen-time enforcement (Layer 1, 4b)**
+  — device admin + the `GuardService` Accessibility guard, a parent-login cover screen, tamper
+  alerts and screen-time locks; see `docs/HEALTH_HUB.md` "Tamper resistance". Compiles and the
+  `GuardRules` JVM tests pass; **not yet exercised on a real phone** (Accessibility events and
+  OEM Settings layouts vary). Identity's `verify_password` now compares digests in constant time.
+  Pre-existing Android lint error (not fixed): `ConfigureActionButtonActivity.java:357`
+  `setTooltipText` needs API 26 (minSdk 24); `lintDebug` fails on it with or without this change.
 - `HEAD` Family guard: **screen-time budgets and routines, step 4a** (rules, live status, more-time
   requests; no phone enforcement yet). See `docs/HEALTH_HUB.md` "Time budgets and routines" for
   the full shape. Identity `ScreenRules`/`ScreenTimeRequest` tables are created on startup; the

@@ -7,6 +7,7 @@ monolith's .env and seeds the SQL database if it is empty. Run once on
 first startup or call via the /api/admin/seed endpoint.
 """
 import hashlib
+import hmac
 import logging
 import os
 
@@ -46,7 +47,8 @@ def verify_password(password: str, stored: str) -> bool:
     salt = bytes.fromhex(parts[1])
     pwd_hash = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260000)
     stored_hash = bytes.fromhex(parts[2])
-    return pwd_hash == stored_hash
+    # Constant time: a plain == leaks how many leading bytes matched.
+    return hmac.compare_digest(pwd_hash, stored_hash)
 
 # Load legacy .env if available
 import sys  # noqa: E402

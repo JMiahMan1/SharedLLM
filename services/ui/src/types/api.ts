@@ -318,6 +318,8 @@ export interface ScreenTimeStatus {
   day: string;
   rules: ScreenRules;
   can_manage: boolean;
+  /** A minor's phone: Jarvis must stay installed and guarded. */
+  protected: boolean;
   limit_min: number | null;
   used_min: number;
   bonus_min: number;

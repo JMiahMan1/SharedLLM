@@ -917,6 +917,11 @@ export const api = {
     return resp.data;
   },
 
+  /** The phone reports Jarvis's protection being switched off; the parents hear. */
+  async reportGuardTamper(event: 'admin_disabled' | 'guard_disabled' | 'guard_missing' | 'uninstall_attempt'): Promise<void> {
+    await apiClient.post('/api/guard/tamper', { event });
+  },
+
   async setScreenRules(username: string, rules: ScreenRules): Promise<{ rules: ScreenRules }> {
     const resp = await apiClient.put(`/api/screen-time/${encodeURIComponent(username)}/rules`, rules);
     return resp.data;

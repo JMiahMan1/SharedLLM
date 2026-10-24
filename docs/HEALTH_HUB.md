@@ -386,6 +386,25 @@ point.
 - [ ] **Tamper resistance.** Device-admin uninstall protection, restart on boot
       (`BootReceiver` exists), split-screen/multi-user detection, tamper alerts to parents —
       with a parent access code as the offline unlock/verify escape hatch.
+      **Layer 1 built (2026-10-24, needs a device check):** on a minor's phone
+      (`status.protected`), `GuardAdminReceiver` (device admin: no plain uninstall) and
+      `GuardService` (Accessibility) cover Jarvis's uninstall dialog, its App info /
+      device-admin / Accessibility pages with `GuardScreenActivity`, which takes a parent's own
+      Jarvis login (`POST /api/guard/parent-unlock`: only this child's parents, five wrong tries
+      then a ten-minute wait, 10-minute window, both parents told). The same service enforces
+      screen time (4b): while `locked` it sends the child home except for always-allowed apps,
+      with the reason and an "Ask for more time" button. Switching device admin or the guard off
+      reports to `POST /api/guard/tamper` and both parents get a notice; `GuardWatch` reports a
+      guard that was on and is now missing. Decisions live in pure `GuardRules` (JVM-tested).
+      Setup is the `PhoneProtectionCard` on the child's Health page (device admin, then
+      Accessibility; Android 13+ first needs App info ⋮ → Allow restricted settings for a
+      sideloaded app). Not yet: the offline parent code; safe mode and factory reset still get
+      around Layer 1.
+      **Layer 2 (planned, optional per phone): device owner.** Set once over USB on a phone with
+      no accounts signed in: `adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver`
+      (sign out Google accounts first, sign back in after). Then the app can call
+      `setUninstallBlocked` and the `DISALLOW_SAFE_BOOT` / `DISALLOW_FACTORY_RESET` restrictions,
+      a hard block Android enforces itself.
 
 ### Watching (Bark parity)
 
