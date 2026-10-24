@@ -43,7 +43,7 @@ const recap: GuardianRecap = {
   web: { top: [{ domain: 'khanacademy.org', visits: 9 }], blocked: [{ domain: 'tiktok.com', count: 3 }] },
   comms: { calls: 2, call_contacts: 1, messages: 10, message_contacts: 3 },
   faith: { bible_days: 2 },
-  concerns: [{ category: 'bullying', label: 'Bullying', level: 'high', count: 2, latest: { at: 'x', excerpt: 'nobody likes you', feature: 'sms' } }],
+  concerns: [{ category: 'bullying', label: 'Bullying', level: 'high', count: 2, latest: { at: 'x', excerpt: 'nobody likes you', feature: 'sms', review: { by: 'model', verdict: 'confirmed', reason: 'Aimed at Emma, more than once.' } } }],
   highlights: ['Read the Bible on 2 days'],
 };
 
@@ -102,6 +102,7 @@ describe('Guardian page (a parent)', () => {
     wrap(<Guardian />, '/guardian?child=sam');
     await waitFor(() => expect(api.getGuardianRecap).toHaveBeenCalledWith('sam'));
     expect(await screen.findByTestId('guardian-concerns')).toHaveTextContent('nobody likes you');
+    expect(screen.getByTestId('guardian-concern-review')).toHaveTextContent('Checked by the local model: Aimed at Emma, more than once.');
     expect(screen.getByTestId('guardian-screen')).toHaveTextContent('2 h 30 min');
     expect(screen.getByText(/tiktok.com \(blocked 3×\)/)).toBeInTheDocument();
     expect(await screen.findByTestId('guidance-bullying')).toHaveTextContent('Psalm 139:14');

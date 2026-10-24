@@ -27,8 +27,13 @@ def wired(monkeypatch):
         sent.append(body)
         return {"status": "SUCCESS"}
 
+    async def _no_model(_session):
+        return {}
+
     monkeypatch.setattr("services.telemetry.main._redis", lambda: fake)
     monkeypatch.setattr(guardian, "children", _children)
+    # No local model configured unless a test says otherwise: the phrase list decides.
+    monkeypatch.setattr(guardian, "_model_settings", _no_model)
     monkeypatch.setattr("services.telemetry.main.deliver_notice", _deliver)
     with TestClient(app) as client:
         yield client, fake, sent
@@ -87,3 +92,72 @@ def test_sunday_evening_sends_each_recap_once(wired):
     assert asyncio.run(guardian.send_weekly_recaps(fake, None, deliver, sunday_evening)) == 0
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert sent[0]["title"] == "Emma's week" and sent[0]["kind"] == "recap"
+
+
+def _with_model(monkeypatch, answer):
+    """A configured local model whose verdict is ``answer`` (a dict, or an exception to raise)."""
+    async def _settings(_session):
+        return {"llm_local_url": "http://llm.local", "guardian_monitor_model": "qwen3:8b"}
+
+    asked: list[dict] = []
+
+    async def _ask(_session, url, model, concern, text):
+        asked.append({"url": url, "model": model, "category": concern["category"], "text": text})
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(guardian, "_model_settings", _settings)
+    monkeypatch.setattr(guardian, "_ask_model", _ask)
+    return asked
+
+
+def test_without_a_model_the_phrase_list_decides_and_says_why(wired):
+    client, _, sent = wired
+    client.post("/api/telemetry/activity", headers=HEADERS, json=_sms("kid", "i want to die"))
+    assert [n["user"] for n in sent] == ["dad", "mom"]
+    review = client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"][0]["review"]
+    assert review["by"] == "phrases" and "no local model configured" in review["reason"]
+
+
+def test_the_model_dismisses_a_false_alarm_which_stays_on_record_unpaged(wired, monkeypatch):
+    client, _, sent = wired
+    asked = _with_model(monkeypatch, {"concern": False, "level": None, "reason": "A song lyric, not a threat."})
+    monkeypatch.setitem(KIDS["kid"], "monitoring", "all")
+    client.post("/api/telemetry/activity", headers=HEADERS, json=_sms("kid", "everyone hates you lol that song slaps"))
+    assert sent == []
+    assert asked[0]["model"] == "qwen3:8b" and "that song slaps" in asked[0]["text"]
+    kept = client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"][0]
+    assert kept["review"]["verdict"] == "dismissed" and kept["review"]["reason"] == "A song lyric, not a threat."
+    recap = client.get("/api/telemetry/recap/kid", headers=HEADERS, params={"day": "2026-10-21"}).json()["recap"]
+    assert recap["concerns"] == []
+
+
+def test_the_model_can_raise_the_level_and_its_reason_reaches_the_parent(wired, monkeypatch):
+    client, _, sent = wired
+    _with_model(monkeypatch, {"concern": True, "level": "severe", "reason": "Repeated, targeted at the child."})
+    client.post("/api/telemetry/activity", headers=HEADERS, json=_sms("kid", "nobody likes you, just leave"))
+    assert [n["user"] for n in sent] == ["dad", "mom"]
+    assert "Checked: Repeated, targeted at the child." in sent[0]["body"]
+    kept = client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"][0]
+    assert kept["level"] == "severe" and kept["review"]["phrase_level"] == "high"
+
+
+def test_self_harm_is_never_silenced_by_the_model(wired, monkeypatch):
+    client, _, sent = wired
+    _with_model(monkeypatch, {"concern": False, "level": None, "reason": "Probably a joke."})
+    client.post("/api/telemetry/activity", headers=HEADERS, json=_sms("kid", "i want to die"))
+    assert [n["user"] for n in sent] == ["dad", "mom"] and sent[0]["priority"] == 5
+    assert "Unsure: Probably a joke." in sent[0]["body"]
+    assert client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"][0]["review"]["verdict"] == "doubted"
+
+
+def test_an_unreachable_model_falls_back_to_the_phrase_list_with_a_logged_reason(wired, monkeypatch, caplog):
+    client, _, sent = wired
+    _with_model(monkeypatch, RuntimeError("connection refused"))
+    with caplog.at_level("WARNING", logger="telemetry.guardian"):
+        client.post("/api/telemetry/activity", headers=HEADERS, json=_sms("kid", "i want to die"))
+    assert [n["user"] for n in sent] == ["dad", "mom"]
+    review = client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"][0]["review"]
+    assert review == {"by": "phrases", "reason": "local model unavailable: connection refused"}
+    assert "using the phrase list" in caplog.text

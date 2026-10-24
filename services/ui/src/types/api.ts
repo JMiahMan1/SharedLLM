@@ -1780,12 +1780,20 @@ export interface GuardianRecap {
 
 export type ConcernLevel = 'medium' | 'high' | 'severe';
 
+/** How a concern was weighed: by the household's local model in context, or by the phrase list alone (and why). */
+export interface ConcernReview {
+  by: 'model' | 'phrases';
+  verdict?: 'confirmed' | 'doubted' | 'dismissed';
+  reason: string;
+  model?: string;
+}
+
 export interface GuardianConcernSummary {
   category: string;
   label: string;
   level: ConcernLevel;
   count: number;
-  latest: { at: string; excerpt: string; feature: string } | null;
+  latest: { at: string; excerpt: string; feature: string; review?: ConcernReview | null } | null;
 }
 
 export interface GuardianPrompt {

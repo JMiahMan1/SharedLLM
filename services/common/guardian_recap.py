@@ -95,7 +95,11 @@ def build(
     texts = [e for e in week_events if e.get("feature") == "sms"]
     bible_days = {str(e.get("at"))[:10] for e in week_events if e.get("feature") == "bible"}
 
-    week_concerns = [c for c in concerns if _in_week(c.get("at"), start, end)]
+    # A hit the local model dismissed in context stays on record, out of the recap.
+    week_concerns = [
+        c for c in concerns
+        if _in_week(c.get("at"), start, end) and (c.get("review") or {}).get("verdict") != "dismissed"
+    ]
     by_category: dict[str, dict[str, Any]] = {}
     for c in week_concerns:
         entry = by_category.setdefault(c["category"], {
@@ -103,7 +107,7 @@ def build(
         })
         entry["count"] += 1
         if entry["latest"] is None or str(c.get("at")) > str(entry["latest"]["at"]):
-            entry["latest"] = {"at": c.get("at"), "excerpt": c.get("excerpt"), "feature": c.get("feature")}
+            entry["latest"] = {"at": c.get("at"), "excerpt": c.get("excerpt"), "feature": c.get("feature"), "review": c.get("review")}
     order = {"severe": 0, "high": 1, "medium": 2}
     concern_list = sorted(by_category.values(), key=lambda x: (order.get(x["level"], 3), -x["count"]))
 
