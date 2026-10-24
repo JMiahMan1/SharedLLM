@@ -145,6 +145,7 @@ export default function ChapterReader({
               noted ? '. Has your note.' : ''
             }${bookmarked ? '. Bookmarked.' : ''}${comparing && !compareText ? '. Not in the compared translation.' : ''}`}
             data-testid={`bible-verse-${verse.chapter}-${verse.verse}`}
+            data-verse-key={`${verse.chapter}:${verse.verse}`}
             data-speaking={speaking || undefined}
             className={`w-full text-left rounded-lg px-2 py-1 min-h-11 pointer-coarse:min-h-11 border-l-2 border-transparent hover:bg-[var(--page-hover)] transition-colors ${
               speaking ? 'bg-sky-500/10 ring-1 ring-inset ring-sky-400/50' : ''

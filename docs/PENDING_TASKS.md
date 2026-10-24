@@ -13,4 +13,4 @@ on 2026-10-21. When something here ships, delete it; history lives in git.
 
 ## Bible study
 
-- Synced-scroll comparison and the reference-chip popover remain.
+- The reference-chip popover remains.
