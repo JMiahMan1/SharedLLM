@@ -114,6 +114,8 @@ from services.common.circuit_breaker import breaker_snapshots
 from services.common.entity_ids import usable_entity_id
 from services.common.music_recommendations import recommend_music
 from services.common.video_recommendations import recommend_video
+from services.common.podcast_recommendations import recommend_podcast
+from services.common.book_recommendations import recommend_book
 from services.common.relay import until_either_ends
 from services.gateway import calls, drawing, family_safety, network_routes, notices, push_routes
 from services.shared import ma_library
@@ -5248,6 +5250,72 @@ async def get_video_recommendation(request: Request):
         if str(e.get("feature") or "").lower() in ("media", "video")
     ]
     rec = recommend_video(video_items)
+    return {"status": "SUCCESS", "recommendation": rec}
+
+
+@app.get("/api/recommendations/podcast")
+async def get_podcast_recommendation(request: Request):
+    """A podcast suggestion for the signed-in member, derived from their listening.
+
+    Themes are first redeemed (a wholesome Christian show with a similar topic)
+    and, where no redeemed equivalent exists, redirected to a different wholesome
+    activity. The raw feed stays parents-only; only the derived suggestion is returned
+    to the member.
+    """
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{TELEMETRY_SVC}/api/telemetry/activity/{user}", params={"limit": 50}, headers=headers
+        )
+    if resp.status != 200:
+        return {"status": "SUCCESS", "recommendation": None}
+    try:
+        data = await resp.json(content_type=None)
+    except Exception:
+        data = {}
+    events = (data or {}).get("events") or []
+    podcast_items = [
+        e for e in events
+        if str(e.get("feature") or "").lower() in ("media", "podcast")
+    ]
+    rec = recommend_podcast(podcast_items)
+    return {"status": "SUCCESS", "recommendation": rec}
+
+
+@app.get("/api/recommendations/book")
+async def get_book_recommendation(request: Request):
+    """A book suggestion for the signed-in member, derived from their reading.
+
+    Themes are first redeemed (a wholesome/classic book with a similar genre)
+    and, where no redeemed equivalent exists, redirected to a wholesome family
+    activity. The raw feed stays parents-only; only the derived suggestion is returned
+    to the member.
+    """
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{TELEMETRY_SVC}/api/telemetry/activity/{user}", params={"limit": 50}, headers=headers
+        )
+    if resp.status != 200:
+        return {"status": "SUCCESS", "recommendation": None}
+    try:
+        data = await resp.json(content_type=None)
+    except Exception:
+        data = {}
+    events = (data or {}).get("events") or []
+    book_items = [
+        e for e in events
+        if str(e.get("feature") or "").lower() in ("media", "book", "reading")
+    ]
+    rec = recommend_book(book_items)
     return {"status": "SUCCESS", "recommendation": rec}
 
 

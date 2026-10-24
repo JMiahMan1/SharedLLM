@@ -174,8 +174,9 @@ describe('Notes (Keep-style)', () => {
   it('opens the exact note named in the URL from the dashboard widget', async () => {
     renderWithProviders(<Notes />, { route: '/notes?note=Notes%2FTrip%20ideas.md' });
 
-    const content = await screen.findByLabelText('Note content');
-    expect(content.textContent).toBe('Sedona in the fall, then the coast.');
+    await waitFor(() => {
+      expect(screen.getByLabelText('Note content').textContent).toBe('Sedona in the fall, then the coast.');
+    });
     expect(notesReadCalls).toEqual([expect.objectContaining({ path: 'Notes/Trip ideas.md' })]);
   });
 

@@ -301,6 +301,8 @@ async def test_a_chat_message_answers_the_running_trivia_game(talk, monkeypatch)
     result = await talk.handle_talk(_request(action="send", message=answer))
 
     assert result.status == "SUCCESS"
+    if talk._GAME_TASKS:
+        await asyncio.gather(*list(talk._GAME_TASKS))
     assert any("got it" in str(m.get("message", "")) for m in talk.posted)
 
 

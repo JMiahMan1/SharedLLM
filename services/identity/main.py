@@ -5477,11 +5477,11 @@ async def update_user_location(
         name, display, family = low_battery
         background.add_task(battery_alerts.announce, name, display, location.battery, family)
 
-    try:
-        await _forward_location_to_ha(user_id, location)
-        await _forward_location_to_geo(user_id, location)
-    except Exception as exc:
-        log.warning(f"[location] Forward failed for {user_id}: {exc}")
+    # Location forwarding to HA and Geo can be slow or subject to external timeouts;
+    # run them in background tasks so location uploads never hold up the mobile client
+    # or cause gateway middleware timeouts.
+    background.add_task(_forward_location_to_ha, user_id, location)
+    background.add_task(_forward_location_to_geo, user_id, location)
 
     return {"status": "SUCCESS", "message": "Location updated"}
 
