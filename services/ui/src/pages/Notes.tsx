@@ -642,30 +642,51 @@ export default function Notes() {
    * fires. A change schedules the new one before cancelling the old, so a
    * failure never leaves the note without the reminder it had.
    */
+  /**
+   * The one way a note's reminder (timed or place) changes: make the new one
+   * first, then cancel the old, then record it in the shared index, so a
+   * failure never leaves the note without the reminder it had.
+   */
+  const replaceReminder = async <K extends 'reminder' | 'placeReminder'>(
+    path: string,
+    field: K,
+    make: (() => Promise<NotesIndexEntry[K]>) | null,
+    cancel: (previous: NonNullable<NotesIndexEntry[K]>) => Promise<void>,
+  ): Promise<NotesIndexEntry[K]> => {
+    const previous = indexEntry(queryClient.getQueryData<NotesIndex>(indexKey), path)[field];
+    const next = make ? await make() : undefined;
+    if (previous) await cancel(previous as NonNullable<NotesIndexEntry[K]>);
+    await persistIndex((current) => setIndexEntry(current, path, { [field]: next } as NotesIndexEntry));
+    return next;
+  };
+
   const setNoteReminder = async (path: string, title: string, at: Date | null): Promise<void> => {
-    const previous = indexEntry(queryClient.getQueryData<NotesIndex>(indexKey), path).reminder;
     const label = `📝 ${title}`;
-    let reminder: NotesIndexEntry['reminder'];
-    if (at) {
-      const res = await api.createTimer({
-        title: label,
-        type: 'reminder',
-        time_str: at.toISOString(),
-        url: `/notes?note=${encodeURIComponent(path)}`,
-      });
-      const timerId = res.detail?.timer_id as string | undefined;
-      if (res.status !== 'SUCCESS' || !timerId) throw new Error(res.message || 'Could not set the reminder');
-      reminder = { at: (res.detail?.expires_at as string | undefined) ?? at.toISOString(), timerId };
-    }
-    if (previous) {
-      // Already fired is fine: there is nothing left to cancel.
-      const res = await api.deleteTimer(label, 'reminder', previous.timerId).catch(() => null);
-      if (res && res.status !== 'SUCCESS' && !/no matching timer/i.test(res.message ?? '')) {
-        toast.error('The earlier reminder could not be cancelled; remove it under Timers');
-      }
-    }
-    await persistIndex((current) => setIndexEntry(current, path, { reminder }));
-    toast.success(at ? `Reminder set for ${new Date(reminder!.at).toLocaleString()}` : 'Reminder removed');
+    const reminder = await replaceReminder(
+      path,
+      'reminder',
+      at
+        ? async () => {
+            const res = await api.createTimer({
+              title: label,
+              type: 'reminder',
+              time_str: at.toISOString(),
+              url: `/notes?note=${encodeURIComponent(path)}`,
+            });
+            const timerId = res.detail?.timer_id as string | undefined;
+            if (res.status !== 'SUCCESS' || !timerId) throw new Error(res.message || 'Could not set the reminder');
+            return { at: (res.detail?.expires_at as string | undefined) ?? at.toISOString(), timerId };
+          }
+        : null,
+      async (previous) => {
+        // Already fired is fine: there is nothing left to cancel.
+        const res = await api.deleteTimer(label, 'reminder', previous.timerId).catch(() => null);
+        if (res && res.status !== 'SUCCESS' && !/no matching timer/i.test(res.message ?? '')) {
+          toast.error('The earlier reminder could not be cancelled; remove it under Timers');
+        }
+      },
+    );
+    toast.success(reminder ? `Reminder set for ${new Date(reminder.at).toLocaleString()}` : 'Reminder removed');
   };
 
   /**
@@ -680,28 +701,31 @@ export default function Notes() {
     place: { zone: string; name: string } | null,
     on: 'arrive' | 'leave' = 'arrive',
   ): Promise<void> => {
-    const previous = indexEntry(queryClient.getQueryData<NotesIndex>(indexKey), path).placeReminder;
-    let placeReminder: NotePlaceReminder | undefined;
-    if (place) {
-      const res = await api.addPlaceReminder({
-        zone: place.zone,
-        on,
-        title: `📝 ${title}`,
-        url: `/notes?note=${encodeURIComponent(path)}`,
-      });
-      const made = res.reminder;
-      if (!made?.id) throw new Error('Could not set the place reminder');
-      placeReminder = { id: made.id, zone: made.zone, zoneName: made.zone_name || place.name, on: made.on };
-    }
-    if (previous) {
-      // 404: it already went off, so there is nothing left to cancel.
-      await api.removePlaceReminder(previous.id).catch((err: unknown) => {
-        if ((err as { response?: { status?: number } })?.response?.status !== 404) {
-          toast.error('The earlier place reminder could not be cancelled');
-        }
-      });
-    }
-    await persistIndex((current) => setIndexEntry(current, path, { placeReminder }));
+    const placeReminder = await replaceReminder(
+      path,
+      'placeReminder',
+      place
+        ? async () => {
+            const res = await api.addPlaceReminder({
+              zone: place.zone,
+              on,
+              title: `📝 ${title}`,
+              url: `/notes?note=${encodeURIComponent(path)}`,
+            });
+            const made = res.reminder;
+            if (!made?.id) throw new Error('Could not set the place reminder');
+            return { id: made.id, zone: made.zone, zoneName: made.zone_name || place.name, on: made.on };
+          }
+        : null,
+      async (previous) => {
+        // 404: it already went off, so there is nothing left to cancel.
+        await api.removePlaceReminder(previous.id).catch((err: unknown) => {
+          if ((err as { response?: { status?: number } })?.response?.status !== 404) {
+            toast.error('The earlier place reminder could not be cancelled');
+          }
+        });
+      },
+    );
     void queryClient.invalidateQueries({ queryKey: PLACE_REMINDERS_KEY });
     toast.success(placeReminder ? `Reminder set for ${placeReminderText(placeReminder).toLowerCase()}` : 'Place reminder removed');
   };

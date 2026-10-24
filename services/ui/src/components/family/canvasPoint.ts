@@ -1,5 +1,26 @@
 export type Point = { x: number; y: number };
 
+/** One stroke from (x1, y1) to (x2, y2), as the family board and note drawings paint it. */
+export interface StrokeSegment {
+  color: string;
+  width: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export function paintSegment(context: CanvasRenderingContext2D, segment: StrokeSegment): void {
+  context.strokeStyle = segment.color;
+  context.lineWidth = segment.width;
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  context.beginPath();
+  context.moveTo(segment.x1, segment.y1);
+  context.lineTo(segment.x2, segment.y2);
+  context.stroke();
+}
+
 /**
  * Where a pointer lands in the canvas's own pixel grid.
  *

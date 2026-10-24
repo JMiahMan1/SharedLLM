@@ -11,7 +11,7 @@ import {
   type DrawingSegment,
 } from '../../lib/drawingSocket';
 import SendToChat from '../chat/SendToChat';
-import { canvasPoint, type Point } from './canvasPoint';
+import { canvasPoint, paintSegment, type Point } from './canvasPoint';
 
 const COLORS = ['#1e293b', '#dc2626', '#2563eb', '#16a34a', '#9333ea', '#ea580c'];
 const WIDTHS = [3, 6, 12];
@@ -31,17 +31,6 @@ function nextSegmentId(): string {
   }
   segmentCounter += 1;
   return `s${Date.now().toString(36)}${segmentCounter.toString(36)}`;
-}
-
-function paintSegment(context: CanvasRenderingContext2D, segment: DrawingSegment): void {
-  context.strokeStyle = segment.color;
-  context.lineWidth = segment.width;
-  context.lineCap = 'round';
-  context.lineJoin = 'round';
-  context.beginPath();
-  context.moveTo(segment.x1, segment.y1);
-  context.lineTo(segment.x2, segment.y2);
-  context.stroke();
 }
 
 /**

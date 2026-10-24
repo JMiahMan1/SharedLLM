@@ -19,6 +19,8 @@ import re
 import time
 import uuid
 
+from services.common.links import app_link  # the timers' rule for in-app links
+
 #: Hash per person: reminder id -> {"id", "zone", "zone_name", "on", "title", "url", "created_at"}.
 KEY = "geo:place_reminders:{user}"
 #: At most this many waiting reminders per person.
@@ -31,20 +33,6 @@ _REMINDER_ID = re.compile(r"^[0-9a-f]{32}$")
 
 def _decode(value):
     return value.decode() if isinstance(value, bytes) else value
-
-
-def app_link(url) -> str | None:
-    """An in-app path, or None. A notice only ever opens the app itself, so
-    anything with a scheme, a host, a backslash or a control character is
-    dropped (the same rule as the timers' links)."""
-    if not isinstance(url, str):
-        return None
-    url = url.strip()
-    if not url.startswith("/") or url.startswith("//") or "\\" in url:
-        return None
-    if any(ord(c) < 32 or ord(c) == 127 for c in url) or len(url) > 1000:
-        return None
-    return url
 
 
 def validate(body) -> dict:

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Bell, BellOff, Loader2, MapPin } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
-import { geoZonesQueryKey, houseConfigQueryOptions } from '../../lib/wanderQueries';
+import { geoZonesQueryKey, houseConfigQueryOptions, zonePlaces } from '../../lib/wanderQueries';
 import { placeReminderText, type NotePlaceReminder, type NoteReminder } from '../../lib/notesMeta';
 
 export interface Place {
@@ -11,17 +11,30 @@ export interface Place {
   name: string;
 }
 
-/** The family's places (Home Assistant zones) from geo's GeoJSON, by name. */
-function placesFrom(data: Record<string, unknown> | undefined): Place[] {
-  const features = Array.isArray(data?.features) ? (data.features as Array<{ properties?: Record<string, unknown> }>) : [];
-  const out: Place[] = [];
-  for (const feature of features) {
-    const zone = feature.properties?.entity_id;
-    if (typeof zone !== 'string' || !zone.startsWith('zone.')) continue;
-    const name = feature.properties?.friendly_name;
-    out.push({ zone, name: typeof name === 'string' && name.trim() ? name : zone.slice(5) });
-  }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+/** The family's places (Home Assistant zones, as Wander reads them), by name. */
+function placesFrom(data: unknown): Place[] {
+  return zonePlaces(data)
+    .filter((p) => p.id.startsWith('zone.'))
+    .map((p) => ({ zone: p.id, name: p.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Run one change, with its busy flag and error message (both parts of the panel). */
+function useChange(fallback: string) {
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError('');
+    try {
+      await action();
+    } catch (err) {
+      setError(errorText(err, fallback));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { error, setError, busy, run };
 }
 
 /**
@@ -49,21 +62,8 @@ function PlaceReminderSection({
   const places = placesFrom(zonesQuery.data);
   const [zone, setZone] = useState(reminder?.zone ?? '');
   const [on, setOn] = useState<'arrive' | 'leave'>(reminder?.on ?? 'arrive');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const { error, busy, run } = useChange('Could not change the place reminder');
   const chosen = places.find((p) => p.zone === zone) ?? (zone ? undefined : places[0]);
-
-  const run = async (action: () => Promise<void>) => {
-    setBusy(true);
-    setError('');
-    try {
-      await action();
-    } catch (err) {
-      setError(errorText(err, 'Could not change the place reminder'));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <div className="space-y-2 border-t border-white/5 pt-2" data-testid="note-place-reminder">
@@ -196,22 +196,9 @@ export default function ReminderPanel({
   const [value, setValue] = useState(() =>
     localInputValue(reminder && Date.parse(reminder.at) > now.getTime() ? new Date(reminder.at) : quickPicks(now)[0].at),
   );
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const { error, setError, busy, run } = useChange('Could not change the reminder');
   const due = reminder ? new Date(reminder.at) : null;
   const passed = Boolean(due && due.getTime() <= now.getTime());
-
-  const run = async (action: () => Promise<void>) => {
-    setBusy(true);
-    setError('');
-    try {
-      await action();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not change the reminder');
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const set = (at: Date) => {
     if (Number.isNaN(at.getTime())) {

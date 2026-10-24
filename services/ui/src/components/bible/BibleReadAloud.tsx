@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
+import { base64ToBytes } from '../../lib/base64';
 import type { BibleNarrationPlan } from '../../types/api';
 
 interface Props {
@@ -139,7 +140,7 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
     }
     const data = await api.getBibleNarrationChunk(ref, index, ver, chosen || undefined);
     const piece: SpokenPiece = {
-      bytes: toBytes(data.audio_base64),
+      bytes: base64ToBytes(data.audio_base64),
       mime: data.mime_type || 'audio/wav',
     };
     remember(key, piece);
@@ -422,13 +423,6 @@ export default function BibleReadAloud({ reference, version, voice, onVoiceChang
       ) : null}
     </div>
   );
-}
-
-function toBytes(base64: string): Uint8Array<ArrayBuffer> {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes;
 }
 
 function messageOf(error: unknown): string {

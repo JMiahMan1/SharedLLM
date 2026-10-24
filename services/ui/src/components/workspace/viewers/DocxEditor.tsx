@@ -4,6 +4,7 @@ import { Loader2, FileType2 } from 'lucide-react';
 import { api } from '../../../services/api';
 import toast from 'react-hot-toast';
 import { WordProcessorToolbar } from './WordProcessorToolbar';
+import { blobToBase64 } from '../../../lib/base64';
 
 // DOCX is a ZIP whose body lives in word/document.xml. We render its
 // paragraphs into a contentEditable surface with the shared word-processor
@@ -323,12 +324,7 @@ export const DocxEditor = forwardRef<DocxEditorHandle, DocxEditorProps>(function
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         compression: 'DEFLATE',
       });
-      const buf = await outBlob.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-      let binary = '';
-      const CHUNK = 0x8000;
-      for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-      const b64 = btoa(binary);
+      const b64 = await blobToBase64(outBlob);
       await api.writeWorkspaceFileBase64(workspaceId, path, b64);
       markDirty(false);
       toast.success(`Saved ${path.split('/').pop()}`);

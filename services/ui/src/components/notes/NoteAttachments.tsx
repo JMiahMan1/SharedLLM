@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { cachedUrl } from '../../lib/blobUrlCache';
+import { useAudioRecorder } from '../../hooks/useAudioRecorder';
+import { canvasPoint, paintSegment, type Point } from '../family/canvasPoint';
+import { base64ToBytes, blobToBase64 } from '../../lib/base64';
 import { FileText, ImagePlus, Loader2, Mic, Paperclip, PenLine, Square, Trash2, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
@@ -8,8 +11,6 @@ import {
   attachmentKind,
   attachmentMarkdown,
   attachmentName,
-  base64ToBlob,
-  blobToBase64,
   listAttachments,
   type NoteAttachment,
 } from '../../lib/noteAttachments';
@@ -22,29 +23,29 @@ function noteFolder(path: string): string {
 /**
  * One attachment's file, read through the note's own account and shown via
  * an object URL (the API needs the app's token, which an <img src> cannot
- * send). Cached for the visit; the URL is revoked when nothing shows it.
+ * send), from the same per-page cache chat photos use.
  */
 function useAttachmentUrl(notePath: string | undefined, link: string, asUser?: 'admin') {
-  const query = useQuery({
-    queryKey: ['note-attachment', asUser ?? 'me', notePath ? noteFolder(notePath) : '', link],
-    enabled: Boolean(notePath),
-    queryFn: async () => {
+  const [loaded, setLoaded] = useState<{ key: string; url?: string; error?: unknown } | null>(null);
+  const key = notePath ? `note:${asUser ?? 'me'}:${noteFolder(notePath)}:${link}` : '';
+  useEffect(() => {
+    if (!key) return;
+    let live = true;
+    cachedUrl(key, async () => {
       const res = await api.noteAttachment({ action: 'read', path: notePath!, attachment: link, as_user: asUser });
       const data = res.detail?.data;
       if (res.status !== 'SUCCESS' || typeof data !== 'string') throw new Error(res.message || 'Could not load the attachment');
-      return { data, mime: typeof res.detail?.mime === 'string' ? res.detail.mime : 'application/octet-stream' };
-    },
-    staleTime: Infinity,
-    retry: false,
-  });
-  const url = useMemo(
-    () => (query.data ? URL.createObjectURL(base64ToBlob(query.data.data, query.data.mime)) : null),
-    [query.data],
-  );
-  useEffect(() => () => {
-    if (url) URL.revokeObjectURL(url);
-  }, [url]);
-  return { url, mime: query.data?.mime, isLoading: query.isLoading, error: query.error };
+      const mime = typeof res.detail?.mime === 'string' ? res.detail.mime : 'application/octet-stream';
+      return new Blob([base64ToBytes(data)], { type: mime });
+    })
+      .then((url) => live && setLoaded({ key, url }))
+      .catch((error: unknown) => live && setLoaded({ key, error }));
+    return () => {
+      live = false;
+    };
+  }, [key, notePath, link, asUser]);
+  const current = loaded?.key === key ? loaded : null;
+  return { url: current?.url ?? null, isLoading: Boolean(key) && !current, error: current?.error };
 }
 
 /** An attachment as it reads in a note: the picture, a player, or the file to open. */
@@ -65,7 +66,7 @@ export function AttachmentView({
   const kind = attachmentKind(label);
   // A card does not fetch a voice note or a file just to name it.
   const fetchIt = !compact || kind === 'image';
-  const { url, mime, isLoading, error } = useAttachmentUrl(fetchIt ? notePath : undefined, link, asUser);
+  const { url, isLoading, error } = useAttachmentUrl(fetchIt ? notePath : undefined, link, asUser);
   if (!fetchIt || !notePath) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-slate-300">
@@ -87,7 +88,7 @@ export function AttachmentView({
       </span>
     );
   }
-  const shown = attachmentKind(label, mime);
+  const shown = kind;
   if (shown === 'image') {
     return <img src={url} alt={label} className={`rounded-lg ${compact ? 'max-h-32' : 'max-h-80'} max-w-full object-contain`} />;
   }
@@ -102,11 +103,12 @@ export function AttachmentView({
 }
 
 const PEN_COLOURS = ['#f8fafc', '#dc2626', '#2563eb', '#16a34a', '#eab308'];
+const PEN_WIDTH = 4;
 
 /** A finger or mouse drawing, saved as a PNG attachment. */
 function DrawingPad({ onDone, onCancel }: { onDone: (png: Blob) => Promise<void>; onCancel: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
+  const last = useRef<Point | null>(null);
   const [colour, setColour] = useState(PEN_COLOURS[0]);
   const [drawn, setDrawn] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -123,22 +125,16 @@ function DrawingPad({ onDone, onCancel }: { onDone: (png: Blob) => Promise<void>
   const context = () => canvasRef.current?.getContext('2d') ?? null;
 
   useEffect(() => {
+    // A dark page, so the PNG reads the same in Nextcloud as here.
     const ctx = context();
     if (!ctx) return;
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = 4;
   }, []);
 
-  const point = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = event.currentTarget;
-    const box = canvas.getBoundingClientRect();
-    const scaleX = box.width ? canvas.width / box.width : 1;
-    const scaleY = box.height ? canvas.height / box.height : 1;
-    return { x: (event.clientX - box.left) * scaleX, y: (event.clientY - box.top) * scaleY };
-  };
+  // The family board's own pointer scaling and stroke painting.
+  const point = (event: React.PointerEvent<HTMLCanvasElement>): Point =>
+    canvasPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), event.currentTarget);
 
   const save = async () => {
     const canvas = canvasRef.current;
@@ -167,28 +163,25 @@ function DrawingPad({ onDone, onCancel }: { onDone: (png: Blob) => Promise<void>
         onPointerDown={(e) => {
           const ctx = context();
           if (!ctx) return;
-          drawing.current = true;
           e.currentTarget.setPointerCapture?.(e.pointerId);
-          const { x, y } = point(e);
-          ctx.strokeStyle = colour;
-          ctx.beginPath();
-          ctx.moveTo(x, y);
-          ctx.lineTo(x + 0.1, y + 0.1);
-          ctx.stroke();
+          const p = point(e);
+          last.current = p;
+          paintSegment(ctx, { color: colour, width: PEN_WIDTH, x1: p.x, y1: p.y, x2: p.x + 0.1, y2: p.y + 0.1 });
           setDrawn(true);
         }}
         onPointerMove={(e) => {
           const ctx = context();
-          if (!ctx || !drawing.current) return;
-          const { x, y } = point(e);
-          ctx.lineTo(x, y);
-          ctx.stroke();
+          const from = last.current;
+          if (!ctx || !from) return;
+          const p = point(e);
+          paintSegment(ctx, { color: colour, width: PEN_WIDTH, x1: from.x, y1: from.y, x2: p.x, y2: p.y });
+          last.current = p;
         }}
         onPointerUp={() => {
-          drawing.current = false;
+          last.current = null;
         }}
         onPointerLeave={() => {
-          drawing.current = false;
+          last.current = null;
         }}
       />
       <div className="flex flex-wrap items-center gap-2">
@@ -268,12 +261,7 @@ export default function NoteAttachments({
   const [busy, setBusy] = useState<string>('');
   const [error, setError] = useState('');
   const [drawingOpen, setDrawingOpen] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => () => recorderRef.current?.stop(), []);
 
   const upload = async (blob: Blob, filename: string) => {
     if (!notePath) return;
@@ -313,41 +301,22 @@ export default function NoteAttachments({
       onRemove(attachment.link);
     });
 
-  const startRecording = async () => {
+  // The same recorder as chat's voice messages.
+  const recorder = useAudioRecorder({
+    onRecorded: (blob) => void run('voice', () => upload(blob, `voice-${stamp()}.${recordingExtension(blob.type)}`)),
+    onError: (reason) =>
+      setError(
+        reason === 'unavailable'
+          ? 'Recording is not available on this device.'
+          : 'Microphone permission is needed to record a voice note.',
+      ),
+  });
+  const recording = recorder.recording;
+  const startRecording = () => {
     setError('');
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setError('Recording is not available on this device.');
-      return;
-    }
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      setError('Microphone permission is needed to record a voice note.');
-      return;
-    }
-    const recorder = new MediaRecorder(stream);
-    chunksRef.current = [];
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunksRef.current.push(event.data);
-    };
-    recorder.onstop = () => {
-      stream.getTracks().forEach((track) => track.stop());
-      setRecording(false);
-      const mime = recorder.mimeType || chunksRef.current[0]?.type || 'audio/webm';
-      const blob = new Blob(chunksRef.current, { type: mime });
-      if (blob.size === 0) return;
-      void run('voice', () => upload(blob, `voice-${stamp()}.${recordingExtension(mime)}`));
-    };
-    recorderRef.current = recorder;
-    recorder.start();
-    setRecording(true);
+    return recorder.start();
   };
-
-  const stopRecording = () => {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-  };
+  const stopRecording = recorder.stop;
 
   return (
     <section className="space-y-2" aria-label="Attachments" data-testid="note-attachments">

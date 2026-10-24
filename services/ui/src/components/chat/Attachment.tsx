@@ -3,22 +3,10 @@ import { Download, FileText, Loader2, Mic, Play, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { formatBytes, type TalkParameter } from './chatModel';
+import { cachedUrl } from '../../lib/blobUrlCache';
 
 type FileParameter = TalkParameter;
 
-// One object URL per file for the life of the page: a chat re-renders every
-// few seconds, and refetching a photo each time would flicker and waste data.
-const blobCache = new Map<string, Promise<string>>();
-
-function cachedUrl(key: string, load: () => Promise<Blob>): Promise<string> {
-  let entry = blobCache.get(key);
-  if (!entry) {
-    entry = load().then((blob) => URL.createObjectURL(blob));
-    entry.catch(() => blobCache.delete(key));
-    blobCache.set(key, entry);
-  }
-  return entry;
-}
 
 const previewUrl = (file: FileParameter, size: number) =>
   cachedUrl(`preview:${file.id}:${size}`, () => api.getTalkFileBlob({ file_id: file.id, preview: true, size }));

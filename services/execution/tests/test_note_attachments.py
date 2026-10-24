@@ -30,6 +30,18 @@ class FakeProvider:
     def sanitize_filename(self, value, fallback):
         return (value or fallback).replace(" ", "_")
 
+    # The real provider's file helpers, over the faked http_client below.
+    async def upload_file(self, path, data, content_type):
+        import services.execution.http_client as http_client
+
+        resp = await http_client.request("PUT", self.file_url(path), data=data, headers={"Content-Type": content_type})
+        return resp["status_code"] in (200, 201, 204)
+
+    async def download_file(self, path):
+        import services.execution.http_client as http_client
+
+        return await http_client.fetch_bytes(self.file_url(path))
+
 
 @pytest.fixture
 def provider(monkeypatch):

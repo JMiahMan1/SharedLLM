@@ -126,7 +126,13 @@ that, every save of an opened note stacked another header on top.
   duplicate copies the one linked folder under the copy's own file id and
   relinks it; delete forever deletes them; Empty trash deletes every
   attachment folder left in Trash. Listings skip anything inside an
-  attachment folder, so a `.md` file there is never a note.
+  attachment folder, so a `.md` file there is never a note. Shared pieces,
+  not copies: execution stores and reads files with the Nextcloud
+  provider's `upload_file` / `download_file`; the voice note uses chat's
+  recorder (`hooks/useAudioRecorder.ts`), the drawing the family board's
+  `canvasPoint` / `paintSegment`, base64 goes through `lib/base64.ts` (also
+  chat uploads and Bible read-aloud), and files show through the same
+  per-page object-URL cache as chat photos (`lib/blobUrlCache.ts`).
 - **Quick capture**: the "Take a note…" bar opens an empty editor; the title
   falls back to the first line of the body, then `Untitled note`.
 - **Instant shelf**: each visit's list and index are kept in localStorage per
@@ -251,7 +257,10 @@ that, every save of an opened note stacked another header on top.
   they come back. The gateway (`GET/POST /api/geo/place-reminders`,
   `DELETE /api/geo/place-reminders/{id}`, `services/gateway/family_safety.py`)
   always acts for the caller; geo refuses a zone it does not have, a link
-  outside the app, and more than 50 waiting per person. The shared index
+  outside the app (the timers' own rule, `services/common/links.py`), and
+  more than 50 waiting per person. The panel reads places with Wander's
+  `zonePlaces`, and both reminders change through one set-then-cancel path
+  (`replaceReminder` in the page). The shared index
   keeps `placeReminder: {id, zone, zoneName, on}` for the card's pin chip
   ("Arriving at Home"); the page asks geo which are still waiting (only when
   some note has one, and again on Refresh), so a reminder that went off
