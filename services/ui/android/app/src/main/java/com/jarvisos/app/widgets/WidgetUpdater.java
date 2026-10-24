@@ -44,6 +44,7 @@ public final class WidgetUpdater {
         request(context, DashboardWidget.class);
         request(context, ActionButtonWidget.class);
         request(context, HealthWidget.class);
+        request(context, HealthTodayWidget.class);
         request(context, VerseWidget.class);
         request(context, NotesWidget.class);
         request(context, SingleNoteWidget.class);
@@ -98,20 +99,24 @@ public final class WidgetUpdater {
      * (`/notes?note=…`), so the widget never grows its own navigation stack.
      */
     public static PendingIntent openNotePendingIntent(Context context, String path, int row) {
+        return openPathPendingIntent(context, "/notes?note=" + Uri.encode(path), 6010 + row);
+    }
+
+    /**
+     * Open the app at a web path the SPA already routes (a notification tap
+     * uses the same extra), so a widget never grows its own navigation.
+     */
+    public static PendingIntent openPathPendingIntent(Context context, String webPath, int requestCode) {
         Intent i = new Intent(context, MainActivity.class);
         i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        i.putExtra(PushNotifier.EXTRA_OPEN_PATH, "/notes?note=" + Uri.encode(path));
-        return PendingIntent.getActivity(context, 6010 + row, i,
+        i.putExtra(PushNotifier.EXTRA_OPEN_PATH, webPath);
+        return PendingIntent.getActivity(context, requestCode, i,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     /** Open the app on a blank note, the widget's quick-add button. */
     public static PendingIntent composeNotePendingIntent(Context context) {
-        Intent i = new Intent(context, MainActivity.class);
-        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        i.putExtra(PushNotifier.EXTRA_OPEN_PATH, "/notes?new=1");
-        return PendingIntent.getActivity(context, 6001, i,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return openPathPendingIntent(context, "/notes?new=1", 6001);
     }
 
     /**
@@ -218,6 +223,19 @@ public final class WidgetUpdater {
         });
     }
 
+    /** Health today home-screen widget: steps, readiness, sleep, water (display only). */
+    public static void pushHealthToday(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, HealthTodayWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = HealthTodayWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
     /** Verse-of-the-day home-screen widget (display only, one request). */
     public static void pushVerse(Context context) {
         AppWidgetManager mgr = AppWidgetManager.getInstance(context);
@@ -309,11 +327,7 @@ public final class WidgetUpdater {
 
     /** Open the widget's note in the app, at the note the widget shows. */
     public static PendingIntent openSingleNotePendingIntent(Context context, int appWidgetId, String path) {
-        Intent i = new Intent(context, MainActivity.class);
-        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        i.putExtra(PushNotifier.EXTRA_OPEN_PATH, "/notes?note=" + Uri.encode(path));
-        return PendingIntent.getActivity(context, 6500 + appWidgetId, i,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return openPathPendingIntent(context, "/notes?note=" + Uri.encode(path), 6500 + appWidgetId);
     }
 
     /** Re-pick the note a single-note widget shows. */
