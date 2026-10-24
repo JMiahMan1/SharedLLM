@@ -7,24 +7,24 @@ import {
   resetMediaTokenForTests,
 } from './mediaToken';
 import { proxiedImage } from './mediaImage';
+import { apiClient } from '../services/api';
+
+vi.mock('../services/api', () => ({ apiClient: { post: vi.fn() } }));
 
 function tokenResponse(token: string, expiresAt: number, user = 'alice') {
-  return new Response(JSON.stringify({ token, expires_at: expiresAt, user }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return { data: { token, expires_at: expiresAt, user } };
 }
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 describe('media token', () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchMock: ReturnType<typeof vi.mocked<typeof apiClient.post>>;
 
   beforeEach(() => {
     resetMediaTokenForTests();
     localStorage.setItem('jarvis_api_key', 'key-1');
-    fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    fetchMock = vi.mocked(apiClient.post);
+    fetchMock.mockReset();
   });
 
   afterEach(() => {
@@ -34,16 +34,13 @@ describe('media token', () => {
     localStorage.removeItem('jarvis_api_key');
   });
 
-  it('mints a token with the API key in the header, never in the URL', async () => {
+  it('mints a token through the shared API client (bearer header), never with the key in the URL', async () => {
     fetchMock.mockResolvedValue(tokenResponse('t1', nowSeconds() + 3600));
 
     const token = await refreshMediaToken();
 
     expect(token).toMatchObject({ token: 't1', user: 'alice' });
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toMatch(/\/api\/media\/token$/);
-    expect(String(url)).not.toContain('key-1');
-    expect(init.headers.Authorization).toBe('Bearer key-1');
+    expect(fetchMock).toHaveBeenCalledWith('/api/media/token');
   });
 
   it('shares one request between concurrent callers', async () => {
@@ -86,7 +83,7 @@ describe('media token', () => {
   });
 
   it('holds nothing when the gateway refuses', async () => {
-    fetchMock.mockResolvedValue(new Response('no', { status: 401 }));
+    fetchMock.mockRejectedValue(new Error('Request failed with status code 401'));
 
     expect(await refreshMediaToken()).toBeNull();
     expect(currentMediaToken()).toBeNull();

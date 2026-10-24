@@ -7,6 +7,7 @@ import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
 import { errorText } from '../../lib/errorText';
+import { trapTab } from '../../lib/focusTrap';
 
 /**
  * The most verses a popover shows, the same cap Blue Letter Bible's
@@ -14,9 +15,6 @@ import { errorText } from '../../lib/errorText';
  * in the reader rather than a bubble.
  */
 export const POPOVER_VERSE_CAP = 7;
-
-const FOCUSABLE =
-  'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
 
 interface ReferenceChipProps {
   /** A reference the server's parser accepted, e.g. "Romans 5:8". */
@@ -108,22 +106,7 @@ export default function ReferenceChip({ reference, version, onOpenRef, className
       close();
       return;
     }
-    if (event.key !== 'Tab' || !panelRef.current) return;
-    const items = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
-    if (!items.length) {
-      event.preventDefault();
-      return;
-    }
-    const first = items[0];
-    const last = items[items.length - 1];
-    const active = document.activeElement;
-    if (event.shiftKey && (active === first || active === panelRef.current)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && active === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    trapTab(event, panelRef.current);
   };
 
   const copy = async () => {

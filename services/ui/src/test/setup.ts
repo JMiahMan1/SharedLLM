@@ -316,6 +316,8 @@ export const server = setupServer(
   ...mediaHandlers,
   http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
   http.get('/api/users/me', () => HttpResponse.json(users[0])),
+  // Signed media token for cover art (lib/mediaToken.ts).
+  http.post('/api/media/token', () => HttpResponse.json({ token: 'mt-1', user: 'alice', expires_at: Math.floor(Date.now() / 1000) + 3600 })),
   // Notice categories: nothing saved yet, so every kind is on.
   http.get('/api/users/me/notification-preferences', () => HttpResponse.json({})),
   http.put('/api/users/me/notification-preferences', async ({ request }) => HttpResponse.json((await request.json()) as Record<string, boolean>)),

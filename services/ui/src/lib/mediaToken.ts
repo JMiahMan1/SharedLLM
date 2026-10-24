@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { storageGetSync } from './storage';
-import { getServerOrigin } from './serverUrl';
+import { apiClient } from '../services/api';
 
 /**
  * The signed media token (`?mt=&user=`, media overhaul §7.4) for URLs that
@@ -62,14 +62,10 @@ export function refreshMediaToken(): Promise<MediaToken | null> {
   if (inflight) return inflight;
   const key = apiKey();
   if (!key) return Promise.resolve(null);
-  const base = getServerOrigin().replace(/\/+$/, '');
-  inflight = fetch(`${base}/api/media/token`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}` },
-  })
-    .then(async (resp) => {
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const body = (await resp.json()) as { token?: unknown; user?: unknown; expires_at?: unknown };
+  // The shared client adds the server URL and the bearer header.
+  inflight = apiClient
+    .post<{ token?: unknown; user?: unknown; expires_at?: unknown }>('/api/media/token')
+    .then(({ data: body }) => {
       if (typeof body.token !== 'string' || typeof body.user !== 'string' || typeof body.expires_at !== 'number') {
         throw new Error('Unexpected media token response');
       }
