@@ -199,6 +199,9 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
   await page.route('**/api/media/abs/progress', json('abs-progress'));
   await page.route('**/api/media/token', json('media-token'));
   await page.route('**/api/media/podcast-episodes**', json('podcast-episodes', 'ma'));
+  // The media event stream: a snapshot and a heartbeat, then the body ends
+  // and EventSource reconnects (a fulfilled route cannot stay open).
+  await page.route('**/api/media/events**', (route) => (scenario === 'offline' ? route.abort() : fulfillEvents(route)));
   // Remote (non-web-player) MA commands are REST, not the player's JSON-RPC
   // socket. Default to an empty answer; output.spec overrides players/all.
   await page.route('**/api/media/ma-command', (route) =>
@@ -423,16 +426,21 @@ export async function mockSendspin(page: Page): Promise<SendspinMock> {
   return state;
 }
 
-export async function mockEvents(page: Page): Promise<void> {
-  await page.route('**/api/media/events**', async (route) => {
-    const body = [
-      'event: snapshot',
-      'data: {"players":[],"active":null}',
-      '',
-      'event: heartbeat',
-      'data: {}',
-      '',
-    ].join('\n');
-    await route.fulfill({ contentType: 'text/event-stream', body });
-  });
+async function fulfillEvents(route: Route, players: unknown[] = []): Promise<void> {
+  const body = [
+    'retry: 3000',
+    '',
+    'event: snapshot',
+    `data: ${JSON.stringify({ type: 'snapshot', players })}`,
+    '',
+    'event: heartbeat',
+    'data: {"type":"heartbeat"}',
+    '',
+  ].join('\n');
+  await route.fulfill({ contentType: 'text/event-stream', body });
+}
+
+/** Serve the media event stream with `players` in its snapshot. */
+export async function mockEvents(page: Page, players: unknown[] = []): Promise<void> {
+  await page.route('**/api/media/events**', (route) => fulfillEvents(route, players));
 }
