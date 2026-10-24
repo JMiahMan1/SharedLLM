@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   player: {} as Record<string, unknown>,
   update: vi.fn().mockResolvedValue(undefined),
   stop: vi.fn().mockResolvedValue(undefined),
+  reclaim: vi.fn().mockResolvedValue({ playing: false }),
   actionListener: null as null | ((d: { action: string }) => void),
 }));
 
@@ -18,6 +19,7 @@ vi.mock('@capacitor/core', async (orig) => ({
   Capacitor: { isNativePlatform: () => h.native },
 }));
 vi.mock('../lib/maWebPlayer', () => ({
+  clientName: () => "Jeremiah's Web Player (Mobile)",
   useMAWebPlayer: () => {
     // One player for the app's lifetime: counted on first render only. Its
     // state is whatever the test last put in h.player.
@@ -32,6 +34,7 @@ vi.mock('../plugins/jarvisMedia', () => ({
   default: {
     update: h.update,
     stop: h.stop,
+    reclaim: h.reclaim,
     addListener: (_e: string, cb: (d: { action: string }) => void) => {
       h.actionListener = cb;
       return Promise.resolve({ remove: vi.fn() });
@@ -60,6 +63,7 @@ const PLAYING = {
   duration: 3600,
   volume: 70,
   muted: false,
+  playerId: 'player-1',
 };
 
 beforeEach(() => {
@@ -84,12 +88,30 @@ describe('the app-wide web player', () => {
   it('keeps Android playback alive and routes the lock-screen buttons back', async () => {
     h.native = true;
     render(<App page="bible" onState={vi.fn()} />);
-    expect(h.update).toHaveBeenCalledWith({ title: 'Narnia', artist: 'C. S. Lewis', playing: true });
+    expect(h.update).toHaveBeenCalledWith({
+      title: 'Narnia', artist: 'C. S. Lewis', playing: true,
+      playerId: 'player-1', playerName: "Jeremiah's Web Player (Mobile)", volume: 70,
+    });
     await act(async () => {});
     h.actionListener?.({ action: 'pause' });
     h.actionListener?.({ action: 'next' });
     expect(h.player.pause).toHaveBeenCalled();
     expect(h.player.next).toHaveBeenCalled();
+  });
+
+  it('takes playback back from the native player when the app opens again', async () => {
+    h.native = true;
+    h.reclaim.mockResolvedValueOnce({ playing: true });
+    render(<App page="bible" onState={vi.fn()} />);
+    await waitFor(() => expect(h.player.play).toHaveBeenCalled());
+    expect(h.reclaim).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start playing at launch when nothing was playing natively', async () => {
+    h.native = true;
+    render(<App page="bible" onState={vi.fn()} />);
+    await waitFor(() => expect(h.reclaim).toHaveBeenCalled());
+    expect(h.player.play).not.toHaveBeenCalled();
   });
 
   it('needs the provider', () => {

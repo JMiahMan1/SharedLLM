@@ -44,13 +44,13 @@ public final class ActionButtonConfig {
             JSONObject o = new JSONObject(raw);
             String entity = o.optString("entity_id", "");
             if (entity.isEmpty()) return null;
-              return new ActionButtonConfig(
-                  entity,
-                  o.optString("service", "turn_on"),
-                  o.optString("label", ""),
-                  o.optString("icon", "garage"),
-                  o.optInt("icon_bg", 0)
-              );
+            return new ActionButtonConfig(
+                entity,
+                o.optString("service", "turn_on"),
+                o.optString("label", ""),
+                o.optString("icon", "garage"),
+                o.optInt("icon_bg", 0)
+            );
         } catch (Exception e) {
             Log.w(TAG, "load failed for " + appWidgetId + ": " + e.getMessage());
             return null;

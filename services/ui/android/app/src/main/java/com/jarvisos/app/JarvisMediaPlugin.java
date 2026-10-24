@@ -25,12 +25,27 @@ public class JarvisMediaPlugin extends Plugin {
 
     @PluginMethod
     public void update(PluginCall call) {
+        Integer volume = call.getInt("volume");
         MediaPlaybackService.update(
                 getContext(),
                 call.getString("title", "Jarvis"),
                 call.getString("artist", ""),
-                Boolean.TRUE.equals(call.getBoolean("playing", false)));
+                Boolean.TRUE.equals(call.getBoolean("playing", false)),
+                call.getString("playerId"),
+                call.getString("playerName"),
+                volume != null ? volume : 70);
         call.resolve();
+    }
+
+    /**
+     * Take playback back from the native player that kept it going while the
+     * app was closed; {@code playing} says whether to carry on in the web player.
+     */
+    @PluginMethod
+    public void reclaim(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("playing", MediaPlaybackService.reclaim());
+        call.resolve(result);
     }
 
     @PluginMethod
@@ -42,6 +57,7 @@ public class JarvisMediaPlugin extends Plugin {
     @Override
     protected void handleOnDestroy() {
         MediaPlaybackService.listener = null;
-        MediaPlaybackService.stop(getContext());
+        // Playing: keep the music going natively. Otherwise this stops the service.
+        MediaPlaybackService.handOff(getContext());
     }
 }

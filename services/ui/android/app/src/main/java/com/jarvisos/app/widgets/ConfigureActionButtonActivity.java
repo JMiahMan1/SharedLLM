@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.appwidget.AppWidgetManager;
 import android.content.Intent;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -401,7 +402,9 @@ public class ConfigureActionButtonActivity extends Activity {
                     selected ? 0xFF4ADE80 : 0xFF64748B);
                 none.setBackground(nbg);
                 none.setContentDescription("None: transparent tile, no background");
-                none.setTooltipText("None: transparent tile, no background");
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    none.setTooltipText("None: transparent tile, no background");
+                }
                 none.setOnClickListener(v -> {
                     selectedIconBg = 0;
                     buildIconBgRow();
@@ -415,7 +418,9 @@ public class ConfigureActionButtonActivity extends Activity {
             lp.setMargins(pad, pad, pad, pad);
             sw.setLayoutParams(lp);
             sw.setContentDescription(ICON_BG_LABELS[i]);
-            sw.setTooltipText(ICON_BG_LABELS[i]);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                sw.setTooltipText(ICON_BG_LABELS[i]);
+            }
             GradientDrawable bg = new GradientDrawable();
             bg.setShape(GradientDrawable.OVAL);
             bg.setColor(color);

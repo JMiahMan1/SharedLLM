@@ -115,7 +115,8 @@ function plainName(value: unknown): string {
   return name && name.length <= 40 && !/[{}"]/.test(name) ? name : '';
 }
 
-function clientName(): string {
+/** The name this player shows in Music Assistant (also used by the native hand-off). */
+export function clientName(): string {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   let userName = '';
   try {
