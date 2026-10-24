@@ -4,6 +4,7 @@ import { Music, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { useOptionalWebPlayer } from '../../context/webPlayerContext';
 import { proxiedImage } from '../../lib/mediaImage';
 import { useMediaToken } from '../../lib/mediaToken';
+import { useMediaStore } from '../../features/media/store/mediaStore';
 
 /**
  * The web player above the page, so music does not disappear when the reader
@@ -15,6 +16,7 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
   const location = useLocation();
   // Re-render once the signed media token for the cover URL arrives.
   useMediaToken();
+  const otherTab = useMediaStore((s) => s.playingInOtherTab);
   if (!player || !player.mediaTitle || location.pathname.startsWith('/media')) return null;
 
   const pct = player.duration > 0 ? Math.min(100, Math.max(0, (player.position / player.duration) * 100)) : 0;
@@ -75,30 +77,45 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
               {summary}
             </Link>
           )}
-          <button
-            type="button"
-            aria-label="Previous track"
-            onClick={() => void player.previous()}
-            className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-slate-300 hover:bg-white/10 hover:text-white"
-          >
-            <SkipBack size={17} />
-          </button>
-          <button
-            type="button"
-            aria-label={player.isPlaying ? 'Pause' : 'Play'}
-            onClick={() => (player.isPlaying ? player.pause() : player.play())}
-            className="flex min-h-11 min-w-11 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30"
-          >
-            {player.isPlaying ? <Pause size={18} /> : <Play size={18} />}
-          </button>
-          <button
-            type="button"
-            aria-label="Next track"
-            onClick={() => void player.next()}
-            className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-slate-300 hover:bg-white/10 hover:text-white"
-          >
-            <SkipForward size={17} />
-          </button>
+          {otherTab ? (
+            <>
+              <span className="shrink-0 text-xs text-slate-400">Playing in another tab</span>
+              <button
+                type="button"
+                onClick={() => void player.play().catch(() => {})}
+                className="min-h-11 shrink-0 rounded-xl bg-cyan-500/20 px-3 text-sm text-cyan-100 hover:bg-cyan-500/30"
+              >
+                Take over
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                aria-label="Previous track"
+                onClick={() => void player.previous()}
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-slate-300 hover:bg-white/10 hover:text-white"
+              >
+                <SkipBack size={17} />
+              </button>
+              <button
+                type="button"
+                aria-label={player.isPlaying ? 'Pause' : 'Play'}
+                onClick={() => (player.isPlaying ? player.pause() : player.play())}
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30"
+              >
+                {player.isPlaying ? <Pause size={18} /> : <Play size={18} />}
+              </button>
+              <button
+                type="button"
+                aria-label="Next track"
+                onClick={() => void player.next()}
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-slate-300 hover:bg-white/10 hover:text-white"
+              >
+                <SkipForward size={17} />
+              </button>
+            </>
+          )}
         </div>
       </div>
     </motion.div>

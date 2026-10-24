@@ -32,6 +32,8 @@ export interface MediaStoreState extends PlayersState {
   /** The server's media event stream. */
   events: 'connecting' | 'open' | 'closed';
   recentSearches: string[];
+  /** Another browser tab took this device's audio (tab lock, BUG-66). */
+  playingInOtherTab: boolean;
   actions: {
     selectOutput: (id: OutputId, opts?: { picked?: boolean }) => void;
     /** Fold the status poll in; follow a playing speaker until the person picks one. */
@@ -47,6 +49,7 @@ export interface MediaStoreState extends PlayersState {
     setEvents: (state: MediaStoreState['events']) => void;
     addRecentSearch: (q: string) => void;
     clearRecentSearches: () => void;
+    setPlayingInOtherTab: (on: boolean) => void;
   };
 }
 
@@ -71,6 +74,7 @@ const INITIAL = {
   sheets: { nowPlaying: false, queue: false, output: false },
   events: 'closed' as const,
   recentSearches: [] as string[],
+  playingInOtherTab: false,
 };
 
 export const useMediaStore = create<MediaStoreState>()(
@@ -125,6 +129,7 @@ export const useMediaStore = create<MediaStoreState>()(
           set({ recentSearches: [query, ...rest].slice(0, MAX_RECENT_SEARCHES) });
         },
         clearRecentSearches: () => set({ recentSearches: [] }),
+        setPlayingInOtherTab: (on) => set({ playingInOtherTab: on }),
       },
     }),
     {

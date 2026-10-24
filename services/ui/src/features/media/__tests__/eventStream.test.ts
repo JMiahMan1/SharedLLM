@@ -19,7 +19,9 @@ class FakeEventSource {
   onerror: (() => void) | null = null;
   closed = false;
   private listeners: Record<string, Array<(e: { data: string }) => void>> = {};
-  constructor(public url: string) {
+  url: string;
+  constructor(url: string) {
+    this.url = url;
     FakeEventSource.instances.push(this);
   }
   addEventListener(type: string, fn: (e: { data: string }) => void) {
