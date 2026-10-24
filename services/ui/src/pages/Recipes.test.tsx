@@ -182,7 +182,10 @@ describe('Recipes', () => {
     fireEvent.change(screen.getByLabelText('Recipe name'), { target: { value: 'Crepes' } });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
 
-    await waitFor(() => expect(deleteNote).toHaveBeenCalledWith('Pancakes', 'nextcloud', `${RECIPES_DIR}/Pancakes.md`, undefined));
+    await waitFor(() => expect(deleteNote).toHaveBeenCalledWith(
+        'Pancakes', 'nextcloud', `${RECIPES_DIR}/Pancakes.md`, undefined, `${RECIPES_DIR}/Crepes.md`,
+      ),
+    );
     expect(writeNote).toHaveBeenCalledWith(expect.objectContaining({ title: 'Crepes', path: undefined }));
   });
 

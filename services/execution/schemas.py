@@ -405,6 +405,7 @@ class NoteRequest(BaseRequest):
         "meta_read", "meta_write", "move", "duplicate", "empty_trash",
         "versions", "version_read", "version_restore",
         "shares", "sharees", "share_add", "share_remove",
+        "attachment_upload", "attachment_read", "attachment_delete",
     ]
     title: str | None = None
     content: str | None = None
@@ -422,6 +423,10 @@ class NoteRequest(BaseRequest):
     share_id: str | None = None # share_remove: the share's id from ``shares``
     can_edit: bool = False # share_add: let them edit (read+update) instead of read only
     search: str | None = None # sharees: narrow the people offered
+    attachment: str | None = None # attachment_read / _delete: the note's relative link, ".attachments.<id>/<file>"
+    filename: str | None = None # attachment_upload: the file's name (made safe for a link)
+    data: str | None = None # attachment_upload: the file, base64
+    attachments_to: str | None = None # delete (a rename's old copy): the new path its attachments follow
 
 
 # Recipes: paste-a-link import and TheMealDB search (corpus index arrives later)

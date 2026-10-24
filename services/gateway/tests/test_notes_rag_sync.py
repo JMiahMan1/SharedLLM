@@ -283,3 +283,42 @@ async def test_the_share_route_maps_each_action_as_the_caller(monkeypatch):
     refused = await main.proxy_note_share(_request({"action": "publish"}))
     assert refused.status_code == 400
     assert len(seen) == 4
+
+
+@pytest.mark.asyncio
+async def test_the_attachment_route_maps_upload_read_and_delete(monkeypatch):
+    from services.gateway import main
+
+    seen: list[tuple[dict, str | None]] = []
+
+    async def fake_proxy(request, path, payload, as_user=None):
+        seen.append((payload, as_user))
+        return JSONResponse(content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
+
+    await main.proxy_note_attachment(_request({"action": "upload", "path": "Notes/A.md", "filename": "a.png", "data": "aGk="}))
+    await main.proxy_note_attachment(_request({"action": "read", "path": "Notes/A.md", "attachment": ".attachments.7/a.png", "as_user": "admin"}))
+    await main.proxy_note_attachment(_request({"action": "delete", "path": "Notes/A.md", "attachment": ".attachments.7/a.png"}))
+    assert [p["action"] for p, _ in seen] == ["attachment_upload", "attachment_read", "attachment_delete"]
+    assert seen[0][0]["data"] == "aGk=" and seen[0][0]["filename"] == "a.png"
+    assert seen[1][0]["attachment"] == ".attachments.7/a.png" and seen[1][1] == "admin"
+
+    refused = await main.proxy_note_attachment(_request({"action": "list"}))
+    assert refused.status_code == 400
+    assert len(seen) == 3
+
+
+@pytest.mark.asyncio
+async def test_the_delete_route_passes_where_a_renamed_notes_attachments_go(monkeypatch):
+    from services.gateway import main
+
+    seen: list[dict] = []
+
+    async def fake_proxy(request, path, payload, as_user=None):
+        seen.append(payload)
+        return JSONResponse(content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
+    await main.proxy_delete_note(_request({"path": "Notes/Old.md", "attachments_to": "Notes/Work/New.md"}))
+    assert seen[0]["action"] == "delete" and seen[0]["attachments_to"] == "Notes/Work/New.md"

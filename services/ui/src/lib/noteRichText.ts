@@ -45,6 +45,8 @@ export const NOTE_TEXT_SIZES = [
   { id: 'huge', label: 'Huge', value: '1.6em', command: '5' },
 ] as const;
 
+import { ATTACHMENT_LINE, attachmentKind, attachmentName } from './noteAttachments';
+
 const COLOR_VALUE = /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20})$/;
 const SIZE_VALUE = /^\d(\.\d{1,2})?em$/;
 const SPAN_OPEN = /^<span style="([^"]*)">/;
@@ -85,6 +87,22 @@ export function spanStyleText(style: SpanStyle): string {
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function escapeAttr(text: string): string {
+  return escapeHtml(text).replace(/"/g, '&quot;');
+}
+
+/**
+ * An attachment line (`![](.attachments.4242/photo.jpg)`) as one block the
+ * caret cannot enter. It keeps the markdown line verbatim, so saving writes
+ * back exactly what was there; the editor draws the picture or file into it.
+ */
+function attachmentBlock(line: string): string {
+  const link = line.slice(line.lastIndexOf('](') + 2, -1).replace(/^<|>$/g, '');
+  const name = attachmentName(link);
+  const icon = line.startsWith('!') || attachmentKind(name) === 'image' ? '🖼' : '📎';
+  return `<div data-attachment="${escapeAttr(line)}" data-link="${escapeAttr(link)}" contenteditable="false">${escapeHtml(`${icon} ${name}`)}</div>`;
 }
 
 /** Find the `</span>` that closes the span opened just before `from`. */
@@ -166,6 +184,11 @@ export function markdownToHtml(markdown: string): string {
     list = null;
   };
   for (const line of lines) {
+    if (ATTACHMENT_LINE.test(line)) {
+      closeList();
+      html += attachmentBlock(line);
+      continue;
+    }
     const task = line.match(TASK_LINE);
     const heading = line.match(HEADING_LINE);
     // Task lines also look like bullets, so they are checked first.
@@ -300,6 +323,8 @@ function blocksToLines(parent: Node, lines: string[]): void {
         for (const [i, s] of sub.entries()) lines.push(i === 0 ? `${prefix}${s}` : s);
         n += 1;
       }
+    } else if (el.hasAttribute('data-attachment')) {
+      lines.push(el.getAttribute('data-attachment') ?? '');
     } else if (el.hasAttribute('data-task')) {
       const checked = el.getAttribute('data-task') === 'true';
       lines.push(`- [${checked ? 'x' : ' '}] ${joinAdjacent(Array.from(el.childNodes).map(inlineToMarkdown).join(''))}`);
@@ -324,7 +349,8 @@ export function htmlToMarkdown(root: Node): string {
 
 /**
  * Markdown the visual editor does not draw (tables, fences, quotes, rules,
- * images, links, indented lists). These would survive as literal text, but
+ * images, links, indented lists). The one exception is an attachment alone
+ * on its line, which `richEditable` takes out before this test. These would survive as literal text, but
  * showing pipes and brackets defeats the point, so they open as text.
  */
 const UNSUPPORTED =
@@ -341,7 +367,12 @@ export function richEditable(markdown: string): boolean {
   const withoutSpans = markdown
     .replace(/<span style="([^"]*)">/g, (tag, style: string) => (parseSpanStyle(style) ? '' : tag))
     .replace(/<\/span>/g, '');
-  if (UNSUPPORTED.test(withoutSpans)) return false;
+  // An attachment alone on its line is drawn as a picture or file block.
+  const withoutAttachments = withoutSpans
+    .split('\n')
+    .filter((line) => !ATTACHMENT_LINE.test(line))
+    .join('\n');
+  if (UNSUPPORTED.test(withoutAttachments)) return false;
   const holder = document.createElement('div');
   holder.innerHTML = markdownToHtml(markdown);
   return htmlToMarkdown(holder) === normalizeMarkdown(markdown);

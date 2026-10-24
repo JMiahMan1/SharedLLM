@@ -1,4 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Bold,
   CheckSquare,
@@ -94,10 +95,15 @@ const RichNoteEditor = forwardRef<
     initialMarkdown: string;
     onChange: (markdown: string) => void;
     label?: string;
+    /** Draws an attachment line (`![](.attachments.…)`) as its picture, player or file. */
+    renderAttachment?: (link: string) => ReactNode;
   }
->(function RichNoteEditor({ initialMarkdown, onChange, label = 'Note content' }, handle) {
+>(function RichNoteEditor({ initialMarkdown, onChange, label = 'Note content', renderAttachment }, handle) {
   const ref = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<Menu>(null);
+  // Attachment blocks are not editable text: React draws each one into its
+  // block (a portal), and the block keeps its markdown line for saving.
+  const [attachmentBlocks, setAttachmentBlocks] = useState<HTMLElement[]>([]);
 
   useImperativeHandle(handle, () => ({
     appendLabel: (tag: string) => {
@@ -114,6 +120,14 @@ const RichNoteEditor = forwardRef<
     const el = ref.current;
     if (!el) return;
     el.innerHTML = markdownToHtml(initialMarkdown);
+    if (renderAttachment) {
+      const blocks = Array.from(el.querySelectorAll<HTMLElement>('[data-attachment]'));
+      for (const block of blocks) {
+        block.textContent = '';
+        block.className = 'my-2 block select-none';
+      }
+      setAttachmentBlocks(blocks);
+    }
     try {
       document.execCommand('styleWithCSS', false, 'true');
       document.execCommand('defaultParagraphSeparator', false, 'div');
@@ -316,6 +330,10 @@ const RichNoteEditor = forwardRef<
           onScroll={measure}
           className="note-rich glass-input min-h-48 max-h-[50vh] w-full overflow-y-auto p-3 text-base sm:text-sm"
         />
+        {renderAttachment &&
+          attachmentBlocks.map((block, index) =>
+            createPortal(renderAttachment(block.getAttribute('data-link') ?? ''), block, `attachment-${index}`),
+          )}
         {/* Per-item controls, clipped to the editor's visible box. */}
         <div ref={overlayRef} className="pointer-events-none absolute inset-0 overflow-hidden" aria-label="Checklist items" role="group">
           {rows.map((row, index) => (

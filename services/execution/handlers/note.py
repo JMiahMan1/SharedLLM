@@ -317,6 +317,213 @@ async def _move_note(provider, source: str, destination: str) -> tuple[bool, str
     return False, f"Could not move the note (HTTP {resp['status_code']})."
 
 
+#: Attachments, as Nextcloud Notes keeps them: files in a hidden folder
+#: beside the note named after the note's Nextcloud file id
+#: (``Notes/.attachments.4242/photo.jpg``), linked from the markdown with a
+#: relative path (``![](.attachments.4242/photo.jpg)``). The note stays plain
+#: markdown and both apps show the same pictures.
+ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+#: A link Jarvis will follow: one file directly inside an attachments folder.
+_ATTACHMENT_LINK = re.compile(r"^(\.attachments\.[0-9]{1,20})/([^/\\]{1,255})$")
+#: Attachment folders a note's markdown points at.
+_ATTACHMENT_REF = re.compile(r"\]\(<?(\.attachments\.[0-9]{1,20})/[^)\s>]+>?\)")
+
+
+def _note_dir(path: str) -> str:
+    path = path.strip("/")
+    return path.rsplit("/", 1)[0] if "/" in path else ""
+
+
+def _in_dir(directory: str, name: str) -> str:
+    return f"{directory}/{name}" if directory else name
+
+
+def attachment_folders(text: str | None) -> list[str]:
+    """The ``.attachments.<id>`` folders a note's markdown links to, in order."""
+    return list(dict.fromkeys(_ATTACHMENT_REF.findall(text or "")))
+
+
+def _attachment_path(note_path: str, link: str | None) -> str | None:
+    """The file a relative attachment link names, or None for anything else
+    (another folder, ``..``, an absolute path or a URL never reach WebDAV)."""
+    from urllib.parse import unquote
+
+    match = _ATTACHMENT_LINK.match(unquote((link or "").strip()))
+    if not match or match.group(2) in (".", ".."):
+        return None
+    return _in_dir(_note_dir(note_path), f"{match.group(1)}/{match.group(2)}")
+
+
+def _attachment_name(filename: str | None) -> str:
+    """A file name safe in a markdown link and a URL: letters, digits, dot,
+    dash and underscore, keeping the extension."""
+    base = (filename or "").strip().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    stem, dot, ext = base.rpartition(".")
+    if not dot:
+        stem, ext = base, ""
+    clean_stem = re.sub(r"[^A-Za-z0-9_-]+", "-", stem).strip("-")[:80] or "attachment"
+    clean_ext = re.sub(r"[^A-Za-z0-9]+", "", ext)[:10].lower()
+    return f"{clean_stem}.{clean_ext}" if clean_ext else clean_stem
+
+
+async def _carry_attachments(provider, text: str | None, source: str, destination: str) -> None:
+    """Move the attachment folders a note links to beside it in its new
+    folder, so its relative links still resolve. Best effort: the note has
+    already moved, and a missing folder simply has nothing to carry."""
+    from ..http_client import request as http_request
+
+    old_dir, new_dir = _note_dir(source), _note_dir(destination)
+    if old_dir == new_dir:
+        return
+    for folder in attachment_folders(text):
+        resp = await http_request(
+            "MOVE", provider.file_url(_in_dir(old_dir, folder)),
+            auth=(provider.username, provider.password),
+            headers={"Destination": provider.file_url(_in_dir(new_dir, folder)), "Overwrite": "F"},
+            verify=False, timeout=60,
+        )
+        if resp["status_code"] not in (201, 204, 404):
+            log.warning("Attachments %s did not follow %s (HTTP %s)", folder, destination, resp["status_code"])
+
+
+async def _drop_attachments(provider, text: str | None, note_path: str) -> None:
+    """Delete the attachment folders a note deleted for good linked to."""
+    from ..http_client import request as http_request
+
+    for folder in attachment_folders(text):
+        resp = await http_request(
+            "DELETE", provider.file_url(_in_dir(_note_dir(note_path), folder)),
+            auth=(provider.username, provider.password), verify=False,
+        )
+        if resp["status_code"] not in (200, 204, 404):
+            log.warning("Attachments %s of %s were not deleted (HTTP %s)", folder, note_path, resp["status_code"])
+
+
+async def _copy_attachments(provider, content: str, new_path: str, new_title: str, directory: str) -> None:
+    """Give a duplicated note its own copy of the one attachment folder it
+    links to, under its own file id, so deleting either note never takes the
+    other's pictures. Best effort: on any failure the copy keeps linking to
+    the original's files. A note linking to several folders (made elsewhere)
+    keeps sharing them."""
+    from ..http_client import request as http_request
+
+    folders = attachment_folders(content)
+    if len(folders) != 1:
+        return
+    file_id, _ = await _file_id(provider, new_path)
+    if not file_id:
+        return
+    own = f".attachments.{file_id}"
+    resp = await http_request(
+        "COPY", provider.file_url(_in_dir(directory, folders[0])),
+        auth=(provider.username, provider.password),
+        headers={"Destination": provider.file_url(_in_dir(directory, own)), "Overwrite": "F", "Depth": "infinity"},
+        verify=False, timeout=120,
+    )
+    if resp["status_code"] not in (201, 204):
+        log.warning("Attachments of %s were not copied (HTTP %s)", new_path, resp["status_code"])
+        return
+    relinked = content.replace(f"]({folders[0]}/", f"]({own}/").replace(f"](<{folders[0]}/", f"](<{own}/")
+    await http_request(
+        "PUT", provider.file_url(new_path), data=relinked.encode("utf-8"),
+        auth=(provider.username, provider.password),
+        headers={"Content-Type": "text/markdown; charset=utf-8"}, verify=False,
+    )
+
+
+async def _note_text(provider, path: str) -> str | None:
+    from ..http_client import request as http_request
+
+    resp = await http_request("GET", provider.file_url(path), auth=(provider.username, provider.password), verify=False)
+    return resp["text"] if resp["status_code"] == 200 else None
+
+
+async def _note_attachment(provider, req: NoteRequest) -> ExecutionResult:
+    """Upload, read or delete one attachment of a saved note."""
+    import base64
+    import mimetypes
+
+    from ..http_client import request as http_request
+
+    service = f"note_{req.action}"
+    note_path = (req.path or "").strip("/")
+    if not note_path.endswith(".md"):
+        return ExecutionResult(status="FAILURE", message="Attachments need a saved note (path).", service=service)
+    auth = (provider.username, provider.password)
+
+    if req.action == "attachment_upload":
+        try:
+            data = base64.b64decode(req.data or "", validate=True)
+        except (ValueError, TypeError):
+            return ExecutionResult(status="FAILURE", message="The attachment was not readable.", service=service)
+        if not data:
+            return ExecutionResult(status="FAILURE", message="The attachment is empty.", service=service)
+        if len(data) > ATTACHMENT_MAX_BYTES:
+            limit = ATTACHMENT_MAX_BYTES // (1024 * 1024)
+            return ExecutionResult(status="FAILURE", message=f"Attachments can be up to {limit} MB.", service=service)
+        # Nextcloud Notes files a note's attachments under its file id.
+        file_id, reason = await _file_id(provider, note_path)
+        if not file_id:
+            return ExecutionResult(status="FAILURE", message=reason, service=service)
+        folder = f".attachments.{file_id}"
+        folder_path = _in_dir(_note_dir(note_path), folder)
+        await provider.ensure_directory(folder_path)
+        name = _attachment_name(req.filename)
+        stem, dot, ext = name.rpartition(".")
+        if not dot:
+            stem, ext = name, ""
+        for n in range(1, 100):
+            if n > 1:
+                name = f"{stem}-{n}.{ext}" if ext else f"{stem}-{n}"
+            if not await _path_exists(provider, f"{folder_path}/{name}"):
+                break
+        else:
+            return ExecutionResult(status="FAILURE", message="Too many attachments with that name.", service=service)
+        mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        resp = await http_request(
+            "PUT", provider.file_url(f"{folder_path}/{name}"), data=data, auth=auth,
+            headers={"Content-Type": mime}, verify=False, timeout=120,
+        )
+        if resp["status_code"] not in (200, 201, 204):
+            return ExecutionResult(
+                status="FAILURE", message=f"Could not store the attachment (HTTP {resp['status_code']}).", service=service,
+            )
+        return ExecutionResult(
+            status="SUCCESS", message=f"Attached {name}.", service=service,
+            detail={"link": f"{folder}/{name}", "name": name, "mime": mime, "size": len(data)},
+        )
+
+    target = _attachment_path(note_path, req.attachment)
+    if not target:
+        return ExecutionResult(status="FAILURE", message="That is not one of this note's attachments.", service=service)
+
+    if req.action == "attachment_read":
+        from ..http_client import fetch_bytes
+
+        status, content_type, body = await fetch_bytes(provider.file_url(target), auth=auth, verify=False, timeout=120)
+        if status == 404:
+            return ExecutionResult(status="FAILURE", message="That attachment is not there any more.", service=service)
+        if status != 200:
+            return ExecutionResult(status="FAILURE", message=f"Could not read the attachment (HTTP {status}).", service=service)
+        if len(body) > ATTACHMENT_MAX_BYTES * 2:
+            return ExecutionResult(status="FAILURE", message="That attachment is too large to show here.", service=service)
+        mime = (content_type or "").split(";", 1)[0].strip()
+        if not mime or mime == "application/octet-stream":
+            mime = mimetypes.guess_type(target)[0] or "application/octet-stream"
+        return ExecutionResult(
+            status="SUCCESS", message="Attachment read.", service=service,
+            detail={"data": base64.b64encode(body).decode("ascii"), "mime": mime, "size": len(body)},
+        )
+
+    # attachment_delete: the file only; the link is the editor's to remove.
+    resp = await http_request("DELETE", provider.file_url(target), auth=auth, verify=False)
+    if resp["status_code"] not in (200, 204, 404):
+        return ExecutionResult(
+            status="FAILURE", message=f"Could not delete the attachment (HTTP {resp['status_code']}).", service=service,
+        )
+    return ExecutionResult(status="SUCCESS", message="Attachment deleted.", service=service, detail={"attachment": req.attachment})
+
+
 #: Nextcloud keeps earlier copies of every file (the files_versions app) and
 #: serves them over WebDAV at /remote.php/dav/versions/<user>/versions/<fileid>.
 #: A version id is the time it was made; anything else is refused before it
@@ -756,8 +963,16 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 deleted_path = f"Notes/{file_title}.md"
                 url = provider.file_url(deleted_path)
             _forget_preview(url)
+            # Its attachments go with it (as in Nextcloud Notes), unless this
+            # delete is the second half of a rename: then they follow the
+            # new copy, which links to the same files.
+            text = await _note_text(provider, deleted_path)
             resp = await http_request("DELETE", url, auth=(provider.username, provider.password), verify=False)
             if resp["status_code"] in [200, 204]:
+                if req.attachments_to:
+                    await _carry_attachments(provider, text, deleted_path, req.attachments_to.lstrip("/"))
+                else:
+                    await _drop_attachments(provider, text, deleted_path)
                 await _index_forget(provider, deleted_path)
                 return ExecutionResult(status="SUCCESS", message=f"Note '{req.title}' deleted.", service="note_delete")
 
@@ -852,9 +1067,13 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 directory = destination.rsplit("/", 1)[0] if "/" in destination else "Notes"
                 stem = destination.rsplit("/", 1)[-1].removesuffix(".md")
                 destination, _ = await _unique_note_path(provider, directory, stem)
+            # Into another folder (archive, trash, restore), its attachment
+            # folders move beside it so the relative links keep working.
+            text = await _note_text(provider, source) if _note_dir(source) != _note_dir(destination) else None
             ok, reason = await _move_note(provider, source, destination)
             if not ok:
                 return ExecutionResult(status="FAILURE", message=reason, service="note_move")
+            await _carry_attachments(provider, text, source, destination)
             _forget_preview(provider.file_url(source))
             _forget_preview(provider.file_url(destination))
             await _index_after_move(provider, source, destination)
@@ -888,6 +1107,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             )
             if put["status_code"] not in (200, 201, 204):
                 return ExecutionResult(status="FAILURE", message=f"Could not write the copy (HTTP {put['status_code']}).", service="note_duplicate")
+            await _copy_attachments(provider, content, new_path, new_title, directory)
             _forget_preview(provider.file_url(new_path))
             return ExecutionResult(
                 status="SUCCESS",
@@ -906,6 +1126,13 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 if resp["status_code"] in (200, 204):
                     deleted.append(note_path)
                     _forget_preview(url)
+            # Trashed notes' attachment folders moved into Trash with them;
+            # with the notes gone, they go too.
+            status, text = await _propfind(provider, TRASH_DIR, "1")
+            if status == 207:
+                for folder in _md_entries(text, TRASH_DIR)[1]:
+                    if folder.rsplit("/", 1)[-1].startswith(".attachments."):
+                        await http_request("DELETE", provider.file_url(folder), auth=(provider.username, provider.password), verify=False)
             await _index_forget(provider, *[note["path"] for note in trashed])
             return ExecutionResult(
                 status="SUCCESS",
@@ -919,6 +1146,9 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
 
         elif action in ("shares", "sharees", "share_add", "share_remove"):
             return await _note_sharing(provider, req)
+
+        elif action in ("attachment_upload", "attachment_read", "attachment_delete"):
+            return await _note_attachment(provider, req)
 
         return ExecutionResult(status="FAILURE", message=f"Action {action} failed or not implemented.", service="note")
 
@@ -975,6 +1205,8 @@ def _md_entries(xml_text: str, base_dir: str) -> tuple[list[dict], list[str]]:
         if not inside:
             continue  # the folder itself
         full_path = f"{base_dir.strip('/')}/{inside}"
+        if "/.attachments." in f"/{inside}" and not inside.rsplit("/", 1)[-1].startswith(".attachments."):
+            continue  # a file inside a note's attachments, never a note itself
         is_collection = href.endswith("/") or response.find(".//DAV:resourcetype/DAV:collection", ns) is not None
         if is_collection:
             folders.append(full_path)
@@ -1017,7 +1249,10 @@ async def _walk_webdav_dir(provider, base_dir: str) -> list[dict]:
                 return
             found, folders = _md_entries(text, base_dir)
             notes.extend(n for n in found if n["path"].rsplit("/", 1)[0] == dir_path.strip("/"))
-            await asyncio.gather(*(walk(f) for f in folders if f.strip("/") != dir_path.strip("/")))
+            await asyncio.gather(*(
+                walk(f) for f in folders
+                if f.strip("/") != dir_path.strip("/") and not f.rsplit("/", 1)[-1].startswith(".attachments.")
+            ))
 
         await walk(base_dir)
         return notes

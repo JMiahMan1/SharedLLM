@@ -37,6 +37,8 @@ import RichNoteEditor, { type RichNoteEditorHandle } from '../components/notes/R
 import NoteHistory from '../components/notes/NoteHistory';
 import ReminderPanel, { type Place } from '../components/notes/ReminderPanel';
 import SharePanel from '../components/notes/SharePanel';
+import NoteAttachments, { AttachmentView } from '../components/notes/NoteAttachments';
+import { appendAttachment, isAttachmentLink, removeAttachment } from '../lib/noteAttachments';
 import { richEditable } from '../lib/noteRichText';
 import { remarkNoteSpans } from '../lib/remarkNoteSpans';
 import { errorText } from '../lib/errorText';
@@ -159,12 +161,31 @@ function categoryFor(folder: string): string {
  * how it looks in Jarvis. Tailwind has no typography plugin here, so every
  * element carries its own classes instead of relying on `prose`.
  */
-function NotePreview({ text, className = '' }: { text: string; className?: string }) {
+function NotePreview({
+  text,
+  className = '',
+  notePath,
+  asUser,
+}: {
+  text: string;
+  className?: string;
+  /** The note's file: its attachment links are relative to it. */
+  notePath?: string;
+  asUser?: 'admin';
+}) {
   return (
     <div className={`text-xs text-slate-300 ${className}`} data-testid="note-preview">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkNoteSpans]}
         components={{
+          // Attachments beside the note (Nextcloud Notes' .attachments.<id>/)
+          // load through the API; anything else stays an ordinary image/link.
+          img: ({ src, alt }) =>
+            typeof src === 'string' && isAttachmentLink(src) ? (
+              <AttachmentView notePath={notePath} link={src} name={alt || undefined} asUser={asUser} compact />
+            ) : (
+              <img src={typeof src === 'string' ? src : undefined} alt={alt ?? ''} className="max-h-32 rounded-lg" />
+            ),
           p: (props) => <p className="mt-1 first:mt-0 leading-snug" {...props} />,
           h1: (props) => <h1 className="mt-2 first:mt-0 text-sm font-bold text-slate-100" {...props} />,
           h2: (props) => <h2 className="mt-2 first:mt-0 text-sm font-semibold text-slate-100" {...props} />,
@@ -172,7 +193,14 @@ function NotePreview({ text, className = '' }: { text: string; className?: strin
           ul: (props) => <ul className="mt-1 list-disc space-y-0.5 pl-4" {...props} />,
           ol: (props) => <ol className="mt-1 list-decimal space-y-0.5 pl-4" {...props} />,
           li: (props) => <li className="leading-snug" {...props} />,
-          a: (props) => <a className="text-purple-300 underline" {...props} />,
+          a: ({ href, children, ...props }) =>
+            isAttachmentLink(href) ? (
+              <AttachmentView notePath={notePath} link={href!} asUser={asUser} compact />
+            ) : (
+              <a className="text-purple-300 underline" href={href} {...props}>
+                {children}
+              </a>
+            ),
           strong: (props) => <strong className="font-semibold text-slate-100" {...props} />,
           em: (props) => <em className="italic" {...props} />,
           code: (props) => <code className="rounded bg-black/40 px-1 py-0.5 font-mono text-[11px]" {...props} />,
@@ -1365,7 +1393,7 @@ export default function Notes() {
                 ) : (
                   <div className="mt-2 max-h-32 overflow-hidden">
                     {body !== undefined ? (
-                      <NotePreview text={noteDisplayBody(body, note.title)} />
+                      <NotePreview text={noteDisplayBody(body, note.title)} notePath={note.path} asUser={asUser} />
                     ) : (
                       <p className="text-xs text-slate-400">{Math.max(1, Math.round(note.size / 1024))} KB</p>
                     )}
@@ -1670,6 +1698,19 @@ const NoteEditor = forwardRef<
 
   const snapshot = snapshotOf(draft);
   const dirty = snapshot !== lastSaved;
+
+  // The latest draft, for changes that land after an upload finishes (the
+  // person may have typed meanwhile).
+  const draftRef = useRef(draft);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  /** Swap in new text from outside the editor (an attachment added or removed) and redraw it. */
+  const replaceContent = (content: string) => {
+    setDraft({ ...draftRef.current, content });
+    setRich(richEditable(content));
+    setRichKey((k) => k + 1);
+  };
   const renaming = Boolean(
     draft.original && (draft.title.trim() !== draft.original.title || categoryFor(draft.folder) !== draft.original.category),
   );
@@ -1917,6 +1958,7 @@ const NoteEditor = forwardRef<
           ref={richRef}
           initialMarkdown={draft.content}
           onChange={(content) => setDraft((d) => ({ ...d, content }))}
+          renderAttachment={(link) => <AttachmentView notePath={draft.path} link={link} asUser={asUser} />}
         />
       ) : (
         <>
@@ -1933,6 +1975,14 @@ const NoteEditor = forwardRef<
           />
         </>
       )}
+      <NoteAttachments
+        notePath={draft.path}
+        content={draft.content}
+        asUser={asUser}
+        drawnInText={rich}
+        onAdd={(line) => replaceContent(appendAttachment(draftRef.current.content, line))}
+        onRemove={(link) => replaceContent(removeAttachment(draftRef.current.content, link))}
+      />
       <div className="flex flex-wrap items-center gap-3">
         {!rich && (
           <button

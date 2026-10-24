@@ -5993,6 +5993,9 @@ async def proxy_delete_note(request: Request):
         "title": body.get("title"),
         "path": body.get("path"),
         "storage": body.get("storage", "nextcloud"),
+        # A rename's old copy: its attachments follow the new path instead
+        # of being deleted with it.
+        "attachments_to": body.get("attachments_to"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
@@ -6102,6 +6105,28 @@ async def proxy_note_share(request: Request):
         "share_id": str(body["share_id"]) if body.get("share_id") is not None else None,
         "can_edit": bool(body.get("can_edit")),
         "search": body.get("search"),
+        "storage": body.get("storage", "nextcloud"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
+
+
+_NOTE_ATTACHMENT_ACTIONS = {"upload": "attachment_upload", "read": "attachment_read", "delete": "attachment_delete"}
+
+
+@app.post("/api/communication/notes/attachment")
+async def proxy_note_attachment(request: Request):
+    """A note's attachment (photo, drawing, voice note), stored as Nextcloud
+    Notes does beside the note: upload one (base64), read one, or delete one."""
+    body = await _request_json_object(request)
+    action = _NOTE_ATTACHMENT_ACTIONS.get(str(body.get("action") or ""))
+    if action is None:
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "action must be upload, read or delete"})
+    payload = {
+        "action": action,
+        "path": body.get("path"),
+        "attachment": body.get("attachment"),
+        "filename": body.get("filename"),
+        "data": body.get("data"),
         "storage": body.get("storage", "nextcloud"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
