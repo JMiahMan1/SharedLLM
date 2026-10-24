@@ -615,7 +615,7 @@ player scope, the unified endpoints and the schema contract test. Details:
 `docs/MEDIA_PLAYER.md` and `git log --grep "P[0-2]-T"`.
 
 ### Phase 3: Frontend foundations (no visual change yet)
-- P3-T1 `features/media/format.ts` + tests (BUG-41). Replace the `formatTime` copies in `Media.tsx` and `ActiveMediaWidget.tsx`.
+- P3-T1 `features/media/format.ts` + tests (BUG-41). Replace the `formatTime` copies in `Media.tsx` and `ActiveMediaWidget.tsx`. **Done 2026-10-24:** `format.ts` (`formatDuration` `H:MM:SS`/`--:--`, `formatRemaining`, `formatTimeLeft`, `spokenDuration`, `normalizePlayedAt`, `formatTimeAgo`) and `log.ts` (`mediaLog`, BUG-70) with `__tests__/format.test.ts`; the page, sheets, queue and dashboard widget use it.
 - P3-T2 `types.ts`, `api/keys.ts`, `api/client.ts`, `api/queries.ts` + tests with msw (BUG-62/63).
 - P3-T3 `engine/maRpc.ts` + tests (BUG-46/48/50/52/53).
 - P3-T4 `engine/sendspinEngine.ts` + `sendspinInternals.ts` + tests (BUG-47/49).

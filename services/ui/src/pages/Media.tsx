@@ -12,6 +12,7 @@ import type { MaPlayerListEntry } from '../lib/deviceLabels';
 import { listRemoteMaPlayers, sendMaRemoteCommand } from '../lib/maRemotePlayer';
 import { proxiedImage } from '../lib/mediaImage';
 import { useMediaToken } from '../lib/mediaToken';
+import { formatTimeAgo, normalizePlayedAt } from '../features/media/format';
 import { DeviceSelector } from '../components/media/DeviceSelector';
 import { NowPlayingCard, type NowPlayingView } from '../components/media/NowPlayingCard';
 import { MediaExplorer } from '../components/media/MediaExplorer';
@@ -22,26 +23,6 @@ import type { DeviceOption, MediaStatus, PlayRequest, QueueOption } from '../com
 const STATUS_POLL_MS = 3000;
 /** After the user moves a volume slider, ignore polled volumes this long. */
 const VOLUME_GRACE_MS = 4000;
-
-// Normalize `last_played` (epoch s, epoch ms or ISO string) to epoch ms.
-const normalizePlayedAt = (value: unknown): number | undefined => {
-  if (value === undefined || value === null || value === '') return undefined;
-  const n = typeof value === 'number' ? value : Number(value);
-  if (!Number.isNaN(n)) return n <= 0 ? undefined : n > 1e12 ? n : n * 1000;
-  const parsed = Date.parse(String(value));
-  return Number.isNaN(parsed) ? undefined : parsed;
-};
-
-const formatTimeAgo = (ts: number): string => {
-  const mins = Math.floor((Date.now() - ts) / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
 
 const playerState = (s?: string): NowPlayingView['state'] =>
   s === 'playing' || s === 'buffering' ? 'playing' : s === 'paused' ? 'paused' : 'idle';

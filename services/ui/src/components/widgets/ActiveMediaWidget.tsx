@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { Music, Play, Pause, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import type { IActiveMediaWidgetProps, MediaState } from '../../types/widget';
 import { api } from '../../services/api';
-import { formatClock } from '../../lib/utils';
+import { formatDuration } from '../../features/media/format';
 import toast from 'react-hot-toast';
 import { useOptionalWebPlayer } from '../../context/webPlayerContext';
 
@@ -307,7 +307,7 @@ const ActiveMediaWidget = ({ userSettings, onMediaStop, settingsButton }: IActiv
                 aria-valuemin={0}
                 aria-valuemax={Math.round(duration)}
                 aria-valuenow={Math.round(position)}
-                aria-valuetext={`${formatClock(position)} of ${formatClock(duration)}`}
+                aria-valuetext={`${formatDuration(position)} of ${formatDuration(duration)}`}
                 className="relative flex-1 py-3 select-none touch-none cursor-pointer group"
               >
                 <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative pointer-events-none">
@@ -322,7 +322,7 @@ const ActiveMediaWidget = ({ userSettings, onMediaStop, settingsButton }: IActiv
                 />
               </div>
               <p className="text-[10px] text-slate-500 font-mono shrink-0 tabular-nums">
-                {formatClock(position)} / {formatClock(duration)}
+                {formatDuration(position)} / {formatDuration(duration)}
               </p>
             </div>
           )}

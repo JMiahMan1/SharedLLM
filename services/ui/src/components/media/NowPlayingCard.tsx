@@ -4,7 +4,7 @@ import {
   Play, Pause, SkipBack, SkipForward, Square, Heart, Music, Loader2,
   Volume1, Volume2, VolumeX,
 } from 'lucide-react';
-import { formatClock } from '../../lib/utils';
+import { formatDuration } from '../../features/media/format';
 
 // Cover image that falls back to nothing (the parent shows the gradient icon)
 // if the proxied URL fails. Keyed by `src` at the call site, so a new cover
@@ -167,7 +167,7 @@ export function NowPlayingCard({
             aria-valuemin={0}
             aria-valuemax={Math.round(duration)}
             aria-valuenow={Math.round(shown)}
-            aria-valuetext={`${formatClock(shown)} of ${formatClock(duration)}`}
+            aria-valuetext={`${formatDuration(shown)} of ${formatDuration(duration)}`}
             onKeyDown={onSeek ? (e) => {
               if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
                 e.preventDefault();
@@ -192,8 +192,8 @@ export function NowPlayingCard({
             )}
           </div>
           <div className="flex justify-between text-[11px] text-slate-500 font-mono -mt-1">
-            <span>{formatClock(shown)}</span>
-            <span>{formatClock(duration)}</span>
+            <span>{formatDuration(shown)}</span>
+            <span>{formatDuration(duration)}</span>
           </div>
         </div>
       )}
@@ -202,7 +202,7 @@ export function NowPlayingCard({
           <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse" aria-hidden />
           <span className="text-[11px] font-semibold uppercase tracking-wider text-rose-300">Live</span>
           <div className="flex-1 h-1.5 rounded-full bg-gradient-to-r from-rose-500/40 via-rose-400/20 to-transparent" />
-          <span className="text-[11px] text-slate-500 font-mono">{formatClock(position)}</span>
+          <span className="text-[11px] text-slate-500 font-mono">{formatDuration(position)}</span>
         </div>
       )}
 
