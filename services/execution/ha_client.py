@@ -269,16 +269,7 @@ async def get_logbook(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
             log.error(f"[ha_client] get_logbook({entity_id}) failed: {e}")
             return []
 
-async def get_areas(ha_url: str, ha_token: str, account: str = "") -> dict:
-    """Retrieve mapping of entity_id to area_name using HA Template API."""
-    if not ha_url:
-        return {}
-
-    headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
-    url = f"{ha_url.rstrip('/')}/api/template"
-
-    # Standard Jinja2 template to list all entity IDs and their area names
-    template = """
+_AREA_TEMPLATE = """
     [
       {%- for state in states %}
       {
@@ -288,24 +279,60 @@ async def get_areas(ha_url: str, ha_token: str, account: str = "") -> dict:
       {%- endfor %}
     ]
     """
+_TEMPLATE_DENIED_WARNED: set[str] = set()
 
+
+async def _render_areas(ha_url: str, ha_token: str) -> dict:
+    """entity_id -> area name through HA's template API. Raises on HTTP errors."""
+    headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
     async with _ha_session(ha_url) as client:
-        try:
-            async with client.post(url, headers=headers, json={"template": template}, timeout=_TIMEOUT) as resp:
-                resp.raise_for_status()
-                raw_data = await resp.json(content_type=None)
-                await credential_alerts.auth_ok("home_assistant", account or "stored login")
-                # Convert list of dicts to a single mapping dict
-                if isinstance(raw_data, list):
-                    return {item["eid"]: item["a"] for item in raw_data if item.get("a")}
-                return {}
-        except Exception as e:
-            status = getattr(e, "status", None)
-            if status in (401, 403):
-                await credential_alerts.auth_failed("home_assistant", account or "stored login", f"HTTP {status}")
+        async with client.post(
+            f"{ha_url.rstrip('/')}/api/template", headers=headers, json={"template": _AREA_TEMPLATE}, timeout=_TIMEOUT
+        ) as resp:
+            resp.raise_for_status()
+            raw_data = await resp.json(content_type=None)
+    if isinstance(raw_data, list):
+        return {item["eid"]: item["a"] for item in raw_data if item.get("a")}
+    return {}
+
+
+async def get_areas(ha_url: str, ha_token: str, account: str = "") -> dict:
+    """Retrieve mapping of entity_id to area_name using HA Template API.
+
+    Home Assistant serves ``/api/template`` to admin users only, so a family
+    member's perfectly valid token gets 401 here. That is a permission answer,
+    not a dead login: it must not raise a credential alert (it did, about once a
+    minute, and flapped against the calls that succeeded). Areas are household
+    metadata every user already sees through ``/api/states``, so the household
+    token (``HA_TOKEN``, an admin's) answers instead when it serves the same HA.
+    """
+    if not ha_url:
+        return {}
+    try:
+        areas = await _render_areas(ha_url, ha_token)
+        await credential_alerts.auth_ok("home_assistant", account or "stored login")
+        return areas
+    except Exception as e:
+        if getattr(e, "status", None) not in (401, 403):
             log.error(f"[ha_client] get_areas failed: {e}")
             return {}
-    return {}  # Fallback
+    from services import config
+
+    household_url, household_token = config.HA_URL or "", config.HA_TOKEN or ""
+    if household_token and household_token != ha_token and host_of(household_url) == host_of(ha_url):
+        try:
+            return await _render_areas(household_url, household_token)
+        except Exception as e:
+            log.error(f"[ha_client] get_areas failed with the household token too: {e}")
+            return {}
+    if ha_url not in _TEMPLATE_DENIED_WARNED:
+        _TEMPLATE_DENIED_WARNED.add(ha_url)
+        log.warning(
+            "[ha_client] %s: area names need an HA admin token for /api/template; "
+            "set HA_TOKEN to an admin's long-lived token to resolve rooms by area",
+            ha_url,
+        )
+    return {}
 
 _ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 # media_player -> remote lookups barely change; one HA round-trip per key press

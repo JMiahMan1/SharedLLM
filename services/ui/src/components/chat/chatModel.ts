@@ -115,7 +115,7 @@ export function isSystemMessage(message: TalkMessage): boolean {
  */
 export function isMine(message: TalkMessage, myActorIds: ReadonlySet<string>): boolean {
   if (message.pending) return true;
-  if (isAssistant(message)) return false;
+  if (isFromJarvis(message)) return false;
   const id = (message.actor_id || '').toLowerCase();
   return id !== '' && myActorIds.has(id);
 }
@@ -143,7 +143,7 @@ export function groupIntoRuns(messages: TalkMessage[], myActorIds: ReadonlySet<s
   const runs: MessageRun[] = [];
   for (const message of messages) {
     const system = isSystemMessage(message);
-    const assistant = !system && isAssistant(message);
+    const assistant = !system && isFromJarvis(message);
     const mine = !system && isMine(message, myActorIds);
     const authorId = assistant ? JARVIS_ID : (message.actor_id || message.actor_display_name || '').toLowerCase();
     const last = runs[runs.length - 1];
@@ -278,6 +278,16 @@ export const JARVIS_ID = 'jarvis';
 /** A Jarvis answer, marked by its envelope (it is posted with the asker's login). */
 export function isAssistant(message: TalkMessage): boolean {
   return decodeEnvelope(message.message).envelope?.kind === 'assistant';
+}
+
+/**
+ * Whether Jarvis posted this, whoever's account carried it: its own bot
+ * account, an answer (`assistant` envelope) or a game post (`from: jarvis`).
+ */
+export function isFromJarvis(message: TalkMessage): boolean {
+  if ((message.actor_id || '').toLowerCase() === JARVIS_ID) return true;
+  const envelope = decodeEnvelope(message.message).envelope;
+  return envelope?.kind === 'assistant' || envelope?.from === 'jarvis';
 }
 
 /** Whether a message asks Jarvis something (the bot answers messages that start with @Jarvis). */

@@ -172,10 +172,25 @@ never wanders off mid-game:
   their ground. One guess per player per question; the first correct answer wins
   the round and moves everyone on, and if every player locked into the session
   misses, the answer is revealed and the round moves on too (a quiet round
-  expires after two minutes). Matching stays forgiving (case, articles,
-  punctuation). One star per round won.
-- **Bible trivia**: the same session engine with a Bible question pool, started
-  from the chat composer's **Bible trivia** action.
+  expires after two minutes). Matching is forgiving but not loose: case,
+  articles, plurals ("Psalm" for "Psalms") and one slip in a long name
+  ("Zaccheus") count, a fragment does not ("Jesus" is not "Jesus wept"). One
+  star per round won.
+- **Fair rounds**: an answer is judged the moment it reaches the server, before
+  the player's own message is posted, so the first answer in wins even when that
+  player's post is slower. An answer to the question that just closed (within
+  20 seconds) is taken as late: it neither scores nor uses up the player's guess
+  on the new question, and Jarvis says a new one is up.
+- **Jarvis speaks as Jarvis**: questions, verdicts and @Jarvis answers post
+  from the `jarvis` Nextcloud account (`JARVIS_BOT_NC_USER`/`_PASS` in the
+  server `.env`); the member who triggers the first post adds the bot to a group
+  room. One-to-one rooms cannot take a third member, so there the post goes out
+  under the member's account with an envelope (`from: jarvis` / `assistant`)
+  that the app still draws as Jarvis.
+- **Bible trivia**: the same session engine with a 174-question Bible pool (31
+  easy, 75 medium, 68 hard; `bible_trivia_bank.py`), started from the chat
+  composer's **Bible trivia** action. Every answer is stated plainly in the
+  66-book canon; tradition and opinion are left out.
 - **Memory**: pick the words, then duplicate them, shuffle, and flip two at a
   time. A pair stays up; a miss flips back.
 

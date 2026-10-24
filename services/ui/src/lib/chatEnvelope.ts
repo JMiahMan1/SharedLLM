@@ -27,6 +27,8 @@ export interface ChatEnvelope {
   /** Avatar-free link (game to play, drawing to open). */
   href?: string;
   action?: { label: string; href: string };
+  /** `jarvis` on a card Jarvis posted (a game verdict) rather than a person. */
+  from?: 'jarvis';
 }
 
 const FENCE = '```jarvis-envelope';
@@ -71,6 +73,7 @@ export function decodeEnvelope(raw: string | null | undefined): { text: string; 
     }
     if (typeof parsed.stars === 'number' && Number.isFinite(parsed.stars)) envelope.stars = parsed.stars;
     if (typeof parsed.href === 'string') envelope.href = parsed.href;
+    if (parsed.from === 'jarvis') envelope.from = 'jarvis';
     if (parsed.action && typeof parsed.action === 'object') {
       const { label, href } = parsed.action as { label?: unknown; href?: unknown };
       if (typeof label === 'string' && typeof href === 'string') envelope.action = { label, href };

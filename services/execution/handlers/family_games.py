@@ -276,6 +276,14 @@ BIBLE_TRIVIA_QUESTIONS: list[dict[str, Any]] = [
     },
 ]
 
+# The starter set above plus the reviewed bank (bible_trivia_bank.py): 17
+# questions meant every second ten-question game repeated the last one.
+from services.execution.handlers.bible_trivia_bank import bank as _bible_bank  # noqa: E402
+
+BIBLE_TRIVIA_QUESTIONS += [
+    q for q in _bible_bank() if q["question"] not in {b["question"] for b in BIBLE_TRIVIA_QUESTIONS}
+]
+
 MEMORY_WORDS = [
     "spaceship", "pancake", "rainbow", "treasure", "dinosaur", "moonwalk",
     "cupcake", "volcano", "penguin", "telescope", "blanket", "garden",
@@ -286,15 +294,55 @@ def normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9 ]+", "", str(text or "").lower()).strip()
 
 
+# Words an answer may add or drop without changing it: "the Red Sea" is "Red
+# Sea", "King Saul" is "Saul", "Mount Ararat" is "Ararat".
+_FILLER_WORDS = frozenset({
+    "a", "an", "the", "of", "and", "to", "in", "on", "it", "was", "is", "its", "he", "she",
+    "king", "queen", "saint", "st", "apostle", "prophet", "mount", "mt", "book", "city",
+})
+
+
+def _answer_words(text: str) -> list[str]:
+    """Content words, singular: "Psalm" and "Psalms" are one answer."""
+    words = [w for w in normalize(text).split() if w not in _FILLER_WORDS]
+    return [w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words]
+
+
+def _edit_distance(a: str, b: str) -> int:
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current = [i]
+        for j, cb in enumerate(b, 1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (ca != cb)))
+        previous = current
+    return previous[-1]
+
+
+def _same_word(given: str, wanted: str) -> bool:
+    """Equal, or one slip in a long name ("Zaccheus", "Gethsemene"). Short
+    names stay exact so that Judah never passes for Judas or Saul for Paul."""
+    if given == wanted:
+        return True
+    if len(wanted) >= 10:
+        return _edit_distance(given, wanted) <= 2
+    if len(wanted) >= 6:
+        return _edit_distance(given, wanted) <= 1
+    return False
+
+
 def is_correct(answer: str, accepted: list[str]) -> bool:
-    given = normalize(answer)
+    """Every content word of one accepted answer appears in the reply.
+
+    "it was Moses" and "the red sea" count; a fragment does not -- "Jesus" is
+    not "Jesus wept", and "the" alone matches nothing. Short forms a kid may
+    give ("red") are listed as accepted answers of their own.
+    """
+    given = _answer_words(answer)
     if not given:
         return False
     for option in accepted:
-        wanted = normalize(option)
-        if not wanted:
-            continue
-        if given == wanted or wanted in given.split() or given in wanted.split():
+        wanted = _answer_words(option)
+        if wanted and all(any(_same_word(g, w) for g in given) for w in wanted):
             return True
     return False
 
