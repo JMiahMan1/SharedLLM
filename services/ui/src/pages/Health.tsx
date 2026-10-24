@@ -13,6 +13,7 @@ import FamilyChallengeCard from '../components/health/FamilyChallengeCard';
 import FastingCard from '../components/health/FastingCard';
 import ActiveMinutesCard from '../components/health/ActiveMinutesCard';
 import StreaksCard from '../components/health/StreaksCard';
+import MicroLessonCard from '../components/health/MicroLessonCard';
 import ScreenTimeCard from '../components/health/ScreenTimeCard';
 import PhoneProtectionCard from '../components/health/PhoneProtectionCard';
 import HealthConnectCard from '../components/health/HealthConnectCard';
@@ -72,6 +73,7 @@ const Health = () => {
             <HealthToday onNavigate={setTab} />
             {on('active_minutes') && <ActiveMinutesCard />}
             {on('streaks') && <StreaksCard />}
+            {on('lessons') && <MicroLessonCard />}
             {on('fasting') && <FastingCard />}
             {on('weekly_digest') && <WeeklyDigestCard />}
             {on('family_challenge') && <FamilyChallengeCard />}
