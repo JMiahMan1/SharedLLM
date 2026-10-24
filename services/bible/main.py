@@ -80,6 +80,7 @@ from services.bible.models import (
     ImportRun,
     MemoryVerse,
     PlanEnrollment,
+    PlanReflection,
     ReadingEvent,
     UserBibleState,
     VerseMark,
@@ -1817,6 +1818,49 @@ async def complete_plan_day(
         )
     badges = await get_achievements(username=username, session=session)
     return {**_enrollment_payload(row), "newly_earned": badges["newly_earned"]}
+
+
+@app.put("/plans/{plan_id}/days/{day}/reflection")
+def put_plan_reflection(
+    plan_id: str, day: int, body: dict, username: str = Query(...), session: Session = Depends(get_session)
+):
+    """Save what the reader took from a day of a plan they follow (replaces any earlier one)."""
+    _plan_or_404(plan_id)
+    if _active_plan(session, username, plan_id) is None:
+        raise HTTPException(404, "Start this plan before writing reflections.")
+    try:
+        readings = plans.day_readings(plan_id, day)
+    except plans.PlanError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    text = str((body or {}).get("text") or "").strip()
+    if not text or len(text) > 4000:
+        raise HTTPException(422, "Write 1 to 4000 characters.")
+    row = session.exec(
+        select(PlanReflection).where(
+            PlanReflection.username == username, PlanReflection.plan_id == plan_id, PlanReflection.day == day
+        )
+    ).first() or PlanReflection(username=username, plan_id=plan_id, day=day)
+    row.text = text
+    row.updated_at = utcnow()
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return {
+        "plan_id": plan_id,
+        "plan_name": plans.find(plan_id)["name"],
+        "day": day,
+        "readings": [r["ref"] for r in readings],
+        "text": row.text,
+        "updated_at": row.updated_at.isoformat(),
+    }
+
+
+@app.get("/plans/{plan_id}/reflections")
+def list_plan_reflections(plan_id: str, username: str = Query(...), session: Session = Depends(get_session)):
+    rows = session.exec(
+        select(PlanReflection).where(PlanReflection.username == username, PlanReflection.plan_id == plan_id)
+    ).all()
+    return {"reflections": [{"day": r.day, "text": r.text, "updated_at": r.updated_at.isoformat()} for r in sorted(rows, key=lambda r: r.day)]}
 
 
 @app.delete("/plans/{plan_id}/days/{day}")

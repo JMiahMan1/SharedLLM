@@ -36,6 +36,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from sqlalchemy import LargeBinary
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -436,6 +437,23 @@ class PlanEnrollment(SQLModel, table=True):
     finished_on: str = Field(default="")
     active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class PlanReflection(SQLModel, table=True):
+    """What a reader took from one day of a reading plan, in their words.
+
+    One per reader, plan and day (saving again replaces it). The gateway also
+    puts it into study memory (RAG) with a citable id, so Jarvis can recall
+    what this family already drew from a passage.
+    """
+
+    __table_args__ = (UniqueConstraint("username", "plan_id", "day", name="uq_plan_reflection"), {"extend_existing": True})
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    plan_id: str = Field(index=True)
+    day: int
+    text: str = Field(default="")
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class VerseContext(SQLModel, table=True):

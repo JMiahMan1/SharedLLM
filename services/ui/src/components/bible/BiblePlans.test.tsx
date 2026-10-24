@@ -16,6 +16,8 @@ const apiMock = vi.hoisted(() => ({
   undoBiblePlanDay: vi.fn(),
   catchUpBiblePlan: vi.fn(),
   stopBiblePlan: vi.fn(),
+  getBiblePlanReflections: vi.fn(),
+  saveBiblePlanReflection: vi.fn(),
 }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -47,6 +49,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   apiMock.getBiblePlans.mockResolvedValue({ catalogue: CATALOGUE, mine: [JOHN] });
   apiMock.getBiblePlanFamily.mockResolvedValue({ plan_id: 'john-21', members: [] });
+  apiMock.getBiblePlanReflections.mockResolvedValue({ reflections: [] });
 });
 
 describe('Bible reading plans', () => {
@@ -112,5 +115,22 @@ describe('reading along', () => {
     await user.click(screen.getByTestId('bible-plan-stop-john-21'));
     await user.click(screen.getByTestId('bible-plan-stop-confirm-john-21'));
     expect(apiMock.stopBiblePlan).toHaveBeenCalledWith('john-21');
+  });
+
+  it('keeps a reflection on the day once it is read', async () => {
+    const user = userEvent.setup();
+    apiMock.getBiblePlans.mockResolvedValue({ catalogue: CATALOGUE, mine: [{ ...JOHN, completed_days: [1, 2, 5] }] });
+    apiMock.saveBiblePlanReflection.mockResolvedValue({ day: 5, text: 'Jesus heals on the Sabbath.', remembered: true });
+    renderIt();
+    const box = await screen.findByLabelText('What stood out to you today?');
+    await user.type(box, 'Jesus heals on the Sabbath.');
+    await user.click(screen.getByRole('button', { name: 'Save reflection' }));
+    await waitFor(() => expect(apiMock.saveBiblePlanReflection).toHaveBeenCalledWith('john-21', 5, 'Jesus heals on the Sabbath.'));
+  });
+
+  it('asks for no reflection before the day is read', async () => {
+    renderIt();
+    await screen.findByTestId('bible-plan-complete-john-21');
+    expect(screen.queryByLabelText('What stood out to you today?')).toBeNull();
   });
 });
