@@ -391,7 +391,7 @@ live search is the ecosystem-standard pattern.
   progress computed from their logs on every read. The suggestion is one small step: last week's
   count plus one, for the kind with the most room. **Reminders:** bedtime, water and movement-break
   reminders are ordinary daily reminders in the timers pipeline (`/api/communication/timers`,
-  recurrence `daily`, opening `/health`), so they ring wherever reminders already do; the person
+  recurrence `daily`, opening the Health page), so they ring wherever reminders already do; the person
   picks each time, nothing is preset. All three sit on `CoachCard` (Health → Today) with the chat
   examples.
 

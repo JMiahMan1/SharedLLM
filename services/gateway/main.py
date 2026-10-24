@@ -13295,7 +13295,7 @@ async def post_health_cheer(request: Request):
         try:
             await _notify.send(_notify.notice(
                 sent["to_user"], "health", f"{sent['from_user'].title()} cheered your day",
-                f"{sent['emoji']} {sent['label']}", url="/health", tag=f"cheer:{sent['id']}",
+                f"{sent['emoji']} {sent['label']}", url="/fitness", tag=f"cheer:{sent['id']}",
             ))
         except Exception as exc:
             log.warning("[health] cheer notice skipped: %s", exc)
