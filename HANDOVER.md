@@ -7,11 +7,11 @@ Every claim below was verified against the live system unless marked **planned**
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
 - Live: `https://jarvis.sumemail.com` — version **1.5.2**, OTA bundle `git_sha`
-  **451e671b** (verified 2026-10-23, with Keep-style visual note editor and USDA food seed),
-  APK available.
-  - Containers were deployed per feature: identity **8e4e8a27**, execution
-    **451e671b**, gateway **f5304149**, health **d766a19f**, ui **451e671b** (see the
-    commit list below).
+  **0c901c38** (verified 2026-10-24), APK available.
+  - Containers: execution **fc7ba693** (image built at `8ccb342a`+), gateway/identity/ui
+    **0c901c38**, storage **8fc73700** (image `8ccb342a`), health **d766a19f**.
+  - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
+    server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
 - Check anytime:
   - `curl -fsS https://jarvis.sumemail.com/api/app-updates/version`
   - `.venv/bin/python scripts/check_service_urls.py` — probes Audiobookshelf,
@@ -21,6 +21,10 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- Data repair 2026-10-24: trivia wins that were filed under display names
+  (`tel:activity:Jeremiah`, `tel:activity:Michele`) were merged by time into the account feeds
+  (`jeremiah` 65 events / 9 wins, `michele` 43 / 36) and the stray keys removed; backup on the
+  server at `/home/jeremiah/telemetry-backup-merge/`.
 - `HEAD` Health + privacy: **digital wellbeing card; usage is parents-only on the server;
   media proxies pool connections.** `GET /api/usage/{user}` let any signed-in member read anyone's
   phone usage (a child a parent's, siblings each other's); identity now owns the rule
