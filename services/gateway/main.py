@@ -5048,6 +5048,9 @@ async def proxy_add_timer(request: Request):
         "tts_enabled",
         "esphome_script",
         "flash_screen",
+        # The page the notice opens (a note's reminder opens that note);
+        # execution keeps in-app paths only.
+        "url",
     ):
         if body.get(optional_key) is not None:
             payload[optional_key] = body.get(optional_key)
@@ -5873,6 +5876,9 @@ async def proxy_write_note(request: Request):
         "category": body.get("category"),
         "path": body.get("path"),
         "storage": body.get("storage", "nextcloud"),
+        # The version the editor opened; Nextcloud refuses the save (412) when
+        # the note changed elsewhere since, instead of overwriting it.
+        "if_match": body.get("if_match"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
@@ -5958,6 +5964,47 @@ async def proxy_duplicate_note(request: Request):
         "action": "duplicate",
         "title": body.get("title"),
         "path": body.get("path"),
+        "storage": body.get("storage", "nextcloud"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
+
+
+_NOTE_VERSION_ACTIONS = {"list": "versions", "read": "version_read", "restore": "version_restore"}
+
+
+@app.post("/api/communication/notes/versions")
+async def proxy_note_versions(request: Request):
+    """Earlier versions of one note from Nextcloud: list, read one, or restore one."""
+    body = await request.json()
+    action = _NOTE_VERSION_ACTIONS.get(str(body.get("action") or "list"))
+    if action is None:
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "action must be list, read or restore"})
+    payload = {
+        "action": action,
+        "path": body.get("path"),
+        "version": body.get("version"),
+        "storage": body.get("storage", "nextcloud"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
+
+
+_NOTE_SHARE_ACTIONS = {"list": "shares", "people": "sharees", "add": "share_add", "remove": "share_remove"}
+
+
+@app.post("/api/communication/notes/share")
+async def proxy_note_share(request: Request):
+    """Share a note with someone on the family's Nextcloud (OCS sharing), or stop."""
+    body = await request.json()
+    action = _NOTE_SHARE_ACTIONS.get(str(body.get("action") or "list"))
+    if action is None:
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "action must be list, people, add or remove"})
+    payload = {
+        "action": action,
+        "path": body.get("path"),
+        "share_with": body.get("share_with"),
+        "share_id": str(body["share_id"]) if body.get("share_id") is not None else None,
+        "can_edit": bool(body.get("can_edit")),
+        "search": body.get("search"),
         "storage": body.get("storage", "nextcloud"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))

@@ -2225,6 +2225,8 @@ export const api = {
     tts_enabled?: boolean;
     esphome_script?: string;
     flash_screen?: boolean;
+    /** The app page the notice opens, e.g. a note's `/notes?note=…` (in-app paths only). */
+    url?: string;
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/timers', payload);
     return resp.data;
@@ -2303,7 +2305,12 @@ export const api = {
     return resp.data;
   },
 
-  /** Full replace: the editor's Save. Append would duplicate the body. */
+  /**
+   * Full replace: the editor's Save. Append would duplicate the body.
+   * `if_match` is the version `readNote` returned (`detail.etag`); a note
+   * changed elsewhere since then comes back as a FAILURE with
+   * `detail.conflict` instead of being overwritten.
+   */
   async writeNote(payload: {
     title: string;
     content: string;
@@ -2311,6 +2318,7 @@ export const api = {
     storage?: string;
     path?: string;
     as_user?: 'admin';
+    if_match?: string;
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/write', payload, { timeout: 60_000 });
     return resp.data;
@@ -2376,6 +2384,40 @@ export const api = {
     as_user?: 'admin';
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/duplicate', payload, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  /**
+   * Nextcloud's earlier versions of one note: `list` (detail.versions, newest
+   * first), `read` one (its text in `message`) or `restore` one over the note.
+   */
+  async noteVersions(payload: {
+    path: string;
+    action?: 'list' | 'read' | 'restore';
+    version?: string;
+    storage?: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/versions', payload, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  /**
+   * Nextcloud sharing for one note: `list` who has it (detail.shares),
+   * `people` it could be shared with (detail.people), `add` a person
+   * (read only, or `can_edit`), `remove` a share by id.
+   */
+  async noteShare(payload: {
+    action: 'list' | 'people' | 'add' | 'remove';
+    path?: string;
+    share_with?: string;
+    can_edit?: boolean;
+    share_id?: string;
+    search?: string;
+    storage?: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/share', payload, { timeout: 60_000 });
     return resp.data;
   },
 

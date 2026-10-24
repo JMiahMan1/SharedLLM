@@ -4,6 +4,7 @@ import { Keyboard, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useOptionalWebPlayer } from '../../context/webPlayerContext';
 import { useHaptics } from '../../hooks/useHaptics';
+import { isTypingTarget } from '../../lib/keyboard';
 
 type RepeatMode = 'off' | 'all' | 'one';
 
@@ -18,7 +19,10 @@ const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
   { keys: ['R'], label: 'Cycle repeat: off, all, one' },
   { keys: ['Q'], label: 'Open the queue' },
   { keys: ['F'], label: 'Open Now Playing' },
-  { keys: ['/'], label: 'Search pages and settings' },
+  { keys: ['/'], label: 'Search pages and settings (on Notes: search notes)' },
+  { keys: ['C'], label: 'On Notes: take a note' },
+  { keys: ['Ctrl', 'S'], label: 'In a note: save' },
+  { keys: ['Ctrl', 'Enter'], label: 'In a note: save and close (Esc closes too)' },
   { keys: ['?'], label: 'Show this help' },
 ];
 
@@ -26,19 +30,6 @@ function nextRepeat(mode: RepeatMode): RepeatMode {
   if (mode === 'off') return 'all';
   if (mode === 'all') return 'one';
   return 'off';
-}
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  const element = target as HTMLElement | null;
-  if (!element || typeof element.tagName !== 'string') return false;
-  const tag = element.tagName.toLowerCase();
-  return (
-    element.isContentEditable
-    || tag === 'input'
-    || tag === 'textarea'
-    || tag === 'select'
-    || tag === 'option'
-  );
 }
 
 /** Space and Enter belong to a focused button/link before they belong to playback. */

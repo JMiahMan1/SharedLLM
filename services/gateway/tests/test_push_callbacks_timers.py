@@ -36,6 +36,13 @@ async def test_snooze_adds_five_minutes_with_the_same_name_and_speaker(execution
     assert payload == {"action": "add", "type": "timer", "duration_str": "5m", "title": "Pasta", "target_device": "kitchen"}
 
 
+async def test_a_snoozed_note_reminder_keeps_its_link(execution):
+    calls, _ = execution
+    params = {"title": "📝 Trip ideas", "type": "timer", "url": "/notes?note=Notes%2FTrip%20ideas.md"}
+    await push_callbacks.PUSH_CALLBACKS["timer_snooze"](object(), params, None)
+    assert calls[0][2]["url"] == "/notes?note=Notes%2FTrip%20ideas.md"
+
+
 async def test_one_more_minute_keeps_an_alarm_an_alarm(execution):
     calls, _ = execution
     await push_callbacks.PUSH_CALLBACKS["timer_add_minute"](object(), {"title": "Wake", "type": "alarm"}, None)
