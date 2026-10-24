@@ -21,9 +21,10 @@ Two things here are about honesty rather than arithmetic:
 from __future__ import annotations
 
 import statistics
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Iterable, Literal, Optional
+from typing import Literal
 
 Range = Literal["D", "W", "M", "3M", "Y"]
 
@@ -76,10 +77,10 @@ class Series:
     buckets: list[Bucket] = field(default_factory=list)
     total: int = 0
     daily_average: int = 0
-    best: Optional[Bucket] = None
+    best: Bucket | None = None
     #: The user's own median daily steps over the window, or None when there is
     #: not enough history to be worth comparing against.
-    baseline: Optional[int] = None
+    baseline: int | None = None
     baseline_days: int = 0
     #: True when the window is too short for the baseline to mean anything.
     thin: bool = False
@@ -197,7 +198,7 @@ def build_buckets(days_map: dict[date, int], today: date, rng: str) -> list[Buck
     return out
 
 
-def personal_baseline(values: Iterable[int]) -> Optional[int]:
+def personal_baseline(values: Iterable[int]) -> int | None:
     """Median of the user's own history.
 
     Median rather than mean because one 30,000-step day should not redefine
@@ -206,10 +207,10 @@ def personal_baseline(values: Iterable[int]) -> Optional[int]:
     clean = [int(v) for v in values if v is not None]
     if not clean:
         return None
-    return int(round(statistics.median(clean)))
+    return round(statistics.median(clean))
 
 
-def build_series(daily: dict[str, int], today: date, rng: str, goal: Optional[int] = None) -> Series:
+def build_series(daily: dict[str, int], today: date, rng: str, goal: int | None = None) -> Series:
     """Assemble the chart buckets plus the summary numbers for one range."""
     days_map = _parse_days(daily)
     span = RANGE_DAYS.get(rng, 7)
@@ -220,7 +221,7 @@ def build_series(daily: dict[str, int], today: date, rng: str, goal: Optional[in
 
     recorded_days = len(in_window)
     total = sum(in_window.values())
-    average = int(round(total / recorded_days)) if recorded_days else 0
+    average = round(total / recorded_days) if recorded_days else 0
 
     # Baseline is computed from every day we hold, not just the visible window:
     # a 7-day view should still be able to say how you usually do.
@@ -250,7 +251,7 @@ def build_series(daily: dict[str, int], today: date, rng: str, goal: Optional[in
     )
 
 
-def to_payload(series: Series, goal: Optional[int] = None) -> dict:
+def to_payload(series: Series, goal: int | None = None) -> dict:
     """Wire format. Explicit about absence so the UI can say why."""
     return {
         "range": series.range,

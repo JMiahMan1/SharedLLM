@@ -1,5 +1,4 @@
 """Arrival / departure notices from HA zones, with an ETA home on departure."""
-import json
 import time
 
 import pytest

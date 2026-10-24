@@ -3,7 +3,6 @@
 The URL used to be hardcoded to one machine's LAN address, so every other
 install handed the UI a link to a host that does not exist.
 """
-import os
 
 import pytest
 

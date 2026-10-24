@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import sys
 import time
@@ -14,8 +15,6 @@ DEVICE_NAME = "TCL Roku TV" # Default target
 ENTITY_ID = "media_player.28_tcl_roku_tv" # Target entity for state verification
 
 # Setup Logging
-import logging
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 log = logging.getLogger("test_chat_lifecycle")
 

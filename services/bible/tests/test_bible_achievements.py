@@ -3,10 +3,8 @@
 The rules are pure functions so they can be pinned precisely: a bug here either
 withholds a badge the reader earned or hands out one they did not.
 """
-from datetime import date, timedelta
 import json
-
-import pytest
+from datetime import date, timedelta
 
 from services.bible import achievements as ach
 

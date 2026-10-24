@@ -13,12 +13,14 @@ inventing a second ledger.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import date, timedelta
+import itertools
 import json
 import logging
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 log = logging.getLogger("bible.achievements")
 
@@ -153,7 +155,7 @@ def longest_streak(active_days: Any) -> int:
     if not days:
         return 0
     best = current = 1
-    for prev, nxt in zip(days, days[1:]):
+    for prev, nxt in itertools.pairwise(days):
         current = current + 1 if (nxt - prev) == timedelta(days=1) else 1
         best = max(best, current)
     return best
@@ -171,7 +173,7 @@ def current_streak(active_days: Any, today: date | None = None) -> int:
     if days[-1] < anchor - timedelta(days=1) or days[-1] > anchor:
         return 0
     run = 1
-    for prev, nxt in zip(reversed(days[:-1]), reversed(days[1:])):
+    for prev, nxt in zip(reversed(days[:-1]), reversed(days[1:]), strict=True):
         if (nxt - prev) == timedelta(days=1):
             run += 1
         else:
@@ -213,7 +215,7 @@ def evaluate(
         else:
             remaining = max(0.0, definition.rule_value - current)
             percent = (
-                int(round((current / definition.rule_value) * 100))
+                round((current / definition.rule_value) * 100)
                 if definition.rule_value
                 else 0
             )

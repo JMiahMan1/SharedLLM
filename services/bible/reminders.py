@@ -115,7 +115,7 @@ async def remind_once(engine, telemetry_url: str, secret: str, now: datetime | N
     for username, note in pending:
         try:
             sent += await send(username, note, now.date().isoformat(), telemetry_url, secret)
-        except Exception as exc:  # noqa: BLE001 - one reader's failure must not stop the rest
+        except Exception as exc:
             log.warning("[Bible] reminder for %s failed: %s", username, exc)
     return sent
 

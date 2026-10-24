@@ -7,8 +7,8 @@ already banked keeps its date in ``AchievementEarned``.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
 import logging
+from datetime import date, timedelta
 from typing import Any
 
 from sqlmodel import Session, select

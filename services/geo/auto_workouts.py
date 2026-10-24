@@ -9,8 +9,10 @@ false "workout" every time someone walks to the car.
 """
 from __future__ import annotations
 
+import itertools
 import math
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 #: Walking, running and cycling are the activities we can tell apart from GPS
 #: speed alone. Mountain biking / dirt biking / horseback riding need terrain
@@ -121,7 +123,7 @@ def _window(candidate: dict) -> dict | None:
         "activity_type": candidate["activity_type"],
         "start_time": round(candidate["start_time"], 3),
         "end_time": round(candidate["end_time"], 3),
-        "duration_seconds": int(round(duration)),
+        "duration_seconds": round(duration),
         "distance_miles": round(miles, 2),
         "top_speed_mph": round(candidate["top_speed_mph"], 1),
         "avg_speed_mph": round(miles / (duration / 3600.0), 1) if duration >= 60 else 0.0,
@@ -184,7 +186,7 @@ def detect_auto_workouts(
                 candidates.append(finished)
         current = None
 
-    for previous, point in zip(ordered, ordered[1:]):
+    for previous, point in itertools.pairwise(ordered):
         kind, distance_m, mph = _segment_kind(previous, point)
         if current is None:
             if kind in MINIMUMS:

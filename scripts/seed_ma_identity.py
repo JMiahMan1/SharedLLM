@@ -17,10 +17,10 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-from sqlmodel import Session, create_engine, select
+from sqlmodel import Session, create_engine, select  # noqa: E402 - after load_dotenv
 
-from services.identity.crypto import encrypt
-from services.identity.models import User
+from services.identity.crypto import encrypt  # noqa: E402 - needs .env loaded first
+from services.identity.models import User  # noqa: E402 - needs .env loaded first
 
 # MA credentials from .env only
 MA_URL = os.getenv("MA_URL")

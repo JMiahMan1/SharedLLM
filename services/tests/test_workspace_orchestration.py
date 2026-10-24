@@ -17,7 +17,6 @@ from services.workspace_runtime.main import (
 )
 
 
-
 @pytest.fixture
 def workspace_env(monkeypatch, tmp_path):
     workspace_root = tmp_path / "workspace"

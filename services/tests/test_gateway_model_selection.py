@@ -9,9 +9,12 @@ from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import httpx
-
-
+import pytest
+from dotenv import dotenv_values
+from fastapi.testclient import TestClient
 from sqlmodel import Session, create_engine, select
+from starlette.requests import Request
+from starlette.responses import Response as StarletteResponse
 
 from services.identity.models import GlobalSetting
 
@@ -89,16 +92,10 @@ for ep in LIVE_GATEWAY_ENDPOINTS:
 
 LIVE_GATEWAY_AVAILABLE = bool(LIVE_GATEWAY_URL and os.getenv("RUN_LIVE_GATEWAY_TESTS"))
 
-import pytest
-from dotenv import dotenv_values
-from fastapi.testclient import TestClient
-from starlette.requests import Request
-from starlette.responses import Response as StarletteResponse
-
-import services.gateway.main as gateway_main
-import services.gateway.orchestrator as gateway_orchestrator
-from services.gateway.main import app, select_model_for_query, select_system_instruction_for_query
-from services.gateway.prompts import (
+import services.gateway.main as gateway_main  # noqa: E402 - after the test settings are resolved
+import services.gateway.orchestrator as gateway_orchestrator  # noqa: E402 - after the test settings are resolved
+from services.gateway.main import app, select_model_for_query, select_system_instruction_for_query  # noqa: E402 - after the test settings are resolved
+from services.gateway.prompts import (  # noqa: E402 - after the test settings are resolved
     PROMPT_ASSISTANT_SYSTEM_INSTRUCTION,
     PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION,
     PROMPT_LIBRARIAN_SYSTEM_INSTRUCTION,

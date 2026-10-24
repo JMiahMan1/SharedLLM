@@ -32,7 +32,7 @@ import sqlite3
 import sys
 import urllib.request
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -380,7 +380,7 @@ def build_seed(
             "fndds": _import_fndds(conn, Path(fndds_json)),
         }
         _check_counts(counts, dict(expect or DEFAULT_EXPECT))
-        built_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        built_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         meta = {"schema_version": "1", "license": LICENSE, "built_at": built_at, "counts": json.dumps(counts)}
         for source in SOURCES:
             meta[f"source_{source['name']}"] = source["url"]

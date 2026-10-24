@@ -9,13 +9,13 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 import services.config as cfg
 from services.bible import corpus
 from services.bible import main as bible_main
-
 from services.bible.tests.conftest import auth
 
 SECRET = "test-secret"
@@ -529,7 +529,7 @@ def test_blb_link_for_an_interlinear(monkeypatch):
 
 def test_blb_link_rejects_a_bad_reference(monkeypatch):
     monkeypatch.setattr(bible_main, "BLB_BASE_URL", "https://bible.test")
-    with pytest.raises(Exception):
+    with pytest.raises(HTTPException):
         bible_main.blb_link("Notabook 1:1")
 
 

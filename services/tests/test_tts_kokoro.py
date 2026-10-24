@@ -5,13 +5,12 @@ import re
 import sys
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 sys.modules['onnxruntime'] = MagicMock()
 
-import numpy as np
-
-from services.execution.tts import KokoroTTSEngine, get_tts_engine
+from services.execution.tts import KokoroTTSEngine, get_tts_engine  # noqa: E402 - after the onnxruntime stub
 
 
 def test_normalization():

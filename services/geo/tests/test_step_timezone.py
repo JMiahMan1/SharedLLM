@@ -95,7 +95,7 @@ async def test_a_late_evening_read_is_filed_under_the_phones_day(redis):
 @pytest.mark.anyio
 async def test_the_zone_is_recorded_alongside_the_day(redis):
     await geo_main._record_daily_steps(redis, "u1", 100, 1_700_000_000, "phone", "Europe/London")
-    day = list(redis.hashes["geo:steps_src:u1:phone"].keys())[0]
+    day = next(iter(redis.hashes["geo:steps_src:u1:phone"].keys()))
     assert await redis.hget("geo:steps_tz:u1:phone", day) == "Europe/London"
 
 
@@ -105,7 +105,7 @@ async def test_a_stale_lower_reading_cannot_lower_a_stored_day(redis):
     late, stale upload from wiping out a real total."""
     await geo_main._record_daily_steps(redis, "u1", 5000, 1_700_000_000, "phone", "Europe/London")
     await geo_main._record_daily_steps(redis, "u1", 10, 1_700_000_000, "phone", "Europe/London")
-    day = list(redis.hashes["geo:steps_src:u1:phone"].keys())[0]
+    day = next(iter(redis.hashes["geo:steps_src:u1:phone"].keys()))
     assert await redis.hget("geo:steps_src:u1:phone", day) == "5000"
 
 
@@ -144,7 +144,7 @@ async def test_a_same_zone_rerun_still_cannot_lower_the_day(redis):
     ts = datetime(2026, 10, 1, 12, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
     await geo_main._record_daily_steps(redis, "u1", 8000, ts, "phone", "Europe/London")
     await geo_main._record_daily_steps(redis, "u1", 5, ts, "phone", "Europe/London")
-    day = list(redis.hashes["geo:steps_src:u1:phone"].keys())[0]
+    day = next(iter(redis.hashes["geo:steps_src:u1:phone"].keys()))
     assert await redis.hget("geo:steps_src:u1:phone", day) == "8000"
 
 

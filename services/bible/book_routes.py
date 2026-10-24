@@ -21,6 +21,7 @@ from sqlmodel import Session, select
 from services.bible import book_import, library
 from services.bible.models import StudySession, StudySessionTurn, utcnow
 
+
 # The helpers below live in ``main`` because every existing route uses them.
 # Importing ``main`` at module import time would close the circle (main imports
 # this router), so they are resolved lazily on first call instead. By then main

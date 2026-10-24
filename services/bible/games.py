@@ -77,16 +77,7 @@ BLANK = "_____"
 _SEED_RE = re.compile(r"^[A-Za-z0-9-]{1,40}$")
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z']*")
 _STOPWORDS = frozenset(
-    """
-    a about above after again against all also am an and any are as at be because been before being
-    below between both but by can did do does doing down during each even every few for from further
-    had has have having he her here hers herself him himself his how i if in into is it its itself
-    let me more most my myself no nor not now of off on once only or other our ours ourselves out over
-    own same say said shall she should so some such than that the thee their theirs them themselves
-    then there these they thine this those thou thy through to too under until unto up upon us very
-    was we were what when where which while who whom why will with would ye yea you your yours
-    yourself yourselves hath doth unto shalt wilt art also
-    """.split()
+    ["a", "about", "above", "after", "again", "against", "all", "also", "am", "an", "and", "any", "are", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can", "did", "do", "does", "doing", "down", "during", "each", "even", "every", "few", "for", "from", "further", "had", "has", "have", "having", "he", "her", "here", "hers", "herself", "him", "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself", "let", "me", "more", "most", "my", "myself", "no", "nor", "not", "now", "of", "off", "on", "once", "only", "or", "other", "our", "ours", "ourselves", "out", "over", "own", "same", "say", "said", "shall", "she", "should", "so", "some", "such", "than", "that", "the", "thee", "their", "theirs", "them", "themselves", "then", "there", "these", "they", "thine", "this", "those", "thou", "thy", "through", "to", "too", "under", "until", "unto", "up", "upon", "us", "very", "was", "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why", "will", "with", "would", "ye", "yea", "you", "your", "yours", "yourself", "yourselves", "hath", "doth", "unto", "shalt", "wilt", "art", "also"]
 )
 
 
@@ -178,7 +169,7 @@ def score(questions: list[Question], answers: list[str | None]) -> list[dict]:
     if len(answers) != len(questions):
         raise GameError(f"Expected {len(questions)} answers, got {len(answers)}.")
     results = []
-    for question, chosen in zip(questions, answers):
+    for question, chosen in zip(questions, answers, strict=True):
         right = chosen is not None and _same(chosen, question.answer)
         results.append(
             {

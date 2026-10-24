@@ -11,11 +11,12 @@ refused before anything is fetched.
 
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
 from services.bible import importer, provider_cache
-from services.bible.provider_cache import CACHE_VERSION, ChapterCache, call_budget, cache_root
+from services.bible.provider_cache import CACHE_VERSION, ChapterCache, cache_root, call_budget
 
 
 def make_cache(tmp_path: Path, *, provider: str = "api.bible", base: str = "https://host", translation: str = "T1") -> ChapterCache:
@@ -190,7 +191,7 @@ class _Book:
 
 
 class _Books:
-    BOOK_BY_OSIS = {"Gen": _Book()}
+    BOOK_BY_OSIS: ClassVar[dict[str, _Book]] = {"Gen": _Book()}
 
 
 def test_a_fake_provider_reports_the_cache_and_the_call_accounting(tmp_path):
@@ -234,9 +235,10 @@ def test_an_unreadable_budget_refuses_the_import_instead_of_running_it(monkeypat
     The refusal has to reach the operator as a recorded failed run carrying the
     reason, because that is what the Admin panel reads back afterwards.
     """
+    from sqlmodel import Session, SQLModel, create_engine, select
+
     import services.config as cfg
     from services.bible.models import BibleVersion, UserBibleState
-    from sqlmodel import Session, SQLModel, create_engine, select
 
     monkeypatch.setattr(cfg, "BIBLE_PROVIDER_CALL_BUDGET", "12oo", raising=False)
     engine = create_engine(f"sqlite:///{tmp_path / 'budget.db'}")
@@ -296,9 +298,8 @@ def test_the_operator_can_manage_every_bible_setting_from_the_config_database():
     Anything wired into settings_map has to be seeded, or Admin > LLM & Settings will
     not render it and the only way to change it is to edit a file on the host.
     """
-    import json as _json
-
     import inspect
+    import json as _json
 
     import services.config as cfg
     from services.bible import main
@@ -313,7 +314,6 @@ def test_the_operator_can_manage_every_bible_setting_from_the_config_database():
     # bible_api_key is deliberately NOT in settings_map: the admin panel reads it
     # live from the settings database on every call so a key pasted into the UI
     # works without restarting the service. Everything else is a boot-time seed.
-    live = {"bible_api_key"}
     for key in (
         "blb_base_url",
         "bible_devotional_dir",

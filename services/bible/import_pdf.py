@@ -21,7 +21,7 @@ import json
 import sys
 from pathlib import Path
 
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from services.bible.books import BOOKS
 from services.bible.corpus import CorpusError, import_corpus, load_manifest

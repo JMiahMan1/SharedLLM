@@ -66,7 +66,8 @@ def main():
             "values": added_values, "ttl": rec.get("ttl", 300),
         })
         if s != 200:
-            print(f"FAIL: PUT add -> {s} {d[:200]}"); sys.exit(1)
+            print(f"FAIL: PUT add -> {s} {d[:200]}")
+            sys.exit(1)
 
     status, raw = req("GET", "/api/dns")
     after_add = next(r for r in json.loads(raw) if r["domain"] == TARGET_DOMAIN)
@@ -84,7 +85,8 @@ def main():
             "values": removed_values, "ttl": rec.get("ttl", 300),
         })
         if s != 200:
-            print(f"FAIL: PUT remove -> {s} {d[:200]}"); sys.exit(1)
+            print(f"FAIL: PUT remove -> {s} {d[:200]}")
+            sys.exit(1)
 
     status, raw = req("GET", "/api/dns")
     after_remove = next(r for r in json.loads(raw) if r["domain"] == TARGET_DOMAIN)

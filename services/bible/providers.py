@@ -30,9 +30,10 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import aiohttp
 
@@ -131,7 +132,7 @@ class Provider:
         destination: Path,
         *,
         progress: Callable[[int, int, str], None] | None = None,
-        cache: "ChapterCache | None" = None,
+        cache: ChapterCache | None = None,
         budget: int | None = None,
     ) -> tuple[Path, str]:
         """Download a whole Bible as corpus-shaped JSON; returns (path, name).
@@ -143,7 +144,7 @@ class Provider:
         """
         raise NotImplementedError
 
-    async def sample(self, translation_id: str, *, cache: "ChapterCache | None" = None) -> dict:
+    async def sample(self, translation_id: str, *, cache: ChapterCache | None = None) -> dict:
         """Fetch and parse one chapter so a dry run can prove the parsing works.
 
         A whole Bible is about 1,190 requests on api.bible's free plan, so the
@@ -216,7 +217,7 @@ class ApiBibleProvider(Provider):
         destination: Path,
         *,
         progress: Callable[[int, int, str], None] | None = None,
-        cache: "ChapterCache | None" = None,
+        cache: ChapterCache | None = None,
         budget: int | None = None,
     ) -> tuple[Path, str]:
         """Download a whole Bible as corpus-shaped JSON; returns (path, name).
@@ -244,7 +245,7 @@ class ApiBibleProvider(Provider):
 
         async with aiohttp.ClientSession() as session:
             remote_name = await _remote_name(self, session, translation_id, cache=cache)
-            catalogue = None if cache is not None else None
+            catalogue = None
             if cache is not None:
                 cached_books = cache.get_books()
                 if isinstance(cached_books, list):
@@ -332,7 +333,7 @@ class ApiBibleProvider(Provider):
     async def _call(
         self,
         session: aiohttp.ClientSession,
-        cache: "ChapterCache | None",
+        cache: ChapterCache | None,
         path: str,
         *,
         timeout: aiohttp.ClientTimeout | None = None,
@@ -342,7 +343,7 @@ class ApiBibleProvider(Provider):
             cache.stats.calls += 1
         return await self._get(session, path, timeout=timeout)
 
-    async def estimate(self, translation_id: str, *, cache: "ChapterCache | None" = None) -> dict:
+    async def estimate(self, translation_id: str, *, cache: ChapterCache | None = None) -> dict:
         """What importing this translation would cost, before spending anything.
 
         Answers the question the Install button should ask: how many chapters are
@@ -403,7 +404,7 @@ class ApiBibleProvider(Provider):
             "cache_directory": cache.stats.directory if cache is not None else "",
         }
 
-    async def sample(self, translation_id: str, *, cache: "ChapterCache | None" = None) -> dict:
+    async def sample(self, translation_id: str, *, cache: ChapterCache | None = None) -> dict:
         """Read back one chapter of Genesis, the way a reader would see it.
 
         Genesis is deliberate rather than arbitrary: it is first in our canonical
@@ -641,11 +642,11 @@ def _verses_of(data: Any, label: str = "", declared: int | None = None) -> list[
 
 
 async def _remote_name(
-    provider: "ApiBibleProvider",
+    provider: ApiBibleProvider,
     session: Any,
     translation_id: str,
     *,
-    cache: "ChapterCache | None" = None,
+    cache: ChapterCache | None = None,
 ) -> str:
     """The translation's own name, so a reader never sees ``78a9f6124f344018-01``.
 

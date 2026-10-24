@@ -1,4 +1,4 @@
-from services.common.book_recommendations import recommend_book, all_themes
+from services.common.book_recommendations import all_themes, recommend_book
 
 
 def test_recommend_book_matches_author_theme():

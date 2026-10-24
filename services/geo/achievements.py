@@ -10,13 +10,15 @@ the Skylight bridge converts into stars (see docs/ACHIEVEMENTS.md).
 """
 from __future__ import annotations
 
+import itertools
 import json
 import logging
+import os
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
-import os
-from typing import Any, Iterable
+from typing import Any
 
 log = logging.getLogger("geo.achievements")
 
@@ -168,7 +170,7 @@ def longest_goal_streak(daily_steps: dict[str, int], daily_goal: int) -> int:
     if not days:
         return 0
     best = current = 1
-    for prev, nxt in zip(days, days[1:]):
+    for prev, nxt in itertools.pairwise(days):
         current = current + 1 if (nxt - prev) == timedelta(days=1) else 1
         best = max(best, current)
     return best
@@ -282,7 +284,7 @@ def evaluate(
             result.earned.append(Earned(definition, today_str, definition.points))
         else:
             remaining = max(0.0, definition.rule_value - current)
-            percent = int(round((current / definition.rule_value) * 100)) if definition.rule_value else 0
+            percent = round((current / definition.rule_value) * 100) if definition.rule_value else 0
             result.next_up.append(
                 Progress(
                     achievement=definition,
@@ -391,7 +393,7 @@ async def announce_awards(earned: list[Earned]) -> None:
                         log.warning(
                             "Achievement announcement failed for %s: %s", item.achievement.id, resp.status
                         )
-    except Exception as exc:  # noqa: BLE001 - an announcement is never load-bearing
+    except Exception as exc:
         log.warning("Achievement announcement error: %s", exc)
 
 

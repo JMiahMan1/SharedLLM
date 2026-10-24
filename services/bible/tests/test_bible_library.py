@@ -6,7 +6,8 @@ import aiohttp
 import pytest
 from sqlmodel import Session, select
 
-from services.bible import importer, library, main as bible_main
+from services.bible import importer, library
+from services.bible import main as bible_main
 from services.bible.models import BibleVersion, ImportRun
 from services.bible.tests.conftest import SECRET
 

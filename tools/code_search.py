@@ -14,8 +14,7 @@ import re
 import sys
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field, asdict
-from typing import Optional
+from dataclasses import asdict, dataclass, field
 
 
 @dataclass
@@ -308,7 +307,7 @@ def format_results(results_list: list[SearchResults]) -> str:
         output.append(f"{'Repository':<35} {'Language':<12} {'Line':>5} {'Path'}")
         output.append("-" * 100)
 
-        for i, m in enumerate(r.matches[:30], 1):
+        for m in r.matches[:30]:
             repo_short = m.repository.split("/")[-2] + "/" + m.repository.split("/")[-1] if "/" in m.repository else m.repository
             lang = m.language or "-"
             line = str(m.line_number) if m.line_number else "-"

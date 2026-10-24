@@ -15,6 +15,8 @@ Each route is checked three ways:
 The edge middleware and the previously-unauthenticated writes are covered too.
 """
 
+from typing import ClassVar
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -28,9 +30,9 @@ SECRET = {"X-Internal-Secret": INTERNAL_SECRET}
 # The consent check runs before any storage access, so the "no consent" cases
 # never touch Redis at all. The "allowed" cases do, and only need empty answers.
 class _EmptyRedis:
-    _LISTS = {"zrevrange", "zrange", "zrevrangebyscore", "zrangebyscore", "keys", "smembers"}
-    _MAPS = {"hgetall"}
-    _INTS = {"zcard", "exists", "ttl", "llen", "scard"}
+    _LISTS: ClassVar[set[str]] = {"zrevrange", "zrange", "zrevrangebyscore", "zrangebyscore", "keys", "smembers"}
+    _MAPS: ClassVar[set[str]] = {"hgetall"}
+    _INTS: ClassVar[set[str]] = {"zcard", "exists", "ttl", "llen", "scard"}
 
     def __getattr__(self, name):
         async def _empty(*a, **k):

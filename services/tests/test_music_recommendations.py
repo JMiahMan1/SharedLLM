@@ -1,4 +1,4 @@
-from services.common.music_recommendations import recommend_music, all_lanes
+from services.common.music_recommendations import all_lanes, recommend_music
 
 
 def test_recommend_music_matches_artist_lane():

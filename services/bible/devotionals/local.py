@@ -43,7 +43,7 @@ class LocalDevotionalSource(DevotionalSource):
         self.default_work = work
         # The registry iterates ``works`` when no work was requested, so the
         # root-level "default" work and any subdirectories have to be listed.
-        self.works = (work,) + self.available_works()
+        self.works = (work, *self.available_works())
 
     def configured(self) -> bool:
         if self.directory is None:

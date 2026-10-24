@@ -11,8 +11,8 @@ live in Identity, not here, so nothing is hardcoded).
 """
 from __future__ import annotations
 
-from datetime import date
 import hashlib
+from datetime import date
 
 from sqlmodel import Session, select
 
@@ -25,7 +25,7 @@ _OT_COUNT = 39
 
 
 def _digest(version: str, doy: int, seed: str, scope: str) -> int:
-    raw = f"{version}|{doy}|{seed}|{scope}".encode("utf-8")
+    raw = f"{version}|{doy}|{seed}|{scope}".encode()
     return int.from_bytes(hashlib.sha256(raw).digest()[:8], "big")
 
 

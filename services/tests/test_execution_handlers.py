@@ -1,10 +1,8 @@
 # services/tests/test_execution_handlers.py
-import os
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-
 
 from services.execution.handlers import climate, light, media, security, talk, volumes
 from services.execution.handlers.security import SecurityRequest

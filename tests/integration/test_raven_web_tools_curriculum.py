@@ -494,7 +494,7 @@ def test_raven_memory_usage():
             f"[memory-usage] output_log has no Apply: citation (plan not recorded):\n{output_log[-600:]}"
         )
     except Exception as e:
-        raise AssertionError(f"[memory-usage] could not read mission output_log: {e}")
+        raise AssertionError(f"[memory-usage] could not read mission output_log: {e}") from e
 
     # Proof 3 (context budget): lesson documents in system_learnings are
     # compact JSON (id + rule), not multi-KB prose; the renderer injects one
@@ -526,4 +526,4 @@ def test_raven_memory_usage():
     except AssertionError:
         raise
     except Exception as e:
-        raise AssertionError(f"[memory-usage] RAG budget check failed: {e}")
+        raise AssertionError(f"[memory-usage] RAG budget check failed: {e}") from e

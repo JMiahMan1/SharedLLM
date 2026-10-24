@@ -1,7 +1,7 @@
 import io
 import zipfile
 
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine
 
 from services.bible import book_import
 from services.bible.models import ImportedBook, ImportedBookChapter

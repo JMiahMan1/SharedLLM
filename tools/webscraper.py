@@ -11,8 +11,8 @@ Usage:
 
 import argparse
 import asyncio
+import contextlib
 import json
-import random
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -79,18 +79,6 @@ URLS = {
 
 async def launch_camoufox(headless=True, is_mobile=True):
     from camoufox.async_api import AsyncCamoufox
-
-    mobile_ua = (
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
-        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-        "Version/18.0 Mobile/15E148 Safari/604.1"
-    )
-
-    desktop_ua = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/125.0.0.0 Safari/537.36"
-    )
 
     ctx = await AsyncCamoufox(headless=headless).__aenter__()
 
@@ -197,8 +185,6 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
         else:
             p, page, ctx, browser = await launch_browser(headless=headless, is_mobile=is_mobile, engine=browser_engine)
 
-        import random
-        import asyncio as aio
 
         await page.goto(url, wait_until="domcontentloaded", timeout=45000)
 
@@ -249,7 +235,7 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
                                 specs = {}
                         elif not isinstance(specs, dict):
                             specs = {}
-                        
+
                         result.prices.append(
                             PriceItem(
                                 product=item.get("product", ""),
@@ -296,10 +282,8 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
     finally:
         if page:
             if browser_engine == "camoufox" and camoufox_ctx:
-                try:
+                with contextlib.suppress(Exception):
                     await camoufox_ctx.close()
-                except Exception:
-                    pass
             elif ctx:
                 await ctx.close()
             elif browser:
@@ -342,10 +326,8 @@ def _parse_ebay(ocr_text: str, html_snippet: str = "") -> list[PriceItem]:
             shipping = 0.0
             ship_match = shipping_pattern.search("\n".join(lines[i:min(i+3, len(lines))]))
             if ship_match:
-                try:
+                with contextlib.suppress(ValueError):
                     shipping = float(ship_match.group(1).replace(",", ""))
-                except ValueError:
-                    pass
 
             if product_name:
                 items.append(PriceItem(
@@ -470,10 +452,8 @@ def _parse_newegg(ocr_text: str, html_snippet: str = "") -> list[PriceItem]:
                 elif "shipping" in lines[i + 1].lower():
                     ship_p = re.search(r"\$\s*([\d,]+(?:\.\d{1,2})?)", lines[i + 1])
                     if ship_p:
-                        try:
+                        with contextlib.suppress(ValueError):
                             shipping = float(ship_p.group(1).replace(",", ""))
-                        except ValueError:
-                            pass
 
             if product_name:
                 items.append(PriceItem(
@@ -526,10 +506,8 @@ def _parse_walmart(ocr_text: str, html_snippet: str = "") -> list[PriceItem]:
                 elif "shipping" in lines[i + 1].lower():
                     ship_p = re.search(r"\$\s*([\d,]+(?:\.\d{1,2})?)", lines[i + 1])
                     if ship_p:
-                        try:
+                        with contextlib.suppress(ValueError):
                             shipping = float(ship_p.group(1).replace(",", ""))
-                        except ValueError:
-                            pass
 
             if product_name:
                 items.append(PriceItem(
@@ -577,9 +555,8 @@ def _parse_aliexpress(ocr_text: str, html_snippet: str = "") -> list[PriceItem]:
 
             # AliExpress often has "free shipping"
             shipping = 0.0
-            if i + 1 < len(lines):
-                if "free shipping" in lines[i + 1].lower():
-                    shipping = 0.0
+            if i + 1 < len(lines) and "free shipping" in lines[i + 1].lower():
+                shipping = 0.0
 
             if product_name:
                 items.append(PriceItem(
@@ -634,10 +611,8 @@ def _parse_bestbuy(ocr_text: str, html_snippet: str = "") -> list[PriceItem]:
                 elif "shipping" in next_line:
                     ship_p = re.search(r"\$\s*([\d,]+(?:\.\d{1,2})?)", lines[i + 1])
                     if ship_p:
-                        try:
+                        with contextlib.suppress(ValueError):
                             shipping = float(ship_p.group(1).replace(",", ""))
-                        except ValueError:
-                            pass
 
             if product_name:
                 items.append(PriceItem(
@@ -692,9 +667,8 @@ def _parse_google_shopping(ocr_text: str, html_snippet: str = "") -> list[PriceI
                     break
 
             shipping = 0.0
-            if i + 1 < len(lines):
-                if "free" in lines[i + 1].lower() and "ship" in lines[i + 1].lower():
-                    shipping = 0.0
+            if i + 1 < len(lines) and "free" in lines[i + 1].lower() and "ship" in lines[i + 1].lower():
+                shipping = 0.0
 
             items.append(PriceItem(
                 product=product_name[:100],
@@ -745,7 +719,6 @@ def extract_prices(ocr_text: str, source: str = "", html_snippet: str = "") -> l
     price_pattern = re.compile(r"\$\s*([\d,]+(?:\.\d{1,2})?)")
 
     # Group consecutive lines into product blocks
-    i = 0
     current_block: list[str] = []
 
     def parse_block(block_lines):
@@ -770,9 +743,8 @@ def extract_prices(ocr_text: str, source: str = "", html_snippet: str = "") -> l
         full_text = "\n".join(block_lines)
         for line in block_lines[:5]:
             line = line.strip()
-            if line and not line.startswith("$") and len(line) > 10:
-                if not product_name:
-                    product_name = line
+            if line and not line.startswith("$") and len(line) > 10 and not product_name:
+                product_name = line
 
         # Look for seller info
         seller_match = re.search(r'(\w+)\s+\((\d+\.?\d*)%', full_text)
@@ -785,10 +757,8 @@ def extract_prices(ocr_text: str, source: str = "", html_snippet: str = "") -> l
         if ship_match:
             ship_price_match = re.search(r'\+\s*(\$\s*[\d,]+\.?\d*)', full_text)
             if ship_price_match:
-                try:
+                with contextlib.suppress(ValueError):
                     shipping = float(ship_price_match.group(1).replace(",", "").replace("$", ""))
-                except ValueError:
-                    pass
 
         item = PriceItem(
             product=product_name,

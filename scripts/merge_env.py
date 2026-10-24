@@ -62,7 +62,7 @@ def merge(remote: str, local: str) -> tuple[list[str], list[str], list[str]]:
 def apply(remote_path: str, local_text: str) -> int:
     remote_text = ""
     if os.path.exists(remote_path):
-        with open(remote_path, "r", encoding="utf-8", errors="replace") as handle:
+        with open(remote_path, encoding="utf-8", errors="replace") as handle:
             remote_text = handle.read()
 
     appended, preserved, duplicates = merge(remote_text, local_text)
