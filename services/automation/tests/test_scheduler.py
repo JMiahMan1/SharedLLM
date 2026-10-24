@@ -1,7 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
 
-
 import pytest
 
 from services.automation import main as automation
@@ -55,7 +54,7 @@ class FakeRedis:
         for key in list(self.strings):
             if key.endswith(":history"):
                 continue
-            if match == "*" or match == "timer:*" and key.startswith("timer:"):
+            if match == "*" or (match == "timer:*" and key.startswith("timer:")):
                 yield key
 
     async def aclose(self):

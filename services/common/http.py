@@ -25,6 +25,7 @@ _DNS_TTL = 60
 #: gets its own session instead of sharing, or closing, the main loop's. The
 #: ``None`` loop key is for callers outside any running loop.
 _clients: dict[tuple[bool, asyncio.AbstractEventLoop | None], aiohttp.ClientSession] = {}
+_CLOSE_TASKS: set[asyncio.Task] = set()
 
 
 class NonClosingSessionWrapper:
@@ -65,7 +66,9 @@ def _retire_session(client: aiohttp.ClientSession | None) -> None:
         try:
             current_loop = asyncio.get_running_loop()
             if current_loop.is_running():
-                current_loop.create_task(client.close())
+                task = current_loop.create_task(client.close())
+                _CLOSE_TASKS.add(task)
+                task.add_done_callback(_CLOSE_TASKS.discard)
             else:
                 _close_connector(client)
         except RuntimeError:

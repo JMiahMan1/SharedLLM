@@ -69,7 +69,7 @@ async def handle_bible(req: BibleRequest) -> ExecutionResult:
         )
     except (BibleRefusal, BibleUnavailable) as exc:
         return ExecutionResult.fail(str(exc), service=SERVICE)
-    except Exception as exc:  # noqa: BLE001 - a tool must answer, not 500
+    except Exception as exc:  # a tool must answer, not 500
         log.exception("Bible %s failed for user %s", req.action, req.user_context.user)
         return ExecutionResult.fail(
             f"Bible {req.action} failed unexpectedly: {exc}", service=SERVICE

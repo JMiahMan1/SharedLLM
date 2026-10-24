@@ -15,9 +15,9 @@ win regardless of how many engines were unhappy.
 
 from __future__ import annotations
 
-from urllib.parse import parse_qs, urlparse
-
+from typing import ClassVar
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -68,13 +68,13 @@ class _ResponseCtx:
 class FakeSession:
     """A stand-in for aiohttp.ClientSession that replays canned payloads."""
 
-    payloads: list[dict] = []
-    urls: list[str] = []
+    payloads: ClassVar[list[dict]] = []
+    urls: ClassVar[list[str]] = []
 
     def __init__(self, *args, **kwargs) -> None:
         pass
 
-    async def __aenter__(self) -> "FakeSession":
+    async def __aenter__(self) -> FakeSession:
         return self
 
     async def __aexit__(self, *exc) -> bool:
@@ -169,7 +169,7 @@ async def test_a_transport_failure_still_raises_for_the_fallback_to_handle(monke
     monkeypatch.setattr(browser, "_get_searxng_url", AsyncMock(return_value=SEARXNG))
 
     class _Down(FakeSession):
-        def get(self, url: str) -> "_ResponseCtx":
+        def get(self, url: str) -> _ResponseCtx:
             raise ConnectionError("json endpoint down")
 
     monkeypatch.setattr(browser.aiohttp, "ClientSession", _Down)

@@ -353,31 +353,28 @@ def resolve_tv_companions(
             continue
 
         # Music Assistant sibling matching
-        if _is_ma_player(s_attrs, eid):
-            if s_q in (entity_id, primary_entity):
-                ma_sibling = eid
-            elif not ma_sibling and room_slug and s_room == room_slug and "speaker" not in eid:
-                ma_sibling = eid
-            elif not ma_sibling and "webos" in eid and ("living_room" in entity_id or "webos" in entity_id):
-                ma_sibling = eid
+        if _is_ma_player(s_attrs, eid) and (
+            s_q in (entity_id, primary_entity)
+            or (not ma_sibling and room_slug and s_room == room_slug and "speaker" not in eid)
+            or (not ma_sibling and "webos" in eid and ("living_room" in entity_id or "webos" in entity_id))
+        ):
+            ma_sibling = eid
 
         # Cast sibling matching (e.g., media_player.office_tv_chrome or media_player.master_bedroom_tv)
-        if not _is_ma_player(s_attrs, eid):
-            if ("chrome" in eid or "_cast" in eid or s_features == CAST_FEATURES) and room_slug and s_room == room_slug:
-                cast_sibling = eid
-                # Also check if there is an MA wrapper for this cast sibling
-                if not ma_sibling:
-                    for s2 in states:
-                        eid2 = s2.get("entity_id", "")
-                        a2 = s2.get("attributes", {}) or {}
-                        if _is_ma_player(a2, eid2) and a2.get("active_queue") == eid:
-                            ma_sibling = eid2
-                            break
+        if not _is_ma_player(s_attrs, eid) and ("chrome" in eid or "_cast" in eid or s_features == CAST_FEATURES) and room_slug and s_room == room_slug:
+            cast_sibling = eid
+            # Also check if there is an MA wrapper for this cast sibling
+            if not ma_sibling:
+                for s2 in states:
+                    eid2 = s2.get("entity_id", "")
+                    a2 = s2.get("attributes", {}) or {}
+                    if _is_ma_player(a2, eid2) and a2.get("active_queue") == eid:
+                        ma_sibling = eid2
+                        break
 
         # DLNA sibling matching (e.g., media_player.tv_loft_samsung_q900)
-        if ("dlna" in eid or "q900" in eid or (s_q == primary_entity and not _is_ma_player(s_attrs, eid))):
-            if room_slug and (room_slug in eid or s_q == primary_entity):
-                dlna_sibling = eid
+        if ("dlna" in eid or "q900" in eid or (s_q == primary_entity and not _is_ma_player(s_attrs, eid))) and room_slug and (room_slug in eid or s_q == primary_entity):
+            dlna_sibling = eid
 
     # Discover LG webOS notify service if available
     webos_notify_service = None

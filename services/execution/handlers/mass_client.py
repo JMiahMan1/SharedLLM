@@ -8,9 +8,9 @@ from typing import Any
 
 import aiohttp
 
-log = logging.getLogger(__name__)
-
 from services.execution.http_client import get_session, host_of
+
+log = logging.getLogger(__name__)
 
 
 class MASearchError(Exception):
@@ -165,57 +165,56 @@ async def search(
             args["media_type"] = [mt.lower() for mt in media_types]
 
         results: list[dict[str, Any]] = []
-        async with _mass_session(mass_url) as session:
-            async with session.ws_connect(ws_url, heartbeat=15, timeout=aiohttp.ClientTimeout(total=25)) as ws:
-                # server/hello
-                await ws.receive_str()
-                # authenticate
-                await ws.send_str(json.dumps({"message_id": "auth", "command": "auth", "args": {"token": mass_token}}))
-                await ws.receive_str()
-                # search
-                await ws.send_str(json.dumps({"message_id": "mass_search", "command": "music/search", "args": args}))
-                try:
-                    while True:
-                        msg = await asyncio.wait_for(ws.receive(), timeout=20)
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            data = json.loads(msg.data)
-                            if data.get("message_id") != "mass_search":
+        async with _mass_session(mass_url) as session, session.ws_connect(ws_url, heartbeat=15, timeout=aiohttp.ClientTimeout(total=25)) as ws:
+            # server/hello
+            await ws.receive_str()
+            # authenticate
+            await ws.send_str(json.dumps({"message_id": "auth", "command": "auth", "args": {"token": mass_token}}))
+            await ws.receive_str()
+            # search
+            await ws.send_str(json.dumps({"message_id": "mass_search", "command": "music/search", "args": args}))
+            try:
+                while True:
+                    msg = await asyncio.wait_for(ws.receive(), timeout=20)
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        data = json.loads(msg.data)
+                        if data.get("message_id") != "mass_search":
+                            continue
+                        if data.get("error_code"):
+                            raise MASearchError(
+                                f"MA search error {data.get('error_code')}: {data.get('details')}"
+                            )
+                        raw = data.get("result", {})
+                        items: list[dict[str, Any]] = []
+                        if isinstance(raw, dict):
+                            for v in raw.values():
+                                if isinstance(v, list):
+                                    items.extend(v)
+                        elif isinstance(raw, list):
+                            items = raw
+                        for item in items:
+                            if not isinstance(item, dict):
                                 continue
-                            if data.get("error_code"):
-                                raise MASearchError(
-                                    f"MA search error {data.get('error_code')}: {data.get('details')}"
-                                )
-                            raw = data.get("result", {})
-                            items: list[dict[str, Any]] = []
-                            if isinstance(raw, dict):
-                                for v in raw.values():
-                                    if isinstance(v, list):
-                                        items.extend(v)
-                            elif isinstance(raw, list):
-                                items = raw
-                            for item in items:
-                                if not isinstance(item, dict):
-                                    continue
-                                item_artists = item.get("artists") or []
-                                item_artist = item_artists[0].get("name", "") if item_artists and isinstance(item_artists[0], dict) else (item.get("artist", "") or "")
-                                item_album = item.get("album")
-                                album_name = item_album.get("name", "") if isinstance(item_album, dict) else (item_album or "")
-                                image = item.get("image")
-                                image_path = image.get("path", "") if isinstance(image, dict) else (image or "")
-                                results.append({
-                                    "name": item.get("name", ""),
-                                    "uri": item.get("uri", ""),
-                                    "type": item.get("media_type", "track"),
-                                    "artist": item_artist,
-                                    "album": album_name,
-                                    "duration": item.get("duration", 0),
-                                    "image": image_path,
-                                })
-                            break
-                        elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                            raise MASearchError("MA search socket closed before a result arrived")
-                except TimeoutError as e:
-                    raise MASearchError("MA search timed out") from e
+                            item_artists = item.get("artists") or []
+                            item_artist = item_artists[0].get("name", "") if item_artists and isinstance(item_artists[0], dict) else (item.get("artist", "") or "")
+                            item_album = item.get("album")
+                            album_name = item_album.get("name", "") if isinstance(item_album, dict) else (item_album or "")
+                            image = item.get("image")
+                            image_path = image.get("path", "") if isinstance(image, dict) else (image or "")
+                            results.append({
+                                "name": item.get("name", ""),
+                                "uri": item.get("uri", ""),
+                                "type": item.get("media_type", "track"),
+                                "artist": item_artist,
+                                "album": album_name,
+                                "duration": item.get("duration", 0),
+                                "image": image_path,
+                            })
+                        break
+                    elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                        raise MASearchError("MA search socket closed before a result arrived")
+            except TimeoutError as e:
+                raise MASearchError("MA search timed out") from e
         if artist:
             needle = artist.casefold()
             results = [r for r in results if needle in (r.get("artist") or "").casefold()]

@@ -20,9 +20,8 @@ Deliberate design choices:
 """
 from __future__ import annotations
 
-import asyncio
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass
 
 # How long an observation stays fresh. A capability that worked 20 minutes ago
 # is worth reporting as working; one that failed a second ago is not.
@@ -104,7 +103,7 @@ async def _probe_image_backend() -> tuple[bool, str]:
         if not models:
             return False, "Image backend is up but advertises no image models."
         return True, f"{len(models)} model(s): {', '.join(models[:3])}"
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return False, f"Image backend did not answer within {PROBE_TIMEOUT_S:.0f}s."
     except Exception as e:  # a probe must never take the page down
         return False, f"Image backend unreachable: {type(e).__name__}."
@@ -136,7 +135,7 @@ async def _probe_voice_backend() -> tuple[bool, str]:
             profiles = (await resp.json()).get("profiles") or []
         n = len(profiles)
         return True, f"{n} family voice(s) enrolled" if n else "Ready; nobody has enrolled a voice yet"
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return False, f"Identity did not answer within {PROBE_TIMEOUT_S:.0f}s."
     except Exception as e:
         return False, f"Enrolled voices unavailable: {type(e).__name__}."
@@ -152,7 +151,7 @@ async def collect_capabilities() -> list[dict]:
             "image_edit",
             "Edit images",
             image_up,
-            image_detail if image_up else image_detail,
+            image_detail,
         ),
         Capability(
             "face_preserve",

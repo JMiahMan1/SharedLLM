@@ -6,7 +6,6 @@ sys.path.insert(0, os.path.abspath("."))
 import pytest
 
 from services.execution.handlers.family_games import (
-    MEMORY_WORDS,
     TRIVIA_QUESTIONS,
     GameRegistry,
     advance_trivia,

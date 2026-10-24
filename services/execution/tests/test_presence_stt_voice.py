@@ -4,6 +4,7 @@ Run from services/execution/ directory: python -m pytest tests/test_presence_stt
 """
 import pytest
 
+
 # Presence Tests
 class TestPresenceTracker:
     """Test ESPresense presence tracking."""

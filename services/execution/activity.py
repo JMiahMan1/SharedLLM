@@ -50,5 +50,5 @@ async def record(
         ) as resp:
             if resp.status != 200:
                 log.debug("activity record for %s failed: HTTP %s", user, resp.status)
-    except Exception as e:  # noqa: BLE001 - best effort by design
+    except Exception as e:  # best effort by design
         log.debug("activity record for %s failed: %s", user, e)

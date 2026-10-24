@@ -142,16 +142,15 @@ async def handle_location(req: LocationRequest) -> ExecutionResult:
     if GEO_SVC_URL:
         try:
             geo_url = GEO_SVC_URL.rstrip("/")
-            async with get_client_insecure() as client:
-                # The asker as viewer: "where is X?" respects X's sharing choice.
-                async with client.get(
-                    f"{geo_url}/people/{target_name}/telemetry",
-                    params={"hours": req.hours, "viewer": caller_user, "is_admin": "true" if is_admin else "false"},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=aiohttp.ClientTimeout(total=5.0),
-                ) as resp:
-                    if resp.status == 200:
-                        telemetry_data = await resp.json()
+            # The asker as viewer: "where is X?" respects X's sharing choice.
+            async with get_client_insecure() as client, client.get(
+                f"{geo_url}/people/{target_name}/telemetry",
+                params={"hours": req.hours, "viewer": caller_user, "is_admin": "true" if is_admin else "false"},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            ) as resp:
+                if resp.status == 200:
+                    telemetry_data = await resp.json()
         except Exception as e:
             log.warning(f"[location] Failed to query Geo service: {e}")
 

@@ -5,10 +5,10 @@ Both used to be one install's values: the subnet fallback returned
 network that is a scan of the wrong LAN and a query aimed at a host that is not
 a router.
 """
+import contextlib
 import importlib
 import subprocess
 import sys
-import types
 
 import pytest
 
@@ -34,13 +34,11 @@ def reloaded(monkeypatch):
     monkeypatch.setenv("SCAN_SUBNET", "127.0.0.0/8")
     importlib.reload(discovery)  # the module is importable again
     monkeypatch.delenv("SCAN_SUBNET", raising=False)
-    try:
+    # The stubbed-out network is still in place for this fixture's teardown,
+    # so real detection cannot succeed yet. The reload above already left a
+    # usable module behind for the rest of the suite.
+    with contextlib.suppress(RuntimeError):
         importlib.reload(discovery)
-    except RuntimeError:
-        # The stubbed-out network is still in place for this fixture's teardown,
-        # so real detection cannot succeed yet. The reload above already left a
-        # usable module behind for the rest of the suite.
-        pass
 
 
 @pytest.fixture

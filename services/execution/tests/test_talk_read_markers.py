@@ -1,10 +1,8 @@
 import os
 import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
-
 
 sys.path.insert(0, os.path.abspath("."))
 

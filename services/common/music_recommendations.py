@@ -12,8 +12,8 @@ the member it is for.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
-
+from collections.abc import Iterable
+from typing import Any
 
 # A "lane" is a (genre, era, energy) bucket. Each lane maps to one vetted
 # recommendation. Keys are lower-case, trimmed; matching is by substring so a

@@ -1,9 +1,10 @@
 """
 Tests for location handler and telemetry queries.
 """
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
+
 from services.execution.handlers.location import LocationRequest, handle_location
 from services.execution.schemas import UserContext
 

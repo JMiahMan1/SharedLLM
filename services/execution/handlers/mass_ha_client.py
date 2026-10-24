@@ -13,10 +13,10 @@ from typing import Any
 
 import aiohttp
 
-log = logging.getLogger("execution.mass_ha")
-
 from services.execution.http_client import get_session, host_of
 from services.shared.ma_player import is_music_assistant_player
+
+log = logging.getLogger("execution.mass_ha")
 
 
 @asynccontextmanager

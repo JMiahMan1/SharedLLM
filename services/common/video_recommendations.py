@@ -15,8 +15,8 @@ the member it is for.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
-
+from collections.abc import Iterable
+from typing import Any
 
 # A "theme" is a content bucket. Each theme maps to one vetted recommendation.
 # `redeemed` is True when the suggestion is the same kind of content made

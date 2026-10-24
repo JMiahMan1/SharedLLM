@@ -1,10 +1,8 @@
 # services/execution/tests/test_media_playback_service.py
-import os
-
-import pytest
-
 
 import contextlib
+
+import pytest
 
 from services.execution.media_playback_service import MediaPlaybackService
 from services.execution.schemas import MediaPlayRequest, MediaStateSyncRequest, MediaStatusRequest, MediaTransportRequest, UserContext

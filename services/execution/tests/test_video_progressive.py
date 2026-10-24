@@ -2,6 +2,7 @@
 give up on a stalled download instead of hanging the cast."""
 import asyncio
 import json
+import pathlib
 
 from services.execution.handlers import video
 
@@ -35,7 +36,7 @@ def _patch(monkeypatch, tmp_path, writes_part):
             p = FakeProc(info=json.dumps({"title": "A video"}).encode())
         else:
             out = cmd[cmd.index("-o") + 1]
-            p = FakeProc(on_start=(lambda: open(out + ".part", "wb").write(b"x" * 2048)) if writes_part else None)
+            p = FakeProc(on_start=(lambda: pathlib.Path(out + ".part").write_bytes(b"x" * 2048)) if writes_part else None)
         procs.append(p)
         return p
 

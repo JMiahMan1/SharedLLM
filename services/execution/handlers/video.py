@@ -1,10 +1,12 @@
 # services/execution/handlers/video.py
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import re
 import secrets
+import time
 import urllib.parse
 
 import aiohttp
@@ -26,9 +28,6 @@ def extract_video_url(query: str) -> str | None:
     match = re.search(url_pattern, query)
     return match.group(0) if match else None
 
-
-import contextlib
-import time
 
 _SEARXNG_URL_CACHE = None
 _SEARXNG_CACHE_TS = 0.0

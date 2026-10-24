@@ -107,8 +107,8 @@ def estimate_night(reports: list[dict[str, Any]], night: str, tz_name: str) -> d
         "night": night,
         "bedtime": _iso(bedtime, tz),
         "wake_time": _iso(wake, tz),
-        "duration_minutes": int(round(asleep_ms / 60000)),
+        "duration_minutes": round(asleep_ms / 60000),
         "wakeups": len(wakeups),
-        "awake_minutes": int(round(awake_ms / 60000)),
+        "awake_minutes": round(awake_ms / 60000),
         "devices": sum(1 for report in reports if report.get("intervals")),
     }

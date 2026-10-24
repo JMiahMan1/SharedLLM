@@ -483,7 +483,7 @@ async def _bank_game_stars(user: str, total_stars: int, reason: str) -> None:
         ) as resp:
             if resp.status >= 400:
                 log.warning("[talk] star banking rejected for %s: %s", user, resp.status)
-    except Exception as exc:  # noqa: BLE001 - never break a game over telemetry
+    except Exception as exc:  # never break a game over telemetry
         log.warning("[talk] star banking failed for %s: %s", user, exc)
 
 
@@ -527,7 +527,7 @@ async def _talk_call(token: str, provider: Any, action: str) -> ExecutionResult:
                 "room_id": signaling.get("roomId") or signaling.get("room_id"),
                 "server_version": (call.get("participantType") or call.get("participant_type")),
             } if isinstance(signaling, dict) else {},
-            "in_call": True if action == "call_join" else False,
+            "in_call": action == "call_join",
         },
     )
 
@@ -644,10 +644,7 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
             message="No game is running here. Say 'start a game' first.",
             service="talk_game",
         )
-    if outcome["kind"] == "trivia":
-        message = "Answer correct." if outcome["result"]["correct"] else "Not this time."
-    else:
-        message = "Flip processed."
+    message = ("Answer correct." if outcome["result"]["correct"] else "Not this time.") if outcome["kind"] == "trivia" else "Flip processed."
     return ExecutionResult(status="SUCCESS", message=message, service="talk_game", detail=outcome["result"])
 
 

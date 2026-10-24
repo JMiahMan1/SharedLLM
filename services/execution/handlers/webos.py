@@ -9,7 +9,6 @@ Services:
 """
 import json
 import logging
-import socket
 
 try:
     import ha_client
