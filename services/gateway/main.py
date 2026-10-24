@@ -5810,6 +5810,25 @@ async def proxy_duplicate_note(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
 
+_NOTE_VERSION_ACTIONS = {"list": "versions", "read": "version_read", "restore": "version_restore"}
+
+
+@app.post("/api/communication/notes/versions")
+async def proxy_note_versions(request: Request):
+    """Earlier versions of one note from Nextcloud: list, read one, or restore one."""
+    body = await request.json()
+    action = _NOTE_VERSION_ACTIONS.get(str(body.get("action") or "list"))
+    if action is None:
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "action must be list, read or restore"})
+    payload = {
+        "action": action,
+        "path": body.get("path"),
+        "version": body.get("version"),
+        "storage": body.get("storage", "nextcloud"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
+
+
 @app.post("/api/communication/notes/empty_trash")
 async def proxy_empty_note_trash(request: Request):
     """Permanently delete every note in Notes/Trash."""

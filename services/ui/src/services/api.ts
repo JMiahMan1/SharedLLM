@@ -2291,6 +2291,21 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * Nextcloud's earlier versions of one note: `list` (detail.versions, newest
+   * first), `read` one (its text in `message`) or `restore` one over the note.
+   */
+  async noteVersions(payload: {
+    path: string;
+    action?: 'list' | 'read' | 'restore';
+    version?: string;
+    storage?: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/versions', payload, { timeout: 60_000 });
+    return resp.data;
+  },
+
   /** Permanently delete everything in Notes/Trash. */
   async emptyNotesTrash(payload: { storage?: string; as_user?: 'admin' } = {}): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/empty_trash', payload, { timeout: 60_000 });
