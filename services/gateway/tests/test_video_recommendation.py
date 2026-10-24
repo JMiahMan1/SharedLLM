@@ -95,7 +95,7 @@ def test_video_recommendation_returns_suggestion(client, monkeypatch):
 
 
 def test_video_recommendation_quiet_without_watching(client, monkeypatch):
-    cap, holder = _patch_telemetry(monkeypatch)
+    _cap, holder = _patch_telemetry(monkeypatch)
     holder["payload"] = {"status": "SUCCESS", "events": []}
     r = client.get("/api/recommendations/video")
     assert r.status_code == 200

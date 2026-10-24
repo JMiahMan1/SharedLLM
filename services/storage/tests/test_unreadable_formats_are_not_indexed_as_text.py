@@ -11,9 +11,8 @@ The honest state until an extractor exists is metadata-only, which is what
 these tests pin. An absent extractor must be a visible restriction, never a
 silently wrong answer.
 """
-from services.storage.indexer import FILE_RULES, chunk_text
+from services.storage.indexer import FILE_RULES, build_content_index, chunk_text
 from services.storage.models import StorageEntry
-from services.storage.indexer import build_content_index
 
 
 def entry(path, content_type="application/octet-stream"):

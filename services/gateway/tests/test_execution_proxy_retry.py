@@ -17,7 +17,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-
 @pytest.fixture(name="client")
 def client_fixture(monkeypatch):
     """Setup gateway test client with mocked dependencies."""

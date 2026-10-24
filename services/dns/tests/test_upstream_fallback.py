@@ -7,7 +7,7 @@ for cloud.sumemail.com, ha.sumemail.com and the like.
 import asyncio
 import time
 
-from services.dns.tests.test_upstream_timeout import _SlowUpstream, _load_dns
+from services.dns.tests.test_upstream_timeout import _load_dns, _SlowUpstream
 
 
 def test_a_list_of_upstreams_is_parsed():

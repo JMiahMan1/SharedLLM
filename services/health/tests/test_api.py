@@ -220,7 +220,7 @@ class TestSleep:
                 "external_id": "hc-1",
             },
         )
-        summary = client.get(f"/summary?day=2026-10-21").json()
+        summary = client.get("/summary?day=2026-10-21").json()
         assert summary["sleep"]["last_night"]["duration_minutes"] == 450
         assert summary["sleep"]["last_night"]["source"] == "health_connect"
 

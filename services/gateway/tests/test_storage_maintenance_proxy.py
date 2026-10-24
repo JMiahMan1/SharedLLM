@@ -150,7 +150,7 @@ def test_maintenance_forwards_report_and_purge_modes(monkeypatch):
         headers=AUTH,
     )
     assert resp.status_code == 200, resp.text
-    sent = [c for c in sess.post.call_args_list if "rag/maintenance" in str(c[0][0])][0][1]["json"]
+    sent = next(c for c in sess.post.call_args_list if "rag/maintenance" in str(c[0][0]))[1]["json"]
     assert sent["user_id"] == "alice", "the payload's user_id must be overridden"
     assert sent["mode"] == "purge"
     assert sent["collections"] == ["telemetry_alerts"]

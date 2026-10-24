@@ -17,7 +17,7 @@ import json
 import logging
 import time
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from typing import Any
 
 import aiohttp
@@ -449,7 +449,7 @@ def create_app():
             millis = int(body.get("millis") or 0)
             sessions = int(body.get("sessions") or 0)
         except (TypeError, ValueError):
-            raise HTTPException(status_code=422, detail="millis and sessions must be numbers")
+            raise HTTPException(status_code=422, detail="millis and sessions must be numbers") from None
         if millis < 0 or sessions < 0:
             raise HTTPException(status_code=422, detail="millis and sessions must not be negative")
         entry = {

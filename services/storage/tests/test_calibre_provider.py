@@ -6,7 +6,7 @@ import zipfile
 import pytest
 from pydantic import ValidationError
 
-from services.storage.models import ProviderConfig, StorageEntry
+from services.storage.models import ProviderConfig
 from services.storage.providers import StorageProvider, build_provider
 from services.storage.providers_impl.calibre import (
     CalibreLibraryError,
@@ -83,7 +83,7 @@ def _make_db(books, authors=((1, "John R. Macduff"),), tags=((1, "Devotional"),)
             "INSERT INTO books (id, title, path, series, series_index, pubdate) VALUES (?,?,?,?,?,?)",
             (bid, title, path, series, sidx, "2010-02-17 00:00:00+00:00"),
         )
-        for order, aid in enumerate(author_ids or []):
+        for aid in author_ids or []:
             conn.execute(
                 "INSERT INTO books_authors_link (book, author) VALUES (?,?)", (bid, aid)
             )
@@ -103,7 +103,8 @@ def _make_db(books, authors=((1, "John R. Macduff"),), tags=((1, "Devotional"),)
         import os
 
         conn.close()
-        data = open(path, "rb").read()
+        with open(path, "rb") as f:
+            data = f.read()
         os.unlink(path)
         return data
     conn.commit()
@@ -206,7 +207,8 @@ def test_a_trimmed_database_without_the_tag_tables_still_parses():
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as fh:
         path = fh.name
-    open(path, "wb").write(db)
+    with open(path, "wb") as f:
+        f.write(db)
     conn = sqlite3.connect(path)
     conn.execute("DROP TABLE books_tags_link")
     conn.execute("DROP TABLE tags")
@@ -286,12 +288,12 @@ def test_list_entries_can_be_scoped_to_one_author_folder():
 
 def test_a_non_ascii_author_survives_into_the_synthesised_path():
     db = _make_db(
-        [(1, "T", "Macduff’s Works/T (1)", "", None, [1], [], [("EPUB", "T - A", 10)])],
+        [(1, "T", "Macduff\u2019s Works/T (1)", "", None, [1], [], [("EPUB", "T - A", 10)])],
         authors=((1, "Macduff"),),
     )
     files = {"/Books/Text/metadata.db": db}
     entries = asyncio.run(_provider(files).list_entries("/"))
-    assert entries[0].path == "/Books/Text/Macduff’s Works/T (1).txt"
+    assert entries[0].path == "/Books/Text/Macduff\u2019s Works/T (1).txt"
 
 
 def test_get_sections_returns_labelled_sections():
@@ -339,7 +341,7 @@ def test_writing_to_the_library_is_refused_with_a_reason():
 
 def test_an_unreachable_metadata_db_names_the_path_it_tried():
     provider = _provider({}, library_path="/Books/Text")
-    with pytest.raises(CalibreLibraryError, match="/Books/Text/metadata.db"):
+    with pytest.raises(CalibreLibraryError, match=r"/Books/Text/metadata\.db"):
         asyncio.run(provider.list_entries("/"))
 
 

@@ -4,7 +4,6 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-
 # Mock dependencies before importing main
 mock_redis = MagicMock()
 sys.modules["redis"] = mock_redis

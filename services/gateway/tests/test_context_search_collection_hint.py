@@ -108,7 +108,6 @@ async def test_the_librarian_tool_path_refuses_a_search_with_no_collection(monke
     already in the model's own context. So the refusal has to live at the
     dispatch site, and it must happen *before* anything is sent.
     """
-    posted = []
 
     class _Boom:
         async def __aenter__(self):

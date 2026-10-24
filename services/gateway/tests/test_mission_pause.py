@@ -67,5 +67,5 @@ async def test_a_kill_set_while_paused_stops_the_mission(monkeypatch):
 
 
 async def test_a_published_resume_still_works(monkeypatch):
-    events, stream = _setup(monkeypatch, {"pause": [True]}, messages=[{"type": "message", "channel": "x", "data": "RESUMED"}])
+    _events, stream = _setup(monkeypatch, {"pause": [True]}, messages=[{"type": "message", "channel": "x", "data": "RESUMED"}])
     assert await asyncio.wait_for(agent_loop._await_mission_resume(7, stream), timeout=2) is False

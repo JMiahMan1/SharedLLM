@@ -13,8 +13,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from services.identity import roles
-from services.identity.main import app
-from services.identity.models import User, UserActivitySharing
+from services.identity.models import User
 from services.identity.tests.test_entity_protection import (  # noqa: F401 (fixtures)
     _as,
     client_fixture,

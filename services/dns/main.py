@@ -24,6 +24,16 @@ from services.common.secrets import secret_matches
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def _run_in_background(coro) -> asyncio.Task:
+    """Schedule a coroutine and hold a strong reference until it finishes."""
+    task = asyncio.ensure_future(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
+
 # Health-aware resolution for static mappings with multiple IPs (e.g. a LAN
 # Ollama host that moves between devices). Only currently-reachable IPs are
 # returned, and the answer flips automatically when the available device
@@ -124,7 +134,7 @@ class DockerWatcher:
 
             # Fallback to first available IP
             if not ip:
-                for net_name, net_config in networks.items():
+                for net_config in networks.values():
                     ip = net_config.get('IPAddress')
                     if ip:
                         break
@@ -249,7 +259,7 @@ class DNSResolver:
                     # at ~1s each took longer than a resolver waits, so the
                     # name timed out (seen for jeremiah-home-desktop.local).
                     up = await asyncio.gather(*(self._is_reachable(ip) for ip in ips))
-                    reachable = [ip for ip, ok in zip(ips, up) if ok]
+                    reachable = [ip for ip, ok in zip(ips, up, strict=False) if ok]
                     if reachable:
                         self._last_reachable[name] = reachable
                     # None answering: the last address that did, not the whole
@@ -422,10 +432,7 @@ class _DNSClient:
         return records
 
     def _remember(self, key: tuple[str, int], records: list, now: float) -> None:
-        if records:
-            ttl = min(max(min(r.get('ttl', 0) for r in records), self.MIN_TTL), self.MAX_TTL)
-        else:
-            ttl = self.NEGATIVE_TTL
+        ttl = min(max(min(r.get('ttl', 0) for r in records), self.MIN_TTL), self.MAX_TTL) if records else self.NEGATIVE_TTL
         if len(self._cache) >= self.MAX_ENTRIES:
             # Drop whatever expires soonest; the cache only has to stay bounded.
             for old in sorted(self._cache, key=lambda k: self._cache[k][1])[: self.MAX_ENTRIES // 4]:
@@ -595,7 +602,7 @@ class UDPServer(asyncio.DatagramProtocol):
 
     def datagram_received(self, data, addr):
         logger.debug(f"DNS query received from {addr}, {len(data)} bytes")
-        asyncio.ensure_future(self._handle_query(data, addr))
+        _run_in_background(self._handle_query(data, addr))
 
     async def _handle_query(self, data: bytes, addr: tuple[str, int]):
         """Answer one DNS query -- always, and at once when there is nothing to find.
@@ -620,10 +627,7 @@ class UDPServer(asyncio.DatagramProtocol):
                 return
 
             records = await self.resolver.resolve(query)
-            if records:
-                response = self._build_response(query, records)
-            else:
-                response = self._build_response(query, [], rcode=RCODE_SERVFAIL)
+            response = self._build_response(query, records) if records else self._build_response(query, [], rcode=RCODE_SERVFAIL)
             self.transport.sendto(response, addr)
             logger.debug(f"Sent response to {addr}: {len(response)} bytes")
         except Exception as e:
@@ -861,11 +865,11 @@ async def main():
 
     # Start refresh task if Identity service URL is configured
     if os.environ.get('IDENTITY_SVC_URL'):
-        asyncio.create_task(refresh_dns_mappings())
+        _run_in_background(refresh_dns_mappings())
 
     # Start Docker watcher
     watcher = DockerWatcher(client, registry)
-    asyncio.create_task(watcher.start())
+    _run_in_background(watcher.start())
 
     # Create HTTP app
     app = web.Application()

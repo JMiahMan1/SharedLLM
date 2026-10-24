@@ -105,7 +105,7 @@ class TestRoutes:
         created = client.post(
             "/challenges", json={"kind": "cook_nights", "day": WEEK_DAY, "target_days": 2}, headers=ADULT
         ).json()
-        client.post("/challenges/%d/join" % created["id"], headers=_as("emma"))
+        client.post(f"/challenges/{created['id']}/join", headers=_as("emma"))
         # A recipe dinner counts; a plain dinner, a recipe lunch and last week do not.
         recipe = {"meal": "dinner", "name": "Chili", "calories": 400, "recipe_path": "Recipes/Chili.md", "source": "recipe"}
         client.post("/food", json={**recipe, "day": "2026-10-19"})

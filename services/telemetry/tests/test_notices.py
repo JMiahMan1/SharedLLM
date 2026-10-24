@@ -7,13 +7,12 @@ import aiohttp
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+from fakes import FakeRedis
 from fastapi.testclient import TestClient
 
 from services.telemetry import notices, ntfy
 from services.telemetry.config import INTERNAL_SECRET as EXPECTED_SECRET
 from services.telemetry.main import app
-
-from fakes import FakeRedis
 
 HEADERS = {"X-Internal-Secret": EXPECTED_SECRET}
 

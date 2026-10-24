@@ -16,8 +16,9 @@ import asyncio
 import logging
 import os
 import time
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime
-from typing import Any, Awaitable, Callable
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from services.common import concern_monitor, guardian_recap

@@ -18,7 +18,7 @@ import re
 import pytest
 
 from services.execution import schemas as execution_schemas
-from services.gateway.tool_registry import SVC_EXECUTION, _RAVEN_TOOL_TABLE
+from services.gateway.tool_registry import _RAVEN_TOOL_TABLE, SVC_EXECUTION
 
 NO_MODEL_TOOLS = {
     "StorageListRequest": "no execution route; storage listing is handled by the gateway",

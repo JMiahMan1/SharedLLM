@@ -172,7 +172,7 @@ def test_search_buckets_and_exact_name_top(client, upstream, ma):
     assert [item["name"] for item in body["audiobooks"]] == ["Blue Train: The Book"]
     assert body["authors"][0]["uri"] == "abs://author/a1"
     assert body["errors"] == {"ma": None, "abs": None}
-    ma_args = [args for command, args in ma["calls"] if command == "music/search"][0]
+    ma_args = next(args for command, args in ma["calls"] if command == "music/search")
     assert ma_args["search_query"] == "Blue Train"
     assert ma_args["config"] == {"providers": ["library"]}
 
@@ -222,9 +222,9 @@ def test_item_ma_returns_children(client, ma):
     assert body["name"] == "Road Trip"
     assert body["media_type"] == "playlist"
     assert [child["name"] for child in body["children"]] == ["Track One"]
-    child_args = [
+    child_args = next(
         args for command, args in ma["calls"] if command == "music/playlists/playlist_tracks"
-    ][0]
+    )
     # Live-verified 2026-10-05: the child commands want the provider instance
     # id or domain, not a "provider" key.
     assert child_args == {"item_id": "6", "provider_instance_id_or_domain": "library"}
@@ -295,7 +295,7 @@ def test_library_tab_uses_its_ma_command(client, ma):
     assert [item["name"] for item in body["items"]] == ["Track One"]
     assert body["offset"] == 5
     assert body["limit"] == 10
-    command, args = [call for call in ma["calls"] if call[0] == "music/tracks/library_items"][0]
+    _command, args = next(call for call in ma["calls"] if call[0] == "music/tracks/library_items")
     assert args == {"limit": 10, "offset": 5, "order_by": "name"}
 
 
@@ -341,7 +341,7 @@ def test_favorites_merges_all_media_types(client, ma):
     assert {item["name"] for item in body["items"]} == set(names.values())
     assert body["errors"] == {"ma": None, "abs": None}
     for command, _name in names.items():
-        args = [args for cmd, args in ma["calls"] if cmd == command][0]
+        args = next(args for cmd, args in ma["calls"] if cmd == command)
         assert args["favorite"] is True
 
 

@@ -9,8 +9,6 @@ purge is needed for is dropping chunks whose source file is gone upstream.
 import asyncio
 import logging
 
-import pytest
-
 from services.storage.main import _purge_stale_paths
 
 log = logging.getLogger(__name__)

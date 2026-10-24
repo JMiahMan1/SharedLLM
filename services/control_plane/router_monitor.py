@@ -412,12 +412,11 @@ def capacity_notices(state: dict[str, Any], snap: dict[str, Any]) -> list[dict[s
                 f"{pool['used']} of its {pool['size']} DHCP addresses are in use; new devices may not be "
                 f"able to join.", f"admin:network:pool:{pool['network']}", priority=4))
     ct = snap.get("conntrack") or {}
-    if ct.get("max"):
-        if _threshold(state, "conntrack", 100.0 * ct["count"] / ct["max"], CONNTRACK_ALERT_PCT, CONNTRACK_CLEAR_PCT):
-            notices.append(_notice(
-                "The router's connection table is nearly full",
-                f"{ct['count']} of {ct['max']} connections are tracked; new connections will start "
-                f"failing when it fills.", "admin:network:conntrack", priority=4))
+    if ct.get("max") and _threshold(state, "conntrack", 100.0 * ct["count"] / ct["max"], CONNTRACK_ALERT_PCT, CONNTRACK_CLEAR_PCT):
+        notices.append(_notice(
+            "The router's connection table is nearly full",
+            f"{ct['count']} of {ct['max']} connections are tracked; new connections will start "
+            f"failing when it fills.", "admin:network:conntrack", priority=4))
     sysinfo = snap.get("system") or {}
     if sysinfo.get("mem_total"):
         pct = 100.0 * sysinfo["mem_available"] / sysinfo["mem_total"]

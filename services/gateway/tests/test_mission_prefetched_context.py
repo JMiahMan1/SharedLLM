@@ -12,7 +12,7 @@ workspace memory, and substituting the prefetched block for its output would
 have silently thrown both away.
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 

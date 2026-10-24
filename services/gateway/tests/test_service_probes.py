@@ -43,7 +43,7 @@ def test_unexpected_status_is_an_error_with_the_code():
 
 def test_timeout_and_connection_failure_are_unreachable():
     timeout = asyncio.run(
-        sp.probe_http(_Client({"http://svc": asyncio.TimeoutError()}), "svc", "http://svc")
+        sp.probe_http(_Client({"http://svc": TimeoutError()}), "svc", "http://svc")
     )
     assert timeout.status == sp.UNREACHABLE
     assert "No answer within" in timeout.detail

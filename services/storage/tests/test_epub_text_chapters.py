@@ -1,3 +1,4 @@
+import dataclasses
 import io
 import zipfile
 
@@ -356,7 +357,7 @@ def test_read_text_labels_each_chapter():
 
 def test_chapter_is_frozen():
     chapter = Chapter(ordinal=1, label="L", text="T")
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         chapter.label = "other"
 
 

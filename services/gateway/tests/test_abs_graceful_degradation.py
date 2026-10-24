@@ -1,7 +1,5 @@
 """Tests for ABS graceful degradation when server is unreachable."""
 import sys
-
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
