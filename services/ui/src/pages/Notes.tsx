@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
@@ -34,6 +34,7 @@ import { richEditable } from '../lib/noteRichText';
 import { remarkNoteSpans } from '../lib/remarkNoteSpans';
 import { errorText } from '../lib/errorText';
 import { showUndoToast } from '../lib/undoToast';
+import { clearNoteDraft, readNoteDraft, readNoteDrafts, writeNoteDraft } from '../lib/noteDrafts';
 import {
   ARCHIVE_PREFIX,
   EMPTY_NOTES_INDEX,
@@ -86,7 +87,30 @@ interface DraftState {
   folder: string;
   color: NoteColor;
   pinned: boolean;
+  /** The file version this edit started from; a save sends it as If-Match. */
+  etag?: string;
+  /** The note's text as opened, to spot a change elsewhere when there is no version. */
+  base?: string;
+  /** This edit's id in the device's draft store (the path, or `new:<time>`). */
+  draftKey?: string;
+  /** Set when the editor opened a stored unsaved draft (when it was kept). */
+  restoredAt?: number;
 }
+
+/** What a save came to: saved (with the new version), refused as a conflict, or failed. */
+type PersistResult =
+  | { status: 'saved'; path: string; title: string; etag?: string }
+  | { status: 'conflict' }
+  | { status: 'failed'; message: string };
+
+/** The stored text the page learned after the editor opened from the list's copy. */
+interface FreshNote {
+  content: string;
+  etag?: string;
+}
+
+/** How long typing must pause before an open note saves itself. */
+const AUTOSAVE_MS = 1500;
 
 const STORAGE = 'nextcloud';
 /** The folder this page lists (recursively); notes are saved inside it. */
@@ -165,8 +189,8 @@ export default function Notes() {
     writeNotesLayout(next);
   };
   /** The open editor: `draft` is null while the note is being read. */
-  const [editing, setEditing] = useState<{ draft: DraftState | null; title: string } | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState<{ draft: DraftState | null; title: string; fresh?: FreshNote } | null>(null);
+  const editorRef = useRef<NoteEditorHandle>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -292,17 +316,36 @@ export default function Notes() {
     return sortNotesByIndex(filtered, index);
   }, [view, mainNotes, archivedNotes, trashedNotes, tagFilter, parsedQuery, contents, index]);
 
-  const closeEditor = useCallback(() => setEditing(null), []);
+  // Unsaved edits this device kept (lib/noteDrafts.ts). Re-read whenever the
+  // editor closes, so a draft left behind by a failed save is offered at once.
+  const [draftsVersion, bumpDrafts] = useReducer((n: number) => n + 1, 0);
+  const storedDrafts = useMemo(() => {
+    void draftsVersion;
+    return readNoteDrafts(scope);
+  }, [scope, draftsVersion]);
 
-  const openEditor = useCallback(async (note?: NoteSummary) => {
+  const closeEditor = useCallback(() => {
+    setEditing(null);
+    bumpDrafts();
+  }, []);
+
+  const openEditor = useCallback(async (note?: NoteSummary, options: { ignoreDraft?: boolean } = {}) => {
     if (!note) {
       setEditing({ draft: { ...EMPTY_DRAFT }, title: '' });
+      return;
+    }
+    // Unsaved changes to this note survived a closed app: open those, with
+    // the version they started from, so saving them still checks for a
+    // change made elsewhere since.
+    const stored = options.ignoreDraft ? null : readNoteDraft(scope, note.path);
+    if (stored) {
+      setEditing({ draft: { ...stored, draftKey: note.path, restoredAt: stored.savedAt }, title: stored.title || note.title });
       return;
     }
     const meta = indexEntry(index, note.path);
     const folder = folderFromPath(note.path);
     /** The draft as it is stored, so every open path paints the same shape. */
-    const draftFor = (text: string): DraftState => ({
+    const draftFor = (text: string, etag?: string): DraftState => ({
       title: note.title,
       // The editor shows the note's own text; the server adds the header.
       content: noteBody(text),
@@ -311,29 +354,31 @@ export default function Notes() {
       folder,
       color: (meta.color ?? 'default') as NoteColor,
       pinned: Boolean(meta.pinned),
+      etag,
+      base: noteBody(text),
     });
     const cached = contents[note.path];
     if (typeof cached === 'string') {
       // The list already carried this note's text, so open it now and read
-      // the stored file in the background. Typing is never clobbered: the
-      // fresh text only lands while the draft still matches the cache.
-      const initial = noteBody(cached);
+      // the stored file in the background. The editor decides what the
+      // fresh copy means: untouched, it shows it; edited, it keeps the
+      // typing and only adopts the version when the text had not changed.
       setEditing({ draft: draftFor(cached), title: note.title });
       try {
         const res = await api.readNote(note.title, STORAGE, note.path, asUser);
         if (res.status !== 'SUCCESS') throw new Error(res.message || 'Could not read that note');
-        const fresh = noteBody(res.message ?? '');
-        setEditing((current) =>
-          current && current.title === note.title && current.draft?.content === initial
-            ? { ...current, draft: { ...current.draft, content: fresh } }
-            : current,
-        );
+        const fresh: FreshNote = {
+          content: noteBody(res.message ?? ''),
+          etag: (res.detail?.etag as string | null | undefined) ?? undefined,
+        };
+        setEditing((current) => (current && current.draft?.path === note.path ? { ...current, fresh } : current));
       } catch (err) {
         // The cache may be stale, so an untouched editor closes instead of
-        // risking a save over a change made elsewhere.
-        setEditing((current) =>
-          current && current.title === note.title && current.draft?.content === initial ? null : current,
-        );
+        // risking a save over a change made elsewhere. An edited one stays:
+        // its save checks the stored text before writing.
+        if (!editorRef.current?.isDirty()) {
+          setEditing((current) => (current && current.draft?.path === note.path ? null : current));
+        }
         toast.error(errorText(err, 'Could not read that note'));
       }
       return;
@@ -343,10 +388,12 @@ export default function Notes() {
     // stale copy would overwrite a change made elsewhere since the list loaded.
     setEditing({ draft: null, title: note.title });
     let content: string;
+    let etag: string | undefined;
     try {
       const res = await api.readNote(note.title, STORAGE, note.path, asUser);
       if (res.status !== 'SUCCESS') throw new Error(res.message || 'Could not read that note');
       content = res.message ?? '';
+      etag = (res.detail?.etag as string | null | undefined) ?? undefined;
     } catch (err) {
       // An editor opened empty would save over the note, so it stays closed.
       setEditing(null);
@@ -355,10 +402,22 @@ export default function Notes() {
     }
     setEditing((current) =>
       current && current.title === note.title && current.draft === null
-        ? { title: note.title, draft: draftFor(content) }
+        ? { title: note.title, draft: draftFor(content, etag) }
         : current,
     );
-  }, [asUser, index, contents]);
+  }, [asUser, index, contents, scope]);
+
+  /** Drop this device's unsaved copy of a note and open the stored one. */
+  const reopenStored = useCallback(
+    (path: string | undefined, draftKey: string | undefined) => {
+      if (draftKey) clearNoteDraft(scope, draftKey);
+      setEditing(null);
+      bumpDrafts();
+      const note = path ? notes.find((n) => n.path === path) : undefined;
+      if (note) void openEditor(note, { ignoreDraft: true });
+    },
+    [scope, notes, openEditor],
+  );
 
   // Deep link from the dashboard's Quick Notes widget and the Android home
   // screen widget: /notes?note=<path> opens a note, /notes?new=1 starts a new
@@ -396,41 +455,74 @@ export default function Notes() {
     return () => window.clearTimeout(timer);
   }, [requestedNew, requestedNote, notes, openEditor, searchParams, setSearchParams]);
 
-  const saveDraft = async (draft: DraftState) => {
+  /**
+   * Write the editor's draft. Never overwrites a newer stored note silently:
+   * an in-place save sends the version it was opened at (Nextcloud refuses a
+   * stale one), and a save without a version, or one that renames or moves
+   * the file, first compares the stored text with what was opened. `force`
+   * skips both checks; it backs the conflict prompt's "Overwrite".
+   */
+  const persistDraft = async (draft: DraftState, force = false): Promise<PersistResult> => {
     const title = draft.title.trim() || draft.content.split('\n')[0].slice(0, 60).trim() || 'Untitled note';
     // A different folder is a move; saving outside Notes/ would hide the note.
     const category = categoryFor(draft.folder);
-    setSaving(true);
+    const previous = draft.path && draft.original ? { ...draft.original, path: draft.path } : undefined;
+    const moving = Boolean(previous && (previous.title !== title || previous.category !== category));
     try {
+      if (!force && draft.path && draft.base !== undefined && (moving || !draft.etag)) {
+        const res = await api.readNote(previous?.title ?? title, STORAGE, draft.path, asUser);
+        if (res.status !== 'SUCCESS') {
+          return { status: 'failed', message: res.message || 'Could not check the stored note before saving' };
+        }
+        if (noteBody(res.message ?? '') !== draft.base) return { status: 'conflict' };
+      }
       // write (replace), never append; append is quick-capture only.
       const saved = await saveNote({
         title,
         content: draft.content,
         category,
-        previous: draft.path && draft.original ? { ...draft.original, path: draft.path } : undefined,
+        previous,
         asUser,
+        ifMatch: force ? undefined : draft.etag,
       });
+      if (saved.conflict) return { status: 'conflict' };
       const res = saved.response;
-      if (res.status !== 'SUCCESS') {
-        toast.error(res.message || 'Save failed');
-        return;
-      }
+      if (res.status !== 'SUCCESS') return { status: 'failed', message: res.message || 'Save failed' };
       const savedPath = saved.path ?? draft.path ?? '';
-      await persistIndex((current) => {
-        let next = current;
-        if (draft.path && savedPath !== draft.path) next = forgetIndexEntry(next, draft.path);
-        if (savedPath) next = setIndexEntry(next, savedPath, { pinned: draft.pinned, color: draft.color });
-        return next;
-      });
+      // The index is shared and slow to write: only touch it when this save
+      // changed what it records (a new path, pin or colour).
+      const known = indexEntry(queryClient.getQueryData<NotesIndex>(indexKey), savedPath);
+      if (
+        (draft.path && savedPath !== draft.path) ||
+        Boolean(known.pinned) !== draft.pinned ||
+        (known.color ?? 'default') !== draft.color
+      ) {
+        await persistIndex((current) => {
+          let next = current;
+          if (draft.path && savedPath !== draft.path) next = forgetIndexEntry(next, draft.path);
+          if (savedPath) next = setIndexEntry(next, savedPath, { pinned: draft.pinned, color: draft.color });
+          return next;
+        });
+      }
       if (saved.leftOldCopy) toast.error('Saved under the new name, but the old copy is still there');
-      setEditing(null);
-      toast.success('Note saved');
-      await refresh();
+      return { status: 'saved', path: savedPath, title, etag: saved.etag };
     } catch (err) {
-      toast.error(errorText(err, 'Save failed'));
-    } finally {
-      setSaving(false);
+      return { status: 'failed', message: errorText(err, 'Save failed') };
     }
+  };
+
+  /** Save the editor's text as a new note beside the one that changed elsewhere. */
+  const keepBoth = async (draft: DraftState): Promise<PersistResult> => {
+    const base = draft.title.trim() || 'Untitled note';
+    const taken = new Set(notes.filter((n) => folderFromPath(n.path) === draft.folder).map((n) => n.title));
+    let title = `${base} (my copy)`;
+    for (let n = 2; taken.has(title); n += 1) title = `${base} (my copy ${n})`;
+    return persistDraft({ ...draft, title, path: undefined, original: undefined, etag: undefined, base: undefined }, true);
+  };
+
+  const finishEditing = (saved: boolean) => {
+    closeEditor();
+    if (saved) void refresh();
   };
 
   /** Move one note; resolves to where it landed, or null when the move failed. */
@@ -722,6 +814,11 @@ export default function Notes() {
     }
   };
 
+  const openDraftKey = editing?.draft ? (editing.draft.draftKey ?? editing.draft.path) : undefined;
+  const pendingDrafts = Object.entries(storedDrafts)
+    .filter(([id]) => id !== openDraftKey)
+    .sort(([, a], [, b]) => b.savedAt - a.savedAt);
+
   const tabs: Array<{ id: NotesView; label: string; count: number }> = [
     { id: 'notes', label: 'Notes', count: mainNotes.length },
     { id: 'archive', label: 'Archive', count: archivedNotes.length },
@@ -809,6 +906,37 @@ export default function Notes() {
           <Plus size={16} className="text-purple-400" />
           Take a note…
         </button>
+      )}
+
+      {/* Unsaved edits this device kept when the app closed mid-edit. */}
+      {pendingDrafts.length > 0 && (
+        <div data-testid="note-drafts" className="glass-panel space-y-2 rounded-2xl border border-amber-400/30 p-3" role="region" aria-label="Unsaved drafts">
+          {pendingDrafts.map(([id, draft]) => (
+            <div key={id} className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
+              <span className="min-w-0 flex-1">
+                Unsaved {draft.path ? 'changes to' : 'new note'} <strong className="text-slate-100">{draft.title.trim() || 'Untitled note'}</strong>
+                <span className="text-slate-500"> · kept {new Date(draft.savedAt).toLocaleString()}</span>
+              </span>
+              <button
+                type="button"
+                className="glass-button min-h-9 px-3 py-1 text-xs"
+                onClick={() => setEditing({ draft: { ...draft, draftKey: id, restoredAt: draft.savedAt }, title: draft.title })}
+              >
+                Restore
+              </button>
+              <button
+                type="button"
+                className="min-h-9 rounded-xl px-3 py-1 text-xs text-rose-300 hover:bg-white/5"
+                onClick={() => {
+                  clearNoteDraft(scope, id);
+                  bumpDrafts();
+                }}
+              >
+                Discard
+              </button>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* Views: keep archive and trash out of the main shelf, like Keep. */}
@@ -1192,19 +1320,37 @@ export default function Notes() {
 
       {/* Editor */}
       {editing && (
-        <Modal isOpen onClose={closeEditor} title={editing.title || editing.draft?.path ? 'Edit note' : 'New note'} size="lg">
+        <Modal
+          isOpen
+          // Closing saves pending changes first (as in Keep); the editor
+          // decides, so a refused save keeps the sheet open on the conflict.
+          onClose={() => (editorRef.current ? void editorRef.current.requestClose() : closeEditor())}
+          title={editing.title || editing.draft?.path ? 'Edit note' : 'New note'}
+          size="lg"
+        >
           {editing.draft ? (
             <NoteEditor
+              // A different note, or the stored copy replacing kept changes,
+              // is a fresh editor: its state is only seeded at mount.
+              key={`${editing.draft.draftKey ?? editing.draft.path ?? 'new'}|${editing.draft.restoredAt ?? ''}`}
+              ref={editorRef}
               initial={editing.draft}
-              saving={saving}
-              onSave={(draft) => void saveDraft(draft)}
-              onCancel={closeEditor}
+              fresh={editing.fresh}
+              scope={scope}
+              onPersist={persistDraft}
+              onKeepBoth={keepBoth}
+              onDone={finishEditing}
+              onUseStored={() => reopenStored(editing.draft?.path, editing.draft?.draftKey ?? editing.draft?.path)}
               onTrash={
                 editing.draft.path
                   ? () => {
                       // By path: the title in the editor may already be edited.
                       const note = notes.find((n) => n.path === editing.draft?.path);
-                      if (note) trashNote(note);
+                      if (!note) return;
+                      // Trashing is the answer to any unsaved edits; Undo brings the stored note back.
+                      clearNoteDraft(scope, note.path);
+                      bumpDrafts();
+                      trashNote(note);
                     }
                   : undefined
               }
@@ -1220,31 +1366,284 @@ export default function Notes() {
   );
 }
 
+
+/** What the page asks of the open editor (Modal close, a failed background read). */
+interface NoteEditorHandle {
+  /** Save pending changes, then close; a refused save keeps the sheet open on the conflict. */
+  requestClose: () => Promise<void>;
+  /** True while the editor holds changes the server does not have. */
+  isDirty: () => boolean;
+}
+
+type SaveState =
+  | { kind: 'idle' }
+  | { kind: 'saving' }
+  | { kind: 'saved' }
+  /** `snapshot` is the text that failed, so autosave waits for a new change before retrying. */
+  | { kind: 'error'; message: string; snapshot: string };
+
+/** The parts of a draft a save writes; equal snapshots mean nothing to save. */
+function snapshotOf(draft: DraftState): string {
+  return JSON.stringify([draft.title, draft.content, draft.folder, draft.color, draft.pinned]);
+}
+
 /**
  * The note editor. Its draft lives here, so typing re-renders this sheet
  * only, not the page and every card behind it.
+ *
+ * Autosave: an open note that keeps its title and folder saves itself
+ * AUTOSAVE_MS after typing pauses, in place and only over the version it was
+ * opened at. A new note, or a rename or move, waits for Save or close (one
+ * file per name, not one per keystroke). Every change the server does not
+ * have yet is also kept on this device (lib/noteDrafts.ts), so a closed app
+ * loses nothing.
  */
-function NoteEditor({
-  initial,
-  saving,
-  onSave,
-  onCancel,
-  onTrash,
-}: {
-  initial: DraftState;
-  saving: boolean;
-  onSave: (draft: DraftState) => void;
-  onCancel: () => void;
-  onTrash?: () => void;
-}) {
+const NoteEditor = forwardRef<
+  NoteEditorHandle,
+  {
+    initial: DraftState;
+    /** The stored text, when it arrived after the sheet opened from the list's copy. */
+    fresh?: FreshNote;
+    /** Whose notes these are (the draft store is per account). */
+    scope: string;
+    onPersist: (draft: DraftState, force?: boolean) => Promise<PersistResult>;
+    onKeepBoth: (draft: DraftState) => Promise<PersistResult>;
+    /** Close the sheet; `saved` asks the page to reload the list. */
+    onDone: (saved: boolean) => void;
+    /** Drop this device's unsaved copy and show the stored note instead. */
+    onUseStored: () => void;
+    onTrash?: () => void;
+  }
+>(function NoteEditor({ initial, fresh, scope, onPersist, onKeepBoth, onDone, onUseStored, onTrash }, handle) {
   const [draft, setDraft] = useState<DraftState>(initial);
   const [labelDraft, setLabelDraft] = useState('');
-  // Chosen once per open: notes the visual editor could not save back
-  // unchanged (tables, code, links …) are edited as text instead.
-  const [rich] = useState(() => richEditable(initial.content));
+  // Chosen per text: notes the visual editor could not save back unchanged
+  // (tables, code, links …) are edited as text instead.
+  const [rich, setRich] = useState(() => richEditable(initial.content));
+  const [richKey, setRichKey] = useState(0);
+  // What the server holds. A restored draft is by definition not stored yet.
+  const [lastSaved, setLastSaved] = useState<string | null>(() => (initial.restoredAt ? null : snapshotOf(initial)));
+  const [version, setVersion] = useState<{ etag?: string; base?: string }>({ etag: initial.etag, base: initial.base });
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  const [conflict, setConflict] = useState(false);
+  const [draftKey] = useState(() => initial.draftKey ?? initial.path ?? `new:${Date.now()}`);
+  const [seenFresh, setSeenFresh] = useState(fresh);
   const richRef = useRef<RichNoteEditorHandle>(null);
+
+  const snapshot = snapshotOf(draft);
+  const dirty = snapshot !== lastSaved;
+  const renaming = Boolean(
+    draft.original && (draft.title.trim() !== draft.original.title || categoryFor(draft.folder) !== draft.original.category),
+  );
+
+  // The stored file arrived after the sheet opened from the list's copy.
+  // Untouched, show it; edited, keep the typing and adopt the version only
+  // when the stored text is what the edit started from. Otherwise the next
+  // save compares texts and reports the conflict instead of overwriting.
+  if (fresh !== seenFresh) {
+    setSeenFresh(fresh);
+    if (fresh && !dirty) {
+      const next = { ...draft, content: fresh.content };
+      setDraft(next);
+      setLastSaved(snapshotOf(next));
+      setVersion({ etag: fresh.etag, base: fresh.content });
+      if (fresh.content !== draft.content) {
+        setRich(richEditable(fresh.content));
+        setRichKey((k) => k + 1);
+      }
+    } else if (fresh && fresh.content === version.base) {
+      setVersion({ etag: fresh.etag, base: version.base });
+    }
+  }
+
+  // Saves run one at a time, each with the version the previous one left,
+  // so an autosave and a Save tap never race each other into a false conflict.
+  const versionRef = useRef(version);
+  useEffect(() => {
+    versionRef.current = version;
+  }, [version]);
+  const onPersistRef = useRef(onPersist);
+  useEffect(() => {
+    onPersistRef.current = onPersist;
+  });
+  const chainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const savedAnyRef = useRef(false);
+  const wroteDraftRef = useRef(false);
+
+  const persist = useCallback((d: DraftState, force = false): Promise<PersistResult> => {
+    const run = chainRef.current.then(async () => {
+      setSaveState({ kind: 'saving' });
+      const result = await onPersistRef.current({ ...d, ...versionRef.current }, force);
+      if (result.status === 'saved') {
+        savedAnyRef.current = true;
+        versionRef.current = { etag: result.etag, base: d.content };
+        setVersion(versionRef.current);
+        setLastSaved(snapshotOf(d));
+        setDraft((current) => ({
+          ...current,
+          path: result.path,
+          original: { title: result.title, category: categoryFor(d.folder) },
+        }));
+        setConflict(false);
+        setSaveState({ kind: 'saved' });
+      } else if (result.status === 'conflict') {
+        setConflict(true);
+        setSaveState({ kind: 'idle' });
+      } else {
+        setSaveState({ kind: 'error', message: result.message, snapshot: snapshotOf(d) });
+      }
+      return result;
+    });
+    chainRef.current = run.catch(() => undefined);
+    return run;
+  }, []);
+
+  const canAutosave =
+    Boolean(draft.path) &&
+    !renaming &&
+    dirty &&
+    !conflict &&
+    saveState.kind !== 'saving' &&
+    !(saveState.kind === 'error' && saveState.snapshot === snapshot);
+  useEffect(() => {
+    if (!canAutosave) return;
+    const timer = window.setTimeout(() => void persist(draft), AUTOSAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [canAutosave, draft, persist]);
+
+  // Keep what the server does not have on this device; forget it once saved.
+  useEffect(() => {
+    const blank = !draft.path && !draft.title.trim() && !draft.content.trim();
+    if (dirty && !blank) {
+      writeNoteDraft(scope, draftKey, {
+        path: draft.path,
+        title: draft.title,
+        content: draft.content,
+        folder: draft.folder,
+        color: draft.color,
+        pinned: draft.pinned,
+        original: draft.original,
+        etag: version.etag,
+        base: version.base,
+      });
+      wroteDraftRef.current = true;
+    } else if (wroteDraftRef.current) {
+      clearNoteDraft(scope, draftKey);
+      wroteDraftRef.current = false;
+    }
+  }, [dirty, draft, version, scope, draftKey]);
+
+  const forgetDraft = () => {
+    clearNoteDraft(scope, draftKey);
+    wroteDraftRef.current = false;
+  };
+
+  const closingRef = useRef(false);
+  const requestClose = async () => {
+    if (closingRef.current) return;
+    const blank = !draft.path && !draft.title.trim() && !draft.content.trim();
+    if (!dirty || blank) {
+      forgetDraft();
+      onDone(savedAnyRef.current);
+      return;
+    }
+    if (conflict) {
+      // Nothing is lost: the draft stays on this device and is offered back.
+      toast('Your version is kept on this device until you choose what to keep.');
+      onDone(savedAnyRef.current);
+      return;
+    }
+    closingRef.current = true;
+    const result = await persist(draft);
+    closingRef.current = false;
+    if (result.status === 'saved') {
+      forgetDraft();
+      onDone(true);
+    } else if (result.status === 'failed') {
+      toast.error(`Not saved: ${result.message}. Your changes are kept on this device.`);
+      onDone(savedAnyRef.current);
+    }
+    // A conflict keeps the sheet open on the choice.
+  };
+
+  useImperativeHandle(handle, () => ({ requestClose, isDirty: () => dirty }));
+
+  const save = async () => {
+    const result = await persist(draft);
+    if (result.status === 'saved') {
+      forgetDraft();
+      toast.success('Note saved');
+      onDone(true);
+    } else if (result.status === 'failed') {
+      toast.error(result.message);
+    }
+  };
+
+  const keepBoth = async () => {
+    setSaveState({ kind: 'saving' });
+    const result = await onKeepBoth(draft);
+    if (result.status === 'saved') {
+      forgetDraft();
+      toast.success(`Saved your version as “${result.title}”`);
+      onDone(true);
+      return;
+    }
+    setSaveState(
+      result.status === 'failed'
+        ? { kind: 'error', message: result.message, snapshot }
+        : { kind: 'idle' },
+    );
+  };
+
+  const takeStored = () => {
+    forgetDraft();
+    onUseStored();
+  };
+
+  const status =
+    saveState.kind === 'saving'
+      ? 'Saving…'
+      : saveState.kind === 'error' && saveState.snapshot === snapshot
+        ? `Not saved: ${saveState.message}`
+        : !dirty
+          ? saveState.kind === 'saved' ? 'Saved' : ''
+          : canAutosave
+            ? 'Unsaved changes'
+            : 'Kept on this device until you save';
+
   return (
     <div className="space-y-3">
+      {initial.restoredAt && !conflict && (
+        <p className="text-[11px] text-amber-200" role="note">
+          Showing unsaved changes this device kept {new Date(initial.restoredAt).toLocaleString()}.{' '}
+          <button type="button" className="underline" onClick={takeStored}>
+            Discard them
+          </button>
+        </p>
+      )}
+      {conflict && (
+        <div role="alert" className="space-y-2 rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+          <p>
+            This note changed somewhere else since you opened it, so your edits were not saved over it. Your text is
+            still here.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="glass-button min-h-9 px-3 py-1 text-xs" onClick={() => void keepBoth()}>
+              Keep both
+            </button>
+            <button type="button" className="glass-button min-h-9 px-3 py-1 text-xs" onClick={takeStored}>
+              Use the stored version
+            </button>
+            <button
+              type="button"
+              className="glass-button min-h-9 px-3 py-1 text-xs text-rose-300"
+              onClick={() => void persist(draft, true)}
+            >
+              Overwrite with mine
+            </button>
+          </div>
+        </div>
+      )}
       <input
         value={draft.title}
         onChange={(e) => setDraft({ ...draft, title: e.target.value })}
@@ -1254,8 +1653,9 @@ function NoteEditor({
       />
       {rich ? (
         <RichNoteEditor
+          key={richKey}
           ref={richRef}
-          initialMarkdown={initial.content}
+          initialMarkdown={draft.content}
           onChange={(content) => setDraft((d) => ({ ...d, content }))}
         />
       ) : (
@@ -1349,14 +1749,22 @@ function NoteEditor({
           ))}
         </div>
       </div>
-      <div className="flex items-center justify-between pt-2 border-t border-white/5">
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
         <div className="flex items-center gap-2">
-          <button type="button" className="glass-button min-h-11 px-4 py-2 text-sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Save
+          <button
+            type="button"
+            className="glass-button min-h-11 px-4 py-2 text-sm"
+            onClick={() => void save()}
+            disabled={saveState.kind === 'saving'}
+          >
+            {saveState.kind === 'saving' ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Save
           </button>
-          <button type="button" className="glass-button min-h-11 px-3 py-2 text-xs" onClick={onCancel}>
-            <X size={13} /> Cancel
+          <button type="button" className="glass-button min-h-11 px-3 py-2 text-xs" onClick={() => void requestClose()}>
+            <X size={13} /> Close
           </button>
+          <span className="text-[11px] text-slate-500" aria-live="polite" data-testid="note-save-status">
+            {status}
+          </span>
         </div>
         {onTrash && (
           <button type="button" className="glass-button min-h-11 px-3 py-2 text-xs text-rose-300" onClick={onTrash}>
@@ -1366,4 +1774,4 @@ function NoteEditor({
       </div>
     </div>
   );
-}
+});

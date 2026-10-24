@@ -28,9 +28,9 @@ with it — Notes lives here and in the nav.
 | action | behaviour |
 |---|---|
 | `create` | write a new note (`# title` + `Category:` header + body) |
-| `write` | **full replace**, used by the editor's Save; returns `detail.path` |
+| `write` | **full replace**, used by the editor's Save and autosave; returns `detail.path` and the new `detail.etag`. With `if_match` and `path` the PUT carries `If-Match`, and a note changed since (Nextcloud's 412) comes back as a FAILURE with `detail.conflict: true` and nothing written |
 | `append` | quick-capture only: adds `- [ ] <content>` to the end |
-| `read` | return the file body in `message` |
+| `read` | return the file body in `message` and its version in `detail.etag` (Nextcloud's `ETag`/`OC-ETag`) |
 | `delete` | remove the file |
 | `move` | move a note with one WebDAV `MOVE` (archive, trash, restore or rename) |
 | `duplicate` | copy a note to the first free `<title> (copy).md` in its folder |
@@ -77,8 +77,11 @@ that, every save of an opened note stacked another header on top.
 - **Instant shelf**: each visit's list and index are kept in localStorage per
   account, so the page paints the last known notes immediately and revalidates
   in the background. Opening a note whose text came with the list shows that
-  text at once and reconciles with the stored file a moment later, unless you
-  have already started editing.
+  text at once and reconciles with the stored file a moment later. If you
+  have already started editing, your typing stays and the stored version is
+  adopted only when its text is what you started from; otherwise the next save
+  reports a conflict (below). This reconcile used to be dropped on the floor:
+  the editor seeded its state once, so it kept showing the list's copy.
 - **Prompt moves**: archive, trash and restore move the card on the shelf the
   moment you tap, then reconcile with the server in the background. Every note
   call allows a full minute, because WebDAV can be slow while previews are
@@ -139,6 +142,34 @@ that, every save of an opened note stacked another header on top.
 - **Typing**: the editor keeps its own draft, so a keystroke re-renders the
   sheet only. It used to re-render the page and every card, and each card
   and sort comparison parsed the stored pin/colour map from localStorage.
+- **Autosave**: an open note that keeps its title and folder saves itself
+  1.5 s after typing pauses, in place, with the version it was opened at
+  (`read`'s `detail.etag`) as `If-Match`; each save hands its new version to
+  the next, and saves run one at a time so an autosave and a Save tap cannot
+  race into a false conflict. A new note, or a rename or folder move, waits
+  for Save or close, so typing a title does not leave a file per keystroke.
+  Closing the sheet (Close, the ×, Escape, the backdrop) saves pending changes
+  first, as in Keep; an untouched note closes without a write. A failed
+  autosave shows "Not saved: <reason>" under the editor and is retried after
+  the next change, not in a loop. The shared index is written only when a save
+  changes a path, pin or colour.
+- **Never a silent overwrite**: a save is refused when the note changed
+  elsewhere since it was opened, either by Nextcloud's 412 on `If-Match` or,
+  when there is no version (or the save renames the file, which `If-Match`
+  cannot cover), by reading the stored text first and comparing it with what
+  was opened. The editor then offers **Keep both** (yours is saved as
+  "<title> (my copy)", numbered past existing titles in that folder),
+  **Use the stored version** (drops yours and reopens the note) or
+  **Overwrite with mine**. Autosave pauses until you choose.
+- **Drafts on the device**: every change the server does not have yet is
+  kept in localStorage per account (`jarvis_notes_drafts_v1:<scope>`,
+  `lib/noteDrafts.ts`, newest 20, written in try/catch) and forgotten once a
+  save holds the same text. If the app closes mid-edit, the next visit shows
+  an "Unsaved …" offer above the shelf with **Restore** and **Discard**, and
+  opening that note shows the kept changes with a **Discard them** link.
+  Drafts keep the version they started from, so saving a restored draft still
+  detects a change made elsewhere since. Trashing a note from the editor drops
+  its draft (Undo brings back the stored note).
 - **WebDAV cost**: Nextcloud spends one to several seconds on every listing,
   so `list` makes one whole-tree PROPFIND (`Depth: infinity`, about 4 s for
   187 notes) instead of one per folder (nine in a row took over 20 s). If the
@@ -181,11 +212,12 @@ per account and revalidated in the background, and a note whose text came with
 the list opens at once), prompt archive/trash/restore (cards move on tap, roll
 back on failure, and note calls allow a minute), dashboard and home-screen
 capture, a grid/list layout toggle remembered per device, undo toasts for
-archive/trash/restore.
+archive/trash/restore, autosave with ETag conflict detection and on-device
+drafts that survive a closed app.
 
 Still open: reminders (time and place), attachments/images/drawings/audio,
-Nextcloud sharing, autosave and drafts, keyboard
-shortcuts, per-item checklist editing and reordering, versions, offline.
+Nextcloud sharing, keyboard shortcuts, per-item checklist editing and
+reordering, versions, offline.
 
 ## Tests
 
@@ -197,9 +229,17 @@ shortcuts, per-item checklist editing and reordering, versions, offline.
   call their routes, search, failure surfacing, the grid/list toggle is
   remembered across visits, Undo after trash and after a bulk archive moves
   each note back, a failed move withdraws the Undo offer
+- `services/ui/src/test/NotesAutosave.test.tsx`: an open note autosaves in
+  place with `If-Match`; a note changed elsewhere is refused and Keep both
+  saves a "(my copy)"; without a version the stored text is compared first;
+  closing saves pending changes and an untouched close writes nothing; a
+  draft survives an unmounted app and is restored or discarded; opening a
+  note with kept changes can discard them for the stored text
+- `services/ui/src/test/noteDrafts.test.ts`: per-account drafts, the newest-20
+  cap, a damaged store, storage that throws
 - `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
 - `services/gateway/tests/test_notes_rag_sync.py`: indexing writes to RAG;
-  the list route passes `previews` through
+  the list route passes `previews` through; the write route passes `if_match`
 - `services/ui/src/test/noteRichText.test.ts` / `RichNoteEditor.test.tsx`:
   markdown round trips, the unsupported-note fallback, span whitelist, tick,
   Enter and toolbar behaviour, span rendering in previews
@@ -210,6 +250,8 @@ shortcuts, per-item checklist editing and reordering, versions, offline.
   PUT) without stacking headers, `check_off` toggles and reports missing items,
   previews are read once and reused, a save forgets the cached text, reads run
   at most four at a time, an unreadable note does not fail the list, a
-  timeout is named in the error, the folder check is `Depth: 0`
+  timeout is named in the error, the folder check is `Depth: 0`, `read`
+  returns the ETag, an in-place `write` sends `If-Match` and returns the new
+  ETag, a 412 is a conflict, a new note never sends `If-Match`
 - `services/execution/tests/test_http_client_session_retire.py`: a pooled
   session that ages out keeps serving the requests already on it

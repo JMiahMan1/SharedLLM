@@ -414,6 +414,7 @@ class NoteRequest(BaseRequest):
     previews: bool = False # list: also return the text of the newest notes
     destination: str | None = None # move: the note's new path
     meta: dict | None = None # meta_write: the shared notes index to store
+    if_match: str | None = None # write: the ETag the note was opened at; a newer file is refused (412)
 
 
 # Recipes: paste-a-link import and TheMealDB search (corpus index arrives later)

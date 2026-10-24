@@ -2209,7 +2209,12 @@ export const api = {
     return resp.data;
   },
 
-  /** Full replace: the editor's Save. Append would duplicate the body. */
+  /**
+   * Full replace: the editor's Save. Append would duplicate the body.
+   * `if_match` is the version `readNote` returned (`detail.etag`); a note
+   * changed elsewhere since then comes back as a FAILURE with
+   * `detail.conflict` instead of being overwritten.
+   */
   async writeNote(payload: {
     title: string;
     content: string;
@@ -2217,6 +2222,7 @@ export const api = {
     storage?: string;
     path?: string;
     as_user?: 'admin';
+    if_match?: string;
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/write', payload, { timeout: 60_000 });
     return resp.data;
