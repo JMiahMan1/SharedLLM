@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Music, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { useOptionalWebPlayer } from '../../context/webPlayerContext';
 import { proxiedImage } from '../../lib/mediaImage';
+import { useMediaToken } from '../../lib/mediaToken';
 
 /**
  * The web player above the page, so music does not disappear when the reader
@@ -12,6 +13,8 @@ import { proxiedImage } from '../../lib/mediaImage';
 export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
   const player = useOptionalWebPlayer();
   const location = useLocation();
+  // Re-render once the signed media token for the cover URL arrives.
+  useMediaToken();
   if (!player || !player.mediaTitle || location.pathname.startsWith('/media')) return null;
 
   const pct = player.duration > 0 ? Math.min(100, Math.max(0, (player.position / player.duration) * 100)) : 0;

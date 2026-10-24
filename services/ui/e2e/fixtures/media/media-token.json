@@ -1,4 +1,5 @@
 {
   "token": "test-media-token",
-  "expires_at": "2026-09-26T12:00:00Z"
+  "expires_at": 4102444800,
+  "user": "testuser"
 }

@@ -2160,13 +2160,31 @@ def _auth_body_from_request(request: Request, body: dict | None = None) -> Any:
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         merged["api_key"] = auth_header.split(" ", 1)[1]
-    # Fallback: accept ?token= query param for browser-native requests (HTMLAudioElement)
-    # that cannot set request headers (used by local media streaming).
+    # Fallback: accept ?token= for browser-native requests (WebSocket, SSE,
+    # downloads) that cannot set request headers. Never on media routes: those
+    # take the signed ``?mt=`` token instead (see _query_api_key).
     elif not merged.get("api_key"):
-        token_qp = request.query_params.get("token")
+        token_qp = _query_api_key(request)
         if token_qp:
             merged["api_key"] = token_qp
     return merged
+
+
+# Media URLs (image proxy, audio streams, the event stream) end up in <img>
+# tags, audio elements, device players and logs, so they authenticate with the
+# short-lived signed ``?mt=&user=`` token (media overhaul §7.4), never with the
+# raw API key as ``?token=``. The legacy ``?token=`` path was retired once the
+# web UI and the Android app had moved to ``mt``; the Sendspin and MA JSON-RPC
+# websockets (``/api/sendspin``, ``/api/ma-jsonrpc``) are not under this
+# prefix and keep their own query-string auth.
+MEDIA_ROUTE_PREFIX = "/api/media/"
+
+
+def _query_api_key(request: Request) -> str:
+    """The API key passed as ``?token=``, or "" on media routes, which refuse it."""
+    if request.url.path.startswith(MEDIA_ROUTE_PREFIX):
+        return ""
+    return (request.query_params.get("token") or "").strip()
 
 
 def _normalize_ma_url(mass_url: str) -> tuple[str, str, int]:
@@ -2250,9 +2268,10 @@ def _presented_api_key(request: Request) -> str:
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         return auth_header.split(" ", 1)[1].strip()
-    # HTMLAudioElement cannot set headers, so local media streaming passes the
+    # Browser WebSockets, SSE and downloads cannot set headers, so they pass the
     # key as ?token=. Same secret, same handling: it must still be a real key.
-    return (request.query_params.get("token") or "").strip()
+    # Media routes refuse it and take the signed ?mt= token instead.
+    return _query_api_key(request)
 
 
 async def _require_identity_from_request(request: Request, body: dict | None = None) -> Any:
@@ -15668,9 +15687,14 @@ def _ma_stream_cache_put(user: str, uri: str, url: str) -> None:
 
 
 async def _ma_stream_creds(request: Request) -> dict[str, Any]:
-    """Resolve identity for the MA stream endpoints (401 on auth failure)."""
+    """Resolve identity for the MA stream endpoints (401 on auth failure).
+
+    An audio element cannot send headers, so a signed ``?mt=&user=`` token
+    (§7.4) is accepted and, when present, is authoritative.
+    """
+    media_creds = await _resolve_identity_from_media_token(request)
     try:
-        creds = await _resolve_identity_from_request(request)
+        creds = media_creds if media_creds is not None else await _resolve_identity_from_request(request)
     except HTTPException as e:
         log.error(f"[stream/ma] Identity resolution failed: {e.detail}")
         raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
@@ -16115,8 +16139,12 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
     log.info(f"[imageproxy] Proxy request path={redact_url(path)[:160]} service={service}")
     if not path:
         raise HTTPException(status_code=400, detail="path required")
+    # <img> cannot send headers, so the UI signs the URL with ?mt=&user= (§7.4).
+    # A present mt is authoritative: a bad or expired one is a 403.
+    creds = await _resolve_identity_from_media_token(request)
     try:
-        creds = await _resolve_identity_from_request(request)
+        if creds is None:
+            creds = await _resolve_identity_from_request(request)
         if not isinstance(creds, dict):
             creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
     except Exception as e:
@@ -16446,7 +16474,8 @@ async def post_media_token(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     token, expires_at = sign(user)
-    return {"token": token, "expires_at": expires_at}
+    # ``user`` goes next to ``mt`` in the URL: the token is bound to it.
+    return {"token": token, "expires_at": expires_at, "user": user}
 
 
 @app.get("/api/media/events")

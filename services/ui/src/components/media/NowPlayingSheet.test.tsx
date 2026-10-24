@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import NowPlayingSheet from './NowPlayingSheet';
+import { resetMediaTokenForTests } from '../../lib/mediaToken';
 import { MediaPlayerContext } from '../../context/webPlayerContext';
 import type { SharedPlayer } from '../../context/webPlayerContext';
 
@@ -118,11 +119,25 @@ describe('NowPlayingSheet', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Remove from favorites' })).toBeTruthy());
   });
 
-  it('loads cover art through the gateway image proxy', () => {
-    const { container } = renderSheet(player({ mediaImage: '/imageproxy/cover.jpg?size=512' }));
-    const img = container.querySelector('img');
-    expect(img?.getAttribute('src')).toContain('/api/media/imageproxy?path=');
-    expect(img?.getAttribute('src')).toContain(encodeURIComponent('/imageproxy/cover.jpg?size=512'));
+  it('loads cover art through the gateway image proxy with a signed media token', async () => {
+    localStorage.setItem('jarvis_api_key', 'key-1');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ token: 'mt-1', user: 'alice', expires_at: Math.floor(Date.now() / 1000) + 3600 }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )));
+    try {
+      const { container } = renderSheet(player({ mediaImage: '/imageproxy/cover.jpg?size=512' }));
+      await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+      const src = container.querySelector('img')?.getAttribute('src') ?? '';
+      expect(src).toContain('/api/media/imageproxy?path=');
+      expect(src).toContain(encodeURIComponent('/imageproxy/cover.jpg?size=512'));
+      expect(src).toContain('&user=alice&mt=mt-1');
+      expect(src).not.toContain('key-1');
+    } finally {
+      vi.unstubAllGlobals();
+      resetMediaTokenForTests();
+      localStorage.removeItem('jarvis_api_key');
+    }
   });
 
   it('offers book controls and a playback speed for audiobooks', async () => {

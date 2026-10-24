@@ -23,6 +23,7 @@ import toast from 'react-hot-toast';
 import { useOptionalWebPlayer } from '../../context/webPlayerContext';
 import { extractMaImage } from '../../lib/maImage';
 import { proxiedImage } from '../../lib/mediaImage';
+import { useMediaToken } from '../../lib/mediaToken';
 import { formatClock } from '../../lib/utils';
 
 const POLL_MS = 5000;
@@ -35,6 +36,7 @@ interface QueueEntry {
   name: string;
   artist: string;
   duration: number;
+  /** The raw MA image reference; proxied (and signed) when rendered. */
   image: string | null;
   available: boolean;
 }
@@ -99,7 +101,7 @@ function toEntry(raw: unknown): QueueEntry | null {
     name,
     artist: artists,
     duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
-    image: proxiedImage(extractMaImage(item.image) ?? extractMaImage(media?.image)),
+    image: extractMaImage(item.image) ?? extractMaImage(media?.image) ?? null,
     available: item.available !== false,
   };
 }
@@ -113,8 +115,10 @@ function toEntries(raw: unknown): QueueEntry[] {
 }
 
 function QueueArt({ entry }: { entry: QueueEntry }) {
-  return entry.image ? (
-    <img src={entry.image} alt="" loading="lazy" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
+  useMediaToken();
+  const src = proxiedImage(entry.image);
+  return src ? (
+    <img src={src} alt="" loading="lazy" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
   ) : (
     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/5 text-slate-500">
       <Music size={17} aria-hidden />

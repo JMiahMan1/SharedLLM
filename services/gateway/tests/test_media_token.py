@@ -78,7 +78,8 @@ async def test_endpoint_issues_token_for_caller(client):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"token", "expires_at"}
+    assert set(body) == {"token", "expires_at", "user"}
+    assert body["user"] == "testuser"
     assert verify(body["token"], "testuser", now=before) is True
     assert before + TOKEN_TTL_SECONDS <= body["expires_at"] <= before + TOKEN_TTL_SECONDS + 2
 

@@ -22,8 +22,10 @@ OpenAI-compatible surface at `/v1/chat/completions`. Base URL:
   The gateway checks the key against Identity's strict
   `GET /api/internal/validate-api-key`, passing it in the `X-Api-Key` header
   (never the query string, since URLs land in access logs).
-- **Local media streaming** (`HTMLAudioElement` cannot set headers) may pass the
-  same key as `?token=`; it is validated exactly like the bearer key.
+- **Browser sockets, SSE and downloads** that cannot set headers (log stream,
+  artifact downloads, terminal, calls) may pass the same key as `?token=`; it is
+  validated exactly like the bearer key. **Not on `/api/media/*`**: media URLs
+  take the signed `?mt=&user=` token below, and `?token=` there is a 401.
 - **Service-to-service** calls use `X-Internal-Secret` (from `.env`; never
   sent by clients). A credential-less internal call resolves as the
   **household**, not the system administrator: it gets the shared Home
@@ -39,8 +41,10 @@ OpenAI-compatible surface at `/v1/chat/completions`. Base URL:
   default. A presented identifier that does not match is a 401; a request with
   no identifier must explicitly ask for `anonymous` (no credentials) or
   `household` (shared services, no admin).
-- **Media streams/SSE** may use a short-lived signed media token `?mt=`
-  (`POST /api/media/token`).
+- **Media URLs** (`/api/media/imageproxy`, `/api/media/stream/*`,
+  `/api/media/events`) use the short-lived signed media token `?mt=&user=`
+  (`POST /api/media/token`) when they cannot send the bearer header. A present
+  `mt` is authoritative: a bad or expired one is a 403.
 
 ## `POST /api/chat`
 
@@ -119,8 +123,8 @@ Streaming, events and tokens:
 - `POST /api/media/stream/music-assistant`: start playback and resolve an MA stream URL (`GET` resolves an already-playing queue; `409` otherwise)
 - `GET /api/media/stream/abs-session/{session_id}/{track_index}[/{segment}]`: Audiobookshelf session HLS proxy
 - `GET /api/media/events`: per-user SSE media events (snapshot, player/queue updates, 15 s heartbeats)
-- `POST /api/media/token`: signed media token `{token, expires_at}` for `?mt=` URLs
-- `GET /api/media/imageproxy?path=&token=`: per-user image proxy
+- `POST /api/media/token`: signed media token `{token, expires_at, user}` for `?mt=&user=` URLs
+- `GET /api/media/imageproxy?path=&user=&mt=`: per-user image proxy (or the bearer header)
 - `WS /api/ma-jsonrpc`: Music Assistant control socket (command allowlist + per-user player scope)
 
 Provider routes (existing screens and widgets):

@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import MiniPlayer from './MiniPlayer';
+import { resetMediaTokenForTests } from '../../lib/mediaToken';
 import { MediaPlayerContext } from '../../context/webPlayerContext';
 import type { SharedPlayer } from '../../context/webPlayerContext';
 
@@ -63,11 +64,25 @@ describe('MiniPlayer', () => {
     expect(onOpen).toHaveBeenCalled();
   });
 
-  it('loads cover art through the gateway image proxy', () => {
-    const { container } = renderAt('/bible', player({ mediaImage: '/imageproxy/cover.jpg?size=512' }));
-    const img = container.querySelector('img');
-    expect(img?.getAttribute('src')).toContain('/api/media/imageproxy?path=');
-    expect(img?.getAttribute('src')).toContain(encodeURIComponent('/imageproxy/cover.jpg?size=512'));
+  it('loads cover art through the gateway image proxy with a signed media token', async () => {
+    localStorage.setItem('jarvis_api_key', 'key-1');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ token: 'mt-1', user: 'alice', expires_at: Math.floor(Date.now() / 1000) + 3600 }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )));
+    try {
+      const { container } = renderAt('/bible', player({ mediaImage: '/imageproxy/cover.jpg?size=512' }));
+      await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+      const src = container.querySelector('img')?.getAttribute('src') ?? '';
+      expect(src).toContain('/api/media/imageproxy?path=');
+      expect(src).toContain(encodeURIComponent('/imageproxy/cover.jpg?size=512'));
+      expect(src).toContain('&user=alice&mt=mt-1');
+      expect(src).not.toContain('key-1');
+    } finally {
+      vi.unstubAllGlobals();
+      resetMediaTokenForTests();
+      localStorage.removeItem('jarvis_api_key');
+    }
   });
 
   it('sits above the measured bottom bar instead of a hard-coded offset', () => {

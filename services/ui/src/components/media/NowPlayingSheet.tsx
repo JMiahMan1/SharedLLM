@@ -13,6 +13,7 @@ import { useHaptics } from '../../hooks/useHaptics';
 import { api } from '../../services/api';
 import { formatClock } from '../../lib/utils';
 import { proxiedImage } from '../../lib/mediaImage';
+import { useMediaToken } from '../../lib/mediaToken';
 import OutputSheet from './OutputSheet';
 
 type RepeatMode = 'off' | 'all' | 'one';
@@ -61,6 +62,8 @@ export default function NowPlayingSheet({
   const { trigger } = useHaptics();
   // MA hands out relative paths and provider URLs; only the gateway proxy can
   // fetch both with credentials, and the accent canvas needs the same origin.
+  // The URL is signed with the media token, so re-render when it arrives.
+  useMediaToken();
   const art = proxiedImage(player?.mediaImage);
   const accent = useAccentColor(art);
 

@@ -11,6 +11,7 @@ import { formatDeviceLabel } from '../lib/deviceLabels';
 import type { MaPlayerListEntry } from '../lib/deviceLabels';
 import { listRemoteMaPlayers, sendMaRemoteCommand } from '../lib/maRemotePlayer';
 import { proxiedImage } from '../lib/mediaImage';
+import { useMediaToken } from '../lib/mediaToken';
 import { DeviceSelector } from '../components/media/DeviceSelector';
 import { NowPlayingCard, type NowPlayingView } from '../components/media/NowPlayingCard';
 import { MediaExplorer } from '../components/media/MediaExplorer';
@@ -107,6 +108,8 @@ function ShelfMessage({ title, detail, onRetry }: { title: string; detail?: stri
 const Media = () => {
   const { trigger } = useHaptics();
   const maPlayer = useSharedMAWebPlayer();
+  // Cover URLs are signed with the media token; re-render when it arrives.
+  useMediaToken();
 
   /** '' = this device's web player, `ma:<id>` = an MA-only player, else an HA entity. */
   const [searchParams] = useSearchParams();

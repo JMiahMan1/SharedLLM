@@ -22,6 +22,7 @@ import { storageGetSync } from './storage';
 import { parseMaPlayerList, type MaPlayerListEntry } from './deviceLabels';
 import { extractMaImage } from './maImage';
 import { proxiedImage } from './mediaImage';
+import { useMediaToken } from './mediaToken';
 
 /**
  * UI-level playback state. Deliberately distinct from Sendspin's own
@@ -99,8 +100,8 @@ function gatewaySocketUrl(path: string, apiToken: string): string {
 
 /* Resolve a (possibly relative) MA image reference to an absolute URL so the
    OS MediaSession artwork can load it. Goes through the gateway image proxy:
-   MA paths are relative to the MA host, not the app, and the proxy carries the
-   credentials. */
+   MA paths are relative to the MA host, not the app, and the URL carries the
+   signed media token (none until one is held; the effect reruns when it arrives). */
 function buildMediaArtwork(img?: string | null): MediaImage[] {
   const src = proxiedImage(img);
   if (!src) return [];
@@ -155,6 +156,8 @@ export function useMAWebPlayer() {
   const wantConnectedRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
+  // OS MediaSession artwork is a signed cover URL; refresh it when the token changes.
+  const mediaToken = useMediaToken();
   const [state, setStateLocal] = useState<MAWebPlayerState>({
     isConnected: false,
     isPlaying: false,
@@ -788,7 +791,7 @@ export function useMAWebPlayer() {
     } catch {
       /* MediaSession unsupported in this WebView */
     }
-  }, [state.mediaTitle, state.mediaArtist, state.mediaImage, state.isPlaying]);
+  }, [state.mediaTitle, state.mediaArtist, state.mediaImage, state.isPlaying, mediaToken]);
 
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
