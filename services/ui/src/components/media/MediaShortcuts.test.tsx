@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import MediaShortcuts from './MediaShortcuts';
 import { MediaPlayerContext } from '../../context/webPlayerContext';
 import type { SharedPlayer } from '../../context/webPlayerContext';
@@ -178,6 +178,31 @@ describe('MediaShortcuts', () => {
     expect(value.play).not.toHaveBeenCalled();
     expect(value.pause).not.toHaveBeenCalled();
     expect(value.setMuted).not.toHaveBeenCalled();
+  });
+
+  it('on a media page, / focuses the media search and ⌘K/Ctrl+K opens search', () => {
+    const Where = () => <p data-testid="where">{useLocation().pathname}</p>;
+    render(
+      <MemoryRouter initialEntries={['/media']}>
+        <MediaPlayerContext.Provider value={player()}>
+          <input data-global-search aria-label="Global search" />
+          <Routes><Route path="/media" element={<input data-media-search aria-label="Media search" />} /></Routes>
+          <MediaShortcuts onOpenNowPlaying={() => {}} onOpenQueue={() => {}} />
+          <Where />
+        </MediaPlayerContext.Provider>
+      </MemoryRouter>,
+    );
+    fireEvent.keyDown(document, { key: '/' });
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Media search' }));
+    fireEvent.keyDown(document.activeElement!, { key: 'k', ctrlKey: true });
+    expect(screen.getByTestId('where')).toHaveTextContent('/media/search');
+  });
+
+  it('leaves Ctrl+K alone outside media', () => {
+    renderShortcuts(player());
+    const event = new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it('still searches and shows help without a player', async () => {
