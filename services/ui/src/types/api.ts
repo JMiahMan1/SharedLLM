@@ -3282,6 +3282,27 @@ export interface HealthActiveMinutes {
   unavailable: string[];
 }
 
+/** A cheer for a family member's day (services/health/cheers.py): a fixed kind, never free text. */
+export interface HealthCheer {
+  id: number;
+  from_user: string;
+  to_user: string;
+  day: string;
+  kind: string;
+  emoji: string;
+  label: string;
+  created_at: string;
+}
+
+export interface HealthCheersDay {
+  day: string;
+  kinds: Array<{ kind: string; emoji: string; label: string }>;
+  /** Who the caller may cheer: people sharing health with them, and challenge co-members. */
+  can_cheer: string[];
+  received: HealthCheer[];
+  sent: HealthCheer[];
+}
+
 /** One of this week's own gentle goals (services/health/goals.py). */
 export interface HealthGoal {
   id: number;

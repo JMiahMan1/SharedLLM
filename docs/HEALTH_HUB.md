@@ -414,7 +414,17 @@ live search is the ecosystem-standard pattern.
   `/api/health/challenges…`). `FamilyChallengeCard` on Health → Today shows the standings, Join/
   Leave, the start form for adults, and **Share to chat** through the same `ShareToChatSheet` the
   recipes use (`🏆 Family challenge: …` with the ranked standings).
-- [ ] Cheers/kudos on a family member's day; share a health card to chat. Scope-limited sleep/nutrition/cycle sharing is built; cheers and cards are not.
+- [x] Cheers/kudos on a family member's day; share a health card to chat. **Cheers**
+  (`services/health/cheers.py`, `Cheer`; `GET/POST /cheers`, gateway `/api/health/cheers`) come
+  from a fixed set (👏 Well done, 💪 Keep going, ⭐ Proud of you, 😴 Rest well, 🥕 Good eating),
+  never free text, so they are kind between any two members, children included. You may cheer
+  someone who shares a health scope with you or is in one of this week's challenges with you; once
+  per kind per person per day. The gateway sends the person one `health` notice ("Mom cheered your
+  day"). A cheer reveals nothing about the day. `CheersCard` on Health → Today lists today's cheers
+  and the buttons, and hides when there is nobody to cheer. **Share my day** on Today opens the
+  same `ShareToChatSheet` the recipes and challenge use, with sleep, steps, water and energy from
+  the cards the person has on (`src/lib/healthShare.ts`) — never calories, weight or cycle data,
+  since a family chat includes the kids.
 
 ### Phase 8 — integrations everywhere
 
