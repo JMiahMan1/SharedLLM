@@ -51,6 +51,9 @@ function rulesFrom(draft: Draft, current: ScreenRules): ScreenRules {
     blocked_apps: current.blocked_apps,
     app_limits: current.app_limits,
     web_filter: current.web_filter,
+    install_approval: current.install_approval,
+    permission_gating: current.permission_gating,
+    monitoring: current.monitoring,
   };
 }
 

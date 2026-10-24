@@ -17,6 +17,7 @@ import MicroLessonCard from '../components/health/MicroLessonCard';
 import CoachCard from '../components/health/CoachCard';
 import CheersCard from '../components/health/CheersCard';
 import ScreenTimeCard from '../components/health/ScreenTimeCard';
+import AskForSiteCard from '../components/health/AskForSiteCard';
 import PhoneProtectionCard from '../components/health/PhoneProtectionCard';
 import HealthConnectCard from '../components/health/HealthConnectCard';
 import TalkRequestCard from '../components/guardian/TalkRequestCard';
@@ -70,6 +71,7 @@ const Health = () => {
           <div className="space-y-3 sm:space-y-4">
             <GuardianLink />
             <ScreenTimeCard />
+            <AskForSiteCard />
             <PhoneProtectionCard />
             <TalkRequestCard />
             <HealthToday onNavigate={setTab} />

@@ -13,7 +13,10 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -29,6 +32,8 @@ final class GuardApi {
     static final String KEY_OFFLINE_CODES = "guard_offline_codes";
     static final String KEY_OFFLINE_FAILS = "guard_offline_fails";
     static final String KEY_OFFLINE_REPORT_DUE = "guard_offline_report_due";
+    /** The user apps on the phone when the guard first ran: never held for approval. */
+    static final String KEY_INSTALL_BASELINE = "guard_install_baseline";
     static final int OFFLINE_MAX_FAILS = 5;
     static final long OFFLINE_WAIT_MS = 10 * 60_000L;
 
@@ -67,10 +72,15 @@ final class GuardApi {
         return lastStatus(context).optBoolean("protected", false);
     }
 
-    /** Locked now: the server said so and the lock has not run out since. */
+    /**
+     * Locked now: the server said so and the lock has not run out since, or
+     * bedtime or school time has started on the clock since the last status.
+     */
     static boolean isLocked(Context context) {
         JSONObject s = lastStatus(context);
-        if (!s.optBoolean("locked", false)) return false;
+        if (!s.optBoolean("locked", false)) {
+            return LockWarning.lockedByClock(System.currentTimeMillis(), nextLockAt(context), nextLockReason(context));
+        }
         String until = s.optString("until", "");
         if (until.isEmpty()) return true;
         try {
@@ -81,7 +91,113 @@ final class GuardApi {
     }
 
     static String lockReason(Context context) {
-        return lastStatus(context).optString("reason", "");
+        JSONObject s = lastStatus(context);
+        if (!s.optBoolean("locked", false)
+                && LockWarning.lockedByClock(System.currentTimeMillis(), nextLockAt(context), nextLockReason(context))) {
+            return nextLockReason(context);
+        }
+        return s.optString("reason", "");
+    }
+
+    /** When the phone next locks on its own (epoch ms), or 0 when nothing is coming. */
+    static long nextLockAt(Context context) {
+        String at = lastStatus(context).optString("next_lock_at", "");
+        if (at.isEmpty() || "null".equals(at)) return 0L;
+        try {
+            return java.time.OffsetDateTime.parse(at).toInstant().toEpochMilli();
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    static String nextLockReason(Context context) {
+        String reason = lastStatus(context).optString("next_lock_reason", "");
+        return "null".equals(reason) ? "" : reason;
+    }
+
+    /** The household day the status was for (YYYY-MM-DD). */
+    static String statusDay(Context context) {
+        return lastStatus(context).optString("day", "");
+    }
+
+    /** Minutes left today for each app with its own limit. */
+    static Map<String, Integer> appMinutesLeft(Context context) {
+        Map<String, Integer> out = new HashMap<>();
+        JSONObject left = lastStatus(context).optJSONObject("app_minutes_left");
+        if (left == null) return out;
+        for (Iterator<String> it = left.keys(); it.hasNext(); ) {
+            String pkg = it.next();
+            out.put(pkg, left.optInt(pkg));
+        }
+        return out;
+    }
+
+    /** New apps wait for a parent's OK (the server's word; off until it has spoken). */
+    static boolean installApprovalRequired(Context context) {
+        return lastStatus(context).optBoolean("install_approval", false);
+    }
+
+    /** The parents' answers on new apps: package to pending, approved or denied. */
+    static Map<String, String> appApprovals(Context context) {
+        return stringMap(lastStatus(context).optJSONObject("app_approvals"));
+    }
+
+    /** The parents' answers on app permissions: "package|group" to pending, approved or denied. */
+    static Map<String, String> permissionApprovals(Context context) {
+        return stringMap(lastStatus(context).optJSONObject("permission_approvals"));
+    }
+
+    /** The kinds of permission a parent approves first (camera, location, ...). */
+    static Set<String> permissionGating(Context context) {
+        Set<String> out = new HashSet<>();
+        JSONArray groups = lastStatus(context).optJSONArray("permission_gating");
+        if (groups != null) {
+            for (int i = 0; i < groups.length(); i++) out.add(groups.optString(i));
+        }
+        return out;
+    }
+
+    private static Map<String, String> stringMap(JSONObject o) {
+        Map<String, String> out = new HashMap<>();
+        if (o == null) return out;
+        for (Iterator<String> it = o.keys(); it.hasNext(); ) {
+            String key = it.next();
+            out.put(key, o.optString(key));
+        }
+        return out;
+    }
+
+    /**
+     * The apps on the phone when the guard first ran on it; set once, so an
+     * app installed later is new. Returns the baseline.
+     */
+    static Set<String> installBaseline(Context context, Set<String> installedNow) {
+        SharedPreferences p = prefs(context);
+        Set<String> saved = p.getStringSet(KEY_INSTALL_BASELINE, null);
+        if (saved != null) return new HashSet<>(saved);
+        p.edit().putStringSet(KEY_INSTALL_BASELINE, new HashSet<>(installedNow)).apply();
+        return new HashSet<>(installedNow);
+    }
+
+    /**
+     * Ask a parent first: a new app ("app", package), an app's permission
+     * ("permission", "package|group") or a blocked site ("site", domain).
+     * Call off the main thread. Returns an error to show, or null.
+     */
+    static String askParent(Context context, String kind, String target, String label) {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("kind", kind);
+            body.put("target", target);
+            if (label != null && !label.isEmpty()) body.put("label", label);
+            HttpResult r = send(context, "POST", "/api/guard/requests", body.toString());
+            if (r == null) return "No connection to Jarvis. Try again when the phone is online.";
+            if (r.status == 200) return null;
+            String detail = new JSONObject(r.body.isEmpty() ? "{}" : r.body).optString("detail", "");
+            return detail.isEmpty() ? "That did not work." : detail;
+        } catch (Exception e) {
+            return "That did not work.";
+        }
     }
 
     static Set<String> alwaysAllowed(Context context) {

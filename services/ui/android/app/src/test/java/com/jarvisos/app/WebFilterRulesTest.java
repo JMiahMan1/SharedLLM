@@ -57,4 +57,39 @@ public class WebFilterRulesTest {
     public void safeSearchOffLeavesSearchAlone() {
         assertEquals(Kind.FORWARD, WebFilterRules.decide("www.google.com", true, false, BLOCK, ALLOW).kind);
     }
+
+    @Test
+    public void aSiteAllowedForAWhileCountsUntilItsTimeRunsOut() {
+        java.util.Map<String, Long> until = new java.util.HashMap<>();
+        until.put("minecraft.net", 5_000L);
+        until.put("old.example", 1_000L);
+        List<String> now = WebFilterRules.activeAllow(ALLOW, until, 2_000L);
+        assertEquals(Arrays.asList("khanacademy.org", "help.reddit.com", "minecraft.net"), now);
+        assertEquals(ALLOW, WebFilterRules.activeAllow(ALLOW, until, 6_000L));
+        // An allowed-for-now site wins over the block list, like the parent's own allow list.
+        assertEquals(Kind.FORWARD, WebFilterRules.decide("www.tiktok.com", true, true, BLOCK,
+                WebFilterRules.activeAllow(ALLOW, java.util.Collections.singletonMap("tiktok.com", 9_000L), 2_000L)).kind);
+    }
+
+    @Test
+    public void aBlockedNameIsAskedAboutAsItsSite() {
+        assertEquals("tiktok.com", WebFilterRules.site("WWW.TikTok.com."));
+        assertEquals("m.tiktok.com", WebFilterRules.site("m.tiktok.com"));
+    }
+
+    @Test
+    public void theFamilyResolversZeroAnswerMeansBlocked() {
+        assertEquals(true, WebFilterRules.familyBlocked(Arrays.asList(new byte[] {0, 0, 0, 0})));
+        assertEquals(false, WebFilterRules.familyBlocked(Arrays.asList(new byte[] {0, 0, 0, 0}, new byte[] {1, 2, 3, 4})));
+        assertEquals(false, WebFilterRules.familyBlocked(java.util.Collections.emptyList()));
+    }
+
+    @Test
+    public void askAParentIsOfferedOncePerSiteEveryHalfHour() {
+        java.util.Map<String, Long> offered = new java.util.HashMap<>();
+        assertEquals(true, WebFilterRules.shouldOffer(offered, "tiktok.com", 0));
+        assertEquals(false, WebFilterRules.shouldOffer(offered, "tiktok.com", 29 * 60_000L));
+        assertEquals(true, WebFilterRules.shouldOffer(offered, "reddit.com", 29 * 60_000L));
+        assertEquals(true, WebFilterRules.shouldOffer(offered, "tiktok.com", 31 * 60_000L));
+    }
 }

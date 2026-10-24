@@ -15,7 +15,15 @@ Semantics follow Family Link and Qustodio:
 - apps on the always-allowed list (phone, messages, Jarvis) are never locked;
 - app control (step 5): a parent can block an app outright, or give it its own
   daily minutes; an app past its minutes is blocked until midnight while the
-  rest of the phone keeps working.
+  rest of the phone keeps working;
+- the next lock is named ahead of time (``next_lock_at``/``next_lock_reason``)
+  so the phone can give Family Link's one-minute warning before it lands;
+- install approvals and permission gating are decided on the phone (only it
+  knows which apps are new and which dialog is open); the server passes the
+  parents' answers through (``approvals`` from identity);
+- a parent's "allow for a while" for a blocked site lives in
+  ``web_filter.allow_until`` ({domain: ISO}); ``active_allow`` is the list
+  the phone's filter honours now.
 """
 
 from __future__ import annotations
@@ -66,6 +74,62 @@ def _window(now: datetime, start: time | None, end: time | None) -> tuple[bool, 
     if at < end:
         return True, datetime.combine(today, end, now.tzinfo)
     return False, None
+
+
+# The kinds of permission a parent can ask to approve first (Family Link's
+# per-permission controls). The phone recognises Android's grant dialog for
+# each one; anything not listed here is never gated.
+PERMISSION_GROUPS = ("location", "camera", "microphone", "contacts", "sms", "phone", "photos", "calendar", "nearby")
+
+
+def next_lock(rules: dict[str, Any], now: datetime, remaining_min: int | None) -> tuple[datetime | None, str | None]:
+    """When the phone next locks on its own (within a day) and why.
+
+    Bedtime and school start at their set times; the daily limit runs out
+    after the minutes left if the phone stays in use. The earliest wins.
+    """
+    candidates: list[tuple[datetime, str]] = []
+
+    def upcoming(start: time | None, days_ok) -> datetime | None:
+        if start is None:
+            return None
+        for offset in (0, 1):
+            day = now.date() + timedelta(days=offset)
+            at = datetime.combine(day, start, now.tzinfo)
+            if at > now and days_ok(WEEKDAYS[day.weekday()]):
+                return at
+        return None
+
+    bed = upcoming(parse_hhmm(rules.get("bedtime_start")), lambda _d: parse_hhmm(rules.get("bedtime_end")) is not None)
+    if bed:
+        candidates.append((bed, "bedtime"))
+    school_days = rules.get("school_days") or list(SCHOOL_DAYS_DEFAULT)
+    if parse_hhmm(rules.get("school_end")) is not None:
+        school = upcoming(parse_hhmm(rules.get("school_start")), lambda d: d in school_days)
+        if school:
+            candidates.append((school, "school"))
+    if remaining_min is not None and remaining_min > 0:
+        candidates.append((now + timedelta(minutes=remaining_min), "limit"))
+    if not candidates:
+        return None, None
+    at, reason = min(candidates, key=lambda c: c[0])
+    return at, reason
+
+
+def active_allow(web_filter: dict[str, Any] | None, now: datetime) -> list[str]:
+    """The parent's allow list plus the sites allowed for a while that have not run out."""
+    wf = web_filter or {}
+    out = list(wf.get("allow") or [])
+    for domain, until in (wf.get("allow_until") or {}).items():
+        try:
+            ends = datetime.fromisoformat(str(until))
+        except ValueError:
+            continue
+        if ends.tzinfo is None:
+            ends = ends.replace(tzinfo=now.tzinfo)
+        if ends > now and domain not in out:
+            out.append(domain)
+    return out
 
 
 def apps_state(rules: dict[str, Any], apps_used_ms: dict[str, int] | None) -> tuple[list[str], dict[str, int]]:
@@ -141,6 +205,7 @@ def evaluate(
     else:
         locked, reason, until = False, None, None
     blocked_apps, app_minutes_left = apps_state(rules, apps_used_ms)
+    lock_at, lock_reason = (None, None) if locked else next_lock(rules, now, remaining)
 
     return {
         "limit_min": None if limit is None else int(limit),
@@ -157,4 +222,10 @@ def evaluate(
         "always_allowed": list(rules.get("always_allowed") or ALWAYS_ALLOWED_DEFAULT),
         "blocked_apps": blocked_apps,
         "app_minutes_left": app_minutes_left,
+        "next_lock_at": lock_at.isoformat() if lock_at else None,
+        "next_lock_reason": lock_reason,
+        # New apps wait for a parent's OK unless the parents switched that off.
+        "install_approval": rules.get("install_approval") is not False,
+        "permission_gating": [g for g in rules.get("permission_gating") or [] if g in PERMISSION_GROUPS],
+        "web_allow": active_allow(rules.get("web_filter"), now),
     }

@@ -4,13 +4,18 @@ import { AppWindow } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { api } from '../../services/api';
 import { appName, duration } from '../../lib/phoneUsageFormat';
-import type { ScreenRules } from '../../types/api';
+import type { PermissionGroup, ScreenRules } from '../../types/api';
+import { PERMISSION_WORDS } from '../../lib/guardRequests';
 
 /**
  * A parent's app control for one child (Phase 11 step 5): switch an app off,
  * or give it its own daily minutes. The apps listed are the ones the child's
  * phone actually reported this week, plus any app that already has a rule.
  * The phone's screen guard closes a blocked app; the rest of the phone works.
+ *
+ * Also: whether a newly installed app waits for a parent's OK (on by
+ * default), and which kinds of permission an app may get only once a parent
+ * approves it for that app. The requests themselves land on the parents' page.
  */
 export default function AppControls({ username, name, rules }: { username: string; name: string; rules: ScreenRules }) {
   const queryClient = useQueryClient();
@@ -44,11 +49,21 @@ export default function AppControls({ username, name, rules }: { username: strin
   const blocked = new Set(rules.blocked_apps || []);
   const limits = rules.app_limits || {};
   // The full rules go back each time: the server replaces them as a whole.
-  const withApps = (blockedApps: string[], appLimits: Record<string, number>): ScreenRules => {
+  const withRules = (patch: ScreenRules): ScreenRules => {
     const rest: ScreenRules = { ...rules };
     delete rest.paused;
     delete rest.paused_until;
-    return { ...rest, blocked_apps: blockedApps, app_limits: appLimits };
+    return { ...rest, ...patch };
+  };
+  const withApps = (blockedApps: string[], appLimits: Record<string, number>): ScreenRules =>
+    withRules({ blocked_apps: blockedApps, app_limits: appLimits });
+  const approvals = rules.install_approval !== false;
+  const gated = new Set<PermissionGroup>(rules.permission_gating || []);
+  const toggleGroup = (group: PermissionGroup) => {
+    const next = new Set(gated);
+    if (next.has(group)) next.delete(group);
+    else next.add(group);
+    save.mutate(withRules({ permission_gating: [...next] }));
   };
   const toggle = (pkg: string) =>
     save.mutate(withApps(blocked.has(pkg) ? [...blocked].filter((p) => p !== pkg) : [...blocked, pkg], limits));
@@ -113,6 +128,35 @@ export default function AppControls({ username, name, rules }: { username: strin
           })}
         </ul>
       )}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={approvals}
+        disabled={save.isPending}
+        onClick={() => save.mutate(withRules({ install_approval: !approvals }))}
+        className={`min-h-11 w-full rounded-xl border px-3 text-left text-xs flex items-center justify-between gap-2 ${approvals ? 'border-sky-400/40 bg-sky-400/10 text-white' : 'border-white/10 bg-white/5 text-slate-300'}`}
+        data-testid="install-approval"
+      >
+        <span>New apps wait for a parent's OK</span>
+        <span className="text-[11px] font-semibold">{approvals ? 'On' : 'Off'}</span>
+      </button>
+      <div className="space-y-1">
+        <p className="text-[11px] text-slate-400">Ask a parent before an app gets:</p>
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Permissions a parent approves first" data-testid="permission-gating">
+          {(Object.keys(PERMISSION_WORDS) as PermissionGroup[]).map((group) => (
+            <button
+              key={group}
+              type="button"
+              aria-pressed={gated.has(group)}
+              disabled={save.isPending}
+              onClick={() => toggleGroup(group)}
+              className={`min-h-11 rounded-xl border px-2.5 text-[11px] ${gated.has(group) ? 'border-sky-400/40 bg-sky-400/10 text-white' : 'border-white/10 bg-white/5 text-slate-400'}`}
+            >
+              {PERMISSION_WORDS[group]}
+            </button>
+          ))}
+        </div>
+      </div>
       {failure && <p className="text-xs text-amber-300">{failure}</p>}
     </div>
   );

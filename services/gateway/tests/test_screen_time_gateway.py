@@ -178,3 +178,51 @@ def test_the_unlock_passes_offline_verifiers_to_the_phone(wired, monkeypatch):
     verifier = {"parent": "mom", "salt": "aa", "iterations": 120000, "hash": "bb"}
     answers[("POST", "/guard/parent-unlock")] = (200, {"ok": True, "parent": "mom", "until": "x", "notify": [], "offline_codes": [verifier]})
     assert client.post("/api/guard/parent-unlock", json={"username": "mom", "password": "p"}).json()["offline_codes"] == [verifier]
+
+
+def test_status_passes_the_parents_answers_and_the_next_lock_to_the_phone(wired):
+    client, _, _, answers = wired
+    answers[("GET", "/screen-time/kid/rules")] = (200, {
+        "rules": {"bedtime_start": "21:00", "bedtime_end": "07:00", "permission_gating": ["camera"]},
+        "approvals": {"apps": {"com.roblox.client": "pending"}, "permissions": {"com.snapchat.android|camera": "approved"}},
+    })
+    body = client.get("/api/screen-time/kid/status").json()
+    assert body["app_approvals"] == {"com.roblox.client": "pending"}
+    assert body["permission_approvals"] == {"com.snapchat.android|camera": "approved"}
+    assert body["install_approval"] is True and body["permission_gating"] == ["camera"]
+    assert (body["next_lock_reason"], body["next_lock_at"]) == ("bedtime", "2026-10-21T21:00:00-07:00")
+
+
+def test_asking_a_parent_first_tells_both_parents_once(wired):
+    client, _, sent, answers = wired
+    answers[("POST", "/guard/requests")] = (200, {
+        "request": {"username": "kid", "kind": "site", "target": "minecraft.net", "label": "", "note": "school project"},
+        "notify": ["dad", "mom"],
+    })
+    r = client.post("/api/guard/requests", json={"kind": "site", "target": "minecraft.net", "note": "school project"})
+    assert r.status_code == 200 and "notify" not in r.json()
+    assert [n["user"] for n in sent] == ["dad", "mom"]
+    assert "kid asks to open minecraft.net" in sent[0]["body"] and "school project" in sent[0]["body"]
+    assert sent[0]["data"]["url"] == "/guardian?child=kid"
+
+    sent.clear()
+    answers[("POST", "/guard/requests")] = (200, {"request": {"username": "kid", "kind": "app", "target": "com.roblox.client"}, "notify": []})
+    client.post("/api/guard/requests", json={"kind": "app", "target": "com.roblox.client"})
+    assert sent == []  # asked before: the parents already heard
+
+
+def test_a_permission_request_reads_in_plain_words_and_the_answer_reaches_the_child(wired):
+    client, _, sent, answers = wired
+    answers[("POST", "/guard/requests")] = (200, {
+        "request": {"username": "kid", "kind": "permission", "target": "com.snapchat.android|camera", "label": "Snapchat"},
+        "notify": ["mom"],
+    })
+    client.post("/api/guard/requests", json={"kind": "permission", "target": "com.snapchat.android|camera"})
+    assert "kid wants to give Snapchat access to the camera" in sent[0]["body"]
+
+    answers[("POST", "/guard/requests/7")] = (200, {
+        "request": {"username": "kid", "kind": "site", "target": "minecraft.net", "status": "approved", "until": "x"},
+        "notify": ["kid"],
+    })
+    assert client.post("/api/guard/requests/7", json={"approve": True, "minutes": 60}).status_code == 200
+    assert sent[-1]["user"] == "kid" and sent[-1]["title"] == "Website allowed"

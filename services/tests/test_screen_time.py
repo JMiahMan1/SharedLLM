@@ -78,3 +78,37 @@ def test_always_allowed_apps_are_never_blocked():
     rules = {"blocked_apps": ["com.google.android.dialer"], "app_limits": {"com.jarvisos.app": 0}}
     s = evaluate(rules, used_ms=0, bonus_min=0, now=WED(16))
     assert s["blocked_apps"] == [] and s["app_minutes_left"] == {}
+
+
+def test_the_next_lock_is_named_ahead_for_the_one_minute_warning():
+    before_bed = evaluate(RULES, used_ms=0, bonus_min=0, now=WED(20, 59))
+    assert before_bed["next_lock_reason"] == "bedtime"
+    assert before_bed["next_lock_at"] == "2026-10-21T21:00:00-07:00"
+    # The limit runs out first when fewer minutes are left than until bedtime.
+    nearly_out = evaluate(RULES, used_ms=119 * 60000, bonus_min=0, now=WED(16))
+    assert (nearly_out["next_lock_reason"], nearly_out["next_lock_at"]) == ("limit", "2026-10-21T16:01:00-07:00")
+    # School starts tomorrow morning only on a school day; Saturday looks past the weekend.
+    school = {"school_start": "08:00", "school_end": "15:00"}
+    after = evaluate(school, 0, 0, WED(16))
+    assert (after["next_lock_reason"], after["next_lock_at"]) == ("school", "2026-10-22T08:00:00-07:00")
+    assert evaluate(school, 0, 0, SAT(12))["next_lock_at"] is None
+
+
+def test_no_next_lock_while_locked_or_without_rules():
+    assert evaluate(RULES, 0, 0, WED(22))["next_lock_at"] is None
+    assert evaluate({}, 0, 0, WED(12))["next_lock_reason"] is None
+
+
+def test_install_approval_is_on_unless_a_parent_switched_it_off_and_gating_keeps_known_groups():
+    assert evaluate({}, 0, 0, WED(12))["install_approval"] is True
+    assert evaluate({"install_approval": False}, 0, 0, WED(12))["install_approval"] is False
+    assert evaluate({"permission_gating": ["camera", "teleport"]}, 0, 0, WED(12))["permission_gating"] == ["camera"]
+
+
+def test_a_site_allowed_for_a_while_counts_only_until_it_runs_out():
+    wf = {
+        "allow": ["khanacademy.org"],
+        "allow_until": {"minecraft.net": "2026-10-21T17:00:00-07:00", "old.example": "2026-10-21T10:00:00-07:00"},
+    }
+    assert evaluate({"web_filter": wf}, 0, 0, WED(16))["web_allow"] == ["khanacademy.org", "minecraft.net"]
+    assert evaluate({"web_filter": wf}, 0, 0, WED(18))["web_allow"] == ["khanacademy.org"]

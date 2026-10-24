@@ -18,7 +18,7 @@ import java.util.Set;
  */
 public final class GuardRules {
 
-    public enum Action { ALLOW, BLOCK_TAMPER, BLOCK_LOCKED, BLOCK_APP }
+    public enum Action { ALLOW, BLOCK_TAMPER, BLOCK_LOCKED, BLOCK_APP, BLOCK_INSTALL }
 
     /** The app's own name as Settings and the uninstaller show it. */
     static final String APP_LABEL = "jarvis os";
@@ -61,6 +61,18 @@ public final class GuardRules {
                                 String pkg, String cls, String text,
                                 Collection<String> alwaysAllowed, String launcher,
                                 Collection<String> blockedApps) {
+        return decide(protectedPhone, locked, unlocked, pkg, cls, text, alwaysAllowed, launcher, blockedApps, null);
+    }
+
+    /**
+     * As above, with {@code awaitingApproval}: apps installed since the guard
+     * started that a parent has not approved (InstallApprovals). They stay
+     * closed, after the locks and blocks above, until a parent says yes.
+     */
+    public static Action decide(boolean protectedPhone, boolean locked, boolean unlocked,
+                                String pkg, String cls, String text,
+                                Collection<String> alwaysAllowed, String launcher,
+                                Collection<String> blockedApps, Collection<String> awaitingApproval) {
         if (pkg == null || pkg.isEmpty() || unlocked) return Action.ALLOW;
         String lowerText = text == null ? "" : text.toLowerCase(Locale.ROOT);
         String lowerCls = cls == null ? "" : cls.toLowerCase(Locale.ROOT);
@@ -79,6 +91,13 @@ public final class GuardRules {
                 && !pkg.equals(launcher)
                 && (alwaysAllowed == null || !alwaysAllowed.contains(pkg))) {
             return Action.BLOCK_APP;
+        }
+        if (protectedPhone
+                && awaitingApproval != null
+                && awaitingApproval.contains(pkg)
+                && !NEVER_LOCKED.contains(pkg)
+                && !pkg.equals(launcher)) {
+            return Action.BLOCK_INSTALL;
         }
         return Action.ALLOW;
     }

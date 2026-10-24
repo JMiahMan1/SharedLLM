@@ -32,6 +32,7 @@ import type {
   ScreenRules,
   ScreenTimeStatus,
   ScreenTimeRequest,
+  GuardRequest,
   RecommendationLane,
   RecommendationLanes,
   FamilyRole,
@@ -969,6 +970,24 @@ export const api = {
 
   async decideScreenTimeRequest(id: number, grant: boolean, minutes?: number): Promise<{ request: ScreenTimeRequest }> {
     const resp = await apiClient.post(`/api/screen-time/requests/${id}`, { grant, ...(minutes ? { minutes } : {}) });
+    return resp.data;
+  },
+
+  /** Asking a parent first: the caller's own requests and their children's. */
+  async getGuardRequests(status: 'pending' | 'approved' | 'denied' = 'pending'): Promise<{ requests: GuardRequest[] }> {
+    const resp = await apiClient.get('/api/guard/requests', { params: { status } });
+    return resp.data;
+  },
+
+  /** A child asks a parent first (the phone asks for new apps and permissions itself). */
+  async askAParent(kind: GuardRequest['kind'], target: string, note?: string): Promise<{ request: GuardRequest }> {
+    const resp = await apiClient.post('/api/guard/requests', { kind, target, ...(note ? { note } : {}) });
+    return resp.data;
+  },
+
+  /** A parent answers; a site is allowed for `minutes` or `always`. */
+  async decideGuardRequest(id: number, body: { approve: boolean; minutes?: number; always?: boolean }): Promise<{ request: GuardRequest }> {
+    const resp = await apiClient.post(`/api/guard/requests/${id}`, body);
     return resp.data;
   },
 
