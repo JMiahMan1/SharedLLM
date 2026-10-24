@@ -29,6 +29,7 @@ const LazyWidgets: Record<WidgetKey, React.LazyExoticComponent<React.ComponentTy
   climate:           lazy(() => import('../widgets/ClimateWidget')),
   presence:          lazy(() => import('../widgets/PresenceWidget')),
   bible_daily:       lazy(() => import('../widgets/BibleDailyWidget')),
+  recommendations:   lazy(() => import('../widgets/RecommendationsWidget')),
 };
 
 // Widget-level error boundary

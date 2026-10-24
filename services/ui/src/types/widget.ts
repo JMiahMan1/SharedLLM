@@ -11,7 +11,8 @@ export type WidgetKey =
   | 'health_activity'
   | 'climate'
   | 'presence'
-  | 'bible_daily';
+  | 'bible_daily'
+  | 'recommendations';
 
 export type WidgetVisibility = 'visible' | 'hidden' | 'removed';
 export type WidgetSize = 'small' | 'medium' | 'wide' | 'tall';
