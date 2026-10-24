@@ -5,8 +5,8 @@ import toast from 'react-hot-toast';
 import { useOptionalWebPlayer } from '../../context/webPlayerContext';
 import { useHaptics } from '../../hooks/useHaptics';
 import { isTypingTarget } from '../../lib/keyboard';
-
-type RepeatMode = 'off' | 'all' | 'one';
+import { webPlayerAdapter } from '../../features/media/engine/adapters/adapters';
+import { nextRepeat } from '../../features/media/engine/adapters/PlayerAdapter';
 
 const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
   { keys: ['Space'], label: 'Play or pause' },
@@ -25,12 +25,6 @@ const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
   { keys: ['Ctrl', 'Enter'], label: 'In a note: save and close (Esc closes too)' },
   { keys: ['?'], label: 'Show this help' },
 ];
-
-function nextRepeat(mode: RepeatMode): RepeatMode {
-  if (mode === 'off') return 'all';
-  if (mode === 'all') return 'one';
-  return 'off';
-}
 
 /** Space and Enter belong to a focused button/link before they belong to playback. */
 function isActivatableTarget(target: EventTarget | null): boolean {
@@ -237,12 +231,9 @@ export default function MediaShortcuts({
           run(() => {
             void (async () => {
               try {
-                const queue = await active.maCommand('player_queues/get', { queue_id: active.playerId });
-                const record = queue && typeof queue === 'object' ? queue as Record<string, unknown> : {};
-                await active.maCommand('player_queues/shuffle', {
-                  queue_id: active.playerId,
-                  shuffle_enabled: !record.shuffle_enabled,
-                });
+                const web = webPlayerAdapter(active);
+                const { shuffle } = await web.queueModes('');
+                await web.setShuffle('', !shuffle);
               } catch {
                 toast.error('Could not change shuffle');
               }
@@ -254,14 +245,9 @@ export default function MediaShortcuts({
           run(() => {
             void (async () => {
               try {
-                const queue = await active.maCommand('player_queues/get', { queue_id: active.playerId });
-                const record = queue && typeof queue === 'object' ? queue as Record<string, unknown> : {};
-                const mode = record.repeat_mode;
-                const current: RepeatMode = mode === 'all' || mode === 'one' ? mode : 'off';
-                await active.maCommand('player_queues/repeat', {
-                  queue_id: active.playerId,
-                  repeat_mode: nextRepeat(current),
-                });
+                const web = webPlayerAdapter(active);
+                const { repeat } = await web.queueModes('');
+                await web.setRepeat('', nextRepeat(repeat ?? 'off'));
               } catch {
                 toast.error('Could not change repeat');
               }
