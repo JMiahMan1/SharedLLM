@@ -81,7 +81,7 @@ describe('health reminders', () => {
       recurrence: 'daily',
       scope: 'user',
       emoji: '🌙',
-      url: '/health',
+      url: '/fitness',
     });
   });
 

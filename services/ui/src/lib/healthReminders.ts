@@ -45,7 +45,7 @@ export function reminderPayload(def: HealthReminderDef, clock: string) {
     recurrence: 'daily',
     scope: 'user' as const,
     emoji: def.emoji,
-    url: '/health',
+    url: '/fitness',
   };
 }
 
