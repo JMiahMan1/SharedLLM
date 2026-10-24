@@ -8,7 +8,7 @@ test.describe('media hermetic smoke', () => {
 
     await page.goto('/media');
 
-    await expect(page.getByRole('heading', { name: 'Media', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Listen Now', level: 1 })).toBeVisible();
 
     mocks.assertNoUnmocked();
   });

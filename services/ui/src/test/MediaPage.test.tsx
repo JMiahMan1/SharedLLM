@@ -3,6 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
+import { openOutputPicker, serveHome } from './mediaScreens';
 
 // sendspin-js cannot be bundled by vitest, so stub the app's shared web player.
 vi.mock('../context/MediaPlayerContext', () => ({
@@ -179,10 +180,11 @@ describe('Media page: poisoned device names', () => {
 
   it('shows a readable label instead of 800 characters of profile', async () => {
     renderWithProviders(<Media />);
+    const picker = await openOutputPicker();
 
-    expect(await screen.findByText("Shared/Default User's Web Player (Desktop)")).toBeInTheDocument();
+    expect(await picker.findByText("Shared/Default User's Web Player (Desktop)")).toBeInTheDocument();
     // A real name is untouched.
-    expect(screen.getByText('Loft TV')).toBeInTheDocument();
+    expect(picker.getByText('Loft TV')).toBeInTheDocument();
     // And nothing from the profile reaches the page.
     const body = document.body.textContent || '';
     expect(body).not.toContain('audiobookshelf_api_key');
@@ -193,20 +195,12 @@ describe('Media page: poisoned device names', () => {
 
 describe('Media page: upstream failures', () => {
   it('names the service that did not answer instead of blaming both', async () => {
-    server.use(
-      http.get('/api/media/music-assistant/recent', () =>
-        HttpResponse.json({ status: 'SUCCESS', recent: [] }),
-      ),
-      http.get('/api/media/audiobookshelf/last-played', () =>
-        HttpResponse.json({ status: 'ERROR', notice: 'ABS unavailable', books: [] }),
-      ),
-    );
-
+    serveHome({ errors: { ma: null, abs: 'Audiobookshelf is unreachable (execution HTTP 502)' } });
     renderWithProviders(<Media />);
 
     expect(
-      await screen.findByText('Audiobookshelf did not answer. Check its URL in Identity.'),
+      await screen.findByText('Audiobookshelf did not answer. Audiobookshelf is unreachable (execution HTTP 502)'),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/Neither Music Assistant/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Music Assistant did not answer/)).not.toBeInTheDocument();
   });
 });

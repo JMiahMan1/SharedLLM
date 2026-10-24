@@ -66,6 +66,33 @@ function emptyVariant(name: string): unknown {
   }
 }
 
+/**
+ * The unified endpoints answer 200 even when one service is down, with what
+ * the other sent and a note in `errors` (§4.5): drop the down service's
+ * items (Audiobookshelf items are `abs://`) and say why.
+ */
+function partialVariant(body: unknown, scenario: MediaScenario): unknown {
+  const downMa = scenario === 'ma-down';
+  const downAbs = scenario === 'abs-down';
+  if ((!downMa && !downAbs) || !body || typeof body !== 'object') return body;
+  const keep = (item: unknown) => {
+    const uri = String((item as { uri?: unknown })?.uri ?? '');
+    return downMa ? uri.startsWith('abs://') : !uri.startsWith('abs://');
+  };
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+    if (Array.isArray(value)) out[key] = value.filter(keep);
+    else if (key === 'top' && value) out[key] = keep(value) ? value : null;
+    else out[key] = value;
+  }
+  out.errors = downMa
+    ? { ma: 'Music Assistant is unreachable: ClientConnectorError', abs: null }
+    : { ma: null, abs: 'Audiobookshelf is unreachable: ClientConnectorError' };
+  return out;
+}
+
+const UNIFIED = new Set(['media-home', 'media-search', 'media-library', 'media-favorites', 'media-item']);
+
 async function respond(
   route: Route,
   fixtureName: string,
@@ -85,7 +112,8 @@ async function respond(
     });
     return;
   }
-  const body = isEmptyLibrary(scenario) ? emptyVariant(fixtureName) : fixture(fixtureName);
+  const raw = isEmptyLibrary(scenario) ? emptyVariant(fixtureName) : fixture(fixtureName);
+  const body = UNIFIED.has(fixtureName) ? partialVariant(raw, scenario) : raw;
   await route.fulfill({ json: body });
 }
 

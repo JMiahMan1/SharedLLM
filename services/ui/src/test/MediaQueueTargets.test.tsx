@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
+import { chooseOutput, mediaItem, serveHome } from './mediaScreens';
 
 // "Play next" and "Add to queue" fill the queue of whichever device is
 // selected: this device's web player, a Music Assistant speaker, or a Home
@@ -65,6 +66,7 @@ beforeEach(() => {
       return HttpResponse.json({ status: 'SUCCESS', message: 'ok' });
     }),
   );
+  serveHome({ recent: [mediaItem({ name: 'Worship Mix', uri: 'library://playlist/5', media_type: 'playlist' })] });
 });
 
 async function openBrowse() {
@@ -84,7 +86,7 @@ describe('Media page: queueing on the selected device', () => {
 
   it('queues on a Music Assistant speaker through the gateway', async () => {
     renderWithProviders(<Media />);
-    await userEvent.click(await screen.findByRole('button', { name: /Kitchen MA/i }));
+    await chooseOutput(/Kitchen MA/i);
     const browse = await openBrowse();
     await userEvent.click(await browse.findByRole('button', { name: 'Add Worship Mix to the queue' }));
 
@@ -97,7 +99,7 @@ describe('Media page: queueing on the selected device', () => {
 
   it('queues on a Home Assistant speaker through the execution service', async () => {
     renderWithProviders(<Media />);
-    await userEvent.click(await screen.findByRole('button', { name: /Loft TV/i }));
+    await chooseOutput(/Loft TV/i);
     const browse = await openBrowse();
     await userEvent.click(await browse.findByRole('button', { name: 'Play Worship Mix next' }));
 
