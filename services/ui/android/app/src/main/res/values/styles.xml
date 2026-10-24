@@ -18,8 +18,9 @@
         <item name="android:statusBarColor">#030711</item>
         <item name="android:navigationBarColor">#030711</item>
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
-        <item name="android:windowTranslucentStatus">true</item>
-        <item name="android:windowTranslucentNavigation">true</item>
+        <!-- No windowTranslucentStatus/Navigation: those legacy flags fight
+             Capacitor 8's edge-to-edge inset handling (SystemBars), which pads
+             or passes the bar insets to the page itself. -->
     </style>
 
 

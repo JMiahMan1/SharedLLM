@@ -16,6 +16,12 @@ const config: CapacitorConfig = {
     CapacitorCookies: {
       enabled: true
     },
+    SystemBars: {
+      // The page sets viewport-fit=cover; saying so up front stops Capacitor
+      // padding the first frame and then re-laying it out edge to edge.
+      insetsHandling: 'css',
+      initialViewportFitValueHint: 'cover'
+    },
     CapacitorUpdater: {
       autoUpdate: false,
       // Drop OTA bundles when a newer native APK is installed so stale web
