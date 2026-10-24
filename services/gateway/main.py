@@ -14565,13 +14565,17 @@ def _media_ma_item(raw: Any) -> dict:
         item = raw
     artists = item.get("artists") or []
     artist = ""
+    artist_uri = ""
     if isinstance(artists, list) and artists:
         first = artists[0]
         artist = first.get("name", "") if isinstance(first, dict) else str(first)
+        artist_uri = (first.get("uri") or "") if isinstance(first, dict) else ""
     elif isinstance(item.get("artist"), str):
         artist = item["artist"]
     album = item.get("album")
+    album_uri = ""
     if isinstance(album, dict):
+        album_uri = album.get("uri") or ""
         album = album.get("name") or ""
     elif not isinstance(album, str):
         album = ""
@@ -14591,7 +14595,9 @@ def _media_ma_item(raw: Any) -> dict:
         "name": item.get("name") or item.get("title") or "",
         "media_type": str(item.get("media_type") or item.get("type") or "").lower(),
         "artist": artist,
+        "artist_uri": str(artist_uri),
         "album": album or "",
+        "album_uri": str(album_uri),
         "image": image or "",
         "duration": duration,
         "version": str(item.get("version") or ""),
@@ -14604,8 +14610,6 @@ def _media_ma_children(raw: Any) -> list[dict]:
     for entry in _media_ma_list(raw):
         item = _media_ma_item(entry)
         item.pop("favorite", None)
-        item.pop("artist", None)
-        item.pop("album", None)
         item.pop("version", None)
         item["index"] = entry.get("disc_number") or entry.get("track_number") if isinstance(entry, dict) else None
         out.append(item)

@@ -6,7 +6,7 @@ import type { MediaHomeResponse, MediaItem } from '../features/media/types';
 
 /** A gateway MediaItem with defaults for the fields a test does not care about. */
 export function mediaItem(over: Partial<MediaItem> & Pick<MediaItem, 'uri' | 'name'>): MediaItem {
-  return { media_type: 'track', artist: '', album: '', image: '', duration: null, version: '', favorite: null, ...over };
+  return { media_type: 'track', artist: '', artist_uri: '', album: '', album_uri: '', image: '', duration: null, version: '', favorite: null, ...over };
 }
 
 /** Serve `/api/media/home` with these shelves (the rest empty). */

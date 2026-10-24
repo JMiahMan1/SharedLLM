@@ -19,7 +19,11 @@ export interface MediaItem {
   name: string
   media_type: string
   artist: string
+  /** The first artist's MA URI ('' when unknown), for "Go to artist". */
+  artist_uri: string
   album: string
+  /** The album's MA URI ('' when unknown), for "Go to album". */
+  album_uri: string
   image: string
   duration: number | null
   version: string
@@ -61,6 +65,10 @@ export interface MediaItemChild {
   uri: string
   name: string
   media_type: string
+  artist: string
+  artist_uri: string
+  album: string
+  album_uri: string
   image: string
   duration: number | null
   index: number | null
