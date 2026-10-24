@@ -41,14 +41,14 @@ def test_due_only_after_the_time_and_only_if_unread(loaded_client: TestClient):
 def test_the_message_names_todays_plan_reading(loaded_client: TestClient):
     loaded_client.put("/state", params={"username": "sam"}, json={"reminder_time": "07:00"})
     loaded_client.post("/plans/john-21/start", params={"username": "sam"})
-    [(user, note)] = _due("08:00")
+    [(_user, note)] = _due("08:00")
     assert note["title"] == "Today in John in 21 Days" and note["body"] == "Day 1: John 1"
 
 
 def test_the_message_falls_back_to_memory_verses(loaded_client: TestClient):
     loaded_client.put("/state", params={"username": "sam"}, json={"reminder_time": "07:00"})
     loaded_client.post("/memorize", params={"username": "sam"}, json={"ref": "Genesis 1:2"})
-    [(user, note)] = _due("08:00")
+    [(_user, note)] = _due("08:00")
     assert note["body"] == "1 verse ready for review." and note["data"]["url"] == "/bible?tab=memorize"
 
 

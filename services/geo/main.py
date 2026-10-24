@@ -12,6 +12,7 @@ docs/GEO_SERVICE.md. OSM = data, MapLibre = renderer. Traccar is the documented
 upgrade path if HA's sharing/geofence UX proves insufficient.
 """
 import asyncio
+import contextlib
 import json
 import logging
 import math
@@ -19,22 +20,15 @@ import os
 import re
 import time
 import urllib.parse
-import contextlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import aiohttp
-
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
-
-from services.geo import achievements, event_feed, metric_history, step_history
-from services.geo.auto_workouts import detect_auto_workouts
 from pydantic import BaseModel
-
-_STATIC = Path(__file__).resolve().parent / "static"
 
 from services.common import notify
 from services.common.http import get_client, get_client_insecure
@@ -48,13 +42,27 @@ from services.config import (
     OSRM_URL,
     REDIS_URL,
 )
-from services.geo import health_notices, map_match, map_regions, safety
+from services.geo import achievements, event_feed, health_notices, map_match, map_regions, metric_history, safety, step_history
+from services.geo.auto_workouts import detect_auto_workouts
 from services.shared.info_endpoint import info_router
 
 try:
     import redis.asyncio as aioredis
 except ImportError:
     aioredis = None
+
+_STATIC = Path(__file__).resolve().parent / "static"
+
+#: Tasks started and not awaited; the loop holds only a weak reference, so an
+#: unreferenced task can be collected mid-run.
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
 
 
 def _verify_internal_secret(header_secret: str | None, query_secret: str | None = None) -> bool:
@@ -101,10 +109,8 @@ async def lifespan(app: FastAPI):
     auto_workouts.cancel()
     global _redis
     if _redis is not None:
-        try:
+        with contextlib.suppress(Exception):
             await _redis.aclose()
-        except Exception:
-            pass
 
 
 app = FastAPI(title="SOA Geo Service", lifespan=lifespan)
@@ -295,7 +301,7 @@ async def get_android_auto(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"HA error: {e}")
+        raise HTTPException(status_code=502, detail=f"HA error: {e}") from e
 
     needle = (user_id or "").split(".")[-1].lower().replace("-", "_")
     autos = []
@@ -303,10 +309,9 @@ async def get_android_auto(
     for s in states:
         eid = (s.get("entity_id") or "").lower()
         if eid.startswith("binary_sensor.") and "android_auto" in eid:
-            if needle and needle not in eid and needle.replace("_", "") not in eid.replace("_", ""):
-                # still include unnamed/ambiguous sensors when user omitted
-                if user_id:
-                    continue
+            # still include unnamed/ambiguous sensors when user omitted
+            if needle and needle not in eid and needle.replace("_", "") not in eid.replace("_", "") and user_id:
+                continue
             attrs = s.get("attributes") or {}
             autos.append({
                 "entity_id": s.get("entity_id"),
@@ -316,9 +321,8 @@ async def get_android_auto(
                 "last_updated": s.get("last_updated") or s.get("last_changed"),
             })
         elif eid.startswith("sensor.") and "detected_activity" in eid:
-            if needle and needle not in eid:
-                if user_id:
-                    continue
+            if needle and needle not in eid and user_id:
+                continue
             attrs = s.get("attributes") or {}
             activities.append({
                 "entity_id": s.get("entity_id"),
@@ -478,7 +482,7 @@ async def record_point(
     except Exception as e:
         log.warning(f"[Geo] Failed to process trip point: {e}")
     # Arrivals and departures, off the upload path (HA zones, ETAs, pushes).
-    asyncio.create_task(_safe_presence_transition(r, clean_id, lat, lon, ts, accuracy or 0.0))
+    _spawn(_safe_presence_transition(r, clean_id, lat, lon, ts, accuracy or 0.0))
 
 
 # Arrival / departure notices
@@ -947,10 +951,8 @@ async def _steps_from_ha(clean_id: str, days: int) -> dict[str, int]:
         last = s.get("last_updated") or s.get("last_changed") or ""
         day = cutoff
         if last:
-            try:
+            with contextlib.suppress(ValueError):
                 day = datetime.fromisoformat(last.replace("Z", "+00:00")).astimezone(tz).strftime("%Y-%m-%d")
-            except ValueError:
-                pass
         steps = int(val)
         if steps > 0 and day >= cutoff:
             best[day] = max(best.get(day, 0), steps)
@@ -974,10 +976,8 @@ async def get_points_in_window(entity_id: str, hours: float = 24.0) -> list[dict
             if raw_points:
                 pts = []
                 for p_str in raw_points:
-                    try:
+                    with contextlib.suppress(Exception):
                         pts.append(json.loads(p_str))
-                    except Exception:
-                        pass
                 pts.sort(key=lambda x: x.get("t", 0))
                 return pts
         except Exception as e:
@@ -1047,12 +1047,13 @@ async def post_see(
     if update.bearing is not None:
         payload["course"] = update.bearing
 
-    async with get_client_insecure() as client:
-        async with client.post(f"{HA_URL}/api/services/device_tracker/see", headers=_ha_headers(), json=payload) as resp:
-            if resp.status >= 300:
-                body = await resp.text()
-                raise HTTPException(status_code=502, detail=f"HA error {resp.status}: {body}")
-            return {"status": "ok", "entity_id": entity_id}
+    async with get_client_insecure() as client, client.post(
+        f"{HA_URL}/api/services/device_tracker/see", headers=_ha_headers(), json=payload
+    ) as resp:
+        if resp.status >= 300:
+            body = await resp.text()
+            raise HTTPException(status_code=502, detail=f"HA error {resp.status}: {body}")
+        return {"status": "ok", "entity_id": entity_id}
 
 
 @app.post("/people/{entity_id:path}/record")
@@ -1198,9 +1199,8 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
     max_mps = cur_speed_mps
     for p in points:
         spd = p.get("spd", 0.0)
-        if spd and spd < 50.0:
-            if spd > max_mps:
-                max_mps = spd
+        if spd and spd < 50.0 and spd > max_mps:
+            max_mps = spd
     top_speed_mph = round(max_mps * 2.23694, 1)
 
     # 6. Dwell time / stationary duration
@@ -1743,7 +1743,7 @@ async def get_user_default_vehicle(user_id: str) -> dict:
             # Fallback to first vehicle in geo:vehicles
             all_veh = await r.hgetall("geo:vehicles")
             if all_veh:
-                return json.loads(list(all_veh.values())[0])
+                return json.loads(next(iter(all_veh.values())))
         except Exception as e:
             log.warning(f"[Geo] Error resolving default vehicle: {e}")
     return {
@@ -1952,9 +1952,8 @@ async def _resolve_place_name(lat: float, lon: float) -> str:
             try:
                 plat = float(data.get("lat")) if data.get("lat") is not None else None
                 plon = float(data.get("lon")) if data.get("lon") is not None else None
-                if plat is not None and plon is not None:
-                    if _haversine_distance(lat, lon, plat, plon) > _PLACE_RADIUS_M:
-                        poi = None
+                if plat is not None and plon is not None and _haversine_distance(lat, lon, plat, plon) > _PLACE_RADIUS_M:
+                    poi = None
             except (TypeError, ValueError):
                 pass
         if poi:
@@ -2015,9 +2014,8 @@ async def _resolve_place_details(lat: float, lon: float) -> dict:
             try:
                 plat = float(data.get("lat")) if data.get("lat") is not None else None
                 plon = float(data.get("lon")) if data.get("lon") is not None else None
-                if plat is not None and plon is not None:
-                    if _haversine_distance(lat, lon, plat, plon) > _PLACE_RADIUS_M:
-                        poi = None
+                if plat is not None and plon is not None and _haversine_distance(lat, lon, plat, plon) > _PLACE_RADIUS_M:
+                    poi = None
             except (TypeError, ValueError):
                 pass
         if poi:
@@ -2259,7 +2257,7 @@ async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -
     # the first time, fetches Geofabrik's index.
     for loc in (completed.get("start_location"), completed.get("end_location")):
         if loc and loc.get("latitude") is not None and loc.get("longitude") is not None:
-            asyncio.create_task(_note_map_region(r, float(loc["latitude"]), float(loc["longitude"])))
+            _spawn(_note_map_region(r, float(loc["latitude"]), float(loc["longitude"])))
     return completed
 
 
@@ -2988,10 +2986,8 @@ async def get_trip_route(trip_id: str, viewer: str | None = None, is_admin: str 
             raw_points = await r.zrangebyscore(key, start_t, end_t)
             if raw_points:
                 for p_str in raw_points:
-                    try:
+                    with contextlib.suppress(Exception):
                         points.append(json.loads(p_str))
-                    except Exception:
-                        pass
                 if points:
                     break
         except Exception as e:
@@ -3054,13 +3050,11 @@ def _is_street_only_name(name: str | None) -> bool:
     if n.lower() in {"home", "work", "school", "church"}:
         return False
     # Has a place-ish qualifier (business words, apostrophe possessives with & etc.)
-    if re.search(r"\b(store|market|walmart|target|costco|starbucks|subway|"
-                 r"pharmacy|clinic|bank|church|school|park|restaurant|cafe|"
-                 r"dollar|gas|fuel|auto|tire|dental|vet|gym|salon)\b", n, re.I):
-        return False
     # Single capitalized words that aren't street suffixes alone: keep.
     # Otherwise: pure "North Green Trail" / "30912, North Green Trail" → street.
-    return True
+    return not re.search(r"\b(store|market|walmart|target|costco|starbucks|subway|"
+                         r"pharmacy|clinic|bank|church|school|park|restaurant|cafe|"
+                         r"dollar|gas|fuel|auto|tire|dental|vet|gym|salon)\b", n, re.I)
 
 
 async def _resolve_place_if_better(stored: str | None, lat: float, lon: float) -> tuple[str, str]:
@@ -3425,7 +3419,7 @@ def _estimate_steps_from_gps(activity_type: str, points: list[dict]) -> int | No
 
     # Weighted-mean stride using the moving speed distribution
     weights = speed_samples
-    stride_est = sum(_stride_at(s) * w for s, w in zip(speed_samples, weights)) / sum(weights)
+    stride_est = sum(_stride_at(s) * w for s, w in zip(speed_samples, weights, strict=True)) / sum(weights)
 
     # Cadence estimate: cadence scales sub-linearly with speed (humans first
     # lengthen stride, then increase cadence). Empirical exponent ~0.4.
@@ -3439,17 +3433,14 @@ def _estimate_steps_from_gps(activity_type: str, points: list[dict]) -> int | No
     dist_est = total_m / max(0.1, stride_est)
     cadence_steps = cadence_est * moving_t
     mid_lo, mid_hi = speeds[len(speeds) // 2 - 1], speeds[-2]
-    if mid_lo <= mean_speed <= mid_hi:
-        cadence_weight = 0.6
-    else:
-        cadence_weight = 0.3
-    steps = int(round(cadence_weight * cadence_steps + (1 - cadence_weight) * dist_est))
+    cadence_weight = 0.6 if mid_lo <= mean_speed <= mid_hi else 0.3
+    steps = round(cadence_weight * cadence_steps + (1 - cadence_weight) * dist_est)
 
     # Sanity bounds: steps imply a stride within ±35% of model stride
     if steps > 0:
         implied_stride = total_m / steps
         if implied_stride < strides[0] * 0.65 or implied_stride > strides[-1] * 1.35:
-            steps = int(round(dist_est))
+            steps = round(dist_est)
     return max(0, steps)
 
 
@@ -3886,7 +3877,7 @@ async def get_events(
     try:
         event_feed.events_for_domain([], domain)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     clean = await _require_may_view(viewer, user_id, is_admin)
     r = await get_redis()
@@ -4208,7 +4199,7 @@ async def grant_stars(
     try:
         amount = int(payload.get("stars"))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="stars must be a whole number")
+        raise HTTPException(status_code=422, detail="stars must be a whole number") from None
     if amount == 0 or abs(amount) > MAX_STARS_PER_GRANT:
         raise HTTPException(
             status_code=422,
@@ -4285,7 +4276,7 @@ async def set_step_goal(
     try:
         goal = int(payload.get("goal"))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="goal must be a number")
+        raise HTTPException(status_code=422, detail="goal must be a number") from None
     if not (MIN_STEP_GOAL <= goal <= MAX_STEP_GOAL):
         raise HTTPException(
             status_code=422,
@@ -4325,10 +4316,8 @@ async def get_workouts(
     for wid in ids:
         raw = await r.get(f"geo:workout:{wid}")
         if raw:
-            try:
+            with contextlib.suppress(Exception):
                 workouts.append(json.loads(raw))
-            except Exception:
-                pass
     return {"workouts": workouts, "total_workouts": len(workouts)}
 
 
@@ -4458,10 +4447,8 @@ async def stop_workout(
             raw_points = await r.zrangebyscore(key, start_t - 5, end_t + 5)
             if raw_points:
                 for p_str in raw_points:
-                    try:
+                    with contextlib.suppress(Exception):
                         points.append(json.loads(p_str))
-                    except Exception:
-                        pass
                 if points:
                     break
         except Exception as e:
@@ -4549,7 +4536,7 @@ async def dismiss_workout(
     try:
         workout = json.loads(raw)
     except ValueError:
-        raise HTTPException(status_code=500, detail="Workout is unreadable")
+        raise HTTPException(status_code=500, detail="Workout is unreadable") from None
     if workout.get("user_id") != user:
         raise HTTPException(status_code=403, detail="You can only dismiss your own workout")
     if not workout.get("auto_detected"):
@@ -4588,10 +4575,8 @@ async def get_workout_route(workout_id: str, viewer: str | None = None, is_admin
             raw_points = await r.zrangebyscore(key, start_t, end_t)
             if raw_points:
                 for p_str in raw_points:
-                    try:
+                    with contextlib.suppress(Exception):
                         points.append(json.loads(p_str))
-                    except Exception:
-                        pass
                 if points:
                     break
         except Exception as e:
@@ -4660,37 +4645,36 @@ async def _llm_trends_analysis(prompt: str, user: str) -> str | None:
             "think": False,
             "enable_thinking": False,
         }
-        async with get_client_insecure() as client:
-            async with client.post(
-                f"{gateway_url.rstrip('/')}/v1/chat/completions",
-                json=body,
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=TRENDS_LLM_TIMEOUT),
-            ) as resp:
-                if resp.status != 200:
-                    log.warning(f"[Geo] LLM trends gateway status {resp.status}")
+        async with get_client_insecure() as client, client.post(
+            f"{gateway_url.rstrip('/')}/v1/chat/completions",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=TRENDS_LLM_TIMEOUT),
+        ) as resp:
+            if resp.status != 200:
+                log.warning(f"[Geo] LLM trends gateway status {resp.status}")
+                return None
+            data = await resp.json()
+            choices = data.get("choices") or []
+            if not choices:
+                # Non-OpenAI response shape (gateway native format)
+                content = data.get("response") or data.get("answer") or data.get("message")
+                if isinstance(content, dict):
+                    content = content.get("content")
+                if not isinstance(content, str) or not content.strip():
                     return None
-                data = await resp.json()
-                choices = data.get("choices") or []
-                if not choices:
-                    # Non-OpenAI response shape (gateway native format)
-                    content = data.get("response") or data.get("answer") or data.get("message")
-                    if isinstance(content, dict):
-                        content = content.get("content")
-                    if not isinstance(content, str) or not content.strip():
-                        return None
-                    return strip_thinking_blocks(content) or None
-                msg = choices[0].get("message", {})
-                # Never surface chain-of-thought as the insight itself.
-                raw = (
-                    msg.get("content")
-                    or msg.get("reasoning_content")
-                    or msg.get("reasoning")
-                    or ""
-                )
-                if not isinstance(raw, str) or not raw.strip():
-                    return None
-                return strip_thinking_blocks(raw) or None
+                return strip_thinking_blocks(content) or None
+            msg = choices[0].get("message", {})
+            # Never surface chain-of-thought as the insight itself.
+            raw = (
+                msg.get("content")
+                or msg.get("reasoning_content")
+                or msg.get("reasoning")
+                or ""
+            )
+            if not isinstance(raw, str) or not raw.strip():
+                return None
+            return strip_thinking_blocks(raw) or None
     except Exception as e:
         log.warning(f"[Geo] LLM trends analysis failed: {e}")
         return None
@@ -4828,14 +4812,13 @@ async def _fetch_activity_sharing() -> dict:
     Failure returns an empty set; the safe default is "nobody shares".
     """
     try:
-        async with get_client_insecure() as client:
-            async with client.get(
-                f"{IDENTITY_SVC_URL.rstrip('/')}/api/internal/activity-sharing",
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=5.0),
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.json()
+        async with get_client_insecure() as client, client.get(
+            f"{IDENTITY_SVC_URL.rstrip('/')}/api/internal/activity-sharing",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        ) as resp:
+            if resp.status == 200:
+                return await resp.json()
     except Exception as e:
         log.warning(f"[Geo] Activity sharing lookup failed: {e}")
     return {"users": []}
@@ -5148,10 +5131,8 @@ async def analyze_activity_trends(
         return result
     finally:
         if lock_acquired:
-            try:
+            with contextlib.suppress(Exception):
                 await r.delete(lock_key)
-            except Exception:
-                pass
 
 
 # ---------------------------------------------------------------------------
@@ -5304,7 +5285,7 @@ async def _fuel_prices_for_location(location: str, *, use_cache: bool = True) ->
         loc = await _nominatim_resolve(location)
     except Exception as exc:
         log.warning(f"[fuel-prices] Nominatim resolve failed for '{location}': {exc}")
-        raise HTTPException(status_code=400, detail=f"Could not resolve location: {location}")
+        raise HTTPException(status_code=400, detail=f"Could not resolve location: {location}") from exc
 
     state_code = loc.get("state_code")
     city = loc.get("city")
@@ -5316,7 +5297,7 @@ async def _fuel_prices_for_location(location: str, *, use_cache: bool = True) ->
         aaa = await _fetch_aaa_prices(state_code)
     except Exception as exc:
         log.warning(f"[fuel-prices] AAA fetch failed for {state_code}: {exc}")
-        raise HTTPException(status_code=502, detail="Unable to fetch fuel prices from upstream source")
+        raise HTTPException(status_code=502, detail="Unable to fetch fuel prices from upstream source") from exc
 
     # 3. Match metro
     matched_prices = aaa.get("state_prices", {})
@@ -5338,10 +5319,8 @@ async def _fuel_prices_for_location(location: str, *, use_cache: bool = True) ->
     }
 
     if use_cache and r:
-        try:
+        with contextlib.suppress(Exception):
             await r.set(cache_key, json.dumps(result), ex=_FUEL_PRICE_CACHE_TTL)
-        except Exception:
-            pass
 
     return result
 
@@ -5403,10 +5382,8 @@ async def _refresh_fuel_prices(r=None, *, now=None, force: bool = False) -> dict
         return {"date": stamp, "updated": 0, "skipped": 0, "errors": [str(exc)]}
 
     if not raw_vehicles:
-        try:
+        with contextlib.suppress(Exception):
             await r.set(_FUEL_PRICE_DAILY_KEY, stamp)
-        except Exception:
-            pass
         return {"date": stamp, "updated": 0, "skipped": 0, "errors": []}
 
     home_location = ""
@@ -5452,10 +5429,8 @@ async def _refresh_fuel_prices(r=None, *, now=None, force: bool = False) -> dict
             skipped += 1
 
     if updated:
-        try:
+        with contextlib.suppress(Exception):
             await r.set(_FUEL_PRICE_DAILY_KEY, stamp)
-        except Exception:
-            pass
         log.info(f"[fuel-prices] Daily refresh updated {updated} vehicle(s), skipped {skipped}")
 
     return {"date": stamp, "updated": updated, "skipped": skipped, "errors": errors}
@@ -5515,10 +5490,8 @@ async def _fueleconomy_get(path: str, params: dict | None = None, cache_ttl: int
         data = await resp.json(content_type=None)
 
     if r and data:
-        try:
+        with contextlib.suppress(Exception):
             await r.set(cache_key, json.dumps(data), ex=cache_ttl)
-        except Exception:
-            pass
 
     return data
 
@@ -6055,17 +6028,14 @@ async def vehicle_lookup_vin(vin: str):
             for m_name, options in models.items():
                 if m_name.lower() in model.lower() or model.lower() in m_name.lower():
                     for opt in options:
-                        if opt["years"][0] <= year <= opt["years"][1]:
-                            if fuel_type == "Diesel" and "diesel" in opt.get("fuelType1", "").lower():
-                                comb_mpg = opt.get("comb08")
-                                city_mpg = opt.get("city08")
-                                hwy_mpg = opt.get("highway08")
-                                break
-                            elif fuel_type != "Diesel" and "diesel" not in opt.get("fuelType1", "").lower():
-                                comb_mpg = opt.get("comb08")
-                                city_mpg = opt.get("city08")
-                                hwy_mpg = opt.get("highway08")
-                                break
+                        if opt["years"][0] <= year <= opt["years"][1] and (
+                            (fuel_type == "Diesel" and "diesel" in opt.get("fuelType1", "").lower())
+                            or (fuel_type != "Diesel" and "diesel" not in opt.get("fuelType1", "").lower())
+                        ):
+                            comb_mpg = opt.get("comb08")
+                            city_mpg = opt.get("city08")
+                            hwy_mpg = opt.get("highway08")
+                            break
                     if comb_mpg:
                         break
 
@@ -6112,9 +6082,7 @@ async def vehicle_lookup_vin(vin: str):
     }
 
     if r:
-        try:
+        with contextlib.suppress(Exception):
             await r.set(cache_key, json.dumps(out), ex=86400 * 30)
-        except Exception:
-            pass
 
     return out

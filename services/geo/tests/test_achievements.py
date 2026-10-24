@@ -7,8 +7,6 @@ either withhold a badge the user earned or hand out one they did not.
 
 from datetime import date, timedelta
 
-import pytest
-
 from services.geo import achievements as ach
 
 

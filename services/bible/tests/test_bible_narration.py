@@ -65,8 +65,8 @@ def _success(audio: bytes = RIFF, mime: str = "audio/wav") -> _Response:
     return _Response(
         200,
         '{"status": "SUCCESS", "message": "TTS generated successfully", '
-        '"service": "tts", "detail": {"audio_base64": "%s", "mime_type": "%s", '
-        '"length_bytes": %d}}' % (_b64(audio), mime, len(audio)),
+        f'"service": "tts", "detail": {{"audio_base64": "{_b64(audio)}", "mime_type": "{mime}", '
+        f'"length_bytes": {len(audio)}}}}}',
     )
 
 

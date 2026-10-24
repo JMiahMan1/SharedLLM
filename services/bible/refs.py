@@ -30,7 +30,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from services.bible.books import BOOK_ORDER, BOOKS, book as book_row, resolve_book
+from services.bible.books import BOOK_ORDER, BOOKS, resolve_book
+from services.bible.books import book as book_row
 
 
 class ReferenceError(ValueError):

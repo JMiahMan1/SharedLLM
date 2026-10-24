@@ -289,7 +289,7 @@ async def ensure_daily_loop(
             raise
         except LookupError as exc:
             log.info("[Bible] verse context waiting for a corpus: %s", exc)
-        except Exception as exc:  # noqa: BLE001 - the loop must survive a bad pass
+        except Exception as exc:
             log.warning("[Bible] verse context pass failed: %s: %s", type(exc).__name__, exc)
         else:
             retry = RETRY_SECONDS

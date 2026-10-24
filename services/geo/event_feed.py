@@ -22,9 +22,10 @@ Honesty rules encoded here, because each one has bitten us before:
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Optional
+from datetime import UTC, datetime, timedelta, timezone
+from typing import Any
 
 #: Ordered by how much a person cares about it, and used to group the timeline
 #: into day sections. Keep in sync with the UI's grouping order.
@@ -151,7 +152,7 @@ class DayGroup:
     _relative: str = "Today"
 
 
-def _finite(value: Any) -> Optional[float]:
+def _finite(value: Any) -> float | None:
     """Coerce to a finite float, or None. Rejects NaN, inf and junk."""
     if value is None or isinstance(value, bool):
         return None
@@ -164,7 +165,7 @@ def _finite(value: Any) -> Optional[float]:
     return out
 
 
-def _epoch_to_day(ts: float, tz: timezone) -> Optional[str]:
+def _epoch_to_day(ts: float, tz: timezone) -> str | None:
     """Calendar day for an epoch, or None if it is out of range.
 
     None rather than a guess: an event we cannot place on a day has no place in
@@ -319,7 +320,7 @@ def events_from_achievements(
     return out
 
 
-def _parse_earned_on(earned_on: Any, definition: Any = None) -> Optional[float]:
+def _parse_earned_on(earned_on: Any, definition: Any = None) -> float | None:
     """Turn an ``earned_on`` value into epoch seconds at end of day.
 
     Accepts a date string, a datetime string, or a raw epoch. Anything else is
@@ -342,7 +343,7 @@ def _parse_earned_on(earned_on: Any, definition: Any = None) -> Optional[float]:
         except ValueError:
             continue
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=UTC)
         if fmt == "%Y-%m-%d":
             # End of day, so today's badge lands after a morning workout.
             parsed = parsed + timedelta(hours=23, minutes=59, seconds=59)
@@ -351,7 +352,7 @@ def _parse_earned_on(earned_on: Any, definition: Any = None) -> Optional[float]:
 
 
 def _format_duration(seconds: float) -> str:
-    total = int(round(seconds))
+    total = round(seconds)
     if total < 60:
         return f"{total}s"
     mins = total // 60

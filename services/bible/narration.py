@@ -29,7 +29,6 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime
 
 import aiohttp
 from sqlmodel import Session, select
@@ -538,16 +537,15 @@ async def _speak(
     if voice:
         body["voice"] = voice
     try:
-        async with aiohttp.ClientSession() as client:
-            async with client.post(
-                f"{execution_url}/execute/tts",
-                json=body,
-                headers={"X-Internal-Secret": internal_secret},
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as resp:
-                status = resp.status
-                raw = await resp.text()
-    except Exception as exc:  # noqa: BLE001 - the reader is told, not just the log
+        async with aiohttp.ClientSession() as client, client.post(
+            f"{execution_url}/execute/tts",
+            json=body,
+            headers={"X-Internal-Secret": internal_secret},
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as resp:
+            status = resp.status
+            raw = await resp.text()
+    except Exception as exc:
         raise NarrationUnavailable(f"The speech engine could not be reached: {exc}") from exc
 
     if status >= 400:
@@ -576,7 +574,7 @@ async def _speak(
         )
     try:
         audio = base64.b64decode(encoded, validate=True)
-    except Exception as exc:  # noqa: BLE001 - reported to the reader
+    except Exception as exc:
         raise NarrationUnavailable(
             f"The speech engine sent audio we could not decode: {exc}"
         ) from exc

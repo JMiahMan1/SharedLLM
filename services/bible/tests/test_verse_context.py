@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 from services.bible import study_ask, verse_context, votd
 from services.bible.models import VerseContext
 
-
 pytestmark = pytest.mark.unit
 
 

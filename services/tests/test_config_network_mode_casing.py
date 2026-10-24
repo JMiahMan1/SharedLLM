@@ -248,7 +248,6 @@ class TestComposeConfigResolves:
 
     @staticmethod
     def _rendered() -> dict:
-        import yaml
 
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         out = subprocess.run(

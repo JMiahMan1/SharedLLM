@@ -1,4 +1,4 @@
-from services.common.podcast_recommendations import recommend_podcast, all_themes
+from services.common.podcast_recommendations import all_themes, recommend_podcast
 
 
 def test_recommend_podcast_matches_show_theme():

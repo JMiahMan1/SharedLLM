@@ -86,7 +86,7 @@ class ImportPlan:
             return f"{self.provider}:{self.provider_id}" if self.provider_id else self.provider
         return self.source_path
 
-    def _replace_source(self, path: Path) -> "ImportPlan":
+    def _replace_source(self, path: Path) -> ImportPlan:
         """The same request, pointed at a local file that is already here.
 
         ``library_path`` is cleared because the file has been fetched: leaving it
@@ -584,7 +584,7 @@ def _record(session, plan: ImportPlan, report: ImportReport, duration_ms: int) -
             )
         )
         session.commit()
-    except Exception as exc:  # noqa: BLE001 - reported, never hidden
+    except Exception as exc:
         session.rollback()
         return [f"Warning: this run was not added to the import history ({exc!s})."]
     return []

@@ -12,12 +12,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ollama_url_raw = os.getenv("OLLAMA_URL")
-if not ollama_url_raw:
-    # Try local fallback only if explicitly allowed, otherwise stricter
-    # User said NO env info hardcoded. So "localhost" is maybe okay but IP isn't.
-    _ollama_url = "http://localhost:11434"
-else:
-    _ollama_url = ollama_url_raw
+# Try local fallback only if explicitly allowed, otherwise stricter
+# User said NO env info hardcoded. So "localhost" is maybe okay but IP isn't.
+_ollama_url = ollama_url_raw or "http://localhost:11434"
 
 HA_URL = os.getenv("HA_URL")
 rag_api_url_raw = os.getenv("RAG_API_URL")

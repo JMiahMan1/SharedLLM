@@ -5,6 +5,7 @@ app.state.engine before anything had created it (None), so the container
 crash-looped on its first deploy.
 """
 from fastapi.testclient import TestClient
+
 from services.bible import main as bible_main
 
 

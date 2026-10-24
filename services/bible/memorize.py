@@ -103,7 +103,7 @@ def grade(expected: str, typed: str) -> dict:
     return {
         "score": round(score, 3),
         "passed": score >= PASS_SCORE,
-        "words": [{"word": w, "ok": ok} for w, ok in zip(shown, hit)],
+        "words": [{"word": w, "ok": ok} for w, ok in zip(shown, hit, strict=True)],
     }
 
 

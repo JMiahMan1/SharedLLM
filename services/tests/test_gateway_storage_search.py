@@ -1,9 +1,6 @@
 """Tests for gateway code orchestration storage search integration."""
-import os
 
 import pytest
-
-
 
 
 @pytest.fixture

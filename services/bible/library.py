@@ -238,17 +238,16 @@ class LibraryClient:
         url = f"{self._endpoint()}/providers/list"
         timeout = aiohttp.ClientTimeout(total=LIST_TIMEOUT_SECONDS)
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    url,
-                    json={
-                        "provider": {"kind": provider, "settings": {}},
-                        "path": wanted,
-                        "recursive": recursive,
-                    },
-                    headers={"X-Internal-Secret": self.internal_secret},
-                ) as response:
-                    body = await _json(response, url)
+            async with aiohttp.ClientSession(timeout=timeout) as session, session.post(
+                url,
+                json={
+                    "provider": {"kind": provider, "settings": {}},
+                    "path": wanted,
+                    "recursive": recursive,
+                },
+                headers={"X-Internal-Secret": self.internal_secret},
+            ) as response:
+                body = await _json(response, url)
         except aiohttp.ClientError as exc:
             raise LibraryUnavailable(
                 f"Could not reach the storage service at {url}: {exc}"
@@ -282,16 +281,15 @@ class LibraryClient:
         url = f"{self._endpoint()}/providers/fetch"
         timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT_SECONDS)
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    url,
-                    json={
-                        "provider": {"kind": provider, "settings": {}},
-                        "path": wanted,
-                    },
-                    headers={"X-Internal-Secret": self.internal_secret},
-                ) as response:
-                    body = await _json(response, url)
+            async with aiohttp.ClientSession(timeout=timeout) as session, session.post(
+                url,
+                json={
+                    "provider": {"kind": provider, "settings": {}},
+                    "path": wanted,
+                },
+                headers={"X-Internal-Secret": self.internal_secret},
+            ) as response:
+                body = await _json(response, url)
         except aiohttp.ClientError as exc:
             raise LibraryUnavailable(
                 f"Could not reach the storage service at {url}: {exc}"
@@ -332,7 +330,7 @@ async def _json(response: aiohttp.ClientResponse, url: str) -> dict:
         )
     try:
         body = await response.json(content_type=None)
-    except Exception as exc:  # noqa: BLE001 - any decoder failure reads the same
+    except Exception as exc:
         raise LibraryUnavailable(f"{url} did not answer with JSON: {exc}") from exc
     if not isinstance(body, dict):
         raise LibraryUnavailable(

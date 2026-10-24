@@ -8,7 +8,7 @@ invent a reflection or quietly substitute one devotional for another.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 
 

@@ -40,7 +40,7 @@ def client_fixture(monkeypatch):
 
 
 def test_grant_stars_updates_balance_and_ledger(client):
-    test_client, redis = client
+    test_client, _redis = client
     resp = test_client.post(
         "/api/geo/stars",
         json={"user_id": "mom", "stars": 3, "reason": "bonus", "note": "helped with chores", "granted_by": "dad"},

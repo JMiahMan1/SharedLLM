@@ -41,7 +41,8 @@ class TestConfigBootstrap:
     def test_no_env_getenv_in_config(self):
         """Config module does not use os.getenv for runtime values at import time."""
         config_path = os.path.join(PROJECT_ROOT, "services", "config.py")
-        source = open(config_path).read()
+        with open(config_path) as f:
+            source = f.read()
         runtime_keys = [
             "OLLAMA_URL", "HA_URL", "HA_TOKEN",
             "ASSISTANT_MODEL", "CODING_MODEL", "REDIS_URL",
@@ -154,7 +155,8 @@ class TestConfigSettingsMap:
     def test_all_runtime_vars_in_settings_map(self):
         """Every runtime variable should be in the settings_map."""
         config_path = os.path.join(PROJECT_ROOT, "services", "config.py")
-        source = open(config_path).read()
+        with open(config_path) as f:
+            source = f.read()
 
         runtime_vars = [
             "FERNET_KEY", "OLLAMA_URL", "EXECUTION_SVC_URL", "RAG_SVC_URL",

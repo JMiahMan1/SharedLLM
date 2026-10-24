@@ -10,9 +10,7 @@ Assistant service surface strips.
 A fake WebSocket stands in for MA so the tests drive the real read/parse/match
 logic, including the failures that must stay loud.
 """
-import asyncio
 import json
-import uuid
 
 import pytest
 
@@ -309,7 +307,7 @@ class TestFailuresAreLoud:
         assert exc.value.reason == "unexpected_uri"
 
     async def test_missing_token_fails_before_any_network_call(self, fake_connect):
-        opened, connect_kwargs = fake_connect({"auth": {}, "music/search": _search_result()})
+        _opened, connect_kwargs = fake_connect({"auth": {}, "music/search": _search_result()})
         with pytest.raises(MALibraryLookupError) as exc:
             await _resolve(mass_token="")
         assert exc.value.reason == "no_mass_token"
@@ -329,7 +327,7 @@ class TestFailuresAreLoud:
 
     async def test_missing_item_id_fails(self, fake_connect):
         """No id means nothing to match on; guessing would pick the wrong media."""
-        opened, connect_kwargs = fake_connect(
+        _opened, connect_kwargs = fake_connect(
             {"auth": {"authenticated": True}, "music/search": _search_result()}
         )
         with pytest.raises(MALibraryLookupError) as exc:

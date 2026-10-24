@@ -12,8 +12,8 @@ from services.execution import device_registry
 @pytest.fixture(autouse=True)
 def use_tmp_db(monkeypatch):
     """Redirect DB to temp file for each test."""
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        pass
     monkeypatch.setenv("DEVICE_REGISTRY_PATH", tmp.name)
     # Force module-level _db to reset
     device_registry._db = None

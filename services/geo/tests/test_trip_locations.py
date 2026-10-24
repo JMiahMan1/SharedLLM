@@ -3,11 +3,9 @@
 Covers POST-safe flows: suggestions degrade gracefully when Overpass is down,
 and PATCH accepts display-name/address edits while coordinates stay locked.
 """
+import json
 import time
 from unittest.mock import AsyncMock
-
-
-import json
 
 import pytest
 from fastapi.testclient import TestClient
