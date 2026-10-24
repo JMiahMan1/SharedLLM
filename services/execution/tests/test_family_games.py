@@ -211,3 +211,39 @@ def test_trivia_round_expires_when_a_player_stays_quiet():
     state.question_started_at -= 999
     result = apply_trivia_answer(state, "Dad", "definitely wrong")
     assert result["round_complete"] == "timeout"
+
+
+def test_the_bible_bank_is_deep_and_every_listed_answer_counts():
+    from services.execution.handlers import family_games as games
+
+    qs = games.BIBLE_TRIVIA_QUESTIONS
+    assert len(qs) >= 150
+    assert len({q["question"] for q in qs}) == len(qs)
+    assert sum(1 for q in qs if q["difficulty"] == 3) >= 50
+    for q in qs:
+        assert q["hint"] and q["difficulty"] in (1, 2, 3)
+        for accepted in q["answers"]:
+            assert games.is_correct(accepted, q["answers"]), (q["question"], accepted)
+
+
+@pytest.mark.parametrize(
+    ("given", "accepted", "expected"),
+    [
+        ("Psalm", ["Psalms"], True),  # Jeremiah's answer, refused before
+        ("it was Moses", ["Moses"], True),
+        ("King Saul", ["Saul"], True),
+        ("Zaccheus", ["Zacchaeus"], True),
+        ("Gethsemene", ["Gethsemane"], True),
+        ("red", ["Red Sea", "red"], True),
+        ("Jesus", ["jesus wept"], False),  # a fragment is not the answer
+        ("the", ["the red sea"], False),
+        ("Judah", ["Judas"], False),  # short names stay exact
+        ("Paul", ["Saul"], False),
+        ("Elijah", ["Elisha"], False),
+        ("6", ["66"], False),
+    ],
+)
+def test_answers_are_forgiving_but_not_loose(given, accepted, expected):
+    from services.execution.handlers.family_games import is_correct
+
+    assert is_correct(given, accepted) is expected

@@ -3,7 +3,10 @@ import base64
 import binascii
 import json
 import logging
+import os
+import time
 import urllib.parse
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import uuid4
 
@@ -23,6 +26,60 @@ _JARVIS_TASKS: set[asyncio.Task] = set()
 _GAME_TASKS: set[asyncio.Task] = set()
 _TALK_RETRIES = 3
 _TALK_RETRY_DELAY = 2
+
+
+# Rooms the bot account could not join (a one-to-one room cannot take a third
+# member; a non-moderator cannot add one), and until when not to try again.
+_BOT_UNJOINABLE: dict[str, float] = {}
+_BOT_RETRY_S = 600.0
+
+
+def _jarvis_bot() -> Any | None:
+    """Jarvis's own Nextcloud account, when one is configured.
+
+    Without it every bot post (a game question, a verdict, an @Jarvis answer)
+    went out under the account of whoever triggered it, so "✅ Michele got it!"
+    was authored by Michele.
+    """
+    from services import config
+
+    user = os.getenv("JARVIS_BOT_NC_USER")
+    password = os.getenv("JARVIS_BOT_NC_PASS")
+    if not (config.NEXTCLOUD_URL and user and password):
+        return None
+    try:
+        from personal_data import NextcloudPersonalDataProvider
+    except ImportError:
+        from ..personal_data import NextcloudPersonalDataProvider
+    return NextcloudPersonalDataProvider(base_url=config.NEXTCLOUD_URL, username=user, password=password)
+
+
+async def _post_as_jarvis(provider: Any, token: str, data: dict[str, Any]) -> tuple[bool, Any, str]:
+    """Post a bot message to the room as Jarvis's own account.
+
+    If the bot is not in the room yet, the person whose action led here adds
+    it once. Where it cannot join, the message goes out under that person's
+    account as before; its envelope still marks it as Jarvis's.
+    """
+    endpoint = f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(token)}"
+    bot = _jarvis_bot()
+    if bot is not None and _BOT_UNJOINABLE.get(token, 0.0) <= time.monotonic():
+        ok, resp, message = await bot.request("POST", endpoint, data=data)
+        if ok:
+            return ok, resp, message
+        added, _, _ = await provider.request(
+            "POST",
+            f"/ocs/v2.php/apps/spreed/api/v4/room/{urllib.parse.quote(token)}/participants",
+            data={"newParticipant": bot.username, "source": "users"},
+        )
+        if added:
+            ok, resp, message = await bot.request("POST", endpoint, data=data)
+            if ok:
+                log.info("[talk] Jarvis's account joined room %s", token)
+                return ok, resp, message
+        log.info("[talk] Jarvis's account cannot post in room %s; posting as the member", token)
+        _BOT_UNJOINABLE[token] = time.monotonic() + _BOT_RETRY_S
+    return await _talk_request_with_retry(provider, "POST", endpoint, data=data)
 
 
 def _game_task_done(task: asyncio.Task) -> None:
@@ -338,12 +395,11 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any, re
         # Output pipeline delivery back into the Nextcloud Talk room session stream
         cleaned_ans = strip_json_from_response(ans)
 
-        ok, _data, message = await _talk_request_with_retry(
+        ok, _data, message = await _post_as_jarvis(
             provider,
-            "POST",
-            f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(token)}",
+            token,
             # A reply to the question, so the answer sits under what was asked.
-            data={"message": _assistant_post(cleaned_ans), **({"replyTo": str(reply_to)} if reply_to else {})},
+            {"message": _assistant_post(cleaned_ans), **({"replyTo": str(reply_to)} if reply_to else {})},
         )
         if not ok:
             log.error(f"[Jarvis] Failed to post answer to Nextcloud Talk: {message}")
@@ -383,7 +439,22 @@ def _encode_envelope(text: str, card: dict) -> str:
             for s in card["stats"]
             if isinstance(s, dict) and "label" in s and "value" in s
         ]
+    if card.get("from"):
+        body["from"] = card["from"]
     return f"{text.strip()}\n\n{ENVELOPE_FENCE}\n{json.dumps(body)}\n{ENVELOPE_FENCE}"
+
+
+def _game_wire(text: str, card: dict | None = None) -> str:
+    """A family game's post, marked as Jarvis's own.
+
+    Game posts go out under the account of whoever triggered them (the bot has
+    no Talk login of its own), so without a mark "✅ Michele got it!" read as
+    Michele's message. A card says ``from: jarvis``; plain text rides the same
+    ``assistant`` envelope Jarvis's answers use.
+    """
+    if card:
+        return _encode_envelope(text, {**card, "from": "jarvis"})
+    return _encode_envelope(text, {"kind": "assistant", "title": "Jarvis"})
 
 
 GAME_COMMANDS = ("start", "answer", "flip", "stop")
@@ -525,13 +596,7 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
         )
 
     async def say(text: str, card: dict | None = None) -> None:
-        wire = _encode_envelope(text, card) if card else text
-        await _talk_request_with_retry(
-            provider,
-            "POST",
-            f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}",
-            data={"message": wire},
-        )
+        await _post_as_jarvis(provider, req.token, {"message": _game_wire(text, card)})
 
     if command == "stop":
         games.registry.drop(req.token)
@@ -600,6 +665,27 @@ async def _apply_game_answer(
     and ordinary chat messages, so an answer typed in the app counts whether
     or not the system account is a member of the room.
     """
+    judged = _judge_game_answer(token, who, text, game_words)
+    if judged is None:
+        return None
+    outcome, announce = judged
+    await announce(provider)
+    return outcome
+
+
+def _judge_game_answer(
+    token: str,
+    who: str,
+    text: str,
+    game_words: str | None = None,
+) -> tuple[dict[str, Any], Callable[[Any], Awaitable[None]]] | None:
+    """Score an answer *now* and return what to announce later.
+
+    Every change to the game happens here, synchronously, so answers count in
+    the order they reach the server. Judging after the player's own message
+    had been posted let a slower post lose a race it had won: Michele's later
+    "Moses" took the round from Jeremiah's earlier one. ``announce`` only talks.
+    """
     from services.execution.handlers import family_games as games
 
     if not text.strip() and not (game_words or "").strip():
@@ -608,67 +694,64 @@ async def _apply_game_answer(
     if state is None:
         return None
 
-    async def say(message: str, card=None) -> None:
-        wire = _encode_envelope(message, card) if card else message
-        await _talk_request_with_retry(
-            provider,
-            "POST",
-            f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(token)}",
-            data={"message": wire},
+    posts: list[tuple[str, dict | None]] = []
+    follow_ups: list[Callable[[], Awaitable[Any]]] = []
+
+    async def announce(provider: Any) -> None:
+        async def say(message: str, card: dict | None) -> None:
+            await _post_as_jarvis(provider, token, {"message": _game_wire(message, card)})
+
+        outcomes = await asyncio.gather(
+            *(say(message, card) for message, card in posts),
+            *(follow_up() for follow_up in follow_ups),
+            return_exceptions=True,
         )
+        for failed in (o for o in outcomes if isinstance(o, BaseException)):
+            log.warning("[talk/game] Game follow-up failed in %s: %s", token, failed)
 
     if state.kind == "trivia":
         result = games.apply_trivia_answer(state, who, text)
+        outcome = {"kind": "trivia", "result": result}
 
         def next_round() -> str:
             # Advance and return what follows the round's verdict in the same
             # message: the next question, or the final board.
-            outcome = games.advance_trivia(state)
-            if outcome.get("finished"):
-                board = ", ".join(f"{name} {stars} ⭐" for name, stars in outcome["leaderboard"])
+            advanced = games.advance_trivia(state)
+            if advanced.get("finished"):
+                board = ", ".join(f"{name} {stars} ⭐" for name, stars in advanced["leaderboard"])
                 return f"🏆 Game over! {board}" if board else "🏆 Game over!"
             return games.trivia_prompt(state)
 
         if result.get("ignored"):
             # Not in this session's locked roster (a late joiner, or the shared
             # family account): the round carries on without them.
-            return {"kind": "trivia", "result": result}
-        if result.get("late"):
-            await say(f"⏩ {result['player']}, that was the last question's answer. A new one is up!")
-            return {"kind": "trivia", "result": result}
-        if result.get("duplicate"):
-            await say(f"One guess each! Still waiting on the others, {result['player']}.")
-            return {"kind": "trivia", "result": result}
-
-        if result["correct"]:
-            # Bank the win in the real star ledger and record in activity feed,
-            # while announcing the win and advancing to the next round in one clean message.
+            pass
+        elif result.get("late"):
+            posts.append((f"⏩ {result['player']}, that was the last question's answer. A new one is up!", None))
+        elif result.get("duplicate"):
+            posts.append((f"One guess each! Still waiting on the others, {result['player']}.", None))
+        elif result["correct"]:
+            # Announce the win and the next question in one message; bank the
+            # star and record the win alongside.
             question_text = state.question
             from services.execution import activity
 
             say_msg = f"✅ {result['player']} got it!\n\n{next_round()}"
-            card = games.game_card(state, "Correct!", f"{result['player']} is on {result['stars']} ⭐")
-
-            outcomes = await asyncio.gather(
-                say(say_msg, card),
-                _bank_game_stars(who, result["stars"], f"Trivia: {question_text}"),
-                activity.record(result["player"] or who, "game", item=question_text, action="win"),
-                return_exceptions=True,
+            posts.append((say_msg, games.game_card(state, "Correct!", f"{result['player']} is on {result['stars']} ⭐")))
+            follow_ups.append(lambda: _bank_game_stars(who, result["stars"], f"Trivia: {question_text}"))
+            # Under the account that answered, like the stars: the display
+            # name opened a second, split profile ("Jeremiah" vs "jeremiah").
+            follow_ups.append(
+                lambda: activity.record(who, "game", item=question_text, action="win", detail={"player": result["player"]})
             )
-            for failed in (o for o in outcomes if isinstance(o, BaseException)):
-                log.warning("[talk/game] Trivia win follow-up failed in %s: %s", token, failed)
-            return {"kind": "trivia", "result": result}
-
-        if result.get("round_complete") in ("all_wrong", "timeout"):
+        elif result.get("round_complete") in ("all_wrong", "timeout"):
             # Read the answer before advancing: the next draw replaces it, and
             # the last question leaves no answers at all.
             answer = state.answers[0] if state.answers else ""
             reveal = f"The answer was {answer}." if answer else "Nobody got that one."
-            await say(f"{reveal}\n\n{next_round()}", None)
-            return {"kind": "trivia", "result": result}
-
+            posts.append((f"{reveal}\n\n{next_round()}", None))
         # A lone wrong answer stays quiet: the round keeps its secret.
-        return {"kind": "trivia", "result": result}
+        return outcome, announce
 
     words = [w for w in (game_words or text).split() if w][:2]
     result = games.apply_memory_flip(state, who, words)
@@ -679,10 +762,10 @@ async def _apply_game_answer(
     )
     if state.over:
         board = ", ".join(f"{p.name} {p.stars} ⭐" for p in state.leaderboard)
-        await say(f"{result['message']}\n\n🏆 All pairs found! {board}", card)
+        posts.append((f"{result['message']}\n\n🏆 All pairs found! {board}", card))
     else:
-        await say(result["message"], card)
-    return {"kind": "memory", "result": result}
+        posts.append((result["message"], card))
+    return {"kind": "memory", "result": result}, announce
 
 
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
@@ -871,6 +954,35 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 detail={"messages": messages},
             )
 
+        if action == "wait":
+            # Talk's long poll: Nextcloud holds the request until a message
+            # newer than `last_known_id` exists (or `wait_s` passes), so a new
+            # question reaches every phone the moment it is posted.
+            if not req.token or not req.last_known_id:
+                return ExecutionResult(status="FAILURE", message="Conversation token and last_known_id are required.", service="talk_wait")
+            # No retries: a long poll that fails is simply asked again by the
+            # app, and retrying a 25 s hold would outlast the gateway's wait.
+            ok, data, message = await provider.request(
+                "GET",
+                f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}",
+                params={
+                    "lookIntoFuture": "1",
+                    "lastKnownMessageId": str(req.last_known_id),
+                    "timeout": str(req.wait_s),
+                    "limit": "100",
+                },
+                timeout=req.wait_s + 15,
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Failed to wait for messages.", service="talk_wait")
+            messages = [_message_summary(item) for item in (data or [])]
+            return ExecutionResult(
+                status="SUCCESS",
+                message=f"{len(messages)} new message(s).",
+                service="talk_wait",
+                detail={"messages": messages},
+            )
+
         if action == "reactions":
             if not req.token or req.message_id is None:
                 return ExecutionResult(status="FAILURE", message="Conversation token and message_id are required.", service="talk_reactions")
@@ -985,6 +1097,15 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
         if action == "send":
             if not req.token or not req.message:
                 return ExecutionResult(status="FAILURE", message="Conversation token and message are required.", service="talk_send")
+            text = (req.message or "").strip()
+            # A short message can be an answer to a family game running here.
+            # It is judged on arrival, before the post below, so the first
+            # answer to reach the server is the one that counts.
+            judged = (
+                _judge_game_answer(req.token, req.user_context.user, text)
+                if text and len(text) <= 120 and not text.startswith("/") and not validate_jarvis_mention(req.message)
+                else None
+            )
             ok, data, message = await _talk_request_with_retry(
                 provider,
                 "POST",
@@ -1004,22 +1125,12 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 task = asyncio.create_task(run_jarvis_orchestration(query, req.token, req.user_context, reply_to=question_id))
                 _JARVIS_TASKS.add(task)
                 task.add_done_callback(_JARVIS_TASKS.discard)
-            elif (
-                (req.message or "").strip()
-                and len((req.message or "").strip()) <= 120
-                and not (req.message or "").strip().startswith("/")
-            ):
-                # A short message can be an answer to a family game running in
-                # this room; schedule as a background task so message delivery
-                # is not blocked by game state evaluation and bot speech.
-                from services.execution.handlers import family_games as games
-
-                if games.registry.get(req.token) is not None:
-                    task = asyncio.create_task(
-                        _apply_game_answer(provider, req.token, req.user_context.user, req.message.strip())
-                    )
-                    _GAME_TASKS.add(task)
-                    task.add_done_callback(_game_task_done)
+            elif judged is not None:
+                # The verdict is already in; the bot's reply follows the
+                # player's own message, without holding up their send.
+                task = asyncio.create_task(judged[1](provider))
+                _GAME_TASKS.add(task)
+                task.add_done_callback(_game_task_done)
 
             return ExecutionResult(
                 status="SUCCESS",

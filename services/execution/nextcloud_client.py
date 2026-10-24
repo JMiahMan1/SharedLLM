@@ -73,6 +73,10 @@ async def ocs_request(
         verify=False,
     )
 
+    if resp["status_code"] == 304:
+        # Talk's long poll answers 304 when nothing new arrived in its window.
+        return True, [], ""
+
     try:
         payload = __import__("json").loads(resp["text"])
     except ValueError:

@@ -2292,6 +2292,17 @@ export const api = {
     return resp.data;
   },
 
+  /** Long poll: answers once a message newer than `lastId` exists, or empty after `wait` s. */
+  async waitTalkMessages(token: string, lastId: number, wait = 25, as_user?: 'admin', signal?: AbortSignal): Promise<ExecutionResponse> {
+    const resp = await apiClient.get('/api/communication/talk/messages/wait', {
+      params: { token, last_id: lastId, wait, ...(as_user ? { as_user } : {}) },
+      // Longer than the hold, or the app would abandon every quiet wait.
+      timeout: (wait + 20) * 1000,
+      signal,
+    });
+    return resp.data;
+  },
+
   async sendTalkMessage(payload: { token: string; message: string; as_user?: 'admin'; reply_to?: number }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/messages', payload);
     return resp.data;

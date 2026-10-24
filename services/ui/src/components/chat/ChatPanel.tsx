@@ -18,6 +18,7 @@ import { verseShareText } from '../../lib/verseShare';
 import { useFamilyDirectory } from './familyDirectory';
 import { useCall } from '../../context/CallContext';
 import MessageThread from './MessageThread';
+import { useTalkLongPoll } from './useTalkLongPoll';
 import Composer from './Composer';
 import PollStrip, { type TalkPoll } from './PollStrip';
 import {
@@ -154,6 +155,14 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   });
 
   const limit = historyLimit[activeToken] ?? PAGE;
+  const newestQuery = queryClient.getQueryData<ExecutionResponse>(['talk-messages', activeToken, limit]);
+  const newestId = detailList<TalkMessage>(newestQuery, 'messages').reduce((max, m) => Math.max(max, Number(m.id) || 0), 0);
+  const liveFeed = useTalkLongPoll(
+    activeToken,
+    newestId,
+    () => void queryClient.invalidateQueries({ queryKey: ['talk-messages', activeToken] }),
+    asUser,
+  );
   const { data: fetched = EMPTY_ARRAY, isFetching: fetchingMessages, refetch: refetchMessages } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
     queryKey: ['talk-messages', activeToken, limit],
     queryFn: () => api.getTalkMessages(activeToken, limit),
@@ -161,8 +170,11 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     // While "Show earlier" loads, keep this conversation's messages on screen
     // (never another conversation's).
     placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === activeToken ? previous : undefined),
-    // Poll briskly while Jarvis is working, a game is running, or right after sending a message.
+    // With the long poll open, new messages arrive through it and the timer is
+    // only a safety net. Without it, poll briskly while Jarvis is working, a
+    // game is running, or right after sending a message.
     refetchInterval: (query) => {
+      if (liveFeed) return 15000;
       const sentRecently = Date.now() - recentSendAt.current < RECENT_SEND_MS;
       const brisk = waitingForJarvis || sentRecently || gameRunning(detailList<TalkMessage>(query.state.data, 'messages'));
       return brisk ? 2000 : 10000;

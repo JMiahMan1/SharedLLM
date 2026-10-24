@@ -21,6 +21,23 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `HEAD` Chat + trivia: **instant, fair, and Jarvis speaks as Jarvis.** Reviewed the live
+  "Jeremiah & Michele's Chat" game (18:39–18:42 MST, which ran *before* the 18:44 deploy):
+  Michele won all ten rounds because (1) late answers burned the next question's guess (fixed
+  by the late-answer guard, now live) and (2) answers were judged only after the player's own
+  post finished (2–5 s with the old re-login), so a later answer could win. Answers are now
+  judged on arrival (`_judge_game_answer`, then `announce`). Bot posts (questions, verdicts,
+  @Jarvis answers) go through `_post_as_jarvis` using a new Nextcloud account **`jarvis`**
+  (created 2026-10-24; login in the server `.env` as `JARVIS_BOT_NC_USER`/`_PASS`, backup
+  `.env.bak-jarvis-bot`); 1:1 rooms fall back to marked posts. Chat long-polls Talk
+  (`lookIntoFuture=1`, `GET /api/communication/talk/messages/wait`, `useTalkLongPoll`), so a
+  new question reaches every phone at once; the timer drops to a 15 s safety net while the
+  long poll is healthy. Bible trivia grew from 17 to 174 reviewed questions and the matcher
+  was tightened (plurals/typos forgiven, fragments refused). Wins now record under the account
+  id, not the display name (old wins sit under `tel:activity:Jeremiah`/`Michele`).
+  HA `get_areas` 401s were a **false positive**: HA's `/api/template` is admin-only
+  (`@require_admin`), so a valid non-admin token is refused there; it no longer raises a
+  credential alert and falls back to the household `HA_TOKEN`.
 - `HEAD` Family guard: **recommendations moved to a "For You" dashboard widget; seeded test
   data removed** — the four suggestion cards left the Health page and are now one
   `recommendations` widget (`RecommendationsWidget`), default-visible for every role
@@ -319,6 +336,8 @@ Every claim below was verified against the live system unless marked **planned**
 
 - **No hardcoded fallbacks** (standing user instruction). Show real data or an
   explicit loading/empty/error state — never fake values.
+- **Never act through a family member's account** to inspect or test (reading their rooms,
+  posting as them). Use the household account, the `jarvis` bot, or ask Jeremiah first.
 - **Live test data is always cleaned up** (standing user instruction). Prefer engine-level
   checks that write nothing; if a smoke test must post to the live server, note the exact
   record and delete it by exact value right after (`redis-cli lrem <key> 1 "<json>"`, not
@@ -494,10 +513,8 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
   cards render sleep/calories/cycle/support — watch for layout regressions.
 - Chat latency: players still see a new question up to one poll apart (2 s in a game). Talk long-polling
   (`lookIntoFuture=1`) or Nextcloud notify_push would make it near-instant; see the `HEAD` latency entry.
-- Home Assistant: execution logs `ha_client` `get_areas` 401s about once a
-  minute (`https://ha.sumemail.com/api/template`) — an expired per-user HA
-  long-lived token. Ask Jeremiah to mint a fresh token and update it in
-  Settings; no code change needed.
+- Home Assistant `get_areas` 401s: resolved — not an expired token. HA serves `/api/template`
+  to admins only; see the `HEAD` chat + trivia entry.
 
 ## 5. Immediate next steps
 

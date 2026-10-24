@@ -2688,6 +2688,7 @@ def _response_log_level(status_code: object) -> str:
 _ROUTINE_POLL_PREFIXES = (
     "/health",
     "/api/telemetry/notifications/wait",
+    "/api/communication/talk/messages/wait",
     "/api/push/stream",
     "/api/users/location",
     "/api/admin/logs",
@@ -5697,6 +5698,28 @@ async def proxy_get_talk_messages(request: Request):
         "limit": int(request.query_params.get("limit", "50")),
     }
     return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
+@app.get("/api/communication/talk/messages/wait")
+async def proxy_wait_talk_messages(request: Request, token: str = "", last_id: int = 0, wait: int = 25):
+    """Long poll for an open chat: answers as soon as a message newer than
+    ``last_id`` lands (Nextcloud holds the request), or empty after ``wait``."""
+    creds_data = await _resolve_acting_identity(request, request.query_params.get("as_user"))
+    wait = max(1, min(wait, 30))
+    payload = {"user_context": creds_data, "action": "wait", "token": token, "last_known_id": last_id, "wait_s": wait}
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/talk",
+            json=payload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=wait + 30),
+        )
+        resp_text = await resp.text()
+    try:
+        content = json.loads(resp_text)
+    except (json.JSONDecodeError, ValueError):
+        content = {"detail": resp_text}
+    return JSONResponse(status_code=resp.status, content=content)
 
 
 @app.post("/api/communication/talk/messages")

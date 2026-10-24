@@ -4,6 +4,7 @@ import {
   dayLabel,
   gameRunning,
   isAssistant,
+  isFromJarvis,
   receiptFor,
   splitRichText,
   groupIntoRuns,
@@ -109,5 +110,19 @@ describe('chat model', () => {
     expect(gameRunning([msg(3, '✅ Kiddo got it!\n\n🏆 Game over! Kiddo 3 ⭐' + card), msg(1, '🧠 Trivia — question 10 of 10')])).toBe(false);
     expect(gameRunning([msg(2, 'Not a pair' + card)])).toBe(true);
     expect(gameRunning([msg(1, 'hello'), msg(2, 'dinner at six')])).toBe(false);
+  });
+
+  it('treats game posts as Jarvis even when a family member account carried them', () => {
+    const game = '\u2705 Michele got it!\n\n```jarvis-envelope\n{"kind":"game","title":"Correct!","from":"jarvis"}\n```jarvis-envelope';
+    const prompt = '\ud83e\udde0 Trivia\n\n```jarvis-envelope\n{"kind":"assistant","title":"Jarvis"}\n```jarvis-envelope';
+    const sharedCard = 'I won!\n\n```jarvis-envelope\n{"kind":"game","title":"Trivia champ"}\n```jarvis-envelope';
+    const michele = new Set(['michele']);
+    expect(isFromJarvis({ id: 1, message: game, actor_id: 'michele' })).toBe(true);
+    expect(isMine({ id: 1, message: game, actor_id: 'michele' }, michele)).toBe(false);
+    expect(isFromJarvis({ id: 2, message: prompt, actor_id: 'jeremiah' })).toBe(true);
+    expect(isFromJarvis({ id: 3, message: 'hi', actor_id: 'jarvis' })).toBe(true);
+    // A card a person shares themselves stays theirs.
+    expect(isFromJarvis({ id: 4, message: sharedCard, actor_id: 'michele' })).toBe(false);
+    expect(groupIntoRuns([{ id: 1, message: game, actor_id: 'michele', timestamp: 1 }], michele)[0].author).toBe('Jarvis');
   });
 });
