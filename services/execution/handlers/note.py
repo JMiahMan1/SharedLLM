@@ -480,14 +480,8 @@ async def _note_attachment(provider, req: NoteRequest) -> ExecutionResult:
         else:
             return ExecutionResult(status="FAILURE", message="Too many attachments with that name.", service=service)
         mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
-        resp = await http_request(
-            "PUT", provider.file_url(f"{folder_path}/{name}"), data=data, auth=auth,
-            headers={"Content-Type": mime}, verify=False, timeout=120,
-        )
-        if resp["status_code"] not in (200, 201, 204):
-            return ExecutionResult(
-                status="FAILURE", message=f"Could not store the attachment (HTTP {resp['status_code']}).", service=service,
-            )
+        if not await provider.upload_file(f"{folder_path}/{name}", data, mime):
+            return ExecutionResult(status="FAILURE", message="Could not store the attachment in Nextcloud.", service=service)
         return ExecutionResult(
             status="SUCCESS", message=f"Attached {name}.", service=service,
             detail={"link": f"{folder}/{name}", "name": name, "mime": mime, "size": len(data)},
@@ -498,9 +492,7 @@ async def _note_attachment(provider, req: NoteRequest) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message="That is not one of this note's attachments.", service=service)
 
     if req.action == "attachment_read":
-        from ..http_client import fetch_bytes
-
-        status, content_type, body = await fetch_bytes(provider.file_url(target), auth=auth, verify=False, timeout=120)
+        status, content_type, body = await provider.download_file(target)
         if status == 404:
             return ExecutionResult(status="FAILURE", message="That attachment is not there any more.", service=service)
         if status != 200:

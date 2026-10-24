@@ -50,7 +50,15 @@ export default function VoiceFoodDraft({
     },
     onError: (error) => toast.error(errorText(error, 'Speech could not be turned into text. Type it instead.')),
   });
-  const { recording, start, stop } = useAudioRecorder((blob) => transcribe.mutate(blob));
+  const { recording, start, stop } = useAudioRecorder({
+    onRecorded: (blob) => transcribe.mutate(blob),
+    onError: (reason) =>
+      toast.error(
+        reason === 'denied'
+          ? 'Microphone permission is needed to record.'
+          : 'Recording is not available here. Type what you ate instead.',
+      ),
+  });
 
   const lookUp = useMutation({
     mutationFn: async (text: string) => {
@@ -114,9 +122,7 @@ export default function VoiceFoodDraft({
               stop();
               return;
             }
-            const started = await start();
-            if (started === 'unsupported') toast.error('Recording is not available here. Type what you ate instead.');
-            else if (started === 'denied') toast.error('Microphone permission is needed to record.');
+            await start();
           }}
           disabled={transcribe.isPending}
           aria-pressed={recording}

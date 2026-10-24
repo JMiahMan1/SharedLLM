@@ -15,11 +15,12 @@ import {
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
 import { formatBytes, MAX_ATTACHMENT_BYTES, plainText, type TalkMessage } from './chatModel';
 import SendAsSelector from './SendAsSelector';
+import { useAudioRecorder } from '../../hooks/useAudioRecorder';
+import { blobToBase64 } from '../../lib/base64';
 import type { SendAs } from './sendAsPref';
 
 interface VoicePayload {
@@ -107,6 +108,19 @@ export default function Composer({
   const [caret, setCaret] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [clip, setClip] = useState<{ url: string; base64: string; mimeType: string } | null>(null);
+  const recorder = useAudioRecorder({
+    // Preview before sending: recording is easy to do by accident, and a
+    // caption often carries the point of a voice note.
+    onRecorded: (blob) =>
+      void blobToBase64(blob).then((base64) => setClip({ url: URL.createObjectURL(blob), base64, mimeType: blob.type })),
+    onError: (reason) =>
+      toast.error(
+        reason === 'unavailable'
+          ? 'Recording is not available on this device'
+          : 'Microphone permission is needed to record a voice message',
+      ),
+  });
+  const recording = recorder.recording;
   const [caption, setCaption] = useState('');
   const [mentionOptions, setMentionOptions] = useState<MentionOption[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -228,24 +242,15 @@ export default function Composer({
     setDraft('');
   };
 
-  const { recording, start: startRecorder, stop: stopRecording } = useAudioRecorder(async (blob) => {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let binary = '';
-    for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-    // Preview before sending: recording is easy to do by accident, and a
-    // caption often carries the point of a voice note.
-    setClip({ url: URL.createObjectURL(blob), base64: btoa(binary), mimeType: blob.type });
-  });
-
   const startRecording = async () => {
     if (disabled) {
       toast.error('Pick a conversation first');
       return;
     }
-    const started = await startRecorder();
-    if (started === 'unsupported') toast.error('Recording is not available on this device');
-    else if (started === 'denied') toast.error('Microphone permission is needed to record a voice message');
+    await recorder.start();
   };
+
+  const stopRecording = recorder.stop;
 
   const discardClip = () => {
     if (clip) URL.revokeObjectURL(clip.url);

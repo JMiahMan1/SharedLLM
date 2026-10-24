@@ -3,13 +3,12 @@ import {
   appendAttachment,
   attachmentKind,
   attachmentMarkdown,
-  base64ToBlob,
-  blobToBase64,
   isAttachmentLink,
   listAttachments,
   removeAttachment,
 } from '../lib/noteAttachments';
 import { htmlToMarkdown, markdownToHtml, richEditable } from '../lib/noteRichText';
+import { base64ToBytes, blobToBase64 } from '../lib/base64';
 
 function roundTrip(md: string): string {
   const holder = document.createElement('div');
@@ -54,7 +53,7 @@ describe('noteAttachments', () => {
   it('turns bytes into base64 and back', async () => {
     const data = await blobToBase64(new Blob([new Uint8Array([0, 1, 254, 255])]));
     expect(data).toBe('AAH+/w==');
-    const back = new Uint8Array(await base64ToBlob(data, 'image/png').arrayBuffer());
+    const back = base64ToBytes(data);
     expect(Array.from(back)).toEqual([0, 1, 254, 255]);
   });
 

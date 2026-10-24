@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 import dateparser
 import redis.asyncio as redis
 
+from services.common.links import app_link  # shared with geo's place reminders
 from services.config import REDIS_URL
 from services.execution.schemas import ExecutionResult, TimerRequest
 
@@ -499,20 +500,6 @@ def _parse_duration(text: str | None) -> timedelta | None:
     return total if total > timedelta() else None
 
 
-def app_link(value: object) -> str | None:
-    """An in-app path a notice may open (``/notes?note=…``), or None.
-
-    Only a path inside the app is kept: no scheme, no ``//host``, no
-    backslashes, so a stored timer can never send someone off-site.
-    """
-    if not isinstance(value, str):
-        return None
-    link = value.strip()
-    if not link.startswith("/") or link.startswith("//") or "\\" in link or len(link) > 512:
-        return None
-    if any(ch in link for ch in "\r\n\t") or ":" in link.split("?", 1)[0]:
-        return None
-    return link
 
 
 async def notify_timer_done(user: str, timer_data: dict) -> bool:

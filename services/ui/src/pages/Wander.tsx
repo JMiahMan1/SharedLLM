@@ -37,6 +37,7 @@ import {
 import {
   geoPeopleQueryKey,
   geoZonesQueryKey,
+  zonePlaces,
   houseConfigQueryOptions,
   tripsQueryKey,
   tripsQueryOptions,
@@ -191,38 +192,7 @@ const Wander = () => {
   const isRefreshing = tripsQuery.isFetching && !tripsQuery.isLoading;
 
   /** HA zones become "Places" on the live map (Life360-style geofences). */
-  const places = useMemo(() => {
-    const geoJson = zonesQuery.data as
-      | {
-          features?: Array<{
-            properties?: Record<string, unknown>;
-            geometry?: { coordinates?: [number, number] };
-          }>;
-        }
-      | undefined;
-    return (geoJson?.features ?? [])
-      .map((feature) => {
-        const props = feature.properties || {};
-        const coords = feature.geometry?.coordinates;
-        const lat = Number(props.latitude ?? coords?.[1]);
-        const lon = Number(props.longitude ?? coords?.[0]);
-        const radius = Number(props.radius ?? 100);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-        return {
-          id: String(props.entity_id || props.friendly_name || `${lat},${lon}`),
-          name: String(props.friendly_name || 'Place'),
-          lat,
-          lon,
-          radius: Number.isFinite(radius) && radius > 0 ? radius : 100,
-          important: props.important === true,
-          notify: Array.isArray(props.notify) ? props.notify.map(String) : [],
-        };
-      })
-      .filter(
-        (z): z is { id: string; name: string; lat: number; lon: number; radius: number; important: boolean; notify: string[] } =>
-          z !== null,
-      );
-  }, [zonesQuery.data]);
+  const places = useMemo(() => zonePlaces(zonesQuery.data), [zonesQuery.data]);
 
   /** The freshest position per person: the Jarvis app's fix, else HA's person. */
   const familyMembers = useMemo(() => {

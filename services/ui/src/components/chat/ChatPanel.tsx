@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import ChatNotify from '../../plugins/chatNotify';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
+import { blobToBase64 } from '../../lib/base64';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Phone, Plus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -41,15 +42,6 @@ const RECENT_SEND_MS = 15 * 1000;
 /** Messages loaded per conversation, and each "Show earlier" step (Talk's cap is 200). */
 const PAGE = 50;
 const MAX_HISTORY = 200;
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(',', 2)[1] || '');
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
 
 interface ChatPanelProps {
   className?: string;
@@ -366,7 +358,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
       for (const [index, file] of files.entries()) {
         const res = await api.sendTalkFile({
           token: activeToken,
-          file_base64: await fileToBase64(file),
+          file_base64: await blobToBase64(file),
           mime_type: file.type || 'application/octet-stream',
           file_name: file.name,
           // The caption rides on the first file, like a photo album's.

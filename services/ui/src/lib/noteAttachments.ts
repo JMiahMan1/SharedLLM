@@ -91,22 +91,3 @@ export function removeAttachment(markdown: string, link: string): string {
   }
   return kept.join('\n');
 }
-
-/** A file's bytes as base64, for the upload's JSON body. */
-export async function blobToBase64(blob: Blob): Promise<string> {
-  const buffer = new Uint8Array(await blob.arrayBuffer());
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < buffer.length; i += chunk) {
-    binary += String.fromCharCode(...buffer.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
-/** Base64 back to a Blob of the given type, to show it through an object URL. */
-export function base64ToBlob(data: string, mime: string): Blob {
-  const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mime });
-}
