@@ -20,10 +20,25 @@ public final class EntityNames {
      */
     public static String friendlyName(JSONObject entity) {
         if (entity == null) return "";
-        String fn = entity.optString("friendly_name");
-        if (fn != null && !fn.isEmpty()) return fn;
-        String id = entity.optString("entity_id", "");
+        String fn = text(entity, "friendly_name");
+        if (!fn.isEmpty()) return fn;
+        String id = text(entity, "entity_id");
         int dot = id.indexOf('.');
         return dot >= 0 ? id.substring(dot + 1).replace('_', ' ') : id;
+    }
+
+    /**
+     * The trimmed string at {@code key}, or "" when it is missing or JSON null.
+     *
+     * <p>Not {@code optString}: Android's org.json turns a JSON {@code null}
+     * into the four-letter string "null" (the desktop org.json used by the JVM
+     * tests returns the fallback instead). The media status handler sends
+     * {@code null} for every attribute a player does not report, so an idle
+     * speaker printed "null" as its title or artist on the widget.
+     */
+    public static String text(JSONObject o, String key) {
+        if (o == null || o.isNull(key)) return "";
+        Object value = o.opt(key);
+        return value == null ? "" : String.valueOf(value).trim();
     }
 }

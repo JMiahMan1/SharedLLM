@@ -15,6 +15,8 @@ import org.json.JSONObject;
  * plain JVM. That separation is what caught the bug it now fixes: the widget
  * looked for {@code detail.player} and {@code detail.entity}, neither of which
  * exists, so it read no player at all and always printed "Nothing playing".
+ * It also read fields with {@code optString}, which on a phone prints the
+ * handler's JSON {@code null}s as the word "null" (see {@link EntityNames#text}).
  */
 public final class MediaStatus {
 
@@ -46,19 +48,17 @@ public final class MediaStatus {
         JSONObject player = detail.optJSONObject("active");
         if (player == null) return new Lines("Nothing playing", "", false);
 
-        String state = orEmpty(player.optString("state", null));
+        // EntityNames.text, never optString: on a phone optString turns the
+        // handler's JSON nulls into the word "null".
+        String state = EntityNames.text(player, "state");
 
-        String title = orEmpty(player.optString("media_title", null));
-        if (title.isEmpty()) title = orEmpty(player.optString("source", null));
+        String title = EntityNames.text(player, "media_title");
+        if (title.isEmpty()) title = EntityNames.text(player, "source");
         if (title.isEmpty()) title = EntityNames.friendlyName(player);
         if (title.isEmpty()) title = "Nothing playing";
 
-        String artist = orEmpty(player.optString("media_artist", null));
+        String artist = EntityNames.text(player, "media_artist");
 
         return new Lines(title, artist.isEmpty() ? state : artist, "playing".equalsIgnoreCase(state));
-    }
-
-    private static String orEmpty(String s) {
-        return s == null ? "" : s.trim();
     }
 }

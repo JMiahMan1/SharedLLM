@@ -114,4 +114,79 @@ public class MediaStatusTest {
         assertFalse(lines.playing);
         assertEquals("Nothing playing", MediaStatus.fromJson(null).title);
     }
+
+    /**
+     * A JSONObject that reads strings the way Android's org.json does: a JSON
+     * null comes back from {@code optString} as the string "null", not the
+     * fallback. The desktop org.json these tests run on does the opposite, which
+     * is how the widget shipped printing "null" without a test noticing.
+     */
+    private static final class AndroidJson extends JSONObject {
+        @Override
+        public String optString(String key, String fallback) {
+            Object value = opt(key);
+            return value == null ? fallback : String.valueOf(value);
+        }
+
+        @Override
+        public String optString(String key) {
+            return optString(key, "");
+        }
+    }
+
+    /** An idle speaker as the handler sends it: every unreported attribute is null. */
+    private static JSONObject idleTarget() throws Exception {
+        JSONObject player = new AndroidJson()
+            .put("entity_id", "media_player.kitchen")
+            .put("friendly_name", "Kitchen Speaker")
+            .put("state", "idle")
+            .put("media_title", JSONObject.NULL)
+            .put("media_artist", JSONObject.NULL)
+            .put("media_album", JSONObject.NULL)
+            .put("source", JSONObject.NULL)
+            .put("entity_picture", JSONObject.NULL);
+        return new JSONObject().put("detail", new JSONObject().put("active", player));
+    }
+
+    @Test
+    public void theAndroidStandInReallyPrintsNullForOptString() throws Exception {
+        // Guards the stand-in itself, so the next test proves something.
+        JSONObject player = idleTarget().getJSONObject("detail").getJSONObject("active");
+        assertEquals("null", player.optString("media_title", null));
+    }
+
+    @Test
+    public void neverPrintsTheWordNullForAttributesThePlayerDoesNotReport() throws Exception {
+        // media_playback_service makes the user's chosen speaker detail.active
+        // even when it is idle, with media_title/media_artist/source all null.
+        MediaStatus.Lines lines = MediaStatus.fromJson(idleTarget());
+        assertEquals("Kitchen Speaker", lines.title);
+        assertEquals("idle", lines.subtitle);
+        assertFalse(lines.playing);
+    }
+
+    @Test
+    public void namesAPlayerFromItsIdWhenTheFriendlyNameIsNull() throws Exception {
+        JSONObject player = new AndroidJson()
+            .put("entity_id", "media_player.living_room_tv")
+            .put("friendly_name", JSONObject.NULL)
+            .put("state", "playing")
+            .put("media_title", JSONObject.NULL)
+            .put("media_artist", JSONObject.NULL)
+            .put("source", JSONObject.NULL);
+        MediaStatus.Lines lines = MediaStatus.fromJson(new JSONObject().put("detail", new JSONObject().put("active", player)));
+        assertEquals("living room tv", lines.title);
+        assertEquals("playing", lines.subtitle);
+        assertTrue(lines.playing);
+    }
+
+    @Test
+    public void textTreatsMissingAndNullAlikeAndTrims() throws Exception {
+        JSONObject o = new AndroidJson().put("a", JSONObject.NULL).put("b", "  Kitchen  ").put("c", 3);
+        assertEquals("", EntityNames.text(o, "a"));
+        assertEquals("", EntityNames.text(o, "missing"));
+        assertEquals("Kitchen", EntityNames.text(o, "b"));
+        assertEquals("3", EntityNames.text(o, "c"));
+        assertEquals("", EntityNames.text(null, "a"));
+    }
 }
