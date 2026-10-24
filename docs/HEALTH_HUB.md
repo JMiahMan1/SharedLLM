@@ -59,6 +59,8 @@ weekly family challenge (Phase 7).
 Built on Android (needs an APK built after this change and a real-phone check, see Phase 2):
 Health Connect import of sleep, resting heart rate, HRV, weight and walks/runs/rides.
 
+Also built on Android (same caveat, Phase 8): the *Health today* home-screen widget.
+
 Not built yet, and not pretended otherwise: marking the plan cooked from a log, family cheers,
 step and veg challenges, the dashboard widget, photo/voice food logging, fasting windows,
 micro-lessons and the chat coach. Those remain the later phases below.
@@ -367,6 +369,19 @@ live search is the ecosystem-standard pattern.
 ### Phase 8 — integrations everywhere
 
 - [ ] Dashboard widget and Android home-screen widget (today card). The existing activity widget is unchanged.
+  **Android home-screen widget built 2026-10-24, not yet confirmed on a phone; the dashboard
+  widget is not built.** *Health today* (`HealthTodayWidget`, 3×2, resizable) shows four tiles —
+  steps (geo, against the goal), readiness, last night's sleep score with its length, and water
+  in the profile's units (fl oz for imperial, litres otherwise) — from the same reads the Today tab
+  uses (`/api/geo/steps?days=1`, `/api/health/summary`), with the signed-in person's own key the
+  way the other widgets read it (TokenBridge → `WidgetApi`). A missing reading prints a dash and
+  why ("Check in", "Not logged", "None logged"), never a zero; one failed read leaves the other
+  tiles intact. No calories, so a child's home screen never shows one. A tap opens Health
+  (`/fitness`); the refresh button and the shared widget tick update it, and a Health Connect sync
+  refreshes it. Captions are pure and JVM-tested (`HealthTodayFormat`, `HealthTodayFormatTest`).
+  **Check on a real phone:** add *Health today* from the widget picker; signed out it says "Sign in
+  to Jarvis OS"; signed in the four tiles match Health → Today (log water and press refresh: the
+  water tile changes); at 3×2 and at the smallest resize nothing is cut off; a tap opens Health.
 - [ ] Recipes: plan ↔ log ↔ shopping list round trip; Calendar: workouts.
 - [x] Family hub entry point: the existing Health nav item now opens the hub.
 
