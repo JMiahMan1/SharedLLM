@@ -49,7 +49,14 @@ describe('mediaKeys', () => {
     expect(mediaKeys.search('abba')).toEqual(['media', 'search', 'abba', 'all']);
     expect(mediaKeys.search('abba', 'tracks')).not.toEqual(mediaKeys.search('abba'));
     expect(mediaKeys.library('albums')).not.toEqual(mediaKeys.library('albums', 'lib-1'));
-    for (const key of [mediaKeys.home(), mediaKeys.item('x'), mediaKeys.favorites(), mediaKeys.podcastEpisodes('p')]) {
+    const all = [
+      mediaKeys.home(), mediaKeys.recent(), mediaKeys.inProgressBooks(), mediaKeys.item('x'), mediaKeys.detail('x'),
+      mediaKeys.absLibraries(), mediaKeys.absLibrary('l'), mediaKeys.maSearch('q'), mediaKeys.absSearch('q'),
+      mediaKeys.favorites(), mediaKeys.podcastEpisodes('p'), mediaKeys.status(), mediaKeys.entities(),
+    ];
+    // Distinct requests never share a key.
+    expect(new Set(all.map((k) => JSON.stringify(k))).size).toBe(all.length);
+    for (const key of all) {
       expect(key[0]).toBe('media');
     }
   });
