@@ -13,6 +13,4 @@ on 2026-10-21. When something here ships, delete it; history lives in git.
 
 ## Bible study
 
-- Saved study turns are ingested into RAG with citable `bible-turn-*` ids.
-  RAG ingest of promoted notes and plan reflections remains.
 - Synced-scroll comparison and the reference-chip popover remain.

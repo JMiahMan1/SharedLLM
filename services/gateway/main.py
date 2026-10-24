@@ -11779,6 +11779,28 @@ async def proxy_bible_study_session(request: Request, session_id: int):
     )
 
 
+async def _ingest_study_memory(username: str, memory_id: str, kind: str, content: str, extra: dict | None = None) -> bool:
+    """Put something this family studied into RAG (``bible_study``) under a
+    stable, citable id; saving again under the same id replaces it."""
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{RAG_SVC}/rag/ingest",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                json={
+                    "user_id": username,
+                    "content": content,
+                    "collection_name": "bible_study",
+                    "metadata": {"id": memory_id, "kind": kind, "username": username, **(extra or {})},
+                },
+                timeout=aiohttp.ClientTimeout(total=15.0),
+            )
+            return resp.status < 300
+    except Exception as exc:  # saving must not fail because RAG is down
+        log.warning("bible study memory ingest failed for %s: %s", memory_id, exc)
+        return False
+
+
 async def _ingest_study_turn(username: str, session_id: int, turn: dict) -> None:
     """Put a saved study answer into RAG with a stable, citable id."""
     question = str(turn.get("question") or "").strip()
@@ -12161,6 +12183,61 @@ async def proxy_bible_plan_start(request: Request, plan_id: str):
     return await _bible_json(
         "POST", f"/plans/{plan_id}/start", label="Failed to start the plan", params={"username": username}
     )
+
+
+@app.put("/api/bible/plans/{plan_id}/days/{day}/reflection")
+async def proxy_bible_plan_reflection(request: Request, plan_id: str, day: int):
+    """A reading-plan day's reflection: kept by the bible service and put into
+    study memory as ``bible-plan-<plan>-<day>-<user>``."""
+    username = await _bible_caller(request)
+    body = await request.json()
+    saved = await _bible_json(
+        "PUT",
+        f"/plans/{plan_id}/days/{day}/reflection",
+        label="Could not save your reflection",
+        params={"username": username},
+        json={"text": str((body or {}).get("text") or "")},
+    )
+    if isinstance(saved, dict) and saved.get("text"):
+        content = (
+            f"Reading plan reflection ({saved.get('plan_name')}, day {day}; "
+            f"{', '.join(saved.get('readings') or [])}): {saved['text']}"
+        )
+        saved["remembered"] = await _ingest_study_memory(
+            username, f"bible-plan-{plan_id}-{day}-{username}", "plan_reflection", content, {"plan_id": plan_id, "day": day}
+        )
+    return saved
+
+
+@app.get("/api/bible/plans/{plan_id}/reflections")
+async def proxy_bible_plan_reflections(request: Request, plan_id: str):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET", f"/plans/{plan_id}/reflections", label="Could not read your reflections", params={"username": username}
+    )
+
+
+@app.post("/api/bible/marks/{mark_id}/remember")
+async def proxy_bible_remember_note(request: Request, mark_id: int):
+    """Promote a verse note into study memory (``bible-note-<id>``) so Jarvis can
+    recall it. Only the caller's own note; the text is what they wrote."""
+    username = await _bible_caller(request)
+    body = await request.json() or {}
+    text = str(body.get("text") or "").strip()
+    if not text or len(text) > 8000:
+        raise HTTPException(status_code=422, detail="The note is empty or too long")
+    marks = await _bible_json("GET", "/marks", label="Failed to read marks", params={"username": username})
+    rows = marks.get("marks") if isinstance(marks, dict) else marks
+    mark = next((m for m in rows or [] if isinstance(m, dict) and m.get("id") == mark_id and m.get("kind") == "note"), None)
+    if mark is None:
+        raise HTTPException(status_code=404, detail="No such note")
+    reference = str(body.get("reference") or "").strip() or f"{mark.get('osis')} {mark.get('chapter')}:{mark.get('verse_start')}"
+    ok = await _ingest_study_memory(
+        username, f"bible-note-{mark_id}", "verse_note", f"Study note on {reference}: {text}", {"reference": reference}
+    )
+    if not ok:
+        raise HTTPException(status_code=503, detail="Study memory is not reachable right now; your note itself is safe.")
+    return {"status": "SUCCESS", "remembered": True, "id": f"bible-note-{mark_id}"}
 
 
 @app.post("/api/bible/plans/{plan_id}/days/{day}/complete")

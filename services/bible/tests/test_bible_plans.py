@@ -116,3 +116,20 @@ def test_reading_along_shows_only_members_who_share(loaded_client: TestClient, m
         loaded_client.post("/plans/john-21/start", params={"username": user})
     members = loaded_client.get("/plans/john-21/family", params={"viewer": "sam"}).json()["members"]
     assert [m["username"] for m in members] == ["mia"]
+
+
+def test_a_reader_keeps_a_reflection_per_day(loaded_client: TestClient, monkeypatch):
+    from services.bible import main as bible_main
+
+    async def fake_award(username, grants):
+        return {"granted": 0, "status": "ok"}
+
+    monkeypatch.setattr(bible_main, "_award_stars", fake_award)
+    assert loaded_client.put("/plans/romans-16/days/1/reflection", params={"username": "sam"}, json={"text": "x"}).status_code == 404
+    loaded_client.post("/plans/romans-16/start", params={"username": "sam"})
+    saved = loaded_client.put("/plans/romans-16/days/1/reflection", params={"username": "sam"}, json={"text": "Not ashamed of the gospel."}).json()
+    assert saved["readings"] == ["Romans 1"] and saved["plan_name"]
+    loaded_client.put("/plans/romans-16/days/1/reflection", params={"username": "sam"}, json={"text": "Grace before works."})
+    assert loaded_client.get("/plans/romans-16/reflections", params={"username": "sam"}).json()["reflections"][0]["text"] == "Grace before works."
+    assert loaded_client.put("/plans/romans-16/days/1/reflection", params={"username": "sam"}, json={"text": ""}).status_code == 422
+    assert loaded_client.get("/plans/romans-16/reflections", params={"username": "ana"}).json()["reflections"] == []

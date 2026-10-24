@@ -469,6 +469,22 @@ export default function VerseActionSheet({
           <div className="mt-3 rounded-xl border border-white/10 bg-black/30 p-3" data-testid="bible-note-body">
             <p className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">Your note</p>
             <p className="whitespace-pre-wrap text-xs text-slate-200">{noteBody}</p>
+            {noteMark && noteBody.trim() && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  run('Remembered', async () => {
+                    await api.rememberBibleNote(noteMark.id, noteBody, verse.reference);
+                    return 'Jarvis will remember this note when you study';
+                  })
+                }
+                className="mt-2 min-h-11 rounded-lg border border-white/10 px-3 text-xs text-sky-200 hover:bg-white/5"
+                data-testid="bible-note-remember"
+              >
+                Remember in study memory
+              </button>
+            )}
           </div>
         )}
 

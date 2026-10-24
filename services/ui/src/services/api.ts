@@ -4094,6 +4094,23 @@ export const api = {
     return resp.data;
   },
 
+  /** What the reader took from a plan day; kept and put into study memory. */
+  async saveBiblePlanReflection(planId: string, day: number, text: string): Promise<{ day: number; text: string; remembered?: boolean }> {
+    const resp = await apiClient.put(`/api/bible/plans/${planId}/days/${day}/reflection`, { text });
+    return resp.data;
+  },
+
+  async getBiblePlanReflections(planId: string): Promise<{ reflections: Array<{ day: number; text: string; updated_at: string }> }> {
+    const resp = await apiClient.get(`/api/bible/plans/${planId}/reflections`);
+    return resp.data;
+  },
+
+  /** Promote one of the reader's verse notes into study memory. */
+  async rememberBibleNote(markId: number, text: string, reference: string): Promise<{ remembered: boolean; id: string }> {
+    const resp = await apiClient.post(`/api/bible/marks/${markId}/remember`, { text, reference });
+    return resp.data;
+  },
+
   async undoBiblePlanDay(planId: string, day: number): Promise<BiblePlanEnrollment> {
     const resp = await apiClient.delete(`/api/bible/plans/${planId}/days/${day}`);
     return resp.data;

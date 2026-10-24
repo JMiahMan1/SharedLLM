@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpenCheck, CalendarDays, Check, ChevronDown, ChevronRight, Loader2, Play, RotateCcw, Trophy, Users, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -162,6 +162,7 @@ function PlanCard({
             {busy === `day-${plan.plan_id}` ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
             {doneToday ? `Day ${today.day} read` : `Mark day ${today.day} read`}
           </button>
+          {doneToday && <PlanReflection planId={plan.plan_id} day={today.day} />}
         </div>
       ) : null}
 
@@ -343,6 +344,53 @@ function Catalogue({
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * What the reader took from today's reading, in their own words. Kept with
+ * the plan and put into study memory, so Jarvis can recall it later.
+ */
+function PlanReflection({ planId, day }: { planId: string; day: number }) {
+  const queryClient = useQueryClient();
+  const key = ['bible-plan-reflections', planId];
+  const { data } = useQuery({ queryKey: key, queryFn: () => api.getBiblePlanReflections(planId), retry: false });
+  const saved = data?.reflections.find((r) => r.day === day)?.text ?? '';
+  const [text, setText] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: () => api.saveBiblePlanReflection(planId, day, (text ?? saved).trim()),
+    onSuccess: () => {
+      setText(null);
+      void queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+  const value = text ?? saved;
+  return (
+    <div className="space-y-1.5" data-testid={`bible-plan-reflection-${planId}`}>
+      <label className="block text-[11px] text-slate-400">
+        What stood out to you today?
+        <textarea
+          rows={2}
+          value={value}
+          onChange={(e) => setText(e.target.value)}
+          className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100"
+        />
+      </label>
+      {text !== null && text.trim() !== saved && (
+        <button
+          type="button"
+          disabled={!text.trim() || save.isPending}
+          onClick={() => save.mutate()}
+          className="min-h-11 rounded-xl border border-white/10 px-3 text-xs text-sky-200 disabled:opacity-50"
+        >
+          Save reflection
+        </button>
+      )}
+      {save.isSuccess && save.data.remembered === false && (
+        <p className="text-[11px] text-amber-300">Saved. Study memory was not reachable, so Jarvis will not recall it yet.</p>
+      )}
+      {save.isError && <p className="text-[11px] text-amber-300">{errorText(save.error, 'The reflection did not save.')}</p>}
     </div>
   );
 }
