@@ -65,6 +65,26 @@ describe('Notes autosave and drafts', () => {
     expect(readNoteDrafts('me')).toEqual({});
   });
 
+  it('drops my edit for the stored version when I choose it', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await user.click(await screen.findByText('Trip ideas'));
+    const content = await screen.findByLabelText('Note content');
+    await waitFor(() => expect(content.textContent).toBe('Sedona in the fall, then the coast.'));
+    notesVersions['Notes/Trip ideas.md'] = 2;
+    await user.type(content, ' Mine.');
+    await screen.findByRole('alert', {}, { timeout: 4000 });
+
+    await user.click(screen.getByRole('button', { name: 'Use the stored version' }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Note content').textContent).toBe('Sedona in the fall, then the coast.'),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(readNoteDrafts('me')).toEqual({});
+  });
+
   it('compares the stored text before saving when there is no version to check', async () => {
     const user = userEvent.setup();
     let stored = '# Trip ideas\nCategory: Notes\n\nSedona in the fall, then the coast.';

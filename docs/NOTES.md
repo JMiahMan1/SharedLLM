@@ -39,6 +39,7 @@ with it — Notes lives here and in the nav.
 | `check_off` | toggle one checklist item (`- [ ] x` ↔ `- [x] x`) by text |
 | `list` | list markdown files under the configured directories, newest first; with `previews: true` the newest 24 also carry their text in `content` |
 | `sync_rag` | read every note (execution); the gateway then indexes them (below) |
+| `versions` / `version_read` / `version_restore` | Nextcloud's own version history of one note (`path`): list (newest first, with label and author on Nextcloud 26+), read one (`version`), or restore one over the note. Gateway: `POST /api/communication/notes/versions` with `action: list\|read\|restore` |
 
 The stored header is the server's: `create`/`write` strip any leading
 `# title` + `Category:` header(s) from the content before adding one
@@ -171,6 +172,21 @@ that, every save of an opened note stacked another header on top.
   "<title> (my copy)", numbered past existing titles in that folder),
   **Use the stored version** (drops yours and reopens the note) or
   **Overwrite with mine**. Autosave pauses until you choose.
+- **Version history**: an open, saved note has a **History** button that
+  lists Nextcloud's earlier versions of the file (`components/notes/NoteHistory.tsx`).
+  Nextcloud's Versions app (files_versions, on by default) keeps one each time
+  the file changes, so autosave, saves from other Nextcloud clients and
+  `check_off` all leave history; nothing extra is stored by Jarvis. Execution
+  looks up the file's `oc:fileid` with a `Depth: 0` PROPFIND, then lists
+  `/remote.php/dav/versions/<user>/versions/<fileid>`, reads a version with a
+  GET and restores one with a WebDAV `MOVE` to `…/restore/target`, all as the
+  note's own account. Pick a version to read it; **Restore this version**
+  confirms first (and warns that unsaved edits will be dropped), then the
+  editor reopens on the restored note. Nextcloud files the current text as a
+  version before restoring, so a restore can be undone from the same list.
+  Version ids must be all digits (they are Unix times) before they are put in
+  a URL. A server without the Versions app answers 404, which reads as "No
+  earlier versions yet"; other failures show the reason.
 - **Keyboard shortcuts** (desktop): on the shelf **C** takes a note (Keep's
   key; N is the media "next track") and **/** jumps to the notes search
   (Escape leaves it). In an open note **Ctrl/Cmd+S** saves and
@@ -234,10 +250,11 @@ back on failure, and note calls allow a minute), dashboard and home-screen
 capture, a grid/list layout toggle remembered per device, undo toasts for
 archive/trash/restore, autosave with ETag conflict detection and on-device
 drafts that survive a closed app, desktop keyboard shortcuts, per-item
-checklist controls (drag, arrow-key and Alt+arrow reordering, delete).
+checklist controls (drag, arrow-key and Alt+arrow reordering, delete),
+version history with read and restore from Nextcloud's Versions app.
 
 Still open: reminders (time and place), attachments/images/drawings/audio,
-Nextcloud sharing, versions, offline.
+Nextcloud sharing, offline.
 
 ## Tests
 
@@ -254,7 +271,11 @@ Nextcloud sharing, versions, offline.
   saves a "(my copy)"; without a version the stored text is compared first;
   closing saves pending changes and an untouched close writes nothing; a
   draft survives an unmounted app and is restored or discarded; opening a
-  note with kept changes can discard them for the stored text
+  note with kept changes can discard them for the stored text; choosing the
+  stored version after a conflict drops the edit and reopens it
+- `services/ui/src/test/NoteHistory.test.tsx`: versions list, read and
+  restore (the editor reopens on the stored note), the empty and failure
+  states, no History for an unsaved note
 - `services/ui/src/test/NotesShortcuts.test.tsx`: C and / on the shelf, not in
   a field or with a modifier; Ctrl+S saves from a field, Ctrl/Cmd+Enter saves
   and closes
@@ -262,7 +283,8 @@ Nextcloud sharing, versions, offline.
   cap, a damaged store, storage that throws
 - `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
 - `services/gateway/tests/test_notes_rag_sync.py`: indexing writes to RAG;
-  the list route passes `previews` through; the write route passes `if_match`
+  the list route passes `previews` through; the write route passes `if_match`;
+  the versions route maps list/read/restore and refuses anything else
 - `services/ui/src/test/noteRichText.test.ts` / `RichNoteEditor.test.tsx`:
   markdown round trips, the unsupported-note fallback, span whitelist, tick,
   Enter and toolbar behaviour, span rendering in previews; checklist items
@@ -277,6 +299,9 @@ Nextcloud sharing, versions, offline.
   at most four at a time, an unreadable note does not fail the list, a
   timeout is named in the error, the folder check is `Depth: 0`, `read`
   returns the ETag, an in-place `write` sends `If-Match` and returns the new
-  ETag, a 412 is a conflict, a new note never sends `If-Match`
+  ETag, a 412 is a conflict, a new note never sends `If-Match`; versions are
+  listed newest first from the fileid folder, read and restored (MOVE to
+  `restore/target`), a missing Versions app is an empty list, a non-numeric
+  version id never reaches a URL, a missing note says so
 - `services/execution/tests/test_http_client_session_retire.py`: a pooled
   session that ages out keeps serving the requests already on it

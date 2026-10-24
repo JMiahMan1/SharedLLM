@@ -8,6 +8,7 @@ from services.execution.handlers import note as note_handler
 class FakeProvider:
     username = "u"
     password = "p"
+    base_url = "http://nextcloud.test"
 
     def __init__(self):
         self.dirs: list[str] = []
@@ -825,3 +826,115 @@ def test_item_matches_raw_or_plain_text_of_a_styled_row():
     assert _item_matches(styled, styled)
     assert _item_matches("  eggs ", "eggs")
     assert not _item_matches(styled, "buy bread")
+
+
+_FILEID_REPLY = (
+    '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">'
+    "<d:response><d:href>/remote.php/dav/files/u/Notes/A.md</d:href><d:propstat><d:prop>"
+    "<oc:fileid>4242</oc:fileid></d:prop></d:propstat></d:response></d:multistatus>"
+)
+_VERSIONS_REPLY = (
+    '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:nc="http://nextcloud.org/ns">'
+    "<d:response><d:href>/remote.php/dav/versions/u/versions/4242/</d:href><d:propstat><d:prop/></d:propstat></d:response>"
+    "<d:response><d:href>/remote.php/dav/versions/u/versions/4242/1700000000</d:href><d:propstat><d:prop>"
+    "<d:getlastmodified>Tue, 14 Nov 2023 22:13:20 GMT</d:getlastmodified><d:getcontentlength>12</d:getcontentlength>"
+    "</d:prop></d:propstat></d:response>"
+    "<d:response><d:href>/remote.php/dav/versions/u/versions/4242/1700003600</d:href><d:propstat><d:prop>"
+    "<d:getlastmodified>Tue, 14 Nov 2023 23:13:20 GMT</d:getlastmodified><d:getcontentlength>30</d:getcontentlength>"
+    "<nc:version-label>Before trip</nc:version-label><nc:version-author>u</nc:version-author>"
+    "</d:prop></d:propstat></d:response></d:multistatus>"
+)
+
+
+async def test_versions_lists_earlier_copies_newest_first(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    calls: list[tuple[str, str, dict]] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        calls.append((method, url, headers or {}))
+        if url.endswith("/Notes/A.md"):
+            return {"status_code": 207, "text": _FILEID_REPLY}
+        return {"status_code": 207, "text": _VERSIONS_REPLY}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("versions", path="Notes/A.md"))
+
+    assert result.status == "SUCCESS"
+    assert [v["id"] for v in result.detail["versions"]] == ["1700003600", "1700000000"]
+    assert result.detail["versions"][0]["label"] == "Before trip"
+    assert result.detail["versions"][1]["size"] == 12
+    assert calls[1][:2] == ("PROPFIND", "http://nextcloud.test/remote.php/dav/versions/u/versions/4242")
+    assert calls[1][2]["Depth"] == "1"
+
+
+async def test_versions_without_the_versions_app_is_an_empty_list(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        if url.endswith("/Notes/A.md"):
+            return {"status_code": 207, "text": _FILEID_REPLY}
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("versions", path="Notes/A.md"))
+    assert result.status == "SUCCESS"
+    assert result.detail == {"versions": []}
+
+
+async def test_version_read_and_restore_use_the_versions_endpoint(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    calls: list[tuple[str, str, dict]] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        calls.append((method, url, headers or {}))
+        if method == "PROPFIND":
+            return {"status_code": 207, "text": _FILEID_REPLY}
+        if method == "GET":
+            return {"status_code": 200, "text": "# A\nCategory: Notes\n\nold"}
+        return {"status_code": 201, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    read = await note_handler.handle_note(request("version_read", path="Notes/A.md", version="1700000000"))
+    assert read.status == "SUCCESS"
+    assert read.message.endswith("old")
+    assert calls[1][:2] == ("GET", "http://nextcloud.test/remote.php/dav/versions/u/versions/4242/1700000000")
+
+    restored = await note_handler.handle_note(request("version_restore", path="Notes/A.md", version="1700000000"))
+    assert restored.status == "SUCCESS"
+    method, url, headers = calls[-1]
+    assert (method, url) == ("MOVE", "http://nextcloud.test/remote.php/dav/versions/u/versions/4242/1700000000")
+    assert headers["Destination"] == "http://nextcloud.test/remote.php/dav/versions/u/restore/target"
+
+
+async def test_a_version_id_that_is_not_a_timestamp_never_reaches_a_url(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    calls: list[str] = []
+
+    async def fake_request(method, url, **kwargs):
+        calls.append(url)
+        return {"status_code": 207, "text": _FILEID_REPLY}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("version_restore", path="Notes/A.md", version="../../files/u/x"))
+    assert result.status == "FAILURE"
+    assert calls == []
+
+
+async def test_versions_of_a_missing_note_say_so(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, **kwargs):
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("versions", path="Notes/Gone.md"))
+    assert result.status == "FAILURE"
+    assert "not there" in result.message

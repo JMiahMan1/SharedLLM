@@ -403,6 +403,7 @@ class NoteRequest(BaseRequest):
     action: Literal[
         "create", "write", "append", "read", "delete", "check_off", "list", "sync_rag",
         "meta_read", "meta_write", "move", "duplicate", "empty_trash",
+        "versions", "version_read", "version_restore",
     ]
     title: str | None = None
     content: str | None = None
@@ -415,6 +416,7 @@ class NoteRequest(BaseRequest):
     destination: str | None = None # move: the note's new path
     meta: dict | None = None # meta_write: the shared notes index to store
     if_match: str | None = None # write: the ETag the note was opened at; a newer file is refused (412)
+    version: str | None = None # version_read / version_restore: a version id from ``versions``
 
 
 # Recipes: paste-a-link import and TheMealDB search (corpus index arrives later)

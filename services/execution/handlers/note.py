@@ -317,6 +317,141 @@ async def _move_note(provider, source: str, destination: str) -> tuple[bool, str
     return False, f"Could not move the note (HTTP {resp['status_code']})."
 
 
+#: Nextcloud keeps earlier copies of every file (the files_versions app) and
+#: serves them over WebDAV at /remote.php/dav/versions/<user>/versions/<fileid>.
+#: A version id is the time it was made; anything else is refused before it
+#: can reach a URL.
+_VERSION_ID = re.compile(r"^[0-9]{1,20}$")
+_FILE_ID_PROPS = (
+    '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">'
+    "<d:prop><oc:fileid/></d:prop></d:propfind>"
+)
+_VERSION_PROPS = (
+    '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:nc="http://nextcloud.org/ns">'
+    "<d:prop><d:getlastmodified/><d:getcontentlength/>"
+    "<nc:version-label/><nc:version-author/></d:prop></d:propfind>"
+)
+
+
+def _versions_root(provider) -> str:
+    from urllib.parse import quote
+
+    return f"{provider.base_url.rstrip('/')}/remote.php/dav/versions/{quote(provider.username)}"
+
+
+async def _file_id(provider, path: str) -> tuple[str | None, str]:
+    """Nextcloud's numeric id of a file (versions are filed under it), or why not."""
+    from .. import http_client
+
+    resp = await http_client.request(
+        "PROPFIND", provider.file_url(path),
+        auth=(provider.username, provider.password),
+        headers={"Depth": "0", "Content-Type": "application/xml; charset=utf-8"},
+        data=_FILE_ID_PROPS, verify=False, timeout=30,
+    )
+    if resp["status_code"] == 404:
+        return None, "That note is not there any more."
+    if resp["status_code"] != 207:
+        return None, f"Could not look up the note (HTTP {resp['status_code']})."
+    found = ET.fromstring(resp.get("text") or "").find(".//{http://owncloud.org/ns}fileid")
+    if found is None or not (found.text or "").strip().isdigit():
+        return None, "Nextcloud did not report an id for this note."
+    return found.text.strip(), ""
+
+
+def _parse_versions(xml_text: str) -> list[dict]:
+    """The versions in a PROPFIND reply, newest first (the collection itself skipped)."""
+    from email.utils import parsedate_to_datetime
+
+    ns = {"d": "DAV:", "nc": "http://nextcloud.org/ns"}
+    versions: list[dict] = []
+    for response in ET.fromstring(xml_text).findall(".//d:response", ns):
+        href = (response.findtext("d:href", "", ns) or "").rstrip("/")
+        version_id = href.rsplit("/", 1)[-1]
+        if not _VERSION_ID.match(version_id) or "/versions/" not in href or href.endswith(f"/versions/{version_id}"):
+            # The folder named by the file id answers too; it is not a version.
+            continue
+        modified = response.findtext(".//d:getlastmodified", "", ns) or ""
+        try:
+            stamp = parsedate_to_datetime(modified).isoformat()
+        except (TypeError, ValueError):
+            stamp = ""
+        size = response.findtext(".//d:getcontentlength", "", ns) or "0"
+        versions.append({
+            "id": version_id,
+            "modified": stamp,
+            "size": int(size) if size.isdigit() else 0,
+            "label": (response.findtext(".//nc:version-label", "", ns) or "").strip(),
+            "author": (response.findtext(".//nc:version-author", "", ns) or "").strip(),
+        })
+    versions.sort(key=lambda v: int(v["id"]), reverse=True)
+    return versions
+
+
+async def _note_versions(provider, req: NoteRequest) -> ExecutionResult:
+    """List, read or restore earlier versions of one note."""
+    from .. import http_client
+
+    path = (req.path or "").lstrip("/")
+    service = f"note_{req.action}"
+    if not path:
+        return ExecutionResult(status="FAILURE", message=f"{req.action} requires path.", service=service)
+    if req.action != "versions" and not _VERSION_ID.match(req.version or ""):
+        return ExecutionResult(status="FAILURE", message="That is not a version of this note.", service=service)
+    file_id, reason = await _file_id(provider, path)
+    if not file_id:
+        return ExecutionResult(status="FAILURE", message=reason, service=service)
+    folder = f"{_versions_root(provider)}/versions/{file_id}"
+    auth = (provider.username, provider.password)
+
+    if req.action == "versions":
+        resp = await http_client.request(
+            "PROPFIND", folder, auth=auth,
+            headers={"Depth": "1", "Content-Type": "application/xml; charset=utf-8"},
+            data=_VERSION_PROPS, verify=False, timeout=30,
+        )
+        if resp["status_code"] == 404:
+            # The versions app is off, or the file has never changed.
+            return ExecutionResult(status="SUCCESS", message="No earlier versions.", service=service, detail={"versions": []})
+        if resp["status_code"] != 207:
+            return ExecutionResult(
+                status="FAILURE",
+                message=f"Nextcloud would not list this note's versions (HTTP {resp['status_code']}).",
+                service=service,
+            )
+        versions = _parse_versions(resp.get("text") or "")
+        return ExecutionResult(
+            status="SUCCESS", message=f"{len(versions)} earlier versions.", service=service,
+            detail={"versions": versions, "path": path},
+        )
+
+    version_url = f"{folder}/{req.version}"
+    if req.action == "version_read":
+        resp = await http_client.request("GET", version_url, auth=auth, verify=False, timeout=30)
+        if resp["status_code"] != 200:
+            return ExecutionResult(
+                status="FAILURE", message=f"Could not read that version (HTTP {resp['status_code']}).", service=service,
+            )
+        return ExecutionResult(status="SUCCESS", message=resp["text"], service=service, detail={"version": req.version})
+
+    # Restore: Nextcloud keeps the current text as a version of its own first,
+    # so a restore can itself be undone from the same list.
+    resp = await http_client.request(
+        "MOVE", version_url, auth=auth,
+        headers={"Destination": f"{_versions_root(provider)}/restore/target"},
+        verify=False, timeout=60,
+    )
+    if resp["status_code"] not in (200, 201, 204):
+        return ExecutionResult(
+            status="FAILURE", message=f"Could not restore that version (HTTP {resp['status_code']}).", service=service,
+        )
+    _forget_preview(provider.file_url(path))
+    return ExecutionResult(
+        status="SUCCESS", message="Earlier version restored.", service=service,
+        detail={"path": path, "version": req.version},
+    )
+
+
 async def handle_note(req: NoteRequest) -> ExecutionResult:
     storage_mode = getattr(req, "storage", "nextcloud")
 
@@ -691,6 +826,9 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 service="note_empty_trash",
                 detail={"deleted": deleted},
             )
+
+        elif action in ("versions", "version_read", "version_restore"):
+            return await _note_versions(provider, req)
 
         return ExecutionResult(status="FAILURE", message=f"Action {action} failed or not implemented.", service="note")
 

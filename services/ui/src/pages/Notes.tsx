@@ -11,6 +11,7 @@ import {
   Check,
   CheckSquare,
   Copy,
+  History,
   LayoutGrid,
   Loader2,
   Palette,
@@ -30,6 +31,7 @@ import Modal from '../components/ui/Modal';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
 import RichNoteEditor, { type RichNoteEditorHandle } from '../components/notes/RichNoteEditor';
+import NoteHistory from '../components/notes/NoteHistory';
 import { richEditable } from '../lib/noteRichText';
 import { remarkNoteSpans } from '../lib/remarkNoteSpans';
 import { errorText } from '../lib/errorText';
@@ -409,11 +411,15 @@ export default function Notes() {
   }, [asUser, index, contents, scope]);
 
   /** Drop this device's unsaved copy of a note and open the stored one. */
+  // Counts reopenings of the same note, so the editor remounts on the stored
+  // text instead of keeping the state it was seeded with.
+  const [reopenCount, bumpReopen] = useReducer((n: number) => n + 1, 0);
   const reopenStored = useCallback(
     (path: string | undefined, draftKey: string | undefined) => {
       if (draftKey) clearNoteDraft(scope, draftKey);
       setEditing(null);
       bumpDrafts();
+      bumpReopen();
       const note = path ? notes.find((n) => n.path === path) : undefined;
       if (note) void openEditor(note, { ignoreDraft: true });
     },
@@ -1368,11 +1374,12 @@ export default function Notes() {
             <NoteEditor
               // A different note, or the stored copy replacing kept changes,
               // is a fresh editor: its state is only seeded at mount.
-              key={`${editing.draft.draftKey ?? editing.draft.path ?? 'new'}|${editing.draft.restoredAt ?? ''}`}
+              key={`${editing.draft.draftKey ?? editing.draft.path ?? 'new'}|${editing.draft.restoredAt ?? ''}|${reopenCount}`}
               ref={editorRef}
               initial={editing.draft}
               fresh={editing.fresh}
               scope={scope}
+              asUser={asUser}
               onPersist={persistDraft}
               onKeepBoth={keepBoth}
               onDone={finishEditing}
@@ -1449,8 +1456,11 @@ const NoteEditor = forwardRef<
     /** Drop this device's unsaved copy and show the stored note instead. */
     onUseStored: () => void;
     onTrash?: () => void;
+    /** Whose Nextcloud the note is in, for its version history. */
+    asUser?: 'admin';
   }
->(function NoteEditor({ initial, fresh, scope, onPersist, onKeepBoth, onDone, onUseStored, onTrash }, handle) {
+>(function NoteEditor({ initial, fresh, scope, onPersist, onKeepBoth, onDone, onUseStored, onTrash, asUser }, handle) {
+  const [showHistory, setShowHistory] = useState(false);
   const [draft, setDraft] = useState<DraftState>(initial);
   const [labelDraft, setLabelDraft] = useState('');
   // Chosen per text: notes the visual editor could not save back unchanged
@@ -1807,6 +1817,18 @@ const NoteEditor = forwardRef<
           ))}
         </div>
       </div>
+      {showHistory && initial.path && (
+        <NoteHistory
+          path={initial.path}
+          asUser={asUser}
+          dirty={dirty}
+          onRestored={() => {
+            // The stored note is now the restored text: drop the edit and show it.
+            forgetDraft();
+            onUseStored();
+          }}
+        />
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
         <div className="flex items-center gap-2">
           <button
@@ -1830,11 +1852,23 @@ const NoteEditor = forwardRef<
             {status}
           </span>
         </div>
-        {onTrash && (
-          <button type="button" className="glass-button min-h-11 px-3 py-2 text-xs text-rose-300" onClick={onTrash}>
-            <Trash2 size={13} /> Move to trash
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {initial.path && (
+            <button
+              type="button"
+              className="glass-button min-h-11 px-3 py-2 text-xs"
+              aria-pressed={showHistory}
+              onClick={() => setShowHistory(!showHistory)}
+            >
+              <History size={13} /> History
+            </button>
+          )}
+          {onTrash && (
+            <button type="button" className="glass-button min-h-11 px-3 py-2 text-xs text-rose-300" onClick={onTrash}>
+              <Trash2 size={13} /> Move to trash
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

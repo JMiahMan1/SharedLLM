@@ -197,3 +197,27 @@ async def test_the_write_route_passes_the_opened_version_through(monkeypatch):
     await main.proxy_write_note(_request({"title": "A", "content": "x", "path": "Notes/A.md", "if_match": '"v1"'}))
     assert seen["payload"]["action"] == "write"
     assert seen["payload"]["if_match"] == '"v1"'
+
+
+@pytest.mark.asyncio
+async def test_the_versions_route_maps_list_read_and_restore(monkeypatch):
+    from services.gateway import main
+
+    seen: list[tuple[dict, str | None]] = []
+
+    async def fake_proxy(request, path, payload, as_user=None):
+        seen.append((payload, as_user))
+        return JSONResponse(content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
+
+    await main.proxy_note_versions(_request({"path": "Notes/A.md", "as_user": "admin"}))
+    await main.proxy_note_versions(_request({"path": "Notes/A.md", "action": "read", "version": "1700000000"}))
+    await main.proxy_note_versions(_request({"path": "Notes/A.md", "action": "restore", "version": "1700000000"}))
+    assert [p["action"] for p, _ in seen] == ["versions", "version_read", "version_restore"]
+    assert seen[0][1] == "admin"
+    assert seen[2][0]["version"] == "1700000000"
+
+    refused = await main.proxy_note_versions(_request({"path": "Notes/A.md", "action": "delete"}))
+    assert refused.status_code == 400
+    assert len(seen) == 3
