@@ -151,8 +151,10 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
     unmockedCalls.push(`${route.request().method()} ${url}`);
     return route.abort();
   };
-  await page.route('**/api/**', catchAll);
-  await page.route('**/execute/**', catchAll);
+  // Match server paths only: a glob like `**/api/**` would also swallow the
+  // app's own source modules (src/features/media/api/*.ts) served by Vite.
+  const isServerCall = (url: URL) => url.pathname.startsWith('/api/') || url.pathname.startsWith('/execute/');
+  await page.route(isServerCall, catchAll);
 
   const json = (fixtureName: string, upstream?: 'ma' | 'abs') =>
     async (route: Route): Promise<void> => respond(route, fixtureName, scenario, upstream);

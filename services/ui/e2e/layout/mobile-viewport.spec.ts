@@ -27,7 +27,7 @@ test.describe('mobile shell fits the screen', () => {
   for (const path of PAGES) {
     test(`${path} cannot be dragged off the screen`, async ({ page }, info) => {
       test.skip(info.project.name !== 'hermetic-mobile', 'phone layout only');
-      await page.route('**/api/**', (route) => {
+      await page.route((url: URL) => url.pathname.startsWith('/api/'), (route) => {
         const url = route.request().url();
         if (url.includes('/api/users/me')) return route.fallback();
         return route.fulfill({ json: {} });

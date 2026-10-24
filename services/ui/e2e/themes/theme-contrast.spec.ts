@@ -27,8 +27,8 @@ const PAGES = [
 const MIN_TEXT = 3;
 
 async function mockApi(page: Page, themeId: string) {
-  await page.route('**/execute/**', (route: Route) => route.fulfill({ json: { status: 'SUCCESS' } }));
-  await page.route('**/api/**', (route: Route) => {
+  await page.route((url: URL) => url.pathname.startsWith('/execute/'), (route: Route) => route.fulfill({ json: { status: 'SUCCESS' } }));
+  await page.route((url: URL) => url.pathname.startsWith('/api/'), (route: Route) => {
     const p = new URL(route.request().url()).pathname;
     if (p === '/api/users/me') return route.fallback();
     if (p === '/api/users/me/theme') return route.fulfill({ json: { theme_id: themeId, packs: [] } });
