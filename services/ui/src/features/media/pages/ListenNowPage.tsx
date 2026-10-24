@@ -8,6 +8,7 @@ import { ActiveOutputCard } from '../components/ActiveOutputCard';
 import { MediaCard } from '../components/MediaCard';
 import { OutputPicker } from '../components/OutputPicker';
 import { PlayingInYourHome } from '../components/PlayingInYourHome';
+import { SearchEntry } from '../components/SearchEntry';
 import { Shelf, ShelfRow } from '../components/Shelf';
 import { CardSkeletons, EmptyState, ErrorRetry, PartialNotice } from '../components/StateViews';
 import { serviceProblem } from '../copy';
@@ -106,7 +107,10 @@ export default function ListenNowPage() {
     <>
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-[var(--site-text)] sm:text-3xl">Listen Now</h1>
-        <OutputPicker />
+        <div className="flex min-w-0 items-center gap-2">
+          <SearchEntry />
+          <OutputPicker />
+        </div>
       </header>
 
       <ActiveOutputCard />

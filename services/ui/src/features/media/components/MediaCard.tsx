@@ -70,12 +70,13 @@ export function MediaCard({
   return (
     <div className="group relative w-[clamp(132px,38vw,184px)] shrink-0 snap-start">
       {to ? (
-        <Link to={to} className="block rounded-[var(--radius-card)] focus-visible:outline-2 focus-visible:outline-[var(--site-accent-focus)]">
+        <Link to={to} data-result className="block rounded-[var(--radius-card)] focus-visible:outline-2 focus-visible:outline-[var(--site-accent-focus)]">
           {body}
         </Link>
       ) : (
         <button
           type="button"
+          data-result
           onClick={onPlay}
           disabled={busy || !onPlay}
           aria-label={`Play ${title}`}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Keyboard, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -19,7 +20,8 @@ const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
   { keys: ['R'], label: 'Cycle repeat: off, all, one' },
   { keys: ['Q'], label: 'Open the queue' },
   { keys: ['F'], label: 'Open Now Playing' },
-  { keys: ['/'], label: 'Search pages and settings (on Notes: search notes)' },
+  { keys: ['/'], label: 'Search (in Media: music and books; elsewhere: pages and settings; on Notes: notes)' },
+  { keys: ['Ctrl', 'K'], label: 'In Media: search music and books' },
   { keys: ['C'], label: 'On Notes: take a note' },
   { keys: ['Ctrl', 'S'], label: 'In a note: save' },
   { keys: ['Ctrl', 'Enter'], label: 'In a note: save and close (Esc closes too)' },
@@ -113,8 +115,12 @@ export default function MediaShortcuts({
   const { trigger } = useHaptics();
   const reduceMotion = useReducedMotion();
   const [helpOpen, setHelpOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const playerRef = useRef(player);
+  const locationRef = useRef(location.pathname);
+  const navigateRef = useRef(navigate);
   const helpRef = useRef(helpOpen);
   const openNowRef = useRef(onOpenNowPlaying);
   const openQueueRef = useRef(onOpenQueue);
@@ -125,6 +131,8 @@ export default function MediaShortcuts({
     openNowRef.current = onOpenNowPlaying;
     openQueueRef.current = onOpenQueue;
     triggerRef.current = trigger;
+    locationRef.current = location.pathname;
+    navigateRef.current = navigate;
   });
 
   useEffect(() => {
@@ -153,6 +161,19 @@ export default function MediaShortcuts({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // ⌘K / Ctrl+K on a media page: straight to media search, even from a field.
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k'
+        && locationRef.current.startsWith('/media')) {
+        event.preventDefault();
+        const field = document.querySelector<HTMLInputElement>('[data-media-search]');
+        if (field && locationRef.current.startsWith('/media/search')) {
+          field.focus();
+          field.select();
+        } else {
+          navigateRef.current('/media/search');
+        }
+        return;
+      }
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
       if (isTypingTarget(event.target)) return;
 
@@ -164,7 +185,9 @@ export default function MediaShortcuts({
       if (helpRef.current) return;
 
       if (event.key === '/') {
-        const search = document.querySelector<HTMLInputElement>('[data-global-search]');
+        // A media page's own search wins over the header's page search.
+        const search = document.querySelector<HTMLInputElement>('[data-media-search]')
+          ?? document.querySelector<HTMLInputElement>('[data-global-search]');
         if (!search) return;
         event.preventDefault();
         search.focus();
