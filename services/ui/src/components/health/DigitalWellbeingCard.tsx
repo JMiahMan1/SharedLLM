@@ -7,6 +7,7 @@ import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import PhoneUsage from '../../plugins/phoneUsage';
 import type { UsageDay } from '../../types/api';
+import ScreenTimeControls from './ScreenTimeControls';
 import { appName, duration } from '../../lib/phoneUsageFormat';
 
 /**
@@ -71,7 +72,10 @@ export default function DigitalWellbeingCard() {
   const viewingSelf = subject === me;
   const canOpenSettings = viewingSelf && Capacitor.getPlatform() === 'android';
 
+  const subjectName = people.find((p) => p.username === subject)?.label || subject;
+
   return (
+    <>
     <section className="glass-panel rounded-2xl p-4 sm:p-5" data-testid="digital-wellbeing-card">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
@@ -164,5 +168,7 @@ export default function DigitalWellbeingCard() {
         </div>
       )}
     </section>
+    {!viewingSelf && <ScreenTimeControls key={subject} username={subject} name={subjectName} />}
+    </>
   );
 }

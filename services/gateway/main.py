@@ -118,6 +118,8 @@ from services.common.podcast_recommendations import podcast_events, recommend_po
 from services.common.book_recommendations import book_events, recommend_book
 from services.common.game_recommendations import recommend_game
 from services.common.activity_recommendations import recommend_activity
+from services.common import notify as _notify
+from services.common.screen_time import evaluate as evaluate_screen_time
 from services.common.relay import until_either_ends
 from services.gateway import calls, drawing, family_safety, network_routes, notices, push_routes
 from services.shared import ma_library
@@ -5409,6 +5411,120 @@ async def get_activity_recommendation(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
     usage = await _own_telemetry(user, "usage", {"days": 7})
     return {"status": "SUCCESS", "recommendation": recommend_activity(usage, os.getenv("TIMEZONE") or "UTC")}
+
+
+# --- screen time (Phase 11 step 4): identity owns the rules and who may
+# touch them; the gateway adds the live status and tells people. ---
+
+
+def _household_now() -> datetime:
+    return datetime.now(ZoneInfo(os.getenv("TIMEZONE") or "UTC"))
+
+
+async def _identity_as_caller(request: Request, method: str, path: str, **kwargs: Any) -> tuple[int, Any]:
+    """Call identity with the caller's own credentials, so identity's rules apply."""
+    headers = {k: v for k, v in (("Authorization", request.headers.get("Authorization")), ("X-API-Key", request.headers.get("X-API-Key"))) if v}
+    async with borrow_http_client() as client:
+        resp = await client.request(method, f"{IDENTITY_SVC}{path}", headers=headers, **kwargs)
+        try:
+            body = await resp.json(content_type=None)
+        except Exception:
+            body = {"detail": await resp.text()}
+    return resp.status, body
+
+
+async def _screen_time_notice(users: list[str], title: str, body: str, url: str) -> None:
+    for user in users or []:
+        try:
+            await _notify.send(_notify.notice(user, "family_safety", title, body, url=url, tag=f"screen-time:{user}"))
+        except Exception as exc:  # a missed notice never fails the request
+            log.warning("[screen-time] notice to %s failed: %s", user, exc)
+
+
+@app.get("/api/screen-time/{username}/status")
+async def screen_time_status(request: Request, username: str):
+    """Time left today and whether the phone should be locked now, and why.
+
+    The member themselves or their parents may ask (identity decides); the
+    phone's lock reads this.
+    """
+    now = _household_now()
+    day = now.date().isoformat()
+    status, body = await _identity_as_caller(request, "GET", f"/api/screen-time/{username}/rules", params={"day": day})
+    if status != 200:
+        raise HTTPException(status_code=status, detail=(body or {}).get("detail") or "Not allowed")
+    usage = await _own_telemetry(username, "usage", {"days": 1})
+    used_ms = next((d.get("millis") or 0 for d in usage if d.get("day") == day), 0)
+    state = evaluate_screen_time(body.get("rules"), used_ms, body.get("bonus_min") or 0, now)
+    return {"status": "SUCCESS", "username": username, "day": day, "rules": body.get("rules") or {}, "can_manage": bool(body.get("can_manage")), **state}
+
+
+@app.put("/api/screen-time/{username}/rules")
+async def screen_time_set_rules(request: Request, username: str):
+    status, body = await _identity_as_caller(request, "PUT", f"/api/screen-time/{username}/rules", json=await request.json())
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.post("/api/screen-time/{username}/pause")
+async def screen_time_pause(request: Request, username: str):
+    payload = await request.json()
+    status, body = await _identity_as_caller(request, "POST", f"/api/screen-time/{username}/pause", json=payload)
+    if status == 200:
+        paused = not payload.get("resume")
+        await _screen_time_notice(
+            [username],
+            "Phone paused" if paused else "Phone unpaused",
+            "A parent paused your phone for now." if paused else "Your phone is back on.",
+            "/health",
+        )
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.post("/api/screen-time/{username}/bonus")
+async def screen_time_bonus(request: Request, username: str):
+    payload = {**(await request.json()), "day": _household_now().date().isoformat()}
+    status, body = await _identity_as_caller(request, "POST", f"/api/screen-time/{username}/bonus", json=payload)
+    if status == 200:
+        minutes = (body.get("request") or {}).get("granted_minutes")
+        await _screen_time_notice(body.get("notify") or [], "Bonus time", f"A parent added {minutes} minutes for today.", "/health")
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.get("/api/screen-time/requests")
+async def screen_time_requests(request: Request, status: str = "pending"):
+    code, body = await _identity_as_caller(request, "GET", "/api/screen-time/requests", params={"status": status})
+    return JSONResponse(status_code=code, content=body)
+
+
+@app.post("/api/screen-time/requests")
+async def screen_time_ask(request: Request):
+    payload = {**(await request.json()), "day": _household_now().date().isoformat()}
+    status, body = await _identity_as_caller(request, "POST", "/api/screen-time/requests", json=payload)
+    if status == 200:
+        asked = body.get("request") or {}
+        note = f" \u2014 \u201c{asked['note']}\u201d" if asked.get("note") else ""
+        await _screen_time_notice(
+            body.get("notify") or [],
+            "More screen time?",
+            f"{asked.get('username')} asks for {asked.get('minutes')} more minutes today{note}.",
+            "/health",
+        )
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.post("/api/screen-time/requests/{request_id}")
+async def screen_time_decide(request: Request, request_id: int):
+    status, body = await _identity_as_caller(request, "POST", f"/api/screen-time/requests/{request_id}", json=await request.json())
+    if status == 200:
+        decided = body.get("request") or {}
+        granted = decided.get("status") == "granted"
+        await _screen_time_notice(
+            body.get("notify") or [],
+            "More time granted" if granted else "Not this time",
+            f"You have {decided.get('granted_minutes')} more minutes today." if granted else "A parent said not today.",
+            "/health",
+        )
+    return JSONResponse(status_code=status, content=body)
 
 
 @app.post("/api/communication/notes/read")

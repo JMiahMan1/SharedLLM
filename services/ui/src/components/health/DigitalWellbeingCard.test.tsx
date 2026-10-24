@@ -11,7 +11,7 @@ vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ user: auth.user 
 
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
-  return { ...actual, api: { ...(actual.api as Record<string, unknown>), getUsage: vi.fn(), getFamily: vi.fn() } };
+  return { ...actual, api: { ...(actual.api as Record<string, unknown>), getUsage: vi.fn(), getFamily: vi.fn(), getScreenTimeStatus: vi.fn(), getScreenTimeRequests: vi.fn() } };
 });
 
 function today(): string {
@@ -50,6 +50,8 @@ describe('DigitalWellbeingCard', () => {
     auth.user = { username: 'dad', family_role: 'father', is_minor: false };
     vi.mocked(api.getFamily).mockResolvedValue([]);
     vi.mocked(api.getUsage).mockResolvedValue({ status: 'SUCCESS', days: [day()] });
+    vi.mocked(api.getScreenTimeStatus).mockRejectedValue(new Error('not mocked here'));
+    vi.mocked(api.getScreenTimeRequests).mockResolvedValue({ requests: [] });
   });
 
   it("shows an adult's own day: screen time, first and last use, top apps by name", async () => {

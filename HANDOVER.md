@@ -21,6 +21,11 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `HEAD` Family guard: **screen-time budgets and routines, step 4a** (rules, live status, more-time
+  requests; no phone enforcement yet). See `docs/HEALTH_HUB.md` "Time budgets and routines" for
+  the full shape. Identity `ScreenRules`/`ScreenTimeRequest` tables are created on startup; the
+  gateway's `/api/screen-time/*` routes forward the caller's own credentials so identity's
+  parents-only rule applies, then add status and notices (`family_safety` category).
 - `HEAD` Android: **white status and navigation bars fixed (needs the new APK).** Capacitor 8's core
   `SystemBars` pads the window by the bar insets and paints the strip with the theme's
   `windowBackground` whenever the WebView is older than 140 (`viewport-fit=cover` alone is not
@@ -552,7 +557,11 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
    media sessions (YouTube title/creator/duration) plus per-app foreground time.
 2. Jarvis recommendations from the profile: music, video, podcasts, books, games and
    activities are done and shown in the For You widget. Still open in step 3: a parent can
-   bless or block a lane. Next build-order step: (4) time budgets and routines.
+   bless or block a lane.
+3. Screen time: 4a (rules, status, requests) is live; next is **4b, enforcement on the phone**
+   (an Accessibility service that locks all but the always-allowed apps while `locked`), together
+   with **tamper resistance** (Jarvis cannot be removed from a child's phone without a parent's
+   login): device admin + a parent PIN screen, or device-owner provisioning for a hard block.
 3. Keep the plan docs (`docs/HEALTH_HUB.md`, this handover) updated in the same commit as
    the code when scope changes.
 
