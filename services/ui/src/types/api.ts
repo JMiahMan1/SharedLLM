@@ -3267,3 +3267,17 @@ export interface HealthFastingState {
   recent: HealthFast[];
   presets: number[];
 }
+
+/** A Monday-to-Sunday week of active minutes (gateway /api/health/active-minutes). */
+export interface HealthActiveMinutes {
+  week_start: string;
+  week_end: string;
+  target_minutes: number | null;
+  total_minutes: number | null;
+  percent: number | null;
+  days: Array<{ day: string; minutes: number | null; sources: string[] }>;
+  sources: Array<'device' | 'heart_rate' | 'workouts' | 'steps'>;
+  estimate: boolean;
+  notes: string[];
+  unavailable: string[];
+}

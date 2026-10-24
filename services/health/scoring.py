@@ -57,6 +57,9 @@ METRIC_UNITS: dict[str, str] = {
     "weight": "kg",
     "body_fat": "%",
     "resting_hr": "bpm",
+    # Moment-to-moment heart rate from a watch or Health Connect; minutes in
+    # the heart-rate zones count towards the weekly active minutes.
+    "heart_rate": "bpm",
     "hrv": "ms",
     "spo2": "%",
     "water": "ml",
@@ -81,6 +84,7 @@ UNIT_ALIASES: dict[str, dict[str, tuple[float, str]]] = {
     },
     "body_fat": {"%": (1.0, "%"), "percent": (1.0, "%"), "pct": (1.0, "%")},
     "resting_hr": {"bpm": (1.0, "bpm"), "beats/min": (1.0, "bpm")},
+    "heart_rate": {"bpm": (1.0, "bpm"), "beats/min": (1.0, "bpm")},
     "hrv": {"ms": (1.0, "ms"), "milliseconds": (1.0, "ms")},
     "spo2": {"%": (1.0, "%"), "percent": (1.0, "%"), "pct": (1.0, "%")},
     "water": {
@@ -124,6 +128,7 @@ METRIC_BOUNDS: dict[str, tuple[float, float]] = {
     "weight": (1.0, 500.0),
     "body_fat": (1.0, 75.0),
     "resting_hr": (20.0, 250.0),
+    "heart_rate": (25.0, 250.0),
     "hrv": (0.0, 500.0),
     "spo2": (50.0, 100.0),
     "water": (0.0, 10000.0),

@@ -11,6 +11,7 @@ import DigitalWellbeingCard from '../components/health/DigitalWellbeingCard';
 import WeeklyDigestCard from '../components/health/WeeklyDigestCard';
 import FamilyChallengeCard from '../components/health/FamilyChallengeCard';
 import FastingCard from '../components/health/FastingCard';
+import ActiveMinutesCard from '../components/health/ActiveMinutesCard';
 import ScreenTimeCard from '../components/health/ScreenTimeCard';
 import PhoneProtectionCard from '../components/health/PhoneProtectionCard';
 import HealthConnectCard from '../components/health/HealthConnectCard';
@@ -68,6 +69,7 @@ const Health = () => {
             <PhoneProtectionCard />
             <TalkRequestCard />
             <HealthToday onNavigate={setTab} />
+            {on('active_minutes') && <ActiveMinutesCard />}
             {on('fasting') && <FastingCard />}
             {on('weekly_digest') && <WeeklyDigestCard />}
             {on('family_challenge') && <FamilyChallengeCard />}

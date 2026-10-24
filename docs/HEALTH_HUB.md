@@ -318,7 +318,17 @@ live search is the ecosystem-standard pattern.
 
 - [x] Sleep score from duration + interruptions (or manual quality), with confidence and missing-signal notes.
 - [x] Readiness from resting HR/sleep when available, else the morning check-in. Recent activity is not yet included.
-- [ ] Weekly cardio target and Active-Zone-like minutes from step/heart-rate data. The target is stored in the profile; no progress ring yet.
+- [x] Weekly cardio target and Active-Zone-like minutes from step/heart-rate data. `ActiveMinutesCard`
+  on Health → Today rings the Monday–Sunday week against the profile's weekly active minutes (no
+  target: the minutes only, and a prompt naming the guidelines rather than assuming one), with a bar
+  per day. The gateway composes `GET /api/health/active-minutes?day=` from geo (hourly steps,
+  workouts) and the health store (`heart_rate` readings, a new metric, and device
+  `active_minutes`) through the pure `services/common/active_minutes.py`: a device's own daily
+  total wins its day; otherwise each hour counts the largest of heart-rate zone minutes (64–76 % of
+  220 − age once, 77 %+ twice; no birth year, no heart-rate minutes, said so), workout minutes in
+  that hour, and brisk-walking minutes (steps beyond 1,000 in the hour at 100 a minute, labelled an
+  estimate). Overlapping step devices take the highest, never a sum. A day with nothing recorded is
+  missing, not zero; geo being down is named in `unavailable`.
 
 ### Phase 4 — nutrition logging
 
