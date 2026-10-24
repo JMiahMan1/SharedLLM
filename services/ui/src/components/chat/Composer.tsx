@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
 import { formatBytes, MAX_ATTACHMENT_BYTES, plainText, type TalkMessage } from './chatModel';
@@ -105,14 +106,11 @@ export default function Composer({
   const [draft, setDraft] = useState('');
   const [caret, setCaret] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [recording, setRecording] = useState(false);
   const [clip, setClip] = useState<{ url: string; base64: string; mimeType: string } | null>(null);
   const [caption, setCaption] = useState('');
   const [mentionOptions, setMentionOptions] = useState<MentionOption[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const photoRef = useRef<HTMLInputElement | null>(null);
   const cameraRef = useRef<HTMLInputElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -230,45 +228,23 @@ export default function Composer({
     setDraft('');
   };
 
+  const { recording, start: startRecorder, stop: stopRecording } = useAudioRecorder(async (blob) => {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+    // Preview before sending: recording is easy to do by accident, and a
+    // caption often carries the point of a voice note.
+    setClip({ url: URL.createObjectURL(blob), base64: btoa(binary), mimeType: blob.type });
+  });
+
   const startRecording = async () => {
     if (disabled) {
       toast.error('Pick a conversation first');
       return;
     }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      toast.error('Recording is not available on this device');
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
-        if (blob.size === 0) return;
-        const bytes = new Uint8Array(await blob.arrayBuffer());
-        let binary = '';
-        for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-        // Preview before sending: recording is easy to do by accident, and a
-        // caption often carries the point of a voice note.
-        setClip({ url: URL.createObjectURL(blob), base64: btoa(binary), mimeType: blob.type });
-      };
-      recorderRef.current = recorder;
-      recorder.start();
-      setRecording(true);
-    } catch {
-      toast.error('Microphone permission is needed to record a voice message');
-    }
-  };
-
-  const stopRecording = () => {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    setRecording(false);
+    const started = await startRecorder();
+    if (started === 'unsupported') toast.error('Recording is not available on this device');
+    else if (started === 'denied') toast.error('Microphone permission is needed to record a voice message');
   };
 
   const discardClip = () => {

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Camera,
   ChevronLeft,
   ChevronRight,
   Loader2,
@@ -24,14 +25,17 @@ import {
   type Meal,
 } from '../../lib/healthHub';
 import { isKidMode } from '../../lib/healthSwitches';
-import type { FoodEntry, FoodSearchItem } from '../../types/api';
+import { foodEntryFromSearch } from '../../lib/foodEntry';
+import { errorText } from '../../lib/errorText';
+import VoiceFoodDraft from './VoiceFoodDraft';
+import type { FoodEntry, FoodLabelDraft, FoodSearchItem } from '../../types/api';
 import type { HealthTab } from './HealthTabs';
 
 interface Props {
   onNavigate: (tab: HealthTab) => void;
 }
 
-type AddMode = 'search' | 'manual' | 'barcode';
+type AddMode = 'search' | 'manual' | 'barcode' | 'photo' | 'voice';
 
 const EMPTY_MANUAL = {
   name: '',
@@ -79,6 +83,9 @@ export default function HealthNutrition({ onNavigate }: Props) {
   const [servings, setServings] = useState('1');
   const [barcode, setBarcode] = useState('');
   const [manual, setManual] = useState(EMPTY_MANUAL);
+  // Set when the By hand form was filled from a label photo: the raw text and
+  // what the label did not print, shown beside the draft until it is saved.
+  const [photoRead, setPhotoRead] = useState<FoodLabelDraft | null>(null);
 
   const nutritionQuery = useQuery({
     queryKey: ['health-nutrition', day],
@@ -109,6 +116,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
     setServings('1');
     setBarcode('');
     setManual(EMPTY_MANUAL);
+    setPhotoRead(null);
   };
 
   const search = useMutation({
@@ -131,32 +139,39 @@ export default function HealthNutrition({ onNavigate }: Props) {
     onError: (error: Error) => toast.error(error.message || 'Barcode lookup failed'),
   });
 
+  const readPhoto = useMutation({
+    mutationFn: (photo: File) => api.readFoodLabelPhoto(photo),
+    onSuccess: (read) => {
+      if (read.found.length === 0) {
+        toast.error('No nutrition label could be read in that photo. Try a sharper, closer photo or type it.');
+        return;
+      }
+      const value = (number: number | null) => (number === null ? '' : String(number));
+      setManual({
+        ...EMPTY_MANUAL,
+        calories: value(read.draft.calories),
+        protein: value(read.draft.protein_g),
+        carbs: value(read.draft.carbs_g),
+        fat: value(read.draft.fat_g),
+      });
+      setPhotoRead(read);
+      setMode('manual');
+    },
+    onError: (error) => toast.error(errorText(error, 'The photo could not be read. Type the values instead.')),
+  });
+
   const addFood = useMutation({
     mutationFn: () => {
       if (!addingMeal) throw new Error('Choose a meal first');
       if (selected) {
-        const per100 = selected.per_100g;
-        if (per100.calories === null) throw new Error('That product has no calorie data');
-        const gramsValue = Number(grams) || selected.serving_grams || 100;
-        if (!Number.isFinite(gramsValue) || gramsValue <= 0) throw new Error('Enter a portion in grams');
-        const factor = gramsValue / 100;
-        return api.addFood({
-          day,
-          meal: addingMeal,
-          name: selected.name,
-          brand: selected.brand,
-          calories: (per100.calories ?? 0) * factor,
-          protein_g: (per100.protein_g ?? 0) * factor,
-          carbs_g: (per100.carbs_g ?? 0) * factor,
-          fat_g: (per100.fat_g ?? 0) * factor,
-          fiber_g: per100.fiber_g !== null ? per100.fiber_g * factor : null,
-          sugar_g: per100.sugar_g !== null ? per100.sugar_g * factor : null,
-          sodium_mg: per100.sodium_mg !== null ? per100.sodium_mg * factor : null,
-          servings: Number(servings) || 1,
-          serving_grams: gramsValue,
-          barcode: selected.source === 'usda_fdc' ? null : selected.code,
-          source: selected.source === 'usda_fdc' ? 'usda_fdc' : 'openfoodfacts',
-        });
+        return api.addFood(
+          foodEntryFromSearch(selected, {
+            grams: Number(grams) || selected.serving_grams || 100,
+            servings: Number(servings) || 1,
+            day,
+            meal: addingMeal,
+          }),
+        );
       }
       const name = manual.name.trim();
       if (!name) throw new Error('Give the food a name');
@@ -170,7 +185,11 @@ export default function HealthNutrition({ onNavigate }: Props) {
         carbs_g: Number(manual.carbs) || 0,
         fat_g: Number(manual.fat) || 0,
         servings: Number(manual.servings) || 1,
-        source: 'manual',
+        serving_grams: photoRead?.draft.serving_grams ?? null,
+        fiber_g: photoRead?.draft.fiber_g ?? null,
+        sugar_g: photoRead?.draft.sugar_g ?? null,
+        sodium_mg: photoRead?.draft.sodium_mg ?? null,
+        source: photoRead ? 'photo' : 'manual',
       });
     },
     onSuccess: () => {
@@ -329,6 +348,8 @@ export default function HealthNutrition({ onNavigate }: Props) {
               ['search', 'Search'],
               ['manual', 'By hand'],
               ['barcode', 'Barcode'],
+              ['photo', 'Photo'],
+              ['voice', 'Voice'],
             ] as Array<[AddMode, string]>).map(([id, label]) => (
               <button
                 key={id}
@@ -338,6 +359,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
                 onClick={() => {
                   setMode(id);
                   setSelected(null);
+                  if (id !== 'manual') setPhotoRead(null);
                 }}
                 className={`min-h-9 rounded-lg px-3 text-xs font-semibold ${
                   mode === id
@@ -485,6 +507,60 @@ export default function HealthNutrition({ onNavigate }: Props) {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {mode === 'photo' && (
+            <div className="mt-3 space-y-2" data-testid="photo-food-panel">
+              <p className="text-xs text-slate-400">
+                Photograph the nutrition label. The numbers it prints fill the form for you to check; anything it
+                cannot read stays empty.
+              </p>
+              <label className="glass-button flex min-h-11 cursor-pointer items-center justify-center gap-2 text-xs font-semibold">
+                {readPhoto.isPending ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+                {readPhoto.isPending ? 'Reading the label…' : 'Take or choose a photo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="sr-only"
+                  aria-label="Nutrition label photo"
+                  disabled={readPhoto.isPending}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (file) readPhoto.mutate(file);
+                  }}
+                />
+              </label>
+            </div>
+          )}
+
+          {mode === 'voice' && addingMeal && (
+            <VoiceFoodDraft
+              day={day}
+              meal={addingMeal}
+              kid={kid}
+              onLogged={() => {
+                resetAdd();
+                invalidate();
+              }}
+            />
+          )}
+
+          {mode === 'manual' && photoRead && (
+            <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-[11px] text-amber-100" data-testid="photo-draft-note">
+              <p>
+                Read from your photo. Check every number and give it a name before adding.
+                {photoRead.missing.length > 0 &&
+                  ` Not on the label: ${photoRead.missing.map((field) => field.replace('_g', '')).join(', ')}.`}
+                {photoRead.per_100g && ' These values are per 100 g: set Servings to the portion you ate (e.g. 0.5 for 50 g).'}
+                {photoRead.draft.serving_label && ` Serving: ${photoRead.draft.serving_label}.`}
+              </p>
+              <details className="mt-1 text-slate-300">
+                <summary className="cursor-pointer">What the photo said</summary>
+                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[10px]">{photoRead.text}</pre>
+              </details>
             </div>
           )}
 

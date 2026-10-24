@@ -100,6 +100,43 @@ def test_a_new_cheer_sends_one_health_notice(client, monkeypatch):
     assert notices[0]["title"] == "Mom cheered your day"
 
 
+def _ocr_fake(monkeypatch, answer, status=200):
+    sent: list[dict] = []
+
+    async def _creds(_request, _as_user=None):
+        return {"user": "dad", "is_admin": False}
+
+    class _Exec:
+        async def post(self, url, json=None, **kw):
+            sent.append({"url": url, "json": json})
+            return _Resp(answer, status=status)
+
+    @asynccontextmanager
+    async def fake():
+        yield _Exec()
+
+    monkeypatch.setattr(gateway_main, "_resolve_acting_identity", _creds)
+    monkeypatch.setattr(gateway_main, "shared_http_client", fake)
+    return sent
+
+
+def test_a_label_photo_becomes_a_draft_and_nothing_is_saved(client, monkeypatch):
+    sent = _ocr_fake(monkeypatch, {"status": "SUCCESS", "detail": {"full_text": "Calories 120\nTotal Fat 2g\nTotal Carbohydrate 20g\nProtein 5g"}})
+    body = client.post("/api/health/food/photo", files={"image": ("label.jpg", b"jpeg-bytes", "image/jpeg")}).json()
+    assert body["draft"]["calories"] == 120 and body["missing"] == []
+    assert body["text"].startswith("Calories 120")
+    assert sent[0]["url"].endswith("/execute/ocr") and sent[0]["json"]["task"] == "document"
+    assert sent[0]["json"]["user_context"]["user"] == "dad"
+
+
+def test_an_unreadable_photo_says_so(client, monkeypatch):
+    _ocr_fake(monkeypatch, {"status": "FAILURE", "message": "OCR failed: vision_ocr_model not configured"})
+    response = client.post("/api/health/food/photo", files={"image": ("label.jpg", b"jpeg-bytes", "image/jpeg")})
+    assert response.status_code == 502
+    assert "vision_ocr_model" in response.json()["detail"]
+    assert client.post("/api/health/food/photo", files={"other": ("x.jpg", b"x", "image/jpeg")}).status_code == 422
+
+
 def _coach_store(monkeypatch, summary):
     seen: list[tuple[str, dict]] = []
 

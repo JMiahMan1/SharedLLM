@@ -1153,7 +1153,10 @@ class OcrRequest(BaseRequest):
     Returns structured fields: full_text, headline, subtext, badge.
     """
     user_context: UserContext
-    image_path: str = Field(..., description="Path to the image file inside the workspace (e.g. 'sign_original.jpg')")
+    image_path: str | None = Field(None, description="Path to the image file inside the workspace (e.g. 'sign_original.jpg')")
+    # An image sent inline instead of a workspace file (a photo of a food label
+    # from the Health hub): base64 bytes, never written outside a temp file.
+    image_base64: str | None = Field(None, description="Base64 image bytes, used instead of image_path")
     task: str = Field("general", description="OCR task type: 'general', 'document', or 'price_scrape'")
     model: str | None = Field(None, description="Override vision model name (default: vision_ocr_model setting)")
     proxy_url: str | None = Field(None, description="Override LLM proxy URL (default: llm_local_url setting)")

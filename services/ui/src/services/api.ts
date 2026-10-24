@@ -158,6 +158,7 @@ import type {
   HealthGoalsWeek,
   HealthCheer,
   HealthCheersDay,
+  FoodLabelDraft,
   HealthFastingState,
   HealthCycleSummary,
   HealthCyclePeriod,
@@ -1810,6 +1811,18 @@ export const api = {
   }> {
     const params = new URLSearchParams({ q, limit: String(limit) });
     const resp = await apiClient.get(`/api/health/food/search?${params.toString()}`);
+    return resp.data;
+  },
+
+  /** A nutrition-label photo read by the vision OCR into a draft; nothing is saved. */
+  async readFoodLabelPhoto(photo: Blob): Promise<FoodLabelDraft> {
+    const form = new FormData();
+    form.append('image', photo, 'label.jpg');
+    const resp = await apiClient.post('/api/health/food/photo', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      // The vision model runs locally and can take a minute or two.
+      timeout: 300_000,
+    });
     return resp.data;
   },
 

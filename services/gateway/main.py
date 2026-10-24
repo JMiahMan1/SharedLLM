@@ -29,6 +29,7 @@ from services.common import active_minutes as _active_minutes
 from services.common import guardian_recap as _recap
 from services.common import health_coach as _health_coach
 from services.common import notify as _notify
+from services.common import nutrition_label as _nutrition_label
 from services.common.activity_recommendations import recommend_activity
 from services.common.book_recommendations import book_events, recommend_book
 from services.common.burden import is_burdened
@@ -13280,6 +13281,49 @@ async def get_health_active_minutes(request: Request, day: str | None = None):
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD") from exc
     return await _active_minutes_week(request, day)
+
+
+_FOOD_PHOTO_MAX_BYTES = 8 * 1024 * 1024
+
+
+@app.post("/api/health/food/photo")
+async def read_food_label_photo(request: Request):
+    """A photo of a nutrition label -> an editable draft (nothing is saved).
+
+    The image goes through the same vision OCR as workspaces and Raven
+    (execution's ``/execute/ocr``, inline bytes instead of a workspace file);
+    ``services/common/nutrition_label.py`` reads the printed numbers out of the
+    transcription. The UI shows the draft and the raw text side by side and
+    the person saves it through the ordinary food log.
+    """
+    creds = await _resolve_acting_identity(request, None)
+    form = await request.form()
+    upload = form.get("image")
+    if not isinstance(upload, UploadFile):
+        raise HTTPException(status_code=422, detail="Attach the photo as 'image'")
+    raw = await upload.read()
+    if not raw:
+        raise HTTPException(status_code=422, detail="The photo is empty")
+    if len(raw) > _FOOD_PHOTO_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="The photo is larger than 8 MB")
+    payload = {"user_context": creds, "image_base64": base64.b64encode(raw).decode(), "task": "document"}
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/ocr",
+                json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=300.0),
+            )
+            result = await resp.json(content_type=None) if resp.status == 200 else None
+    except Exception as exc:
+        log.warning("[health] food photo OCR failed: %s", exc)
+        result = None
+    if not isinstance(result, dict) or result.get("status") == "FAILURE":
+        reason = (result or {}).get("message") if isinstance(result, dict) else None
+        raise HTTPException(status_code=502, detail=reason or "The photo could not be read. Type the values instead.")
+    text = str(((result.get("detail") or {}).get("full_text")) or "")
+    return {"text": text, **_nutrition_label.parse(text)}
 
 
 @app.get("/api/health/cheers")
