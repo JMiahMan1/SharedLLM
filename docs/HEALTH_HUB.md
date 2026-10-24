@@ -52,8 +52,11 @@ Built in this pass:
   Fitness page is hosted unchanged under its tab, so hourly step charts,
   workouts, achievements and the family activity feed keep one implementation.
 
+Built since: recipe-first logging (a recipe or tonight's planned dinner logs
+to Health with a portion picker; Phase 4) and the weekly digest (Phase 5).
+
 Not built yet, and not pretended otherwise: Health Connect/device import,
-recipe↔log round trip and one-tap planned meals, weekly digest, family
+marking the plan cooked from a log, family
 challenges/cheers, dashboard and Android home-screen widgets, photo/voice food
 logging, fasting windows, micro-lessons and the chat coach. Those remain the
 later phases below.
@@ -254,7 +257,16 @@ live search is the ecosystem-standard pattern.
 
 ### Phase 4 — nutrition logging
 
-- [ ] Recipe-first logging: a cooked planned meal logs its per-serving macros with a portion picker. `FoodEntry` carries `recipe_path`; the recipe import/one-tap flow is not built.
+- [x] Recipe-first logging: a cooked planned meal logs its per-serving macros with a portion picker.
+  **Log to Health** on an open recipe (Recipes page) and **Log tonight's dinner** on today's row of
+  the week plan open `LogRecipeSheet`: portion ½ / 1 / 1½ / 2, meal (dinner by default), the
+  portion's calories and macros, then one tap posts a `FoodEntry` with the note's per-serving
+  values, `servings` as the multiplier, `recipe_path` set, brand `Family recipe` and source
+  `recipe`. The values are read from the note's `## Nutrition` line as `scripts/import_recipes.py`
+  writes it (`src/lib/recipeNutrition.ts`, pure and tested): calories, protein, carbs and fat must
+  all be stated (fiber, sugar and sodium are kept when present). A note with no nutrition, or one
+  missing any of the four, says so and offers manual entry instead (logged as source `manual`,
+  still linked to the recipe). Entries show in the Nutrition day like any other.
 - [x] Quick add: USDA seed search (generic foods, household portions), OpenFoodFacts search, cached barcode lookup and manual entry. Voice and photo logging remain future work.
 - [x] Food data depth: the read-only USDA seed is mirrored on the server (13,620 foods, per-100 g plus portions like "1 cup, chopped" = 91 g) and searched before OpenFoodFacts; barcode results are cached permanently. The seed is optional at runtime (`FDC_SEED_PATH`): absent → OFF-only, one log line, never an error.
 - [x] Water tracking. Fasting window indicator is not built.
@@ -520,7 +532,7 @@ surfaces.
 ## Acceptance
 
 - [x] Each family member has a profile and their own Health day.
-- [ ] A planned dinner logs with one tap and shows calories, macros and portions.
+- [x] A planned dinner logs with one tap and shows calories, macros and portions (Recipes → Week plan → Log tonight's dinner).
 - [x] Barcode lookup works with a permanent per-product cache; photo and voice logging are not built.
 - [x] Sleep and readiness show from manual data now and are device-ready; check-ins cover the no-wearable case.
 - [x] Cycle tracking is opt-in, private, shown only when the profile is female, and minors can share it only with their linked mother account. An adult can share with a spouse, who also sees phase-aware support suggestions clearly labelled as general ideas.

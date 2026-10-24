@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, CalendarDays, Link2, Loader2, Plus, Save, Search, Share2, ShoppingCart, Shuffle, Trash2, Users } from 'lucide-react';
+import { BookOpen, CalendarDays, Link2, Loader2, Plus, Save, Search, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
@@ -9,6 +9,7 @@ import type { ExecutionResponse } from '../types/api';
 import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
 import ShareToChatSheet from '../components/bible/ShareToChatSheet';
+import LogRecipeSheet from '../components/health/LogRecipeSheet';
 import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
 import { SHOPPING_PATH, SHOPPING_TITLE, buildShoppingList, ingredientLines, shoppingShareText } from '../lib/shoppingList';
 import { buildRecipeNote, type ImportedRecipe, type RecipeSearchItem } from '../lib/recipeImport';
@@ -18,6 +19,7 @@ import {
   parseMealPlan,
   planLevel,
   pickSurprise,
+  planDayOf,
   planShareText,
   PLAN_DAYS,
   PLAN_PATH,
@@ -42,6 +44,13 @@ interface ShareRequest {
   heading: string;
   previewIcon: string;
   buildMessage: (note: string) => string;
+}
+
+/** A recipe on its way to Health: the note body carries its nutrition. */
+interface LogRequest {
+  title: string;
+  path: string;
+  body: string;
 }
 
 function notesOf(response: ExecutionResponse | undefined): RecipeSummary[] {
@@ -83,6 +92,8 @@ export default function Recipes() {
   const [planExists, setPlanExists] = useState(false);
   const [planBusy, setPlanBusy] = useState(false);
   const [planLevels, setPlanLevels] = useState<Record<string, string>>({});
+  const [logRequest, setLogRequest] = useState<LogRequest | null>(null);
+  const [loggingPlanned, setLoggingPlanned] = useState(false);
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
@@ -295,6 +306,22 @@ export default function Recipes() {
     setPlan(next);
   };
 
+  // Today's planned dinner goes to Health from the note itself, so the
+  // values are the ones the recipe states, not the editor's draft.
+  const logPlannedDinner = async (recipeTitle: string) => {
+    const path = recipes.find((recipe) => recipe.title === recipeTitle)?.path ?? `${RECIPES_DIR}/${recipeTitle}.md`;
+    setLoggingPlanned(true);
+    try {
+      const res = await api.readNote(recipeTitle, STORAGE, path, asUser);
+      if (res.status === 'SUCCESS') setLogRequest({ title: recipeTitle, path, body: noteBody(res.message ?? '') });
+      else toast.error(res.message || 'Could not read that recipe');
+    } catch {
+      toast.error('Could not read that recipe');
+    } finally {
+      setLoggingPlanned(false);
+    }
+  };
+
   const savePlan = async () => {
     setPlanBusy(true);
     try {
@@ -448,6 +475,7 @@ export default function Recipes() {
     }
   };
 
+  const today = planDayOf();
   const plannedTitles = PLAN_DAYS.map((day) => plan[day].title).filter(Boolean) as string[];
   const repeated = Array.from(
     new Set(plannedTitles.filter((candidate, index) => plannedTitles.indexOf(candidate) !== index)),
@@ -668,6 +696,18 @@ export default function Recipes() {
                   Level {planLevels[plan[day].title as string]}
                 </span>
               ) : null}
+              {day === today && plan[day].title ? (
+                <button
+                  type="button"
+                  onClick={() => void logPlannedDinner(plan[day].title as string)}
+                  disabled={loggingPlanned}
+                  data-testid="plan-log-today"
+                  className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+                >
+                  {loggingPlanned ? <Loader2 size={14} className="animate-spin" /> : <Utensils size={14} />}
+                  Log tonight&apos;s dinner
+                </button>
+              ) : null}
             </div>
           ))}
           {repeated.length > 0 && (
@@ -771,7 +811,7 @@ export default function Recipes() {
               {selected ? 'Editing' : 'New recipe'}
             </span>
             {selected && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -787,6 +827,15 @@ export default function Recipes() {
                   className="glass-button min-h-11 px-3 text-xs"
                 >
                   <Share2 size={14} /> Share to chat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLogRequest({ title: selected.title, path: selected.path, body })}
+                  disabled={read.isPending}
+                  data-testid="recipe-log-health"
+                  className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+                >
+                  <Utensils size={14} /> Log to Health
                 </button>
                 <button type="button" onClick={startNew} className="glass-button min-h-11 px-3 text-xs">
                   <Plus size={14} /> New recipe
@@ -830,6 +879,15 @@ export default function Recipes() {
           previewIcon={share.previewIcon}
           buildMessage={share.buildMessage}
           onClose={() => setShare(null)}
+        />
+      )}
+
+      {logRequest && (
+        <LogRecipeSheet
+          title={logRequest.title}
+          path={logRequest.path}
+          body={logRequest.body}
+          onClose={() => setLogRequest(null)}
         />
       )}
     </div>

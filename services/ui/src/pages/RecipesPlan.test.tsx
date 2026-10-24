@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import Recipes, { RECIPES_DIR } from './Recipes';
 import { api } from '../services/api';
+import { PLAN_DAYS, planDayOf } from '../lib/mealPlan';
 
 vi.mock('../services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/api')>();
@@ -185,5 +186,44 @@ describe('Recipes week plan', () => {
     expect(sent.token).toBe('room-1');
     expect(sent.message).toContain("This week's dinners");
     expect(sent.message).toContain('Mon · Chicken Chili');
+  });
+
+  it("logs tonight's planned dinner from the recipe note", async () => {
+    const today = planDayOf();
+    const tomorrow = PLAN_DAYS[(PLAN_DAYS.indexOf(today) + 1) % 7];
+    readNote.mockImplementation(
+      (async (title: string) => {
+        if (title === 'Meal plan') {
+          return {
+            status: 'SUCCESS' as const,
+            message: `#meal-plan\n\n- [ ] ${today} · Pancakes\n- [ ] ${tomorrow} · Pancakes`,
+            service: 'note_read',
+          };
+        }
+        return {
+          status: 'SUCCESS' as const,
+          message: '# Pancakes\nCategory: Recipes\n\n## Nutrition\n*Per serving — foodcom:* 300 kcal · 9 g fat · 45 g carbs · 8 g protein',
+          service: 'note_read',
+        };
+      }) as never,
+    );
+    renderRecipes();
+    await screen.findByText('Pancakes');
+    fireEvent.click(await screen.findByRole('button', { name: /week plan/i }));
+
+    // Only today's row offers it.
+    expect(await screen.findAllByTestId('plan-log-today')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('plan-log-today'));
+    expect(await screen.findByTestId('log-recipe-sheet')).toBeTruthy();
+    expect(screen.getByTestId('log-recipe-per-serving')).toHaveTextContent('300 kcal');
+    expect(readNote).toHaveBeenCalledWith('Pancakes', 'nextcloud', `${RECIPES_DIR}/Pancakes.md`, undefined);
+  });
+
+  it('offers Log to Health from an open recipe', async () => {
+    renderRecipes();
+    fireEvent.click(await screen.findByText('Pancakes'));
+    fireEvent.click(await screen.findByTestId('recipe-log-health'));
+    // The test recipe has no nutrition: the sheet says so instead of guessing.
+    expect(await screen.findByTestId('log-recipe-manual')).toHaveTextContent('no per-serving nutrition');
   });
 });
