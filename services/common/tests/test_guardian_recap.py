@@ -63,3 +63,25 @@ def test_late_nights_count_in_household_time():
     early = {"day": "2026-10-21", "millis": 60000, "last_use": 1792627200000}  # 21 Oct 17:00 Phoenix
     r = build([late, early], [], [], START, END, "America/Phoenix")
     assert r["screen"]["late_nights"] == 1
+
+
+def test_a_parents_question_names_one_of_their_children():
+    from services.common.guardian_recap import asked_about
+
+    kids = [{"username": "emma", "display_name": "Emma"}, {"username": "sam", "display_name": "Samuel"}]
+    assert asked_about("How was Emma's week?", kids)["username"] == "emma"
+    assert asked_about("how is samuel doing", kids)["username"] == "sam"
+    assert asked_about("how was the weather this week", kids) is None
+    assert asked_about("play emma's playlist", kids) is None
+    assert asked_about("how was Emmanuel's week", kids) is None
+
+
+def test_the_spoken_recap():
+    from services.common.guardian_recap import spoken
+
+    usage = [_usage("2026-10-19", 120, [("com.google.android.youtube", 70)])]
+    concerns = [{"category": "bullying", "label": "Bullying", "level": "high", "at": "2026-10-21T10:00:00Z"}]
+    text = spoken("Emma", build(usage, [], concerns, START, END))
+    assert text.startswith("Emma has averaged 2 h 0 min a day on the phone.")
+    assert "Most used: Youtube." in text and "bullying (high)" in text
+    assert spoken("Emma", build([], [], [], START, END)) == "Nothing has been reported from Emma's phone yet this week."

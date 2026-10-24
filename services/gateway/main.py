@@ -121,6 +121,7 @@ from services.common.activity_recommendations import recommend_activity
 from services.common.sleep_estimate import estimate_night
 from services.common.guidance import guidance as _guidance
 from services.common.burden import is_burdened
+from services.common import guardian_recap as _recap
 from services.common import notify as _notify
 from services.common.screen_time import evaluate as evaluate_screen_time
 from services.common.relay import until_either_ends
@@ -1530,6 +1531,31 @@ async def workspace_runtime_request(method: str, path: str, *, json_payload: dic
     if not isinstance(data, dict):
       raise HTTPException(status_code=500, detail=f"Workspace runtime returned invalid payload for {path}")
     return data
+
+
+async def _child_week_answer(query: str, user_id: str) -> str | None:
+    """A parent asking about one of their own children's week ("how was Emma's
+    week?") gets the recap in plain words; anyone else falls through."""
+    q = (query or "").lower()
+    if not user_id or not any(cue in q for cue in ("week", "doing", "recap")):
+        return None
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    try:
+        async with borrow_http_client() as client:
+            resp = await client.get(f"{IDENTITY_SVC}/api/internal/guardian/children", headers=headers)
+            children = ((await resp.json(content_type=None)) or {}).get("children") or [] if resp.status == 200 else []
+            mine = [c for c in children if user_id.lower() in [p.lower() for p in c.get("parents") or []]]
+            child = _recap.asked_about(query, mine)
+            if not child:
+                return None
+            got = await client.get(f"{TELEMETRY_SVC}/api/telemetry/recap/{child['username']}", headers=headers)
+            recap = ((await got.json(content_type=None)) or {}).get("recap") if got.status == 200 else None
+    except Exception as exc:
+        log.warning("[guardian] week answer skipped: %s", exc)
+        return None
+    if recap is None:
+        return None
+    return _recap.spoken(child.get("display_name") or child["username"], recap)
 
 
 async def handle_workspace_creation(
@@ -3204,6 +3230,14 @@ async def chat_handler(request: Request, background_tasks=None):
         if is_openai:
             return _make_openai_response(ans, selected_model, "datetime")
         return _make_ollama_response(ans, selected_model, "datetime")
+
+    recap_answer = await _child_week_answer(query, user_id)
+    if recap_answer:
+        await update_history(user_id, "user", query)
+        await update_history(user_id, "assistant", recap_answer)
+        if is_openai:
+            return _make_openai_response(recap_answer, selected_model, "guardian_recap")
+        return _make_ollama_response(recap_answer, selected_model, "guardian_recap")
 
     if wants_workspace_readme_generation(query):
         return await generate_workspace_readme_via_coding_model(
