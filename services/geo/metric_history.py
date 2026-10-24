@@ -40,9 +40,9 @@ AVAILABLE_METRICS: dict[str, dict] = {
 #: can explain the absence instead of showing an empty card.
 UNAVAILABLE_METRICS: dict[str, str] = {
     "calories": "Never recorded: the calories field is written as None and nothing fills it in.",
-    "active_minutes": "Never recorded: no minute-by-minute activity intensity is stored.",
+    "active_minutes": "Not a geo metric: the health service composes it (GET /api/health/active-minutes).",
     "sleep": "Not recorded by any current source.",
-    "heart_rate": "Not recorded by any current source.",
+    "heart_rate": "Not a geo metric: heart-rate readings live in the health store (/api/health/metrics/heart_rate).",
     "weight": "Not recorded by any current source.",
 }
 
