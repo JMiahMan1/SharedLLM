@@ -15,6 +15,7 @@ import {
   History,
   LayoutGrid,
   Loader2,
+  MapPin,
   Palette,
   Pin,
   PinOff,
@@ -34,7 +35,7 @@ import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
 import RichNoteEditor, { type RichNoteEditorHandle } from '../components/notes/RichNoteEditor';
 import NoteHistory from '../components/notes/NoteHistory';
-import ReminderPanel from '../components/notes/ReminderPanel';
+import ReminderPanel, { type Place } from '../components/notes/ReminderPanel';
 import SharePanel from '../components/notes/SharePanel';
 import { richEditable } from '../lib/noteRichText';
 import { remarkNoteSpans } from '../lib/remarkNoteSpans';
@@ -61,6 +62,7 @@ import {
   noteBody,
   noteDisplayBody,
   parseChecklist,
+  placeReminderText,
   parseNoteQuery,
   parseNotesIndex,
   readNotesSnapshot,
@@ -73,6 +75,7 @@ import {
   type NoteColor,
   type NotesIndex,
   type NoteReminder,
+  type NotePlaceReminder,
   type NotesIndexEntry,
   type NotesLayout,
 } from '../lib/notesMeta';
@@ -117,6 +120,9 @@ interface FreshNote {
   content: string;
   etag?: string;
 }
+
+/** The caller's waiting place reminders (geo). */
+const PLACE_REMINDERS_KEY = ['place-reminders'] as const;
 
 /** How long typing must pause before an open note saves itself. */
 const AUTOSAVE_MS = 1500;
@@ -254,6 +260,26 @@ export default function Notes() {
   });
   const index = indexQuery.data ?? EMPTY_NOTES_INDEX;
 
+  // Which place reminders geo still has: one that went off is gone there, so
+  // its card stops showing it. Asked only when some note has one.
+  const hasPlaceReminders = useMemo(() => Object.values(index.notes).some((e) => e.placeReminder), [index]);
+  const placeRemindersQuery = useQuery({
+    queryKey: PLACE_REMINDERS_KEY,
+    queryFn: () => api.getPlaceReminders(),
+    enabled: hasPlaceReminders,
+    retry: false,
+    staleTime: 60_000,
+  });
+  const waitingPlaceIds = useMemo(
+    () => (placeRemindersQuery.isSuccess ? new Set(placeRemindersQuery.data.reminders.map((r) => r.id)) : null),
+    [placeRemindersQuery.isSuccess, placeRemindersQuery.data],
+  );
+  /** True while geo still has it, false once it went off, undefined while unknown. */
+  const placeWaiting = useCallback(
+    (reminder: NotePlaceReminder | undefined) => (reminder && waitingPlaceIds ? waitingPlaceIds.has(reminder.id) : undefined),
+    [waitingPlaceIds],
+  );
+
   // Keep the last good list on this device. The next visit seeds the queries
   // above with it, so the shelf never waits on WebDAV to show anything.
   useEffect(() => {
@@ -311,8 +337,9 @@ export default function Notes() {
   const loadError = listRes != null && listRes.status !== 'SUCCESS';
 
   const refresh = useCallback(async () => {
+    void queryClient.invalidateQueries({ queryKey: PLACE_REMINDERS_KEY });
     await refetch();
-  }, [refetch]);
+  }, [refetch, queryClient]);
 
   const parsedQuery = useMemo(() => parseNoteQuery(search), [search]);
   const tagChips = useMemo(() => topTags(mainNotes, contents), [mainNotes, contents]);
@@ -541,14 +568,16 @@ export default function Notes() {
       ) {
         await persistIndex((current) => {
           let next = current;
-          // A renamed note keeps its reminder (the timer itself is unchanged).
-          const carried = draft.path && savedPath !== draft.path ? indexEntry(current, draft.path).reminder : undefined;
+          // A renamed note keeps its reminders (the timer and the place
+          // reminder themselves are unchanged).
+          const old = draft.path && savedPath !== draft.path ? indexEntry(current, draft.path) : {};
           if (draft.path && savedPath !== draft.path) next = forgetIndexEntry(next, draft.path);
           if (savedPath) {
             next = setIndexEntry(next, savedPath, {
               pinned: draft.pinned,
               color: draft.color,
-              ...(carried ? { reminder: carried } : {}),
+              ...(old.reminder ? { reminder: old.reminder } : {}),
+              ...(old.placeReminder ? { placeReminder: old.placeReminder } : {}),
             });
           }
           return next;
@@ -594,15 +623,54 @@ export default function Notes() {
     toast.success(at ? `Reminder set for ${new Date(reminder!.at).toLocaleString()}` : 'Reminder removed');
   };
 
-  /** A note deleted for good takes its pending reminder with it (best effort). */
+  /**
+   * Set, change or remove a note's place reminder ("when I get home"). Geo
+   * keeps it and fires it on the caller's own arrival or departure; the
+   * index records which one, for the card. A change sets the new one before
+   * removing the old, as with the timed reminder.
+   */
+  const setNotePlaceReminder = async (
+    path: string,
+    title: string,
+    place: { zone: string; name: string } | null,
+    on: 'arrive' | 'leave' = 'arrive',
+  ): Promise<void> => {
+    const previous = indexEntry(queryClient.getQueryData<NotesIndex>(indexKey), path).placeReminder;
+    let placeReminder: NotePlaceReminder | undefined;
+    if (place) {
+      const res = await api.addPlaceReminder({
+        zone: place.zone,
+        on,
+        title: `📝 ${title}`,
+        url: `/notes?note=${encodeURIComponent(path)}`,
+      });
+      const made = res.reminder;
+      if (!made?.id) throw new Error('Could not set the place reminder');
+      placeReminder = { id: made.id, zone: made.zone, zoneName: made.zone_name || place.name, on: made.on };
+    }
+    if (previous) {
+      // 404: it already went off, so there is nothing left to cancel.
+      await api.removePlaceReminder(previous.id).catch((err: unknown) => {
+        if ((err as { response?: { status?: number } })?.response?.status !== 404) {
+          toast.error('The earlier place reminder could not be cancelled');
+        }
+      });
+    }
+    await persistIndex((current) => setIndexEntry(current, path, { placeReminder }));
+    void queryClient.invalidateQueries({ queryKey: PLACE_REMINDERS_KEY });
+    toast.success(placeReminder ? `Reminder set for ${placeReminderText(placeReminder).toLowerCase()}` : 'Place reminder removed');
+  };
+
+  /** A note deleted for good takes its pending reminders with it (best effort). */
   const cancelReminders = (paths: string[]) => {
     const current = queryClient.getQueryData<NotesIndex>(indexKey);
     for (const path of paths) {
-      const reminder = indexEntry(current, path).reminder;
+      const { reminder, placeReminder } = indexEntry(current, path);
       if (reminder && Date.parse(reminder.at) > Date.now()) {
         const title = path.split('/').pop()?.replace(/\.md$/, '') ?? path;
         void api.deleteTimer(`📝 ${title}`, 'reminder', reminder.timerId).catch(() => null);
       }
+      if (placeReminder) void api.removePlaceReminder(placeReminder.id).catch(() => null);
     }
   };
 
@@ -1309,6 +1377,11 @@ export default function Notes() {
                     <Bell size={11} /> {new Date(meta.reminder.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
                   </p>
                 )}
+                {meta.placeReminder && placeWaiting(meta.placeReminder) !== false && (
+                  <p className="mt-2 flex items-center gap-1 text-[10px] text-amber-200" data-testid="note-place-reminder-chip">
+                    <MapPin size={11} /> {placeReminderText(meta.placeReminder)}
+                  </p>
+                )}
 
                 {tags.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -1459,6 +1532,16 @@ export default function Notes() {
                     }
                   : undefined
               }
+              placeReminder={editing.draft.path ? indexEntry(index, editing.draft.path).placeReminder : undefined}
+              placeWaiting={editing.draft.path ? placeWaiting(indexEntry(index, editing.draft.path).placeReminder) : undefined}
+              onSetPlaceReminder={
+                editing.draft.path
+                  ? (place, on) => {
+                      const path = editing.draft!.path!;
+                      return setNotePlaceReminder(path, notes.find((n) => n.path === path)?.title ?? editing.title, place, on);
+                    }
+                  : undefined
+              }
               onPersist={persistDraft}
               onKeepBoth={keepBoth}
               onDone={finishEditing}
@@ -1541,9 +1624,29 @@ const NoteEditor = forwardRef<
     reminder?: NoteReminder;
     /** Set (a time) or remove (null) the reminder; only a saved note can have one. */
     onSetReminder?: (at: Date | null) => Promise<void>;
+    /** The saved note's place reminder, and whether geo still has it. */
+    placeReminder?: NotePlaceReminder;
+    placeWaiting?: boolean;
+    /** Set (a place) or remove (null) the place reminder. */
+    onSetPlaceReminder?: (place: Place | null, on?: 'arrive' | 'leave') => Promise<void>;
   }
 >(function NoteEditor(
-  { initial, fresh, scope, onPersist, onKeepBoth, onDone, onUseStored, onTrash, asUser, reminder, onSetReminder },
+  {
+    initial,
+    fresh,
+    scope,
+    onPersist,
+    onKeepBoth,
+    onDone,
+    onUseStored,
+    onTrash,
+    asUser,
+    reminder,
+    onSetReminder,
+    placeReminder,
+    placeWaiting,
+    onSetPlaceReminder,
+  },
   handle,
 ) {
   const [showHistory, setShowHistory] = useState(false);
@@ -1907,7 +2010,21 @@ const NoteEditor = forwardRef<
         </div>
       </div>
       {showReminder && onSetReminder && (
-        <ReminderPanel reminder={reminder} onSet={(at) => onSetReminder(at)} onClear={() => onSetReminder(null)} />
+        <ReminderPanel
+          reminder={reminder}
+          onSet={(at) => onSetReminder(at)}
+          onClear={() => onSetReminder(null)}
+          place={
+            onSetPlaceReminder
+              ? {
+                  reminder: placeReminder,
+                  waiting: placeWaiting,
+                  onSet: (place, on) => onSetPlaceReminder(place, on),
+                  onClear: () => onSetPlaceReminder(null),
+                }
+              : undefined
+          }
+        />
       )}
       {showShare && initial.path && <SharePanel path={initial.path} asUser={asUser} />}
       {showHistory && initial.path && (
@@ -1959,7 +2076,7 @@ const NoteEditor = forwardRef<
           {onSetReminder && (
             <button
               type="button"
-              className={`glass-button min-h-11 px-3 py-2 text-xs ${reminder && Date.parse(reminder.at) > openedAt ? 'text-amber-300' : ''}`}
+              className={`glass-button min-h-11 px-3 py-2 text-xs ${(reminder && Date.parse(reminder.at) > openedAt) || (placeReminder && placeWaiting !== false) ? 'text-amber-300' : ''}`}
               aria-pressed={showReminder}
               onClick={() => setShowReminder(!showReminder)}
             >

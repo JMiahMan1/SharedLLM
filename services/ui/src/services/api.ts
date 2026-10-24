@@ -1417,6 +1417,28 @@ export const api = {
     return resp.data;
   },
 
+  /** The caller's waiting place reminders ("when I get home"); fired ones are gone. */
+  async getPlaceReminders(): Promise<{ reminders: PlaceReminder[] }> {
+    const resp = await apiClient.get('/api/geo/place-reminders');
+    return resp.data;
+  },
+
+  /** Remind the caller when they arrive at or leave one of the family's places. */
+  async addPlaceReminder(payload: {
+    zone: string;
+    on: 'arrive' | 'leave';
+    title: string;
+    url?: string;
+  }): Promise<{ reminder: PlaceReminder }> {
+    const resp = await apiClient.post('/api/geo/place-reminders', payload);
+    return resp.data;
+  },
+
+  async removePlaceReminder(id: string): Promise<{ removed: string }> {
+    const resp = await apiClient.delete(`/api/geo/place-reminders/${encodeURIComponent(id)}`);
+    return resp.data;
+  },
+
   // Family Circle & Vehicle Trips
   async getTrips(userId?: string): Promise<TripsResponse> {
     const resolved = resolveUserId(userId);
@@ -4606,6 +4628,17 @@ export const api = {
 };
 
 /** Notice category to on/off; a category that is absent is on. */
+/** One waiting place reminder, as geo keeps it (docs/NOTES.md, Reminders (place)). */
+export interface PlaceReminder {
+  id: string;
+  zone: string;
+  zone_name: string;
+  on: 'arrive' | 'leave';
+  title: string;
+  url: string | null;
+  created_at: number;
+}
+
 export type NotificationPreferences = Record<string, boolean>;
 
 /** One app on one phone using Jarvis for push (GET /api/push/up). */

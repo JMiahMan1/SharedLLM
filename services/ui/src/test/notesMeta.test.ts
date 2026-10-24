@@ -10,6 +10,7 @@ import {
   getNoteMeta,
   hasTag,
   indexEntry,
+  placeReminderText,
   isArchivedPath,
   isTrashedPath,
   matchesNoteQuery,
@@ -230,6 +231,21 @@ describe('notesMeta', () => {
     // Clearing the only thing an entry held drops the entry.
     const cleared = setIndexEntry(parsed!, 'Notes/A.md', { reminder: undefined });
     expect(cleared.notes['Notes/A.md']).toBeUndefined();
+  });
+
+  it('keeps a valid place reminder and drops one with an unknown movement', () => {
+    const place = { id: 'p1', zone: 'zone.home', zoneName: 'Home', on: 'arrive' };
+    const parsed = parseNotesIndex({
+      version: 1,
+      notes: {
+        'Notes/A.md': { placeReminder: place },
+        'Notes/B.md': { pinned: true, placeReminder: { ...place, on: 'nearby' } },
+      },
+    });
+    expect(parsed?.notes['Notes/A.md']).toEqual({ placeReminder: place });
+    expect(parsed?.notes['Notes/B.md']).toEqual({ pinned: true });
+    expect(placeReminderText({ ...place, on: 'leave' } as const)).toBe('Leaving Home');
+    expect(setIndexEntry(parsed!, 'Notes/A.md', { placeReminder: undefined }).notes['Notes/A.md']).toBeUndefined();
   });
 
   it('remembers the shelf layout and falls back to grid when storage fails', () => {

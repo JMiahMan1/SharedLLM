@@ -28,6 +28,7 @@ Google.
 | Health / client | `GET /health`, `GET /` (static map client) |
 | People and places | `GET /people`, `GET /zones`, `GET /people/{id}/history`, `POST /people/{id}/see` (internal secret), `POST /people/{id}/record`, `GET /closest`, `GET /people/{id}/eta`, `GET /people/{id}/telemetry`, `GET /telemetry/{id}`, `GET /android_auto` |
 | Places | `PUT /place-settings/{zone_id}` `{important, notify}` (gateway `PUT /api/geo/places/{zone_id}`, admins only: HA zones have no owner; the body must be an object with `important` a boolean and `notify` a list of family usernames, else 422); `GET /zones` features carry `important` and `notify` |
+| Place reminders | `GET /place-reminders?user=`, `POST /place-reminders?user=` `{zone, on: arrive\|leave, title, url?}`, `DELETE /place-reminders/{id}?user=` (internal secret; gateway `/api/geo/place-reminders`, always the caller). A note's "when I get home" reminder, rung once by that person's own arrival or departure (docs/NOTES.md) |
 | Trips | `GET /trips`, `GET/PATCH /trips/{id}`, `PATCH /trips/{id}/share`, `GET /trips/{id}/route`, `GET /trips/{id}/locations`, `GET /locations/suggestions` |
 | Steps and metrics | `POST/GET /steps`, `GET /steps/sources`, `GET /steps/ranges`, `GET/PUT /steps/goal`, `GET /metrics/ranges`, `GET /metrics/catalog`, `GET /events` |
 | Workouts | `GET /workouts`, `POST /workouts/start`, `GET /workouts/active`, `POST /workouts/stop`, `GET /workouts/{id}/route` |
@@ -54,6 +55,9 @@ who may see the person (sharing consent), never to the person themselves.
   departures `family_safety` notices (priority 4, tag `place:<user>`) for the
   people chosen for it, or everyone who may see the person when none are
   chosen. Everyone else still gets the ordinary `family_presence` notice.
+- **Place reminders** (`services/geo/place_reminders.py`): the same
+  transitions ring the person's own "when I get home" reminders, a `timers`
+  notice to them alone, once; then the reminder is removed.
 - **Long stops**: every breadcrumb moves the person's stop (`geo:stop:<user>`;
   within `LONG_STOP_RADIUS_M`, 150 m, it is the same stop). A stop of
   `LONG_STOP_HOURS` (2) somewhere that is not a zone is one `family_safety`
