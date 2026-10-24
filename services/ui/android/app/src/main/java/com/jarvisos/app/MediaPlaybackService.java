@@ -11,9 +11,16 @@ import android.content.pm.ServiceInfo;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
+import android.net.wifi.WifiManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
+import android.os.PowerManager;
 import android.util.Log;
+
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
 
 /**
  * Keeps the app's own music playing once it is not on screen.
@@ -25,6 +32,11 @@ import android.util.Log;
  * and its MediaStyle notification (with a MediaSession) gives the lock screen,
  * headset buttons and Bluetooth play/pause/skip, all routed back to the web
  * player through {@link JarvisMediaPlugin}.
+ *
+ * When the app is swiped away mid-song the WebView, and the web player with
+ * it, is gone. If something was playing, this service then becomes the player
+ * itself ({@link NativeSendspinPlayer}, same Sendspin player id) so the music
+ * carries on; opening the app hands it back ({@link #reclaim}).
  */
 public class MediaPlaybackService extends Service {
     private static final String TAG = "MediaPlayback";
@@ -37,12 +49,29 @@ public class MediaPlaybackService extends Service {
 
     static volatile ActionListener listener;
 
+    /** What the web player last reported, so a hand-off knows who to be. */
+    private static volatile boolean lastPlaying;
+    private static volatile String lastPlayerId;
+    private static volatile String lastPlayerName;
+    private static volatile int lastVolume = 70;
+    private static volatile NativeSendspinPlayer nativePlayer;
+    private static volatile MediaPlaybackService instance;
+
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private PowerManager.WakeLock wakeLock;
+    private WifiManager.WifiLock wifiLock;
+
     private MediaSession session;
     private String title = "Jarvis";
     private String artist = "";
     private boolean playing = false;
 
-    static void update(Context context, String title, String artist, boolean playing) {
+    static void update(Context context, String title, String artist, boolean playing,
+                       String playerId, String playerName, int volume) {
+        lastPlaying = playing;
+        if (playerId != null && !playerId.isEmpty()) lastPlayerId = playerId;
+        if (playerName != null && !playerName.isEmpty()) lastPlayerName = playerName;
+        lastVolume = volume;
         Intent intent = new Intent(context, MediaPlaybackService.class)
                 .setAction("update")
                 .putExtra("title", title)
@@ -59,6 +88,47 @@ public class MediaPlaybackService extends Service {
         }
     }
 
+    /**
+     * The app's screen is going away. If the web player was playing, keep the
+     * music going natively; otherwise there is nothing to keep, so stop.
+     */
+    static void handOff(Context context) {
+        if (!lastPlaying || lastPlayerId == null || nativePlayer != null) {
+            if (nativePlayer == null) stop(context);
+            return;
+        }
+        Intent intent = new Intent(context, MediaPlaybackService.class)
+                .setAction("native")
+                .putExtra("playerId", lastPlayerId)
+                .putExtra("playerName", lastPlayerName)
+                .putExtra("volume", lastVolume);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent);
+            } else {
+                context.startService(intent);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "could not hand off: " + e.getMessage());
+        }
+    }
+
+    /**
+     * The app is back: end the native player so the web player can be the
+     * phone's player again. Returns whether music was playing, so the web
+     * player can carry on from where the native one stopped.
+     */
+    static boolean reclaim() {
+        NativeSendspinPlayer p = nativePlayer;
+        if (p == null) return false;
+        boolean wasPlaying = p.isPlaying();
+        nativePlayer = null;
+        p.close();
+        MediaPlaybackService s = instance;
+        if (s != null) s.main.post(s::releaseLocks);
+        return wasPlaying;
+    }
+
     static void stop(Context context) {
         // stopService is always allowed. startService with a "stop" action is
         // refused from the background (Android 8+), which is where a paused
@@ -73,6 +143,7 @@ public class MediaPlaybackService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null && nm.getNotificationChannel(CHANNEL_ID) == null) {
@@ -95,6 +166,11 @@ public class MediaPlaybackService extends Service {
     }
 
     private void dispatch(String action) {
+        NativeSendspinPlayer p = nativePlayer;
+        if (p != null) {
+            p.command(action);
+            return;
+        }
         ActionListener l = listener;
         if (l != null) {
             l.onAction(action);
@@ -115,6 +191,17 @@ public class MediaPlaybackService extends Service {
             dispatch(action);
             return START_NOT_STICKY;
         }
+        if ("native".equals(action)) {
+            // The intent carries who to be, in case this is a fresh process.
+            String id = intent.getStringExtra("playerId");
+            if (id != null && !id.isEmpty()) lastPlayerId = id;
+            String name = intent.getStringExtra("playerName");
+            if (name != null && !name.isEmpty()) lastPlayerName = name;
+            lastVolume = intent.getIntExtra("volume", lastVolume);
+            startNative();
+            publish();
+            return START_NOT_STICKY;
+        }
         if (intent != null && "update".equals(action)) {
             title = valueOr(intent.getStringExtra("title"), "Jarvis");
             artist = valueOr(intent.getStringExtra("artist"), "");
@@ -123,6 +210,108 @@ public class MediaPlaybackService extends Service {
         publish();
         // Not sticky: after the process dies there is no web player to resume.
         return START_NOT_STICKY;
+    }
+
+    /** Become the phone's Music Assistant player, as the web player was. */
+    private void startNative() {
+        if (nativePlayer != null || lastPlayerId == null) return;
+        String url = sendspinUrl();
+        if (url == null) {
+            Log.w(TAG, "no server or API key saved; cannot keep playing");
+            return;
+        }
+        String name = lastPlayerName != null ? lastPlayerName : "Jarvis Web Player (Mobile)";
+        nativePlayer = new NativeSendspinPlayer(url, lastPlayerId, name, lastVolume, true, new NativeSendspinPlayer.Listener() {
+            @Override
+            public void onMetadata(String t, String a) {
+                main.post(() -> {
+                    title = valueOr(t, title);
+                    artist = a == null ? "" : a;
+                    publish();
+                });
+            }
+
+            @Override
+            public void onPlaying(boolean isPlaying) {
+                main.post(() -> {
+                    playing = isPlaying;
+                    publish();
+                });
+            }
+
+            @Override
+            public void onClosed(String reason) {
+                main.post(() -> {
+                    if (nativePlayer != null) {
+                        nativePlayer = null;
+                        playing = false;
+                        publish();
+                    }
+                    releaseLocks();
+                });
+            }
+        });
+        acquireLocks();
+        playing = true;
+        // Give the WebView's own socket a moment to close, so Music Assistant
+        // does not see this player id twice.
+        NativeSendspinPlayer p = nativePlayer;
+        main.postDelayed(() -> {
+            if (nativePlayer == p) p.connect();
+        }, 1_000);
+    }
+
+    /** wss://<server>/api/sendspin?token=<api key>, the socket the web player uses. */
+    private String sendspinUrl() {
+        android.content.SharedPreferences prefs = TokenBridgePlugin.prefs(this);
+        String server = prefs.getString(TokenBridgePlugin.KEY_SERVER_URL, null);
+        String key = prefs.getString(TokenBridgePlugin.KEY_API_KEY, null);
+        if (server == null || server.isEmpty() || key == null || key.isEmpty()) return null;
+        String base = server.replaceAll("/+$", "");
+        if (base.startsWith("https://")) base = "wss://" + base.substring(8);
+        else if (base.startsWith("http://")) base = "ws://" + base.substring(7);
+        try {
+            return base + "/api/sendspin?token=" + URLEncoder.encode(key, "UTF-8");
+        } catch (UnsupportedEncodingException e) {
+            return null; // UTF-8 is always there
+        }
+    }
+
+    private void acquireLocks() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null && wakeLock == null) {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:native-player");
+                wakeLock.setReferenceCounted(false);
+                wakeLock.acquire(6 * 60 * 60 * 1000L);
+            }
+            WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            if (wm != null && wifiLock == null) {
+                wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "jarvis:native-player");
+                wifiLock.setReferenceCounted(false);
+                wifiLock.acquire();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "could not hold the device awake: " + e.getMessage());
+        }
+    }
+
+    private void releaseLocks() {
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
+        wakeLock = null;
+        wifiLock = null;
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        // The app was swiped away; the plugin's onDestroy usually handed off
+        // already, but Android does not promise that callback.
+        if (lastPlaying && nativePlayer == null) {
+            startNative();
+            publish();
+        }
+        super.onTaskRemoved(rootIntent);
     }
 
     private static String valueOr(String s, String fallback) {
@@ -195,6 +384,11 @@ public class MediaPlaybackService extends Service {
 
     @Override
     public void onDestroy() {
+        NativeSendspinPlayer p = nativePlayer;
+        nativePlayer = null;
+        if (p != null) p.close();
+        releaseLocks();
+        instance = null;
         if (session != null) {
             session.setActive(false);
             session.release();

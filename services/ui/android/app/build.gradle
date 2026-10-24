@@ -17,6 +17,10 @@ def apkVersionCode = (ciRunNumber && ciRunNumber.isInteger() && ciRunNumber.toIn
 android {
     namespace = "com.jarvisos.app"
     compileSdk = rootProject.ext.compileSdkVersion
+    compileOptions {
+        // java.time (steps, guard, location) on Android 7.x, which lacks it.
+        coreLibraryDesugaringEnabled true
+    }
     defaultConfig {
         applicationId "com.jarvisos.app"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -86,6 +90,9 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.5"
+    // WebSocket for the native Music Assistant player (NativeSendspinPlayer).
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     // android.jar's org.json is stubs only; the push stream parsing tests need the real one.

@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { useMAWebPlayer } from '../lib/maWebPlayer';
+import { clientName, useMAWebPlayer } from '../lib/maWebPlayer';
 import type { MAWebPlayerState } from '../lib/maWebPlayer';
 import JarvisMedia from '../plugins/jarvisMedia';
 import { api } from '../services/api';
@@ -93,7 +93,7 @@ export function MediaPlayerProvider({ children }: { children: ReactNode }) {
   useReportWebPlayerState(player);
 
   const native = Capacitor.isNativePlatform();
-  const { mediaTitle, mediaArtist, isPlaying } = player;
+  const { mediaTitle, mediaArtist, isPlaying, playerId, volume } = player;
   const serviceStarted = useRef(false);
   useEffect(() => {
     if (!native) return;
@@ -110,8 +110,22 @@ export function MediaPlayerProvider({ children }: { children: ReactNode }) {
       title: mediaTitle || 'Jarvis',
       artist: mediaArtist || '',
       playing: Boolean(isPlaying),
+      playerId: playerId || undefined,
+      playerName: clientName(),
+      volume,
     }).catch(() => {});
-  }, [native, mediaTitle, mediaArtist, isPlaying]);
+  }, [native, mediaTitle, mediaArtist, isPlaying, playerId, volume]);
+
+  // Opening the app again: if the phone kept playing natively after the app
+  // was swiped away, take playback back and carry on here.
+  useEffect(() => {
+    if (!native) return;
+    void JarvisMedia.reclaim()
+      .then(({ playing }) => {
+        if (playing) void playerRef.current.play().catch(() => {});
+      })
+      .catch(() => {});
+  }, [native]);
 
   useEffect(() => {
     if (!native) return;
