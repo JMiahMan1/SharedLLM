@@ -132,6 +132,9 @@ export function useMAWebPlayer() {
   const playerIdRef = useRef<string>(storedPlayerId());
   const [playerId, setPlayerId] = useState<string>(() => storedPlayerId());
   const msgIdRef = useRef(0);
+  // JSON-RPC calls still waiting for MA, so a closed connection can fail them
+  // at once instead of leaving each to its timeout (BUG-48).
+  const pendingRpcRef = useRef(new Map<string, (error: Error) => void>());
   /** The in-flight connection attempt, shared by concurrent callers. */
   const initPromiseRef = useRef<Promise<boolean> | null>(null);
   /** True once someone asked for the player; false after an explicit disconnect. */
@@ -310,10 +313,20 @@ export function useMAWebPlayer() {
         return;
       }
 
-      const timeout = setTimeout(() => {
+      const pending = pendingRpcRef.current;
+      const settle = () => {
+        clearTimeout(timeout);
         ws.removeEventListener('message', onMessage);
+        pending.delete(id);
+      };
+      const timeout = setTimeout(() => {
+        settle();
         reject(new Error(`Music Assistant did not answer ${command}`));
       }, RPC_TIMEOUT_MS);
+      pending.set(id, (error) => {
+        settle();
+        reject(error);
+      });
 
       function onMessage(event: MessageEvent) {
         let data: Record<string, unknown>;
@@ -324,12 +337,10 @@ export function useMAWebPlayer() {
         }
         if (data?.message_id !== id) return;
         if (data.result !== undefined) {
-          clearTimeout(timeout);
-          ws!.removeEventListener('message', onMessage);
+          settle();
           resolve(data.result);
         } else if (data.error !== undefined || data.error_code !== undefined) {
-          clearTimeout(timeout);
-          ws!.removeEventListener('message', onMessage);
+          settle();
           const detail = data.details || (typeof data.error === 'string' ? data.error : JSON.stringify(data.error || `Error code ${data.error_code}`));
           reject(new Error(`Music Assistant: ${detail}`));
         }
@@ -353,6 +364,10 @@ export function useMAWebPlayer() {
     try { jsonrpcWs?.close(1000, reason); } catch { /* already gone */ }
     try { audioRef.current?.remove(); } catch { /* already gone */ }
     audioRef.current = null;
+    // Nothing will answer on a closed socket: fail what is waiting now.
+    const waiting = [...pendingRpcRef.current.values()];
+    pendingRpcRef.current.clear();
+    for (const fail of waiting) fail(new Error(`Music Assistant connection closed (${reason})`));
   }, []);
 
   // `initPlayer` and the reconnect scheduler refer to each other.

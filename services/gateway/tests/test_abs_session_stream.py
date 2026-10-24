@@ -497,6 +497,44 @@ class TestMaLibraryUriEndpoint:
         assert resp.status_code == 200
 
 
+class TestPodcastEpisodesEndpoint:
+    """GET /api/media/podcast-episodes: a podcast's episodes to pick from (BUG-43)."""
+
+    def _lister(self, monkeypatch, *, episodes=None, error=None):
+        from services.shared import ma_library as ma_lib
+
+        calls: list[dict] = []
+
+        async def _list(mass_url, mass_token, abs_item_id, title):
+            calls.append({"url": mass_url, "token": mass_token, "id": abs_item_id, "title": title})
+            if error is not None:
+                raise error
+            return episodes or []
+
+        monkeypatch.setattr(ma_lib, "list_podcast_episodes", _list)
+        return calls
+
+    def test_returns_the_episodes_with_the_callers_credentials(self, client, monkeypatch):
+        ep = {"uri": "audiobookshelf--x://podcast_episode/p e1", "name": "Episode 1"}
+        calls = self._lister(monkeypatch, episodes=[ep])
+        resp = client.get("/api/media/podcast-episodes", params={"abs_item_id": "pod-1", "title": "Show"})
+        assert resp.status_code == 200
+        assert resp.json()["episodes"] == [ep]
+        assert calls[0] == {"url": "http://ma.local:8095", "token": "test-mass-token", "id": "pod-1", "title": "Show"}
+
+    def test_a_miss_is_404_with_the_reason(self, client, monkeypatch):
+        from services.shared.ma_library import MALibraryLookupError
+
+        self._lister(monkeypatch, error=MALibraryLookupError("not a podcast", reason="not_a_podcast"))
+        resp = client.get("/api/media/podcast-episodes", params={"abs_item_id": "book-1"})
+        assert resp.status_code == 404
+        assert "not a podcast" in resp.json()["detail"]
+
+    def test_missing_id_is_422(self, client, monkeypatch):
+        self._lister(monkeypatch)
+        assert client.get("/api/media/podcast-episodes", params={"abs_item_id": " "}).status_code == 422
+
+
 class TestMaLibraryUriEndpointRequiresAuth:
     """An anonymous caller must not reach MA's library index.
 

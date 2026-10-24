@@ -3049,6 +3049,15 @@ export const api = {
     return resp.data;
   },
 
+  /** A podcast's episodes, newest first, each with the Music Assistant URI that plays it. */
+  async getPodcastEpisodes(absItemId: string, title = ''): Promise<{
+    status: string;
+    episodes: Array<{ uri: string; name: string; duration: number | null; published: number | null; fully_played: boolean | null; resume_position_ms: number | null }>;
+  }> {
+    const resp = await apiClient.get('/api/media/podcast-episodes', { params: { abs_item_id: absItemId, title }, timeout: 20000 });
+    return resp.data;
+  },
+
   async getAudiobookshelfLibraries(): Promise<{ status: string; notice?: string; libraries: Array<{ id: string; name: string; media_type: string }> }> {
     const resp = await apiClient.get('/api/media/audiobookshelf/libraries', { timeout: 10000 });
     return resp.data;

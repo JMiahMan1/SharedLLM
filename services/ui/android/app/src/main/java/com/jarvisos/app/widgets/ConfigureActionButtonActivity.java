@@ -354,7 +354,9 @@ public class ConfigureActionButtonActivity extends Activity {
             iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
             iv.setImageResource(MaterialIcons.drawableRes(name));
             iv.setContentDescription(name);
-            iv.setTooltipText(name);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                iv.setTooltipText(name); // API 26+; the content description covers older phones
+            }
             final String iconId = name;
             final ImageView button = iv;
             highlightIcon(iv, name.equals(selectedIcon));

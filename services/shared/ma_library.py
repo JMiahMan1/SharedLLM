@@ -300,3 +300,61 @@ async def resolve_audiobook_uri(
         f"Could not reach Music Assistant to resolve {abs_item_id or query!r}: {last_error}",
         reason="mass_unreachable",
     ) from last_error
+
+async def list_podcast_episodes(
+    mass_url: str,
+    mass_token: str,
+    abs_item_id: str,
+    title: str,
+) -> list[dict]:
+    """The episodes of an Audiobookshelf podcast, newest first, each with the
+    URI Music Assistant plays it by.
+
+    Episodes are not in MA's library index (see ``resolve_audiobook_uri``), but
+    ``music/podcasts/podcast_episodes`` lists them for the library podcast with
+    provider URIs (``audiobookshelf--<instance>://podcast_episode/<podcast>
+    <episode>``), which ``player_queues/play_media`` accepts. Only such episode
+    URIs are returned; anything else is dropped rather than handed to a player.
+    """
+    from websockets.asyncio.client import connect
+
+    podcast = await resolve_audiobook_uri(mass_url, mass_token, abs_item_id, title)
+    kind, _, library_id = podcast.ma_uri.removeprefix("library://").partition("/")
+    if kind != "podcast" or not library_id:
+        raise MALibraryLookupError(
+            f"Audiobookshelf item {abs_item_id} is not a podcast in Music Assistant ({podcast.ma_uri}).",
+            reason="not_a_podcast",
+        )
+    ws_url = _ws_base_url(mass_url)
+    sep = "&" if "?" in ws_url else "?"
+    async with connect(
+        f"{ws_url}{sep}token={mass_token}",
+        ping_interval=WS_PING_INTERVAL,
+        ping_timeout=WS_PING_TIMEOUT,
+        open_timeout=WS_OPEN_TIMEOUT,
+    ) as ws:
+        await _rpc(ws, "auth", {"token": mass_token})
+        result = await _rpc(
+            ws,
+            "music/podcasts/podcast_episodes",
+            {"item_id": library_id, "provider_instance_id_or_domain": "library"},
+        )
+
+    episodes: list[dict] = []
+    for item in result if isinstance(result, list) else []:
+        if not isinstance(item, dict):
+            continue
+        uri = str(item.get("uri") or "").strip()
+        if "://podcast_episode/" not in uri or not uri.startswith("audiobookshelf"):
+            continue
+        episodes.append({
+            "uri": uri,
+            "name": str(item.get("name") or "").strip(),
+            "duration": item.get("duration"),
+            # MA reports an episode's publish time (epoch ms) as its position.
+            "published": item.get("position"),
+            "fully_played": item.get("fully_played"),
+            "resume_position_ms": item.get("resume_position_ms"),
+        })
+    episodes.sort(key=lambda e: e["published"] or 0, reverse=True)
+    return episodes

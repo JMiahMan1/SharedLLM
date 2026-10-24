@@ -555,3 +555,42 @@ class TestFirstSegmentUri:
         from services.gateway.main import _first_segment_uri
 
         assert _first_segment_uri("") is None
+
+def _podcast_search(abs_id: str = NARNIA_ABS_ID) -> dict:
+    return {
+        "podcasts": [{
+            "item_id": "25", "provider": "library", "media_type": "podcast",
+            "uri": "library://podcast/25", "name": "The Show",
+            "provider_mappings": [{"item_id": abs_id, "provider_domain": "audiobookshelf", "available": True}],
+        }]
+    }
+
+
+def _episode(n: int, published: int) -> dict:
+    return {
+        "name": f"Episode {n}", "duration": 1800, "position": published,
+        "uri": f"audiobookshelf--EpUcRzwM://podcast_episode/{NARNIA_ABS_ID} ep-{n}",
+    }
+
+
+async def test_podcast_episodes_newest_first(fake_connect):
+    opened, _ = fake_connect({
+        "auth": {},
+        "music/search": _podcast_search(),
+        "music/podcasts/podcast_episodes": [
+            _episode(1, 1_000), _episode(3, 3_000), _episode(2, 2_000),
+            {"name": "not an episode", "uri": "library://track/9"},
+        ],
+    })
+    episodes = await ma_library.list_podcast_episodes(MASS_URL, MASS_TOKEN, NARNIA_ABS_ID, "The Show")
+    assert [e["name"] for e in episodes] == ["Episode 3", "Episode 2", "Episode 1"]
+    assert episodes[0]["uri"].endswith("ep-3") and episodes[0]["published"] == 3_000
+    asked = [f for ws in opened for f in ws.sent if f["command"] == "music/podcasts/podcast_episodes"]
+    assert asked[0]["args"] == {"item_id": "25", "provider_instance_id_or_domain": "library"}
+
+
+async def test_episodes_of_a_book_are_refused(fake_connect):
+    fake_connect({"auth": {}, "music/search": _search_result()})
+    with pytest.raises(MALibraryLookupError) as err:
+        await ma_library.list_podcast_episodes(MASS_URL, MASS_TOKEN, NARNIA_ABS_ID, "Narnia")
+    assert err.value.reason == "not_a_podcast"
