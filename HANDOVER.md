@@ -7,9 +7,10 @@ Every claim below was verified against the live system unless marked **planned**
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
 - Live: `https://jarvis.sumemail.com` — version **1.5.2**, OTA bundle `git_sha`
-  **0c901c38** (verified 2026-10-24), APK available.
-  - Containers: execution **fc7ba693** (image built at `8ccb342a`+), gateway/identity/ui
-    **0c901c38**, storage **8fc73700** (image `8ccb342a`), health **d766a19f**.
+  **5bdaea9b**, APK **437** (verified 2026-10-24, no errors since restart).
+  - Containers: identity/gateway/ui **5bdaea9b**, execution **fc7ba693**, storage **8fc73700**,
+    health **d766a19f**.
+  - Phones need APK 437 for the native changes (white-bar fix, Jarvis guard).
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
 - Check anytime:
@@ -559,17 +560,22 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
 
 ## 5. Immediate next steps
 
-1. The Android collection engine is complete: usage, media sessions, calls and SMS all
-   land on the digital profile (commits through `ac963b2c`). Video watching is covered by
-   media sessions (YouTube title/creator/duration) plus per-app foreground time.
-2. Jarvis recommendations from the profile: music, video, podcasts, books, games and
-   activities are done and shown in the For You widget. Still open in step 3: a parent can
-   bless or block a lane.
-3. Screen time: 4a (rules, status, requests) is live; next is **4b, enforcement on the phone**
-   (an Accessibility service that locks all but the always-allowed apps while `locked`), together
-   with **tamper resistance** (Jarvis cannot be removed from a child's phone without a parent's
-   login): device admin + a parent PIN screen, or device-owner provisioning for a hard block.
-3. Keep the plan docs (`docs/HEALTH_HUB.md`, this handover) updated in the same commit as
+1. **Device check of the Jarvis guard (APK 437)** on one child's phone: set it up from the
+   Health page's Phone protection card, then confirm an uninstall attempt shows the parent-login
+   screen, a parent login unlocks it and a wrong one does not, a bedtime or pause sends games
+   home, and calls and texts still work. OEM Settings layouts vary; `GuardRules` is where a
+   missed screen is taught.
+2. **First live trivia game on the new code**: confirm questions and verdicts post from the
+   `jarvis` account in a group room, answers count in arrival order, and late answers are not
+   burned.
+3. Phase 11 still open: a parent can bless or block a recommendation lane; the offline parent
+   unlock; app control and the web filter (build order 5); monitoring alerts and the weekly
+   recap (6); the parents' page and discipleship surfaces (7). Additional device lock-down
+   features beyond the built guard were not built in this session.
+4. Other open work: Health weekly digest and family challenge; recipes ↔ Health logging;
+   Notes items in §4; media BUG-43 and Android background audio; the pre-existing Android lint
+   error in `ConfigureActionButtonActivity.java:357` (`setTooltipText` needs API 26).
+5. Keep the plan docs (`docs/HEALTH_HUB.md`, this handover) updated in the same commit as
    the code when scope changes.
 
 ## 6. Where the details live
