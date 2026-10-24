@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
+import { chooseOutput, mediaItem, openOutputPicker, serveHome } from './mediaScreens';
 
 // sendspin-js cannot be bundled by vitest: stub the app-wide web player.
 const p = vi.hoisted(() => ({
@@ -65,19 +66,16 @@ beforeEach(() => {
         { id: 'done-book', title: 'Finished Book', author: 'Someone', progress: 100, is_complete: true, last_played: 1791736021981, library_id: 'l' },
       ],
     })),
-    http.get('/api/media/music-assistant/recent', () => HttpResponse.json({ status: 'SUCCESS', recent: [] })),
-    http.get('/api/media/music-assistant/playlists', () => HttpResponse.json({
-      status: 'SUCCESS', playlists: [{ name: 'Road Trip', items: 12, uri: 'library://playlist/6' }],
-    })),
     http.post('/api/media/ma-library-uri', async ({ request }) => {
       const body = (await request.json()) as { abs_item_id: string };
       return HttpResponse.json({ status: 'SUCCESS', abs_item_id: body.abs_item_id, ma_uri: 'library://audiobook/260', title: 'x' });
     }),
   );
+  serveHome({ playlists: [mediaItem({ name: 'Road Trip', uri: 'library://playlist/6', media_type: 'playlist' })] });
 });
 
 describe('Media page: this device (web player)', () => {
-  it('plays a book from Jump back in through the resolved Music Assistant URI', async () => {
+  it('plays a book from Continue listening through the resolved Music Assistant URI', async () => {
     renderWithProviders(<Media />);
     await userEvent.click(await screen.findByRole('button', { name: /Chronicles of Narnia/i }));
     await waitFor(() => expect(p.state.play).toHaveBeenCalledWith('library://audiobook/260'));
@@ -85,7 +83,7 @@ describe('Media page: this device (web player)', () => {
     expect(JSON.stringify((p.state.play as ReturnType<typeof vi.fn>).mock.calls)).not.toContain('audiobookshelf');
   });
 
-  it('leaves finished books out of Jump back in', async () => {
+  it('leaves finished books out of Continue listening', async () => {
     renderWithProviders(<Media />);
     await screen.findByRole('button', { name: /Chronicles of Narnia/i });
     expect(screen.queryByText('Finished Book')).not.toBeInTheDocument();
@@ -113,10 +111,11 @@ describe('Media page: this device (web player)', () => {
     expect(p.state.stop).toHaveBeenCalled();
   });
 
-  it('offers Reconnect once automatic retries have given up', async () => {
+  it('UX-04 offers Try again once automatic retries have given up', async () => {
     p.state = player({ isConnected: false, connectionState: 'FAILED', error: 'Lost the connection to Music Assistant.' });
     renderWithProviders(<Media />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
+    expect(await screen.findByText(/Couldn’t connect this device/)).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Try again' }));
     expect(p.state.reconnect).toHaveBeenCalled();
   });
 
@@ -149,10 +148,12 @@ describe('Media page: device picker', () => {
       ]),
     });
     renderWithProviders(<Media />);
-    expect(await screen.findByRole('button', { name: /RV TV/ })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /Office TV/ })).toHaveLength(1);
-    // Our own web player is the "This device" chip, not a second entry.
-    expect(screen.queryByRole('button', { name: /Jeremiah's Web Player/ })).not.toBeInTheDocument();
+    const picker = await openOutputPicker();
+    expect(await picker.findByRole('button', { name: /RV TV/ })).toBeInTheDocument();
+    expect(picker.getAllByRole('button', { name: /Office TV/ })).toHaveLength(1);
+    // Our own web player is the "This device" row, not a second entry.
+    expect(picker.queryByRole('button', { name: /Jeremiah's Web Player/ })).not.toBeInTheDocument();
+    expect(picker.getByRole('button', { name: /This device/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('plays on a Home Assistant speaker through the execution service', async () => {
@@ -169,7 +170,7 @@ describe('Media page: device picker', () => {
       }),
     );
     renderWithProviders(<Media />);
-    await userEvent.click(await screen.findByRole('button', { name: /Kitchen/ }));
+    await chooseOutput(/Kitchen/);
     await userEvent.click(await screen.findByRole('button', { name: /Chronicles of Narnia/i }));
     await waitFor(() => expect(plays).toHaveLength(1));
     expect(plays[0]).toMatchObject({ action: 'play', book_id: NARNIA, entity_id: 'media_player.kitchen' });
@@ -178,19 +179,35 @@ describe('Media page: device picker', () => {
 });
 
 describe('Media page: when a provider is down', () => {
-  it('says playlists could not load (not "no playlists") and retries', async () => {
+  it('says the music could not load (not "nothing here") and retries', async () => {
     let calls = 0;
     server.use(
-      http.get('/api/media/music-assistant/playlists', () => {
+      http.get('/api/media/home', () => {
         calls += 1;
-        return HttpResponse.json({ status: 'ERROR', error: 'down' }, { status: 502 });
+        return HttpResponse.json({ detail: 'down' }, { status: 502 });
       }),
     );
     renderWithProviders(<Media />);
-    expect(await screen.findByText('Couldn’t load playlists', {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(await screen.findByText('Couldn’t load your music', {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.queryByText('Nothing here yet')).not.toBeInTheDocument();
     const before = calls;
-    await userEvent.click(within(screen.getByText('Couldn’t load playlists').parentElement!).getByRole('button', { name: /try again/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(calls).toBeGreaterThan(before));
+  });
+
+  it('keeps the audiobook shelf up and says which service is down (§4.5 partial)', async () => {
+    serveHome({ errors: { ma: 'Music Assistant is unreachable: ClientConnectorError', abs: null } });
+    renderWithProviders(<Media />);
+    expect(await screen.findByText(/Music Assistant did not answer/)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Chronicles of Narnia/i })).toBeInTheDocument();
+  });
+
+  it('UX-40 invites a first-run user to connect their services', async () => {
+    serveHome({ errors: { ma: 'Music Assistant is not configured', abs: null } });
+    server.use(http.get('/api/media/audiobookshelf/last-played', () => HttpResponse.json({ status: 'SUCCESS', books: [] })));
+    renderWithProviders(<Media />);
+    expect(await screen.findByText('Connect your music')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open settings' })).toHaveAttribute('href', '/identity');
   });
 });
 

@@ -67,8 +67,8 @@ export async function setupPlayerMocks(
 /** Open /media and wait for its shelves. */
 export async function openMedia(page: Page): Promise<void> {
   await page.goto('/media');
-  await expect(page.getByRole('heading', { name: 'Media', level: 1 })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Midnight Drive/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Listen Now', level: 1 })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Midnight Drive/ }).first()).toBeVisible();
 }
 
 /**
@@ -82,14 +82,14 @@ export async function startTrack(
 ): Promise<void> {
   const track = { ...FIXTURE_TRACK, ...overrides };
   await openMedia(page);
-  await page.getByRole('button', { name: new RegExp(track.title) }).click();
+  await page.getByRole('button', { name: `Play ${track.title}` }).first().click();
   await expect.poll(() => ma.sentCommands.some(
     (entry) => entry.command === 'player_queues/play_media'
       && entry.args?.queue_id === WEB_PLAYER_ID
       && entry.args?.media === track.uri,
   )).toBe(true);
   pushNowPlaying(ma, WEB_PLAYER_ID, track);
-  await expect(page.getByText('Playing on this device')).toBeVisible();
+  await expect(page.getByText('Playing on this device', { exact: true })).toBeVisible();
 }
 
 /** Push only the queue state, e.g. after a pause/play command in a spec. */

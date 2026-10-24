@@ -3,6 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
+import { chooseOutput, serveHome } from './mediaScreens';
 
 // sendspin-js cannot be bundled by vitest, so stub the app's shared web player. The
 // audiobook play path goes through it, so the stubs are the assertion surface.
@@ -64,16 +65,12 @@ let resolveCalls: Array<{ abs_item_id: string; title: string }> = [];
 let remoteCalls: Array<{ command: string; args: Record<string, unknown> }> = [];
 
 /**
- * Select a device, then click the audiobook's play button.
- *
- * The device picker is a row of buttons (no <select>), and the book only appears
- * once a target is chosen, so this walks the real user path rather than calling a
- * handler directly.
+ * Pick the speaker in the "Playing on" picker, then tap the book's card in
+ * Continue listening: the real user path rather than calling a handler.
  */
 async function playOnMaPlayer(bookTitle: string) {
-  const device = await screen.findByRole('button', { name: /A25-27JN MacBook Pro/i });
-  await userEvent.click(device);
-  const play = await screen.findByRole('button', { name: new RegExp(bookTitle, 'i') });
+  await chooseOutput(/A25-27JN MacBook Pro/i);
+  const play = await screen.findByRole('button', { name: new RegExp(`Play .*${bookTitle}`, 'i') });
   await userEvent.click(play);
 }
 
@@ -99,12 +96,6 @@ beforeEach(async () => {
     http.get('/api/media/audiobookshelf/search', () =>
       HttpResponse.json({ status: 'SUCCESS', books: LAST_PLAYED.books })
     ),
-    http.get('/api/media/music-assistant/recent', () =>
-      HttpResponse.json({ status: 'SUCCESS', recent: [] })
-    ),
-    http.get('/api/media/music-assistant/playlists', () =>
-      HttpResponse.json({ status: 'SUCCESS', playlists: [] })
-    ),
     http.get('/api/admin/logs', () => HttpResponse.json([])),
     http.post('/api/media/ma-command', async ({ request }) => {
       remoteCalls.push((await request.json()) as { command: string; args: Record<string, unknown> });
@@ -121,6 +112,7 @@ beforeEach(async () => {
       });
     })
   );
+  serveHome();
 });
 
 describe('Media page: playing an audiobook on a Music Assistant player', () => {

@@ -144,7 +144,7 @@ function App() {
             <Route path="/recipes" element={<ProtectedRoute isMobile={isMobile}><Recipes /></ProtectedRoute>} />
             <Route path="/family" element={<ProtectedRoute isMobile={isMobile}><Family /></ProtectedRoute>} />
             <Route path="/calendar" element={<ProtectedRoute isMobile={isMobile}><Calendar /></ProtectedRoute>} />
-            <Route path="/media" element={<ProtectedRoute isMobile={isMobile}><Media /></ProtectedRoute>} />
+            <Route path="/media/*" element={<ProtectedRoute isMobile={isMobile}><Media /></ProtectedRoute>} />
             <Route path="/wander" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
             <Route path="/fitness" element={<ProtectedRoute isMobile={isMobile}><Health /></ProtectedRoute>} />
             <Route path="/family/member/:username?" element={<ProtectedRoute isMobile={isMobile}><FamilyMember /></ProtectedRoute>} />

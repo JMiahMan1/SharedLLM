@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
+import { chooseOutput, mediaItem, serveHome } from './mediaScreens';
 
 // sendspin-js cannot be bundled by vitest, so stub the shared web player. The
 // remote path must never touch its connect()/maCommand() methods.
@@ -59,18 +60,7 @@ const IDLE_STATUS = {
   detail: { active: null, available: [], all_players: [] },
 };
 
-const RECENT = {
-  status: 'SUCCESS',
-  recent: [
-    {
-      name: 'Remote Song',
-      artist: 'Remote Artist',
-      uri: 'library://track/1',
-      last_played: '2026-10-18T08:00:00Z',
-      type: 'track',
-    },
-  ],
-};
+const RECENT = [mediaItem({ name: 'Remote Song', artist: 'Remote Artist', uri: 'library://track/1' })];
 
 beforeEach(() => {
   commands = [];
@@ -81,10 +71,6 @@ beforeEach(() => {
     http.get('/api/entities', () => HttpResponse.json({ entities: [] })),
     http.get('/api/media/audiobookshelf/last-played', () =>
       HttpResponse.json({ status: 'SUCCESS', books: [] })
-    ),
-    http.get('/api/media/music-assistant/recent', () => HttpResponse.json(RECENT)),
-    http.get('/api/media/music-assistant/playlists', () =>
-      HttpResponse.json({ status: 'SUCCESS', playlists: [] })
     ),
     http.post('/api/media/ma-command', async ({ request }) => {
       const body = (await request.json()) as MaCommand;
@@ -109,11 +95,11 @@ beforeEach(() => {
       return HttpResponse.json({ status: 'SUCCESS', result: {} });
     })
   );
+  serveHome({ recent: RECENT });
 });
 
 async function selectRemoteSpeaker() {
-  const device = await screen.findByRole('button', { name: /Kitchen MA/i });
-  await userEvent.click(device);
+  await chooseOutput(/Kitchen MA/i);
 }
 
 describe('Media page: remote Music Assistant speakers', () => {

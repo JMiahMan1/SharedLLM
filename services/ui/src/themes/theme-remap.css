@@ -108,7 +108,6 @@
 [data-site-theme-active] .hover\:text-purple-200:hover { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .hover\:text-purple-300:hover { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .hover\:text-purple-400:hover { color: var(--site-accent-text) !important; }
-[data-site-theme-active] .hover\:to-purple-500\/20:hover { --tw-gradient-to: color-mix(in srgb, var(--site-accent) 20%, transparent); }
 [data-site-theme-active] .text-indigo-100 { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .text-indigo-200 { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .text-indigo-300 { color: var(--site-accent-text) !important; }
@@ -221,7 +220,6 @@
 [data-theme-scheme="light"] .bg-white\/\[0\.08\] { background-color: rgba(17, 24, 39, 0.05) !important; }
 [data-theme-scheme="light"] .bg-white\/10 { background-color: rgba(17, 24, 39, 0.06) !important; }
 [data-theme-scheme="light"] .bg-white\/15 { background-color: rgba(17, 24, 39, 0.09) !important; }
-[data-theme-scheme="light"] .bg-white\/3 { background-color: rgba(17, 24, 39, 0.02) !important; }
 [data-theme-scheme="light"] .bg-white\/40 { background-color: rgba(17, 24, 39, 0.12) !important; }
 [data-theme-scheme="light"] .bg-white\/5 { background-color: rgba(17, 24, 39, 0.03) !important; }
 [data-theme-scheme="light"] .border-slate-700 { border-color: var(--color-border-soft) !important; }
@@ -266,7 +264,6 @@
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.12\]:hover { background-color: rgba(17, 24, 39, 0.07) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.14\]:hover { background-color: rgba(17, 24, 39, 0.08) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/10:hover { background-color: rgba(17, 24, 39, 0.06) !important; }
-[data-theme-scheme="light"] .hover\:bg-white\/15:hover { background-color: rgba(17, 24, 39, 0.09) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/20:hover { background-color: rgba(17, 24, 39, 0.12) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/25:hover { background-color: rgba(17, 24, 39, 0.12) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/5:hover { background-color: rgba(17, 24, 39, 0.03) !important; }
@@ -283,7 +280,6 @@
 [data-theme-scheme="light"] .hover\:text-amber-400:hover { color: oklch(55.5% 0.163 48.998) !important; }
 [data-theme-scheme="light"] .hover\:text-blue-300:hover { color: oklch(48.8% 0.243 264.376) !important; }
 [data-theme-scheme="light"] .hover\:text-blue-400:hover { color: oklch(48.8% 0.243 264.376) !important; }
-[data-theme-scheme="light"] .hover\:text-cyan-200:hover { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .hover\:text-cyan-300:hover { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .hover\:text-cyan-400:hover { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .hover\:text-emerald-300:hover { color: oklch(50.8% 0.118 165.612) !important; }

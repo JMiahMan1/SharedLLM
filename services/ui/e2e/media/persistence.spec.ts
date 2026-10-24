@@ -30,8 +30,8 @@ test('keeps the browser player alive across pages', async ({ page }) => {
   await expect(page.getByTestId('mini-player')).toBeVisible();
 
   await goToPage(page, 'media');
-  await expect(page.getByRole('heading', { name: 'Media', level: 1 })).toBeVisible();
-  await expect(page.getByText('Playing on this device')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Listen Now', level: 1 })).toBeVisible();
+  await expect(page.getByText('Playing on this device', { exact: true })).toBeVisible();
   await expect(page.getByText('Midnight Drive').first()).toBeVisible();
   await expect(page.getByText('The Synthwave Collective').first()).toBeVisible();
 
