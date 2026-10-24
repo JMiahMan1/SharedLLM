@@ -13,6 +13,7 @@ import {
   Eye,
   Wand2,
   Palette,
+  ShieldHalf,
   Activity,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -228,7 +229,9 @@ const LLMSettings: React.FC = () => {
                   { label: 'Reports', key: 'telemetry_model', icon: Activity },
                   { label: 'Vision OCR', key: 'vision_ocr_model', icon: Eye },
                   { label: 'Image Edit', key: 'image_edit_model', icon: Wand2 },
-                  { label: 'Family Drawing', key: 'family_drawing_edit_model', icon: Palette }
+                  { label: 'Family Drawing', key: 'family_drawing_edit_model', icon: Palette },
+                  // Content monitoring's second look (Phase 11); blank: the phrase list decides alone.
+                  { label: 'Family Monitoring', key: 'guardian_monitor_model', icon: ShieldHalf }
                 ].map(role => (
                   <div key={role.key} className="glass-card p-4 bg-white/5">
                     <div className="flex items-center gap-2 mb-3">
