@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   asksJarvis,
   dayLabel,
+  gameRunning,
   isAssistant,
   receiptFor,
   splitRichText,
@@ -98,5 +99,15 @@ describe('chat model', () => {
   it('previews attachments and Jarvis answers readably in the inbox', () => {
     expect(previewLine({ token: 'a', display_name: 'Fam', type: 2, last_message: '{file}', last_message_actor: 'Michele', last_message_actor_id: 'michele' }, me)).toBe('Michele: 📎 Attachment');
     expect(previewLine({ token: 'a', display_name: 'Fam', type: 2, last_message: 'Tacos\n\n```jarvis-envelope\n{"kind":"assistant","title":"Jarvis"}\n```jarvis-envelope', last_message_actor_id: 'jeremiah' }, me)).toBe('Jarvis: Tacos');
+  });
+
+  it('tells a running family game from a finished one by the newest game line', () => {
+    const card = '\n\n```jarvis-envelope\n{"kind":"game","title":"Correct!"}\n```jarvis-envelope';
+    const msg = (id: number, message: string): TalkMessage => ({ id, timestamp: id, message, actor_id: 'jarvis' });
+    // Newest-first, the order the server hands the feed over in.
+    expect(gameRunning([msg(2, 'ok'), msg(1, '🧠 Trivia — question 1 of 10\nWhat?')])).toBe(true);
+    expect(gameRunning([msg(3, '✅ Kiddo got it!\n\n🏆 Game over! Kiddo 3 ⭐' + card), msg(1, '🧠 Trivia — question 10 of 10')])).toBe(false);
+    expect(gameRunning([msg(2, 'Not a pair' + card)])).toBe(true);
+    expect(gameRunning([msg(1, 'hello'), msg(2, 'dinner at six')])).toBe(false);
   });
 });

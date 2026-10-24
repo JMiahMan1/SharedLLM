@@ -41,3 +41,20 @@ def test_all_themes_non_empty():
     assert len(themes) >= 8
     for theme in themes:
         assert theme["reason"]
+
+
+def test_longer_triggers_win_over_shorter_ones():
+    rec = recommend_book([{"feature": "reading", "item": "An epic fantasy saga"}])
+    assert rec["theme"] == "epic fantasy"
+
+
+def test_only_reading_and_audiobooks_reach_the_recommender():
+    from services.common.book_recommendations import book_events
+
+    events = [
+        {"feature": "media", "item": "Horror Movie Theme", "detail": {"app": "com.google.android.youtube"}},
+        {"feature": "audiobook", "item": "The Hobbit"},
+        {"feature": "media", "item": "Dune", "detail": {"app": "com.audible.application"}},
+        {"feature": "reading", "item": "Mere Christianity"},
+    ]
+    assert book_events(events) == events[1:]

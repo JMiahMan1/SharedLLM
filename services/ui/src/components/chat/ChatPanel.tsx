@@ -15,7 +15,6 @@ import NewChatSheet from './NewChatSheet';
 import ConversationAvatar from './ConversationAvatar';
 import VerseBanner from './VerseBanner';
 import { verseShareText } from '../../lib/verseShare';
-import { decodeEnvelope } from '../../lib/chatEnvelope';
 import { useFamilyDirectory } from './familyDirectory';
 import { useCall } from '../../context/CallContext';
 import MessageThread from './MessageThread';
@@ -28,6 +27,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   reactionCounts,
   sortMessages,
+  gameRunning,
   type TalkConversation,
   type TalkMessage,
 } from './chatModel';
@@ -36,6 +36,7 @@ const EMPTY_ARRAY: never[] = [];
 
 /** How long to show "Jarvis is thinking" before giving up on an answer. */
 const JARVIS_WAIT_MS = 3 * 60 * 1000;
+const RECENT_SEND_MS = 15 * 1000;
 /** Messages loaded per conversation, and each "Show earlier" step (Talk's cap is 200). */
 const PAGE = 50;
 const MAX_HISTORY = 200;
@@ -138,10 +139,11 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const [sendAs, setSendAs] = useConversationSendAs(isAdmin, activeToken);
   const asUser = sendAs === 'admin' ? ('admin' as const) : undefined;
 
-  const [recentSendAt, setRecentSendAt] = useState<number>(0);
+  // Read against the real clock in refetchInterval: `now` only ticks while
+  // the Jarvis indicator shows, so it cannot end the brisk window by itself.
+  const recentSendAt = useRef(0);
   const askedAt = jarvisAsked[activeToken];
   const waitingForJarvis = askedAt !== undefined && now - askedAt < JARVIS_WAIT_MS;
-  const sentRecently = now - recentSendAt < 15000;
 
   const { data: polls = EMPTY_ARRAY, refetch: refetchPolls } = useQuery<ExecutionResponse, Error, TalkPoll[]>({
     queryKey: ['talk-polls', activeToken],
@@ -161,26 +163,9 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === activeToken ? previous : undefined),
     // Poll briskly while Jarvis is working, a game is running, or right after sending a message.
     refetchInterval: (query) => {
-      const msgs = detailList<TalkMessage>(query.state.data, 'messages');
-      let gameActive = false;
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const text = msgs[i]?.message || '';
-        if (text.includes('🏆 Game over') || text.includes('🛑 Game over') || text.includes('🏆 All pairs found')) {
-          break;
-        }
-        if (text.includes('❓ Question') || text.includes('🃏 Memory: find the pairs')) {
-          gameActive = true;
-          break;
-        }
-        const envelope = decodeEnvelope(text).envelope;
-        if (envelope?.kind === 'game') {
-          if (!envelope.title.includes('Game over') && !envelope.title.includes('All pairs found')) {
-            gameActive = true;
-          }
-          break;
-        }
-      }
-      return waitingForJarvis || gameActive || sentRecently ? 2000 : 10000;
+      const sentRecently = Date.now() - recentSendAt.current < RECENT_SEND_MS;
+      const brisk = waitingForJarvis || sentRecently || gameRunning(detailList<TalkMessage>(query.state.data, 'messages'));
+      return brisk ? 2000 : 10000;
     },
     select: (response) => sortMessages(detailList<TalkMessage>(response, 'messages')),
   });
@@ -307,9 +292,9 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     try {
       const res = await api.sendTalkMessage({ token, message: local.message || '', as_user: asUser, reply_to: local.reply_to });
       if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Message failed to send');
-      setRecentSendAt(Date.now());
-      setNow(Date.now());
+      recentSendAt.current = Date.now();
       if (asksJarvis(local.message || '')) {
+        setNow(Date.now());
         setJarvisAsked((current) => ({ ...current, [token]: Date.now() }));
       }
       await queryClient.invalidateQueries({ queryKey: ['talk-messages', token] });

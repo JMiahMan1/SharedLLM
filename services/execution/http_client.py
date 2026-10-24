@@ -51,9 +51,14 @@ async def request(
     json: dict | None = None,
     timeout: ClientTimeout | int | None = None,
     verify: bool = True,
+    keep_login: bool = True,
 ) -> dict:
     """
     Make an HTTP request using a pooled connection.
+
+    With ``auth``, the server's session cookies for these exact credentials
+    ride from one call to the next unless ``keep_login`` is off (see
+    :data:`_LOGIN_COOKIES`).
 
     Returns:
         dict with keys: status_code, headers, text, content, ok
@@ -78,16 +83,29 @@ async def request(
         request_kwargs["data"] = data
     if json is not None:
         request_kwargs["json"] = json
+    login_key = _login_key(host, auth) if keep_login and auth else None
+    if login_key and _LOGIN_COOKIES.get(login_key):
+        request_kwargs["cookies"] = dict(_LOGIN_COOKIES[login_key])
 
-    async with session.request(method, url, timeout=timeout, **request_kwargs) as resp:
-        response_text = await resp.text()
-        return {
-            "status_code": resp.status,
-            "headers": dict(resp.headers),
-            "text": response_text,
-            "content": response_text.encode("utf-8"),
-            "ok": resp.status in (200, 201, 204),
-        }
+    for attempt in (1, 2):
+        async with session.request(method, url, timeout=timeout, **request_kwargs) as resp:
+            if attempt == 1 and login_key and resp.status == 401 and "cookies" in request_kwargs:
+                # A session the server has since dropped: forget it and log
+                # in afresh once, with the Basic auth alone.
+                _LOGIN_COOKIES.pop(login_key, None)
+                request_kwargs.pop("cookies")
+                continue
+            if login_key:
+                _remember_login(login_key, resp)
+            response_text = await resp.text()
+            return {
+                "status_code": resp.status,
+                "headers": dict(resp.headers),
+                "text": response_text,
+                "content": response_text.encode("utf-8"),
+                "ok": resp.status in (200, 201, 204),
+            }
+    raise AssertionError("unreachable")
 
 
 async def fetch_bytes(
@@ -97,21 +115,67 @@ async def fetch_bytes(
     params: dict | None = None,
     timeout: int = 60,
     verify: bool = True,
+    keep_login: bool = True,
 ) -> tuple[int, str, bytes]:
     """GET a binary body: (status, content type, bytes).
 
     :func:`request` decodes every body as text, which corrupts images and
     audio; this returns the bytes untouched.
     """
-    session = await get_session(host_of(url), verify)
+    host = host_of(url)
+    session = await get_session(host, verify)
     kwargs: dict = {"timeout": ClientTimeout(total=timeout)}
     if auth:
         kwargs["auth"] = BasicAuth(auth[0], auth[1])
     if params:
         kwargs["params"] = params
-    async with session.get(url, **kwargs) as resp:
-        body = await resp.read()
-        return resp.status, resp.headers.get("Content-Type", "application/octet-stream"), body
+    login_key = _login_key(host, auth) if keep_login and auth else None
+    if login_key and _LOGIN_COOKIES.get(login_key):
+        kwargs["cookies"] = dict(_LOGIN_COOKIES[login_key])
+    for attempt in (1, 2):
+        async with session.get(url, **kwargs) as resp:
+            if attempt == 1 and login_key and resp.status == 401 and "cookies" in kwargs:
+                _LOGIN_COOKIES.pop(login_key, None)
+                kwargs.pop("cookies")
+                continue
+            if login_key:
+                _remember_login(login_key, resp)
+            body = await resp.read()
+            return resp.status, resp.headers.get("Content-Type", "application/octet-stream"), body
+    raise AssertionError("unreachable")
+
+
+# Nextcloud checks the password behind Basic auth on every request that
+# arrives without its session cookie, and that check costs it 2-5 s (measured
+# from execution, against ~0.3 s with the cookie) -- on every Talk message,
+# note and thumbnail. WebDAV writes with the cookie were verified to pass
+# Nextcloud's CSRF check, since Basic auth rides along. The pooled session cannot
+# keep cookies (see get_session), so they are kept here instead, per host and
+# per exact credentials: a cookie only ever goes back with the login that
+# earned it, and a changed password starts a fresh session.
+_LOGIN_COOKIES: dict[tuple[str, str, str], dict[str, str]] = {}
+_LOGIN_COOKIES_MAX = 64
+
+
+def _login_key(host: str, auth: tuple[str, str]) -> tuple[str, str, str]:
+    import hashlib
+
+    return host, auth[0], hashlib.sha256(auth[1].encode("utf-8")).hexdigest()
+
+
+def _remember_login(key: tuple[str, str, str], resp) -> None:
+    if not resp.cookies:
+        return
+    jar = _LOGIN_COOKIES.setdefault(key, {})
+    for name, morsel in resp.cookies.items():
+        if not morsel.value or morsel.value == "deleted" or morsel["max-age"] in ("0", "-1"):
+            jar.pop(name, None)
+        else:
+            jar[name] = morsel.value
+    if not jar:
+        _LOGIN_COOKIES.pop(key, None)
+    while len(_LOGIN_COOKIES) > _LOGIN_COOKIES_MAX:
+        _LOGIN_COOKIES.pop(next(iter(_LOGIN_COOKIES)))
 
 
 _TLS_WARNED: set[tuple[str, str]] = set()

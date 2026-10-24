@@ -11,8 +11,8 @@ the member it is for.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable
-
 
 THEMES: dict[str, dict[str, Any]] = {
     "fantasy adventure": {
@@ -132,15 +132,39 @@ GENRE_TRIGGERS: dict[str, str] = {
 }
 
 
+# Matched as whole words, longest trigger first, so "epic fantasy" wins over
+# "fantasy" and "grace" never fires inside a word like "disgraced".
+_TRIGGERS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(rf"(?<![a-z0-9]){re.escape(trigger)}(?![a-z0-9])"), theme)
+    for table in (AUTHOR_TRIGGERS, GENRE_TRIGGERS)
+    for trigger, theme in sorted(table.items(), key=lambda kv: -len(kv[0]))
+]
+
+# The phone's media-session reader posts every external app as feature
+# "media"; such an event counts only from these apps, or when it names its
+# book or author outright.
+BOOK_APPS = ("audible", "libby", "audiobook", "books", "kindle", "storytel")
+
+
+def book_events(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The activity events that are reading or audiobook listening."""
+    picked = []
+    for event in events or []:
+        feature = str(event.get("feature") or "").lower()
+        detail = event.get("detail") or {}
+        app = str(detail.get("app") or "").lower()
+        named = any(detail.get(key) for key in ("book", "author"))
+        if feature in ("audiobook", "book", "reading") or (feature == "media" and (named or any(a in app for a in BOOK_APPS))):
+            picked.append(event)
+    return picked
+
+
 def _theme_for_text(text: str) -> str | None:
     t = (text or "").strip().lower()
     if not t:
         return None
-    for trigger, theme in AUTHOR_TRIGGERS.items():
-        if trigger in t:
-            return theme
-    for trigger, theme in GENRE_TRIGGERS.items():
-        if trigger in t:
+    for pattern, theme in _TRIGGERS:
+        if pattern.search(t):
             return theme
     return None
 

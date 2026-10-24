@@ -21,7 +21,41 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
-- `HEAD` Family guard: **podcasts and books recommendations from the digital profile** —
+- `HEAD` Fix: **chat and Nextcloud latency — stop re-logging in on every request** — measured
+  from execution, any authenticated Nextcloud call took 2–5 s (`status.php` 0.1 s): the
+  pooled aiohttp session uses `DummyCookieJar` (so one user's cookies never ride another's
+  request), which made Nextcloud re-check the password on every Talk fetch, every bot post,
+  every note read/write and every thumbnail. `http_client.request`/`fetch_bytes` now keep
+  Nextcloud's session cookies per host + user + password hash (`_LOGIN_COOKIES`), drop and
+  retry once on a 401, and do this by default whenever `auth` is sent (all such callers
+  are Nextcloud). Live probe: ~0.3 s per call with the cookie; WebDAV PUT/MOVE/DELETE with
+  cookie + Basic pass Nextcloud's CSRF check. The CalDAV client is cached per login for
+  10 min (it was rebuilt, reconnected and re-authenticated per calendar action), and the
+  storage service caches Nextcloud/Calibre providers per login + library (each request had
+  built a new client and, for Calibre, re-downloaded `metadata.db`). Trivia also takes a
+  late answer to the question that just closed (within 20 s, `TRIVIA_LATE_ANSWER_SECONDS`)
+  as late: it neither scores nor burns the player's one guess on the new question, and the
+  bot says a new question is up. Still open from the audit: Music Assistant search opens a
+  new websocket + auth per search (`handlers/mass_client.py:169`), webOS/ha_config open a
+  new HA websocket per command, the gateway ABS/HLS proxy builds a new `ClientSession` per
+  segment (`gateway/main.py` ~14121/14260/15063), and Talk still has no push (clients poll
+  2 s during games, 10 s otherwise; Nextcloud's long-poll `lookIntoFuture=1` is the next step).
+- `HEAD` Fix: **review of `c68f55e4`** — (1) a missed or timed-out trivia round revealed the
+  *next* question's answer (the reveal read `state.answers` after `advance_trivia`), and a
+  missed final question raised `IndexError` inside the unawaited game task, so the game never
+  said "Game over"; the answer is now read first and background game-task failures are logged
+  (`_game_task_done`). (2) Chat brisk polling never ended: `sentRecently` compared against
+  `now`, which only ticks while the Jarvis indicator shows, so every room polled at 2 s after
+  any send; it now reads the real clock. The game detector also looked for `❓ Question`,
+  which the server never posts (prompts are `🧠 Trivia — question N of M`), and scanned the
+  unsorted feed; it is now `gameRunning()` in `chatModel.ts`, tested. (3) Podcast/book
+  suggestions matched substrings over every media event, so playing *Newsboys* on Spotify
+  produced a "worldview news" podcast pick, `drama` shadowed `audio drama` and `fantasy`
+  shadowed `epic fantasy`; triggers now match whole words, longest first, and only real
+  podcast/reading events reach them (`podcast_events` / `book_events`: podcast/audiobook/
+  reading features, or media from a podcast/audiobook app or naming a show/book). Jarvis
+  audiobook plays (`feature: audiobook`) now count for books.
+- `c68f55e4` Family guard: **podcasts and books recommendations from the digital profile** —
   Jarvis now reads recent podcast listening and reading activity from telemetry and suggests
   redeemed alternatives. `services/common/podcast_recommendations.py` and `services/common/book_recommendations.py`
   map themes to vetted Christian shows/authors (news worldview, theology study, church history,
@@ -29,7 +63,7 @@ Every claim below was verified against the live system unless marked **planned**
   New routes `GET /api/recommendations/podcast` and `GET /api/recommendations/book` return only the
   derived suggestion (raw stream is parents-only). Rendered via `PodcastRecommendationCard` and
   `BookRecommendationCard` on the Health page. Verified with unit & integration tests.
-- `HEAD` Fix: **chat trivia lag and location upload timeout storms** —
+- `c68f55e4` Fix: **chat trivia lag and location upload timeout storms** —
   (1) Trivia chat lag: Server-side execution now decouples game answer processing (`_apply_game_answer`)
   into background tasks (`asyncio.create_task`) when a short message arrives in a room with an active game,
   so the user's `send` HTTP request returns immediately in <1.5s instead of 16s. Star banking and
@@ -86,7 +120,29 @@ Every claim below was verified against the live system unless marked **planned**
   call fired another recovery notice. A rejection inside the quiet window now stays quiet
   without re-arming; recovery only fires for a genuine new outage after the window passes.
   No "login works again" lines since deploy.
-- `3de98f13` Family guard: **video themes redeemed or redirected** — Jarvis now reads a\n  member's recent watching (media sessions) and suggests a redeemed alternative for a\n  creator or theme that is not appropriate: first try to redeem the theme (a wholesome\n  creator with the same kind of content — gaming, comedy, science, vlog, fitness, music\n  video, film, animation), and where no redeemed equivalent exists (news, pranks) redirect\n  to a different wholesome activity. A reviewed theme/creator map\n  (`services/common/video_recommendations.py`) maps themes to a vetted creator with a\n  plain-language reason and a redeemed/redirected flag. `GET /api/recommendations/video`\n  resolves the signed-in member, pulls recent activity from telemetry, runs the matching,\n  and returns only the derived suggestion (the raw feed stays parents-only). A\n  `VideoRecommendationCard` on the Health page surfaces it to the member. Music and video\n  recommendations now both live on the Health page. Verified live (PewDiePie → DanTDM).\n- `8d5bc4f6` Family guard: **music style matching, the first recommendation brick** — Jarvis now\n  reads a member's recent listening and suggests a Christian artist with a similar style\n  (genre, era, energy) instead of an artist whose lyrics are not appropriate. A reviewed\n  genre/artist map (`services/common/music_recommendations.py`) maps lanes (pop, hip hop,\n  rock, country, electronic, indie, acoustic, latin, classical, R&B) to a vetted Christian\n  artist with a plain-language reason. `GET /api/recommendations/music` resolves the\n  signed-in member, pulls recent activity from telemetry, runs the matching, and returns\n  only the derived suggestion (the raw feed stays parents-only). A `MusicRecommendationCard`\n  on the Health page surfaces it to the member. Music first, per the build order; video\n  themes (redeemed or redirected) follow. Verified live (Drake → Lecrae).\n- `ac963b2c` Family guard: **calls and SMS land on the activity profile** — the sideloaded
+- `3de98f13` Family guard: **video themes redeemed or redirected** — Jarvis now reads a
+  member's recent watching (media sessions) and suggests a redeemed alternative for a
+  creator or theme that is not appropriate: first try to redeem the theme (a wholesome
+  creator with the same kind of content — gaming, comedy, science, vlog, fitness, music
+  video, film, animation), and where no redeemed equivalent exists (news, pranks) redirect
+  to a different wholesome activity. A reviewed theme/creator map
+  (`services/common/video_recommendations.py`) maps themes to a vetted creator with a
+  plain-language reason and a redeemed/redirected flag. `GET /api/recommendations/video`
+  resolves the signed-in member, pulls recent activity from telemetry, runs the matching,
+  and returns only the derived suggestion (the raw feed stays parents-only). A
+  `VideoRecommendationCard` on the Health page surfaces it to the member. Music and video
+  recommendations now both live on the Health page. Verified live (PewDiePie → DanTDM).
+- `8d5bc4f6` Family guard: **music style matching, the first recommendation brick** — Jarvis now
+  reads a member's recent listening and suggests a Christian artist with a similar style
+  (genre, era, energy) instead of an artist whose lyrics are not appropriate. A reviewed
+  genre/artist map (`services/common/music_recommendations.py`) maps lanes (pop, hip hop,
+  rock, country, electronic, indie, acoustic, latin, classical, R&B) to a vetted Christian
+  artist with a plain-language reason. `GET /api/recommendations/music` resolves the
+  signed-in member, pulls recent activity from telemetry, runs the matching, and returns
+  only the derived suggestion (the raw feed stays parents-only). A `MusicRecommendationCard`
+  on the Health page surfaces it to the member. Music first, per the build order; video
+  themes (redeemed or redirected) follow. Verified live (Drake → Lecrae).
+- `ac963b2c` Family guard: **calls and SMS land on the activity profile** — the sideloaded
   app now reads the call log and SMS store with runtime permissions (READ_CALL_LOG, READ_SMS)
   and posts each new call and message to the activity feed (feature calls/sms), with direction,
   duration (calls) and body (SMS), contacts resolved best-effort. A `CommsPlugin`
@@ -424,7 +480,8 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
 - docs/PENDING_TASKS.md: RAG ingest of promoted notes and plan reflections.
 - Health: periodic cycle data never appears in family projections; the family
   cards render sleep/calories/cycle/support — watch for layout regressions.
-- Chat trivia: lag eliminated (server game answers decoupled into background tasks, single OCS post for answer+next prompt, and UI brisk polling at 2s during active games).
+- Chat latency: players still see a new question up to one poll apart (2 s in a game). Talk long-polling
+  (`lookIntoFuture=1`) or Nextcloud notify_push would make it near-instant; see the `HEAD` latency entry.
 - Home Assistant: execution logs `ha_client` `get_areas` 401s about once a
   minute (`https://ha.sumemail.com/api/template`) — an expired per-user HA
   long-lived token. Ask Jeremiah to mint a fresh token and update it in
