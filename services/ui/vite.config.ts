@@ -65,6 +65,9 @@ export default defineConfig({
     // hang failing rather than hanging forever.
     testTimeout: 20000,
     hookTimeout: 20000,
+    // sendspin-js ships extensionless ESM imports that Node cannot resolve;
+    // inlining lets Vite transform it (the shape test uses the real library).
+    server: { deps: { inline: ['@sendspin/sendspin-js'] } },
     exclude: [
       '**/e2e/**/*.spec.ts',
       '**/node_modules/**',
