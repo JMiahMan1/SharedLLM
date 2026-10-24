@@ -33,6 +33,7 @@ import RichNoteEditor, { type RichNoteEditorHandle } from '../components/notes/R
 import { richEditable } from '../lib/noteRichText';
 import { remarkNoteSpans } from '../lib/remarkNoteSpans';
 import { errorText } from '../lib/errorText';
+import { showUndoToast } from '../lib/undoToast';
 import {
   ARCHIVE_PREFIX,
   EMPTY_NOTES_INDEX,
@@ -432,7 +433,8 @@ export default function Notes() {
     }
   };
 
-  const moveNote = async (note: NoteSummary, destination: string, previousPath?: string | null) => {
+  /** Move one note; resolves to where it landed, or null when the move failed. */
+  const moveNote = async (note: NoteSummary, destination: string, previousPath?: string | null): Promise<string | null> => {
     // Paint the move before the network answers: WebDAV MOVE plus the index
     // write can outlast the old 15s window while the previews are busy, and a
     // card that stays put for that long reads as "the move did not work".
@@ -466,20 +468,48 @@ export default function Notes() {
       });
       // Reconcile in the background; the shelf is already showing the move.
       void refresh();
+      return movedTo;
     } catch (err) {
       // The card was only moved optimistically, so put it back where it was.
       if (previousList) queryClient.setQueryData(listKey, previousList);
       toast.error(errorText(err, 'Could not move the note'));
       void refresh();
+      return null;
     }
   };
 
+  /**
+   * The index's previousPath to give a note moved back to `from` by Undo: a
+   * note going back into Archive or Trash keeps the origin it had there, a
+   * note going back to the shelf needs none.
+   */
+  const undoPreviousFor = (from: string) =>
+    isArchivedPath(from) || isTrashedPath(from) ? (indexEntry(index, from).previousPath ?? null) : null;
+
+  /**
+   * Archive, trash or restore with an Undo toast. The toast shows at once (the
+   * card has already moved); Undo waits for the move to land, then moves the
+   * note back through the same move route a Restore uses.
+   */
+  const undoableMove = (note: NoteSummary, destination: string, previousPath: string | null, done: string) => {
+    const backPrevious = undoPreviousFor(note.path);
+    const landed = moveNote(note, destination, previousPath);
+    const toastId = showUndoToast(`${done} “${note.title}”`, () => {
+      void landed.then((movedTo) => {
+        if (movedTo) void moveNote({ ...note, path: movedTo }, note.path, backPrevious);
+      });
+    });
+    void landed.then((movedTo) => {
+      if (!movedTo) toast.dismiss(toastId);
+    });
+  };
+
   const archiveNote = (note: NoteSummary) => {
-    void moveNote(note, archivedPathFor(note.path, ARCHIVE_PREFIX), indexEntry(index, note.path).previousPath ?? note.path);
+    undoableMove(note, archivedPathFor(note.path, ARCHIVE_PREFIX), indexEntry(index, note.path).previousPath ?? note.path, 'Archived');
   };
 
   const trashNote = (note: NoteSummary) => {
-    void moveNote(note, archivedPathFor(note.path, TRASH_PREFIX), indexEntry(index, note.path).previousPath ?? note.path);
+    undoableMove(note, archivedPathFor(note.path, TRASH_PREFIX), indexEntry(index, note.path).previousPath ?? note.path, 'Moved to trash');
   };
 
   const restoreDestinationFor = (note: NoteSummary) => {
@@ -513,10 +543,12 @@ export default function Notes() {
     notes: NoteSummary[],
     destinationFor: (note: NoteSummary) => string,
     previousFor?: (note: NoteSummary) => string | null,
+    /** Past-tense verb for an Undo toast ("Archived"); omitted for an Undo itself. */
+    done?: string,
   ) => {
     if (!notes.length || bulkBusy) return;
     setBulkBusy(true);
-    const moved: Array<{ from: string; to: string; previousPath?: string | null }> = [];
+    const moved: Array<{ from: string; to: string; previousPath?: string | null; note: NoteSummary; backPrevious: string | null }> = [];
     const failed: string[] = [];
     for (const note of notes) {
       try {
@@ -527,6 +559,8 @@ export default function Notes() {
           from: note.path,
           to: (res.detail?.path as string | undefined) || destination,
           previousPath: previousFor?.(note),
+          note,
+          backPrevious: undoPreviousFor(note.path),
         });
       } catch {
         failed.push(note.title);
@@ -548,7 +582,19 @@ export default function Notes() {
     setBulkBusy(false);
     exitSelection();
     if (failed.length) toast.error(`Could not move ${failed.length} note${failed.length === 1 ? '' : 's'}: ${failed.join(', ')}`);
-    else if (moved.length) toast.success(`Moved ${moved.length} note${moved.length === 1 ? '' : 's'}`);
+    if (moved.length && done) {
+      // Undo puts back only the notes that actually moved, each where it was.
+      const back = new Map(moved.map((m) => [m.to, m]));
+      showUndoToast(`${done} ${moved.length} note${moved.length === 1 ? '' : 's'}`, () => {
+        void bulkMove(
+          moved.map((m) => ({ ...m.note, path: m.to })),
+          (note) => back.get(note.path)?.from ?? note.path,
+          (note) => back.get(note.path)?.backPrevious ?? null,
+        );
+      });
+    } else if (moved.length && !failed.length) {
+      toast.success(`Moved ${moved.length} note${moved.length === 1 ? '' : 's'} back`);
+    }
     void refresh();
   };
 
@@ -583,7 +629,7 @@ export default function Notes() {
   const selectedNotes = visible.filter((note) => selected.has(note.path));
 
   const restoreNote = (note: NoteSummary) => {
-    void moveNote(note, restoreDestinationFor(note), null);
+    undoableMove(note, restoreDestinationFor(note), null, 'Restored');
   };
 
   const destroyNote = async (note: NoteSummary) => {
@@ -813,6 +859,7 @@ export default function Notes() {
                     selectedNotes,
                     (note) => archivedPathFor(note.path, ARCHIVE_PREFIX),
                     (note) => indexEntry(index, note.path).previousPath ?? note.path,
+                    'Archived',
                   )
                 }
                 className="min-h-9 rounded-full px-3 text-[11px] text-slate-200 hover:bg-white/10 disabled:opacity-50"
@@ -827,6 +874,7 @@ export default function Notes() {
                     selectedNotes,
                     (note) => archivedPathFor(note.path, TRASH_PREFIX),
                     (note) => indexEntry(index, note.path).previousPath ?? note.path,
+                    'Moved to trash:',
                   )
                 }
                 className="min-h-9 rounded-full px-3 text-[11px] text-rose-300 hover:bg-white/10 disabled:opacity-50"
@@ -839,7 +887,14 @@ export default function Notes() {
             <button
               type="button"
               disabled={!selectedNotes.length || bulkBusy}
-              onClick={() => void bulkMove(selectedNotes, (note) => archivedPathFor(note.path, TRASH_PREFIX), (note) => indexEntry(index, note.path).previousPath ?? note.path)}
+              onClick={() =>
+                void bulkMove(
+                  selectedNotes,
+                  (note) => archivedPathFor(note.path, TRASH_PREFIX),
+                  (note) => indexEntry(index, note.path).previousPath ?? note.path,
+                  'Moved to trash:',
+                )
+              }
               className="min-h-9 rounded-full px-3 text-[11px] text-rose-300 hover:bg-white/10 disabled:opacity-50"
             >
               Trash
@@ -849,7 +904,7 @@ export default function Notes() {
             <button
               type="button"
               disabled={!selectedNotes.length || bulkBusy}
-              onClick={() => void bulkMove(selectedNotes, restoreDestinationFor, () => null)}
+              onClick={() => void bulkMove(selectedNotes, restoreDestinationFor, () => null, 'Restored')}
               className="min-h-9 rounded-full px-3 text-[11px] text-emerald-300 hover:bg-white/10 disabled:opacity-50"
             >
               Restore

@@ -114,6 +114,16 @@ that, every save of an opened note stacked another header on top.
   confirms before deleting permanently. Both folders are excluded from the
   main grid. On a touch screen the pin is always shown and colour is set in
   the editor; hover reveals both on a desktop. Delete asks first.
+- **Undo**: archive, trash and restore (one card, the editor's "Move to
+  trash", or a bulk selection) show a toast with **Undo** for eight seconds
+  (`lib/undoToast.tsx`). The toast appears at once, since the card has
+  already moved; Undo waits for that move to land and then moves the note back
+  with the same `move` route Restore uses, so a collision still gets a
+  numbered name rather than overwriting. A note put back into Archive or Trash
+  keeps the origin it had there; one put back on the shelf drops it. If the
+  move itself fails the offer is withdrawn. Delete forever and Empty trash are
+  not undoable here and keep their confirmation (Nextcloud's own Deleted
+  files bin keeps the file when its trash bin app is enabled, the default).
 - **Previews**: the page asks `list` for `previews: true` and gets the newest
   24 notes' text in the same reply. Execution reads them four at a time and
   keeps each note's text keyed by its file URL, modified time and size, so a
@@ -170,12 +180,12 @@ preview in cards and the editor, labels as inline
 per account and revalidated in the background, and a note whose text came with
 the list opens at once), prompt archive/trash/restore (cards move on tap, roll
 back on failure, and note calls allow a minute), dashboard and home-screen
-capture, a grid/list layout toggle remembered per device.
+capture, a grid/list layout toggle remembered per device, undo toasts for
+archive/trash/restore.
 
 Still open: reminders (time and place), attachments/images/drawings/audio,
 Nextcloud sharing, autosave and drafts, keyboard
-shortcuts, per-item checklist editing and reordering, undo
-toasts, versions, offline.
+shortcuts, per-item checklist editing and reordering, versions, offline.
 
 ## Tests
 
@@ -185,7 +195,8 @@ toasts, versions, offline.
   `write`, opens without the header, rename moves the file, pin writes the
   shared index, archive and trash move and restore, duplicate and empty trash
   call their routes, search, failure surfacing, the grid/list toggle is
-  remembered across visits
+  remembered across visits, Undo after trash and after a bulk archive moves
+  each note back, a failed move withdraws the Undo offer
 - `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
 - `services/gateway/tests/test_notes_rag_sync.py`: indexing writes to RAG;
   the list route passes `previews` through
