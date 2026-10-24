@@ -16,6 +16,7 @@ import {
   server,
 } from './setup';
 import { http, HttpResponse } from 'msw';
+import toast, { Toaster } from 'react-hot-toast';
 
 const lastIndex = (path: string) => {
   const meta = notesMetaWrites.at(-1)?.meta as
@@ -27,6 +28,7 @@ const lastIndex = (path: string) => {
 describe('Notes (Keep-style)', () => {
   beforeEach(() => {
     localStorage.clear();
+    toast.remove();
   });
 
   it('lists notes with content previews and checklists', async () => {
@@ -424,6 +426,74 @@ describe('Notes (Keep-style)', () => {
     const snapshot = readNotesSnapshot('me');
     expect(snapshot?.notes).toHaveLength(notesFixtures.length);
     expect(typeof snapshot?.savedAt).toBe('number');
+  });
+
+  it('offers Undo after trashing a note and moves it back through the move route', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <Toaster />
+        <Notes />
+      </>,
+    );
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByRole('button', { name: 'Move Trip ideas to trash' }));
+    const undoToast = await screen.findByTestId('undo-toast');
+    expect(undoToast).toHaveTextContent('Moved to trash “Trip ideas”');
+    await user.click(within(undoToast).getByRole('button', { name: 'Undo' }));
+
+    await waitFor(() => expect(notesMoveCalls.length).toBe(2));
+    expect(notesMoveCalls[0]).toMatchObject({ path: 'Notes/Trip ideas.md', destination: 'Notes/Trash/Trip ideas.md' });
+    expect(notesMoveCalls[1]).toMatchObject({ path: 'Notes/Trash/Trip ideas.md', destination: 'Notes/Trip ideas.md' });
+    // Back on the shelf, the index no longer points at a trash origin.
+    await waitFor(() => expect(lastIndex('Notes/Trip ideas.md')?.previousPath).toBeUndefined());
+    expect(await screen.findByText('Trip ideas')).toBeInTheDocument();
+  });
+
+  it('undoes a bulk archive by moving each note back where it was', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <Toaster />
+        <Notes />
+      </>,
+    );
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByTestId('select-notes'));
+    await user.click(screen.getByText('Trip ideas'));
+    await user.click(screen.getByText('Shared Checklist'));
+    await user.click(within(screen.getByTestId('bulk-bar')).getByRole('button', { name: 'Archive' }));
+
+    const undoToast = await screen.findByTestId('undo-toast');
+    expect(undoToast).toHaveTextContent('Archived 2 notes');
+    await user.click(within(undoToast).getByRole('button', { name: 'Undo' }));
+
+    await waitFor(() => expect(notesMoveCalls.length).toBe(4));
+    expect(notesMoveCalls.slice(2).map((c) => [c.path, c.destination]).sort()).toEqual([
+      ['Notes/Archive/Shared Checklist.md', 'Notes/Shared Checklist.md'],
+      ['Notes/Archive/Trip ideas.md', 'Notes/Trip ideas.md'],
+    ]);
+  });
+
+  it('withdraws the Undo offer when the move itself fails', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post('/api/communication/notes/move', () => HttpResponse.json({ status: 'FAILURE', message: 'Source is gone' })),
+    );
+    renderWithProviders(
+      <>
+        <Toaster />
+        <Notes />
+      </>,
+    );
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByRole('button', { name: 'Archive Trip ideas' }));
+
+    expect(await screen.findByText('Source is gone')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('undo-toast')).toBeNull());
   });
 
   it('switches between grid and list and remembers the choice on this device', async () => {
