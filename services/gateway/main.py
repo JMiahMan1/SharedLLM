@@ -5046,6 +5046,9 @@ async def proxy_add_timer(request: Request):
         "tts_enabled",
         "esphome_script",
         "flash_screen",
+        # The page the notice opens (a note's reminder opens that note);
+        # execution keeps in-app paths only.
+        "url",
     ):
         if body.get(optional_key) is not None:
             payload[optional_key] = body.get(optional_key)

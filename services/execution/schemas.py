@@ -458,6 +458,7 @@ class TimerRequest(BaseRequest):
     tts_enabled: bool | None = None
     esphome_script: str | None = None
     flash_screen: bool | None = None
+    url: str | None = None  # add: the app page the notice opens (e.g. a note's /notes?note=…); in-app paths only
 
 
 class TalkFileRequest(BaseModel):

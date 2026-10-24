@@ -269,6 +269,65 @@ async def test_a_notice_failure_does_not_raise(monkeypatch):
     assert await notify_timer_done("michele", {"title": "Pasta"}) is False
 
 
+async def test_a_note_reminder_opens_its_note_and_a_snooze_keeps_the_link(monkeypatch):
+    from services.common import http
+    from services.execution.handlers.timer import notify_timer_done
+
+    _FakeSession.calls, _FakeSession.fail = [], False
+    monkeypatch.setattr(http, "get_client", _FakeSession)
+    link = "/notes?note=Notes%2FTrip%20ideas.md"
+    await notify_timer_done(
+        "michele", {"id": "r1", "title": "📝 Trip ideas", "type": "reminder", "url": link, "expires_at": "x"}
+    )
+    (_, body), = _FakeSession.calls
+    assert body["data"]["url"] == link
+    assert body["title"] == "Reminder: 📝 Trip ideas"
+    assert body["body"] == "📝 Trip ideas"
+    assert body["actions"][1]["params"]["url"] == link
+
+
+async def test_a_stored_link_off_the_app_falls_back_to_communication(monkeypatch):
+    from services.common import http
+    from services.execution.handlers.timer import notify_timer_done
+
+    _FakeSession.calls, _FakeSession.fail = [], False
+    monkeypatch.setattr(http, "get_client", _FakeSession)
+    await notify_timer_done("michele", {"id": "r2", "title": "x", "type": "reminder", "url": "https://evil.test/"})
+    (_, body), = _FakeSession.calls
+    assert body["data"]["url"] == "/communication"
+    assert "url" not in body["actions"][1]["params"]
+
+
+def test_app_link_keeps_only_in_app_paths():
+    from services.execution.handlers.timer import app_link
+
+    assert app_link("/notes?note=Notes%2FA.md") == "/notes?note=Notes%2FA.md"
+    assert app_link("/notes?note=a:b") == "/notes?note=a:b"
+    for bad in ("https://x.test/", "//x.test/a", "javascript:alert(1)", "/\\x.test", "notes", "/a\nb", None, 3, "/" + "a" * 600):
+        assert app_link(bad) is None
+
+
+@pytest.mark.asyncio
+async def test_a_reminder_stores_its_link_and_reports_when_it_fires(mock_redis_conn):
+    req = TimerRequest(
+        user_context=mock_context, action="add", type="reminder", title="📝 Trip ideas",
+        time_str="2099-01-01T09:00:00+00:00", url="/notes?note=Notes%2FTrip%20ideas.md",
+    )
+    res = await handle_timer(req)
+    assert res.status == "SUCCESS"
+    stored = json.loads(next(iter(mock_redis_conn.store.values())))
+    assert stored["url"] == "/notes?note=Notes%2FTrip%20ideas.md"
+    assert stored["type"] == "reminder"
+    assert res.detail["expires_at"].startswith("2099-01-01T09:00:00")
+
+    bad = TimerRequest(
+        user_context=mock_context, action="add", type="reminder", title="x",
+        duration_str="10m", url="https://evil.test/",
+    )
+    await handle_timer(bad)
+    assert all("evil" not in value for value in mock_redis_conn.store.values())
+
+
 class HistoryList(list):
     """A Redis list value: reading it with GET is a WRONGTYPE error."""
 

@@ -221,3 +221,40 @@ async def test_the_versions_route_maps_list_read_and_restore(monkeypatch):
     refused = await main.proxy_note_versions(_request({"path": "Notes/A.md", "action": "delete"}))
     assert refused.status_code == 400
     assert len(seen) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_note_reminder_reaches_the_timers_with_its_link(monkeypatch):
+    from services.gateway import main
+
+    seen: dict = {}
+
+    async def fake_proxy(request, path, payload, as_user=None):
+        seen.update(path=path, payload=payload)
+        return JSONResponse(content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
+
+    await main.proxy_add_timer(_request({
+        "title": "📝 Trip ideas", "type": "reminder", "time_str": "2099-01-01T09:00:00Z",
+        "url": "/notes?note=Notes%2FTrip%20ideas.md",
+    }))
+    assert seen["path"] == "/execute/timer"
+    assert seen["payload"]["type"] == "reminder"
+    assert seen["payload"]["url"] == "/notes?note=Notes%2FTrip%20ideas.md"
+
+
+@pytest.mark.asyncio
+async def test_the_versions_route_refuses_an_unknown_action(monkeypatch):
+    from services.gateway import main
+
+    seen: list = []
+
+    async def fake_proxy(request, path, payload, as_user=None):
+        seen.append(payload)
+        return JSONResponse(content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
+    refused = await main.proxy_note_versions(_request({"path": "Notes/A.md", "action": "delete"}))
+    assert refused.status_code == 400
+    assert seen == []

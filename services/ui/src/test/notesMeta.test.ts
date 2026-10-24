@@ -216,6 +216,22 @@ describe('notesMeta', () => {
     expect(snapshot?.notes).toEqual([{ title: 'A', path: 'Notes/A.md' }]);
   });
 
+  it('keeps a valid reminder in the index and drops a malformed one', () => {
+    const parsed = parseNotesIndex({
+      version: 1,
+      notes: {
+        'Notes/A.md': { reminder: { at: '2099-01-01T09:00:00+00:00', timerId: 't1' } },
+        'Notes/B.md': { pinned: true, reminder: { at: 'soon', timerId: 't2' } },
+      },
+    });
+    expect(parsed?.notes['Notes/A.md']).toEqual({ reminder: { at: '2099-01-01T09:00:00+00:00', timerId: 't1' } });
+    expect(parsed?.notes['Notes/B.md']).toEqual({ pinned: true });
+
+    // Clearing the only thing an entry held drops the entry.
+    const cleared = setIndexEntry(parsed!, 'Notes/A.md', { reminder: undefined });
+    expect(cleared.notes['Notes/A.md']).toBeUndefined();
+  });
+
   it('remembers the shelf layout and falls back to grid when storage fails', () => {
     expect(readNotesLayout()).toBe('grid');
     writeNotesLayout('list');

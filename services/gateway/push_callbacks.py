@@ -48,7 +48,8 @@ async def chat_reply(request: Request, params: dict, reply: str | None):
 
 # Timers (execution handlers/timer.py notify_timer_done sends these buttons)
 
-#: A snooze or an extra minute is a new timer with the same name, speakers, sound, and emoji.
+#: A snooze or an extra minute is a new timer with the same name, speakers,
+#: sound, emoji and link (a snoozed note reminder still opens the note).
 _AGAIN_FIELDS = (
     "title",
     "target_device",
@@ -59,6 +60,7 @@ _AGAIN_FIELDS = (
     "flash_screen",
     "scope",
     "tts_enabled",
+    "url",
 )
 
 
