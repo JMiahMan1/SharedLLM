@@ -1694,6 +1694,9 @@ def family_summary(
     """
     viewer = _user(request)
     day = _day(day or date.today().isoformat())
+    # A viewer in kid mode never sees calorie numbers, not even a parent's.
+    viewer_profile = session.get(HealthProfile, viewer)
+    viewer_kid_mode = bool(viewer_profile.kid_mode) if viewer_profile else False
     grants = session.exec(select(HealthShare).where(HealthShare.viewer == viewer)).all()
     by_owner: dict[str, set[str]] = {}
     for grant in grants:
@@ -1722,7 +1725,7 @@ def family_summary(
             nutrition = _nutrition_day(session, owner, day, session.get(HealthProfile, owner))
             entry["nutrition"] = {
                 "logged": nutrition["logged"],
-                "calories": nutrition["totals"]["calories"],
+                "calories": None if viewer_kid_mode else nutrition["totals"]["calories"],
             }
         if "cycle" in scopes:
             owner_profile = session.get(HealthProfile, owner)
@@ -1734,13 +1737,15 @@ def family_summary(
                 "enabled": shared is not None,
                 "phase": shared["phase"] if shared else None,
                 "phase_label": shared["phase_label"] if shared else None,
-                "cycle_day": shared["cycle_day"] if shared else None,
                 "next_period_start": shared["next_period_start"] if shared else None,
                 "days_until_next_period": shared["days_until_next_period"] if shared else None,
                 "confidence": shared["confidence"] if shared else None,
-                "detail": shared["detail"] if shared else None,
                 "support": support,
-                # Deliberately no flow, symptoms, BBT, notes or period history.
+                # Phase and next period only. Deliberately no flow, symptoms,
+                # BBT, notes or period history -- and no cycle day or the
+                # owner's own estimate text either: today minus the cycle day
+                # is the last period's start date, and the text speaks to the
+                # owner ("your period is late") rather than to a viewer.
             }
         people.append(entry)
     return {"viewer": viewer, "day": day, "people": people}

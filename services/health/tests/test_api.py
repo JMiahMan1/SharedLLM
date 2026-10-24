@@ -1,6 +1,7 @@
 """HTTP contract tests for the health service."""
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -751,6 +752,37 @@ class TestCycleApi:
         for private_field in ("flow", "symptoms", "bbt_c", "note", "periods", "logs"):
             assert private_field not in cycle_entry
             assert private_field not in family["people"][0]
+
+    def test_the_cycle_projection_never_reveals_period_dates(self, client):
+        # Phase and next period only: the cycle day (today minus it is the
+        # last period's start) and the owner's own estimate text stay home.
+        _cycle_profile(client)
+        _enable_cycle(client)
+        started = (date.today() - timedelta(days=3)).isoformat()
+        client.post("/cycle/periods", json={"start_day": started, "flow": "heavy", "note": "zq-owner-note"})
+        client.put(f"/cycle/logs/{TODAY}", json={"symptoms": ["cramps"], "note": "zq-owner-note"})
+        assert client.put("/shares", json={"viewer": "dad", "scope": "cycle"}).status_code == 200
+        entry = client.get("/family", headers={"X-User-Id": "dad"}).json()["people"][0]["cycle"]
+        assert set(entry) == {
+            "applicable",
+            "enabled",
+            "phase",
+            "phase_label",
+            "next_period_start",
+            "days_until_next_period",
+            "confidence",
+            "support",
+        }
+        assert started not in json.dumps(entry)
+        assert "zq-owner-note" not in json.dumps(entry)
+        assert "cramps" not in json.dumps(entry)
+
+    def test_a_viewer_in_kid_mode_never_sees_calories(self, client):
+        client.post("/food", json={"day": TODAY, "name": "Toast", "calories": 120})
+        assert client.put("/shares", json={"viewer": "kid", "scope": "nutrition"}).status_code == 200
+        client.put("/profile", json={"kid_mode": True}, headers={"X-User-Id": "kid"})
+        entry = client.get("/family", headers={"X-User-Id": "kid"}).json()["people"][0]["nutrition"]
+        assert entry == {"logged": True, "calories": None}
 
     def test_cycle_sharing_requires_tracking_to_be_on(self, client):
         _cycle_profile(client)
