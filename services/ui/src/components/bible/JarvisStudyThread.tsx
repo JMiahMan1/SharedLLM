@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { BookOpen, BookOpenCheck, Send, Sparkles, X } from 'lucide-react';
+import { BookOpenCheck, Send, Sparkles, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { BibleStudyDepth } from '../../types/api';
+import ReferenceChip from './ReferenceChip';
 
 /**
  * Ask about the passage being read, and see what the answer was built from.
@@ -213,18 +214,7 @@ export default function JarvisStudyThread({
                 {!turn.failed && turn.references.length > 0 && (
                   <div className="flex flex-wrap gap-1.5" data-testid="bible-ask-references">
                     {turn.references.map((ref) => (
-                      <button
-                        key={ref}
-                        type="button"
-                        disabled={!onOpenRef}
-                        onClick={() => {
-                          void trigger('light');
-                          onOpenRef?.(ref);
-                        }}
-                        className={`${TOUCH} rounded-xl border border-sky-400/30 bg-sky-500/10 px-2.5 text-[12px] text-sky-100 flex items-center gap-1`}
-                      >
-                        <BookOpen size={12} /> {ref}
-                      </button>
+                      <ReferenceChip key={ref} reference={ref} version={version} onOpenRef={onOpenRef} />
                     ))}
                   </div>
                 )}

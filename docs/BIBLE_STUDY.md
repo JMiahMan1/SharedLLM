@@ -48,7 +48,8 @@ What differs from the plan below:
   `/api/bible/speak`.
 - **Jarvis study help** streams: `POST /study/ask/stream` (the reader uses it;
   `POST /study/ask` remains for one-shot callers), with a depth selector
-  (child/teen/adult) and reference chips.
+  (child/teen/adult) and reference chips. A chip opens a popover with the
+  passage text from `GET /passages` (`ReferenceChip.tsx`).
 - **Family chat cards** use the envelope kinds the Talk handler already
   accepts (`activity`, `game`), posted through execution `POST /execute/talk`
   (`action: post_card`). No new `card_kind` values were added.
@@ -205,8 +206,9 @@ blbclassic.org/freeoffer.cfm, study.bible/aboutBLB (researched 2026-10-02).
 - **Consequence for the plan**: we do **not** scrape or reproduce BLB
   content (copyrighted). We (a) deep-link every study affordance to the
   right blb.org URL, (b) implement our own ScriptTagger-style reference
-  hover for Jarvis answers and notes (same 7-verse cap, then "More »" to
-  BLB), and (c) vendor public-domain text for the reader itself.
+  popover for Jarvis answers and notes (same 7-verse cap, then "More »" to
+  BLB; shipped as `ReferenceChip.tsx`, opened by a tap rather than a hover
+  so it works on a phone), and (c) vendor public-domain text for the reader itself.
 
 ### Scripture text sourcing
 
@@ -854,8 +856,19 @@ order), **weekly set** (Sunday review of the week's due verses).
   reader asked never leaves the reader's own history.
 - **Three depths (child / teen / adult)** change only the wording of the
   answer; the passage and the rules stay the same. **Reference chips** show
-  only references the server's own parser accepts (at most 8), and open the
-  reader at that reference.
+  only references the server's own parser accepts (at most 8). Tapping one
+  (or Enter/Space on it) opens a **reference popover** (`ReferenceChip.tsx`)
+  with the passage text, fetched from `GET /passages` in the translation
+  being studied only when the chip is opened. The popover shows at most 7
+  verses (BLB ScriptTagger's cap); a longer passage says "Showing 7 of N
+  verses" with a "More on Blue Letter Bible" link the server builds
+  (`GET /blb/link`). Actions: **Open in reader** (only where there is a
+  reader to open) and **Copy** (`Reference (VERSION)` + the text; a refused
+  clipboard says why). Loading, a failed fetch (verbatim, with a retry) and a
+  passage with no imported text each have their own state. It is a bottom
+  sheet on a phone and sits beside the chip from `md` up; either way it is a
+  modal dialog: focus moves in, Tab is trapped, Escape or a tap outside
+  closes it, and focus returns to the chip.
 - **Over-long input is refused rather than truncated**: an empty question,
   one over 2,000 characters, or a passage over 150 verses is a 400 naming
   the number, because a silently shortened passage would produce a confident
@@ -1109,8 +1122,8 @@ verse opens `/bible?ref=…`; the devotional opens `/bible?tab=devotional`.
 
 - 44px touch targets: interactive rows, option buttons, steppers; desktop
   density kept via `pointer-coarse:min-h-11`.
-- No hover-only affordances; no `onMouseEnter`-only paths (reference
-  popover opens on tap-hold on touch).
+- No hover-only affordances; no `onMouseEnter`-only paths (the reference
+  popover opens on a tap, as a bottom sheet on a phone).
 - Phone grid fit: widget content scales with container (SVG `viewBox`,
   no fixed pixel canvas); page sections fit 280px/200px bands.
 - `safe-area-*` insets on sticky bars and composers; content that the
@@ -1148,6 +1161,8 @@ src/components/bible/BibleStudyNotes.tsx          # commentary/footnotes per ver
 src/components/bible/InterlinearPanel.tsx         # imported word-by-word interlinear
 src/components/bible/JarvisStudyThread.tsx        # ask about this passage: question,
                                                   #   thread, provenance, failures verbatim
+src/components/bible/ReferenceChip.tsx            # reference chip + passage popover
+                                                  #   (7-verse cap, open in reader, copy)
 src/components/bible/BibleReadAloud.tsx           # narration player + voice picker
 src/components/bible/FocusReader.tsx              # full-screen reading page
 src/components/bible/focusAmbience.ts             # hour -> page tint (pure function)
@@ -1167,8 +1182,7 @@ src/components/admin/BibleAdminPanel.tsx          # Admin › Bible: catalogue,
                                                   #   before Install, one-book test
 ```
 
-Planned and not built: a reference-chip popover with the 7-verse cap (the
-ScriptTagger analog), a family plan board, a study-memory search over RAG,
+Planned and not built: a family plan board, a study-memory search over RAG,
 and an opt-in workspace export.
 
 Tests: `src/pages/Bible.test.tsx` (including comparing two translations: the
@@ -1189,7 +1203,13 @@ controls absent until the sheet is opened, choosing a chapter closing it, and
 jsdom's default landing on the desktop bar),
 `src/components/bible/BibleStudyNotes.test.tsx` (including the note pointer
 using the path the server reported, and no pointer at all when none was
-reported), `src/components/bible/JarvisStudyThread.test.tsx`,
+reported), `src/components/bible/JarvisStudyThread.test.tsx` (a chip
+showing its passage before opening the reader),
+`src/components/bible/ReferenceChip.test.tsx` (nothing fetched until tapped,
+loading then a failure verbatim with a retry, the empty passage, the 7-verse
+cap with the BLB link, open in reader, copy and a refused copy, keyboard open
+with Tab trapped and Escape returning focus to the chip, and a tap outside
+closing it),
 `BibleToday.test.tsx`, `BiblePlans.test.tsx`, `BibleMemorize.test.tsx`,
 `BibleGames.test.tsx`, `BookPicker.test.tsx`, `verseMarks.test.ts`,
 `VerseActionSheet.links.test.tsx`,
@@ -1359,7 +1379,7 @@ parity with the Bible App" passes on desktop **and** phone.
 | Phase | Scope | Definition of done |
 |---|---|---|
 | **0** Config + corpus + reading + study (done) | `services/bible/` service (port 8010), compose + Caddy + `BRIDGE_BIBLE_SVC_URL` + Identity `GlobalSetting`s, reference resolver, `corpus_manifest.json`, PDF + EPUB importers, `StudyNote` table with the two-axis `BibleEdition` corpus, `migrations.py` for existing databases, `editions.py` CLI, gateway `/api/bible/*`, `/books`, `/versions`, `/passages`, `/search`, `/editions`, `/study/notes`, `/study/ask`, `/verse-of-day`, `/devotional`, `/marks`, `/state`, `/events`, `/stats`, `/streaks`, `/achievements`, `/activity/*`, `/blb/link`, `/daily`, `/narration`, `/voices`, `/admin/imports*`; `/bible` page, `bible_daily` dashboard widget, Android Verse-of-the-Day home-screen widget, `bible` sharing scope, Admin › Bible import surface, one primary translation, long-term per-chapter provider cache with cost estimate, request budget and one-book dry run; **the mobile reference sheet** (one-line passage header with prev/next, every other control in a sheet), **the `note` mark kind** with a verse-note glyph and read-back from Nextcloud, **Ask about this verse** (grounded Jarvis answers), **Focus mode** with hour-tinted chrome, `favorite_version`/`compare_version`/`show_notes` preferences; `bible` added to the image CI matrix | **Shipped.** Service boots in compose; corpus imported (KJV/ASV/WEB + NKJV with 44k study notes under the Nelson study Bible); multiple study Bibles per translation and opt-in notes from other translations both work end to end; every unconfigured path returns a message naming the setting; proxy is caller-scoped with the family 404 intact. Live-verified: `/study/ask` answered a John 3:16 question in 83s citing 1 verse and 3 notes |
-| **1** **The reader** (mostly done) | `BookPicker`, compare view, HA speaker playback (read-aloud itself ships in Phase 0 via `BibleReadAloud.tsx`), note editor → Nextcloud, Continue reading card, verse image share, reference popover, offline cache. **Shipped (2026-10-13):** opaque reading page in dark/sepia/light tones (AAA contrast), 66-book + chapter grid picker, swipe to turn the chapter, last 120 passages kept on the device for offline reading, verse image share card, Continue reading card. **Shipped (2026-10-20):** per-verse highlight while speaking and sending the reading to a chosen speaker. **Shipped (2026-10-24):** Panes comparison with verse-synced scroll. Not yet: reference popover | A user opens the app and is reading, where they left off, on desktop and phone; marks/notes/position sync; chapters read offline; read-aloud speaks a chapter and states its errors honestly |
+| **1** **The reader** (mostly done) | `BookPicker`, compare view, HA speaker playback (read-aloud itself ships in Phase 0 via `BibleReadAloud.tsx`), note editor → Nextcloud, Continue reading card, verse image share, reference popover, offline cache. **Shipped (2026-10-13):** opaque reading page in dark/sepia/light tones (AAA contrast), 66-book + chapter grid picker, swipe to turn the chapter, last 120 passages kept on the device for offline reading, verse image share card, Continue reading card. **Shipped (2026-10-20):** per-verse highlight while speaking and sending the reading to a chosen speaker. **Shipped (2026-10-24):** Panes comparison with verse-synced scroll, and the reference-chip popover | A user opens the app and is reading, where they left off, on desktop and phone; marks/notes/position sync; chapters read offline; read-aloud speaks a chapter and states its errors honestly |
 | **2** Plans + daily rhythm (plans done) | **Shipped (2026-10-13):** `services/bible/plans.py` (twelve plans in `games/plans.json` generated from the canonical chapter table, every chapter exactly once, side-by-side tracks), `PlanEnrollment` table, `/plans*` (start, complete/undo a day, catch me up, stop), plans on the Today tab, plan badges live. Plan line on the dashboard widget and a daily reading reminder (bible-service loop + telemetry notify with a per-day `once` key, the leave-by pattern; automation has no timer-create API and its daily recurrence drifts across DST) also shipped. Reading along: family members on the same plan, consent-gated | Completing a plan day advances the plan and the badges (tests); missed days are catchable (test) |
 | **3** Achievements + points | Rules engine already shipped in Phase 0 (reading/streak rules); plan, memory and quiz rules land with those features; banking to `POST /api/geo/stars`, Talk announcement cards, `AchievementsPanel` reuse in Progress | Unlock → points land in the one ledger, `earned_on` is stable across re-reads, family card posts when configured |
 | **4** Family sharing (mostly done) | Family plan board, per-day discussion cards in Talk, in-chat Bible trivia; the `bible` sharing scope already ships in Phase 0. **Shipped (2026-10-13):** consent now reads Identity's real `{users:[...]}` payload (it was always false before), reading along on a plan (no group table: following the same plan is the group), family chat cards for a daily quiz score, a finished plan and a mastered verse (sharers only), badge cards fixed to an accepted `card_kind`. Not yet: in-chat trivia (the Talk game API is unwired in the UI and off unless `FAMILY_GAMES_ENABLED`) | Non-consented user gets 404; feed omits; family plan board and Talk round work for members only |
