@@ -34,6 +34,7 @@ import { richEditable } from '../lib/noteRichText';
 import { remarkNoteSpans } from '../lib/remarkNoteSpans';
 import { errorText } from '../lib/errorText';
 import { showUndoToast } from '../lib/undoToast';
+import { isTypingTarget } from '../lib/keyboard';
 import { clearNoteDraft, readNoteDraft, readNoteDrafts, writeNoteDraft } from '../lib/noteDrafts';
 import {
   ARCHIVE_PREFIX,
@@ -418,6 +419,33 @@ export default function Notes() {
     },
     [scope, notes, openEditor],
   );
+
+  // Desktop shortcuts on the shelf: C takes a note (as in Keep), / searches
+  // the notes. Never while typing in a field or with a modifier held, and not
+  // while a note is open (the editor has its own). Registered on the document
+  // so they run before the app-wide media shortcuts on the window, whose `/`
+  // would otherwise open the global search instead.
+  const searchRef = useRef<HTMLInputElement>(null);
+  const shelfKeysRef = useRef({ editorOpen: false, openNew: () => {} });
+  useEffect(() => {
+    shelfKeysRef.current = { editorOpen: Boolean(editing), openNew: () => void openEditor() };
+  });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+      if (isTypingTarget(event.target) || shelfKeysRef.current.editorOpen) return;
+      if (event.key === 'c' || event.key === 'C') {
+        event.preventDefault();
+        shelfKeysRef.current.openNew();
+      } else if (event.key === '/') {
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   // Deep link from the dashboard's Quick Notes widget and the Android home
   // screen widget: /notes?note=<path> opens a note, /notes?new=1 starts a new
@@ -857,10 +885,16 @@ export default function Notes() {
           <div className="relative min-w-40 flex-1 sm:flex-none">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
+              ref={searchRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                // Escape leaves the search box, back to the shelf's shortcuts.
+                if (e.key === 'Escape') e.currentTarget.blur();
+              }}
               placeholder="Search notes (tag:…)"
               aria-label="Search notes"
+              title="Search notes (/)"
               className="glass-input min-h-11 pl-8 pr-3 py-2 text-base sm:text-sm w-full sm:w-56"
             />
           </div>
@@ -905,6 +939,8 @@ export default function Notes() {
         >
           <Plus size={16} className="text-purple-400" />
           Take a note…
+          {/* The shortcut hint only where there is a keyboard-and-mouse desktop. */}
+          <kbd className="ml-auto hidden rounded border border-white/15 px-1.5 text-[10px] text-slate-500 [@media(hover:hover)]:inline">C</kbd>
         </button>
       )}
 
@@ -1579,6 +1615,28 @@ const NoteEditor = forwardRef<
     }
   };
 
+  // Ctrl/Cmd+S saves and Ctrl/Cmd+Enter saves and closes, from anywhere in
+  // the sheet, fields included: a modifier chord is never typing. Escape
+  // closes through the Modal. The browser's own Save page is kept out.
+  const editorKeysRef = useRef({ save: () => {}, close: () => {} });
+  useEffect(() => {
+    editorKeysRef.current = { save: () => void save(), close: () => void requestClose() };
+  });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.repeat) return;
+      if (event.key === 's' || event.key === 'S') {
+        event.preventDefault();
+        editorKeysRef.current.save();
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        editorKeysRef.current.close();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
   const keepBoth = async () => {
     setSaveState({ kind: 'saving' });
     const result = await onKeepBoth(draft);
@@ -1755,11 +1813,17 @@ const NoteEditor = forwardRef<
             type="button"
             className="glass-button min-h-11 px-4 py-2 text-sm"
             onClick={() => void save()}
+            title="Save (Ctrl+S)"
             disabled={saveState.kind === 'saving'}
           >
             {saveState.kind === 'saving' ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Save
           </button>
-          <button type="button" className="glass-button min-h-11 px-3 py-2 text-xs" onClick={() => void requestClose()}>
+          <button
+            type="button"
+            className="glass-button min-h-11 px-3 py-2 text-xs"
+            onClick={() => void requestClose()}
+            title="Save and close (Ctrl+Enter or Esc)"
+          >
             <X size={13} /> Close
           </button>
           <span className="text-[11px] text-slate-500" aria-live="polite" data-testid="note-save-status">

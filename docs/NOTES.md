@@ -161,6 +161,16 @@ that, every save of an opened note stacked another header on top.
   "<title> (my copy)", numbered past existing titles in that folder),
   **Use the stored version** (drops yours and reopens the note) or
   **Overwrite with mine**. Autosave pauses until you choose.
+- **Keyboard shortcuts** (desktop): on the shelf **C** takes a note (Keep's
+  key; N is the media "next track") and **/** jumps to the notes search
+  (Escape leaves it). In an open note **Ctrl/Cmd+S** saves and
+  **Ctrl/Cmd+Enter** saves and closes, from inside the fields too, since a
+  modifier chord is never typing; **Esc** closes (and saves) through the
+  sheet. Single-key shortcuts never fire in a field, a contentEditable editor,
+  with a modifier held, or while a note is open. The shelf listener sits on
+  the document so its **/** wins over the app-wide media shortcuts' global
+  search on the window; the media help (**?**) lists the Notes keys.
+  `lib/keyboard.ts` holds the shared "is the person typing" check.
 - **Drafts on the device**: every change the server does not have yet is
   kept in localStorage per account (`jarvis_notes_drafts_v1:<scope>`,
   `lib/noteDrafts.ts`, newest 20, written in try/catch) and forgotten once a
@@ -213,10 +223,10 @@ the list opens at once), prompt archive/trash/restore (cards move on tap, roll
 back on failure, and note calls allow a minute), dashboard and home-screen
 capture, a grid/list layout toggle remembered per device, undo toasts for
 archive/trash/restore, autosave with ETag conflict detection and on-device
-drafts that survive a closed app.
+drafts that survive a closed app, desktop keyboard shortcuts.
 
 Still open: reminders (time and place), attachments/images/drawings/audio,
-Nextcloud sharing, keyboard shortcuts, per-item checklist editing and
+Nextcloud sharing, per-item checklist editing and
 reordering, versions, offline.
 
 ## Tests
@@ -235,6 +245,9 @@ reordering, versions, offline.
   closing saves pending changes and an untouched close writes nothing; a
   draft survives an unmounted app and is restored or discarded; opening a
   note with kept changes can discard them for the stored text
+- `services/ui/src/test/NotesShortcuts.test.tsx`: C and / on the shelf, not in
+  a field or with a modifier; Ctrl+S saves from a field, Ctrl/Cmd+Enter saves
+  and closes
 - `services/ui/src/test/noteDrafts.test.ts`: per-account drafts, the newest-20
   cap, a damaged store, storage that throws
 - `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
