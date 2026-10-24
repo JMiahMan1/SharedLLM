@@ -137,3 +137,11 @@ def test_a_parent_unlock_is_never_silent(wired, monkeypatch):
 
     assert r.status_code == 200 and "notify" not in r.json()
     assert [n["user"] for n in sent] == ["dad", "mom"] and "mom unlocked" in sent[0]["body"]
+
+
+def test_lane_changes_go_to_identity_as_the_caller(wired):
+    client, calls, _, answers = wired
+    answers[("PUT", "/recommendation-lanes/kid")] = (403, {"detail": "Only a parent can change suggestions"})
+    r = client.put("/api/recommendation-lanes/kid", json={"lanes": {"game": False}})
+    assert r.status_code == 403
+    assert calls[0]["headers"]["Authorization"] == "Bearer kid-key" and calls[0]["json"] == {"lanes": {"game": False}}

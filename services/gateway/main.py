@@ -5244,6 +5244,20 @@ async def get_usage(request: Request, user: str, days: int = 7):
     return await _proxy_json_response(resp)
 
 
+async def _lane_blocked(user: str, lane: str) -> bool:
+    """A suggestion lane this member's parents switched off (identity owns it)."""
+    try:
+        async with borrow_http_client() as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC}/api/internal/recommendation-lanes/{user}", headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status != 200:
+                return False
+            return lane in ((await resp.json(content_type=None)) or {}).get("blocked", [])
+    except Exception:
+        return False
+
+
 @app.get("/api/recommendations/music")
 async def get_music_recommendation(request: Request):
     """A music suggestion for the signed-in member, derived from their listening.
@@ -5255,6 +5269,8 @@ async def get_music_recommendation(request: Request):
     user = str((creds or {}).get("user") or "").strip()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if await _lane_blocked(user, "music"):
+        return {"status": "SUCCESS", "recommendation": None, "blocked": True}
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -5288,6 +5304,8 @@ async def get_video_recommendation(request: Request):
     user = str((creds or {}).get("user") or "").strip()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if await _lane_blocked(user, "video"):
+        return {"status": "SUCCESS", "recommendation": None, "blocked": True}
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -5321,6 +5339,8 @@ async def get_podcast_recommendation(request: Request):
     user = str((creds or {}).get("user") or "").strip()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if await _lane_blocked(user, "podcast"):
+        return {"status": "SUCCESS", "recommendation": None, "blocked": True}
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -5350,6 +5370,8 @@ async def get_book_recommendation(request: Request):
     user = str((creds or {}).get("user") or "").strip()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if await _lane_blocked(user, "book"):
+        return {"status": "SUCCESS", "recommendation": None, "blocked": True}
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -5394,6 +5416,8 @@ async def get_game_recommendation(request: Request):
     user = str((creds or {}).get("user") or "").strip()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if await _lane_blocked(user, "game"):
+        return {"status": "SUCCESS", "recommendation": None, "blocked": True}
     usage, events = await asyncio.gather(
         _own_telemetry(user, "usage", {"days": 7}),
         _own_telemetry(user, "activity", {"limit": 100}),
@@ -5409,6 +5433,8 @@ async def get_activity_recommendation(request: Request):
     user = str((creds or {}).get("user") or "").strip()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if await _lane_blocked(user, "activity"):
+        return {"status": "SUCCESS", "recommendation": None, "blocked": True}
     usage = await _own_telemetry(user, "usage", {"days": 7})
     return {"status": "SUCCESS", "recommendation": recommend_activity(usage, os.getenv("TIMEZONE") or "UTC")}
 
@@ -5473,6 +5499,18 @@ _TAMPER_EVENTS = {
     "guard_missing": "is running without Jarvis's screen guard",
     "uninstall_attempt": "tried to remove Jarvis",
 }
+
+
+@app.get("/api/recommendation-lanes/{username}")
+async def recommendation_lanes(request: Request, username: str):
+    status, body = await _identity_as_caller(request, "GET", f"/api/recommendation-lanes/{username}")
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.put("/api/recommendation-lanes/{username}")
+async def set_recommendation_lanes(request: Request, username: str):
+    status, body = await _identity_as_caller(request, "PUT", f"/api/recommendation-lanes/{username}", json=await request.json())
+    return JSONResponse(status_code=status, content=body)
 
 
 @app.post("/api/guard/parent-unlock")
