@@ -34,6 +34,13 @@ def test_the_weekend_limit_replaces_the_daily_one():
     assert evaluate(RULES, 150 * 60000, 0, SAT(12))["remaining_min"] == 30
 
 
+def test_a_day_of_the_weekly_schedule_wins_over_daily_and_weekend():
+    rules = {**RULES, "day_limits": {"wed": 60, "sat": 240}}
+    assert evaluate(rules, 30 * 60000, 0, WED(16))["limit_min"] == 60
+    assert evaluate(rules, 0, 0, SAT(12))["limit_min"] == 240
+    assert evaluate({**RULES, "day_limits": {"mon": 30}}, 0, 0, WED(16))["limit_min"] == 120  # other days keep theirs
+
+
 def test_bedtime_runs_overnight_and_wins_over_time_left():
     late = evaluate(RULES, 0, 0, WED(22, 30))
     assert late["locked"] and late["reason"] == "bedtime" and late["until"] == "2026-10-22T07:00:00-07:00"

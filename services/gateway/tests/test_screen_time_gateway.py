@@ -108,8 +108,8 @@ def test_tamper_reports_tell_the_parents(wired, monkeypatch):
             return {"parents": ["dad", "mom"], "display_name": "Zachary"}
 
     class _Client:
-        async def get(self, url, **kw):
-            calls.append({"url": url})
+        async def post(self, url, **kw):
+            calls.append({"url": url, **kw})
             return _Resp()
 
     @asynccontextmanager
@@ -118,8 +118,10 @@ def test_tamper_reports_tell_the_parents(wired, monkeypatch):
 
     monkeypatch.setattr(gateway_main, "borrow_http_client", fake)
 
-    assert client.post("/api/guard/tamper", json={"event": "admin_disabled"}).status_code == 200
-    assert calls[-1]["url"].endswith("/api/internal/guard/parents/kid")
+    assert client.post("/api/guard/tamper", json={"event": "admin_disabled", "device_key": "k" * 16}).status_code == 200
+    # Identity keeps the report for the father's Devices section and says who to tell.
+    assert calls[-1]["url"].endswith("/api/internal/guard/tamper/kid")
+    assert calls[-1]["json"] == {"event": "admin_disabled", "device_key": "k" * 16}
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert "Zachary's phone turned off Jarvis's device protection" in sent[0]["body"]
     assert client.post("/api/guard/tamper", json={"event": "nonsense"}).status_code == 422
@@ -203,7 +205,7 @@ def test_asking_a_parent_first_tells_both_parents_once(wired):
     assert r.status_code == 200 and "notify" not in r.json()
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert "kid asks to open minecraft.net" in sent[0]["body"] and "school project" in sent[0]["body"]
-    assert sent[0]["data"]["url"] == "/guardian?child=kid"
+    assert sent[0]["data"]["url"] == "/family/member/kid"
 
     sent.clear()
     answers[("POST", "/guard/requests")] = (200, {"request": {"username": "kid", "kind": "app", "target": "com.roblox.client"}, "notify": []})

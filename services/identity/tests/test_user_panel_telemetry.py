@@ -101,6 +101,7 @@ class TestNoOptInEventAllowlist:
                 "feature_use",
                 "capability_miss",
                 "battery",
+                "guard_tamper",  # protection switched off: a state change, never content
             }
         ) == NO_OPT_IN_EVENTS
 
