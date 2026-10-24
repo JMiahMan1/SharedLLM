@@ -452,6 +452,93 @@ async def _note_versions(provider, req: NoteRequest) -> ExecutionResult:
     )
 
 
+#: Nextcloud's sharing API (OCS). A note is shared like any file: with a
+#: Nextcloud user (shareType 0), read only (1) or read and edit (1 + 2).
+_SHARES = "/ocs/v2.php/apps/files_sharing/api/v1/shares"
+_SHAREES = "/ocs/v2.php/apps/files_sharing/api/v1/sharees"
+_SHARE_USER = 0
+_PERM_READ = 1
+_PERM_UPDATE = 2
+_SHARE_ID = re.compile(r"^[0-9]{1,20}$")
+
+
+def _user_share(share: dict) -> dict | None:
+    """One person a note is shared with, as the page shows it."""
+    if int(share.get("share_type", -1)) != _SHARE_USER:
+        return None
+    permissions = int(share.get("permissions") or 0)
+    return {
+        "id": str(share.get("id")),
+        "with": str(share.get("share_with") or ""),
+        "name": str(share.get("share_with_displayname") or share.get("share_with") or ""),
+        "can_edit": bool(permissions & _PERM_UPDATE),
+    }
+
+
+async def _note_sharing(provider, req: NoteRequest) -> ExecutionResult:
+    """Who a note is shared with, who it could be, and sharing or unsharing it."""
+    service = f"note_{req.action}"
+    path = (req.path or "").lstrip("/")
+
+    if req.action == "sharees":
+        ok, data, message = await provider.request(
+            "GET", _SHAREES,
+            params={"search": (req.search or "").strip(), "itemType": "file", "perPage": "50", "lookup": "false"},
+        )
+        if not ok:
+            return ExecutionResult(status="FAILURE", message=message or "Could not list the people to share with.", service=service)
+        people: dict[str, dict] = {}
+        data = data if isinstance(data, dict) else {}
+        for bucket in ((data.get("exact") or {}).get("users") or [], data.get("users") or []):
+            for entry in bucket:
+                value = entry.get("value") or {}
+                user_id = str(value.get("shareWith") or "")
+                if user_id and user_id != provider.username and int(value.get("shareType", _SHARE_USER)) == _SHARE_USER:
+                    people.setdefault(user_id, {"id": user_id, "name": str(entry.get("label") or user_id)})
+        return ExecutionResult(
+            status="SUCCESS", message=f"{len(people)} people.", service=service,
+            detail={"people": sorted(people.values(), key=lambda p: p["name"].lower())},
+        )
+
+    if req.action == "share_remove":
+        if not _SHARE_ID.match(req.share_id or ""):
+            return ExecutionResult(status="FAILURE", message="That is not a share of this note.", service=service)
+        ok, _data, message = await provider.request("DELETE", f"{_SHARES}/{req.share_id}")
+        if not ok:
+            return ExecutionResult(status="FAILURE", message=message or "Could not stop sharing.", service=service)
+        return ExecutionResult(status="SUCCESS", message="No longer shared.", service=service, detail={"share_id": req.share_id})
+
+    if not path:
+        return ExecutionResult(status="FAILURE", message=f"{req.action} requires path.", service=service)
+
+    if req.action == "share_add":
+        share_with = (req.share_with or "").strip()
+        if not share_with or share_with == provider.username:
+            return ExecutionResult(status="FAILURE", message="Pick someone to share this note with.", service=service)
+        permissions = _PERM_READ | (_PERM_UPDATE if req.can_edit else 0)
+        ok, data, message = await provider.request(
+            "POST", _SHARES,
+            data={"path": f"/{path}", "shareType": str(_SHARE_USER), "shareWith": share_with, "permissions": str(permissions)},
+        )
+        if not ok:
+            return ExecutionResult(status="FAILURE", message=message or "Could not share the note.", service=service)
+        share = _user_share(data) if isinstance(data, dict) else None
+        return ExecutionResult(status="SUCCESS", message="Shared.", service=service, detail={"share": share})
+
+    ok, data, message = await provider.request(
+        "GET", _SHARES, params={"path": f"/{path}", "reshares": "false", "subfiles": "false"},
+    )
+    if not ok:
+        if "not exist" in (message or "").lower():
+            return ExecutionResult(status="FAILURE", message="That note is not there any more.", service=service)
+        return ExecutionResult(status="FAILURE", message=message or "Could not list who this note is shared with.", service=service)
+    shares = [s for s in (_user_share(item) for item in (data or []) if isinstance(item, dict)) if s]
+    return ExecutionResult(
+        status="SUCCESS", message=f"Shared with {len(shares)}.", service=service,
+        detail={"shares": shares, "path": path},
+    )
+
+
 async def handle_note(req: NoteRequest) -> ExecutionResult:
     storage_mode = getattr(req, "storage", "nextcloud")
 
@@ -829,6 +916,9 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
 
         elif action in ("versions", "version_read", "version_restore"):
             return await _note_versions(provider, req)
+
+        elif action in ("shares", "sharees", "share_add", "share_remove"):
+            return await _note_sharing(provider, req)
 
         return ExecutionResult(status="FAILURE", message=f"Action {action} failed or not implemented.", service="note")
 

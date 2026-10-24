@@ -11,6 +11,10 @@ grid of colour-coded cards with checklists, search, and a full editor.
 | Keep-style page (route `/notes`) | `services/ui/src/pages/Notes.tsx` |
 | Pin/colour/search/header helpers | `services/ui/src/lib/notesMeta.ts` |
 | Save / rename (shared with Recipes) | `services/ui/src/lib/noteSave.ts` |
+| Unsaved drafts on the device | `services/ui/src/lib/noteDrafts.ts` |
+| Visual editor, checklist item controls | `services/ui/src/components/notes/RichNoteEditor.tsx` |
+| Version history, reminder, sharing panels | `services/ui/src/components/notes/{NoteHistory,ReminderPanel,SharePanel}.tsx` |
+| Undo toast | `services/ui/src/lib/undoToast.tsx` |
 | API client | `services/ui/src/services/api.ts` (`*Note` methods) |
 | Gateway proxies | `services/gateway/main.py` (`/api/communication/notes/*`) |
 | Handler | `services/execution/handlers/note.py` |
@@ -39,6 +43,7 @@ with it — Notes lives here and in the nav.
 | `check_off` | toggle one checklist item (`- [ ] x` ↔ `- [x] x`) by text |
 | `list` | list markdown files under the configured directories, newest first; with `previews: true` the newest 24 also carry their text in `content` |
 | `sync_rag` | read every note (execution); the gateway then indexes them (below) |
+| `shares` / `sharees` / `share_add` / `share_remove` | Nextcloud sharing of one note (OCS): who has it, who it could go to (`search`), share with `share_with` (read only, or `can_edit`), stop a share by `share_id`. Gateway: `POST /api/communication/notes/share` with `action: list\|people\|add\|remove` |
 | `versions` / `version_read` / `version_restore` | Nextcloud's own version history of one note (`path`): list (newest first, with label and author on Nextcloud 26+), read one (`version`), or restore one over the note. Gateway: `POST /api/communication/notes/versions` with `action: list\|read\|restore` |
 
 The stored header is the server's: `create`/`write` strip any leading
@@ -191,6 +196,18 @@ that, every save of an opened note stacked another header on top.
   refused in the panel, because the timers read a past clock time as that
   time tomorrow. Reminders are personal (the person who set it), not
   household-wide.
+- **Sharing**: a saved note's **Share** panel (`components/notes/SharePanel.tsx`)
+  shows who has it and shares it with someone on the family's Nextcloud,
+  read only or with editing, through Nextcloud's own sharing (OCS
+  `files_sharing/api/v1/shares`, user shares only) via the provider's existing
+  OCS client, as the note's own account. The people offered come from
+  Nextcloud's sharee search (`…/sharees`, itemType file), so they are exactly
+  the users this account may share with (the caller is never offered, and
+  someone already shared with is not offered again). Stop sharing deletes the
+  share by its numeric id. The note stays one file: the other person sees it
+  under Files → Shared with you, and in their Jarvis Notes once they move it
+  into their Notes folder (Jarvis lists `Notes/` only). Public links and
+  group shares are not offered. Failures show Nextcloud's own reason.
 - **Version history**: an open, saved note has a **History** button that
   lists Nextcloud's earlier versions of the file (`components/notes/NoteHistory.tsx`).
   Nextcloud's Versions app (files_versions, on by default) keeps one each time
@@ -271,10 +288,27 @@ archive/trash/restore, autosave with ETag conflict detection and on-device
 drafts that survive a closed app, desktop keyboard shortcuts, per-item
 checklist controls (drag, arrow-key and Alt+arrow reordering, delete),
 version history with read and restore from Nextcloud's Versions app, timed
-reminders on the existing timers whose notice opens the note.
+reminders on the existing timers whose notice opens the note, sharing with
+someone on the family's Nextcloud (view or edit).
 
-Still open: place-based reminders, attachments/images/drawings/audio,
-Nextcloud sharing, offline.
+Still open, and why:
+
+- **Place-based reminders**: the timers are time-only. A "when I get home"
+  reminder needs a geofence registered on the phone (the Android shell's
+  location services) and a place picker; geo already knows family places,
+  but nothing turns arriving at one into a notice yet.
+- **Attachments, images, drawings, audio**: Nextcloud Notes keeps
+  attachments as files beside the note, referenced by relative markdown
+  links (`![](.attachments.<id>/photo.jpg)`). Jarvis would need an upload
+  route into that folder, image rendering in cards and the editor, and the
+  visual editor's exact round trip extended to image links (today any note
+  with an image opens as text, by design, so it cannot be flattened).
+  Drawings and audio would ride on the same attachment path.
+- **Offline editing**: the shelf already paints the last list, and unsaved
+  edits survive on the device, but an edit made with no connection is not
+  queued and replayed when the network returns. That needs a write queue
+  that replays with the same If-Match rules (so a stale offline edit still
+  becomes a conflict, not an overwrite) and the app's network state.
 
 ## Tests
 
@@ -293,6 +327,9 @@ Nextcloud sharing, offline.
   draft survives an unmounted app and is restored or discarded; opening a
   note with kept changes can discard them for the stored text; choosing the
   stored version after a conflict drops the edit and reopens it
+- `services/ui/src/test/NoteShare.test.tsx`: share with a household member
+  (view only), the share shows and is not offered again, stop sharing; the
+  empty and failure states
 - `services/ui/src/test/NoteHistory.test.tsx`: versions list, read and
   restore (the editor reopens on the stored note), the empty and failure
   states, no History for an unsaved note
@@ -313,7 +350,8 @@ Nextcloud sharing, offline.
 - `services/ui/src/pages/Recipes.test.tsx`: edit in place, rename, delete
 - `services/gateway/tests/test_notes_rag_sync.py`: indexing writes to RAG;
   the list route passes `previews` through; the write route passes `if_match`;
-  the versions route maps list/read/restore and refuses anything else
+  the versions and share routes map their actions and refuse anything else;
+  a note reminder reaches the timers with its link
 - `services/ui/src/test/noteRichText.test.ts` / `RichNoteEditor.test.tsx`:
   markdown round trips, the unsupported-note fallback, span whitelist, tick,
   Enter and toolbar behaviour, span rendering in previews; checklist items
@@ -331,6 +369,9 @@ Nextcloud sharing, offline.
   ETag, a 412 is a conflict, a new note never sends `If-Match`; versions are
   listed newest first from the fileid folder, read and restored (MOVE to
   `restore/target`), a missing Versions app is an empty list, a non-numeric
-  version id never reaches a URL, a missing note says so
+  version id never reaches a URL, a missing note says so; sharing lists user
+  shares only, shares read only or editable (permissions 1 or 3), refuses
+  nobody or yourself, removes by numeric id only, offers each other user once
+  and passes on Nextcloud's reason
 - `services/execution/tests/test_http_client_session_retire.py`: a pooled
   session that ages out keeps serving the requests already on it

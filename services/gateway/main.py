@@ -5832,6 +5832,28 @@ async def proxy_note_versions(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
 
+_NOTE_SHARE_ACTIONS = {"list": "shares", "people": "sharees", "add": "share_add", "remove": "share_remove"}
+
+
+@app.post("/api/communication/notes/share")
+async def proxy_note_share(request: Request):
+    """Share a note with someone on the family's Nextcloud (OCS sharing), or stop."""
+    body = await request.json()
+    action = _NOTE_SHARE_ACTIONS.get(str(body.get("action") or "list"))
+    if action is None:
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "action must be list, people, add or remove"})
+    payload = {
+        "action": action,
+        "path": body.get("path"),
+        "share_with": body.get("share_with"),
+        "share_id": str(body["share_id"]) if body.get("share_id") is not None else None,
+        "can_edit": bool(body.get("can_edit")),
+        "search": body.get("search"),
+        "storage": body.get("storage", "nextcloud"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
+
+
 @app.post("/api/communication/notes/empty_trash")
 async def proxy_empty_note_trash(request: Request):
     """Permanently delete every note in Notes/Trash."""
