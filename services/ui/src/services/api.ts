@@ -316,9 +316,16 @@ declare module 'axios' {
      * authentication can log the user out (and loop).
      */
     skipAuthRedirect?: boolean;
+    /**
+     * Background calls (status polling, heartbeats): a failure is retried by
+     * the caller's own schedule, so no "Reconnecting…" or "Cannot reach"
+     * toast is shown for it (UX-45).
+     */
+    silent?: boolean;
   }
   export interface AxiosRequestConfig {
     skipAuthRedirect?: boolean;
+    silent?: boolean;
   }
 }
 
@@ -597,15 +604,20 @@ let lastFailedTarget = 'Jarvis server';
 
 // Derive a human-friendly description of which service/endpoint failed so the
 // reconnect toast can tell the user what is actually unreachable.
+/** The service a request path belongs to, as people should read it. */
+export function serviceForPath(path: string): string {
+  if (path.startsWith('/api/media') || path.startsWith('/execute/media') || path.startsWith('/execute/audiobookshelf')) return 'Media service';
+  if (path.startsWith('/api/execute') || path.startsWith('/execute/')) return 'Execution service';
+  if (path.startsWith('/api/auth') || path.startsWith('/api/users')) return 'Identity service';
+  if (path.includes('ma-jsonrpc') || path.includes('sendspin')) return 'Music Assistant';
+  if (path.startsWith('/api/')) return 'Gateway';
+  return 'Jarvis server';
+}
+
 function describeFailedTarget(config: AxiosRequestConfig | undefined, status?: number, code?: string): string {
   const method = (config?.method || 'GET').toString().toUpperCase();
   const path: string = config?.url?.toString() || '(unknown endpoint)';
-  let service = 'Jarvis server';
-  if (path.startsWith('/api/execute')) service = 'Execution service';
-  else if (path.startsWith('/api/media')) service = 'Media service';
-  else if (path.startsWith('/api/auth') || path.startsWith('/api/users')) service = 'Identity service';
-  else if (path.includes('ma-jsonrpc') || path.includes('sendspin')) service = 'Music Assistant';
-  else if (path.startsWith('/api/')) service = 'Gateway';
+  const service = serviceForPath(path);
 
   const detail = status ? ` (HTTP ${status})` : code ? ` (${code})` : '';
   const target = `${service}${detail} (${method} ${path})`;
@@ -642,7 +654,8 @@ apiClient.interceptors.response.use(
     // Check if error is retryable
     const status = error.response?.status;
     const code = error.code;
-    const isRetryable = isAxiosError && isRetryableRequest(config?.method, status, code);
+    const silent = config?.silent === true;
+    const isRetryable = !silent && isAxiosError && isRetryableRequest(config?.method, status, code);
 
     if (config && isRetryable) {
       const currentRetry = config.__retryCount || 0;
@@ -706,7 +719,7 @@ apiClient.interceptors.response.use(
       code === 'ERR_NETWORK'
     );
 
-    if (isConnectivityError) {
+    if (isConnectivityError && !silent) {
       const now = Date.now();
       if (now - lastConnectivityToast > 15000) {
         lastConnectivityToast = now;
@@ -3309,8 +3322,9 @@ export const api = {
     return resp.data;
   },
 
-  async mediaStatus(): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/execute/media/status', {});
+  /** Every media player's state. `silent` for background polling (UX-45). */
+  async mediaStatus(opts: { silent?: boolean } = {}): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/execute/media/status', {}, { silent: opts.silent });
     return resp.data;
   },
 
