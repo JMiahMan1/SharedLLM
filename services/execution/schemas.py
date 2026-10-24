@@ -404,6 +404,7 @@ class NoteRequest(BaseRequest):
         "create", "write", "append", "read", "delete", "check_off", "list", "sync_rag",
         "meta_read", "meta_write", "move", "duplicate", "empty_trash",
         "versions", "version_read", "version_restore",
+        "shares", "sharees", "share_add", "share_remove",
     ]
     title: str | None = None
     content: str | None = None
@@ -417,6 +418,10 @@ class NoteRequest(BaseRequest):
     meta: dict | None = None # meta_write: the shared notes index to store
     if_match: str | None = None # write: the ETag the note was opened at; a newer file is refused (412)
     version: str | None = None # version_read / version_restore: a version id from ``versions``
+    share_with: str | None = None # share_add: the Nextcloud user id to share with
+    share_id: str | None = None # share_remove: the share's id from ``shares``
+    can_edit: bool = False # share_add: let them edit (read+update) instead of read only
+    search: str | None = None # sharees: narrow the people offered
 
 
 # Recipes: paste-a-link import and TheMealDB search (corpus index arrives later)

@@ -2308,6 +2308,25 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * Nextcloud sharing for one note: `list` who has it (detail.shares),
+   * `people` it could be shared with (detail.people), `add` a person
+   * (read only, or `can_edit`), `remove` a share by id.
+   */
+  async noteShare(payload: {
+    action: 'list' | 'people' | 'add' | 'remove';
+    path?: string;
+    share_with?: string;
+    can_edit?: boolean;
+    share_id?: string;
+    search?: string;
+    storage?: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/share', payload, { timeout: 60_000 });
+    return resp.data;
+  },
+
   /** Permanently delete everything in Notes/Trash. */
   async emptyNotesTrash(payload: { storage?: string; as_user?: 'admin' } = {}): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/empty_trash', payload, { timeout: 60_000 });

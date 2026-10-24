@@ -22,6 +22,7 @@ import {
   RefreshCw,
   Rows3,
   Search,
+  Share2,
   Sparkles,
   Square,
   Trash2,
@@ -34,6 +35,7 @@ import { saveNote } from '../lib/noteSave';
 import RichNoteEditor, { type RichNoteEditorHandle } from '../components/notes/RichNoteEditor';
 import NoteHistory from '../components/notes/NoteHistory';
 import ReminderPanel from '../components/notes/ReminderPanel';
+import SharePanel from '../components/notes/SharePanel';
 import { richEditable } from '../lib/noteRichText';
 import { remarkNoteSpans } from '../lib/remarkNoteSpans';
 import { errorText } from '../lib/errorText';
@@ -1546,6 +1548,7 @@ const NoteEditor = forwardRef<
 ) {
   const [showHistory, setShowHistory] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const [openedAt] = useState(() => Date.now());
   const [draft, setDraft] = useState<DraftState>(initial);
   const [labelDraft, setLabelDraft] = useState('');
@@ -1906,6 +1909,7 @@ const NoteEditor = forwardRef<
       {showReminder && onSetReminder && (
         <ReminderPanel reminder={reminder} onSet={(at) => onSetReminder(at)} onClear={() => onSetReminder(null)} />
       )}
+      {showShare && initial.path && <SharePanel path={initial.path} asUser={asUser} />}
       {showHistory && initial.path && (
         <NoteHistory
           path={initial.path}
@@ -1942,6 +1946,16 @@ const NoteEditor = forwardRef<
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {initial.path && (
+            <button
+              type="button"
+              className="glass-button min-h-11 px-3 py-2 text-xs"
+              aria-pressed={showShare}
+              onClick={() => setShowShare(!showShare)}
+            >
+              <Share2 size={13} /> Share
+            </button>
+          )}
           {onSetReminder && (
             <button
               type="button"

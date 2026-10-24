@@ -13,6 +13,7 @@ class FakeProvider:
     def __init__(self):
         self.dirs: list[str] = []
         self.writes: list[tuple[str, str]] = []
+        self.ocs_calls = []
 
     async def ensure_directory(self, path):
         self.dirs.append(path)
@@ -22,6 +23,14 @@ class FakeProvider:
 
     def sanitize_filename(self, value, fallback):
         return (value or fallback).replace(" ", "_")
+
+    #: OCS calls (method, endpoint, params, data) and the answer a test sets.
+    ocs_calls: list
+    ocs_answer: tuple = (True, None, "")
+
+    async def request(self, method, endpoint, *, params=None, data=None, timeout=30):
+        self.ocs_calls.append((method, endpoint, params, data))
+        return self.ocs_answer
 
 
 class FakeResponse(dict):
@@ -938,3 +947,73 @@ async def test_versions_of_a_missing_note_say_so(provider, monkeypatch):
     result = await note_handler.handle_note(request("versions", path="Notes/Gone.md"))
     assert result.status == "FAILURE"
     assert "not there" in result.message
+
+
+async def test_shares_lists_the_people_a_note_is_shared_with(provider):
+    provider.ocs_answer = (True, [
+        {"id": 7, "share_type": 0, "share_with": "michele", "share_with_displayname": "Michele", "permissions": 3},
+        {"id": 8, "share_type": 0, "share_with": "kid", "share_with_displayname": "Kid", "permissions": 1},
+        {"id": 9, "share_type": 3, "share_with": None, "permissions": 1},  # a public link is not a person
+    ], "")
+    result = await note_handler.handle_note(request("shares", path="Notes/A.md"))
+
+    assert result.status == "SUCCESS"
+    assert result.detail["shares"] == [
+        {"id": "7", "with": "michele", "name": "Michele", "can_edit": True},
+        {"id": "8", "with": "kid", "name": "Kid", "can_edit": False},
+    ]
+    method, endpoint, params, _ = provider.ocs_calls[0]
+    assert (method, endpoint) == ("GET", "/ocs/v2.php/apps/files_sharing/api/v1/shares")
+    assert params["path"] == "/Notes/A.md"
+
+
+async def test_share_add_shares_with_one_user_read_only_or_editable(provider):
+    provider.ocs_answer = (True, {"id": 11, "share_type": 0, "share_with": "michele", "permissions": 3}, "")
+    result = await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="michele", can_edit=True))
+    assert result.status == "SUCCESS"
+    assert result.detail["share"]["can_edit"] is True
+    _, endpoint, _, data = provider.ocs_calls[0]
+    assert endpoint == "/ocs/v2.php/apps/files_sharing/api/v1/shares"
+    assert data == {"path": "/Notes/A.md", "shareType": "0", "shareWith": "michele", "permissions": "3"}
+
+    await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="kid"))
+    assert provider.ocs_calls[1][3]["permissions"] == "1"
+
+
+async def test_share_add_refuses_nobody_or_yourself(provider):
+    for who in ("", "u"):
+        result = await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with=who))
+        assert result.status == "FAILURE"
+    assert provider.ocs_calls == []
+
+
+async def test_share_remove_deletes_by_numeric_id_only(provider):
+    result = await note_handler.handle_note(request("share_remove", share_id="11"))
+    assert result.status == "SUCCESS"
+    assert provider.ocs_calls[0][:2] == ("DELETE", "/ocs/v2.php/apps/files_sharing/api/v1/shares/11")
+
+    bad = await note_handler.handle_note(request("share_remove", share_id="11/../../x"))
+    assert bad.status == "FAILURE"
+    assert len(provider.ocs_calls) == 1
+
+
+async def test_sharees_offers_other_users_once_and_never_yourself(provider):
+    provider.ocs_answer = (True, {
+        "exact": {"users": [{"label": "Michele", "value": {"shareType": 0, "shareWith": "michele"}}]},
+        "users": [
+            {"label": "Michele", "value": {"shareType": 0, "shareWith": "michele"}},
+            {"label": "Ada", "value": {"shareType": 0, "shareWith": "ada"}},
+            {"label": "Me", "value": {"shareType": 0, "shareWith": "u"}},
+        ],
+    }, "")
+    result = await note_handler.handle_note(request("sharees"))
+    assert result.status == "SUCCESS"
+    assert result.detail["people"] == [{"id": "ada", "name": "Ada"}, {"id": "michele", "name": "Michele"}]
+    assert provider.ocs_calls[0][2]["itemType"] == "file"
+
+
+async def test_a_refused_share_reports_nextcloud_s_reason(provider):
+    provider.ocs_answer = (False, None, "Sharing is disabled for this user")
+    result = await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="michele"))
+    assert result.status == "FAILURE"
+    assert result.message == "Sharing is disabled for this user"

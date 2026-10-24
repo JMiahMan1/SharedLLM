@@ -258,3 +258,28 @@ async def test_the_versions_route_refuses_an_unknown_action(monkeypatch):
     refused = await main.proxy_note_versions(_request({"path": "Notes/A.md", "action": "delete"}))
     assert refused.status_code == 400
     assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_the_share_route_maps_each_action_as_the_caller(monkeypatch):
+    from services.gateway import main
+
+    seen: list[tuple[dict, str | None]] = []
+
+    async def fake_proxy(request, path, payload, as_user=None):
+        seen.append((payload, as_user))
+        return JSONResponse(content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
+
+    await main.proxy_note_share(_request({"path": "Notes/A.md"}))
+    await main.proxy_note_share(_request({"action": "people", "search": "mi"}))
+    await main.proxy_note_share(_request({"action": "add", "path": "Notes/A.md", "share_with": "michele", "can_edit": True, "as_user": "admin"}))
+    await main.proxy_note_share(_request({"action": "remove", "share_id": 11}))
+    assert [p["action"] for p, _ in seen] == ["shares", "sharees", "share_add", "share_remove"]
+    assert seen[2][0]["share_with"] == "michele" and seen[2][0]["can_edit"] is True and seen[2][1] == "admin"
+    assert seen[3][0]["share_id"] == "11"
+
+    refused = await main.proxy_note_share(_request({"action": "publish"}))
+    assert refused.status_code == 400
+    assert len(seen) == 4
