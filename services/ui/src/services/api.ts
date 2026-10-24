@@ -134,6 +134,9 @@ import type {
   HealthProfile,
   HealthSummary,
   HealthWeekly,
+  HealthChallenge,
+  HealthChallengeKind,
+  HealthChallengeWeek,
   SleepEstimate,
   SleepSession,
   HealthCheckin,
@@ -1597,6 +1600,36 @@ export const api = {
   /** The seven days ending on `end` (today by default) against the week before. */
   async getHealthWeekly(end?: string): Promise<HealthWeekly> {
     const resp = await apiClient.get('/api/health/weekly', { params: end ? { end } : {} });
+    return resp.data;
+  },
+
+  /** The family's challenges for the week `day` falls in, with live standings. */
+  async getHealthChallenges(day?: string): Promise<HealthChallengeWeek> {
+    const resp = await apiClient.get('/api/health/challenges', { params: day ? { day } : {} });
+    return resp.data;
+  },
+
+  async createHealthChallenge(body: {
+    kind: HealthChallengeKind;
+    day: string;
+    target_days: number;
+  }): Promise<HealthChallenge> {
+    const resp = await apiClient.post('/api/health/challenges', body);
+    return resp.data;
+  },
+
+  async joinHealthChallenge(id: number): Promise<HealthChallenge> {
+    const resp = await apiClient.post(`/api/health/challenges/${id}/join`);
+    return resp.data;
+  },
+
+  async leaveHealthChallenge(id: number): Promise<HealthChallenge> {
+    const resp = await apiClient.delete(`/api/health/challenges/${id}/join`);
+    return resp.data;
+  },
+
+  async deleteHealthChallenge(id: number): Promise<{ deleted: number }> {
+    const resp = await apiClient.delete(`/api/health/challenges/${id}`);
     return resp.data;
   },
 

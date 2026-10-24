@@ -1722,6 +1722,41 @@ export interface HealthWeekly {
   days: Array<{ day: string } & Partial<Record<HealthWeeklyMetric, number | null>>>;
 }
 
+export type HealthChallengeKind = 'water_days' | 'sleep_nights' | 'cook_nights';
+
+/** One member's week: only the days their own logs counted. */
+export interface HealthChallengeStanding {
+  user_id: string;
+  count: number;
+  days: string[];
+  reached: boolean;
+  /** True when the member has no goal of their own and the guideline goal is used. */
+  guideline_goal: boolean;
+}
+
+export interface HealthChallenge {
+  id: number;
+  kind: HealthChallengeKind;
+  title: string;
+  unit: string;
+  detail: string;
+  week_start: string;
+  week_end: string;
+  target_days: number;
+  created_by: string;
+  joined: boolean;
+  leaderboard: HealthChallengeStanding[];
+}
+
+export interface HealthChallengeWeek {
+  week_start: string;
+  week_end: string;
+  /** Adults (and admins) may start one; minors and unknown roles may only join. */
+  can_create: boolean;
+  kinds: Array<{ kind: HealthChallengeKind; title: string; unit: string; detail: string; taken: boolean }>;
+  challenges: HealthChallenge[];
+}
+
 export interface HealthSummary {
   user_id: string;
   day: string;
