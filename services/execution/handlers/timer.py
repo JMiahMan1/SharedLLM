@@ -502,6 +502,22 @@ def _parse_duration(text: str | None) -> timedelta | None:
     return total if total > timedelta() else None
 
 
+def app_link(value: object) -> str | None:
+    """An in-app path a notice may open (``/notes?note=…``), or None.
+
+    Only a path inside the app is kept: no scheme, no ``//host``, no
+    backslashes, so a stored timer can never send someone off-site.
+    """
+    if not isinstance(value, str):
+        return None
+    link = value.strip()
+    if not link.startswith("/") or link.startswith("//") or "\\" in link or len(link) > 512:
+        return None
+    if any(ch in link for ch in "\r\n\t") or ":" in link.split("?", 1)[0]:
+        return None
+    return link
+
+
 async def notify_timer_done(user: str, timer_data: dict) -> bool:
     """Put "<title> is done" on the person's phone (category ``timers``).
 
@@ -536,6 +552,10 @@ async def notify_timer_done(user: str, timer_data: dict) -> bool:
         again["esphome_script"] = timer_data.get("esphome_script")
     if scope == "household":
         again["scope"] = "household"
+    # A reminder made from a note opens that note; a snooze keeps the link.
+    link = app_link(timer_data.get("url")) or "/communication"
+    if link != "/communication":
+        again["url"] = link
 
     extra_data: dict = {}
     if emoji:
@@ -562,7 +582,7 @@ async def notify_timer_done(user: str, timer_data: dict) -> bool:
         for member in members:
             ok = await notify.send(notify.notice(
                 member, "timers", notice_title, notice_body,
-                url="/communication", kind="alarm" if kind == "alarm" else "timer",
+                url=link, kind="alarm" if kind == "alarm" else "timer",
                 priority=priority, tag=f"timer:{timer_id}",
                 data=extra_data or None,
                 actions=[
@@ -577,7 +597,7 @@ async def notify_timer_done(user: str, timer_data: dict) -> bool:
 
     return await notify.send(notify.notice(
         user, "timers", notice_title, notice_body,
-        url="/communication", kind="alarm" if kind == "alarm" else "timer",
+        url=link, kind="alarm" if kind == "alarm" else "timer",
         priority=priority, tag=f"timer:{timer_id}",
         data=extra_data or None,
         actions=[
@@ -777,6 +797,10 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
             if req.flash_screen is not None:
                 timer_obj["flash_screen"] = req.flash_screen
 
+            link = app_link(req.url)
+            if link:
+                timer_obj["url"] = link
+
             bucket = HOUSEHOLD_BUCKET if is_household else user_id
             await r.set(f"timer:{bucket}:{timer_id}", json.dumps(timer_obj))
 
@@ -787,7 +811,12 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 status="SUCCESS",
                 message=msg,
                 service="timer_add",
-                detail={"timer_id": timer_id, "scope": timer_obj["scope"], "target_devices": devices},
+                detail={
+                    "timer_id": timer_id,
+                    "scope": timer_obj["scope"],
+                    "target_devices": devices,
+                    "expires_at": timer_obj["expires_at"],
+                },
             )
 
         elif action == "list":

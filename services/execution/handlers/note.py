@@ -80,6 +80,19 @@ def note_body(content: str | None) -> str:
     return text
 
 
+def _etag(resp: dict) -> str | None:
+    """The file version Nextcloud reported (``ETag``, or its ``OC-ETag`` twin).
+
+    Header names arrive in whatever case the server used, so look them up
+    without case. A save sends this back as ``If-Match`` so an edit made
+    elsewhere since the note was opened is refused instead of overwritten.
+    """
+    headers = resp.get("headers") or {}
+    lowered = {str(k).lower(): v for k, v in headers.items()}
+    value = lowered.get("etag") or lowered.get("oc-etag")
+    return str(value) if value else None
+
+
 def _with_header(title: str | None, category: str | None, content: str | None) -> str:
     return f"# {title}\nCategory: {category}\n\n{note_body(content)}"
 
@@ -304,6 +317,228 @@ async def _move_note(provider, source: str, destination: str) -> tuple[bool, str
     return False, f"Could not move the note (HTTP {resp['status_code']})."
 
 
+#: Nextcloud keeps earlier copies of every file (the files_versions app) and
+#: serves them over WebDAV at /remote.php/dav/versions/<user>/versions/<fileid>.
+#: A version id is the time it was made; anything else is refused before it
+#: can reach a URL.
+_VERSION_ID = re.compile(r"^[0-9]{1,20}$")
+_FILE_ID_PROPS = (
+    '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">'
+    "<d:prop><oc:fileid/></d:prop></d:propfind>"
+)
+_VERSION_PROPS = (
+    '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:nc="http://nextcloud.org/ns">'
+    "<d:prop><d:getlastmodified/><d:getcontentlength/>"
+    "<nc:version-label/><nc:version-author/></d:prop></d:propfind>"
+)
+
+
+def _versions_root(provider) -> str:
+    from urllib.parse import quote
+
+    return f"{provider.base_url.rstrip('/')}/remote.php/dav/versions/{quote(provider.username)}"
+
+
+async def _file_id(provider, path: str) -> tuple[str | None, str]:
+    """Nextcloud's numeric id of a file (versions are filed under it), or why not."""
+    from .. import http_client
+
+    resp = await http_client.request(
+        "PROPFIND", provider.file_url(path),
+        auth=(provider.username, provider.password),
+        headers={"Depth": "0", "Content-Type": "application/xml; charset=utf-8"},
+        data=_FILE_ID_PROPS, verify=False, timeout=30,
+    )
+    if resp["status_code"] == 404:
+        return None, "That note is not there any more."
+    if resp["status_code"] != 207:
+        return None, f"Could not look up the note (HTTP {resp['status_code']})."
+    found = ET.fromstring(resp.get("text") or "").find(".//{http://owncloud.org/ns}fileid")
+    if found is None or not (found.text or "").strip().isdigit():
+        return None, "Nextcloud did not report an id for this note."
+    return found.text.strip(), ""
+
+
+def _parse_versions(xml_text: str) -> list[dict]:
+    """The versions in a PROPFIND reply, newest first (the collection itself skipped)."""
+    from email.utils import parsedate_to_datetime
+
+    ns = {"d": "DAV:", "nc": "http://nextcloud.org/ns"}
+    versions: list[dict] = []
+    for response in ET.fromstring(xml_text).findall(".//d:response", ns):
+        href = (response.findtext("d:href", "", ns) or "").rstrip("/")
+        version_id = href.rsplit("/", 1)[-1]
+        if not _VERSION_ID.match(version_id) or "/versions/" not in href or href.endswith(f"/versions/{version_id}"):
+            # The folder named by the file id answers too; it is not a version.
+            continue
+        modified = response.findtext(".//d:getlastmodified", "", ns) or ""
+        try:
+            stamp = parsedate_to_datetime(modified).isoformat()
+        except (TypeError, ValueError):
+            stamp = ""
+        size = response.findtext(".//d:getcontentlength", "", ns) or "0"
+        versions.append({
+            "id": version_id,
+            "modified": stamp,
+            "size": int(size) if size.isdigit() else 0,
+            "label": (response.findtext(".//nc:version-label", "", ns) or "").strip(),
+            "author": (response.findtext(".//nc:version-author", "", ns) or "").strip(),
+        })
+    versions.sort(key=lambda v: int(v["id"]), reverse=True)
+    return versions
+
+
+async def _note_versions(provider, req: NoteRequest) -> ExecutionResult:
+    """List, read or restore earlier versions of one note."""
+    from .. import http_client
+
+    path = (req.path or "").lstrip("/")
+    service = f"note_{req.action}"
+    if not path:
+        return ExecutionResult(status="FAILURE", message=f"{req.action} requires path.", service=service)
+    if req.action != "versions" and not _VERSION_ID.match(req.version or ""):
+        return ExecutionResult(status="FAILURE", message="That is not a version of this note.", service=service)
+    file_id, reason = await _file_id(provider, path)
+    if not file_id:
+        return ExecutionResult(status="FAILURE", message=reason, service=service)
+    folder = f"{_versions_root(provider)}/versions/{file_id}"
+    auth = (provider.username, provider.password)
+
+    if req.action == "versions":
+        resp = await http_client.request(
+            "PROPFIND", folder, auth=auth,
+            headers={"Depth": "1", "Content-Type": "application/xml; charset=utf-8"},
+            data=_VERSION_PROPS, verify=False, timeout=30,
+        )
+        if resp["status_code"] == 404:
+            # The versions app is off, or the file has never changed.
+            return ExecutionResult(status="SUCCESS", message="No earlier versions.", service=service, detail={"versions": []})
+        if resp["status_code"] != 207:
+            return ExecutionResult(
+                status="FAILURE",
+                message=f"Nextcloud would not list this note's versions (HTTP {resp['status_code']}).",
+                service=service,
+            )
+        versions = _parse_versions(resp.get("text") or "")
+        return ExecutionResult(
+            status="SUCCESS", message=f"{len(versions)} earlier versions.", service=service,
+            detail={"versions": versions, "path": path},
+        )
+
+    version_url = f"{folder}/{req.version}"
+    if req.action == "version_read":
+        resp = await http_client.request("GET", version_url, auth=auth, verify=False, timeout=30)
+        if resp["status_code"] != 200:
+            return ExecutionResult(
+                status="FAILURE", message=f"Could not read that version (HTTP {resp['status_code']}).", service=service,
+            )
+        return ExecutionResult(status="SUCCESS", message=resp["text"], service=service, detail={"version": req.version})
+
+    # Restore: Nextcloud keeps the current text as a version of its own first,
+    # so a restore can itself be undone from the same list.
+    resp = await http_client.request(
+        "MOVE", version_url, auth=auth,
+        headers={"Destination": f"{_versions_root(provider)}/restore/target"},
+        verify=False, timeout=60,
+    )
+    if resp["status_code"] not in (200, 201, 204):
+        return ExecutionResult(
+            status="FAILURE", message=f"Could not restore that version (HTTP {resp['status_code']}).", service=service,
+        )
+    _forget_preview(provider.file_url(path))
+    return ExecutionResult(
+        status="SUCCESS", message="Earlier version restored.", service=service,
+        detail={"path": path, "version": req.version},
+    )
+
+
+#: Nextcloud's sharing API (OCS). A note is shared like any file: with a
+#: Nextcloud user (shareType 0), read only (1) or read and edit (1 + 2).
+_SHARES = "/ocs/v2.php/apps/files_sharing/api/v1/shares"
+_SHAREES = "/ocs/v2.php/apps/files_sharing/api/v1/sharees"
+_SHARE_USER = 0
+_PERM_READ = 1
+_PERM_UPDATE = 2
+_SHARE_ID = re.compile(r"^[0-9]{1,20}$")
+
+
+def _user_share(share: dict) -> dict | None:
+    """One person a note is shared with, as the page shows it."""
+    if int(share.get("share_type", -1)) != _SHARE_USER:
+        return None
+    permissions = int(share.get("permissions") or 0)
+    return {
+        "id": str(share.get("id")),
+        "with": str(share.get("share_with") or ""),
+        "name": str(share.get("share_with_displayname") or share.get("share_with") or ""),
+        "can_edit": bool(permissions & _PERM_UPDATE),
+    }
+
+
+async def _note_sharing(provider, req: NoteRequest) -> ExecutionResult:
+    """Who a note is shared with, who it could be, and sharing or unsharing it."""
+    service = f"note_{req.action}"
+    path = (req.path or "").lstrip("/")
+
+    if req.action == "sharees":
+        ok, data, message = await provider.request(
+            "GET", _SHAREES,
+            params={"search": (req.search or "").strip(), "itemType": "file", "perPage": "50", "lookup": "false"},
+        )
+        if not ok:
+            return ExecutionResult(status="FAILURE", message=message or "Could not list the people to share with.", service=service)
+        people: dict[str, dict] = {}
+        data = data if isinstance(data, dict) else {}
+        for bucket in ((data.get("exact") or {}).get("users") or [], data.get("users") or []):
+            for entry in bucket:
+                value = entry.get("value") or {}
+                user_id = str(value.get("shareWith") or "")
+                if user_id and user_id != provider.username and int(value.get("shareType", _SHARE_USER)) == _SHARE_USER:
+                    people.setdefault(user_id, {"id": user_id, "name": str(entry.get("label") or user_id)})
+        return ExecutionResult(
+            status="SUCCESS", message=f"{len(people)} people.", service=service,
+            detail={"people": sorted(people.values(), key=lambda p: p["name"].lower())},
+        )
+
+    if req.action == "share_remove":
+        if not _SHARE_ID.match(req.share_id or ""):
+            return ExecutionResult(status="FAILURE", message="That is not a share of this note.", service=service)
+        ok, _data, message = await provider.request("DELETE", f"{_SHARES}/{req.share_id}")
+        if not ok:
+            return ExecutionResult(status="FAILURE", message=message or "Could not stop sharing.", service=service)
+        return ExecutionResult(status="SUCCESS", message="No longer shared.", service=service, detail={"share_id": req.share_id})
+
+    if not path:
+        return ExecutionResult(status="FAILURE", message=f"{req.action} requires path.", service=service)
+
+    if req.action == "share_add":
+        share_with = (req.share_with or "").strip()
+        if not share_with or share_with == provider.username:
+            return ExecutionResult(status="FAILURE", message="Pick someone to share this note with.", service=service)
+        permissions = _PERM_READ | (_PERM_UPDATE if req.can_edit else 0)
+        ok, data, message = await provider.request(
+            "POST", _SHARES,
+            data={"path": f"/{path}", "shareType": str(_SHARE_USER), "shareWith": share_with, "permissions": str(permissions)},
+        )
+        if not ok:
+            return ExecutionResult(status="FAILURE", message=message or "Could not share the note.", service=service)
+        share = _user_share(data) if isinstance(data, dict) else None
+        return ExecutionResult(status="SUCCESS", message="Shared.", service=service, detail={"share": share})
+
+    ok, data, message = await provider.request(
+        "GET", _SHARES, params={"path": f"/{path}", "reshares": "false", "subfiles": "false"},
+    )
+    if not ok:
+        if "not exist" in (message or "").lower():
+            return ExecutionResult(status="FAILURE", message="That note is not there any more.", service=service)
+        return ExecutionResult(status="FAILURE", message=message or "Could not list who this note is shared with.", service=service)
+    shares = [s for s in (_user_share(item) for item in (data or []) if isinstance(item, dict)) if s]
+    return ExecutionResult(
+        status="SUCCESS", message=f"Shared with {len(shares)}.", service=service,
+        detail={"shares": shares, "path": path},
+    )
+
+
 async def handle_note(req: NoteRequest) -> ExecutionResult:
     storage_mode = getattr(req, "storage", "nextcloud")
 
@@ -417,7 +652,12 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 url = provider.file_url(f"Notes/{file_title}.md")
             resp = await http_request("GET", url, auth=(provider.username, provider.password), verify=False)
             if resp["status_code"] == 200:
-                return ExecutionResult(status="SUCCESS", message=resp["text"], service="note_read")
+                # The version travels with the text so the editor's save can
+                # prove nothing changed in between (If-Match on write).
+                return ExecutionResult(
+                    status="SUCCESS", message=resp["text"], service="note_read",
+                    detail={"etag": _etag(resp)},
+                )
             elif resp["status_code"] == 404:
                 return ExecutionResult(status="FAILURE", message=f"Note '{req.title}' not found.", service="note_read")
 
@@ -447,18 +687,30 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 url = provider.file_url(f"{category}/{file_title}.md")
             _forget_preview(url)
             content = _with_header(req.title, category, req.content)
+            headers = {"Content-Type": "text/markdown; charset=utf-8"}
+            # Only an in-place save can be checked: the version names the
+            # file at ``path``. Nextcloud answers 412 when it has changed.
+            if req.if_match and req.path:
+                headers["If-Match"] = req.if_match
             resp = await http_request(
                 "PUT", url, data=content.encode('utf-8'),
                 auth=(provider.username, provider.password), verify=False,
-                headers={"Content-Type": "text/markdown; charset=utf-8"},
+                headers=headers,
             )
+            if resp["status_code"] == 412:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message="This note changed somewhere else since it was opened, so it was not overwritten.",
+                    service="note_write",
+                    detail={"conflict": True, "path": req.path.lstrip("/") if req.path else None},
+                )
             if resp["status_code"] in [200, 201, 204]:
                 written = f"{category}/{file_title}.md" if not req.path else req.path.lstrip("/")
                 return ExecutionResult(
                     status="SUCCESS",
                     message=f"Note '{req.title}' saved.",
                     service="note_write",
-                    detail={"path": written},
+                    detail={"path": written, "etag": _etag(resp)},
                 )
 
         elif action == "check_off":
@@ -661,6 +913,12 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 service="note_empty_trash",
                 detail={"deleted": deleted},
             )
+
+        elif action in ("versions", "version_read", "version_restore"):
+            return await _note_versions(provider, req)
+
+        elif action in ("shares", "sharees", "share_add", "share_remove"):
+            return await _note_sharing(provider, req)
 
         return ExecutionResult(status="FAILURE", message=f"Action {action} failed or not implemented.", service="note")
 

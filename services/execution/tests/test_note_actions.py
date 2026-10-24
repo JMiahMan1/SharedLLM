@@ -8,10 +8,12 @@ from services.execution.handlers import note as note_handler
 class FakeProvider:
     username = "u"
     password = "p"
+    base_url = "http://nextcloud.test"
 
     def __init__(self):
         self.dirs: list[str] = []
         self.writes: list[tuple[str, str]] = []
+        self.ocs_calls = []
 
     async def ensure_directory(self, path):
         self.dirs.append(path)
@@ -21,6 +23,14 @@ class FakeProvider:
 
     def sanitize_filename(self, value, fallback):
         return (value or fallback).replace(" ", "_")
+
+    #: OCS calls (method, endpoint, params, data) and the answer a test sets.
+    ocs_calls: list
+    ocs_answer: tuple = (True, None, "")
+
+    async def request(self, method, endpoint, *, params=None, data=None, timeout=30):
+        self.ocs_calls.append((method, endpoint, params, data))
+        return self.ocs_answer
 
 
 class FakeResponse(dict):
@@ -181,6 +191,69 @@ async def test_saving_what_read_returned_does_not_stack_headers(provider, monkey
     await note_handler.handle_note(request("write", title="Groceries", category="Notes", content=stacked))
 
     assert puts[0] == "# Groceries\nCategory: Notes\n\nmilk\n# Heading kept"
+
+
+async def test_read_returns_the_version_it_read(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, **kwargs):
+        return {"status_code": 200, "text": "# A\nCategory: Notes\n\nx", "headers": {"Etag": '"v1"'}}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("read", title="A", path="Notes/A.md"))
+    assert result.status == "SUCCESS"
+    assert result.detail == {"etag": '"v1"'}
+
+
+async def test_an_in_place_save_sends_if_match_and_returns_the_new_version(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    sent: list[dict] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        sent.append(headers or {})
+        return {"status_code": 204, "text": "", "headers": {"OC-ETag": '"v2"'}}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(
+        request("write", title="A", category="Notes", path="Notes/A.md", content="x", if_match='"v1"')
+    )
+    assert result.status == "SUCCESS"
+    assert sent[0]["If-Match"] == '"v1"'
+    assert result.detail == {"path": "Notes/A.md", "etag": '"v2"'}
+
+
+async def test_a_save_over_a_newer_file_is_refused_as_a_conflict(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, **kwargs):
+        return {"status_code": 412, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(
+        request("write", title="A", category="Notes", path="Notes/A.md", content="x", if_match='"old"')
+    )
+    assert result.status == "FAILURE"
+    assert result.detail == {"conflict": True, "path": "Notes/A.md"}
+
+
+async def test_a_new_note_never_sends_if_match(provider, monkeypatch):
+    """The version names the file at ``path``; a new file has none to check."""
+    import services.execution.http_client as http_client
+
+    sent: list[dict] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        sent.append(headers or {})
+        return {"status_code": 201, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    await note_handler.handle_note(request("write", title="New", category="Notes", content="x", if_match='"v1"'))
+    assert "If-Match" not in sent[0]
 
 
 def test_note_body_keeps_a_markdown_heading_that_is_not_the_stored_header():
@@ -762,3 +835,185 @@ def test_item_matches_raw_or_plain_text_of_a_styled_row():
     assert _item_matches(styled, styled)
     assert _item_matches("  eggs ", "eggs")
     assert not _item_matches(styled, "buy bread")
+
+
+_FILEID_REPLY = (
+    '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">'
+    "<d:response><d:href>/remote.php/dav/files/u/Notes/A.md</d:href><d:propstat><d:prop>"
+    "<oc:fileid>4242</oc:fileid></d:prop></d:propstat></d:response></d:multistatus>"
+)
+_VERSIONS_REPLY = (
+    '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:nc="http://nextcloud.org/ns">'
+    "<d:response><d:href>/remote.php/dav/versions/u/versions/4242/</d:href><d:propstat><d:prop/></d:propstat></d:response>"
+    "<d:response><d:href>/remote.php/dav/versions/u/versions/4242/1700000000</d:href><d:propstat><d:prop>"
+    "<d:getlastmodified>Tue, 14 Nov 2023 22:13:20 GMT</d:getlastmodified><d:getcontentlength>12</d:getcontentlength>"
+    "</d:prop></d:propstat></d:response>"
+    "<d:response><d:href>/remote.php/dav/versions/u/versions/4242/1700003600</d:href><d:propstat><d:prop>"
+    "<d:getlastmodified>Tue, 14 Nov 2023 23:13:20 GMT</d:getlastmodified><d:getcontentlength>30</d:getcontentlength>"
+    "<nc:version-label>Before trip</nc:version-label><nc:version-author>u</nc:version-author>"
+    "</d:prop></d:propstat></d:response></d:multistatus>"
+)
+
+
+async def test_versions_lists_earlier_copies_newest_first(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    calls: list[tuple[str, str, dict]] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        calls.append((method, url, headers or {}))
+        if url.endswith("/Notes/A.md"):
+            return {"status_code": 207, "text": _FILEID_REPLY}
+        return {"status_code": 207, "text": _VERSIONS_REPLY}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("versions", path="Notes/A.md"))
+
+    assert result.status == "SUCCESS"
+    assert [v["id"] for v in result.detail["versions"]] == ["1700003600", "1700000000"]
+    assert result.detail["versions"][0]["label"] == "Before trip"
+    assert result.detail["versions"][1]["size"] == 12
+    assert calls[1][:2] == ("PROPFIND", "http://nextcloud.test/remote.php/dav/versions/u/versions/4242")
+    assert calls[1][2]["Depth"] == "1"
+
+
+async def test_versions_without_the_versions_app_is_an_empty_list(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        if url.endswith("/Notes/A.md"):
+            return {"status_code": 207, "text": _FILEID_REPLY}
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("versions", path="Notes/A.md"))
+    assert result.status == "SUCCESS"
+    assert result.detail == {"versions": []}
+
+
+async def test_version_read_and_restore_use_the_versions_endpoint(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    calls: list[tuple[str, str, dict]] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        calls.append((method, url, headers or {}))
+        if method == "PROPFIND":
+            return {"status_code": 207, "text": _FILEID_REPLY}
+        if method == "GET":
+            return {"status_code": 200, "text": "# A\nCategory: Notes\n\nold"}
+        return {"status_code": 201, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    read = await note_handler.handle_note(request("version_read", path="Notes/A.md", version="1700000000"))
+    assert read.status == "SUCCESS"
+    assert read.message.endswith("old")
+    assert calls[1][:2] == ("GET", "http://nextcloud.test/remote.php/dav/versions/u/versions/4242/1700000000")
+
+    restored = await note_handler.handle_note(request("version_restore", path="Notes/A.md", version="1700000000"))
+    assert restored.status == "SUCCESS"
+    method, url, headers = calls[-1]
+    assert (method, url) == ("MOVE", "http://nextcloud.test/remote.php/dav/versions/u/versions/4242/1700000000")
+    assert headers["Destination"] == "http://nextcloud.test/remote.php/dav/versions/u/restore/target"
+
+
+async def test_a_version_id_that_is_not_a_timestamp_never_reaches_a_url(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    calls: list[str] = []
+
+    async def fake_request(method, url, **kwargs):
+        calls.append(url)
+        return {"status_code": 207, "text": _FILEID_REPLY}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("version_restore", path="Notes/A.md", version="../../files/u/x"))
+    assert result.status == "FAILURE"
+    assert calls == []
+
+
+async def test_versions_of_a_missing_note_say_so(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, **kwargs):
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("versions", path="Notes/Gone.md"))
+    assert result.status == "FAILURE"
+    assert "not there" in result.message
+
+
+async def test_shares_lists_the_people_a_note_is_shared_with(provider):
+    provider.ocs_answer = (True, [
+        {"id": 7, "share_type": 0, "share_with": "michele", "share_with_displayname": "Michele", "permissions": 3},
+        {"id": 8, "share_type": 0, "share_with": "kid", "share_with_displayname": "Kid", "permissions": 1},
+        {"id": 9, "share_type": 3, "share_with": None, "permissions": 1},  # a public link is not a person
+    ], "")
+    result = await note_handler.handle_note(request("shares", path="Notes/A.md"))
+
+    assert result.status == "SUCCESS"
+    assert result.detail["shares"] == [
+        {"id": "7", "with": "michele", "name": "Michele", "can_edit": True},
+        {"id": "8", "with": "kid", "name": "Kid", "can_edit": False},
+    ]
+    method, endpoint, params, _ = provider.ocs_calls[0]
+    assert (method, endpoint) == ("GET", "/ocs/v2.php/apps/files_sharing/api/v1/shares")
+    assert params["path"] == "/Notes/A.md"
+
+
+async def test_share_add_shares_with_one_user_read_only_or_editable(provider):
+    provider.ocs_answer = (True, {"id": 11, "share_type": 0, "share_with": "michele", "permissions": 3}, "")
+    result = await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="michele", can_edit=True))
+    assert result.status == "SUCCESS"
+    assert result.detail["share"]["can_edit"] is True
+    _, endpoint, _, data = provider.ocs_calls[0]
+    assert endpoint == "/ocs/v2.php/apps/files_sharing/api/v1/shares"
+    assert data == {"path": "/Notes/A.md", "shareType": "0", "shareWith": "michele", "permissions": "3"}
+
+    await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="kid"))
+    assert provider.ocs_calls[1][3]["permissions"] == "1"
+
+
+async def test_share_add_refuses_nobody_or_yourself(provider):
+    for who in ("", "u"):
+        result = await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with=who))
+        assert result.status == "FAILURE"
+    assert provider.ocs_calls == []
+
+
+async def test_share_remove_deletes_by_numeric_id_only(provider):
+    result = await note_handler.handle_note(request("share_remove", share_id="11"))
+    assert result.status == "SUCCESS"
+    assert provider.ocs_calls[0][:2] == ("DELETE", "/ocs/v2.php/apps/files_sharing/api/v1/shares/11")
+
+    bad = await note_handler.handle_note(request("share_remove", share_id="11/../../x"))
+    assert bad.status == "FAILURE"
+    assert len(provider.ocs_calls) == 1
+
+
+async def test_sharees_offers_other_users_once_and_never_yourself(provider):
+    provider.ocs_answer = (True, {
+        "exact": {"users": [{"label": "Michele", "value": {"shareType": 0, "shareWith": "michele"}}]},
+        "users": [
+            {"label": "Michele", "value": {"shareType": 0, "shareWith": "michele"}},
+            {"label": "Ada", "value": {"shareType": 0, "shareWith": "ada"}},
+            {"label": "Me", "value": {"shareType": 0, "shareWith": "u"}},
+        ],
+    }, "")
+    result = await note_handler.handle_note(request("sharees"))
+    assert result.status == "SUCCESS"
+    assert result.detail["people"] == [{"id": "ada", "name": "Ada"}, {"id": "michele", "name": "Michele"}]
+    assert provider.ocs_calls[0][2]["itemType"] == "file"
+
+
+async def test_a_refused_share_reports_nextcloud_s_reason(provider):
+    provider.ocs_answer = (False, None, "Sharing is disabled for this user")
+    result = await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="michele"))
+    assert result.status == "FAILURE"
+    assert result.message == "Sharing is disabled for this user"

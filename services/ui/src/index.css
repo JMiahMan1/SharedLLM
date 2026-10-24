@@ -464,11 +464,14 @@ input[type="range"] {
   background: rgba(17, 24, 39, 0.28);
 }
 
-/* Keep-style note editor: checklist rows draw their own checkbox in the left gutter. */
+/* Keep-style note editor: checklist rows draw their own checkbox in the left
+   gutter and leave the right gutter for the row's drag grip and delete button
+   (an overlay in RichNoteEditor). */
 .note-rich [data-task] {
   position: relative;
   padding-left: 1.75rem;
-  min-height: 1.5em;
+  padding-right: 4.5rem;
+  min-height: 2rem;
 }
 .note-rich [data-task]::before {
   content: '\2610';
