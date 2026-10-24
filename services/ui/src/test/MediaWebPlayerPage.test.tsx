@@ -219,7 +219,7 @@ describe('Media page: browse', () => {
     await userEvent.click(within(dialog).getByRole('tab', { name: /Audiobooks/i }));
     await userEvent.type(within(dialog).getByRole('searchbox', { name: 'Search' }), 'daily');
     await userEvent.click(await within(dialog).findByRole('button', { name: /Daily Pod/ }));
-    await userEvent.click(await within(dialog).findByRole('button', { name: /Monday news/ }));
+    await userEvent.click(await within(dialog).findByRole('button', { name: /^Monday news/ }));
     await waitFor(() => expect(p.state.play).toHaveBeenCalledWith(episodeUri));
     expect(asked).toEqual(['pod-1']);
   });

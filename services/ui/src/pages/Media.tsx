@@ -14,7 +14,7 @@ import { proxiedImage } from '../lib/mediaImage';
 import { DeviceSelector } from '../components/media/DeviceSelector';
 import { NowPlayingCard, type NowPlayingView } from '../components/media/NowPlayingCard';
 import { MediaExplorer } from '../components/media/MediaExplorer';
-import type { DeviceOption, MediaStatus, PlayRequest } from '../components/media/types';
+import type { DeviceOption, MediaStatus, PlayRequest, QueueOption } from '../components/media/types';
 
 /* helpers */
 
@@ -333,6 +333,28 @@ const Media = () => {
     }
   }, [maPlayer, refreshStatus, trigger]);
 
+  /** Queue a Music Assistant item on the selected device: this device's own
+   *  queue, an MA player's queue, or a Home Assistant speaker's MA queue. */
+  const queueItem = useCallback(async (req: PlayRequest, option: QueueOption) => {
+    if (req.kind !== 'uri') return;
+    void trigger('light');
+    setError(null);
+    const target = selectedRef.current;
+    try {
+      if (!target) {
+        await maPlayer.enqueue(req.uri, option);
+      } else if (target.startsWith('ma:')) {
+        await sendMaRemoteCommand('player_queues/play_media', { queue_id: target.slice(3), media: [req.uri], option });
+      } else {
+        const resp = await api.mediaPlay({ entity_id: target, query: req.uri, media_type: 'music', enqueue: option });
+        if (resp.status === 'FAILURE') throw new Error(resp.message || 'Could not add to the queue');
+      }
+      toast.success(option === 'next' ? `${req.title} plays next` : `${req.title} added to the queue`);
+    } catch (err) {
+      setError(errorText(err, 'Could not add to the queue'));
+    }
+  }, [maPlayer, trigger]);
+
   /** Transport for the selected remote device. */
   const sendTransport = useCallback(async (command: 'play' | 'resume' | 'pause' | 'next' | 'previous' | 'stop') => {
     const target = selectedRef.current;
@@ -626,7 +648,7 @@ const Media = () => {
         Browse all media
       </button>
 
-      <MediaExplorer open={showExplorer} onClose={() => setShowExplorer(false)} onPlay={playItem} />
+      <MediaExplorer open={showExplorer} onClose={() => setShowExplorer(false)} onPlay={playItem} onQueue={queueItem} />
     </div>
   );
 };

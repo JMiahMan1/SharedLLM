@@ -141,6 +141,12 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
     # No MA variant found, return original (may still work for non-MA players)
     return original_entity
 
+async def _is_ma_entity(ctx, entity_id: str) -> bool:
+    """True when `entity_id` is a Music Assistant player (it has an MA queue)."""
+    state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id)
+    return bool(state) and is_music_assistant_player(state.get("attributes"), entity_id)
+
+
 async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play music via Music Assistant or fallback."""
     from . import roku as roku_handler
@@ -159,7 +165,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     if is_roku:
         log.info(f"[media/play] Detected Roku device, using Roku music handler for query '{req.query}'")
         return await roku_handler.roku_play_music(
-            ctx.ha_url, ctx.ha_token, entity_id, req.query or "", mass_entry,
+            ctx.ha_url, ctx.ha_token, entity_id, req.query or "", mass_entry, enqueue=req.enqueue or "replace",
         )
 
     mass_entity = await resolve_mass_entity(ctx, entity_id)
@@ -169,7 +175,11 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         # Check if the query is already a direct Music Assistant URI
         if "://" in req.query:
             log.info(f"[media/play] Query looks like a direct URI: {req.query}. Playing directly.")
-            if is_samsung:
+            # A Music Assistant item (a playlist, album, track) belongs in the
+            # speaker's MA queue whenever the speaker has one; only a plain web
+            # address goes to the TV's own player.
+            ma_item = not req.query.lower().startswith(("http://", "https://"))
+            if is_samsung and not (ma_item and await _is_ma_entity(ctx, mass_entity)):
                 log.info("[media/play] Samsung TV detected, playing MASS URL via play_media")
                 return await samsung_handler.play_music(
                     ctx.ha_url, ctx.ha_token, entity_id, req.query,
@@ -387,8 +397,9 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
 
     # 1. Search Audiobookshelf for podcasts
     try:
-        from . import audiobookshelf as abs_handler
         from services.execution.schemas import AudiobookshelfRequest
+
+        from . import audiobookshelf as abs_handler
         abs_uctx = ctx.user_context if hasattr(ctx, "user_context") else ctx
         podcasts = []
         for sq in search_queries:
@@ -435,7 +446,7 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
     if is_roku:
         return await roku_handler.roku_play_music(
-            ctx.ha_url, ctx.ha_token, entity_id, req.query or "", mass_entry,
+            ctx.ha_url, ctx.ha_token, entity_id, req.query or "", mass_entry, enqueue=req.enqueue or "replace",
         )
 
     mass_entity = await resolve_mass_entity(ctx, entity_id)
@@ -500,8 +511,8 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
 
     # Fallback 2: Check Nextcloud storage for audio/podcast files
     try:
-        from ..nextcloud_client import resolve_credentials, webdav_url
         from ..http_client import request as http_request
+        from ..nextcloud_client import resolve_credentials, webdav_url
         # BUG-26: ctx IS the UserContext; the old `.user_context` read raised
         # AttributeError (swallowed below), silently killing this fallback.
         nc_url, nc_user, nc_pass = resolve_credentials(ctx)
@@ -656,6 +667,12 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         log.error(f"[media/play] Error playing media for {ctx.user} on {entity_id}: {e}", exc_info=True)
         return ExecutionResult(status="FAILURE", message=f"Media play failed: {e!s}", service="media_play")
 
+# Transport commands that act on what is queued rather than on the device.
+_QUEUE_COMMANDS = frozenset({
+    "play", "resume", "pause", "stop", "next", "previous", "seek", "shuffle_set", "repeat_set",
+})
+
+
 async def handle_media_transport(req) -> ExecutionResult:
     """Handle media transport commands with TV-specific handling for Android TV, WebOS, Samsung, and Roku."""
     from ..announce_handlers import detect_tv_type
@@ -687,6 +704,22 @@ async def handle_media_transport(req) -> ExecutionResult:
     supported_features = int(attrs.get("supported_features", 0) or 0)
     feature_bit = feature_bits.get(command)
     standard_supported = feature_bit is not None and bool(supported_features & feature_bit)
+
+    # A TV or cast speaker playing Music Assistant's stream has its queue on
+    # MA's own entity for the same device ("Master Bedroom TV" the Cast entity
+    # cannot skip a track; its MA twin can). Queue commands go there while MA
+    # is driving the device, or whenever the device itself cannot do them.
+    if command in _QUEUE_COMMANDS and state and not is_music_assistant_player(attrs, full_entity_id):
+        sibling = await resolve_mass_entity(ctx, full_entity_id)
+        if sibling != full_entity_id:
+            sibling_state = await ha_client.get_state(ha_url, ha_token, sibling) or {}
+            if sibling_state.get("state") in ("playing", "paused", "buffering") or not standard_supported:
+                log.info(f"[media/transport] {command} on {full_entity_id} goes to its Music Assistant player {sibling}")
+                full_entity_id = sibling
+                attrs = sibling_state.get("attributes", {})
+                tv_type = "music_assistant"
+                supported_features = int(attrs.get("supported_features", 0) or 0)
+                standard_supported = feature_bit is not None and bool(supported_features & feature_bit)
 
     # Shuffle/repeat/grouping are ordinary media_player.* services, not
     # feature-gated and never served by a brand remote fallback.
@@ -770,7 +803,7 @@ async def handle_media_transport(req) -> ExecutionResult:
         # behaviour of muting on press.
         muted = getattr(req, "muted", None)
         if muted is None:
-            muted = True if req.volume_level in (None, 0) else False
+            muted = req.volume_level in (None, 0)
         service_cmd = "volume_mute"
         data = {"is_volume_muted": bool(muted)}
 

@@ -433,3 +433,52 @@ async def test_companion_remote_never_templates_an_unsafe_entity_id(monkeypatch)
     monkeypatch.setattr(ha_client, "_render_template", registry)
     await ha_client.find_companion_remote("http://ha.test", "t", "media_player.x') }}{{ states")
     assert seen == []
+
+
+# A Cast TV playing Music Assistant's stream: the Cast entity cannot skip a
+# track (HA answered 400 Bad Request), its Music Assistant twin holds the queue.
+CAST_ATTRS = {"friendly_name": "Master Bedroom TV", "app_id": "CC1AD845", "supported_features": 152463}
+MA_TWIN_ATTRS = {
+    "friendly_name": "Master Bedroom TV", "app_id": "music_assistant",
+    "active_queue": "media_player.master_bedroom_tv", "supported_features": 7796671,
+}
+
+
+def _cast_with_twin(monkeypatch, twin_state):
+    from services.execution import ha_client
+
+    states = {
+        "media_player.master_bedroom_tv": _state("media_player.master_bedroom_tv", CAST_ATTRS, "playing"),
+        "media_player.master_bedroom_tv_2": _state("media_player.master_bedroom_tv_2", MA_TWIN_ATTRS, twin_state),
+    }
+    calls: list = []
+    _patch_ha(monkeypatch, states, calls)
+
+    async def all_states(ha_url, ha_token):
+        return list(states.values())
+
+    monkeypatch.setattr(ha_client, "get_states", all_states)
+    return calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command,service", [("next", "media_next_track"), ("previous", "media_previous_track")])
+async def test_skip_on_a_cast_tv_goes_to_its_music_assistant_queue(monkeypatch, command, service):
+    calls = _cast_with_twin(monkeypatch, "playing")
+    result = await media.handle_media_transport(_request("media_player.master_bedroom_tv", command))
+    assert result.status == "SUCCESS"
+    assert calls == [{"domain": "media_player", "service": service, "entity_id": "media_player.master_bedroom_tv_2", "data": None}]
+
+
+@pytest.mark.asyncio
+async def test_pause_stays_on_the_tv_when_music_assistant_is_not_playing_there(monkeypatch):
+    calls = _cast_with_twin(monkeypatch, "idle")
+    await media.handle_media_transport(_request("media_player.master_bedroom_tv", "pause"))
+    assert [c["entity_id"] for c in calls] == ["media_player.master_bedroom_tv"]
+
+
+@pytest.mark.asyncio
+async def test_volume_stays_on_the_tv(monkeypatch):
+    calls = _cast_with_twin(monkeypatch, "playing")
+    await media.handle_media_transport(_request("media_player.master_bedroom_tv", "volume_set", volume_level=0.3))
+    assert [c["entity_id"] for c in calls] == ["media_player.master_bedroom_tv"]

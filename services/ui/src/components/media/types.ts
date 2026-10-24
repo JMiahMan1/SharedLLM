@@ -8,6 +8,12 @@ export type PlayRequest =
 /** Starts playback of `req`; `key` identifies the row that shows the spinner. */
 export type PlayHandler = (req: PlayRequest, key: string) => Promise<void>;
 
+/** Where a queued item goes: right after the current one, or at the end. */
+export type QueueOption = 'next' | 'add';
+
+/** Adds `req` to the selected device's queue without interrupting it. */
+export type QueueHandler = (req: PlayRequest, option: QueueOption) => Promise<void>;
+
 /** One entry in the device picker. `id` is '' for this device's web player,
  *  `ma:<player_id>` for a Music Assistant-only player, else an HA entity id. */
 export interface DeviceOption {
