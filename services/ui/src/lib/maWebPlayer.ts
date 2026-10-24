@@ -21,8 +21,6 @@ import { getServerOrigin, getWsProtocolFor } from './serverUrl';
 import { storageGetSync } from './storage';
 import { parseMaPlayerList, type MaPlayerListEntry } from './deviceLabels';
 import { extractMaImage } from './maImage';
-import { proxiedImage } from './mediaImage';
-import { useMediaToken } from './mediaToken';
 import toast from 'react-hot-toast';
 import { MaRpc, eventIsForPlayer } from '../features/media/engine/maRpc';
 import { SendspinAudioOutput } from '../features/media/engine/sendspinEngine';
@@ -100,16 +98,6 @@ function gatewaySocketUrl(path: string, apiToken: string): string {
   return `${getWsProtocolFor(origin)}://${host}${path}?token=${encodeURIComponent(apiToken)}`;
 }
 
-/* Resolve a (possibly relative) MA image reference to an absolute URL so the
-   OS MediaSession artwork can load it. Goes through the gateway image proxy:
-   MA paths are relative to the MA host, not the app, and the URL carries the
-   signed media token (none until one is held; the effect reruns when it arrives). */
-function buildMediaArtwork(img?: string | null): MediaImage[] {
-  const src = proxiedImage(img);
-  if (!src) return [];
-  return [{ src, sizes: '512x512', type: 'image/png' }];
-}
-
 /** A short human name, or '' for anything else (an object, a JSON blob):
  *  the player name is shown in Music Assistant and Home Assistant. */
 function plainName(value: unknown): string {
@@ -155,7 +143,6 @@ export function useMAWebPlayer() {
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   // OS MediaSession artwork is a signed cover URL; refresh it when the token changes.
-  const mediaToken = useMediaToken();
   const [state, setStateLocal] = useState<MAWebPlayerState>({
     isConnected: false,
     isPlaying: false,
@@ -687,40 +674,6 @@ export function useMAWebPlayer() {
     setStateLocal(s => ({ ...s, isConnected: false, isPlaying: false, error: null, reconnectAttempts: 0 }));
     await connect();
   }, [teardown, connect]);
-
-  // Keep the OS MediaSession (lock screen / media keys) in sync.
-  useEffect(() => {
-    if (!('mediaSession' in navigator)) return;
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: state.mediaTitle || 'Jarvis OS',
-        artist: state.mediaArtist || 'Music Assistant',
-        album: 'Jarvis OS',
-        artwork: buildMediaArtwork(state.mediaImage),
-      });
-      navigator.mediaSession.playbackState = state.isPlaying ? 'playing' : 'paused';
-    } catch {
-      /* MediaSession unsupported in this WebView */
-    }
-  }, [state.mediaTitle, state.mediaArtist, state.mediaImage, state.isPlaying, mediaToken]);
-
-  useEffect(() => {
-    if (!('mediaSession' in navigator)) return;
-    const setHandler = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
-      try {
-        navigator.mediaSession.setActionHandler(action, handler);
-      } catch {
-        /* action not supported */
-      }
-    };
-    setHandler('play', () => { void play().catch(() => {}); });
-    setHandler('pause', () => { void pause(); });
-    setHandler('nexttrack', () => { void next(); });
-    setHandler('previoustrack', () => { void previous(); });
-    return () => {
-      for (const action of ['play', 'pause', 'nexttrack', 'previoustrack'] as const) setHandler(action, null);
-    };
-  }, [play, pause, next, previous]);
 
   return {
     ...state,

@@ -11,7 +11,7 @@ import { currentMediaToken, ensureMediaToken } from './mediaToken';
  * null (the caller shows its placeholder) and asks for one; components that
  * call it subscribe with `useMediaToken()` so they re-render once it arrives.
  */
-export function proxiedImage(raw?: string | null): string | null {
+export function proxiedImage(raw?: string | null, width?: number): string | null {
   if (!raw) return null;
   const mt = currentMediaToken();
   if (!mt) {
@@ -19,5 +19,8 @@ export function proxiedImage(raw?: string | null): string | null {
     return null;
   }
   const base = getServerOrigin().replace(/\/+$/, '');
-  return `${base}/api/media/imageproxy?path=${encodeURIComponent(raw)}&user=${encodeURIComponent(mt.user)}&mt=${encodeURIComponent(mt.token)}`;
+  // `w` asks the upstream for an image this wide (MA's `size=`), so a 44 px
+  // thumbnail does not download a 1500 px cover (BUG-11).
+  const size = width && width > 0 ? `&w=${Math.round(width)}` : '';
+  return `${base}/api/media/imageproxy?path=${encodeURIComponent(raw)}${size}&user=${encodeURIComponent(mt.user)}&mt=${encodeURIComponent(mt.token)}`;
 }
