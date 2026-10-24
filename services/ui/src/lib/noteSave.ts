@@ -8,6 +8,10 @@ export interface SavedNote {
   path?: string;
   /** The old copy could not be removed after a rename (the new one is saved). */
   leftOldCopy: boolean;
+  /** The saved file's version, for the next save's `ifMatch`. */
+  etag?: string;
+  /** Refused: the note changed elsewhere since `ifMatch` was read. Nothing was written. */
+  conflict: boolean;
 }
 
 /**
@@ -16,7 +20,8 @@ export interface SavedNote {
  * A note's file name is its title in every list, so renaming it -- or moving
  * it to another category -- writes a new file and then removes the old one,
  * only once the new one is safely written and only when it really is a
- * different file. Editing in place writes over the same path.
+ * different file. Editing in place writes over the same path, and when
+ * `ifMatch` is given only if the file is still the version that was opened.
  */
 export async function saveNote(params: {
   title: string;
@@ -25,24 +30,29 @@ export async function saveNote(params: {
   /** The note as it was opened; omit for a new note. */
   previous?: { title: string; category: string; path: string };
   asUser?: 'admin';
+  /** The version the note was opened at (an in-place save is refused if it changed). */
+  ifMatch?: string;
 }): Promise<SavedNote & { response: ExecutionResponse }> {
-  const { title, content, category, previous, asUser } = params;
+  const { title, content, category, previous, asUser, ifMatch } = params;
   const moved = Boolean(previous && (previous.title !== title || previous.category !== category));
+  const inPlace = Boolean(previous && !moved);
   const response = await api.writeNote({
     title,
     content,
     category,
-    path: previous && !moved ? previous.path : undefined,
+    path: inPlace ? previous!.path : undefined,
     storage: STORAGE,
     as_user: asUser,
+    if_match: inPlace && ifMatch ? ifMatch : undefined,
   });
-  if (response.status !== 'SUCCESS') return { response, leftOldCopy: false };
-  const path = ((response.detail as { path?: string } | null | undefined)?.path) ?? previous?.path;
+  const detail = (response.detail ?? {}) as { path?: string; etag?: string | null; conflict?: boolean };
+  if (response.status !== 'SUCCESS') return { response, leftOldCopy: false, conflict: Boolean(detail.conflict) };
+  const path = detail.path ?? previous?.path;
   const strip = (p: string) => p.replace(/^\/+/, '');
   let leftOldCopy = false;
   if (moved && previous && path && strip(path) !== strip(previous.path)) {
     const old = await api.deleteNote(previous.title, STORAGE, previous.path, asUser);
     leftOldCopy = old.status !== 'SUCCESS';
   }
-  return { response, path, leftOldCopy };
+  return { response, path, leftOldCopy, etag: detail.etag ?? undefined, conflict: false };
 }

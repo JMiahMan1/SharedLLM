@@ -80,6 +80,19 @@ def note_body(content: str | None) -> str:
     return text
 
 
+def _etag(resp: dict) -> str | None:
+    """The file version Nextcloud reported (``ETag``, or its ``OC-ETag`` twin).
+
+    Header names arrive in whatever case the server used, so look them up
+    without case. A save sends this back as ``If-Match`` so an edit made
+    elsewhere since the note was opened is refused instead of overwritten.
+    """
+    headers = resp.get("headers") or {}
+    lowered = {str(k).lower(): v for k, v in headers.items()}
+    value = lowered.get("etag") or lowered.get("oc-etag")
+    return str(value) if value else None
+
+
 def _with_header(title: str | None, category: str | None, content: str | None) -> str:
     return f"# {title}\nCategory: {category}\n\n{note_body(content)}"
 
@@ -417,7 +430,12 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 url = provider.file_url(f"Notes/{file_title}.md")
             resp = await http_request("GET", url, auth=(provider.username, provider.password), verify=False)
             if resp["status_code"] == 200:
-                return ExecutionResult(status="SUCCESS", message=resp["text"], service="note_read")
+                # The version travels with the text so the editor's save can
+                # prove nothing changed in between (If-Match on write).
+                return ExecutionResult(
+                    status="SUCCESS", message=resp["text"], service="note_read",
+                    detail={"etag": _etag(resp)},
+                )
             elif resp["status_code"] == 404:
                 return ExecutionResult(status="FAILURE", message=f"Note '{req.title}' not found.", service="note_read")
 
@@ -447,18 +465,30 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 url = provider.file_url(f"{category}/{file_title}.md")
             _forget_preview(url)
             content = _with_header(req.title, category, req.content)
+            headers = {"Content-Type": "text/markdown; charset=utf-8"}
+            # Only an in-place save can be checked: the version names the
+            # file at ``path``. Nextcloud answers 412 when it has changed.
+            if req.if_match and req.path:
+                headers["If-Match"] = req.if_match
             resp = await http_request(
                 "PUT", url, data=content.encode('utf-8'),
                 auth=(provider.username, provider.password), verify=False,
-                headers={"Content-Type": "text/markdown; charset=utf-8"},
+                headers=headers,
             )
+            if resp["status_code"] == 412:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message="This note changed somewhere else since it was opened, so it was not overwritten.",
+                    service="note_write",
+                    detail={"conflict": True, "path": req.path.lstrip("/") if req.path else None},
+                )
             if resp["status_code"] in [200, 201, 204]:
                 written = f"{category}/{file_title}.md" if not req.path else req.path.lstrip("/")
                 return ExecutionResult(
                     status="SUCCESS",
                     message=f"Note '{req.title}' saved.",
                     service="note_write",
-                    detail={"path": written},
+                    detail={"path": written, "etag": _etag(resp)},
                 )
 
         elif action == "check_off":

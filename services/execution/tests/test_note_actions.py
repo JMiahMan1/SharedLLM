@@ -183,6 +183,69 @@ async def test_saving_what_read_returned_does_not_stack_headers(provider, monkey
     assert puts[0] == "# Groceries\nCategory: Notes\n\nmilk\n# Heading kept"
 
 
+async def test_read_returns_the_version_it_read(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, **kwargs):
+        return {"status_code": 200, "text": "# A\nCategory: Notes\n\nx", "headers": {"Etag": '"v1"'}}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("read", title="A", path="Notes/A.md"))
+    assert result.status == "SUCCESS"
+    assert result.detail == {"etag": '"v1"'}
+
+
+async def test_an_in_place_save_sends_if_match_and_returns_the_new_version(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    sent: list[dict] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        sent.append(headers or {})
+        return {"status_code": 204, "text": "", "headers": {"OC-ETag": '"v2"'}}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(
+        request("write", title="A", category="Notes", path="Notes/A.md", content="x", if_match='"v1"')
+    )
+    assert result.status == "SUCCESS"
+    assert sent[0]["If-Match"] == '"v1"'
+    assert result.detail == {"path": "Notes/A.md", "etag": '"v2"'}
+
+
+async def test_a_save_over_a_newer_file_is_refused_as_a_conflict(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, **kwargs):
+        return {"status_code": 412, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(
+        request("write", title="A", category="Notes", path="Notes/A.md", content="x", if_match='"old"')
+    )
+    assert result.status == "FAILURE"
+    assert result.detail == {"conflict": True, "path": "Notes/A.md"}
+
+
+async def test_a_new_note_never_sends_if_match(provider, monkeypatch):
+    """The version names the file at ``path``; a new file has none to check."""
+    import services.execution.http_client as http_client
+
+    sent: list[dict] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        sent.append(headers or {})
+        return {"status_code": 201, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    await note_handler.handle_note(request("write", title="New", category="Notes", content="x", if_match='"v1"'))
+    assert "If-Match" not in sent[0]
+
+
 def test_note_body_keeps_a_markdown_heading_that_is_not_the_stored_header():
     assert note_handler.note_body("# Shopping\n- [ ] milk") == "# Shopping\n- [ ] milk"
     assert note_handler.note_body("# T\nCategory: Recipes\n\nStep 1") == "Step 1"

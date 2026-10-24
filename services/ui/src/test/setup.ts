@@ -233,6 +233,13 @@ export const notesMoveCalls: Array<{ path?: string; destination?: string }> = []
 export const notesDuplicateCalls: Array<{ path?: string; title?: string }> = [];
 export const notesMetaWrites: Array<{ meta?: unknown }> = [];
 export const notesEmptyTrashCalls: number[] = [];
+/**
+ * Each note's version in the fake Nextcloud (the ETag is `"v<n>"`, 1 when
+ * unset). A test bumps one to model an edit made on another device; a write
+ * whose `if_match` names an older version is refused as a conflict.
+ */
+export const notesVersions: Record<string, number> = {};
+const noteEtag = (path?: string) => `"v${notesVersions[path ?? ''] ?? 1}"`;
 /** The hidden Notes/.jarvis-notes.json the fake Nextcloud holds. */
 let notesIndexFixture: { version: number; notes: Record<string, unknown> } = { version: 1, notes: {} };
 const NOTES_FIXTURE_BASE = notesFixtures.map((note) => ({ ...note }));
@@ -645,9 +652,14 @@ export const server = setupServer(
     service: 'note_create',
   })),
   http.post('/api/communication/notes/read', async ({ request }) => {
-    const body = await request.json() as { title?: string };
+    const body = await request.json() as { title?: string; path?: string };
     notesReadCalls.push(body);
-    return HttpResponse.json({ status: 'SUCCESS', message: noteFixtureText(body?.title), service: 'note_read' });
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      message: noteFixtureText(body?.title),
+      service: 'note_read',
+      detail: { etag: noteEtag(body?.path) },
+    });
   }),
   http.post('/api/communication/notes/list', async ({ request }) => {
     const body = await request.json() as { previews?: boolean };
@@ -657,9 +669,19 @@ export const server = setupServer(
     return HttpResponse.json({ status: 'SUCCESS', message: 'Notes listed', detail: { notes, directories: ['Notes'] } });
   }),
   http.post('/api/communication/notes/write', async ({ request }) => {
-    const body = await request.json() as { title?: string; content?: string };
+    const body = await request.json() as { title?: string; content?: string; path?: string; category?: string; if_match?: string };
     notesWriteCalls.push(body);
-    return HttpResponse.json({ status: 'SUCCESS', message: 'Note saved.', service: 'note_write' });
+    if (body.path && body.if_match && body.if_match !== noteEtag(body.path)) {
+      return HttpResponse.json({
+        status: 'FAILURE',
+        message: 'This note changed somewhere else since it was opened, so it was not overwritten.',
+        service: 'note_write',
+        detail: { conflict: true, path: body.path },
+      });
+    }
+    const path = body.path ?? `${body.category ?? 'Notes'}/${body.title ?? 'untitled'}.md`;
+    notesVersions[path] = (notesVersions[path] ?? 1) + 1;
+    return HttpResponse.json({ status: 'SUCCESS', message: 'Note saved.', service: 'note_write', detail: { path, etag: noteEtag(path) } });
   }),
   http.post('/api/communication/notes/check_off', async ({ request }) => {
     const body = await request.json() as { item?: string };
@@ -1124,6 +1146,7 @@ afterEach(() => {
   notesMetaWrites.length = 0;
   notesEmptyTrashCalls.length = 0;
   notesIndexFixture = { version: 1, notes: {} };
+  for (const path of Object.keys(notesVersions)) delete notesVersions[path];
   notesFixtures.splice(0, notesFixtures.length, ...NOTES_FIXTURE_BASE.map((note) => ({ ...note })));
 });
 

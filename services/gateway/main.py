@@ -5717,6 +5717,9 @@ async def proxy_write_note(request: Request):
         "category": body.get("category"),
         "path": body.get("path"),
         "storage": body.get("storage", "nextcloud"),
+        # The version the editor opened; Nextcloud refuses the save (412) when
+        # the note changed elsewhere since, instead of overwriting it.
+        "if_match": body.get("if_match"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 

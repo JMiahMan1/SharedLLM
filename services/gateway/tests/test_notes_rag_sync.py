@@ -179,3 +179,21 @@ async def test_the_notes_duplicate_and_empty_trash_routes(monkeypatch):
 
     await main.proxy_empty_note_trash(_request({}))
     assert seen[-1] == {"action": "empty_trash", "storage": "nextcloud"}
+
+
+@pytest.mark.asyncio
+async def test_the_write_route_passes_the_opened_version_through(monkeypatch):
+    """Without if_match the editor's conflict check never reaches Nextcloud."""
+    from services.gateway import main
+
+    seen: dict = {}
+
+    async def fake_proxy(request, path, payload, as_user=None):
+        seen.update(path=path, payload=payload, as_user=as_user)
+        return JSONResponse(content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
+
+    await main.proxy_write_note(_request({"title": "A", "content": "x", "path": "Notes/A.md", "if_match": '"v1"'}))
+    assert seen["payload"]["action"] == "write"
+    assert seen["payload"]["if_match"] == '"v1"'
