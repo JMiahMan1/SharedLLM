@@ -393,3 +393,10 @@ def test_the_base_provider_declines_to_imagine_structure():
             return {}
 
     assert asyncio.run(Bare().get_sections("/anything")) is None
+
+def test_build_provider_keeps_one_provider_per_login_and_library():
+    first = build_provider(ProviderConfig(kind="calibre", settings={"library_path": "/Books/Text"}))
+    assert build_provider(ProviderConfig(kind="calibre", settings={"library_path": "/Books/Text"})) is first
+    assert build_provider(ProviderConfig(kind="calibre", settings={"library_path": "/Books/Other"})) is not first
+    other_login = ProviderConfig(kind="calibre", settings={"library_path": "/Books/Text", "username": "kiddo"})
+    assert build_provider(other_login) is not first

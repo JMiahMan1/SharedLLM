@@ -25,6 +25,14 @@ _TALK_RETRIES = 3
 _TALK_RETRY_DELAY = 2
 
 
+def _game_task_done(task: asyncio.Task) -> None:
+    # Nobody awaits a background game answer, so surface its failure here
+    # instead of letting the round silently stall.
+    _GAME_TASKS.discard(task)
+    if not task.cancelled() and task.exception() is not None:
+        log.error("[talk/game] Game answer failed", exc_info=task.exception())
+
+
 async def _talk_request_with_retry(provider: Any, method: str, endpoint: str, *, params: dict | None = None, data: dict | None = None, timeout: int = 30) -> tuple[bool, Any, str]:
     """Retry provider.request() on connection errors up to _TALK_RETRIES times."""
     last_exc: Exception | None = None
@@ -612,9 +620,21 @@ async def _apply_game_answer(
     if state.kind == "trivia":
         result = games.apply_trivia_answer(state, who, text)
 
+        def next_round() -> str:
+            # Advance and return what follows the round's verdict in the same
+            # message: the next question, or the final board.
+            outcome = games.advance_trivia(state)
+            if outcome.get("finished"):
+                board = ", ".join(f"{name} {stars} ⭐" for name, stars in outcome["leaderboard"])
+                return f"🏆 Game over! {board}" if board else "🏆 Game over!"
+            return games.trivia_prompt(state)
+
         if result.get("ignored"):
             # Not in this session's locked roster (a late joiner, or the shared
             # family account): the round carries on without them.
+            return {"kind": "trivia", "result": result}
+        if result.get("late"):
+            await say(f"⏩ {result['player']}, that was the last question's answer. A new one is up!")
             return {"kind": "trivia", "result": result}
         if result.get("duplicate"):
             await say(f"One guess each! Still waiting on the others, {result['player']}.")
@@ -626,34 +646,25 @@ async def _apply_game_answer(
             question_text = state.question
             from services.execution import activity
 
-            outcome = games.advance_trivia(state)
+            say_msg = f"✅ {result['player']} got it!\n\n{next_round()}"
             card = games.game_card(state, "Correct!", f"{result['player']} is on {result['stars']} ⭐")
-            if outcome.get("finished"):
-                board = ", ".join(f"{name} {stars} ⭐" for name, stars in outcome["leaderboard"])
-                over_msg = f"🏆 Game over! {board}" if board else "🏆 Game over!"
-                say_msg = f"✅ {result['player']} got it!\n\n{over_msg}"
-            else:
-                prompt = games.trivia_prompt(state)
-                say_msg = f"✅ {result['player']} got it!\n\n{prompt}"
 
-            await asyncio.gather(
+            outcomes = await asyncio.gather(
                 say(say_msg, card),
                 _bank_game_stars(who, result["stars"], f"Trivia: {question_text}"),
                 activity.record(result["player"] or who, "game", item=question_text, action="win"),
                 return_exceptions=True,
             )
+            for failed in (o for o in outcomes if isinstance(o, BaseException)):
+                log.warning("[talk/game] Trivia win follow-up failed in %s: %s", token, failed)
             return {"kind": "trivia", "result": result}
 
         if result.get("round_complete") in ("all_wrong", "timeout"):
-            outcome = games.advance_trivia(state)
-            if outcome.get("finished"):
-                board = ", ".join(f"{name} {stars} ⭐" for name, stars in outcome["leaderboard"])
-                over_msg = f"🏆 Game over! {board}" if board else "🏆 Game over!"
-                say_msg = f"The answer was {state.answers[0]}.\n\n{over_msg}"
-            else:
-                prompt = games.trivia_prompt(state)
-                say_msg = f"The answer was {state.answers[0]}.\n\n{prompt}"
-            await say(say_msg, None)
+            # Read the answer before advancing: the next draw replaces it, and
+            # the last question leaves no answers at all.
+            answer = state.answers[0] if state.answers else ""
+            reveal = f"The answer was {answer}." if answer else "Nobody got that one."
+            await say(f"{reveal}\n\n{next_round()}", None)
             return {"kind": "trivia", "result": result}
 
         # A lone wrong answer stays quiet: the round keeps its secret.
@@ -1008,7 +1019,7 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                         _apply_game_answer(provider, req.token, req.user_context.user, req.message.strip())
                     )
                     _GAME_TASKS.add(task)
-                    task.add_done_callback(_GAME_TASKS.discard)
+                    task.add_done_callback(_game_task_done)
 
             return ExecutionResult(
                 status="SUCCESS",

@@ -1,6 +1,8 @@
 # services/storage/providers.py
 from __future__ import annotations
 
+import hashlib
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -64,11 +66,41 @@ def _resolve_nextcloud_settings(settings: dict[str, Any]) -> dict[str, Any]:
         merged["password"] = NEXTCLOUD_PASS
     return merged
 
+# Nextcloud-backed providers are kept per exact login (and library): a fresh
+# one per request opened a new connection, made Nextcloud check the password
+# again (2-5 s) and, for Calibre, downloaded metadata.db again. A kept one
+# carries its session cookie and its catalog (which re-checks its digest).
+_PROVIDERS: dict[tuple[str, ...], tuple[StorageProvider, float]] = {}
+_PROVIDER_TTL_S = 600
+_PROVIDERS_MAX = 32
+
+
 def build_provider(config: ProviderConfig) -> StorageProvider:
     """
     Factory function to build storage providers.
     Moving specifics to plugins ensures backend agnosticism.
     """
+    if config.kind not in ("nextcloud", "calibre"):
+        return _build_provider(config)
+    settings = _resolve_nextcloud_settings(config.settings)
+    key = (
+        config.kind,
+        str(settings.get("url") or ""),
+        str(settings.get("username") or ""),
+        hashlib.sha256(str(settings.get("password") or "").encode("utf-8")).hexdigest(),
+        str(settings.get("library_path") or ""),
+    )
+    cached = _PROVIDERS.get(key)
+    if cached and time.monotonic() - cached[1] < _PROVIDER_TTL_S:
+        return cached[0]
+    provider = _build_provider(config)
+    _PROVIDERS[key] = (provider, time.monotonic())
+    while len(_PROVIDERS) > _PROVIDERS_MAX:
+        _PROVIDERS.pop(next(iter(_PROVIDERS)))
+    return provider
+
+
+def _build_provider(config: ProviderConfig) -> StorageProvider:
     if config.kind == "nextcloud":
         settings = _resolve_nextcloud_settings(config.settings)
         try:

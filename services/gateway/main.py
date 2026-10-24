@@ -114,8 +114,8 @@ from services.common.circuit_breaker import breaker_snapshots
 from services.common.entity_ids import usable_entity_id
 from services.common.music_recommendations import recommend_music
 from services.common.video_recommendations import recommend_video
-from services.common.podcast_recommendations import recommend_podcast
-from services.common.book_recommendations import recommend_book
+from services.common.podcast_recommendations import podcast_events, recommend_podcast
+from services.common.book_recommendations import book_events, recommend_book
 from services.common.relay import until_either_ends
 from services.gateway import calls, drawing, family_safety, network_routes, notices, push_routes
 from services.shared import ma_library
@@ -5278,11 +5278,7 @@ async def get_podcast_recommendation(request: Request):
     except Exception:
         data = {}
     events = (data or {}).get("events") or []
-    podcast_items = [
-        e for e in events
-        if str(e.get("feature") or "").lower() in ("media", "podcast")
-    ]
-    rec = recommend_podcast(podcast_items)
+    rec = recommend_podcast(podcast_events(events))
     return {"status": "SUCCESS", "recommendation": rec}
 
 
@@ -5311,11 +5307,7 @@ async def get_book_recommendation(request: Request):
     except Exception:
         data = {}
     events = (data or {}).get("events") or []
-    book_items = [
-        e for e in events
-        if str(e.get("feature") or "").lower() in ("media", "book", "reading")
-    ]
-    rec = recommend_book(book_items)
+    rec = recommend_book(book_events(events))
     return {"status": "SUCCESS", "recommendation": rec}
 
 

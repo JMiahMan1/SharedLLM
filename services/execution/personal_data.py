@@ -1,3 +1,5 @@
+import hashlib
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -33,6 +35,14 @@ class PersonalDataProvider(Protocol):
     def sanitize_filename(self, value: str, fallback: str) -> str: ...
 
 
+_CALDAV_CLIENTS: dict[tuple[str, str, str], tuple[caldav.DAVClient, float]] = {}
+_CALDAV_CLIENT_TTL_S = 600
+
+
+def _login_key(base_url: str, username: str, password: str) -> tuple[str, str, str]:
+    return base_url.rstrip("/"), username, hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
 @dataclass
 class NextcloudPersonalDataProvider:
     base_url: str
@@ -41,6 +51,18 @@ class NextcloudPersonalDataProvider:
     kind: str = "nextcloud"
 
     def calendar_client(self) -> caldav.DAVClient:
+        # One client per exact login, kept for a while: a fresh one opened a
+        # new connection and made Nextcloud check the password again (2-5 s)
+        # on every calendar view or edit; the kept one carries its session.
+        key = _login_key(self.base_url, self.username, self.password)
+        cached = _CALDAV_CLIENTS.get(key)
+        if cached and time.monotonic() - cached[1] < _CALDAV_CLIENT_TTL_S:
+            return cached[0]
+        client = self._new_calendar_client()
+        _CALDAV_CLIENTS[key] = (client, time.monotonic())
+        return client
+
+    def _new_calendar_client(self) -> caldav.DAVClient:
         client = caldav.DAVClient(
             url=f"{self.base_url.rstrip('/')}/remote.php/dav",
             username=self.username,

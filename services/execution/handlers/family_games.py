@@ -29,6 +29,10 @@ CARD_KINDS = ("game",)
 # quiet player cannot stall the whole session.
 SESSION_LENGTH = 10
 TRIVIA_ROUND_SECONDS = 120
+# How long after a new question an answer to the one before it is still taken
+# as late, not as a guess: players see the next question seconds apart, and a
+# kid typing the last answer should not lose their turn on the new one.
+TRIVIA_LATE_ANSWER_SECONDS = 20
 
 # Kept small and warm on purpose: gentle content, no trick questions, and
 # enough local colour to play at home. Extend by adding entries.
@@ -334,6 +338,7 @@ class GameState:
     last_correct: bool | None = None
     correct_count: int = 0
     question_started_at: float = 0.0
+    previous_answers: list[str] = field(default_factory=list)
 
     def player(self, name: str) -> Player:
         key = normalize(name) or "anon"
@@ -381,6 +386,7 @@ def draw_trivia_question(state: GameState) -> None:
         if near:
             break
     picked = random.choice(near)  # noqa: S311 - game content, not security
+    state.previous_answers = list(state.answers)
     state.question = picked["question"]
     state.answers = list(picked["answers"])
     state.served.append(picked["question"])
@@ -552,10 +558,27 @@ def apply_trivia_answer(state: GameState, who: str, answer: str, star_value: int
             "round_complete": None,
             "leaderboard": [(p.name, p.stars) for p in state.leaderboard],
         }
+    correct = is_correct(answer, state.answers)
+    if (
+        not correct
+        and state.previous_answers
+        and time.time() - state.question_started_at < TRIVIA_LATE_ANSWER_SECONDS
+        and is_correct(answer, state.previous_answers)
+    ):
+        # Meant for the question that just closed: it neither scores nor
+        # uses up this player's one guess on the new question.
+        player = state.session_player(key, fallback=who)
+        return {
+            "late": True,
+            "correct": False,
+            "player": player.name,
+            "stars": player.stars,
+            "round_complete": None,
+            "leaderboard": [(p.name, p.stars) for p in state.leaderboard],
+        }
     player = state.session_player(key, fallback=who)
     state.answered.add(key)
     player.attempts += 1
-    correct = is_correct(answer, state.answers)
     complete: str | None = None
     if correct:
         player.correct += 1

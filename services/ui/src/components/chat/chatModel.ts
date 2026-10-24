@@ -87,6 +87,22 @@ export function sortMessages(messages: TalkMessage[]): TalkMessage[] {
   });
 }
 
+/**
+ * Whether a family game is still running, judged from the newest game line in
+ * the feed: a question or memory board means yes, a final board means no.
+ * Matches the lines execution's family games post.
+ */
+export function gameRunning(messages: TalkMessage[]): boolean {
+  const ordered = sortMessages(messages);
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    const text = ordered[i]?.message || '';
+    if (text.includes('Game over') || text.includes('All pairs found')) return false;
+    if (text.includes('🧠 Trivia') || text.includes('🃏 Memory: find the pairs')) return true;
+    if (decodeEnvelope(text).envelope?.kind === 'game') return true;
+  }
+  return false;
+}
+
 /** System lines ("Michele joined the call") are shown as centred notes. */
 export function isSystemMessage(message: TalkMessage): boolean {
   return Boolean(message.system_message) && message.message_type === 'system';

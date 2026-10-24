@@ -307,6 +307,42 @@ async def test_a_chat_message_answers_the_running_trivia_game(talk, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_a_missed_round_reveals_its_own_answer_not_the_next_one(talk, monkeypatch):
+    monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+    from services.execution.handlers import family_games as games
+
+    await talk.handle_talk(_request(game_command="start", game_kind="trivia"))
+    state = games.registry.get("room-1")
+    answer = state.answers[0]
+    state.question_started_at = 1.0  # long expired: the next wrong guess closes the round
+
+    await talk._apply_game_answer(None, "room-1", "Kiddo", "definitely not it")
+
+    reveal = talk.posted[-1]["message"]
+    assert reveal.startswith(f"The answer was {answer}.")
+    assert "question 2 of" in reveal
+
+
+@pytest.mark.asyncio
+async def test_a_missed_last_question_still_ends_the_game(talk, monkeypatch):
+    monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+    from services.execution.handlers import family_games as games
+
+    await talk.handle_talk(_request(game_command="start", game_kind="trivia"))
+    state = games.registry.get("room-1")
+    answer = state.answers[0]
+    state.served = state.served + ["filler"] * (state.session_len - len(state.served))
+    state.question_started_at = 1.0
+
+    await talk._apply_game_answer(None, "room-1", "Kiddo", "definitely not it")
+
+    final = talk.posted[-1]["message"]
+    assert final.startswith(f"The answer was {answer}.")
+    assert "🏆 Game over" in final
+    assert state.over
+
+
+@pytest.mark.asyncio
 async def test_a_chat_message_is_left_alone_when_no_game_is_running(talk, monkeypatch):
     monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
 
@@ -315,3 +351,44 @@ async def test_a_chat_message_is_left_alone_when_no_game_is_running(talk, monkey
     assert result.status == "SUCCESS"
     assert result.service == "talk_send"
     assert talk.posted == [{"message": "hello everyone"}]
+
+
+@pytest.mark.asyncio
+async def test_a_late_answer_to_the_last_question_keeps_the_players_guess(talk, monkeypatch):
+    monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+    from services.execution.handlers import family_games as games
+
+    await talk.handle_talk(_request(game_command="start", game_kind="trivia"))
+    state = games.registry.get("room-1")
+    first_answer = state.answers[0]
+    await talk._apply_game_answer(None, "room-1", "Mom", first_answer)  # Mom wins round 1
+    second_answer = state.answers[0]
+    if games.is_correct(first_answer, state.answers):
+        pytest.skip("the drawn questions share an answer")
+
+    late = await talk._apply_game_answer(None, "room-1", "Kiddo", first_answer)
+
+    assert late["result"].get("late") is True
+    assert "last question's answer" in talk.posted[-1]["message"]
+    assert "kiddo" not in state.answered
+    right = await talk._apply_game_answer(None, "room-1", "Kiddo", second_answer)
+    assert right["result"]["correct"] is True
+
+
+@pytest.mark.asyncio
+async def test_an_old_answer_long_after_the_question_changed_is_a_normal_guess(talk, monkeypatch):
+    monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+    from services.execution.handlers import family_games as games
+
+    await talk.handle_talk(_request(game_command="start", game_kind="trivia"))
+    state = games.registry.get("room-1")
+    first_answer = state.answers[0]
+    await talk._apply_game_answer(None, "room-1", "Mom", first_answer)
+    if games.is_correct(first_answer, state.answers):
+        pytest.skip("the drawn questions share an answer")
+    state.question_started_at -= games.TRIVIA_LATE_ANSWER_SECONDS + 1
+
+    stale = await talk._apply_game_answer(None, "room-1", "Kiddo", first_answer)
+
+    assert not stale["result"].get("late")
+    assert "kiddo" in state.answered

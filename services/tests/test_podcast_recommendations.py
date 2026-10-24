@@ -40,3 +40,25 @@ def test_all_themes_non_empty():
     assert len(themes) >= 8
     for theme in themes:
         assert theme["reason"]
+
+
+def test_longer_triggers_win_over_shorter_ones():
+    rec = recommend_podcast([{"feature": "podcast", "item": "A family audio drama"}])
+    assert rec["theme"] == "kids drama"
+
+
+def test_triggers_match_whole_words_only():
+    assert recommend_podcast([{"feature": "podcast", "item": "Newsboys live"}]) is None
+
+
+def test_only_podcast_listening_reaches_the_recommender():
+    from services.common.podcast_recommendations import podcast_events
+
+    events = [
+        {"feature": "media", "item": "Crime Junkie", "detail": {"app": "com.spotify.music"}},
+        {"feature": "media", "item": "Crime Junkie", "detail": {"app": "au.com.shiftyjelly.pocketcasts"}},
+        {"feature": "media", "item": "Ep. 12", "detail": {"show": "Crime Junkie", "app": "com.spotify.music"}},
+        {"feature": "podcast", "item": "Crime Junkie"},
+        {"feature": "music", "item": "Crime Junkie"},
+    ]
+    assert podcast_events(events) == events[1:4]
