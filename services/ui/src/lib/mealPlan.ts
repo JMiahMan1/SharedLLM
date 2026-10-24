@@ -49,6 +49,11 @@ export function buildMealPlan(plan: WeeklyPlan): string {
   return lines.join('\n');
 }
 
+/** The plan's day for a local date (the plan week starts on Monday). */
+export function planDayOf(date = new Date()): PlanDay {
+  return PLAN_DAYS[(date.getDay() + 6) % 7];
+}
+
 /** The `#level-N` tag an imported recipe carries, when the body has one. */
 export function planLevel(body: string): string {
   const match = body.match(/#level-([123])\b/);

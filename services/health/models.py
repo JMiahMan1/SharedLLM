@@ -260,3 +260,38 @@ class OffProduct(SQLModel, table=True):  # type: ignore
     code: str = Field(primary_key=True)
     payload_json: str
     fetched_at: str = Field(default_factory=utcnow)
+
+
+class FamilyChallenge(SQLModel, table=True):  # type: ignore
+    """A weekly family challenge, Monday to Sunday.
+
+    ``kind`` is one of the measurable kinds in ``challenges.KINDS``; progress
+    is computed from logged data on every read, never stored, so a late log or
+    a deleted entry shows at once. One challenge per kind per week.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("kind", "week_start", name="uq_challenge_kind_week"),
+        {"extend_existing": True},
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    kind: str = Field(index=True)
+    week_start: str = Field(index=True)  # the Monday, YYYY-MM-DD
+    target_days: int
+    created_by: str
+    created_at: str = Field(default_factory=utcnow)
+
+
+class ChallengeMember(SQLModel, table=True):  # type: ignore
+    """One person who joined a challenge. Joining is always the person's own choice."""
+
+    __table_args__ = (
+        UniqueConstraint("challenge_id", "user_id", name="uq_challenge_member"),
+        {"extend_existing": True},
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    challenge_id: int = Field(index=True)
+    user_id: str = Field(index=True)
+    joined_at: str = Field(default_factory=utcnow)

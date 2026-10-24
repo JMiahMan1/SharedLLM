@@ -254,11 +254,17 @@ account is connected, everything above still works.
 - [ ] Health tab: a **Meals** card showing today's planned meals from
       `Recipes/Meal plan.md` with an estimated total, scaled to the household servings.
 - [ ] Ticking a meal cooked logs it for the day, so Health shows planned vs. eaten.
+      Logging is built, as a button rather than the tick: **Log tonight's dinner** on
+      today's row of the week plan, and **Log to Health** on an open recipe, post the
+      note's per-serving nutrition with a portion picker (see HEALTH_HUB.md Phase 4).
+      The tick and the log stay separate; a planned-vs-eaten card is still open.
 - [ ] Optional (decide with the family): daily calorie/protein targets, weekly averages,
       and per-person portions.
 - [ ] Stay out of the way when there is no plan or nutrition data: hide the card.
 - [ ] Tests: nutrition parsing and scaling (pure), plan → health day mapping, the card
-      and mark-cooked UI.
+      and mark-cooked UI. Parsing, portion scaling, the plan's today mapping and the log
+      sheet are tested (`src/test/recipeNutrition.test.ts`, `LogRecipeSheet.test.tsx`,
+      `RecipesPlan.test.tsx`); the card is not built.
 - [ ] Docs and deploy.
 
 ## Phase 11 — calorie budget and logging (Noom-style)
@@ -267,9 +273,10 @@ account is connected, everything above still works.
       activity level. Adults get a daily calorie budget from Mifflin-St Jeor BMR ×
       activity (minus a gentle deficit only when they ask); kids and teens get
       age-appropriate guidance ranges, never weight-loss deficits.
-- [ ] Log meals: ticking a planned meal cooked adds its per-serving nutrition to the
-      day (portion picker ½, 1, 1½ …); quick-add other foods from the imported set
-      or by hand.
+- [x] Log meals: a planned meal adds its per-serving nutrition to the day (portion
+      picker ½, 1, 1½, 2) from the week plan's **Log tonight's dinner** or a recipe's
+      **Log to Health**; a recipe without stated nutrition is entered by hand. Other
+      foods are quick-added from Health → Nutrition.
 - [ ] Day view: calories eaten vs budget, protein/carbs/fat totals, and a simple
       density colour (green / yellow / orange) like Noom's food colours.
 - [ ] Optional: weight trend for adults, weekly averages, per-person portions.
