@@ -10,15 +10,16 @@ the Skylight bridge converts into stars (see docs/ACHIEVEMENTS.md).
 """
 from __future__ import annotations
 
-import itertools
 import json
 import logging
 import os
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+
+from services.common.streaks import longest_run
 
 log = logging.getLogger("geo.achievements")
 
@@ -166,14 +167,7 @@ def goal_dates(daily_steps: dict[str, int], daily_goal: int) -> list[date]:
 
 def longest_goal_streak(daily_steps: dict[str, int], daily_goal: int) -> int:
     """Longest run of consecutive calendar days meeting the goal."""
-    days = goal_dates(daily_steps, daily_goal)
-    if not days:
-        return 0
-    best = current = 1
-    for prev, nxt in itertools.pairwise(days):
-        current = current + 1 if (nxt - prev) == timedelta(days=1) else 1
-        best = max(best, current)
-    return best
+    return longest_run(goal_dates(daily_steps, daily_goal))
 
 
 def has_goal_after_gap(daily_steps: dict[str, int], daily_goal: int, gap_days: int) -> bool:

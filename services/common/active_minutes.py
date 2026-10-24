@@ -28,14 +28,14 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from services.common.streaks import week_start
+
+__all__ = ["compute", "max_heart_rate", "step_minutes", "week_start"]
+
 BASELINE_STEPS_PER_HOUR = 1000
 BRISK_STEPS_PER_MINUTE = 100
 MODERATE_FRACTION = 0.64
 VIGOROUS_FRACTION = 0.77
-
-
-def week_start(day: date) -> date:
-    return day - timedelta(days=day.weekday())
 
 
 def _local(value: str | float | int, tz: ZoneInfo) -> datetime | None:

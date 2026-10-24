@@ -17,6 +17,10 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from services.common.streaks import week_start
+
+__all__ = ["KINDS", "day_counts", "leaderboard", "progress", "week_days", "week_start"]
+
 KINDS: dict[str, dict[str, str]] = {
     "water_days": {
         "title": "Water goal days",
@@ -34,11 +38,6 @@ KINDS: dict[str, dict[str, str]] = {
         "detail": "Days a dinner is logged from a family recipe.",
     },
 }
-
-
-def week_start(day: date) -> date:
-    """The Monday of the week ``day`` falls in."""
-    return day - timedelta(days=day.weekday())
 
 
 def week_days(start: date) -> list[str]:
