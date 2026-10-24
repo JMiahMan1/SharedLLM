@@ -395,6 +395,15 @@ point.
 - [ ] **App control.** Block apps, per-app daily limits, install approvals, per-permission
       gating; Accessibility-service enforcement on the device with Family Link's one-minute
       grace warning before a block lands.
+      **Blocking and per-app limits built (2026-10-24, needs the APK after 437):** a parent
+      switches an app off or gives it its own daily minutes from the apps the child's phone
+      reported this week (`AppControls`, under the child's screen-time controls; rules
+      `blocked_apps` / `app_limits` in identity's `ScreenRules`). `screen_time.apps_state` turns
+      today's per-app foreground time into `blocked_apps` and `app_minutes_left` on the status;
+      always-allowed apps are never blocked. The guard closes a blocked app (`GuardRules`
+      `BLOCK_APP`) with "That app is off for now" while the rest of the phone works, and the
+      child's card shows minutes left per limited app. Not yet: install approvals,
+      per-permission gating and the one-minute warning.
 - [ ] **Web filtering.** On-device VPN/DNS filter with category lists, allow/block lists,
       safe-search enforcement, an "ask a parent" request flow, and Qustodio-style bypass
       blocks (unsupported browsers, split-screen, safe mode).
@@ -418,8 +427,14 @@ point.
       guard that was on and is now missing. Decisions live in pure `GuardRules` (JVM-tested).
       Setup is the `PhoneProtectionCard` on the child's Health page (device admin, then
       Accessibility; Android 13+ first needs App info ⋮ → Allow restricted settings for a
-      sideloaded app). Needs APK 437 or later on the phone. Not yet: the offline parent code;
-      safe mode and factory reset still get around Layer 1. Known gap to check on a device: pages
+      sideloaded app). Needs APK 437 or later on the phone. **Offline parent code (2026-10-24,
+      APK after 437):** a parent sets 6–12 digits (`PUT /api/guard/offline-code`, shown under the
+      child's controls); identity keeps only a PBKDF2-SHA256 verifier (`GuardOfflineCode`), which
+      reaches a child's phone only inside a successful online parent unlock (never through the
+      child's own reads). With no connection the guard screen takes the code, checks it on the
+      phone (`OfflineCode`, five wrong tries then ten minutes), lifts the guard for ten minutes
+      and reports `offline_unlock` to both parents once the phone is online again. Safe mode and
+      factory reset still get around Layer 1. Known gap to check on a device: pages
       are recognised by the text "Jarvis OS", and the guard's own Accessibility page is labelled
       "Jarvis screen guard", so it may not be covered on every phone (`GuardRules.APP_LABEL`).
       **Layer 2 (planned, optional per phone): device owner.** Set once over USB on a phone with
@@ -513,7 +528,8 @@ media sessions, calls and SMS DONE (video covered by media sessions + per-app fo
 time); (3) Jarvis recommendations from the profile — DONE (music style matching,
 video themes redeemed or redirected, podcasts, books, games and activities, and a parent's
 bless/block per lane); (4) time budgets and routines;
-(5) app control and the web filter;
+(5) app control and the web filter — app blocking and per-app limits DONE, the web filter
+next;
 (6) monitoring alerts and the weekly recap; (7) the parents' page and the discipleship
 surfaces.
 

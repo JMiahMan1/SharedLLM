@@ -12,7 +12,10 @@ Semantics follow Family Link and Qustodio:
 - bedtime and school time are windows (bedtime may cross midnight) during
   which the phone is locked whatever is left of the limit;
 - a parent's pause locks the phone until it is lifted or runs out;
-- apps on the always-allowed list (phone, messages, Jarvis) are never locked.
+- apps on the always-allowed list (phone, messages, Jarvis) are never locked;
+- app control (step 5): a parent can block an app outright, or give it its own
+  daily minutes; an app past its minutes is blocked until midnight while the
+  rest of the phone keeps working.
 """
 
 from __future__ import annotations
@@ -65,10 +68,36 @@ def _window(now: datetime, start: time | None, end: time | None) -> tuple[bool, 
     return False, None
 
 
-def evaluate(rules: dict[str, Any] | None, used_ms: int, bonus_min: int, now: datetime) -> dict[str, Any]:
+def apps_state(rules: dict[str, Any], apps_used_ms: dict[str, int] | None) -> tuple[list[str], dict[str, int]]:
+    """Which apps are blocked now, and minutes left for each app with a limit.
+
+    An always-allowed app is never blocked, whatever the lists say.
+    """
+    allowed = set(rules.get("always_allowed") or ALWAYS_ALLOWED_DEFAULT)
+    used = apps_used_ms or {}
+    blocked = [pkg for pkg in rules.get("blocked_apps") or [] if pkg not in allowed]
+    left: dict[str, int] = {}
+    for pkg, limit in (rules.get("app_limits") or {}).items():
+        if pkg in allowed:
+            continue
+        remaining = max(0, int(limit) - max(0, int(used.get(pkg) or 0)) // 60000)
+        left[pkg] = remaining
+        if remaining == 0 and pkg not in blocked:
+            blocked.append(pkg)
+    return blocked, left
+
+
+def evaluate(
+    rules: dict[str, Any] | None,
+    used_ms: int,
+    bonus_min: int,
+    now: datetime,
+    apps_used_ms: dict[str, int] | None = None,
+) -> dict[str, Any]:
     """The member's screen-time state right now.
 
-    ``now`` must be timezone-aware in the household's zone. Returns the limit,
+    ``now`` must be timezone-aware in the household's zone; ``apps_used_ms``
+    is today's foreground time per package. Returns the limit,
     use and remaining minutes (None when there is no limit), the active
     routine, and ``locked`` with a ``reason`` and an ``until`` (ISO) when the
     lock lifts on its own (the limit's lock lifts at midnight).
@@ -111,6 +140,7 @@ def evaluate(rules: dict[str, Any] | None, used_ms: int, bonus_min: int, now: da
         locked, reason, until = True, "limit", midnight
     else:
         locked, reason, until = False, None, None
+    blocked_apps, app_minutes_left = apps_state(rules, apps_used_ms)
 
     return {
         "limit_min": None if limit is None else int(limit),
@@ -125,4 +155,6 @@ def evaluate(rules: dict[str, Any] | None, used_ms: int, bonus_min: int, now: da
         "until": until.isoformat() if until else None,
         "resets_at": midnight.isoformat(),
         "always_allowed": list(rules.get("always_allowed") or ALWAYS_ALLOWED_DEFAULT),
+        "blocked_apps": blocked_apps,
+        "app_minutes_left": app_minutes_left,
     }

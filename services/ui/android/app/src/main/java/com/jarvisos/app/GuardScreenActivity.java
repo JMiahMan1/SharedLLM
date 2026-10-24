@@ -29,11 +29,14 @@ public class GuardScreenActivity extends ComponentActivity {
     static final String EXTRA_MODE = "mode";
     static final String MODE_TAMPER = "tamper";
     static final String MODE_LOCKED = "locked";
+    /** One app is off (blocked by a parent, or its own minutes are up); the rest of the phone works. */
+    static final String MODE_APP = "app";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         boolean tamper = MODE_TAMPER.equals(getIntent().getStringExtra(EXTRA_MODE));
+        boolean appOff = MODE_APP.equals(getIntent().getStringExtra(EXTRA_MODE));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -41,9 +44,11 @@ public class GuardScreenActivity extends ComponentActivity {
         root.setPadding(64, 64, 64, 64);
         root.setBackgroundColor(Color.parseColor("#030711"));
 
-        TextView title = text(tamper ? "A parent needs to sign in" : lockedTitle(), 24);
+        TextView title = text(tamper ? "A parent needs to sign in" : appOff ? "That app is off for now" : lockedTitle(), 24);
         TextView body = text(tamper
                 ? "Removing Jarvis or switching off its protection needs one of your parents' logins."
+                : appOff
+                ? "Your parents turned this app off, or its time is used up for today. Everything else still works."
                 : "Calls, texts and Jarvis still work. You can ask a parent for more time in Jarvis.", 16);
         body.setTextColor(Color.parseColor("#94A3B8"));
 
@@ -94,9 +99,36 @@ public class GuardScreenActivity extends ComponentActivity {
             });
             root.addView(ask);
         }
+        // No connection: a parent's offline code works instead of their login.
+        EditText offline = new EditText(this);
+        offline.setHint("Parent's offline code");
+        offline.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        offline.setTextColor(Color.WHITE);
+        offline.setHintTextColor(Color.parseColor("#64748B"));
+        Button useCode = new Button(this);
+        useCode.setText("Use offline code");
+        useCode.setOnClickListener(v -> {
+            useCode.setEnabled(false);
+            String code = offline.getText().toString().trim();
+            new Thread(() -> {
+                String problem = GuardApi.offlineUnlock(this, code);
+                runOnUiThread(() -> {
+                    useCode.setEnabled(true);
+                    offline.setText("");
+                    if (problem == null) {
+                        finish();
+                    } else {
+                        error.setText(problem);
+                    }
+                });
+            }).start();
+        });
+
         root.addView(user);
         root.addView(pass);
         root.addView(unlock);
+        root.addView(offline);
+        root.addView(useCode);
         root.addView(error);
         setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 

@@ -156,3 +156,39 @@ def test_only_parents_change_lanes_and_values_are_checked(family):
     assert family("sib").get("/api/recommendation-lanes/kid").status_code == 403
     assert family("dad").put("/api/recommendation-lanes/kid", json={"lanes": {"tiktok": False}}).status_code == 422
     assert family("dad").put("/api/recommendation-lanes/grown", json={"lanes": {"game": False}}).status_code == 403
+
+
+def test_a_parent_blocks_and_limits_apps(family):
+    r = family("dad").put("/api/screen-time/kid/rules", json={
+        "blocked_apps": ["com.roblox.client", "com.roblox.client"],
+        "app_limits": {"com.google.android.youtube": 45},
+    })
+    assert r.status_code == 200
+    rules = family("kid").get("/api/screen-time/kid/rules").json()["rules"]
+    assert rules["blocked_apps"] == ["com.roblox.client"]
+    assert rules["app_limits"] == {"com.google.android.youtube": 45}
+    assert family("mom").put("/api/screen-time/kid/rules", json={"blocked_apps": ["not a package"]}).status_code == 422
+    assert family("mom").put("/api/screen-time/kid/rules", json={"app_limits": {"com.x.y": 2000}}).status_code == 422
+
+
+def test_a_parents_offline_code_reaches_the_phone_only_through_a_parent_login(family):
+    import hashlib
+
+    _with_passwords(family)
+    assert family("mom").get("/api/guard/offline-code").json() == {"set": False, "updated_at": None, "can_set": True}
+    assert family("mom").put("/api/guard/offline-code", json={"code": "12ab"}).status_code == 422
+    assert family("mom").put("/api/guard/offline-code", json={"code": "48291735"}).status_code == 200
+    # A child cannot set one, and never sees a verifier through its own reads.
+    assert family("kid").put("/api/guard/offline-code", json={"code": "111111"}).status_code == 403
+    assert "offline" not in str(family("kid").get("/api/screen-time/kid/rules").json())
+
+    body = family("kid").post("/api/guard/parent-unlock", json={"username": "dad", "password": "dad-pass"}).json()
+    [code] = body["offline_codes"]
+    assert code["parent"] == "mom"
+    digest = hashlib.pbkdf2_hmac("sha256", b"48291735", bytes.fromhex(code["salt"]), code["iterations"])
+    assert digest.hex() == code["hash"]
+    assert "48291735" not in str(body)
+
+    assert family("mom").delete("/api/guard/offline-code").json() == {"set": False}
+    again = family("kid").post("/api/guard/parent-unlock", json={"username": "dad", "password": "dad-pass"}).json()
+    assert again["offline_codes"] == []

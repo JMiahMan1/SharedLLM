@@ -745,3 +745,17 @@ class RecommendationLanes(SQLModel, table=True):  # type: ignore
     data: str = Field(default="{}")
     updated_by: str | None = None
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class GuardOfflineCode(SQLModel, table=True):  # type: ignore
+    """A parent's offline unlock code for their children's phones, kept only as
+    a PBKDF2-SHA256 verifier. The verifier reaches a child's phone only inside
+    a successful online parent unlock, so the phone can check the code later
+    with no connection.
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    salt: str  # hex
+    iterations: int
+    hash: str  # hex
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

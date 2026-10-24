@@ -21,6 +21,8 @@ vi.mock('../../services/api', async (importOriginal) => {
       pauseScreenTime: vi.fn(),
       giveScreenTimeBonus: vi.fn(),
       decideScreenTimeRequest: vi.fn(),
+      getUsage: vi.fn().mockResolvedValue({ status: 'SUCCESS', days: [] }),
+      getOfflineCode: vi.fn().mockResolvedValue({ set: false, updated_at: null, can_set: true }),
     },
   };
 });
@@ -64,6 +66,15 @@ describe('ScreenTimeCard (the member)', () => {
     wrap(<ScreenTimeCard />);
     expect(await screen.findByTestId('screen-time-waiting')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Ask for/ })).toBeNull();
+  });
+
+  it('shows the minutes left on each app with its own limit', async () => {
+    vi.mocked(api.getScreenTimeStatus).mockResolvedValue(status({
+      rules: { app_limits: { 'com.google.android.youtube': 30 } }, limit_min: null, remaining_min: null,
+      app_minutes_left: { 'com.google.android.youtube': 0 },
+    }));
+    wrap(<ScreenTimeCard />);
+    expect(await screen.findByTestId('screen-time-apps')).toHaveTextContent('YouTube: used up for today');
   });
 
   it('stays out of the way when no rules are set', async () => {

@@ -25,6 +25,12 @@ final class GuardApi {
 
     static final String KEY_STATUS = "guard_status";
     static final String KEY_UNLOCKED_UNTIL = "guard_unlocked_until";
+    /** The parents' offline-code verifiers, from the last online parent unlock. */
+    static final String KEY_OFFLINE_CODES = "guard_offline_codes";
+    static final String KEY_OFFLINE_FAILS = "guard_offline_fails";
+    static final String KEY_OFFLINE_REPORT_DUE = "guard_offline_report_due";
+    static final int OFFLINE_MAX_FAILS = 5;
+    static final long OFFLINE_WAIT_MS = 10 * 60_000L;
 
     private GuardApi() {}
 
@@ -87,6 +93,16 @@ final class GuardApi {
         return out;
     }
 
+    /** Apps blocked now (a parent switched them off, or their own minutes ran out). */
+    static Set<String> blockedApps(Context context) {
+        Set<String> out = new HashSet<>();
+        JSONArray apps = lastStatus(context).optJSONArray("blocked_apps");
+        if (apps != null) {
+            for (int i = 0; i < apps.length(); i++) out.add(apps.optString(i));
+        }
+        return out;
+    }
+
     static boolean isUnlocked(Context context) {
         return System.currentTimeMillis() < prefs(context).getLong(KEY_UNLOCKED_UNTIL, 0L);
     }
@@ -104,7 +120,11 @@ final class GuardApi {
                 long ms = until.isEmpty()
                         ? System.currentTimeMillis() + 10 * 60_000L
                         : java.time.OffsetDateTime.parse(until).toInstant().toEpochMilli();
-                prefs(context).edit().putLong(KEY_UNLOCKED_UNTIL, ms).apply();
+                JSONObject answer = new JSONObject(r.body);
+                SharedPreferences.Editor edit = prefs(context).edit().putLong(KEY_UNLOCKED_UNTIL, ms);
+                JSONArray codes = answer.optJSONArray("offline_codes");
+                if (codes != null) edit.putString(KEY_OFFLINE_CODES, codes.toString());
+                edit.apply();
                 return null;
             }
             String detail = new JSONObject(r.body.isEmpty() ? "{}" : r.body).optString("detail", "");
@@ -112,6 +132,70 @@ final class GuardApi {
         } catch (Exception e) {
             return "That did not work.";
         }
+    }
+
+    /**
+     * A parent's offline code, typed with no connection. Five wrong codes wait
+     * ten minutes, like the online unlock. A good code lifts the guard for ten
+     * minutes and the parents are told once the phone is back online.
+     * Returns an error to show, or null.
+     */
+    static String offlineUnlock(Context context, String code) {
+        SharedPreferences p = prefs(context);
+        long now = System.currentTimeMillis();
+        java.util.List<Long> fails = new java.util.ArrayList<>();
+        for (String t : p.getString(KEY_OFFLINE_FAILS, "").split(",")) {
+            try {
+                long at = Long.parseLong(t.trim());
+                if (now - at < OFFLINE_WAIT_MS) fails.add(at);
+            } catch (NumberFormatException ignored) {
+                // empty or damaged entry
+            }
+        }
+        if (fails.size() >= OFFLINE_MAX_FAILS) return "Too many tries. Wait ten minutes, then try again.";
+        JSONArray codes;
+        try {
+            codes = new JSONArray(p.getString(KEY_OFFLINE_CODES, "[]"));
+        } catch (Exception e) {
+            codes = new JSONArray();
+        }
+        if (codes.length() == 0) {
+            return "No offline code is set up on this phone yet. A parent signs in here once while online to set it up.";
+        }
+        for (int i = 0; i < codes.length(); i++) {
+            JSONObject c = codes.optJSONObject(i);
+            if (c != null && OfflineCode.matches(code, c.optString("salt"), c.optInt("iterations"), c.optString("hash"))) {
+                p.edit()
+                        .putLong(KEY_UNLOCKED_UNTIL, now + 10 * 60_000L)
+                        .putString(KEY_OFFLINE_FAILS, "")
+                        .putBoolean(KEY_OFFLINE_REPORT_DUE, true)
+                        .apply();
+                reportOfflineUnlockIfDue(context);
+                return null;
+            }
+        }
+        fails.add(now);
+        StringBuilder joined = new StringBuilder();
+        for (Long at : fails) joined.append(joined.length() == 0 ? "" : ",").append(at);
+        p.edit().putString(KEY_OFFLINE_FAILS, joined.toString()).apply();
+        return "That code is not right.";
+    }
+
+    /** An offline unlock is never silent: tell the parents as soon as the server answers. */
+    static void reportOfflineUnlockIfDue(Context context) {
+        if (!prefs(context).getBoolean(KEY_OFFLINE_REPORT_DUE, false)) return;
+        new Thread(() -> {
+            try {
+                JSONObject body = new JSONObject();
+                body.put("event", "offline_unlock");
+                HttpResult r = send(context, "POST", "/api/guard/tamper", body.toString());
+                if (r != null && r.status == 200) {
+                    prefs(context).edit().putBoolean(KEY_OFFLINE_REPORT_DUE, false).apply();
+                }
+            } catch (Exception ignored) {
+                // Still offline: the next status refresh tries again.
+            }
+        }).start();
     }
 
     /** Tell the parents protection changed; best effort, never throws. */

@@ -35,7 +35,8 @@ def wired(monkeypatch):
 
         async def get(self, url, **kw):
             calls.append({"method": "GET", "url": url, **kw})
-            return _Resp(200, {"days": [{"day": "2026-10-21", "millis": 100 * 60000}]})
+            return _Resp(200, {"days": [{"day": "2026-10-21", "millis": 100 * 60000,
+                                         "apps": [{"package": "com.google.android.youtube", "millis": 40 * 60000}]}]})
 
     @asynccontextmanager
     async def fake():
@@ -122,6 +123,8 @@ def test_tamper_reports_tell_the_parents(wired, monkeypatch):
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert "Zachary's phone turned off Jarvis's device protection" in sent[0]["body"]
     assert client.post("/api/guard/tamper", json={"event": "nonsense"}).status_code == 422
+    assert client.post("/api/guard/tamper", json={"event": "offline_unlock"}).status_code == 200
+    assert "unlocked with a parent's offline code" in sent[-1]["body"]
 
 
 def test_a_parent_unlock_is_never_silent(wired, monkeypatch):
@@ -145,3 +148,33 @@ def test_lane_changes_go_to_identity_as_the_caller(wired):
     r = client.put("/api/recommendation-lanes/kid", json={"lanes": {"game": False}})
     assert r.status_code == 403
     assert calls[0]["headers"]["Authorization"] == "Bearer kid-key" and calls[0]["json"] == {"lanes": {"game": False}}
+
+
+def test_status_blocks_an_app_past_its_own_minutes(wired):
+    client, _, _, answers = wired
+    answers[("GET", "/screen-time/kid/rules")] = (200, {"rules": {"app_limits": {"com.google.android.youtube": 30}}})
+    body = client.get("/api/screen-time/kid/status").json()
+    assert body["blocked_apps"] == ["com.google.android.youtube"]
+    assert body["app_minutes_left"] == {"com.google.android.youtube": 0}
+    assert body["locked"] is False
+
+
+def test_offline_code_routes_go_to_identity_as_the_caller(wired):
+    client, calls, _, answers = wired
+    answers[("PUT", "/guard/offline-code")] = (200, {"set": True, "updated_at": "x"})
+    r = client.put("/api/guard/offline-code", json={"code": "48291735"})
+    assert r.status_code == 200 and r.json()["set"] is True
+    assert calls[-1]["headers"]["Authorization"] == "Bearer kid-key"
+    assert calls[-1]["json"] == {"code": "48291735"}
+
+
+def test_the_unlock_passes_offline_verifiers_to_the_phone(wired, monkeypatch):
+    client, _, _, answers = wired
+
+    async def _who(_request):
+        return {"user": "kid"}
+
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _who)
+    verifier = {"parent": "mom", "salt": "aa", "iterations": 120000, "hash": "bb"}
+    answers[("POST", "/guard/parent-unlock")] = (200, {"ok": True, "parent": "mom", "until": "x", "notify": [], "offline_codes": [verifier]})
+    assert client.post("/api/guard/parent-unlock", json={"username": "mom", "password": "p"}).json()["offline_codes"] == [verifier]

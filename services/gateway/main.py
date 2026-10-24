@@ -5537,8 +5537,14 @@ async def screen_time_status(request: Request, username: str):
     if status != 200:
         raise HTTPException(status_code=status, detail=(body or {}).get("detail") or "Not allowed")
     usage = await _own_telemetry(username, "usage", {"days": 1})
-    used_ms = next((d.get("millis") or 0 for d in usage if d.get("day") == day), 0)
-    state = evaluate_screen_time(body.get("rules"), used_ms, body.get("bonus_min") or 0, now)
+    today = next((d for d in usage if d.get("day") == day), {})
+    used_ms = today.get("millis") or 0
+    apps_ms = {
+        str(a.get("package")): int(a.get("millis") or 0)
+        for a in today.get("apps") or []
+        if isinstance(a, dict) and a.get("package")
+    }
+    state = evaluate_screen_time(body.get("rules"), used_ms, body.get("bonus_min") or 0, now, apps_ms)
     return {
         "status": "SUCCESS",
         "username": username,
@@ -5555,6 +5561,7 @@ _TAMPER_EVENTS = {
     "guard_disabled": "turned off Jarvis's screen guard",
     "guard_missing": "is running without Jarvis's screen guard",
     "uninstall_attempt": "tried to remove Jarvis",
+    "offline_unlock": "was unlocked with a parent's offline code",
 }
 
 
@@ -5567,6 +5574,25 @@ async def recommendation_lanes(request: Request, username: str):
 @app.put("/api/recommendation-lanes/{username}")
 async def set_recommendation_lanes(request: Request, username: str):
     status, body = await _identity_as_caller(request, "PUT", f"/api/recommendation-lanes/{username}", json=await request.json())
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.get("/api/guard/offline-code")
+async def get_guard_offline_code(request: Request):
+    status, body = await _identity_as_caller(request, "GET", "/api/guard/offline-code")
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.put("/api/guard/offline-code")
+async def put_guard_offline_code(request: Request):
+    """A parent's offline unlock code; identity keeps only a verifier."""
+    status, body = await _identity_as_caller(request, "PUT", "/api/guard/offline-code", json=await request.json())
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.delete("/api/guard/offline-code")
+async def delete_guard_offline_code(request: Request):
+    status, body = await _identity_as_caller(request, "DELETE", "/api/guard/offline-code")
     return JSONResponse(status_code=status, content=body)
 
 

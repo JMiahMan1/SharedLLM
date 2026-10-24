@@ -308,6 +308,9 @@ export interface ScreenRules {
   school_end?: string;
   school_days?: string[];
   always_allowed?: string[];
+  /** App control: packages switched off, and per-app daily minutes. */
+  blocked_apps?: string[];
+  app_limits?: Record<string, number>;
   paused?: boolean;
   paused_until?: string;
 }
@@ -331,6 +334,9 @@ export interface ScreenTimeStatus {
   reason: 'paused' | 'bedtime' | 'school' | 'limit' | null;
   until: string | null;
   resets_at: string;
+  /** Apps closed now: switched off, or past their own minutes. */
+  blocked_apps?: string[];
+  app_minutes_left?: Record<string, number>;
 }
 
 /** The kinds of suggestion Jarvis makes; a parent can switch each off for a child. */

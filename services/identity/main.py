@@ -8,7 +8,9 @@ import logging
 import os
 import base64
 import binascii
+import hashlib
 import re
+import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -50,6 +52,7 @@ from services.identity.models import (
     ScreenRules,
     ScreenTimeRequest,
     RecommendationLanes,
+    GuardOfflineCode,
     UserAvatarImage,
     VoiceSignature,
     UserCalendarSetting,
@@ -4173,6 +4176,10 @@ def _granted_minutes(session: Session, username: str, day: str) -> int:
     return sum(r.granted_minutes for r in rows)
 
 
+# An Android package name: dotted segments of letters, digits and underscores.
+_PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
+
+
 def _clean_screen_rules(body: dict) -> dict:
     """Only known keys, in range; a bad value is a 422, never silently kept."""
     out: dict = {}
@@ -4197,6 +4204,21 @@ def _clean_screen_rules(body: dict) -> dict:
         if not isinstance(apps, list) or any(not isinstance(a, str) or not a.strip() for a in apps):
             raise HTTPException(status_code=422, detail="always_allowed must be package names")
         out["always_allowed"] = [a.strip() for a in apps][:50]
+    # App control (step 5): apps blocked outright, and per-app daily minutes.
+    if body.get("blocked_apps") is not None:
+        apps = body["blocked_apps"]
+        if not isinstance(apps, list) or any(not isinstance(a, str) or not _PACKAGE.match(a.strip()) for a in apps):
+            raise HTTPException(status_code=422, detail="blocked_apps must be package names")
+        out["blocked_apps"] = list(dict.fromkeys(a.strip() for a in apps))[:200]
+    if body.get("app_limits") is not None:
+        limits = body["app_limits"]
+        if not isinstance(limits, dict) or any(
+            not isinstance(k, str) or not _PACKAGE.match(k.strip())
+            or not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 1440
+            for k, v in limits.items()
+        ):
+            raise HTTPException(status_code=422, detail="app_limits must map package names to whole minutes from 0 to 1440")
+        out["app_limits"] = {k.strip(): v for k, v in list(limits.items())[:200]}
     return out
 
 
@@ -4459,7 +4481,61 @@ def guard_parent_unlock(body: dict, session: Session = Depends(get_session), cal
         raise HTTPException(status_code=401, detail="That is not one of your parents' logins.")
     _UNLOCK_FAILURES.pop(caller.username, None)
     until = datetime.now(UTC) + timedelta(minutes=PARENT_UNLOCK_MINUTES)
-    return {"ok": True, "parent": parent.username, "until": until.isoformat(), "notify": _parents_of(session, caller)}
+    parents = _parents_of(session, caller)
+    # Only after a real parent login: the phone keeps these to check an
+    # offline code later. A child's own login never receives them.
+    offline = [
+        {"parent": row.username, "salt": row.salt, "iterations": row.iterations, "hash": row.hash}
+        for row in session.exec(select(GuardOfflineCode).where(GuardOfflineCode.username.in_(parents))).all()
+    ] if parents else []
+    return {"ok": True, "parent": parent.username, "until": until.isoformat(), "notify": parents, "offline_codes": offline}
+
+
+OFFLINE_CODE_ITERATIONS = 120_000
+_OFFLINE_CODE = re.compile(r"^\d{6,12}$")
+
+
+def _is_a_parent(session: Session, caller: User) -> bool:
+    return any(_may_manage_screen_time(caller, u) for u in session.exec(select(User)).all() if u.username != caller.username)
+
+
+@app.get("/api/guard/offline-code")
+def get_offline_code(session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Whether the caller has an offline unlock code set (never the code)."""
+    row = session.get(GuardOfflineCode, caller.username)
+    return {"set": row is not None, "updated_at": row.updated_at if row else None, "can_set": _is_a_parent(session, caller)}
+
+
+@app.put("/api/guard/offline-code")
+def put_offline_code(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A parent sets their offline unlock code: 6 to 12 digits.
+
+    Phones learn the new code at the next online parent unlock on them.
+    """
+    if not _is_a_parent(session, caller):
+        raise HTTPException(status_code=403, detail="Only a parent sets an offline unlock code")
+    code = str((body or {}).get("code") or "")
+    if not _OFFLINE_CODE.match(code):
+        raise HTTPException(status_code=422, detail="The code must be 6 to 12 digits")
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", code.encode(), salt, OFFLINE_CODE_ITERATIONS)
+    row = session.get(GuardOfflineCode, caller.username) or GuardOfflineCode(
+        username=caller.username, salt="", iterations=OFFLINE_CODE_ITERATIONS, hash=""
+    )
+    row.salt, row.iterations, row.hash = salt.hex(), OFFLINE_CODE_ITERATIONS, digest.hex()
+    row.updated_at = datetime.now(UTC).isoformat()
+    session.add(row)
+    session.commit()
+    return {"set": True, "updated_at": row.updated_at}
+
+
+@app.delete("/api/guard/offline-code")
+def delete_offline_code(session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    row = session.get(GuardOfflineCode, caller.username)
+    if row is not None:
+        session.delete(row)
+        session.commit()
+    return {"set": False}
 
 
 @app.get("/api/internal/guard/parents/{username}")

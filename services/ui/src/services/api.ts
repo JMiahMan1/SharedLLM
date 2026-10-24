@@ -969,6 +969,22 @@ export const api = {
     return resp.data;
   },
 
+  /** Whether the caller has an offline unlock code for their children's phones. */
+  async getOfflineCode(): Promise<{ set: boolean; updated_at: string | null; can_set: boolean }> {
+    const resp = await apiClient.get('/api/guard/offline-code');
+    return resp.data;
+  },
+
+  async setOfflineCode(code: string): Promise<{ set: boolean; updated_at: string }> {
+    const resp = await apiClient.put('/api/guard/offline-code', { code });
+    return resp.data;
+  },
+
+  async clearOfflineCode(): Promise<{ set: boolean }> {
+    const resp = await apiClient.delete('/api/guard/offline-code');
+    return resp.data;
+  },
+
   /** Household roster with family roles; parent/household-manager only. */
   async getFamily(): Promise<FamilyRecord[]> {
     const resp = await apiClient.get('/api/users/family');
