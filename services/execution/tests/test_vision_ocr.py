@@ -5,6 +5,24 @@ import respx
 from httpx import Response
 
 
+@pytest.fixture(autouse=True)
+def _restore_modules_and_env(monkeypatch):
+    """Each test re-imports vision_ocr against its own environment. Put the
+    original modules and environment back afterwards: a missing or replaced
+    ``services.config`` leaves later tests patching a different module than
+    the code under test reads."""
+    import services
+    import services.config
+
+    for mod in ("tools.vision_ocr", "services.config"):
+        if mod in sys.modules:
+            monkeypatch.setitem(sys.modules, mod, sys.modules[mod])
+    # `import services.config as cfg` reads the package attribute, which a
+    # re-import rebinds; restore that too.
+    monkeypatch.setattr(services, "config", services.config)
+    monkeypatch.setenv("BRIDGE_IDENTITY_SVC_URL", os.environ.get("BRIDGE_IDENTITY_SVC_URL", ""))
+
+
 def _reimport_vision_ocr():
     """Force-reimport vision_ocr with current env by clearing cached modules."""
     for mod in list(sys.modules):
