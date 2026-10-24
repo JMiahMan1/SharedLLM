@@ -52,6 +52,16 @@ that, every save of an opened note stacked another header on top.
 
 ## UI behaviour
 
+- **Checklist items in the editor**: each checklist row has its own drag grip
+  and delete button in the right gutter (an overlay in `RichNoteEditor`
+  placed from the rows' measured positions, since a contentEditable cannot
+  hold controls). Drag the grip to move the item; the grip is the one place a
+  touch drags instead of scrolling (`touch-action: none`), so it works on a
+  phone too. With the grip focused, ↑/↓ moves the item and focus follows it;
+  while typing, **Alt+↑/↓** moves the line the caret is on (any line, not only
+  checklist rows). The text of an item is edited in place as before. Moves and
+  deletes only reorder or drop `- [ ]` lines, so the file stays plain
+  markdown.
 - **Visual editor (Keep-style)**: a note opens as formatted text, not
   markdown. People tick real checkboxes (tap the box; Enter adds an unticked
   row, Enter on an empty row ends the list), and a toolbar gives bold, italic,
@@ -223,11 +233,11 @@ the list opens at once), prompt archive/trash/restore (cards move on tap, roll
 back on failure, and note calls allow a minute), dashboard and home-screen
 capture, a grid/list layout toggle remembered per device, undo toasts for
 archive/trash/restore, autosave with ETag conflict detection and on-device
-drafts that survive a closed app, desktop keyboard shortcuts.
+drafts that survive a closed app, desktop keyboard shortcuts, per-item
+checklist controls (drag, arrow-key and Alt+arrow reordering, delete).
 
 Still open: reminders (time and place), attachments/images/drawings/audio,
-Nextcloud sharing, per-item checklist editing and
-reordering, versions, offline.
+Nextcloud sharing, versions, offline.
 
 ## Tests
 
@@ -255,7 +265,9 @@ reordering, versions, offline.
   the list route passes `previews` through; the write route passes `if_match`
 - `services/ui/src/test/noteRichText.test.ts` / `RichNoteEditor.test.tsx`:
   markdown round trips, the unsupported-note fallback, span whitelist, tick,
-  Enter and toolbar behaviour, span rendering in previews
+  Enter and toolbar behaviour, span rendering in previews; checklist items
+  move by grip arrow keys (focus follows), by pointer drag and by Alt+arrow,
+  and delete one at a time
 - `services/ui/src/test/notesMeta.test.ts`: checklist parsing, previews,
   sorting, pin/colour storage, the layout preference (and its fallback when
   storage throws)

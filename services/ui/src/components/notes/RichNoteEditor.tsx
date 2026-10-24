@@ -1,5 +1,18 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Bold, CheckSquare, Heading2, Highlighter, Italic, List, ListOrdered, Palette, Strikethrough, Type } from 'lucide-react';
+import {
+  Bold,
+  CheckSquare,
+  GripVertical,
+  Heading2,
+  Highlighter,
+  Italic,
+  List,
+  ListOrdered,
+  Palette,
+  Strikethrough,
+  Type,
+  X,
+} from 'lucide-react';
 import {
   NOTE_HIGHLIGHT_COLORS,
   NOTE_TEXT_COLORS,
@@ -31,6 +44,28 @@ function tidySpans(root: HTMLElement) {
     if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
     if (el.tagName === 'SPAN' && !el.attributes.length) el.replaceWith(...Array.from(el.childNodes));
   }
+}
+
+/** The checklist rows, in order (only top-level rows are checklist items). */
+function taskRows(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.children).filter((el) => el.hasAttribute('data-task')) as HTMLElement[];
+}
+
+/** Where a checklist row sits inside the editor's visible box, for its controls. */
+interface RowBox {
+  top: number;
+  height: number;
+  text: string;
+}
+
+/** The height of the line showing where a dragged row will land. */
+function dropLineTop(rows: RowBox[], drag: { from: number; to: number }): number {
+  const others = rows.filter((_, k) => k !== drag.from);
+  if (drag.to >= others.length) {
+    const last = others[others.length - 1];
+    return last.top + last.height;
+  }
+  return others[drag.to].top;
 }
 
 function placeCaretAtStart(el: HTMLElement) {
@@ -89,8 +124,82 @@ const RichNoteEditor = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Each checklist row gets a drag grip and a delete button beside it. They
+  // are real elements in an overlay (a contentEditable cannot hold controls),
+  // placed from the rows' measured positions.
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const [rows, setRows] = useState<RowBox[]>([]);
+  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
+
+  const measure = () => {
+    const root = ref.current;
+    if (!root) return;
+    setRows(
+      taskRows(root).map((row) => ({
+        top: row.offsetTop - root.scrollTop,
+        height: row.offsetHeight,
+        text: (row.textContent ?? '').trim(),
+      })),
+    );
+  };
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    // Measure after layout, and again whenever the box changes size.
+    const frame = window.requestAnimationFrame(measure);
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => measure()) : null;
+    observer?.observe(root);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+    // Once at mount: measure only reads the DOM through refs.
+  }, []);
+
   const emit = () => {
     if (ref.current) onChange(htmlToMarkdown(ref.current));
+    measure();
+  };
+
+  /** Move checklist row `from` to position `to` among the checklist rows. */
+  const moveTask = (from: number, to: number) => {
+    const root = ref.current;
+    if (!root) return;
+    const tasks = taskRows(root);
+    const row = tasks[from];
+    if (!row || to === from) return;
+    const others = tasks.filter((_, k) => k !== from);
+    const target = Math.max(0, Math.min(to, others.length));
+    if (target >= others.length) others[others.length - 1].after(row);
+    else others[target].before(row);
+    emit();
+  };
+
+  const deleteTask = (index: number) => {
+    const root = ref.current;
+    const row = root ? taskRows(root)[index] : undefined;
+    if (!row) return;
+    row.remove();
+    emit();
+  };
+
+  /** Keep keyboard focus on the grip of the row that just moved. */
+  const focusGrip = (index: number) => {
+    window.requestAnimationFrame(() => {
+      overlayRef.current?.querySelector<HTMLButtonElement>(`[data-grip="${index}"]`)?.focus();
+    });
+  };
+
+  /** The slot a dragged row would land in, from the pointer's height. */
+  const slotAt = (from: number, clientY: number): number => {
+    const root = ref.current;
+    if (!root) return from;
+    const others = taskRows(root).filter((_, k) => k !== from);
+    return others.filter((row) => {
+      const box = row.getBoundingClientRect();
+      return box.top + box.height / 2 < clientY;
+    }).length;
   };
 
   const run = (command: string, value?: string) => {
@@ -125,7 +234,26 @@ const RichNoteEditor = forwardRef<
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const root = ref.current;
-    if (!root || e.key !== 'Enter' || e.shiftKey) return;
+    if (!root) return;
+    // Alt+↑ / Alt+↓ moves the line the caret is on (a checklist row or any
+    // other line) past its neighbour, keeping the caret where it was.
+    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      const block = currentBlock(root);
+      const neighbour = e.key === 'ArrowUp' ? block?.previousElementSibling : block?.nextElementSibling;
+      if (!block || !neighbour) return;
+      e.preventDefault();
+      const sel = window.getSelection();
+      const range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+      if (e.key === 'ArrowUp') neighbour.before(block);
+      else neighbour.after(block);
+      if (range && sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      emit();
+      return;
+    }
+    if (e.key !== 'Enter' || e.shiftKey) return;
     const block = currentBlock(root);
     // Enter on an empty checklist row ends the list, as in Keep.
     if (block?.hasAttribute('data-task') && !(block.textContent ?? '').trim()) {
@@ -173,19 +301,88 @@ const RichNoteEditor = forwardRef<
 
   return (
     <div className="space-y-2">
-      <div
-        ref={ref}
-        role="textbox"
-        aria-multiline="true"
-        aria-label={label}
-        contentEditable
-        suppressContentEditableWarning
-        spellCheck
-        onInput={onInput}
-        onKeyDown={onKeyDown}
-        onClick={onClick}
-        className="note-rich glass-input min-h-48 max-h-[50vh] w-full overflow-y-auto p-3 text-base sm:text-sm"
-      />
+      <div className="relative">
+        <div
+          ref={ref}
+          role="textbox"
+          aria-multiline="true"
+          aria-label={label}
+          contentEditable
+          suppressContentEditableWarning
+          spellCheck
+          onInput={onInput}
+          onKeyDown={onKeyDown}
+          onClick={onClick}
+          onScroll={measure}
+          className="note-rich glass-input min-h-48 max-h-[50vh] w-full overflow-y-auto p-3 text-base sm:text-sm"
+        />
+        {/* Per-item controls, clipped to the editor's visible box. */}
+        <div ref={overlayRef} className="pointer-events-none absolute inset-0 overflow-hidden" aria-label="Checklist items" role="group">
+          {rows.map((row, index) => (
+            <div
+              key={index}
+              className="absolute right-1 flex items-start gap-0.5"
+              style={{ top: row.top }}
+            >
+              <button
+                type="button"
+                data-grip={index}
+                aria-label={`Move “${row.text || 'empty item'}”`}
+                title="Drag to move, or use the arrow keys"
+                // The grip is the only place a touch drags instead of scrolling.
+                style={{ touchAction: 'none' }}
+                className={`pointer-events-auto flex h-8 w-8 cursor-grab items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100 ${
+                  drag?.from === index ? 'bg-white/10 text-slate-100' : ''
+                }`}
+                onMouseDown={(e) => e.preventDefault()}
+                onKeyDown={(e) => {
+                  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+                  e.preventDefault();
+                  const to = e.key === 'ArrowUp' ? index - 1 : index + 1;
+                  if (to < 0 || to >= rows.length) return;
+                  moveTask(index, to);
+                  focusGrip(to);
+                }}
+                onPointerDown={(e) => {
+                  e.currentTarget.setPointerCapture?.(e.pointerId);
+                  setDrag({ from: index, to: index });
+                }}
+                onPointerMove={(e) => {
+                  if (!drag) return;
+                  const to = slotAt(drag.from, e.clientY);
+                  if (to !== drag.to) setDrag({ from: drag.from, to });
+                }}
+                onPointerUp={(e) => {
+                  if (!drag) return;
+                  const to = slotAt(drag.from, e.clientY);
+                  setDrag(null);
+                  moveTask(drag.from, to);
+                }}
+                onPointerCancel={() => setDrag(null)}
+              >
+                <GripVertical size={15} />
+              </button>
+              <button
+                type="button"
+                aria-label={`Delete “${row.text || 'empty item'}”`}
+                title="Delete item"
+                className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-rose-300"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => deleteTask(index)}
+              >
+                <X size={15} />
+              </button>
+            </div>
+          ))}
+          {drag && drag.to !== drag.from && rows.length > 1 && (
+            <div
+              aria-hidden
+              className="absolute left-2 right-2 h-0.5 rounded bg-purple-400"
+              style={{ top: dropLineTop(rows, drag) }}
+            />
+          )}
+        </div>
+      </div>
       <div role="toolbar" aria-label="Formatting" className="flex flex-wrap items-center gap-0.5">
         {tool('Bold', <Bold size={16} />, () => run('bold'))}
         {tool('Italic', <Italic size={16} />, () => run('italic'))}

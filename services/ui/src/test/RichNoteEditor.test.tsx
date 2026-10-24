@@ -1,5 +1,5 @@
 import { createRef } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ReactMarkdown from 'react-markdown';
 import { describe, expect, it, vi } from 'vitest';
@@ -86,5 +86,65 @@ describe('remarkNoteSpans', () => {
     const md = 'x <span style="position:fixed">y</span>';
     const { container } = render(<ReactMarkdown remarkPlugins={[remarkNoteSpans]}>{md}</ReactMarkdown>);
     expect(container.querySelector('span')).toBeNull();
+  });
+});
+
+describe('RichNoteEditor checklist items', () => {
+  const list = '- [ ] milk\n- [x] eggs\n- [ ] bread';
+
+  it('moves an item with the arrow keys on its grip and keeps focus on it', async () => {
+    const onChange = vi.fn();
+    render(<RichNoteEditor initialMarkdown={list} onChange={onChange} />);
+    const grip = await screen.findByRole('button', { name: 'Move “milk”' });
+
+    fireEvent.keyDown(grip, { key: 'ArrowDown' });
+    expect(onChange).toHaveBeenLastCalledWith('- [x] eggs\n- [ ] milk\n- [ ] bread');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Move “milk”' })).toHaveFocus());
+
+    // The first row cannot go further up.
+    onChange.mockClear();
+    fireEvent.keyDown(await screen.findByRole('button', { name: 'Move “eggs”' }), { key: 'ArrowUp' });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('deletes one item and leaves the rest', async () => {
+    const onChange = vi.fn();
+    render(<RichNoteEditor initialMarkdown={list} onChange={onChange} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete “eggs”' }));
+    expect(onChange).toHaveBeenLastCalledWith('- [ ] milk\n- [ ] bread');
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete “eggs”' })).toBeNull());
+  });
+
+  it('drags an item by its grip to where the pointer lets go', async () => {
+    const onChange = vi.fn();
+    render(<RichNoteEditor initialMarkdown={list} onChange={onChange} />);
+    const box = screen.getByRole('textbox');
+    // Rows 20px tall, stacked from the top (jsdom has no layout).
+    box.querySelectorAll<HTMLElement>('[data-task]').forEach((row, i) => {
+      row.getBoundingClientRect = () => ({ top: i * 20, height: 20, bottom: i * 20 + 20, left: 0, right: 200, width: 200, x: 0, y: i * 20, toJSON: () => ({}) });
+    });
+    const grip = await screen.findByRole('button', { name: 'Move “milk”' });
+
+    fireEvent.pointerDown(grip, { pointerId: 1, clientY: 10 });
+    fireEvent.pointerMove(grip, { pointerId: 1, clientY: 55 });
+    fireEvent.pointerUp(grip, { pointerId: 1, clientY: 55 });
+
+    expect(onChange).toHaveBeenLastCalledWith('- [x] eggs\n- [ ] bread\n- [ ] milk');
+  });
+
+  it('moves the line the caret is on with Alt+Arrow', () => {
+    const onChange = vi.fn();
+    render(<RichNoteEditor initialMarkdown={list} onChange={onChange} />);
+    const box = screen.getByRole('textbox');
+    const bread = box.querySelectorAll('[data-task]')[2] as HTMLElement;
+    const range = document.createRange();
+    range.selectNodeContents(bread);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    fireEvent.keyDown(box, { key: 'ArrowUp', altKey: true });
+    expect(onChange).toHaveBeenLastCalledWith('- [ ] milk\n- [ ] bread\n- [x] eggs');
   });
 });
