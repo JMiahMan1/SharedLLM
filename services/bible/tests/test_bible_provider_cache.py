@@ -77,6 +77,8 @@ def test_an_empty_payload_is_refused_rather_than_cached_as_truth(tmp_path):
     for empty in (None, "", [], {}):
         with pytest.raises(ValueError):
             cache.put_chapter("GEN.1", empty)
+    assert not cache.chapter_path("GEN.1").exists(), "a refused payload must leave nothing on disk"
+    assert cache.get_chapter("GEN.1") is None
 
 
 def test_a_changed_dialect_gets_its_own_space_instead_of_reusing_old_text(tmp_path, monkeypatch):

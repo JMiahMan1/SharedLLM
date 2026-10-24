@@ -11,7 +11,6 @@ import pytest
 
 import services.workspace_sandbox as sb
 
-
 # Any stable value works; it just has to be consistent between the container's
 # reported image and the one the client resolves for the image name, so
 # _get_or_recreate() sees a matching image and reuses the container instead of
