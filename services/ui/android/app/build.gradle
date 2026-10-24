@@ -1,4 +1,5 @@
 apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
 
 // Single source of truth for marketing version: services/ui/package.json
 // (web OTA bundle + Android versionName stay in lockstep; a bugfix release
@@ -93,6 +94,14 @@ dependencies {
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.5"
     // WebSocket for the native Music Assistant player (NativeSendspinPlayer).
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    // Health Connect import (sleep, resting heart rate, HRV, weight, workouts)
+    // and the periodic worker that posts it (HealthConnectSyncWorker).
+    implementation "androidx.health.connect:connect-client:1.1.0"
+    implementation "androidx.work:work-runtime:2.10.5"
+    // Worker's ListenableFuture type, which work-runtime does not export. The
+    // same Guava another plugin already ships at runtime, so the APK is unchanged.
+    implementation "com.google.guava:guava:31.1-android"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     // android.jar's org.json is stubs only; the push stream parsing tests need the real one.

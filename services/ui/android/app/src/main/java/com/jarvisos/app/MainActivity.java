@@ -36,6 +36,7 @@ public class MainActivity extends BridgeActivity {
 registerPlugin(MediaSessionPlugin.class);
 registerPlugin(CommsPlugin.class);
         registerPlugin(GuardPlugin.class);
+        registerPlugin(HealthConnectPlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

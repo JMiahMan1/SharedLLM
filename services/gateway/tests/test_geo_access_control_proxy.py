@@ -468,3 +468,23 @@ def test_dismissing_an_auto_workout_is_scoped_to_the_caller(make_client, anon_cl
     assert call["url"].endswith("/workouts/w1/dismiss")
     assert call["headers"]["X-User-Id"] == "michele"
     assert call["headers"]["X-Internal-Secret"]
+
+
+def test_imported_workouts_always_belong_to_the_caller(make_client, anon_client, monkeypatch):
+    captured = _patch_geo(monkeypatch, payload={"imported": 1, "duplicates": 0, "skipped": [], "workouts": []})
+
+    anon = anon_client.post("/api/geo/workouts/import", json={"source": "health_connect", "workouts": []})
+    assert anon.status_code == 401
+
+    body = {
+        "source": "health_connect",
+        "user_id": "jeremiah",
+        "workouts": [{"external_id": "hc:exercise:a", "activity_type": "walking", "start_time": 1, "end_time": 2}],
+    }
+    resp = make_client(user="kate").post("/api/geo/workouts/import", json=body)
+    assert resp.status_code == 200
+    call = captured["calls"][-1]
+    assert call["url"].endswith("/workouts/import")
+    # The body's user_id is never consulted; the header names the caller.
+    assert call["headers"]["X-User-Id"] == "kate"
+    assert call["headers"]["X-Internal-Secret"]

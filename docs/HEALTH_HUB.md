@@ -56,10 +56,12 @@ Built since: recipe-first logging (a recipe or tonight's planned dinner logs
 to Health with a portion picker; Phase 4), the weekly digest (Phase 5) and the
 weekly family challenge (Phase 7).
 
-Not built yet, and not pretended otherwise: Health Connect/device import,
-marking the plan cooked from a log, family cheers, step and veg challenges, dashboard and Android home-screen widgets, photo/voice food
-logging, fasting windows, micro-lessons and the chat coach. Those remain the
-later phases below.
+Built on Android (needs an APK built after this change and a real-phone check, see Phase 2):
+Health Connect import of sleep, resting heart rate, HRV, weight and walks/runs/rides.
+
+Not built yet, and not pretended otherwise: marking the plan cooked from a log, family cheers,
+step and veg challenges, the dashboard widget, photo/voice food logging, fasting windows,
+micro-lessons and the chat coach. Those remain the later phases below.
 
 The goal: one local, family-first Health tab that pulls the strengths of the apps
 the family has used — Noom, Google Health (formerly Fitbit), MyFitnessPal and friends —
@@ -233,7 +235,57 @@ live search is the ecosystem-standard pattern.
 
 ### Phase 2 — data in
 
-- [ ] Health Connect import on Android (steps already sync; add sleep sessions, heart rate/HRV, weight and workouts) with a native bridge. The ingestion API and idempotent `external_id` replay are ready for it.
+- [ ] Health Connect import on Android (steps already sync; add sleep sessions, heart rate/HRV, weight and workouts) with a native bridge.
+  **Built 2026-10-24, not yet confirmed on a phone** (box stays open until it is).
+  - **Control:** Health → Health → *Health Connect* (`HealthConnectCard`, Android only): Connect asks
+    Health Connect for read access to sleep, resting heart rate, HRV, weight, exercise and distance,
+    plus *read in background* where the phone offers it; *Sync now*, *Choose what to share* (Health
+    Connect's own screen) and *Disconnect* (stops the import and revokes access; imported readings
+    stay and can be deleted like any other). Missing or outdated Health Connect offers the install.
+  - **Native:** `HealthConnectPlugin` (Capacitor, mirrors StepCounter/PhoneUsage), `HealthConnectReader`
+    (the only Kotlin file: Health Connect's client is a coroutine API; connect-client 1.1.0, gated to
+    Android 9+ with `tools:overrideLibrary` because the app's minSdk is 24), `HealthConnectSync` (one
+    run), `HealthConnectSyncWorker` (WorkManager, hourly, network required) and
+    `HealthPrivacyActivity` (the privacy text Health Connect insists on before it shows its sheet).
+  - **Mapping** (`HealthConnectMapping`, pure, JVM-tested in `HealthConnectMappingTest`): every
+    payload carries `source: health_connect` and `external_id` `hc:<kind>:<record id>`. Sleep sessions
+    → `POST /api/health/sleep` (night = the local day it ended; with stages, duration = time asleep
+    and efficiency = asleep / in bed, stage minutes kept; without stages the whole session and no
+    efficiency). Resting HR (bpm), HRV RMSSD (ms) and weight (kg) → `POST /api/health/metrics`,
+    with the store's bounds applied on the phone so one odd reading cannot fail a batch. Walks
+    (incl. hiking), runs (incl. treadmill) and rides (incl. stationary) → the new
+    `POST /api/geo/workouts/import` (geo owns workouts), with Health Connect's de-duplicated distance
+    total for the session. Raw heart-rate series are not imported (the store has resting HR, not a
+    heart-rate series); other exercise types (swims, strength, yoga) are counted and reported as
+    "a kind Fitness does not list yet", not filed under a wrong name.
+  - **No double counting:** steps are never read (the pedometer posts them). Geo's import
+    (`services/geo/workout_import.py`) is idempotent per user/source/external id, refuses an
+    unknown type with a reason, never sets steps, and skips a session that overlaps a workout geo
+    already has from another source (the same walk tracked by Jarvis's GPS and a watch), using the
+    overlap rule automatic detection already uses (`auto_workouts.overlaps`). Imported sessions
+    land in geo's own workout store (`geo:workout:{id}` and the per-user/all indexes) in the same
+    record shape as a stopped workout, so Fitness, achievements and the feed read them unchanged.
+    Sleep from Health Connect ranks above a hand log and the device-use estimate (`_sleep_rank`).
+  - **Incremental:** the first sync reads 30 days; later ones re-read from 48 h before the last good
+    sync (late watch uploads), and the server's `external_id` replay answers the overlap as
+    duplicates. Only a complete read moves the cursor; a 4xx on one payload is counted as
+    `rejected` and skipped, anything else retries later. Runs hourly in the background when
+    *read in background* is granted, otherwise on each app open (at most every 15 min) and on
+    *Sync now*. The card shows the last sync, what it added and why a run did not happen.
+  - **Whose data:** the account that connected owns the import; when someone else is signed in on
+    the phone the sync posts nothing (`different_account`).
+  - **Known limits:** an edit made later in Health Connect to an already-imported record is not
+    re-sent (same id, answered as a duplicate); records older than 30 days before connecting are
+    not read (Health Connect's history permission is not requested).
+  - **Check on a real phone** (Android 14+ with Health Connect built in, and one Android 9–13 phone
+    with the Health Connect app): Connect shows Health Connect's sheet listing the six data types
+    (and background reading on 14+); its "privacy policy" link opens the Jarvis text; after
+    granting, Health → Sleep shows last night from the watch and Health → Today shows resting HR /
+    weight with source `health_connect`; a watch walk appears on Fitness once, and a walk also
+    recorded with Jarvis's GPS is not duplicated; *Sync now* twice reports "nothing new"; with the
+    app closed for over an hour, a new watch reading arrives (background permission granted) or
+    the card says it is waiting for the app; Disconnect removes Jarvis from Health Connect's app
+    permissions; signing in as another account on the phone posts nothing for them.
 - [x] Manual logs for sleep hours/quality, weight, resting heart rate and water. Workouts remain on Fitness/geo.
   Saved nights can be corrected in place (`PUT /sleep/{id}`, the pencil on Sleep → Recent nights).
 - [x] Sleep estimated from device use. Each phone or tablet running Jarvis reports the stretches
@@ -268,6 +320,9 @@ live search is the ecosystem-standard pattern.
   missing any of the four, says so and offers manual entry instead (logged as source `manual`,
   still linked to the recipe). Entries show in the Nutrition day like any other.
 - [x] Quick add: USDA seed search (generic foods, household portions), OpenFoodFacts search, cached barcode lookup and manual entry. Voice and photo logging remain future work.
+  Phone camera for photo logging needs no native work: Capacitor's WebView already turns an
+  `<input type="file" accept="image/*" capture>` into the camera (the app holds `CAMERA` and a
+  `FileProvider`), so the web flow only has to add that input when photo logging is built.
 - [x] Food data depth: the read-only USDA seed is mirrored on the server (13,620 foods, per-100 g plus portions like "1 cup, chopped" = 91 g) and searched before OpenFoodFacts; barcode results are cached permanently. The seed is optional at runtime (`FDC_SEED_PATH`): absent → OFF-only, one log line, never an error.
 - [x] Water tracking. Fasting window indicator is not built.
 

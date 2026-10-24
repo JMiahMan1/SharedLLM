@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from services.common import notify
 from services.common.http import get_client, get_client_insecure
@@ -42,7 +42,7 @@ from services.config import (
     OSRM_URL,
     REDIS_URL,
 )
-from services.geo import achievements, event_feed, health_notices, map_match, map_regions, metric_history, safety, step_history
+from services.geo import achievements, event_feed, health_notices, map_match, map_regions, metric_history, safety, step_history, workout_import
 from services.geo.auto_workouts import detect_auto_workouts
 from services.shared.info_endpoint import info_router
 
@@ -4511,6 +4511,77 @@ async def stop_workout(
     await r.delete(f"geo:active_workout:{user}")
     log.info(f"[Geo] Completed {activity} workout {workout['id']}: {distance_miles} mi in {duration}s")
     return {"status": "ok", "workout": workout}
+
+
+class ImportedWorkoutIn(BaseModel):
+    external_id: str = Field(min_length=1, max_length=128)
+    activity_type: str
+    start_time: float
+    end_time: float
+    distance_meters: float | None = None
+    title: str | None = Field(default=None, max_length=200)
+    origin: str | None = Field(default=None, max_length=200)
+
+
+class WorkoutImportPayload(BaseModel):
+    source: str
+    workouts: list[ImportedWorkoutIn] = Field(min_length=1, max_length=200)
+
+
+@app.post("/workouts/import")
+async def import_workouts(
+    body: WorkoutImportPayload,
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Workouts recorded elsewhere (Health Connect), idempotent per external_id.
+
+    See ``workout_import``: unsupported types are refused with a reason, a
+    session that repeats a workout geo already has from another source is
+    skipped, and steps are never set (the pedometer counts them per day).
+    """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    user = (x_user_id or "").split(".")[-1].lower()
+    if not user:
+        raise HTTPException(status_code=400, detail="X-User-Id header required")
+    source = body.source.strip().lower()
+    if not workout_import.SOURCE_RE.match(source) or source in {"manual", "auto"}:
+        raise HTTPException(status_code=422, detail="source must be a device or app name")
+
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    existing = await _list_recent_workouts(r, user)
+    now = time.time()
+    imported: list[dict] = []
+    duplicates = 0
+    skipped: list[dict] = []
+    for item in body.workouts:
+        wid = workout_import.workout_id(user, source, item.external_id)
+        if await r.get(f"geo:workout:{wid}"):
+            duplicates += 1
+            continue
+        workout, reason = workout_import.build(
+            item.model_dump(), user=user, source=source, allowed_types=WORKOUT_TYPES, now=now
+        )
+        if workout is None:
+            skipped.append({"external_id": item.external_id, "reason": reason})
+            continue
+        same = workout_import.duplicate_of(workout["start_time"], workout["end_time"], source, existing)
+        if same is not None:
+            skipped.append({"external_id": item.external_id, "reason": "overlaps", "workout_id": same.get("id")})
+            continue
+        await r.set(f"geo:workout:{wid}", json.dumps(workout))
+        await r.zadd(f"geo:workouts:user:{user}", {wid: workout["start_time"]})
+        await r.zadd("geo:workouts:all", {wid: workout["start_time"]})
+        existing.append(workout)
+        imported.append(workout)
+    if imported:
+        log.info(f"[Geo] Imported {len(imported)} {source} workout(s) for {user}")
+    return {"imported": len(imported), "duplicates": duplicates, "skipped": skipped, "workouts": imported}
 
 
 @app.post("/workouts/{workout_id}/dismiss")

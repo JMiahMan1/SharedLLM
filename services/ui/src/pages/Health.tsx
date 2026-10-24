@@ -11,6 +11,7 @@ import WeeklyDigestCard from '../components/health/WeeklyDigestCard';
 import FamilyChallengeCard from '../components/health/FamilyChallengeCard';
 import ScreenTimeCard from '../components/health/ScreenTimeCard';
 import PhoneProtectionCard from '../components/health/PhoneProtectionCard';
+import HealthConnectCard from '../components/health/HealthConnectCard';
 import TalkRequestCard from '../components/guardian/TalkRequestCard';
 import GuardianLink from '../components/guardian/GuardianLink';
 import HealthFitness from './HealthFitness';
@@ -69,6 +70,8 @@ const Health = () => {
         {tab === 'health' && (
           <div className="space-y-3 sm:space-y-4">
             <HealthProfilePanel />
+            {/* Android only: sleep, heart and weight from a watch or scale. */}
+            <HealthConnectCard />
             {/* Opt-in, private, and hidden entirely for a male profile. */}
             <HealthCycle />
           </div>
