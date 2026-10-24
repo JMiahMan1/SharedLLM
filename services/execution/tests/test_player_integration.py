@@ -699,6 +699,8 @@ class TestGatewayStreamEndpoint:
 
         class FakeRequest:
             headers: ClassVar[dict] = {"Authorization": "Bearer test_internal_secret"}
+            # No signed media token (?mt=&user=), so the bearer header decides.
+            query_params: ClassVar[dict] = {}
             async def json(self):
                 return {}
 
@@ -760,6 +762,8 @@ class TestGatewayStreamEndpoint:
 
         class FakeRequest:
             headers: ClassVar[dict] = {"Authorization": "Bearer test_internal_secret"}
+            # No signed media token (?mt=&user=), so the bearer header decides.
+            query_params: ClassVar[dict] = {}
             async def json(self):
                 return {}
 
