@@ -22,7 +22,7 @@ from typing import Any
 import aiohttp
 
 from services.common import spotify
-from services.telemetry import guardian, notices, store
+from services.telemetry import guardian, notices
 from services.telemetry.config import IDENTITY_SVC
 from services.telemetry.store import internal_headers
 
@@ -80,16 +80,14 @@ async def sync_account(rc, session, account: dict[str, Any], settings: dict[str,
     events, new_cursor = spotify.recently_played_events(data, cursor)
     for event in events:
         event = {**event, "user": username}
-        await store.append_activity(rc, username, event)
-        await guardian.on_activity(rc, session, event, deliver)
+        await guardian.record_activity(rc, session, event, deliver)
     await _patch(session, username, {"cursor_ms": new_cursor, "synced": True, "last_error": None})
     return len(events)
 
 
 async def sync_once(rc, session, deliver, now: float | None = None) -> int:
     """One pass over every linked member. Not configured: nothing is read."""
-    rows = await notices._identity_get(session, "/api/settings")
-    settings = {r["key"]: str(r.get("value") or "").strip() for r in rows or [] if isinstance(r, dict) and r.get("key") in spotify.SETTING_KEYS}
+    settings = await notices.identity_settings(session, spotify.SETTING_KEYS)
     if spotify.missing_settings(settings):
         return 0
     accounts = (await notices._identity_get(session, "/api/internal/linked-accounts/spotify") or {}).get("accounts") or []

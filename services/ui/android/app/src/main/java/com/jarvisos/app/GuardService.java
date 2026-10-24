@@ -137,7 +137,7 @@ public class GuardService extends AccessibilityService {
         Intent cover = new Intent(this, GuardScreenActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra(GuardScreenActivity.EXTRA_MODE, mode)
-                .putExtra(GuardScreenActivity.EXTRA_APP, GuardNotices.label(this, pkg))
+                .putExtra(GuardScreenActivity.EXTRA_APP, UnifiedPushDistributor.label(this, pkg))
                 .putExtra(GuardScreenActivity.EXTRA_DENIED,
                         InstallApprovals.denied(pkg, GuardApi.appApprovals(this)));
         startActivity(cover);
@@ -155,7 +155,7 @@ public class GuardService extends AccessibilityService {
         Map<String, String> approvals = GuardApi.permissionApprovals(this);
         if (!PermissionGate.holds(GuardApi.permissionGating(this), approvals, app, group)) return false;
         performGlobalAction(GLOBAL_ACTION_BACK);
-        String label = GuardNotices.label(this, app);
+        String label = UnifiedPushDistributor.label(this, app);
         if (!approvals.containsKey(PermissionGate.target(app, group))) {
             new Thread(() -> GuardApi.askParent(this, "permission", PermissionGate.target(app, group), label)).start();
         }
@@ -181,7 +181,7 @@ public class GuardService extends AccessibilityService {
             Set<String> waiting = InstallApprovals.awaiting(GuardApi.installApprovalRequired(this), installed, baseline, approvals);
             awaitingApproval = waiting;
             for (String pkg : InstallApprovals.toAsk(waiting, approvals)) {
-                GuardApi.askParent(this, "app", pkg, GuardNotices.label(this, pkg));
+                GuardApi.askParent(this, "app", pkg, UnifiedPushDistributor.label(this, pkg));
             }
         } catch (Exception ignored) {
             // Tried again at the next refresh.
@@ -194,7 +194,7 @@ public class GuardService extends AccessibilityService {
         LockWarning.Warning w = LockWarning.due(System.currentTimeMillis(),
                 GuardApi.nextLockAt(this), GuardApi.nextLockReason(this));
         if (w == null && !lastApp.isEmpty()) {
-            w = LockWarning.appDue(lastApp, GuardNotices.label(this, lastApp),
+            w = LockWarning.appDue(lastApp, UnifiedPushDistributor.label(this, lastApp),
                     GuardApi.appMinutesLeft(this).get(lastApp), GuardApi.statusDay(this));
         }
         if (w == null || w.key.equals(lastWarningKey)) return;

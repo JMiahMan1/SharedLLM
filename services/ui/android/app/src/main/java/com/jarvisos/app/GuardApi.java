@@ -81,13 +81,8 @@ final class GuardApi {
         if (!s.optBoolean("locked", false)) {
             return LockWarning.lockedByClock(System.currentTimeMillis(), nextLockAt(context), nextLockReason(context));
         }
-        String until = s.optString("until", "");
-        if (until.isEmpty()) return true;
-        try {
-            return System.currentTimeMillis() < java.time.OffsetDateTime.parse(until).toInstant().toEpochMilli();
-        } catch (Exception e) {
-            return true;
-        }
+        long until = epochMs(s.optString("until", ""));
+        return until == 0L || System.currentTimeMillis() < until;
     }
 
     static String lockReason(Context context) {
@@ -101,13 +96,7 @@ final class GuardApi {
 
     /** When the phone next locks on its own (epoch ms), or 0 when nothing is coming. */
     static long nextLockAt(Context context) {
-        String at = lastStatus(context).optString("next_lock_at", "");
-        if (at.isEmpty() || "null".equals(at)) return 0L;
-        try {
-            return java.time.OffsetDateTime.parse(at).toInstant().toEpochMilli();
-        } catch (Exception e) {
-            return 0L;
-        }
+        return epochMs(lastStatus(context).optString("next_lock_at", ""));
     }
 
     static String nextLockReason(Context context) {
@@ -149,12 +138,7 @@ final class GuardApi {
 
     /** The kinds of permission a parent approves first (camera, location, ...). */
     static Set<String> permissionGating(Context context) {
-        Set<String> out = new HashSet<>();
-        JSONArray groups = lastStatus(context).optJSONArray("permission_gating");
-        if (groups != null) {
-            for (int i = 0; i < groups.length(); i++) out.add(groups.optString(i));
-        }
-        return out;
+        return strings(lastStatus(context).optJSONArray("permission_gating"));
     }
 
     private static Map<String, String> stringMap(JSONObject o) {
@@ -201,22 +185,31 @@ final class GuardApi {
     }
 
     static Set<String> alwaysAllowed(Context context) {
-        Set<String> out = new HashSet<>();
-        JSONArray apps = lastStatus(context).optJSONArray("always_allowed");
-        if (apps != null) {
-            for (int i = 0; i < apps.length(); i++) out.add(apps.optString(i));
-        }
-        return out;
+        return strings(lastStatus(context).optJSONArray("always_allowed"));
     }
 
     /** Apps blocked now (a parent switched them off, or their own minutes ran out). */
     static Set<String> blockedApps(Context context) {
+        return strings(lastStatus(context).optJSONArray("blocked_apps"));
+    }
+
+    /** A JSON list of strings as a set (empty when missing). */
+    static Set<String> strings(JSONArray list) {
         Set<String> out = new HashSet<>();
-        JSONArray apps = lastStatus(context).optJSONArray("blocked_apps");
-        if (apps != null) {
-            for (int i = 0; i < apps.length(); i++) out.add(apps.optString(i));
+        if (list != null) {
+            for (int i = 0; i < list.length(); i++) out.add(list.optString(i));
         }
         return out;
+    }
+
+    /** An ISO-8601 time from the server as epoch ms; 0 when empty or unreadable. */
+    static long epochMs(String iso) {
+        if (iso == null || iso.isEmpty() || "null".equals(iso)) return 0L;
+        try {
+            return java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli();
+        } catch (Exception e) {
+            return 0L;
+        }
     }
 
     static boolean isUnlocked(Context context) {
@@ -232,10 +225,8 @@ final class GuardApi {
             HttpResult r = send(context, "POST", "/api/guard/parent-unlock", body.toString());
             if (r == null) return "No connection to Jarvis. Try again when the phone is online.";
             if (r.status == 200) {
-                String until = new JSONObject(r.body).optString("until", "");
-                long ms = until.isEmpty()
-                        ? System.currentTimeMillis() + 10 * 60_000L
-                        : java.time.OffsetDateTime.parse(until).toInstant().toEpochMilli();
+                long until = epochMs(new JSONObject(r.body).optString("until", ""));
+                long ms = until == 0L ? System.currentTimeMillis() + 10 * 60_000L : until;
                 JSONObject answer = new JSONObject(r.body);
                 SharedPreferences.Editor edit = prefs(context).edit().putLong(KEY_UNLOCKED_UNTIL, ms);
                 JSONArray codes = answer.optJSONArray("offline_codes");

@@ -13,6 +13,7 @@ from typing import Any
 
 import aiohttp
 
+from services.telemetry import llm
 from services.telemetry.config import (
     GATEWAY_INTERNAL_URL,
     GEO_SVC,
@@ -142,24 +143,10 @@ async def analyze(
         "enable_thinking": False,
         "queue_timeout": LLM_QUEUE_TIMEOUT_SECONDS,
     }
-    async with session.post(
-        f"{GATEWAY_INTERNAL_URL}/v1/chat/completions",
-        json=payload,
-        headers=internal_headers(),
-        timeout=aiohttp.ClientTimeout(total=LLM_TIMEOUT_SECONDS),
-    ) as resp:
-        if resp.status != 200:
-            body = await resp.text()
-            raise RuntimeError(f"analysis failed HTTP {resp.status}: {body[:200]}")
-        data = await resp.json(content_type=None)
-    choices = data.get("choices") or []
-    if not choices:
-        raise RuntimeError("analysis returned no choices")
-    message = choices[0].get("message") or {}
-    content = (message.get("content") or "").strip()
-    if not content:
-        raise RuntimeError("analysis returned empty content")
-    return content
+    return await llm.chat_content(
+        session, f"{GATEWAY_INTERNAL_URL}/v1/chat/completions", payload, LLM_TIMEOUT_SECONDS,
+        headers=internal_headers(), what="analysis",
+    )
 
 
 async def generate_report(

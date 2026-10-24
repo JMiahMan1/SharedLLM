@@ -103,8 +103,8 @@ public class WebFilterService extends VpnService {
             String name = DnsMessage.questionName(query);
             WebFilterRules.Decision d = WebFilterRules.decide(name,
                     wf.optBoolean("adult", true), wf.optBoolean("safe_search", true),
-                    list(wf.optJSONArray("block")),
-                    WebFilterRules.activeAllow(list(wf.optJSONArray("allow")), untilMs(wf.optJSONObject("allow_until")),
+                    GuardApi.strings(wf.optJSONArray("block")),
+                    WebFilterRules.activeAllow(GuardApi.strings(wf.optJSONArray("allow")), untilMs(wf.optJSONObject("allow_until")),
                             System.currentTimeMillis()));
             if (d.kind == WebFilterRules.Kind.BLOCK) {
                 note(name, true);
@@ -189,18 +189,8 @@ public class WebFilterService extends VpnService {
         if (until == null) return out;
         for (java.util.Iterator<String> it = until.keys(); it.hasNext(); ) {
             String domain = it.next();
-            try {
-                out.put(domain, java.time.OffsetDateTime.parse(until.optString(domain)).toInstant().toEpochMilli());
-            } catch (Exception ignored) {
-                // An unreadable time allows nothing.
-            }
+            out.put(domain, GuardApi.epochMs(until.optString(domain))); // unreadable: 0, allows nothing
         }
-        return out;
-    }
-
-    private static List<String> list(JSONArray a) {
-        List<String> out = new ArrayList<>();
-        if (a != null) for (int i = 0; i < a.length(); i++) out.add(a.optString(i));
         return out;
     }
 

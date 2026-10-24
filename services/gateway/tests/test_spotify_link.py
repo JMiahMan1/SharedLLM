@@ -37,8 +37,6 @@ def wired(monkeypatch):
     class _Client:
         async def get(self, url, **kw):
             calls.append({"method": "GET", "url": url, **kw})
-            if url.endswith("/api/settings"):
-                return _Resp(200, state["settings"])
             if url.endswith("/v1/me"):
                 return _Resp(200, {"id": "emma1", "display_name": "Emma S"})
             return _Resp(404, {})
@@ -62,6 +60,10 @@ def wired(monkeypatch):
     async def _who(_request, body=None):
         return {"user": "emma"}
 
+    async def _settings():
+        return {r["key"]: r["value"] for r in state["settings"]}
+
+    monkeypatch.setattr(gateway_main, "get_all_settings", _settings)
     monkeypatch.setattr(gateway_main, "borrow_http_client", fake)
     monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _who)
     return TestClient(app, headers={"Authorization": "Bearer emma-key"}), calls, state
@@ -117,3 +119,20 @@ def test_a_refused_token_exchange_reports_failure(wired):
     r = client.get("/api/spotify/callback", params={"state": ok, "code": "C"}, follow_redirects=False)
     assert r.headers["location"] == "/identity?spotify=failed"
     assert not any(c["method"] == "PUT" for c in calls)
+
+
+def test_the_phones_ask_a_parent_button_goes_the_same_way_as_the_route(wired, monkeypatch):
+    client, _, _ = wired
+    asked: list[dict] = []
+
+    async def _ask(request, payload):
+        asked.append(payload)
+        return 200, {"request": {"id": 1}}
+
+    async def _strict(_key):
+        return {"user": "emma"}
+
+    monkeypatch.setattr(gateway_main, "_resolve_strict_identity", _strict)
+    monkeypatch.setattr(gateway_main, "ask_a_parent", _ask)
+    r = client.post("/api/push/action", json={"callback": "guard_ask", "params": {"kind": "site", "target": "minecraft.net"}})
+    assert r.status_code == 200 and asked == [{"kind": "site", "target": "minecraft.net"}]

@@ -27,10 +27,8 @@ from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import aiohttp
-
 from services.common import concern_monitor, concern_review, guardian_recap
-from services.telemetry import notices, store
+from services.telemetry import llm, notices, store
 
 log = logging.getLogger("telemetry.guardian")
 
@@ -90,9 +88,7 @@ async def _model_settings(session) -> dict[str, str]:
     global _settings_cache
     if _settings_cache and _settings_cache[0] > time.monotonic():
         return _settings_cache[1]
-    rows = await notices._identity_get(session, "/api/settings")
-    wanted = {"llm_local_url", "guardian_monitor_model"}
-    found = {r["key"]: str(r.get("value") or "").strip() for r in rows or [] if isinstance(r, dict) and r.get("key") in wanted}
+    found = await notices.identity_settings(session, ("llm_local_url", "guardian_monitor_model"))
     _settings_cache = (time.monotonic() + SETTINGS_CACHE_SECONDS, found)
     return found
 
@@ -105,15 +101,7 @@ async def _ask_model(session, url: str, model: str, concern: dict[str, Any], tex
         "max_tokens": 200,
         "stream": False,
     }
-    async with session.post(
-        f"{url.rstrip('/')}/v1/chat/completions",
-        json=payload,
-        timeout=aiohttp.ClientTimeout(total=MODEL_TIMEOUT_SECONDS),
-    ) as resp:
-        if resp.status != 200:
-            raise RuntimeError(f"the local model answered HTTP {resp.status}")
-        data = await resp.json(content_type=None)
-    content = (((data or {}).get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+    content = await llm.chat_content(session, f"{url.rstrip('/')}/v1/chat/completions", payload, MODEL_TIMEOUT_SECONDS)
     return concern_review.parse_verdict(content)
 
 
@@ -168,6 +156,13 @@ async def on_activity(rc, session, event: dict[str, Any], deliver: Deliver) -> l
     except Exception as exc:
         log.warning("content monitoring skipped an event: %s", exc)
         return []
+
+
+async def record_activity(rc, session, event: dict[str, Any], deliver: Deliver) -> list[dict[str, Any]]:
+    """Keep one activity event on its person's feed and scan it (a child's) for
+    concerns: the one path for every recorder (the activity route, Spotify)."""
+    await store.append_activity(rc, str(event.get("user") or ""), event)
+    return await on_activity(rc, session, event, deliver)
 
 
 async def build_recap(rc, username: str, day: date) -> dict[str, Any]:

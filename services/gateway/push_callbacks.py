@@ -137,3 +137,18 @@ async def raven_reject(request: Request, params: dict, reply: str | None) -> dic
     from services.gateway import raven_approval
 
     return await raven_approval.reject(await _raven_creds(request), params)
+
+
+# Family guard (the phone's "… is blocked" notice: Ask a parent)
+
+
+@push_callback("guard_ask")
+async def guard_ask(request: Request, params: dict, reply: str | None) -> dict:
+    """A child asks a parent first from a notification, through the same path
+    as ``POST /api/guard/requests``: ``params`` is ``{"kind", "target"}``."""
+    from services.gateway.main import ask_a_parent
+
+    status, body = await ask_a_parent(request, {"kind": params.get("kind"), "target": params.get("target")})
+    if status != 200:
+        raise HTTPException(status_code=status, detail=body.get("detail") or "Could not ask")
+    return body
