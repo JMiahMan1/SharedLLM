@@ -11,6 +11,8 @@ import WeeklyDigestCard from '../components/health/WeeklyDigestCard';
 import FamilyChallengeCard from '../components/health/FamilyChallengeCard';
 import ScreenTimeCard from '../components/health/ScreenTimeCard';
 import PhoneProtectionCard from '../components/health/PhoneProtectionCard';
+import TalkRequestCard from '../components/guardian/TalkRequestCard';
+import GuardianLink from '../components/guardian/GuardianLink';
 import HealthFitness from './HealthFitness';
 
 /**
@@ -51,8 +53,10 @@ const Health = () => {
       >
         {tab === 'today' && (
           <div className="space-y-3 sm:space-y-4">
+            <GuardianLink />
             <ScreenTimeCard />
             <PhoneProtectionCard />
+            <TalkRequestCard />
             <HealthToday onNavigate={setTab} />
             <WeeklyDigestCard />
             <FamilyChallengeCard />

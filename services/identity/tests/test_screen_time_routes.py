@@ -204,3 +204,24 @@ def test_a_parent_sets_the_web_filter(family):
     assert wf == {"enabled": True, "adult": True, "safe_search": True, "block": ["tiktok.com", "reddit.com"], "allow": ["khanacademy.org"]}
     assert family("mom").put("/api/screen-time/kid/rules", json={"web_filter": {"block": ["not a domain"]}}).status_code == 422
     assert family("mom").put("/api/screen-time/kid/rules", json={"web_filter": {"enabled": "yes"}}).status_code == 422
+
+
+def test_the_guardian_list_names_each_child_their_parents_and_sensitivity(family):
+    assert family("mom").put("/api/screen-time/kid/rules", json={"monitoring": "all"}).status_code == 200
+    assert family("mom").put("/api/screen-time/kid/rules", json={"monitoring": "loud"}).status_code == 422
+    children = {c["username"]: c for c in family("dad").get("/api/internal/guardian/children").json()["children"]}
+    assert set(children) == {"kid", "sib"}  # the adult child is not monitored
+    assert set(children["kid"]["parents"]) == {"dad", "mom"}
+    assert children["kid"]["monitoring"] == "all" and children["sib"]["monitoring"] == "severe"
+
+
+def test_the_talk_journal_is_the_authors_unless_shared(family):
+    mine = family("dad").post("/api/guardian/journal/kid", json={"text": "Talked about the bus ride.", "shared": False}).json()
+    family("mom").post("/api/guardian/journal/kid", json={"text": "Prayed together at bedtime.", "shared": True})
+    assert [n["text"] for n in family("dad").get("/api/guardian/journal/kid").json()["notes"]] == [
+        "Prayed together at bedtime.", "Talked about the bus ride."]
+    assert [n["text"] for n in family("mom").get("/api/guardian/journal/kid").json()["notes"]] == ["Prayed together at bedtime."]
+    assert family("kid").get("/api/guardian/journal/kid").status_code == 403
+    assert family("sib").post("/api/guardian/journal/kid", json={"text": "x"}).status_code == 403
+    assert family("mom").delete(f"/api/guardian/journal/kid/{mine['id']}").status_code == 404  # only the author
+    assert family("dad").delete(f"/api/guardian/journal/kid/{mine['id']}").status_code == 200

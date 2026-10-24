@@ -1699,6 +1699,67 @@ export interface HealthMetricHistory {
   latest: HealthMetricSample | null;
 }
 
+/** A child's week for their parents (Phase 11 step 6), built from what was reported. */
+export interface GuardianRecap {
+  week: { start: string; end: string };
+  has_data: boolean;
+  screen: {
+    total_min: number;
+    daily_avg_min: number;
+    days_reported: number;
+    prev_total_min: number | null;
+    change_pct: number | null;
+    busiest_day: string;
+    busiest_min: number;
+    late_nights: number;
+  } | null;
+  top_apps: Array<{ package: string; minutes: number }>;
+  media: Array<{ title: string; count: number }>;
+  web: { top: Array<{ domain: string; visits: number }>; blocked: Array<{ domain: string; count: number }> };
+  comms: { calls: number; call_contacts: number; messages: number; message_contacts: number };
+  faith: { bible_days: number };
+  concerns: GuardianConcernSummary[];
+  highlights: string[];
+}
+
+export type ConcernLevel = 'medium' | 'high' | 'severe';
+
+export interface GuardianConcernSummary {
+  category: string;
+  label: string;
+  level: ConcernLevel;
+  count: number;
+  latest: { at: string; excerpt: string; feature: string } | null;
+}
+
+export interface GuardianPrompt {
+  signal: string;
+  title: string;
+  ref: string;
+  verse: string;
+  prayer: string;
+  starter: string;
+}
+
+export interface GuardianJournalNote {
+  id: number;
+  author: string;
+  child: string;
+  text: string;
+  shared: boolean;
+  created_at: string;
+}
+
+export interface ActivityEvent {
+  user: string;
+  feature: string;
+  item: string;
+  action: string;
+  at: string;
+  duration_s?: number | null;
+  detail?: Record<string, unknown>;
+}
+
 /** A night estimated from device use (ISO times with offset); the person corrects it before saving. */
 export interface SleepEstimate {
   night: string;

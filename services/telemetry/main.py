@@ -17,7 +17,7 @@ import json
 import logging
 import time
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -25,7 +25,7 @@ import redis.asyncio as redis
 from fastapi import HTTPException
 
 from services.common.secrets import secret_matches
-from services.telemetry import notices, push, store
+from services.telemetry import guardian, notices, push, store
 from services.telemetry.alpaca import is_busy
 from services.telemetry.config import (
     BUSY_DEFER_SECONDS,
@@ -261,7 +261,11 @@ def _internal_ok(value: str | None) -> bool:
 
 @asynccontextmanager
 async def lifespan(app):
-    tasks = [asyncio.create_task(scheduler_loop()), asyncio.create_task(worker_loop())]
+    tasks = [
+        asyncio.create_task(scheduler_loop()),
+        asyncio.create_task(worker_loop()),
+        asyncio.create_task(guardian.recap_loop(_redis, _client, deliver_notice)),
+    ]
     log.info("Telemetry scheduler + worker started")
     try:
         yield
@@ -408,7 +412,24 @@ def create_app():
         }
         rc = _redis()
         await store.append_activity(rc, user, event)
+        # A child's events are scanned for concerns as they land (never fails the record).
+        await guardian.on_activity(rc, _client(), event, deliver_notice)
         return {"status": "SUCCESS", "event": event}
+
+    @application.get("/api/telemetry/recap/{user}")
+    async def get_recap(user: str, day: str = Query(default=""), _: bool = Depends(require_internal)):
+        """A child's weekly recap for the week holding ``day`` (today by default), built now."""
+        try:
+            when = date.fromisoformat(day) if day else guardian.household_now().date()
+        except ValueError:
+            raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD") from None
+        rc = _redis()
+        return {"status": "SUCCESS", "recap": await guardian.build_recap(rc, user, when)}
+
+    @application.get("/api/telemetry/concerns/{user}")
+    async def get_concerns(user: str, limit: int = Query(default=50, le=300), _: bool = Depends(require_internal)):
+        rc = _redis()
+        return {"status": "SUCCESS", "concerns": list(reversed(await store.list_concerns(rc, user)))[:limit]}
 
     @application.get("/api/telemetry/activity/{user}")
     async def get_activity(

@@ -759,3 +759,17 @@ class GuardOfflineCode(SQLModel, table=True):  # type: ignore
     iterations: int
     hash: str  # hex
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class GuardianNote(SQLModel, table=True):  # type: ignore
+    """A parent's talk journal about one child (Phase 11 step 7): what was
+    talked about, prayed about, agreed. The author's own, unless shared with
+    the child's other parent; the child never sees it.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    author: str = Field(index=True, foreign_key="user.username")
+    child: str = Field(index=True, foreign_key="user.username")
+    text: str
+    shared: bool = Field(default=False)
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

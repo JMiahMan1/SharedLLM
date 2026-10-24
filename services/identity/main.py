@@ -53,6 +53,7 @@ from services.identity.models import (
     ScreenTimeRequest,
     RecommendationLanes,
     GuardOfflineCode,
+    GuardianNote,
     UserAvatarImage,
     VoiceSignature,
     UserCalendarSetting,
@@ -4240,6 +4241,11 @@ def _clean_screen_rules(body: dict) -> dict:
                     raise HTTPException(status_code=422, detail=f"web_filter.{key} must be domain names")
                 clean[key] = list(dict.fromkeys(d.strip().lower().rstrip(".") for d in domains))[:500]
         out["web_filter"] = clean
+    # Content monitoring (step 6): what pages a parent at once.
+    if body.get("monitoring") is not None:
+        if body["monitoring"] not in ("all", "severe", "off"):
+            raise HTTPException(status_code=422, detail="monitoring must be all, severe or off")
+        out["monitoring"] = body["monitoring"]
     return out
 
 
@@ -4566,6 +4572,67 @@ def internal_guard_parents(username: str, session: Session = Depends(get_session
     if subject is None:
         return {"parents": [], "display_name": username}
     return {"parents": _parents_of(session, subject), "display_name": subject.display_name or subject.username}
+
+
+def _journal_out(row: GuardianNote) -> dict:
+    return {"id": row.id, "author": row.author, "child": row.child, "text": row.text, "shared": row.shared, "created_at": row.created_at}
+
+
+@app.get("/api/guardian/journal/{username}")
+def list_guardian_journal(username: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A parent's talk journal about a child: their own notes, and the other
+    parent's shared ones, newest first."""
+    child = _screen_subject(session, username)
+    if not _may_manage_screen_time(caller, child):
+        raise HTTPException(status_code=403, detail="Only a parent can see this")
+    rows = session.exec(select(GuardianNote).where(GuardianNote.child == child.username)).all()
+    mine = [r for r in rows if r.author == caller.username or r.shared]
+    return {"notes": [_journal_out(r) for r in sorted(mine, key=lambda r: r.created_at, reverse=True)]}
+
+
+@app.post("/api/guardian/journal/{username}")
+def add_guardian_journal(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    child = _screen_subject(session, username)
+    if not _may_manage_screen_time(caller, child):
+        raise HTTPException(status_code=403, detail="Only a parent can write this")
+    text = str((body or {}).get("text") or "").strip()
+    if not text or len(text) > 4000:
+        raise HTTPException(status_code=422, detail="Write 1 to 4000 characters")
+    row = GuardianNote(author=caller.username, child=child.username, text=text, shared=bool((body or {}).get("shared")))
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _journal_out(row)
+
+
+@app.delete("/api/guardian/journal/{username}/{note_id}")
+def delete_guardian_journal(username: str, note_id: int, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    row = session.get(GuardianNote, note_id)
+    if row is None or row.child != username.strip().lower() or row.author != caller.username:
+        raise HTTPException(status_code=404, detail="No such note")
+    session.delete(row)
+    session.commit()
+    return {"deleted": note_id}
+
+
+@app.get("/api/internal/guardian/children")
+def internal_guardian_children(session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: every minor, their parents and their monitoring sensitivity
+    (the weekly recap and content monitoring read this)."""
+    out = []
+    for child in session.exec(select(User)).all():
+        if (child.family_role or "other") not in roles.MINOR_FAMILY_ROLES:
+            continue
+        parents = _parents_of(session, child)
+        if not parents:
+            continue
+        out.append({
+            "username": child.username,
+            "display_name": child.display_name or child.username,
+            "parents": parents,
+            "monitoring": _screen_rules(session, child.username).get("monitoring") or "severe",
+        })
+    return {"children": out}
 
 
 @app.get("/api/internal/screen-time/{username}")
