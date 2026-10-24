@@ -238,7 +238,7 @@ async def check_once(r, client: aiohttp.ClientSession, settings: dict[str, Any],
     targets = desktop_targets(settings)
     results = await asyncio.gather(*(_answers(client, url) for url in targets.values()))
     down_minutes = int(settings.get("alert_desktop_down_minutes") or ALERT_DESKTOP_DOWN_MINUTES)
-    _queue(outbox, desktop_transitions(state.setdefault("desktop", {}), dict(zip(targets, results)),
+    _queue(outbox, desktop_transitions(state.setdefault("desktop", {}), dict(zip(targets, results, strict=False)),
                                        now, down_minutes))
 
     sent = 0

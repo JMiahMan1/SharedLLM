@@ -25,7 +25,7 @@ import re
 import time
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -224,7 +224,7 @@ def _instant(value: str | None, *, field: str = "recorded_at") -> str:
     body fat) where the exact hour is irrelevant.
     """
     if not value:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
     text = value.strip()
     if DAY_RE.match(text):
         return f"{text}T12:00:00"
@@ -237,7 +237,7 @@ def _instant(value: str | None, *, field: str = "recorded_at") -> str:
         # from UTC. Anchor it to the household's timezone so a 22:30 bedtime
         # does not render as 15:30 in the UI.
         parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if parsed > now + timedelta(days=1):
         raise HTTPException(status_code=422, detail=f"{field} is in the future")
     if parsed.year < 1900:
@@ -1183,7 +1183,7 @@ def _sleep_times(body: SleepIn, night: str) -> tuple[str | None, str | None, int
         wake = datetime.fromisoformat(wake_time)
         if wake <= bed:
             wake += timedelta(days=1)
-        duration = int(round((wake - bed).total_seconds() / 60.0))
+        duration = round((wake - bed).total_seconds() / 60.0)
     if duration is None:
         raise HTTPException(status_code=422, detail="Provide duration_minutes, or both bedtime and wake_time")
     if not (0 < duration <= 1440):
@@ -1467,7 +1467,7 @@ def _nutrition_day(session: Session, user: str, day: str, profile: HealthProfile
         kid_mode=profile.kid_mode if profile else False,
     )
     # Macro targets use the midpoint of the range when one exists.
-    macro_calories = int(round((target.min + target.max) / 2)) if target.min and target.max else None
+    macro_calories = round((target.min + target.max) / 2) if target.min and target.max else None
     macros = scoring.macro_targets(macro_calories) if macro_calories else None
 
     return {
@@ -1544,11 +1544,13 @@ def _off_product(product: dict) -> dict | None:
 
 async def _off_get(path: str, params: dict | None = None) -> dict:
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
-            async with client.get(f"{OFF_BASE}{path}", params=params, headers=OFF_HEADERS) as resp:
-                if resp.status != 200:
-                    raise HTTPException(status_code=502, detail=f"OpenFoodFacts returned {resp.status}")
-                return await resp.json(content_type=None)
+        async with (
+            aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client,
+            client.get(f"{OFF_BASE}{path}", params=params, headers=OFF_HEADERS) as resp,
+        ):
+            if resp.status != 200:
+                raise HTTPException(status_code=502, detail=f"OpenFoodFacts returned {resp.status}")
+            return await resp.json(content_type=None)
     except aiohttp.ClientError as exc:
         log.warning("[Health] OpenFoodFacts lookup failed: %s", exc)
         raise HTTPException(status_code=503, detail="OpenFoodFacts is unreachable; try again or add the food by hand.") from exc

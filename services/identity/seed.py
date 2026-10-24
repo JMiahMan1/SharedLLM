@@ -12,7 +12,7 @@ import logging
 import os
 
 from dotenv import dotenv_values, load_dotenv
-from sqlmodel import Session, select, text
+from sqlmodel import Session, select
 
 from services.identity.crypto import encrypt
 from services.identity.models import DEFAULT_GLOBAL_SETTINGS, DnsRecord, GlobalSetting, User

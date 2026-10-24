@@ -1,6 +1,5 @@
 import base64
 
-import pytest
 from fastapi.testclient import TestClient
 
 from services.storage.main import app

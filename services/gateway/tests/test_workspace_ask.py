@@ -12,14 +12,14 @@ carries the context it was launched with, and that a mode the client named is
 never second-guessed.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 import services.gateway.orchestrator as orchestrator
 from services.gateway import main as gateway_main
-from services.gateway.main import app, _resolve_workspace_ask_mode
+from services.gateway.main import _resolve_workspace_ask_mode, app
 
 client = TestClient(app)
 

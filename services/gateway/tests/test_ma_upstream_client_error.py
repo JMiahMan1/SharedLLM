@@ -7,9 +7,7 @@ import re
 
 import aiohttp
 import pytest
-
 from conftest_media import mock_upstream  # noqa: F401  (fixtures come via conftest)
-
 
 EXEC_PATHS = {
     "/api/media/music-assistant/playlists": "playlists",

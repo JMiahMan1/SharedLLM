@@ -244,7 +244,7 @@ def _dispatch_timeout_for(action: str) -> float:
     """
     expr = ast.Expression(body=ast.fix_missing_locations(_dispatch_timeout_expr()))
     code = compile(expr, "<dispatch-timeout>", "eval")
-    return float(eval(code, {"__builtins__": {}}, {"lookup_action": action}))  # noqa: S307
+    return float(eval(code, {"__builtins__": {}}, {"lookup_action": action}))
 
 
 def _handler_budget(action: str) -> float | None:

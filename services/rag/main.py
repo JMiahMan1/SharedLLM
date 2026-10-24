@@ -152,7 +152,7 @@ def embed_batched(
         text if len(text) <= max_chars else text[:max_chars] for text in texts
     ]
     clipped_count = sum(
-        1 for short, long in zip(clipped, texts) if len(short) < len(long)
+        1 for short, long in zip(clipped, texts, strict=False) if len(short) < len(long)
     )
     if clipped_count:
         log.warning(
@@ -1086,10 +1086,10 @@ async def dream_learnings(
     try:
         target_user = user_id.lower()
         rows = _conn().execute(
-            f"SELECT id, content, metadata, created_at, usage_count, applied_count, "
-            f"rule, confidence, supersedes "
-            f"FROM rag_items WHERE collection_name = ? AND user_id = ? "
-            f"ORDER BY created_at DESC",
+            "SELECT id, content, metadata, created_at, usage_count, applied_count, "
+            "rule, confidence, supersedes "
+            "FROM rag_items WHERE collection_name = ? AND user_id = ? "
+            "ORDER BY created_at DESC",
             ["system_learnings", target_user],
         ).fetchall()
         docs = [
@@ -1114,10 +1114,8 @@ async def dream_learnings(
         for d in docs:
             parsed: dict[str, Any] = {}
             if d["content"].strip().startswith("{"):
-                try:
+                with suppress(Exception):
                     parsed = json.loads(d["content"])
-                except Exception:
-                    pass
             rule = parsed.get("rule", parsed.get("topic", ""))
             if not rule or rule in seen_rules:
                 continue
@@ -1179,7 +1177,7 @@ async def dream_learnings(
             if d["rule"]:
                 by_rule.setdefault(d["rule"].lower(), []).append(d)
         deleted: set[str] = set()
-        for key, group in by_rule.items():
+        for group in by_rule.values():
             if len(group) < 2:
                 continue
             survivor = max(group, key=_lesson_priority_score)
@@ -1232,10 +1230,8 @@ async def dream_learnings(
             all_remaining.append(d)
             parsed: dict[str, Any] = {}
             if d["content"].strip().startswith("{"):
-                try:
+                with suppress(Exception):
                     parsed = json.loads(d["content"])
-                except Exception:
-                    pass
             critical = ["rule", "root_cause", "outcome"]
             missing = [f for f in critical if not parsed.get(f)]
             if missing:
@@ -1381,10 +1377,8 @@ async def pending_validations(user_id: str = "default"):
             if (r["applied_count"] or 0) > 0 and last_passed is not False:
                 parsed: dict[str, Any] = {}
                 if r["content"].strip().startswith("{"):
-                    try:
+                    with suppress(Exception):
                         parsed = json.loads(r["content"])
-                    except Exception:
-                        pass
                 candidates.append({
                     "id": r["id"],
                     "rule": parsed.get("rule", ""),
@@ -1534,7 +1528,6 @@ async def ingest_benchmark_results(models: list[str] | None = None):
     try:
         results_dir = BENCHMARK_RESULTS_DIR
         target_user = "default"
-        now = int(time.time())
         now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         updates: dict[str, dict] = {}
 
@@ -1769,7 +1762,7 @@ def _ingest_redis_data(user_id: str = "default") -> dict:
         total_logs = client.zcard("logs:entries")
         if total_logs > 0:
             logs = client.zrange("logs:entries", 0, min(99, total_logs-1))
-            content = "\n".join(str(l) for l in logs if l)[:5000]
+            content = "\n".join(str(entry) for entry in logs if entry)[:5000]
             doc_id = "redis-logs:entries"
             meta = {
                 "id": doc_id, "topic": "redis-system-logs",

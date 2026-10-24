@@ -1,4 +1,3 @@
-import os
 
 
 import pytest
@@ -128,7 +127,6 @@ def test_put_theme_ignores_unknown_keys(client: TestClient):
     assert resp.status_code == 200
     assert resp.json()["theme_id"] == "bloom"
     # unknown keys must not be stored
-    row = client.app.dependency_overrides  # silence lint about unused if any
     assert "evil" not in resp.json()
 
 

@@ -1,4 +1,3 @@
-import os
 
 # Set environment variables BEFORE any imports that might use them
 

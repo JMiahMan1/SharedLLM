@@ -3,12 +3,12 @@
 Microservice 1: Identity & Profile Service
 Manages user profiles, device assignments, and secure credential resolution.
 """
-import json
-import logging
-import os
 import base64
 import binascii
 import hashlib
+import json
+import logging
+import os
 import re
 import secrets
 import time
@@ -27,12 +27,12 @@ from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common.http import get_client, get_client_insecure
+from services.common.secrets import secret_matches
 from services.config import IDENTITY_CORS_ORIGINS, IDENTITY_DATABASE_URL, INTERNAL_SECRET
 from services.identity import audit, battery_alerts, push, roles, voice
 from services.identity.crypto import decrypt, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
-    ADVANCED_DEVICE_KINDS,
     DEVICE_KINDS,
     NO_OPT_IN_EVENTS,
     APIKey,
@@ -40,51 +40,49 @@ from services.identity.models import (
     CapabilityInventory,
     Device,
     DeviceAssignment,
-    Role,
     DeviceEvent,
-    FeatureUsage,
     DnsRecord,
     EntityProtection,
     GlobalSetting,
+    GuardianNote,
+    GuardOfflineCode,
     RavenMission,
-    User,
-    UserActivitySharing,
+    RecommendationLanes,
+    Role,
     ScreenRules,
     ScreenTimeRequest,
-    RecommendationLanes,
-    GuardOfflineCode,
-    GuardianNote,
+    User,
+    UserActivitySharing,
     UserAvatarImage,
-    VoiceSignature,
     UserCalendarSetting,
     UserCredentialShare,
+    UserRole,
     UserThemeSetting,
     UserWidget,
-    UserRole,
     UserWorkspaceSession,
+    VoiceSignature,
     WorkspaceChat,
     WorkspaceChatMessage,
 )
 from services.identity.schemas import (
     CREDENTIAL_COLUMNS,
+    BatteryReading,
     ChangePasswordRequest,
     CredentialSharesRead,
     CredentialSharesUpdate,
+    DeviceActivity,
     DeviceAdminCreate,
     DeviceAssign,
-    DeviceClaim,
     DeviceAssignmentCreate,
     DeviceAssignmentRead,
-    BatteryReading,
-    DeviceActivity,
+    DeviceClaim,
     DeviceEventRead,
     DeviceRead,
     DeviceSelfRegister,
-    TelemetryIngest,
     DiscoverResponse,
+    DiscoverUser,
     EntityProtectionRead,
     EntityProtectionUpdate,
-    DiscoverUser,
     FamilyMemberRead,
     FamilyUpdate,
     GlobalSettingRead,
@@ -97,11 +95,12 @@ from services.identity.schemas import (
     RavenMissionRead,
     RavenMissionUpdate,
     ResolvedCredentials,
-ResolveRequest,
-    ShareRecipient,
-    UserCreate,
+    ResolveRequest,
     RoleRead,
     RoleWrite,
+    ShareRecipient,
+    TelemetryIngest,
+    UserCreate,
     UserRead,
     UserRolesUpdate,
     UserUpdate,
@@ -111,7 +110,6 @@ ResolveRequest,
 )
 from services.identity.seed import hash_password, seed_from_env, system_service_urls, verify_password
 from services.shared.info_endpoint import info_router
-from services.common.secrets import secret_matches
 
 # Config
 
@@ -1627,6 +1625,7 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     # nothing behind that could still surface their data.
     try:
         import redis as _redis_sync
+
         from services.config import REDIS_URL as _REDIS_URL
 
         r = _redis_sync.from_url(_REDIS_URL, decode_responses=True)
@@ -5471,8 +5470,8 @@ async def trigger_telemetry_analysis(analysis_data: dict, x_internal_secret: str
     if hours < 1 or hours > 2160:
         raise HTTPException(status_code=422, detail="hours must be between 1 and 2160")
 
-    import time as _time
     import statistics
+    import time as _time
 
     key = f"telemetry_data:{entity_id}"
     with Session(engine) as session:
@@ -5521,7 +5520,8 @@ async def trigger_telemetry_analysis(analysis_data: dict, x_internal_secret: str
 
     analysis_text: str | None = None
     try:
-        from services.config import GATEWAY_INTERNAL_URL, INTERNAL_SECRET as _INTERNAL_SECRET
+        from services.config import GATEWAY_INTERNAL_URL
+        from services.config import INTERNAL_SECRET as _INTERNAL_SECRET
         gateway_url = GATEWAY_INTERNAL_URL or "http://gateway:11435"
         enrollment_key = f"telemetry_enroll:{entity_id}"
         rag_user = None
@@ -5550,26 +5550,25 @@ async def trigger_telemetry_analysis(analysis_data: dict, x_internal_secret: str
             "think": False,
         }
         timeout = aiohttp.ClientTimeout(total=90.0)
-        async with aiohttp.ClientSession() as client:
-            async with client.post(
-                f"{gateway_url.rstrip('/')}/v1/chat/completions",
-                json=body,
-                headers={"X-Internal-Secret": _INTERNAL_SECRET},
-                timeout=timeout,
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    choices = data.get("choices") or []
-                    if choices:
-                        analysis_text = (choices[0].get("message") or {}).get("content")
-                    else:
-                        content = data.get("response") or data.get("answer") or data.get("message")
-                        if isinstance(content, dict):
-                            content = content.get("content")
-                        if isinstance(content, str):
-                            analysis_text = content
+        async with aiohttp.ClientSession() as client, client.post(
+            f"{gateway_url.rstrip('/')}/v1/chat/completions",
+            json=body,
+            headers={"X-Internal-Secret": _INTERNAL_SECRET},
+            timeout=timeout,
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                choices = data.get("choices") or []
+                if choices:
+                    analysis_text = (choices[0].get("message") or {}).get("content")
                 else:
-                    log.warning(f"[telemetry] LLM gateway status {resp.status} for {entity_id}")
+                    content = data.get("response") or data.get("answer") or data.get("message")
+                    if isinstance(content, dict):
+                        content = content.get("content")
+                    if isinstance(content, str):
+                        analysis_text = content
+            else:
+                log.warning(f"[telemetry] LLM gateway status {resp.status} for {entity_id}")
     except Exception as e:
         log.warning(f"[telemetry] LLM analysis failed for {entity_id}: {e}")
 
@@ -5629,7 +5628,7 @@ def get_telemetry_insight_for_entity(entity_id: str, x_internal_secret: str = He
             "insight": data,
             "insights": [
                 {
-                    "type": data.get("analysis_available") and "analysis" or "none",
+                    "type": (data.get("analysis_available") and "analysis") or "none",
                     "message": data.get("analysis") or "",
                     "severity": "info",
                     "timestamp": data.get("generated_at"),
@@ -5968,17 +5967,16 @@ async def _forward_location_to_geo(user_id: str, location: LocationUpdate):
         }
         if location.daily_steps is not None:
             payload["daily_steps"] = location.daily_steps
-        async with get_client_insecure() as client:
-            async with client.post(
-                f"{geo_url}/people/{clean_user}/record",
-                headers={"X-Internal-Secret": INTERNAL_SECRET, "Content-Type": "application/json"},
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=3.0),
-            ) as resp:
-                if resp.status < 300:
-                    log.info(f"[location] Recorded breadcrumb in Geo service for {clean_user}")
-                else:
-                    log.warning(f"[location] Geo record status {resp.status} for {clean_user}")
+        async with get_client_insecure() as client, client.post(
+            f"{geo_url}/people/{clean_user}/record",
+            headers={"X-Internal-Secret": INTERNAL_SECRET, "Content-Type": "application/json"},
+            json=payload,
+            timeout=aiohttp.ClientTimeout(total=3.0),
+        ) as resp:
+            if resp.status < 300:
+                log.info(f"[location] Recorded breadcrumb in Geo service for {clean_user}")
+            else:
+                log.warning(f"[location] Geo record status {resp.status} for {clean_user}")
     except Exception as e:
         log.warning(f"[location] Failed to record breadcrumb in Geo service: {e}")
 
@@ -6228,7 +6226,7 @@ def register_device(
 
 
 @app.get("/api/user-panel/devices", response_model=list[DeviceRead])
-def list_devices(
+def list_user_panel_devices(
     session: Session = Depends(get_session),
     caller: User = Depends(require_api_key),
 ):

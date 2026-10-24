@@ -254,7 +254,7 @@ def test_a_failed_rag_sync_is_recorded_not_swallowed(monkeypatch):
 def test_status_exposes_the_crawl_record(monkeypatch):
     from fastapi.testclient import TestClient
 
-    from services.storage.main import app, _require_internal_secret
+    from services.storage.main import _require_internal_secret, app
 
     app.dependency_overrides[_require_internal_secret] = lambda: None
     try:

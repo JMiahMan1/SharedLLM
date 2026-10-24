@@ -2,7 +2,6 @@ import json
 import os
 import time
 
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, StaticPool, create_engine

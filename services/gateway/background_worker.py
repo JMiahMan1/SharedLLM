@@ -19,6 +19,7 @@ from typing import Any
 import aiohttp
 
 from services.config import JARVIS_TALK_CLAIM_KEY
+from services.gateway import notices
 from services.gateway.agent_loop import should_persist_learning
 from services.gateway.config import (
     EXECUTION_SVC,
@@ -31,7 +32,6 @@ from services.gateway.config import (
     SYSTEM_IDENTITY,
     WORKSPACE_RUNTIME_SVC,
 )
-from services.gateway import notices
 from services.gateway.intent_engine import is_raven_intent
 from services.shared.rag_client import push_mission
 
@@ -1265,7 +1265,6 @@ class RavenWorker:
                     from services.gateway.main import (
                         _enqueue_user_mission,
                         resolve_first_user,
-                        _build_raven_system_prompt,
                     )
                     _q = str(payload.get("query") or "").lower()
                     _workspace_id = str(payload.get("workspace_id") or "")

@@ -105,7 +105,7 @@ def test_i_need_to_talk_reaches_only_the_parent_picked(talk):
 
 
 def test_i_need_to_talk_defaults_to_both_parents(talk):
-    client, sent = talk
+    client, _sent = talk
     assert client.post("/api/guardian/talk", json={}).json()["told"] == ["dad", "mom"]
     assert client.get("/api/guardian/my-parents").json()["parents"] == ["dad", "mom"]
 

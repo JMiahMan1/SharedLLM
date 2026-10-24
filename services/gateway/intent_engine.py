@@ -138,7 +138,6 @@ class IntentEngine:
         Regex-based extraction of the target entity from a natural language query.
         Returns the resolved entity_id if a match is found via fuzzy lookup.
         """
-        q = query.lower().strip()
         target = None
 
         # Regex patterns for common control intents
@@ -216,9 +215,7 @@ class IntentEngine:
         q = query.lower().strip().strip("?.!")
         if "," in q:
             parts = [p.strip() for p in q.split(",") if p.strip()]
-            if len(parts) > 1 and (parts[0] in parts[1] or parts[1] in parts[0]):
-                q = parts[0]
-            elif len(parts) > 1 and any(w in parts[0] for w in ["turn", "play", "pause", "resume", "stop", "switch", "lights", "light", "skip", "next"]):
+            if (len(parts) > 1 and (parts[0] in parts[1] or parts[1] in parts[0])) or (len(parts) > 1 and any(w in parts[0] for w in ["turn", "play", "pause", "resume", "stop", "switch", "lights", "light", "skip", "next"])):
                 q = parts[0]
 
         # 1. Fast Pattern & Keyword Detection (immediate 1.0 confidence for media/home control)
@@ -237,9 +234,8 @@ class IntentEngine:
             return "media_transport", 1.0
 
         # Media Play: "play <content>", "listen to <content>", "put on <content>", "stream <content>"
-        if re.search(r"^(?:play|listen to|put on|stream|start playing)\b", q):
-            if not re.search(r"^(?:play\s+(?:a\s+game|roles|dumb))\b", q):
-                return "play_media", 1.0
+        if re.search(r"^(?:play|listen to|put on|stream|start playing)\b", q) and not re.search(r"^(?:play\s+(?:a\s+game|roles|dumb))\b", q):
+            return "play_media", 1.0
 
         # Lights & Switches
         # Matches: "turn on lights", "turn the piano lamp off", "turn off the lamp", "piano lamp off", "lights on", etc.

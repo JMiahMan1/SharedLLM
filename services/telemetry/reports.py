@@ -17,7 +17,6 @@ from services.telemetry.config import (
     GATEWAY_INTERNAL_URL,
     GEO_SVC,
     IDENTITY_SVC,
-    INTERNAL_SECRET,
     LLM_QUEUE_TIMEOUT_SECONDS,
     LLM_TIMEOUT_SECONDS,
 )

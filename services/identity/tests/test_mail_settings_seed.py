@@ -60,9 +60,8 @@ def test_mail_settings_are_seeded_into_the_database():
 
 
 def test_seeded_mail_password_is_never_logged(caplog):
-    with _session() as session:
-        with caplog.at_level(logging.INFO, logger="identity.seed"):
-            seed_from_env(session, force=True)
+    with _session() as session, caplog.at_level(logging.INFO, logger="identity.seed"):
+        seed_from_env(session, force=True)
 
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert "super-secret-mail-password" not in logged
@@ -88,9 +87,8 @@ def test_mail_user_credentials_land_on_the_matching_jarvis_user():
 def test_mail_user_matching_nobody_is_reported_not_shared(caplog):
     os.environ["MAIL_USER"] = "nobody-at-all"
     try:
-        with _session() as session:
-            with caplog.at_level(logging.INFO, logger="identity.seed"):
-                seed_from_env(session, force=True)
+        with _session() as session, caplog.at_level(logging.INFO, logger="identity.seed"):
+            seed_from_env(session, force=True)
 
         logged = "\n".join(r.getMessage() for r in caplog.records)
         assert "matches no Jarvis user" in logged

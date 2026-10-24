@@ -4,9 +4,8 @@ A forged user_context in the request body must never reach the execution
 service: the gateway resolves identity only from the authenticated request.
 """
 import pytest
-from yarl import URL
-
 from conftest_media import mock_upstream
+from yarl import URL
 
 EXEC_STATUS_URL = "http://host.docker.internal:8003/execute/media/status"
 

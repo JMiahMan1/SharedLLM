@@ -8,11 +8,9 @@ import asyncio
 import re
 
 import pytest
+from conftest_media import mock_upstream  # noqa: F401  (fixtures come via conftest
 from fastapi import HTTPException
 from starlette.requests import Request
-
-from conftest_media import mock_upstream  # noqa: F401  (fixtures come via conftest
-
 
 STREAM_URL = "http://audio.test:8082/stream.mp3"
 

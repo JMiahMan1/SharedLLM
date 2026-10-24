@@ -5,7 +5,6 @@ conversation's last message once, when it is new, unread and someone else's.
 The phone collects those notices through a long poll on the gateway.
 """
 import asyncio
-from contextlib import asynccontextmanager
 
 import pytest
 from fastapi.testclient import TestClient

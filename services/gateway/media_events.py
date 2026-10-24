@@ -180,16 +180,15 @@ class HAEntitySource:
     async def _load_snapshot(self) -> None:
         try:
             timeout = aiohttp.ClientTimeout(total=10.0)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(
-                    f"{self._ha_url}/api/states",
-                    headers={"Authorization": f"Bearer {self._ha_token}"},
-                ) as resp:
-                    if resp.status != 200:
-                        log.warning("[media_events] HA snapshot HTTP %s", resp.status)
-                        return
-                    states = await resp.json()
-        except Exception as exc:  # noqa: BLE001 - a broken snapshot must not kill the hub
+            async with aiohttp.ClientSession(timeout=timeout) as session, session.get(
+                f"{self._ha_url}/api/states",
+                headers={"Authorization": f"Bearer {self._ha_token}"},
+            ) as resp:
+                if resp.status != 200:
+                    log.warning("[media_events] HA snapshot HTTP %s", resp.status)
+                    return
+                states = await resp.json()
+        except Exception as exc:  # a broken snapshot must not kill the hub
             log.warning("[media_events] HA snapshot failed: %s", exc)
             return
         for state in states or []:
@@ -223,7 +222,7 @@ class HAEntitySource:
                         self._handle_message(raw)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001 - reconnect on any transport failure
+            except Exception as exc:  # reconnect on any transport failure
                 log.warning("[media_events] HA ws error: %s; reconnecting in 5s", exc)
                 with suppress(asyncio.TimeoutError):
                     await asyncio.wait_for(self._stop.wait(), timeout=5.0)
@@ -278,7 +277,7 @@ class MASource:
         await self._client.connect()
         try:
             players = await self._client.send_command("players/all")
-        except Exception as exc:  # noqa: BLE001 - snapshot is best effort
+        except Exception as exc:  # snapshot is best effort
             log.warning("[media_events] MA players/all failed: %s", exc)
             players = None
         for player in players or []:
@@ -340,7 +339,7 @@ class MediaEventHub:
         for source in self._sources:
             try:
                 await source.start()
-            except Exception:  # noqa: BLE001 - one dead source must not block the hub
+            except Exception:  # one dead source must not block the hub
                 log.exception("[media_events] source start failed for %s", self.user)
         self._idle_task = asyncio.create_task(self._idle_monitor())
 
@@ -352,10 +351,8 @@ class MediaEventHub:
         self._idle_task = None
         if task is not None and task is not asyncio.current_task():
             task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
         for source in self._sources:
             with suppress(Exception):
                 await source.stop()
@@ -430,7 +427,7 @@ class MediaEventHub:
                     event = await asyncio.wait_for(
                         queue.get(), timeout=self._heartbeat_interval,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield sse_event("heartbeat", {"type": "heartbeat"})
                     continue
                 yield sse_event(str(event.get("type") or "message"), event)
