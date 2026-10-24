@@ -35,12 +35,14 @@ from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.config import INTERNAL_SECRET
-from services.health import cycle, food_seed, scoring, weekly
+from services.health import challenges, cycle, food_seed, scoring, weekly
 from services.health.models import (
+    ChallengeMember,
     Checkin,
     CycleLog,
     CyclePeriod,
     CycleSettings,
+    FamilyChallenge,
     FoodEntry,
     HealthProfile,
     HealthShare,
@@ -1947,6 +1949,210 @@ def weekly_digest(
     }
 
 
+# --- weekly family challenges ----------------------------------------------
+
+
+class ChallengeIn(BaseModel):
+    kind: str
+    # Any day in the challenge's week; the client knows the local date.
+    day: str
+    target_days: int = Field(ge=1, le=7)
+
+    @field_validator("kind")
+    @classmethod
+    def _kind(cls, value: str) -> str:
+        if value not in challenges.KINDS:
+            raise ValueError(f"kind must be one of {', '.join(challenges.KINDS)}")
+        return value
+
+
+def _may_create_challenge(request: Request, session: Session, user: str) -> bool:
+    """Only an adult starts a family challenge; anyone may join one.
+
+    The gateway says whether the caller's family role is a minor's
+    (``X-User-Is-Minor``); anything but an explicit ``false`` -- including
+    Identity being unreachable -- is treated as a minor. A profile in kid mode
+    or with a birth year under 18 is a minor here too. Admins may always.
+    """
+    if _admin(request):
+        return True
+    if (request.headers.get("X-User-Is-Minor") or "").strip().lower() != "false":
+        return False
+    profile = session.get(HealthProfile, user)
+    if profile is None:
+        return True
+    age = _age_years(profile)
+    return not profile.kid_mode and (age is None or age >= 18)
+
+
+def _challenge_member_days(session: Session, user: str, start: date) -> tuple[list[dict], dict]:
+    """The week's logged records for one member, plus the goals they are measured against."""
+    profile = session.get(HealthProfile, user)
+    sleep_need = profile.sleep_need_minutes if profile else None
+    water_goal = profile.water_goal_ml if profile else None
+    goals = {
+        "sleep_need_minutes": sleep_need or DEFAULT_SLEEP_NEED,
+        "water_goal_ml": water_goal or DEFAULT_WATER_GOAL,
+        # Said out loud, like the summary's ``defaults_used``.
+        "guideline_goals": [
+            name
+            for name, value in (("sleep_need_minutes", sleep_need), ("water_goal_ml", water_goal))
+            if value is None
+        ],
+    }
+    days = _week_days(session, user, start, 7, goals["sleep_need_minutes"])
+    stop = (start + timedelta(days=7)).isoformat()
+    recipe_dinners = {
+        row.day
+        for row in session.exec(
+            select(FoodEntry).where(
+                FoodEntry.user_id == user,
+                FoodEntry.meal == "dinner",
+                FoodEntry.recipe_path.is_not(None),  # type: ignore[union-attr]
+                FoodEntry.day >= start.isoformat(),
+                FoodEntry.day < stop,
+            )
+        ).all()
+        if row.recipe_path
+    }
+    for record in days:
+        record["recipe_dinner"] = record["day"] in recipe_dinners
+    return days, goals
+
+
+def _challenge_out(session: Session, row: FamilyChallenge, viewer: str) -> dict:
+    start = date.fromisoformat(row.week_start)
+    members = session.exec(
+        select(ChallengeMember).where(ChallengeMember.challenge_id == row.id).order_by(ChallengeMember.joined_at.asc())
+    ).all()
+    scored = []
+    for member in members:
+        days, goals = _challenge_member_days(session, member.user_id, start)
+        result = challenges.progress(
+            row.kind,
+            days,
+            water_goal_ml=goals["water_goal_ml"],
+            sleep_need_minutes=goals["sleep_need_minutes"],
+        )
+        relevant = {"water_days": "water_goal_ml", "sleep_nights": "sleep_need_minutes"}.get(row.kind)
+        scored.append({
+            "user_id": member.user_id,
+            **result,
+            "guideline_goal": relevant in goals["guideline_goals"] if relevant else False,
+        })
+    meta = challenges.KINDS[row.kind]
+    return {
+        "id": row.id,
+        "kind": row.kind,
+        "title": meta["title"],
+        "unit": meta["unit"],
+        "detail": meta["detail"],
+        "week_start": row.week_start,
+        "week_end": (start + timedelta(days=6)).isoformat(),
+        "target_days": row.target_days,
+        "created_by": row.created_by,
+        "joined": any(member.user_id == viewer for member in members),
+        "leaderboard": challenges.leaderboard(scored, row.target_days),
+    }
+
+
+def _challenge_or_404(session: Session, challenge_id: int) -> FamilyChallenge:
+    row = session.get(FamilyChallenge, challenge_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    return row
+
+
+@app.get("/challenges")
+def list_challenges(
+    request: Request,
+    day: str | None = None,
+    session: Session = Depends(get_session),
+):
+    """The family's challenges for the week ``day`` falls in, with live progress.
+
+    Only members' progress is computed, from what they logged; a person who
+    has not joined is never read.
+    """
+    user = _user(request)
+    start = challenges.week_start(date.fromisoformat(_day(day or date.today().isoformat())))
+    rows = session.exec(
+        select(FamilyChallenge)
+        .where(FamilyChallenge.week_start == start.isoformat())
+        .order_by(FamilyChallenge.created_at.asc())
+    ).all()
+    taken = {row.kind for row in rows}
+    return {
+        "week_start": start.isoformat(),
+        "week_end": (start + timedelta(days=6)).isoformat(),
+        "can_create": _may_create_challenge(request, session, user),
+        "kinds": [{"kind": kind, **meta, "taken": kind in taken} for kind, meta in challenges.KINDS.items()],
+        "challenges": [_challenge_out(session, row, user) for row in rows],
+    }
+
+
+@app.post("/challenges")
+def create_challenge(body: ChallengeIn, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    if not _may_create_challenge(request, session, user):
+        raise HTTPException(status_code=403, detail="A parent or another adult starts family challenges.")
+    start = challenges.week_start(date.fromisoformat(_day(body.day)))
+    existing = session.exec(
+        select(FamilyChallenge).where(
+            FamilyChallenge.kind == body.kind, FamilyChallenge.week_start == start.isoformat()
+        )
+    ).first()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="That challenge is already running this week.")
+    row = FamilyChallenge(kind=body.kind, week_start=start.isoformat(), target_days=body.target_days, created_by=user)
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    # Starting a challenge is joining it.
+    session.add(ChallengeMember(challenge_id=row.id, user_id=user))
+    session.commit()
+    return _challenge_out(session, row, user)
+
+
+@app.post("/challenges/{challenge_id}/join")
+def join_challenge(challenge_id: int, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    row = _challenge_or_404(session, challenge_id)
+    member = session.exec(
+        select(ChallengeMember).where(ChallengeMember.challenge_id == challenge_id, ChallengeMember.user_id == user)
+    ).first()
+    if member is None:
+        session.add(ChallengeMember(challenge_id=challenge_id, user_id=user))
+        session.commit()
+    return _challenge_out(session, row, user)
+
+
+@app.delete("/challenges/{challenge_id}/join")
+def leave_challenge(challenge_id: int, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    row = _challenge_or_404(session, challenge_id)
+    member = session.exec(
+        select(ChallengeMember).where(ChallengeMember.challenge_id == challenge_id, ChallengeMember.user_id == user)
+    ).first()
+    if member is not None:
+        session.delete(member)
+        session.commit()
+    return _challenge_out(session, row, user)
+
+
+@app.delete("/challenges/{challenge_id}")
+def delete_challenge(challenge_id: int, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    row = _challenge_or_404(session, challenge_id)
+    if row.created_by != user and not _admin(request):
+        raise HTTPException(status_code=403, detail="Only whoever started the challenge can end it.")
+    for member in session.exec(select(ChallengeMember).where(ChallengeMember.challenge_id == challenge_id)).all():
+        session.delete(member)
+    session.delete(row)
+    session.commit()
+    return {"deleted": challenge_id}
+
+
 # --- export ----------------------------------------------------------------
 
 
@@ -2004,6 +2210,10 @@ def export_data(request: Request, session: Session = Depends(get_session)):
         "shares": [
             {"viewer": row.viewer, "scope": row.scope}
             for row in session.exec(select(HealthShare).where(HealthShare.owner == user)).all()
+        ],
+        "challenges_joined": [
+            {"challenge_id": row.challenge_id, "joined_at": row.joined_at}
+            for row in session.exec(select(ChallengeMember).where(ChallengeMember.user_id == user)).all()
         ],
         "notes": {
             "activity": "Steps and workouts live in geo; request /api/geo/steps and /api/geo/workouts.",

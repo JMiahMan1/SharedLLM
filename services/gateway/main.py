@@ -12602,6 +12602,7 @@ async def _health_json(
     *,
     params: dict | None = None,
     body: dict | None = None,
+    minor_check: bool = False,
 ):
     ident = await _acting_identity(request)
     if not ident:
@@ -12611,6 +12612,8 @@ async def _health_json(
         "X-User-Id": ident["user"],
         "X-User-Is-Admin": "true" if ident.get("is_admin") else "false",
     }
+    if minor_check:
+        headers["X-User-Is-Minor"] = await _health_minor_flag(ident["user"])
     clean_params = {key: value for key, value in (params or {}).items() if value is not None}
     async with shared_http_client() as client:
         resp = await client.request(
@@ -12794,6 +12797,59 @@ async def get_health_family(request: Request, day: str | None = None):
 @app.get("/api/health/export")
 async def export_health(request: Request):
     return await _health_json("GET", "/export", request)
+
+
+async def _health_minor_flag(user: str) -> str:
+    """``true``/``false`` for whether ``user``'s family role is a minor's, else ``unknown``.
+
+    Identity's screen-time read already answers exactly this as ``managed``
+    (family role child or teen). The health service treats anything but an
+    explicit ``false`` as a minor, so an unreachable Identity can never let a
+    child start a family challenge.
+    """
+    try:
+        async with borrow_http_client() as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC}/api/internal/screen-time/{user}",
+                params={"day": _household_now().date().isoformat()},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            if resp.status != 200:
+                return "unknown"
+            managed = ((await resp.json(content_type=None)) or {}).get("managed")
+    except Exception as exc:
+        log.warning("[health] family role lookup failed: %s", exc)
+        return "unknown"
+    return ("true" if managed else "false") if isinstance(managed, bool) else "unknown"
+
+
+# Weekly family challenges: an adult starts one, anyone joins, progress comes
+# from what members logged. The minor flag decides who may start one.
+
+
+@app.get("/api/health/challenges")
+async def get_health_challenges(request: Request, day: str | None = None):
+    return await _health_json("GET", "/challenges", request, params={"day": day}, minor_check=True)
+
+
+@app.post("/api/health/challenges")
+async def post_health_challenge(request: Request):
+    return await _health_json("POST", "/challenges", request, body=await request.json(), minor_check=True)
+
+
+@app.post("/api/health/challenges/{challenge_id}/join")
+async def join_health_challenge(challenge_id: int, request: Request):
+    return await _health_json("POST", f"/challenges/{challenge_id}/join", request)
+
+
+@app.delete("/api/health/challenges/{challenge_id}/join")
+async def leave_health_challenge(challenge_id: int, request: Request):
+    return await _health_json("DELETE", f"/challenges/{challenge_id}/join", request)
+
+
+@app.delete("/api/health/challenges/{challenge_id}")
+async def delete_health_challenge(challenge_id: int, request: Request):
+    return await _health_json("DELETE", f"/challenges/{challenge_id}", request)
 
 
 # --- Scheduled telemetry reports (health/fitness + power) --------------------
