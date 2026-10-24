@@ -158,3 +158,35 @@ def test_a_childs_hard_mornings_tell_the_parents_gently(talk, monkeypatch):
     recent["checkins"] = [{"day": "2026-10-23", "mood": 4}]
     client.put("/api/health/checkins/2026-10-24", json={"mood": 4})
     assert sent == []
+
+
+def test_a_parent_asking_about_their_childs_week_gets_the_recap(monkeypatch):
+    import asyncio
+
+    class _Resp:
+        status = 200
+
+        def __init__(self, body):
+            self._body = body
+
+        async def json(self, content_type=None):
+            return self._body
+
+    class _Client:
+        async def get(self, url, **kw):
+            if url.endswith("/guardian/children"):
+                return _Resp({"children": [
+                    {"username": "emma", "display_name": "Emma", "parents": ["dad", "mom"]},
+                    {"username": "neighbour", "display_name": "Zoe", "parents": ["other"]},
+                ]})
+            return _Resp({"recap": {"has_data": False}})
+
+    @asynccontextmanager
+    async def fake():
+        yield _Client()
+
+    monkeypatch.setattr(gateway_main, "borrow_http_client", fake)
+    answer = asyncio.run(gateway_main._child_week_answer("How was Emma's week?", "dad"))
+    assert answer == "Nothing has been reported from Emma's phone yet this week."
+    assert asyncio.run(gateway_main._child_week_answer("How was Zoe's week?", "dad")) is None  # not his child
+    assert asyncio.run(gateway_main._child_week_answer("turn on the lights", "dad")) is None

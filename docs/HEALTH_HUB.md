@@ -513,8 +513,10 @@ point.
       visited and blocked, how many calls and messages with how many people (never content),
       Bible days and the week's concerns, plus a few highlights. Telemetry sends it to both
       parents on Sunday from 18:00 household time (once per child and week, kept 12 weeks);
-      `GET /api/guardian/recap/{child}` builds it on demand for the parents' page. Not yet: the
-      Jarvis chat answer to "how was Emma's week?".
+      `GET /api/guardian/recap/{child}` builds it on demand for the parents' page. Jarvis chat
+      answers a parent's "how was Emma's week?" / "how is Sam doing?" from the same recap in
+      plain words (`guardian_recap.asked_about` / `spoken`, only for the caller's own children,
+      before any model is asked).
 
 ### Discipleship (what those apps do not have)
 
@@ -611,7 +613,7 @@ bless/block per lane); (4) time budgets and routines;
 DONE (install approvals and "ask a parent" for a site still open);
 (6) monitoring alerts and the weekly recap — DONE (local phrase monitoring, Sunday recap);
 (7) the parents' page and the discipleship surfaces — DONE (parents' page, prayer and
-guidance, talk journal, "I need to talk", burden signals; the Jarvis chat recap is open).
+guidance, talk journal, "I need to talk", burden signals, the Jarvis chat recap).
 
 ## Acceptance
 
