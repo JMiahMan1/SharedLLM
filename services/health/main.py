@@ -30,6 +30,7 @@ from typing import Any
 
 import aiohttp
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -183,7 +184,30 @@ async def require_internal_secret_middleware(request: Request, call_next):
     secret = request.headers.get("X-Internal-Secret") or request.query_params.get("x_internal_secret")
     if not _verify_internal_secret(secret):
         return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+    user = (request.headers.get("X-User-Id") or "").strip().lower()
+    if user and _family_minor(request):
+        await run_in_threadpool(_enforce_kid_mode, user)
     return await call_next(request)
+
+
+def _family_minor(request: Request) -> bool:
+    """The gateway says the caller's family role is a minor's (child or teen).
+
+    Only an explicit ``true`` counts here: this switches kid mode on, so an
+    unreachable Identity (``unknown``) leaves the stored choice alone.
+    """
+    return (request.headers.get("X-User-Is-Minor") or "").strip().lower() == "true"
+
+
+def _enforce_kid_mode(user: str) -> None:
+    """Every minor's profile is in kid mode, whatever was saved (decided
+    2026-10-24). Stored, so every read that checks ``kid_mode`` agrees."""
+    with Session(_db()) as session:
+        profile = session.get(HealthProfile, user)
+        if profile is not None and not profile.kid_mode:
+            profile.kid_mode = True
+            profile.updated_at = utcnow()
+            session.commit()
 
 
 app.include_router(info_router)
@@ -621,8 +645,11 @@ def _metrics_on(session: Session, user: str, profile: HealthProfile | None) -> d
     return preferences.resolve(_stored_metrics(session, user), minor=_is_minor(profile))
 
 
-def _profile_out(session: Session, profile: HealthProfile | None, user: str) -> dict:
-    minor = _is_minor(profile)
+def _profile_out(session: Session, profile: HealthProfile | None, user: str, *, family_minor: bool = False) -> dict:
+    minor = family_minor or _is_minor(profile)
+    # A minor cannot switch kid mode off: by family role, or by a birth year under 18.
+    age = _age_years(profile)
+    kid_mode_locked = family_minor or (age is not None and age < 18)
     switches = {
         "metrics": preferences.resolve(_stored_metrics(session, user), minor=minor),
         "metric_catalog": preferences.catalog(minor=minor),
@@ -638,7 +665,8 @@ def _profile_out(session: Session, profile: HealthProfile | None, user: str) -> 
             "activity_level": "moderate",
             "goal": "maintain",
             "units": "imperial",
-            "kid_mode": False,
+            "kid_mode": family_minor,
+            "kid_mode_locked": kid_mode_locked,
             "sleep_need_minutes": None,
             "water_goal_ml": None,
             "weekly_active_minutes": None,
@@ -646,13 +674,14 @@ def _profile_out(session: Session, profile: HealthProfile | None, user: str) -> 
         }
     data = profile.model_dump()
     data["exists"] = True
+    data["kid_mode_locked"] = kid_mode_locked
     return {**data, **switches}
 
 
 @app.get("/profile")
 def get_profile(request: Request, session: Session = Depends(get_session)):
     user = _user(request)
-    return _profile_out(session, session.get(HealthProfile, user), user)
+    return _profile_out(session, session.get(HealthProfile, user), user, family_minor=_family_minor(request))
 
 
 @app.put("/profile")
@@ -666,6 +695,9 @@ def put_profile(body: ProfileUpdate, request: Request, session: Session = Depend
     metric_changes = changes.pop("metrics", None)
     for key, value in changes.items():
         setattr(profile, key, value)
+    age = _age_years(profile)
+    if _family_minor(request) or (age is not None and age < 18):
+        profile.kid_mode = True
     profile.updated_at = utcnow()
     if metric_changes:
         try:
@@ -681,7 +713,7 @@ def put_profile(body: ProfileUpdate, request: Request, session: Session = Depend
         row.updated_at = utcnow()
     session.commit()
     session.refresh(profile)
-    return _profile_out(session, profile, user)
+    return _profile_out(session, profile, user, family_minor=_family_minor(request))
 
 
 # --- cycle tracking --------------------------------------------------------
@@ -1819,7 +1851,7 @@ def summary(
     user = _user(request)
     day = _day(day or date.today().isoformat())
     profile = session.get(HealthProfile, user)
-    profile_out = _profile_out(session, profile, user)
+    profile_out = _profile_out(session, profile, user, family_minor=_family_minor(request))
 
     defaults: list[str] = []
     sleep_need = profile.sleep_need_minutes if profile else None
@@ -2563,7 +2595,7 @@ def export_data(request: Request, session: Session = Depends(get_session)):
     return {
         "exported_at": utcnow(),
         "user_id": user,
-        "profile": _profile_out(session, session.get(HealthProfile, user), user),
+        "profile": _profile_out(session, session.get(HealthProfile, user), user, family_minor=_family_minor(request)),
         "metrics": [
             _sample_out(row)
             for row in session.exec(

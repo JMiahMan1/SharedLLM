@@ -1574,6 +1574,8 @@ export interface HealthProfile {
   goal: 'lose' | 'maintain' | 'gain' | 'balance';
   units: 'imperial' | 'metric';
   kid_mode: boolean;
+  /** Kid mode is forced on for every minor (family role or a birth year under 18). */
+  kid_mode_locked?: boolean;
   sleep_need_minutes: number | null;
   water_goal_ml: number | null;
   weekly_active_minutes: number | null;

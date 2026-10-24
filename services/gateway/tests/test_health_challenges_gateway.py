@@ -1,4 +1,8 @@
-"""Family challenge proxy: acts as the caller and tells health whether they are a minor."""
+"""Health proxy: acts as the caller and tells health whether they are a minor.
+
+The flag rides on every health call (kid mode is forced for minors, and only
+adults start a family challenge); a definite answer is cached for five minutes.
+"""
 from contextlib import asynccontextmanager
 
 import pytest
@@ -20,6 +24,7 @@ class _Resp:
 def calls(monkeypatch):
     """Record health and identity calls; identity's answer is set per test."""
     recorded: dict = {"health": [], "identity": [], "managed": False, "identity_status": 200}
+    monkeypatch.setattr(gateway_main, "_HEALTH_MINOR_CACHE", {})
 
     async def _ident(_request):
         return {"user": "mom", "is_admin": False}
@@ -80,14 +85,23 @@ def test_identity_down_is_unknown_not_adult(client, calls):
     assert calls["health"][0][2]["headers"]["X-User-Is-Minor"] == "unknown"
 
 
-def test_join_leave_and_delete_proxy_without_a_role_lookup(client, calls):
+def test_every_health_call_carries_the_flag_and_identity_is_asked_once(client, calls):
+    calls["managed"] = True
     client.post("/api/health/challenges/4/join")
     client.delete("/api/health/challenges/4/join")
-    client.delete("/api/health/challenges/4")
-    assert [c[1].rsplit("/challenges", 1)[1] for c in calls["health"]] == ["/4/join", "/4/join", "/4"]
-    assert [c[0] for c in calls["health"]] == ["POST", "DELETE", "DELETE"]
-    assert calls["identity"] == []
-    assert all("X-User-Is-Minor" not in c[2]["headers"] for c in calls["health"])
+    client.get("/api/health/profile")
+    assert [c[0] for c in calls["health"]] == ["POST", "DELETE", "GET"]
+    assert all(c[2]["headers"]["X-User-Is-Minor"] == "true" for c in calls["health"])
+    assert len(calls["identity"]) == 1
+
+
+def test_an_identity_outage_is_not_remembered(client, calls):
+    calls["identity_status"] = 503
+    client.get("/api/health/profile")
+    calls["identity_status"] = 200
+    client.get("/api/health/profile")
+    assert [c[2]["headers"]["X-User-Is-Minor"] for c in calls["health"]] == ["unknown", "false"]
+    assert len(calls["identity"]) == 2
 
 
 def test_anonymous_is_refused(calls, monkeypatch):
