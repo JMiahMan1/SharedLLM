@@ -11,7 +11,7 @@ import { useOptionalWebPlayer } from '../../context/webPlayerContext';
 import { useAccentColor } from '../../hooks/useAccentColor';
 import { useHaptics } from '../../hooks/useHaptics';
 import { api } from '../../services/api';
-import { formatClock } from '../../lib/utils';
+import { formatDuration, formatRemaining } from '../../features/media/format';
 import { proxiedImage } from '../../lib/mediaImage';
 import { useMediaToken } from '../../lib/mediaToken';
 import OutputSheet from './OutputSheet';
@@ -353,7 +353,7 @@ export default function NowPlayingSheet({
                       className="pointer-events-none absolute -top-8 -translate-x-1/2 rounded-lg bg-slate-800 px-2 py-1 text-xs font-medium text-white shadow-lg"
                       style={{ left: `${pct}%` }}
                     >
-                      {formatClock(position)}
+                      {formatDuration(position)}
                     </div>
                   ) : null}
                   <input
@@ -368,13 +368,13 @@ export default function NowPlayingSheet({
                     onBlur={commitSeek}
                     disabled={duration <= 0}
                     aria-label="Playback position"
-                    aria-valuetext={`${formatClock(position)} of ${formatClock(duration)}`}
+                    aria-valuetext={`${formatDuration(position)} of ${formatDuration(duration)}`}
                     className="h-11 w-full cursor-pointer accent-cyan-400 disabled:cursor-default disabled:opacity-50"
                   />
                 </div>
                 <div className="flex justify-between text-xs tabular-nums text-slate-400">
-                  <span>{formatClock(position)}</span>
-                  <span>-{formatClock(Math.max(0, duration - position))}</span>
+                  <span>{formatDuration(position)}</span>
+                  <span>{formatRemaining(position, duration)}</span>
                 </div>
               </div>
 
@@ -544,7 +544,7 @@ export default function NowPlayingSheet({
                 >
                   <Timer size={16} aria-hidden />
                   <span className="max-w-[38vw] truncate">
-                    {sleepAt !== null ? `${sleepLabel} · ${formatClock(sleepLeft)}` : 'Sleep timer'}
+                    {sleepAt !== null ? `${sleepLabel} · ${formatDuration(sleepLeft)}` : 'Sleep timer'}
                   </span>
                 </button>
               </div>

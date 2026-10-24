@@ -24,7 +24,7 @@ import { useOptionalWebPlayer } from '../../context/webPlayerContext';
 import { extractMaImage } from '../../lib/maImage';
 import { proxiedImage } from '../../lib/mediaImage';
 import { useMediaToken } from '../../lib/mediaToken';
-import { formatClock } from '../../lib/utils';
+import { formatDuration } from '../../features/media/format';
 
 const POLL_MS = 5000;
 const MAX_ITEMS = 500;
@@ -168,7 +168,7 @@ function SortableRow({
       </div>
 
       <span className="w-10 shrink-0 text-right text-[11px] tabular-nums text-slate-500">
-        {entry.duration > 0 ? formatClock(entry.duration) : ''}
+        {entry.duration > 0 ? formatDuration(entry.duration) : ''}
       </span>
 
       <button
@@ -414,7 +414,7 @@ export default function QueueSheet({ open, onClose }: { open: boolean; onClose: 
                       </p>
                     </div>
                     <span className="w-10 shrink-0 text-right text-[11px] tabular-nums text-cyan-200/70">
-                      {currentEntry.duration > 0 ? formatClock(currentEntry.duration) : ''}
+                      {currentEntry.duration > 0 ? formatDuration(currentEntry.duration) : ''}
                     </span>
                   </div>
                 </section>
