@@ -11114,6 +11114,32 @@ async def stop_geo_workout(request: Request):
     await _raise_scoped_failure(resp, "Failed to stop workout")
 
 
+@app.post("/api/geo/workouts/import")
+async def import_geo_workouts(request: Request):
+    """Workouts the caller's phone read from Health Connect, for the caller only.
+
+    There is no ``user_id`` in the body to trust: imported sessions always
+    belong to the signed-in account that posts them.
+    """
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    body = await request.json()
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{GEO_SVC}/workouts/import",
+            json=body,
+            headers={
+                "X-Internal-Secret": INTERNAL_SECRET,
+                "X-User-Id": ident["user"],
+            },
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    await _raise_scoped_failure(resp, "Failed to import workouts")
+
+
 @app.post("/api/geo/workouts/{workout_id}/dismiss")
 async def dismiss_geo_workout(request: Request, workout_id: str):
     """Hide an auto-detected workout the person says was not a workout."""

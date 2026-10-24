@@ -43,6 +43,8 @@
     <!-- Apps using Jarvis for UnifiedPush: they must be visible to receive
          their messages and to be raised to the foreground for them. -->
     <queries>
+        <!-- Health Connect's provider, for availability and the permission sheet. -->
+        <package android:name="com.google.android.apps.healthdata" />
         <intent>
             <action android:name="org.unifiedpush.android.connector.MESSAGE" />
         </intent>
@@ -230,6 +232,28 @@
             </intent-filter>
         </activity>
 
+        <!-- Health Connect's privacy-policy links: the rationale on Android
+             13 and below, the permission-usage page on 14+. -->
+        <activity
+            android:name=".HealthPrivacyActivity"
+            android:exported="true"
+            android:label="@string/health_connect_privacy_title"
+            android:theme="@style/AppTheme.NoActionBar">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+        <activity-alias
+            android:name=".HealthPermissionUsageActivity"
+            android:exported="true"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
+            android:targetActivity=".HealthPrivacyActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
+
         <receiver
             android:name=".widgets.WidgetActionReceiver"
             android:exported="false" />
@@ -384,6 +408,19 @@
         </service>
 
     </application>
+
+    <!-- Health Connect import (read only; HealthConnectReader). Steps are
+         deliberately absent: the pedometer already posts them. -->
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY" />
+    <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <uses-permission android:name="android.permission.health.READ_DISTANCE" />
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+    <!-- connect-client needs API 26; every call is gated on Android 9+
+         (HealthConnectReader.supported), where Health Connect exists. -->
+    <uses-sdk tools:overrideLibrary="androidx.health.connect.client" />
 
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.READ_SMS" />

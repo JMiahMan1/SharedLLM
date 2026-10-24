@@ -131,7 +131,7 @@ def _window(candidate: dict) -> dict | None:
     }
 
 
-def _overlaps(candidate: dict, others: Iterable[Any], pad_s: float = 60.0) -> bool:
+def overlaps(candidate: dict, others: Iterable[Any], pad_s: float = 60.0) -> bool:
     start = candidate["start_time"]
     end = candidate["end_time"]
     for other in others:
@@ -231,9 +231,9 @@ def detect_auto_workouts(
 
     kept: list[dict] = []
     for candidate in candidates:
-        if _overlaps(candidate, existing_workouts):
+        if overlaps(candidate, existing_workouts):
             continue
-        if _overlaps(candidate, recent_trips):
+        if overlaps(candidate, recent_trips):
             continue
         if _dismissed(candidate, dismissed_starts):
             continue
