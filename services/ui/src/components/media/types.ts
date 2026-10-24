@@ -43,6 +43,10 @@ export interface MediaStatus {
   app_name?: string | null;
   /** Players grouped with this one (HA entity ids or MA player ids). */
   group_members?: string[];
+  /** When `position` was read (ISO), so the clock can run on from it. */
+  media_position_updated_at?: string | null;
+  shuffle?: boolean | null;
+  repeat?: string | null;
 }
 
 /** Shared row styling: full-width, at least 44 px tall for touch. */

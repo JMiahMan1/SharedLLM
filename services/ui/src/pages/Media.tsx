@@ -7,27 +7,22 @@ import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import { useSharedMAWebPlayer } from '../context/MediaPlayerContext';
 import { errorText } from '../lib/errorText';
-import { formatDeviceLabel } from '../lib/deviceLabels';
-import type { MaPlayerListEntry } from '../lib/deviceLabels';
-import { listRemoteMaPlayers, sendMaRemoteCommand } from '../lib/maRemotePlayer';
+import { sendMaRemoteCommand } from '../lib/maRemotePlayer';
 import { proxiedImage } from '../lib/mediaImage';
 import { useMediaToken } from '../lib/mediaToken';
 import { formatTimeAgo, normalizePlayedAt } from '../features/media/format';
 import { mediaKeys } from '../features/media/api/keys';
 import { useBooksInProgress, usePlaylists, useRecent } from '../features/media/api/queries';
+import { useMediaActions, useMediaStore } from '../features/media/store/mediaStore';
+import { deviceOptions, selectActiveOutputId, selectPlayers } from '../features/media/store/selectors';
+import { useMediaStatusFeed } from '../features/media/engine/statusFeed';
+import { useLivePosition } from '../features/media/engine/useLivePosition';
 import { DeviceSelector } from '../components/media/DeviceSelector';
 import { NowPlayingCard, type NowPlayingView } from '../components/media/NowPlayingCard';
 import { MediaExplorer } from '../components/media/MediaExplorer';
-import type { DeviceOption, MediaStatus, PlayRequest, QueueOption } from '../components/media/types';
+import type { DeviceOption, PlayRequest, QueueOption } from '../components/media/types';
 
 /* helpers */
-
-const STATUS_POLL_MS = 3000;
-/** After the user moves a volume slider, ignore polled volumes this long. */
-const VOLUME_GRACE_MS = 4000;
-
-const playerState = (s?: string): NowPlayingView['state'] =>
-  s === 'playing' || s === 'buffering' ? 'playing' : s === 'paused' ? 'paused' : 'idle';
 
 interface ShelfItem {
   key: string;
@@ -95,87 +90,31 @@ const Media = () => {
   useMediaToken();
 
   /** '' = this device's web player, `ma:<id>` = an MA-only player, else an HA entity. */
-  const [searchParams] = useSearchParams();
-  const requestedOutput = searchParams.get('output') ?? '';
-  const [selectedTarget, setSelectedTarget] = useState(requestedOutput);
+  const selectedTarget = useMediaStore(selectActiveOutputId);
+  const players = useMediaStore(selectPlayers);
+  const { selectOutput, setVolume: storeVolume, setMuted: storeMuted, patchPlayer } = useMediaActions();
   const isWebPlayer = !selectedTarget;
   const selectedRef = useRef(selectedTarget);
   useEffect(() => {
     selectedRef.current = selectedTarget;
   }, [selectedTarget]);
-  // Once the person picks a device the page stops second-guessing them; until
-  // then, a speaker that is already playing is followed automatically so the
-  // page never shows an empty card over live music. Arriving from the output
-  // picker's "Control" action counts as a choice.
-  const userPickedRef = useRef(Boolean(requestedOutput));
+  // Arriving from the output picker's "Control" action is a choice; until the
+  // person picks, the store follows a speaker that is already playing so the
+  // page never shows an empty card over live music.
+  const [searchParams] = useSearchParams();
+  const requestedOutput = searchParams.get('output');
+  useEffect(() => {
+    if (requestedOutput) selectOutput(requestedOutput);
+  }, [requestedOutput, selectOutput]);
 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [players, setPlayers] = useState<MediaStatus[]>([]);
-  const [maPlayers, setMaPlayers] = useState<MaPlayerListEntry[]>([]);
   const [showExplorer, setShowExplorer] = useState(false);
-
-  // Remote (HA / MA) volume, position and duration.
-  const [volume, setVolume] = useState(50);
-  const [muted, setMuted] = useState(false);
-  const lastVolumeChangeRef = useRef(0);
   const volumeTimerRef = useRef<number | null>(null);
-  const [remoteTime, setRemoteTime] = useState(0);
 
   /* device status */
 
-  const refreshStatus = useCallback(async () => {
-    try {
-      const resp = await api.mediaStatus();
-      if (resp.status !== 'SUCCESS' || !resp.detail) return;
-      const detail = resp.detail as { active?: MediaStatus | null; all_players?: MediaStatus[] };
-      const active = detail.active;
-      // `active` carries the richest view of the playing device; prefer it.
-      const all = (detail.all_players || [])
-        .filter((p) => p.entity_id && p.entity_id !== 'web_player')
-        .map((p) => (active && p.entity_id === active.entity_id ? { ...p, ...active } : p));
-      setPlayers(all);
-      if (
-        active?.entity_id && active.entity_id !== 'web_player' && playerState(active.state) === 'playing' &&
-        !userPickedRef.current && !selectedRef.current
-      ) {
-        userPickedRef.current = true; // adopt once
-        setSelectedTarget(active.entity_id);
-        if (!all.some((p) => p.entity_id === active.entity_id)) setPlayers([active, ...all]);
-      }
-    } catch {
-      /* the next poll retries */
-    }
-  }, []);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- polling an external service
-    void refreshStatus();
-    const id = window.setInterval(() => {
-      if (!document.hidden) void refreshStatus();
-    }, STATUS_POLL_MS);
-    return () => clearInterval(id);
-  }, [refreshStatus]);
-
-  // Music Assistant players that Home Assistant does not also expose. Use the
-  // web player's control socket when it is already connected; otherwise ask the
-  // gateway, so a remote speaker never requires this browser to become a player.
-  const { isConnected: maConnected, listMaPlayers } = maPlayer;
-  const isMaTarget = selectedTarget.startsWith('ma:');
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      const list = maConnected ? await listMaPlayers() : await listRemoteMaPlayers();
-      if (!cancelled) setMaPlayers((prev) => (JSON.stringify(prev) === JSON.stringify(list) ? prev : list));
-    };
-    void load();
-    // A selected MA player's state only comes from here, so keep it fresh.
-    const id = isMaTarget ? window.setInterval(() => { if (!document.hidden) void load(); }, STATUS_POLL_MS * 2) : null;
-    return () => {
-      cancelled = true;
-      if (id !== null) clearInterval(id);
-    };
-  }, [maConnected, listMaPlayers, isMaTarget]);
+  const { refresh: refreshStatus } = useMediaStatusFeed(maPlayer);
 
   const { data: entities = [] } = useQuery({
     queryKey: mediaKeys.entities(),
@@ -184,77 +123,20 @@ const Media = () => {
     staleTime: 60_000,
   });
 
-  const devices = useMemo<DeviceOption[]>(() => {
-    const byId = new Map<string, DeviceOption>();
-    const statusById = new Map(players.map((p) => [p.entity_id as string, p]));
-    for (const e of entities) {
-      const p = statusById.get(e.entity_id);
-      const state = p?.state ?? e.state;
-      byId.set(e.entity_id, {
-        id: e.entity_id,
-        name: formatDeviceLabel(e.friendly_name, p?.friendly_name, e.entity_id),
-        detail: p?.icon_kind === 'tv' ? 'TV' : state === 'playing' ? 'Playing' : 'Speaker',
-        online: state !== 'unavailable' && state !== 'unknown',
-      });
-    }
-    for (const p of players) {
-      if (byId.has(p.entity_id as string)) continue;
-      byId.set(p.entity_id as string, {
-        id: p.entity_id as string,
-        name: formatDeviceLabel(p.friendly_name, p.entity_id),
-        detail: p.icon_kind === 'tv' ? 'TV' : p.state === 'playing' ? 'Playing' : 'Speaker',
-        online: p.state !== 'unavailable' && p.state !== 'unknown',
-      });
-    }
-    // Most MA players are Home Assistant entities too; list those once. Our own
-    // web player is the "This device" chip.
-    const covered = new Set<string>([...byId.keys(), ...players.map((p) => p.ma_player_id || '').filter(Boolean)]);
-    for (const p of maPlayers) {
-      if (covered.has(p.player_id) || p.player_id === maPlayer.playerId) continue;
-      byId.set(`ma:${p.player_id}`, { id: `ma:${p.player_id}`, name: p.name, detail: 'Music Assistant', online: p.available });
-    }
-    return [...byId.values()].sort((a, b) => Number(b.online) - Number(a.online));
-  }, [entities, players, maPlayers, maPlayer.playerId]);
+  const devices = useMemo<DeviceOption[]>(
+    () => deviceOptions(entities, players, maPlayer.playerId),
+    [entities, players, maPlayer.playerId],
+  );
 
   const selectedDevice = devices.find((d) => d.id === selectedTarget);
-  const remoteStatus = useMemo<MediaStatus | null>(() => {
-    if (!selectedTarget) return null;
-    if (isMaTarget) {
-      const p = maPlayers.find((m) => `ma:${m.player_id}` === selectedTarget);
-      return p ? { entity_id: selectedTarget, friendly_name: p.name, state: p.state } : null;
-    }
-    return players.find((p) => p.entity_id === selectedTarget) ?? null;
-  }, [selectedTarget, isMaTarget, maPlayers, players]);
-
-  // Follow the device's volume unless the person is moving the slider.
-  useEffect(() => {
-    if (!remoteStatus || Date.now() - lastVolumeChangeRef.current < VOLUME_GRACE_MS) return;
-    /* eslint-disable react-hooks/set-state-in-effect -- mirror polled device state */
-    if (typeof remoteStatus.volume_level === 'number') setVolume(Math.round(remoteStatus.volume_level * 100));
-    if (typeof remoteStatus.is_volume_muted === 'boolean') setMuted(remoteStatus.is_volume_muted);
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [remoteStatus]);
-
-  // Position: take each poll, and tick between polls while playing. A poll
-  // within 3 s of the ticked value is ignored so the clock does not stutter.
-  const remotePos = remoteStatus?.position ?? 0;
-  const remotePlaying = playerState(remoteStatus?.state) === 'playing';
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirror polled position
-    setRemoteTime((prev) => (remotePlaying && prev > 0 && Math.abs(remotePos - prev) < 3 ? prev : remotePos));
-  }, [remotePos, remotePlaying, remoteStatus?.media_content_id]);
-  const remoteDuration = remoteStatus?.duration ?? 0;
-  useEffect(() => {
-    if (!remotePlaying) return;
-    const id = window.setInterval(() => {
-      setRemoteTime((t) => (remoteDuration > 0 && t >= remoteDuration ? remoteDuration : t + 1));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [remotePlaying, remoteDuration]);
+  const remote = selectedTarget ? players[selectedTarget] ?? null : null;
+  const volume = remote?.volume ?? 50;
+  const muted = remote?.muted ?? false;
+  const remotePosition = useLivePosition(remote);
 
   /* favourites (Music Assistant items) */
 
-  const activeUri = isWebPlayer ? maPlayer.mediaUri : remoteStatus?.media_content_id || null;
+  const activeUri = isWebPlayer ? maPlayer.mediaUri : remote?.item?.uri || null;
   const maItemUri = activeUri && activeUri.includes('://') ? activeUri : null;
   const { data: detail } = useQuery({
     queryKey: mediaKeys.detail(maItemUri ?? ''),
@@ -359,9 +241,7 @@ const Media = () => {
         // Keep the card in step until the next poll; the poll remains the
         // authority, so a command MA accepted but could not act on self-corrects.
         const nextState = command === 'pause' ? 'paused' : command === 'stop' ? 'idle' : command === 'play' || command === 'resume' ? 'playing' : null;
-        if (nextState) {
-          setMaPlayers((prev) => prev.map((p) => (p.player_id === pid ? { ...p, state: nextState } : p)));
-        }
+        if (nextState) patchPlayer(target, { status: nextState });
       } else {
         const resp = await api.mediaTransport({ entity_id: target, command });
         if (resp.status === 'FAILURE') throw new Error(resp.message || 'Command failed');
@@ -372,7 +252,7 @@ const Media = () => {
     } finally {
       setBusy(null);
     }
-  }, [refreshStatus, trigger]);
+  }, [patchPlayer, refreshStatus, trigger]);
 
   const runWeb = useCallback(async (command: string, fn: () => Promise<unknown>) => {
     void trigger('light');
@@ -389,9 +269,7 @@ const Media = () => {
   const handleRemoteVolume = useCallback((v: number) => {
     const target = selectedRef.current;
     if (!target) return;
-    lastVolumeChangeRef.current = Date.now();
-    setVolume(v);
-    setMuted(false);
+    storeVolume(target, v);
     if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current);
     volumeTimerRef.current = window.setTimeout(() => {
       const send = target.startsWith('ma:')
@@ -399,27 +277,26 @@ const Media = () => {
         : api.mediaTransport({ entity_id: target, command: 'volume_set', volume_level: v / 100 });
       void Promise.resolve(send).catch(() => toast.error('Could not change the volume'));
     }, 200);
-  }, []);
+  }, [storeVolume]);
 
   const toggleRemoteMute = useCallback(() => {
     const target = selectedRef.current;
     if (!target) return;
     const next = !muted;
-    lastVolumeChangeRef.current = Date.now();
-    setMuted(next);
+    storeMuted(target, next);
     const send = target.startsWith('ma:')
       ? sendMaRemoteCommand('players/cmd/volume_mute', { player_id: target.slice(3), muted: next })
       : api.mediaTransport({ entity_id: target, command: 'volume_mute', muted: next });
     void Promise.resolve(send).catch(() => {
-      setMuted(!next);
+      storeMuted(target, !next);
       toast.error('Could not mute that player');
     });
-  }, [muted]);
+  }, [muted, storeMuted]);
 
   const handleRemoteSeek = useCallback(async (seconds: number) => {
     const target = selectedRef.current;
     if (!target) return;
-    setRemoteTime(seconds);
+    patchPlayer(target, { positionSec: seconds, positionUpdatedAt: Date.now() });
     try {
       if (target.startsWith('ma:')) {
         await sendMaRemoteCommand('player_queues/seek', { queue_id: target.slice(3), position: Math.round(seconds) });
@@ -431,19 +308,18 @@ const Media = () => {
       // The optimistic position snaps back on the next poll; say why.
       toast.error('Could not seek on that player');
     }
-  }, []);
+  }, [patchPlayer]);
 
   const selectDevice = useCallback((id: string) => {
     void trigger('light');
-    userPickedRef.current = true;
-    setSelectedTarget(id);
+    selectOutput(id);
     setError(null);
     // Remember the choice server-side (voice "pause" and the dashboard follow
     // it). The web player records itself once it plays.
     if (id && !id.startsWith('ma:')) {
       void api.syncMediaState({ entity_id: id, state: 'idle' }).catch(() => {});
     }
-  }, [trigger]);
+  }, [selectOutput, trigger]);
 
   /* shelves */
 
@@ -492,13 +368,13 @@ const Media = () => {
   /* render */
 
   const remoteView: NowPlayingView = {
-    title: detail?.name && maItemUri === remoteStatus?.media_content_id ? detail.name : remoteStatus?.media_title,
-    artist: [remoteStatus?.media_artist, remoteStatus?.media_album].filter(Boolean).join(' · '),
-    coverUrl: proxiedImage(remoteStatus?.entity_picture),
-    state: playerState(remoteStatus?.state),
-    position: remoteTime,
-    duration: remoteDuration,
-    trackKey: remoteStatus?.media_content_id || remoteStatus?.media_title || '',
+    title: detail?.name && maItemUri === remote?.item?.uri ? detail.name : remote?.item?.title,
+    artist: [remote?.item?.artist, remote?.item?.album].filter(Boolean).join(' · '),
+    coverUrl: proxiedImage(remote?.item?.image),
+    state: remote?.status === 'buffering' ? 'playing' : remote?.status ?? 'idle',
+    position: remotePosition,
+    duration: remote?.item?.durationSec ?? 0,
+    trackKey: remote?.item?.uri || remote?.item?.title || '',
   };
   const webView: NowPlayingView = {
     title: maPlayer.mediaTitle || undefined,
@@ -564,7 +440,7 @@ const Media = () => {
         idleHint={isWebPlayer ? 'Pick something below to play it here' : `Pick something below to play on ${selectedDevice?.name || 'this speaker'}`}
         footer={isWebPlayer ? webFooter : (
           <p className="text-sm text-purple-300 text-center truncate">
-            {selectedDevice && !selectedDevice.online ? `${selectedDevice.name} is offline` : `Playing through ${selectedDevice?.name || remoteStatus?.friendly_name || 'the selected speaker'}`}
+            {selectedDevice && !selectedDevice.online ? `${selectedDevice.name} is offline` : `Playing through ${selectedDevice?.name || remote?.name || 'the selected speaker'}`}
           </p>
         )}
         onPrevious={isWebPlayer ? () => void runWeb('previous', maPlayer.previous) : () => void sendTransport('previous')}

@@ -126,3 +126,58 @@ export type MediaSchemaName =
   | 'MediaFavoritesResponse'
   | 'AbsProgressRequest'
   | 'AbsProgressResponse'
+
+/* Playback domain (§6.3). The web player's own state stays in
+   `useMAWebPlayer`; these describe every other output in the house. */
+
+/** Where playback goes: '' is this device, `ma:<id>` a Music Assistant player
+ *  Home Assistant does not expose, anything else a Home Assistant entity id. */
+export type OutputId = string
+
+export const THIS_DEVICE: OutputId = ''
+
+export type OutputKind = 'web' | 'ma' | 'ha'
+
+export function outputKind(id: OutputId): OutputKind {
+  if (!id) return 'web'
+  return id.startsWith('ma:') ? 'ma' : 'ha'
+}
+
+export type PlaybackStatus = 'idle' | 'playing' | 'paused' | 'buffering'
+
+export type RepeatMode = 'off' | 'all' | 'one'
+
+/** What a remote output is playing. */
+export interface NowPlayingItem {
+  uri: string
+  title: string
+  artist: string
+  album: string
+  image: string
+  durationSec: number
+}
+
+/** A remote output as the store knows it: fed by the status poll, Music
+ *  Assistant's player list and the media event stream. */
+export interface RemotePlayer {
+  id: OutputId
+  kind: Exclude<OutputKind, 'web'>
+  name: string
+  available: boolean
+  status: PlaybackStatus
+  item: NowPlayingItem | null
+  /** Position at `positionUpdatedAt` (ms epoch); see `livePosition`. */
+  positionSec: number
+  positionUpdatedAt: number
+  /** 0-100, or null when the device does not report one. */
+  volume: number | null
+  muted: boolean
+  shuffle: boolean | null
+  repeat: RepeatMode | null
+  groupMembers: string[]
+  iconKind: 'tv' | 'speaker'
+  maPlayerId: string | null
+  appName: string | null
+  /** Bumped on every queue change, so queue views know to refetch. */
+  queueVersion: number
+}

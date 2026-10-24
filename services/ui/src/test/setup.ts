@@ -4,6 +4,7 @@ import { cleanup, configure } from '@testing-library/react';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { mediaHandlers } from './msw/handlers/media';
+import { resetMediaStore } from '../features/media/store/mediaStore';
 
 const defaultUser = {
   id: 1,
@@ -1138,6 +1139,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  // The media store is a module singleton; each test starts from a fresh one.
+  resetMediaStore();
   telemetrySchedules = [];
   notesWriteCalls.length = 0;
   notesCheckOffCalls.length = 0;
