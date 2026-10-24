@@ -56,6 +56,9 @@ const PLAYER_ID_STORAGE = 'sendspin_webplayer_id';
 const MAX_RECONNECT_ATTEMPTS = 10;
 const CONNECT_TIMEOUT_MS = 15_000;
 const RPC_TIMEOUT_MS = 10_000;
+/** How long a fresh connection waits for MA to list this player as available. */
+const PLAYER_READY_TIMEOUT_MS = 8_000;
+const PLAYER_READY_POLL_MS = 300;
 
 function storedPlayerId(): string {
   try {
@@ -104,19 +107,29 @@ function buildMediaArtwork(img?: string | null): MediaImage[] {
   return [{ src, sizes: '512x512', type: 'image/png' }];
 }
 
+/** A short human name, or '' for anything else (an object, a JSON blob):
+ *  the player name is shown in Music Assistant and Home Assistant. */
+function plainName(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const name = value.trim();
+  return name && name.length <= 40 && !/[{}"]/.test(name) ? name : '';
+}
+
 function clientName(): string {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   let userName = '';
   try {
-    const rawUser = storageGetSync('jarvis_user');
-    if (rawUser) {
-      const parsed = typeof rawUser === 'string' ? JSON.parse(rawUser) : rawUser;
-      userName = parsed.display_name || parsed.username || '';
+    let parsed: unknown = storageGetSync('jarvis_user');
+    // The profile is stored as JSON; an older build stored it encoded twice.
+    for (let i = 0; i < 2 && typeof parsed === 'string'; i += 1) parsed = JSON.parse(parsed);
+    if (parsed && typeof parsed === 'object') {
+      const user = parsed as { display_name?: unknown; username?: unknown };
+      userName = plainName(user.display_name) || plainName(user.username);
     }
   } catch {
     // Not JSON
   }
-  if (!userName) userName = storageGetSync('username') || '';
+  if (!userName) userName = plainName(storageGetSync('username'));
   return `${userName ? userName + "'s " : ''}Web Player (${isMobile ? 'Mobile' : 'Desktop'})`;
 }
 
@@ -473,6 +486,15 @@ export function useMAWebPlayer() {
       });
       if (sendspinWs.readyState !== WebSocket.OPEN) throw new Error('The audio stream closed while connecting');
 
+      // MA registers a new Sendspin player a moment after the handshake; a
+      // command sent before then fails with "The player is not available".
+      const readyBy = Date.now() + PLAYER_READY_TIMEOUT_MS;
+      while (Date.now() < readyBy) {
+        const info = await sendJsonRpc('players/get', { player_id: pid }).catch(() => null) as { available?: boolean } | null;
+        if (info?.available) break;
+        await new Promise((r) => setTimeout(r, PLAYER_READY_POLL_MS));
+      }
+
       reconnectAttemptsRef.current = 0;
       setStateLocal(s => ({
         ...s,
@@ -491,7 +513,7 @@ export function useMAWebPlayer() {
       console.warn('[MAWebPlayer] connect failed:', msg);
       throw new Error(msg, { cause: err });
     }
-  }, [teardown, setError, handleMaEvent, handleConnectionLost]);
+  }, [teardown, setError, handleMaEvent, handleConnectionLost, sendJsonRpc]);
 
   /** Connect once, sharing the attempt with anyone who asks meanwhile. */
   const initPlayer = useCallback((): Promise<boolean> => {
@@ -606,6 +628,13 @@ export function useMAWebPlayer() {
       throw new Error(msg, { cause: err });
     }
   }, [unlockAudio, ensureConnected, runOwn, sendJsonRpc, setError]);
+
+  /** Put `mediaUri` into this player's queue: after the current item
+   *  ('next') or at the end ('add'), without interrupting what plays. */
+  const enqueue = useCallback(async (mediaUri: string, option: 'next' | 'add') => {
+    await ensureConnected();
+    await sendJsonRpc('player_queues/play_media', { queue_id: playerIdRef.current, media: mediaUri, option }, true);
+  }, [ensureConnected, sendJsonRpc]);
 
   const pause = useCallback(async () => {
     playerRef.current?.sendCommand('pause', undefined);
@@ -785,6 +814,7 @@ export function useMAWebPlayer() {
     reconnect,
     disconnect,
     play,
+    enqueue,
     pause,
     stop,
     seek,

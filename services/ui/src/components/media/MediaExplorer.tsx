@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  BookOpen, ChevronLeft, ChevronRight, Clock, Grid3X3, Library, List, Loader2, Mic2, Music, Search, Users, X,
+  BookOpen, ChevronLeft, ChevronRight, Clock, Grid3X3, Library, List, ListEnd, ListStart, Loader2, Mic2, Music, Search, Users, X,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
-import { ROW_CLASS, type PlayHandler, type PlayRequest } from './types';
+import { ROW_CLASS, type PlayHandler, type PlayRequest, type QueueHandler, type QueueOption } from './types';
 
 function Loading() {
   return (
@@ -72,7 +72,13 @@ function PlayRow({
  * Music Assistant search, playlists and recents, and Audiobookshelf libraries,
  * books and podcasts.
  */
-export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClose: () => void; onPlay: PlayHandler }) {
+export function MediaExplorer({ open, onClose, onPlay, onQueue }: {
+  open: boolean;
+  onClose: () => void;
+  onPlay: PlayHandler;
+  /** Queue a Music Assistant item on the selected device instead of playing it now. */
+  onQueue?: QueueHandler;
+}) {
   const [tab, setTab] = useState<'ma' | 'abs'>('ma');
   const [search, setSearch] = useState('');
   const [library, setLibrary] = useState<{ id: string; name: string; mediaType?: string } | null>(null);
@@ -145,17 +151,46 @@ export function MediaExplorer({ open, onClose, onPlay }: { open: boolean; onClos
     setBusyKey(key);
     void onPlay(req, key).finally(() => setBusyKey(null));
   };
-  const row = (key: string, req: PlayRequest, icon: ReactNode, subtitle?: string, badge?: string) => (
-    <li key={key}>
-      <PlayRow
-        icon={icon}
-        title={req.title}
-        subtitle={subtitle}
-        badge={badge}
-        busy={busyKey === key}
+  const queue = (req: PlayRequest, key: string, option: QueueOption) => {
+    setBusyKey(`${key}:${option}`);
+    void onQueue!(req, option).finally(() => setBusyKey(null));
+  };
+  const queueButton = (req: PlayRequest, key: string, option: QueueOption) => {
+    const label = option === 'next' ? `Play ${req.title} next` : `Add ${req.title} to the queue`;
+    return (
+      <button
+        type="button"
+        aria-label={label}
+        title={option === 'next' ? 'Play next' : 'Add to queue'}
         disabled={busyKey !== null}
-        onClick={() => play(req, key)}
-      />
+        onClick={() => queue(req, key, option)}
+        className="min-h-11 min-w-11 shrink-0 flex items-center justify-center rounded-xl bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-50"
+      >
+        {busyKey === `${key}:${option}`
+          ? <Loader2 size={16} className="animate-spin text-cyan-300" />
+          : option === 'next' ? <ListStart size={16} /> : <ListEnd size={16} />}
+      </button>
+    );
+  };
+  const row = (key: string, req: PlayRequest, icon: ReactNode, subtitle?: string, badge?: string) => (
+    <li key={key} className="flex items-center gap-1.5">
+      <div className="min-w-0 flex-1">
+        <PlayRow
+          icon={icon}
+          title={req.title}
+          subtitle={subtitle}
+          badge={badge}
+          busy={busyKey === key}
+          disabled={busyKey !== null}
+          onClick={() => play(req, key)}
+        />
+      </div>
+      {onQueue && req.kind === 'uri' && (
+        <>
+          {queueButton(req, key, 'next')}
+          {queueButton(req, key, 'add')}
+        </>
+      )}
     </li>
   );
   const podcastRow = (id: string, title: string, subtitle?: string) => (

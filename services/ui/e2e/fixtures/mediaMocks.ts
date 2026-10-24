@@ -337,6 +337,8 @@ export async function mockMaJsonRpc(
       if (req.command === 'players/all' && options.players) result = options.players;
       else if (req.command === 'player_queues/get' && options.queue) result = options.queue;
       else if (req.command === 'player_queues/items' && options.items) result = options.items;
+      // The web player waits for MA to list itself as available after connecting.
+      else if (req.command === 'players/get') result = { player_id: req.args?.player_id, available: true };
       ws.send(JSON.stringify({ message_id: req.message_id, result }));
     });
   });

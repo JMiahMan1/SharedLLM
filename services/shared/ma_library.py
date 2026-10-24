@@ -287,7 +287,7 @@ async def resolve_audiobook_uri(
             # A *lookup* miss will not fix itself on retry. Only transport-level
             # failures are worth a second attempt.
             raise
-        except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+        except Exception as exc:  # reported, never swallowed
             last_error = exc
             log.warning(
                 "[ma_library] attempt %s/%s failed for %s: %s",

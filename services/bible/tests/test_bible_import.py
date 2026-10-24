@@ -479,17 +479,12 @@ def test_an_upload_is_stored_and_installed(loaded_client: TestClient, corpus_fil
     monkeypatch_target = tmp_path / "uploads"
     monkeypatch_target.mkdir()
 
-    monkeypatch.setattr(main_module, "_import_dir", lambda: target)
-    original = main_module._import_dir
-    main_module._import_dir = lambda: monkeypatch_target
-    try:
-        response = loaded_client.post(
-            "/admin/imports/upload",
-            files={"file": ("mini.json", corpus_file.read_bytes(), "application/json")},
-            data={"code": "nkjv"},
-        )
-    finally:
-        main_module._import_dir = original
+    monkeypatch.setattr(main_module, "_import_dir", lambda: monkeypatch_target)
+    response = loaded_client.post(
+        "/admin/imports/upload",
+        files={"file": ("mini.json", corpus_file.read_bytes(), "application/json")},
+        data={"code": "nkjv"},
+    )
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["status"] == "succeeded"

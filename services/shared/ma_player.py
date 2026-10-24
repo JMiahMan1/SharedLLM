@@ -7,7 +7,8 @@ truth here so media status, ABS, media play, and Roku sibling lookup agree.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
 def is_music_assistant_player(
@@ -40,9 +41,7 @@ def is_music_assistant_player(
     )
     if not looks_ma:
         return False
-    if require_active_queue and active_queue is None:
-        return False
-    return True
+    return not (require_active_queue and active_queue is None)
 
 
 def ma_player_id(

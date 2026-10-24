@@ -4,6 +4,8 @@ import { renderHook, act } from '@testing-library/react';
 /** A WebSocket the test opens and closes by hand. */
 class FakeSocket {
   static instances: FakeSocket[] = [];
+  /** The player names handed to Sendspin, newest last. */
+  static clientNames: string[] = [];
   static OPEN = 1;
   static CONNECTING = 0;
   static CLOSED = 3;
@@ -23,8 +25,20 @@ class FakeSocket {
   removeEventListener(type: string, fn: (e: unknown) => void) {
     this.listeners[type] = (this.listeners[type] || []).filter((f) => f !== fn);
   }
+  /** How many `players/get` answers report the player unavailable first. */
+  static unavailableAnswers = 0;
   send(data: string) {
     this.sent.push(data);
+    // Answer like MA: a new Sendspin player is listed a moment after connecting.
+    const msg = JSON.parse(data) as { message_id: string; command: string };
+    if (msg.command === 'players/get') {
+      const available = FakeSocket.unavailableAnswers <= 0;
+      FakeSocket.unavailableAnswers -= 1;
+      queueMicrotask(() => {
+        const e = { data: JSON.stringify({ message_id: msg.message_id, result: { available } }) };
+        for (const fn of this.listeners.message || []) fn(e);
+      });
+    }
   }
   open() {
     this.readyState = 1;
@@ -48,8 +62,9 @@ vi.mock('@sendspin/sendspin-js', () => ({
     muted = false;
     trackProgress = null;
     core: { wsManager: { ws: FakeSocket }; isConnected: boolean };
-    constructor(opts: { webSocket: FakeSocket }) {
+    constructor(opts: { webSocket: FakeSocket; clientName: string }) {
       this.core = { wsManager: { ws: opts.webSocket }, isConnected: true };
+      FakeSocket.clientNames.push(opts.clientName);
     }
     async connect() {
       this.core.wsManager.ws.open();
@@ -60,7 +75,10 @@ vi.mock('@sendspin/sendspin-js', () => ({
     sendCommand() {}
   },
 }));
-vi.mock('../lib/storage', () => ({ storageGetSync: (k: string) => (k === 'jarvis_api_key' ? 'test-key' : null) }));
+const stored = vi.hoisted(() => ({ values: {} as Record<string, string> }));
+vi.mock('../lib/storage', () => ({
+  storageGetSync: (k: string) => (k === 'jarvis_api_key' ? 'test-key' : stored.values[k] ?? null),
+}));
 
 import { useMAWebPlayer, reconnectDelayMs } from '../lib/maWebPlayer';
 
@@ -83,6 +101,9 @@ async function connected() {
 
 beforeEach(() => {
   FakeSocket.instances = [];
+  FakeSocket.clientNames = [];
+  FakeSocket.unavailableAnswers = 0;
+  stored.values = {};
   vi.stubGlobal('WebSocket', FakeSocket);
 });
 afterEach(() => {
@@ -101,6 +122,38 @@ describe('the web player connection', () => {
     expect(result.current.connectionState).toBe('CONNECTED');
     expect(sockets('/api/sendspin')[0].url).toContain('token=test-key');
     expect(lastControl().url).toContain('token=test-key');
+  });
+
+  it('names the player after the person, even from a profile stored twice-encoded', async () => {
+    stored.values = { jarvis_user: JSON.stringify(JSON.stringify({ display_name: 'Jeremiah' })) };
+    await connected();
+    expect(FakeSocket.clientNames.at(-1)).toMatch(/^Jeremiah's Web Player/);
+  });
+
+  it('never names the player with a stored blob of data', async () => {
+    stored.values = { jarvis_user: 'not json', username: '{"id":1,"username":"default"}' };
+    await connected();
+    expect(FakeSocket.clientNames.at(-1)).toMatch(/^Web Player \(/);
+  });
+
+  it('waits for MA to list the new player before playing on it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    FakeSocket.unavailableAnswers = 2;
+    const hook = renderHook(() => useMAWebPlayer());
+    let played: Promise<void> | undefined;
+    act(() => {
+      played = hook.result.current.play('library://track/1');
+    });
+    await act(async () => {
+      await Promise.resolve();
+      lastControl().open();
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    const commands = lastControl().sent.map((s) => (JSON.parse(s) as { command: string }).command);
+    // Asked until available, and only then told to play.
+    expect(commands.filter((c) => c === 'players/get')).toHaveLength(3);
+    expect(commands.indexOf('player_queues/play_media')).toBeGreaterThan(commands.lastIndexOf('players/get'));
+    void played?.catch(() => {});
   });
 
   it('reconnects by itself when the network drops the control socket', async () => {

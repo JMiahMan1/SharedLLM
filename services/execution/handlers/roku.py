@@ -140,8 +140,20 @@ async def find_ma_player_sibling(ha_url: str, ha_token: str, roku_entity: str) -
     return None
 
 
+def _ma_uri_type(query: str) -> str | None:
+    """The media type of a Music Assistant URI ("library://playlist/5" -> "playlist").
+
+    None for a plain search phrase or a web address.
+    """
+    scheme, sep, rest = query.partition("://")
+    if not sep or scheme.lower() in ("http", "https"):
+        return None
+    kind = rest.split("/", 1)[0]
+    return kind or None
+
+
 async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: str,
-                          mass_config_entry_id: str = "") -> ExecutionResult:
+                          mass_config_entry_id: str = "", enqueue: str = "replace") -> ExecutionResult:
     """
     Play music on Roku using the two-part approach:
     1. Launch Media Assistant (782875) via ECP for the UI
@@ -162,7 +174,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
         if ma_entity:
             result = await ha_client.call_service(
                 ha_url, ha_token, "music_assistant", "play_media", ma_entity,
-                {"media_id": query, "media_type": "track", "enqueue": "play"},
+                {"media_id": query, "media_type": _ma_uri_type(query) or "track", "enqueue": enqueue},
             )
             if result.get("ok"):
                 return ExecutionResult(status="SUCCESS", message=f"Playing '{query}' on {roku_entity} (MA only).", service="roku_music")
@@ -174,22 +186,30 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     import aiohttp
     params = {"t": "a", "autoplay": "true"}
 
-    search_result = await ha_client.call_service(
-        ha_url, ha_token, "music_assistant", "search", entity_id="",
-        service_data={
-            "config_entry_id": mass_config_entry_id,
-            "name": query,
-            "media_type": ["track", "artist", "album", "playlist"],
-            "limit": 1,
-        },
-        return_response=True,
-    )
-
     song_name = query
     artist_name = ""
     ma_media_id = query
     ma_media_type = "track"
     full_library_uri = None
+
+    # A Music Assistant item picked in the app (a playlist, album, track) is
+    # played as given; searching its URI as a name would find something else.
+    uri_type = _ma_uri_type(query)
+    search_result: dict = {}
+    if uri_type:
+        full_library_uri = query
+        ma_media_type = uri_type
+    else:
+        search_result = await ha_client.call_service(
+            ha_url, ha_token, "music_assistant", "search", entity_id="",
+            service_data={
+                "config_entry_id": mass_config_entry_id,
+                "name": query,
+                "media_type": ["track", "artist", "album", "playlist"],
+                "limit": 1,
+            },
+            return_response=True,
+        )
 
     if search_result.get("ok") and search_result.get("service_response"):
         raw = search_result["service_response"]
@@ -224,23 +244,27 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
                         params["albumArt"] = image
                 log.info(f"[roku.music] MA search match: {song_name} by {artist_name} (uri={full_library_uri or ma_media_id}, type={ma_media_type})")
                 break
-    else:
+    elif not uri_type:
         params["songName"] = song_name
 
     ecp_url = f"http://{roku_ip}:8060/launch/{MEDIA_ASSISTANT_CHANNEL_ID}"
-    try:
-        log.info(f"[roku.music] Launching Media Assistant via ECP: {ecp_url}")
-        connector = aiohttp.TCPConnector()
-        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as client:
-            async with client.post(ecp_url, params=params) as resp:
+    # Only a new play brings the channel up; queueing behind what plays leaves it alone.
+    if enqueue == "replace":
+        try:
+            log.info(f"[roku.music] Launching Media Assistant via ECP: {ecp_url}")
+            connector = aiohttp.TCPConnector()
+            async with (
+                aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as client,
+                client.post(ecp_url, params=params) as resp,
+            ):
                 log.info(f"[roku.music] ECP response: {resp.status}")
                 if resp.status in (200, 204):
                     await asyncio.sleep(3)
                 else:
                     log.warning(f"[roku.music] ECP launch returned {resp.status}")
-    except Exception as e:
-        log.warning(f"[roku.music] ECP launch failed: {e}")
-        await device_registry.invalidate_device(roku_entity)
+        except Exception as e:
+            log.warning(f"[roku.music] ECP launch failed: {e}")
+            await device_registry.invalidate_device(roku_entity)
 
     log.info(f"[roku.music] Delegating audio to MA: {ma_entity} media_id={ma_media_id} type={ma_media_type}")
 
@@ -252,7 +276,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     # Primary: use music_assistant.play_media service with library:// URI
     result = await ha_client.call_service(
         ha_url, ha_token, "music_assistant", "play_media", ma_entity,
-        {"media_id": play_media_id, "media_type": ma_media_type, "enqueue": "replace"},
+        {"media_id": play_media_id, "media_type": ma_media_type, "enqueue": enqueue},
     )
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Playing '{song_name}' on {roku_entity}.", service="roku_music")
