@@ -25,6 +25,9 @@ export const MEAL_LABELS: Record<Meal, string> = {
 };
 
 /** The local calendar day, not the UTC day. */
+/** The 1–5 check-in answers in words (index 0 unused), for energy and mood. */
+export const CHECKIN_WORDS = ['', 'Rough', 'Low', 'Okay', 'Good', 'Great'];
+
 export function localDay(date = new Date()): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');

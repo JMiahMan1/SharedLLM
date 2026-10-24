@@ -7,6 +7,8 @@
  * text) so a mid-week refresh does not lose progress.
  */
 
+import { withShareNote } from './verseShare';
+
 export const SHOPPING_TITLE = 'Shopping list';
 export const SHOPPING_PATH = 'Recipes/Shopping list.md';
 
@@ -105,6 +107,5 @@ export function shoppingShareText(body: string, note?: string): string {
     list = `🛒 Shopping list:\n${shown.join('\n')}`;
     if (more > 0) list += `\n…and ${more} more.`;
   }
-  const intro = (note ?? '').trim();
-  return intro ? `${intro}\n\n${list}` : list;
+  return withShareNote(list, note);
 }

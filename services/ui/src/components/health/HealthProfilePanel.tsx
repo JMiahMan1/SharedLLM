@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { formatDayLabel, localDay } from '../../lib/healthHub';
 import { isKidMode } from '../../lib/healthSwitches';
+import { Toggle } from '../ui/Toggle';
 import type { HealthMetricSwitch, HealthProfile, HealthShare } from '../../types/api';
 
 const ACTIVITY_OPTIONS: Array<[HealthProfile['activity_level'], string]> = [
@@ -393,20 +394,19 @@ export default function HealthProfilePanel() {
         ) : (
           <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
             {profile.metric_catalog.map((entry) => (
-              <label
+              <div
                 key={entry.key}
-                className="flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 text-xs text-slate-300"
+                className="flex min-h-11 items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 text-xs text-slate-300"
               >
-                <input
-                  type="checkbox"
+                {entry.label}
+                <Toggle
                   checked={profile.metrics[entry.key] === true}
                   disabled={switchMetric.isPending}
-                  onChange={(event) => switchMetric.mutate({ key: entry.key, value: event.target.checked })}
-                  data-testid={`metric-switch-${entry.key}`}
-                  className="h-4 w-4 accent-purple-500"
+                  onChange={(value) => switchMetric.mutate({ key: entry.key, value })}
+                  ariaLabel={entry.label}
+                  testId={`metric-switch-${entry.key}`}
                 />
-                {entry.label}
-              </label>
+              </div>
             ))}
           </div>
         )}

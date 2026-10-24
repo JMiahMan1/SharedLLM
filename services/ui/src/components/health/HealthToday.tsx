@@ -15,6 +15,7 @@ import {
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import {
+  CHECKIN_WORDS,
   calorieSummary,
   confidenceLabel,
   formatDayLabel,
@@ -37,7 +38,7 @@ interface Props {
   onNavigate: (tab: HealthTab) => void;
 }
 
-const MOOD_WORDS = ['', 'Rough', 'Low', 'Okay', 'Good', 'Great'];
+const MOOD_WORDS = CHECKIN_WORDS;
 const SORE_WORDS = ['', 'None', 'Mild', 'Some', 'Sore', 'Very sore'];
 
 function ScaleRow({

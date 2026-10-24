@@ -5,10 +5,9 @@
  * steps and the check-in's energy. Never calories, weight or cycle data -- a
  * family chat includes the kids, and food numbers there would be pressure.
  */
-import { formatMinutes } from './healthHub';
+import { CHECKIN_WORDS, formatMinutes } from './healthHub';
 import type { HealthSummary } from '../types/api';
-
-const ENERGY_WORDS = ['', 'rough', 'low', 'okay', 'good', 'great'];
+import { withShareNote } from './verseShare';
 
 export interface ShareableDay {
   summary: HealthSummary;
@@ -29,7 +28,7 @@ export function healthDayLines({ summary, steps }: ShareableDay): string[] {
     lines.push(`💧 ${summary.water.ml.toLocaleString()} ml of water${summary.water.percent !== null && summary.water.percent >= 100 ? ' — goal reached' : ''}`);
   }
   const energy = summary.checkin?.energy;
-  if (on('checkin') && energy) lines.push(`⚡ Feeling ${ENERGY_WORDS[energy]}`);
+  if (on('checkin') && energy) lines.push(`⚡ Feeling ${CHECKIN_WORDS[energy].toLowerCase()}`);
   return lines;
 }
 
@@ -37,6 +36,5 @@ export function healthDayLines({ summary, steps }: ShareableDay): string[] {
 export function healthDayShareText(day: ShareableDay, note?: string): string {
   const lines = healthDayLines(day);
   const body = lines.length ? `💚 My day so far:\n${lines.join('\n')}` : '💚 Just getting started today.';
-  const intro = (note ?? '').trim();
-  return intro ? `${intro}\n\n${body}` : body;
+  return withShareNote(body, note);
 }
