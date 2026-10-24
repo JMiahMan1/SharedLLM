@@ -3281,3 +3281,20 @@ export interface HealthActiveMinutes {
   notes: string[];
   unavailable: string[];
 }
+
+/** Forgiving streaks (services/health/streaks.py): one rest day a week. */
+export interface HealthStreaks {
+  day: string;
+  rule: string;
+  habits: Array<{
+    key: 'logging' | 'checkin' | 'water_goal' | 'sleep_logged';
+    title: string;
+    detail: string;
+    current: number;
+    best: number;
+    rest_days: number;
+    today_done: boolean;
+    /** What is missing before this streak can start (e.g. a water goal). */
+    needs?: string;
+  }>;
+}

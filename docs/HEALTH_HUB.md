@@ -415,7 +415,14 @@ live search is the ecosystem-standard pattern.
 
 ### Phase 9 — tests, docs, deploy
 
-- [x] Pure tests: BMR/budget maths, scores, portion scaling, density mapping and water. Streaks are not built.
+- [x] Pure tests: BMR/budget maths, scores, portion scaling, density mapping and water.
+- [x] Streaks, forgiving by design (`services/health/streaks.py`, `GET /streaks?day=`, gateway
+  `/api/health/streaks`): **Showing up** (any food, water, sleep or check-in log), **Morning
+  check-in**, **Water goal** (against the person's own goal only; no goal, no streak and the card
+  says what to set) and **Sleep logged**. One missed day in any seven is a rest day that keeps a
+  streak (it bridges, never counts); two misses in a week end it; today never breaks a streak while
+  it is still today. The best run of the last 90 days is kept. `StreaksCard` on Health → Today
+  never calls a day failed (`services/health/tests/test_streaks.py`, `StreaksCard.test.tsx`).
 - [x] UI tests: log a meal (search + manual), day view, check-in, water and cycle opt-in/log/share. Challenge standings, join, start and share are tested (`FamilyChallengeCard.test.tsx`, `services/health/tests/test_challenges.py`, `services/gateway/tests/test_health_challenges_gateway.py`).
 - [x] Kid-mode UI hiding: with kid mode on, Today's food card and the Nutrition day show what was
   logged (and the macros) but no calorie number, range, progress bar, per-food calories or density

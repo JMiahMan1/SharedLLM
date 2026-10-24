@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field, StrictBool, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.config import INTERNAL_SECRET
-from services.health import challenges, cycle, fasting, food_seed, preferences, scoring, weekly
+from services.health import challenges, cycle, fasting, food_seed, preferences, scoring, streaks, weekly
 from services.health.models import (
     ChallengeMember,
     Checkin,
@@ -2205,6 +2205,53 @@ def delete_challenge(challenge_id: int, request: Request, session: Session = Dep
     session.delete(row)
     session.commit()
     return {"deleted": challenge_id}
+
+
+# --- streaks ---------------------------------------------------------------
+
+
+def _habit_days(session: Session, user: str, today: date, history: int) -> dict[str, set[str]]:
+    """For each habit in ``streaks.HABITS``, the days it was logged."""
+    profile = session.get(HealthProfile, user)
+    sleep_need = (profile.sleep_need_minutes if profile else None) or DEFAULT_SLEEP_NEED
+    water_goal = profile.water_goal_ml if profile else None
+    first = today - timedelta(days=history - 1)
+    records = _week_days(session, user, first, history, sleep_need)
+    checkins = {
+        row.day
+        for row in session.exec(
+            select(Checkin).where(Checkin.user_id == user, Checkin.day >= first.isoformat(), Checkin.day <= today.isoformat())
+        ).all()
+    }
+    food = {record["day"] for record in records if record["calories"] is not None}
+    water = {record["day"] for record in records if record["water_ml"] is not None}
+    sleep = {record["day"] for record in records if record["sleep_minutes"] is not None}
+    return {
+        "logging": food | water | sleep | checkins,
+        "checkin": checkins,
+        # Measured against the person's own goal only: no goal, no water streak.
+        "water_goal": {
+            record["day"] for record in records if water_goal and record["water_ml"] is not None and record["water_ml"] >= water_goal
+        },
+        "sleep_logged": sleep,
+    }
+
+
+@app.get("/streaks")
+def get_streaks(request: Request, day: str | None = None, session: Session = Depends(get_session)):
+    """Forgiving streaks for the habits the store can see (``streaks.py``)."""
+    user = _user(request)
+    today = date.fromisoformat(_day(day or date.today().isoformat()))
+    history = 90
+    days = _habit_days(session, user, today, history + 7)
+    profile = session.get(HealthProfile, user)
+    habits = []
+    for key, (title, detail) in streaks.HABITS.items():
+        entry = {"key": key, "title": title, "detail": detail, **streaks.streak(days[key], today, history_days=history)}
+        if key == "water_goal" and not (profile and profile.water_goal_ml):
+            entry["needs"] = "Set a water goal in Health → Health to start this streak."
+        habits.append(entry)
+    return {"day": today.isoformat(), "rule": streaks.RULE, "habits": habits}
 
 
 # --- fasting window --------------------------------------------------------

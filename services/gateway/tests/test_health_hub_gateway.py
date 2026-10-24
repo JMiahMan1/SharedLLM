@@ -46,6 +46,7 @@ def client():
 @pytest.mark.parametrize(
     ("method", "path", "body", "upstream"),
     [
+        ("GET", "/api/health/streaks", None, "/streaks"),
         ("GET", "/api/health/fasting", None, "/fasting"),
         ("POST", "/api/health/fasting/start", {"target_hours": 14}, "/fasting/start"),
         ("POST", "/api/health/fasting/stop", {}, "/fasting/stop"),
