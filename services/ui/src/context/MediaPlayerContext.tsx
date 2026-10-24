@@ -5,6 +5,8 @@ import { clientName, useMAWebPlayer } from '../lib/maWebPlayer';
 import type { MAWebPlayerState } from '../lib/maWebPlayer';
 import JarvisMedia from '../plugins/jarvisMedia';
 import { api } from '../services/api';
+import { TabLock } from '../features/media/engine/tabLock';
+import { useMediaStore } from '../features/media/store/mediaStore';
 
 import { MediaPlayerContext } from './webPlayerContext';
 import type { SharedPlayer } from './webPlayerContext';
@@ -75,6 +77,38 @@ function useReportWebPlayerState(player: SharedPlayer) {
 }
 
 /**
+ * One tab plays this device's audio at a time (BUG-66). Starting playback
+ * claims it; when another tab claims it, this tab drops its audio connection
+ * (pausing would pause the shared Music Assistant player for both) and the
+ * mini player offers "Take over", which simply plays here again.
+ */
+function useTabLock(player: SharedPlayer) {
+  const playerRef = useRef(player);
+  useEffect(() => {
+    playerRef.current = player;
+  }, [player]);
+  const lockRef = useRef<TabLock | null>(null);
+  useEffect(() => {
+    const lock = new TabLock();
+    lockRef.current = lock;
+    const { setPlayingInOtherTab } = useMediaStore.getState().actions;
+    const offLost = lock.onLost(() => playerRef.current.disconnect());
+    const offChange = lock.onChange((owner) => setPlayingInOtherTab(owner === 'other'));
+    return () => {
+      offLost();
+      offChange();
+      lock.dispose();
+      lockRef.current = null;
+    };
+  }, []);
+  const { isPlaying } = player;
+  useEffect(() => {
+    if (isPlaying) lockRef.current?.claim();
+    else lockRef.current?.release();
+  }, [isPlaying]);
+}
+
+/**
  * The one web player for the whole app, mounted above the router.
  *
  * It used to belong to the Media page, whose unmount disconnected it -- so
@@ -91,6 +125,7 @@ export function MediaPlayerProvider({ children }: { children: ReactNode }) {
   }, [player]);
 
   useReportWebPlayerState(player);
+  useTabLock(player);
 
   const native = Capacitor.isNativePlatform();
   const { mediaTitle, mediaArtist, isPlaying, playerId, volume } = player;

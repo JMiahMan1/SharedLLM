@@ -191,3 +191,23 @@ describe('reporting the web player to the house', () => {
     expect(h.stop).not.toHaveBeenCalled();
   });
 });
+
+describe('one tab plays (BUG-66)', () => {
+  it('drops this tab\'s audio when another tab starts playing, and says so', async () => {
+    const { FakeBroadcastChannel } = await import('./fakes/FakeBroadcastChannel');
+    const { TabLock, CHANNEL_NAME } = await import('../features/media/engine/tabLock');
+    const { useMediaStore } = await import('../features/media/store/mediaStore');
+    FakeBroadcastChannel.reset();
+    vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel);
+    const disconnect = vi.fn();
+    h.player = { ...h.player, disconnect };
+    render(<App page="bible" onState={vi.fn()} />);
+    // This tab is playing, so it holds the lock; another tab now plays.
+    const other = new TabLock({ channel: new FakeBroadcastChannel(CHANNEL_NAME), tabId: 'other-tab' });
+    act(() => other.claim());
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(useMediaStore.getState().playingInOtherTab).toBe(true);
+    other.dispose();
+    vi.unstubAllGlobals();
+  });
+});

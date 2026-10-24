@@ -6,6 +6,7 @@ import MiniPlayer from './MiniPlayer';
 import { resetMediaTokenForTests } from '../../lib/mediaToken';
 import { MediaPlayerContext } from '../../context/webPlayerContext';
 import type { SharedPlayer } from '../../context/webPlayerContext';
+import { useMediaStore } from '../../features/media/store/mediaStore';
 
 function player(over: Partial<SharedPlayer> = {}): SharedPlayer {
   return {
@@ -34,6 +35,16 @@ function renderAt(path: string, value: SharedPlayer | null, onOpen?: () => void)
 }
 
 describe('MiniPlayer', () => {
+  it('BUG-66 offers to take the audio back from another tab', async () => {
+    useMediaStore.getState().actions.setPlayingInOtherTab(true);
+    const value = player({ isPlaying: false, play: vi.fn().mockResolvedValue(undefined) });
+    renderAt('/bible', value);
+    expect(screen.getByText('Playing in another tab')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Next track' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Take over' }));
+    expect(value.play).toHaveBeenCalledWith();
+  });
+
   it('shows what is playing and controls it from another page', async () => {
     const value = player();
     renderAt('/bible', value);

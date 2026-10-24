@@ -92,6 +92,7 @@ const Media = () => {
   /** '' = this device's web player, `ma:<id>` = an MA-only player, else an HA entity. */
   const selectedTarget = useMediaStore(selectActiveOutputId);
   const players = useMediaStore(selectPlayers);
+  const playingInOtherTab = useMediaStore((s) => s.playingInOtherTab);
   const { selectOutput } = useMediaActions();
   const isWebPlayer = !selectedTarget;
   const selectedRef = useRef(selectedTarget);
@@ -248,6 +249,16 @@ const Media = () => {
   const view = isWebPlayer ? webView : remoteView;
 
   const webFooter = (() => {
+    if (playingInOtherTab) {
+      return (
+        <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-slate-300">
+          <span>Playing in another tab</span>
+          <button type="button" onClick={() => void maPlayer.play().catch(() => {})} className="min-h-11 px-4 rounded-xl bg-white/10 text-white hover:bg-white/15">
+            Take over
+          </button>
+        </div>
+      );
+    }
     switch (maPlayer.connectionState) {
       case 'CONNECTED':
         return <p className="text-sm text-cyan-300 text-center">Playing on this device</p>;
