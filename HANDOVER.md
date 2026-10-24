@@ -21,6 +21,14 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `HEAD` Family guard: **recommendations moved to a "For You" dashboard widget; seeded test
+  data removed** — the four suggestion cards left the Health page and are now one
+  `recommendations` widget (`RecommendationsWidget`), default-visible for every role
+  (identity `CHILD_WIDGETS` + `WIDGET_DEFAULT_SIZES`). The artists Jeremiah saw were not real:
+  earlier "verified live" steps had posted fake events into his production feed (Drake,
+  PewDiePie, a "smoke test" play, a `/notes` beacon smoke, 555 call/SMS, and a `source: smoke`
+  usage day). Those 6 events and the usage record were deleted 2026-10-24 by exact value
+  (backup on the server: `/home/jeremiah/telemetry-backup-20261024T013229Z/`).
 - `HEAD` Fix: **chat and Nextcloud latency — stop re-logging in on every request** — measured
   from execution, any authenticated Nextcloud call took 2–5 s (`status.php` 0.1 s): the
   pooled aiohttp session uses `DummyCookieJar` (so one user's cookies never ride another's
@@ -311,6 +319,10 @@ Every claim below was verified against the live system unless marked **planned**
 
 - **No hardcoded fallbacks** (standing user instruction). Show real data or an
   explicit loading/empty/error state — never fake values.
+- **Live test data is always cleaned up** (standing user instruction). Prefer engine-level
+  checks that write nothing; if a smoke test must post to the live server, note the exact
+  record and delete it by exact value right after (`redis-cli lrem <key> 1 "<json>"`, not
+  `-x`), then confirm it is gone. Never leave seeded artists/creators/calls in a real feed.
 - **UI gates**, run in `services/ui`: `npm run typecheck`, `npm run lint`
   (baseline 0 errors / 11 pre-existing warnings), `npx vitest run`
   (204 files / 1602 tests), `npm run build` (also packages the OTA bundle).

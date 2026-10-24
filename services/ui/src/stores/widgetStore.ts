@@ -59,6 +59,9 @@ export const defaultWidgetDefs: WidgetDef[] = [
   // whole widget is one tap into the chapter, so it is not hidden by default:
   // a dashboard that does not show today's Scripture is not a family dashboard.
   { key: 'bible_daily', label: 'Verse of the Day', icon: BookOpen, minSize: 'small', defaultSize: 'medium' },
+  // The member's own suggestions (music, video, podcasts, books), shown to
+  // everyone by default; the activity behind them stays parents-only.
+  { key: 'recommendations', label: 'For You', icon: Sparkles, minSize: 'small', defaultSize: 'medium' },
 ];
 
 /**

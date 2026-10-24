@@ -38,8 +38,6 @@
 [data-site-theme-active] .bg-purple-900\/10 { background-color: color-mix(in srgb, var(--site-accent) 10%, transparent) !important; }
 [data-site-theme-active] .bg-violet-400\/15 { background-color: color-mix(in srgb, var(--site-accent) 15%, transparent) !important; }
 [data-site-theme-active] .bg-violet-400\/25 { background-color: color-mix(in srgb, var(--site-accent) 25%, transparent) !important; }
-[data-site-theme-active] .bg-violet-500\/10 { background-color: color-mix(in srgb, var(--site-accent) 10%, transparent) !important; }
-[data-site-theme-active] .bg-violet-500\/5 { background-color: color-mix(in srgb, var(--site-accent) 5%, transparent) !important; }
 [data-site-theme-active] .bg-violet-600\/30 { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .border-indigo-400\/60 { border-color: color-mix(in srgb, var(--site-accent) 60%, transparent) !important; }
 [data-site-theme-active] .border-indigo-500 { border-color: var(--site-accent) !important; }
@@ -62,7 +60,6 @@
 [data-site-theme-active] .border-purple-500\/50 { border-color: color-mix(in srgb, var(--site-accent) 50%, transparent) !important; }
 [data-site-theme-active] .border-violet-400\/40 { border-color: color-mix(in srgb, var(--site-accent) 40%, transparent) !important; }
 [data-site-theme-active] .border-violet-400\/60 { border-color: color-mix(in srgb, var(--site-accent) 60%, transparent) !important; }
-[data-site-theme-active] .border-violet-500\/20 { border-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .border-violet-500\/30 { border-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .focus\:border-indigo-400:focus { border-color: var(--site-accent) !important; }
 [data-site-theme-active] .focus\:border-indigo-500:focus { border-color: var(--site-accent) !important; }

@@ -49,7 +49,7 @@ def test_get_widget_settings_returns_all_known_widgets(client: TestClient, sessi
     resp = client.get("/api/widgets/settings")
     assert resp.status_code == 200
     settings = resp.json()
-    assert len(settings["widgets"]) == 13  # 13 known widget keys
+    assert len(settings["widgets"]) == 14  # 14 known widget keys
 
     widget_keys = [w["widget_key"] for w in settings["widgets"]]
     assert "energy_insights" in widget_keys
@@ -423,7 +423,7 @@ def _visibility(client: TestClient) -> dict:
 def test_a_child_starts_with_the_kid_dashboard(client: TestClient, session: Session):
     _acting_as(session, "child")
     vis = _visibility(client)
-    for key in ("chores_progress", "upcoming_events", "active_media", "quick_notes", "bible_daily", "device_control"):
+    for key in ("chores_progress", "upcoming_events", "active_media", "quick_notes", "bible_daily", "recommendations", "device_control"):
         assert vis[key] == "visible", key
     for key in ("climate", "workspaces", "health_activity", "presence", "energy_insights", "ambient_timer", "quick_assistant"):
         assert vis[key] == "hidden", key

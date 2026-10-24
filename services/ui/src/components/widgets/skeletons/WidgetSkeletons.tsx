@@ -251,6 +251,7 @@ const skeletonMap: Record<WidgetKey, React.ComponentType> = {
   climate: ClimateSkeleton,
   presence: PresenceSkeleton,
   bible_daily: BibleDailySkeleton,
+  recommendations: BibleDailySkeleton,
 };
 
 interface WidgetSkeletonSelectorProps {

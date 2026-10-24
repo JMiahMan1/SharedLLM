@@ -3479,17 +3479,18 @@ WIDGET_DEFAULT_SIZES: dict[str, str] = {
     'climate': 'medium',
     'presence': 'medium',
     'bible_daily': 'medium',
+    'recommendations': 'medium',
 }
 _WIDGET_ORDER = {key: index for index, key in enumerate(WIDGET_DEFAULT_SIZES)}
 WIDGET_SIZES = frozenset({'small', 'medium', 'wide', 'tall'})
 WIDGET_VISIBILITIES = frozenset({'visible', 'hidden', 'removed'})
 
 #: Widgets a child sees before they touch the dashboard: chores, calendar,
-#: music/media, notes, the verse of the day and device control for the devices
-#: they are assigned.
+#: music/media, notes, the verse of the day, their own suggestions and device
+#: control for the devices they are assigned.
 CHILD_WIDGETS = frozenset({
     'chores_progress', 'upcoming_events', 'active_media', 'quick_notes',
-    'bible_daily', 'device_control',
+    'bible_daily', 'recommendations', 'device_control',
 })
 #: Teens get the child set plus climate control.
 TEEN_WIDGETS = CHILD_WIDGETS | {'climate'}

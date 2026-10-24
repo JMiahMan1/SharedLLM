@@ -396,22 +396,25 @@ point.
       and a parent can bless or block a lane.
       First brick (music): a reviewed genre/artist map (`services/common/music_recommendations.py`)
       plus `GET /api/recommendations/music` returning a suggestion derived from the member's
-      listening, and a `MusicRecommendationCard` on the Health page. Raw feed stays parents-only.
+      listening, and a suggestion in the dashboard's For You widget. Raw feed stays parents-only.
       Second brick (video): a reviewed theme/creator map (`services/common/video_recommendations.py`)
       plus `GET /api/recommendations/video` returning a suggestion derived from the member's
       watching — themes first redeemed (wholesome creator, same kind of content), then
       redirected to a wholesome activity when no redeemed equivalent exists — and a
-      `VideoRecommendationCard` on the Health page. Raw feed stays parents-only.
+      suggestion in the dashboard's For You widget. Raw feed stays parents-only.
       Third brick (podcasts): a reviewed theme/show map (`services/common/podcast_recommendations.py`)
       plus `GET /api/recommendations/podcast` returning a suggestion derived from the member's
       listening — themes first redeemed (wholesome Christian shows, similar topic/style), then
       redirected to an audio drama or family walk when no redeemed equivalent exists — and a
-      `PodcastRecommendationCard` on the Health page. Raw feed stays parents-only.
+      suggestion in the dashboard's For You widget. Raw feed stays parents-only.
       Fourth brick (books): a reviewed theme/author map (`services/common/book_recommendations.py`)
       plus `GET /api/recommendations/book` returning a suggestion derived from the member's
       reading — themes first redeemed (wholesome/classic literature, similar genre), then
       redirected to uplifting family reading when no redeemed equivalent exists — and a
-      `BookRecommendationCard` on the Health page. Raw feed stays parents-only.
+      suggestion in the dashboard's For You widget. Raw feed stays parents-only.
+      All four kinds render in one `recommendations` dashboard widget ("For You",
+      `RecommendationsWidget`), on by default for every role; it shows only what the server
+      derived, an explicit empty state when there is nothing yet, and per-kind failures.
 - [ ] **Who sees what (the visibility rule).** The collected data is parents-only: a minor's
       profile — every raw section — is open to both parents (including the linked mother
       under `docs/ROLES.md`) and to no one else; a minor does not browse their own raw feed,
