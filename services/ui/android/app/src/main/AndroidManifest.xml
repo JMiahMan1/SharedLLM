@@ -33,6 +33,10 @@
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Install approvals: the screen guard lists the apps on a child's phone to
+         hold a newly installed one until a parent says yes. Sideloaded, never
+         on Play. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" />
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -277,6 +281,11 @@
                 <action android:name="com.jarvisos.app.widget.TICK" />
             </intent-filter>
         </receiver>
+
+        <!-- "Ask a parent" on the web filter's blocked-site notification. -->
+        <receiver
+            android:name=".AskParentReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

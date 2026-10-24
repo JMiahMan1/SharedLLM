@@ -27,6 +27,7 @@ from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common.http import get_client, get_client_insecure
+from services.common.screen_time import PERMISSION_GROUPS
 from services.common.secrets import secret_matches
 from services.config import IDENTITY_CORS_ORIGINS, IDENTITY_DATABASE_URL, INTERNAL_SECRET
 from services.identity import audit, battery_alerts, push, roles, voice
@@ -46,6 +47,7 @@ from services.identity.models import (
     GlobalSetting,
     GuardianNote,
     GuardOfflineCode,
+    GuardRequest,
     RavenMission,
     RecommendationLanes,
     Role,
@@ -4240,7 +4242,36 @@ def _clean_screen_rules(body: dict) -> dict:
                 if not isinstance(domains, list) or any(not isinstance(d, str) or not _DOMAIN.match(d.strip().lower()) for d in domains):
                     raise HTTPException(status_code=422, detail=f"web_filter.{key} must be domain names")
                 clean[key] = list(dict.fromkeys(d.strip().lower().rstrip(".") for d in domains))[:500]
+        # Sites a parent allowed for a while ("ask a parent"): {domain: ISO end}.
+        # Ones that already ran out are dropped here, so the list stays short.
+        if wf.get("allow_until") is not None:
+            until = wf["allow_until"]
+            if not isinstance(until, dict) or any(
+                not isinstance(d, str) or not _DOMAIN.match(d.strip().lower()) or not isinstance(v, str) for d, v in until.items()
+            ):
+                raise HTTPException(status_code=422, detail="web_filter.allow_until must map domain names to ISO times")
+            now = datetime.now(UTC)
+            kept: dict = {}
+            for d, v in until.items():
+                try:
+                    ends = datetime.fromisoformat(v)
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail="web_filter.allow_until must map domain names to ISO times") from exc
+                if (ends if ends.tzinfo else ends.replace(tzinfo=UTC)) > now:
+                    kept[d.strip().lower().rstrip(".")] = v
+            clean["allow_until"] = kept
         out["web_filter"] = clean
+    # Install approvals (step 5): on unless a parent switches them off.
+    if body.get("install_approval") is not None:
+        if not isinstance(body["install_approval"], bool):
+            raise HTTPException(status_code=422, detail="install_approval must be true or false")
+        out["install_approval"] = body["install_approval"]
+    # Permissions a new grant of which waits for a parent (camera, location, ...).
+    if body.get("permission_gating") is not None:
+        groups = body["permission_gating"]
+        if not isinstance(groups, list) or any(g not in PERMISSION_GROUPS for g in groups):
+            raise HTTPException(status_code=422, detail=f"permission_gating must be among {', '.join(PERMISSION_GROUPS)}")
+        out["permission_gating"] = list(dict.fromkeys(groups))
     # Content monitoring (step 6): what pages a parent at once.
     if body.get("monitoring") is not None:
         if body["monitoring"] not in ("all", "severe", "off"):
@@ -4268,6 +4299,8 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         # A minor's phone keeps Jarvis protected (no uninstall, no switching
         # the guard off) whether or not any time rules are set.
         "protected": (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES,
+        # The parents' answers on new apps and permissions, for the phone's guard.
+        "approvals": _guard_approvals(session, subject.username),
     }
 
 
@@ -4412,6 +4445,145 @@ def give_screen_time_bonus(username: str, body: dict, session: Session = Depends
     session.commit()
     session.refresh(bonus)
     return {"request": _request_read(bonus), "notify": [subject.username]}
+
+
+# --- asking a parent first: new apps, permissions, blocked sites (Phase 11 step 5) ---
+
+GUARD_REQUEST_KINDS = ("app", "permission", "site")
+
+
+def _guard_request_read(r: GuardRequest) -> dict:
+    return {
+        "id": r.id, "username": r.username, "kind": r.kind, "target": r.target, "label": r.label,
+        "note": r.note, "status": r.status, "until": r.until, "decided_by": r.decided_by,
+        "created_at": r.created_at, "decided_at": r.decided_at,
+    }
+
+
+def _guard_approvals(session: Session, username: str) -> dict:
+    """The latest answer per app and per app permission: {"apps": {pkg: status},
+    "permissions": {"pkg|group": status}}. Pending counts as an answer too, so
+    the phone knows it already asked."""
+    rows = session.exec(
+        select(GuardRequest).where(GuardRequest.username == username, GuardRequest.kind.in_(("app", "permission")))
+    ).all()
+    out: dict = {"apps": {}, "permissions": {}}
+    for r in sorted(rows, key=lambda r: (r.created_at, r.id or 0)):
+        out["apps" if r.kind == "app" else "permissions"][r.target] = r.status
+    return out
+
+
+def _clean_guard_target(kind: str, target: str) -> str:
+    target = target.strip()
+    if kind == "app":
+        if not _PACKAGE.match(target):
+            raise HTTPException(status_code=422, detail="target must be an app package")
+        return target
+    if kind == "permission":
+        pkg, _, group = target.partition("|")
+        if not _PACKAGE.match(pkg) or group not in PERMISSION_GROUPS:
+            raise HTTPException(status_code=422, detail="target must be package|permission group")
+        return f"{pkg}|{group}"
+    domain = target.lower().rstrip(".")
+    domain = domain[4:] if domain.startswith("www.") else domain
+    if not _DOMAIN.match(domain):
+        raise HTTPException(status_code=422, detail="target must be a domain name")
+    return domain
+
+
+@app.post("/api/guard/requests")
+def ask_a_parent(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A child asks a parent first: ``{"kind": "app"|"permission"|"site", "target", "label"?, "note"?}``.
+
+    The phone asks again after a restart, so a request already waiting is
+    returned as it is (``notify`` empty: the parents heard the first time), and
+    an app or permission a parent already answered is not asked again.
+    """
+    kind = str((body or {}).get("kind") or "")
+    if kind not in GUARD_REQUEST_KINDS:
+        raise HTTPException(status_code=422, detail="kind must be app, permission or site")
+    target = _clean_guard_target(kind, str((body or {}).get("target") or ""))
+    parents = _parents_of(session, caller)
+    if not parents:
+        raise HTTPException(status_code=409, detail="There is no parent to ask")
+    existing = session.exec(
+        select(GuardRequest).where(
+            GuardRequest.username == caller.username, GuardRequest.kind == kind, GuardRequest.target == target
+        )
+    ).all()
+    latest = max(existing, key=lambda r: (r.created_at, r.id or 0)) if existing else None
+    if latest is not None and (latest.status == "pending" or kind != "site"):
+        return {"request": _guard_request_read(latest), "notify": []}
+    request = GuardRequest(
+        username=caller.username,
+        kind=kind,
+        target=target,
+        label=str((body or {}).get("label") or "")[:120],
+        note=str((body or {}).get("note") or "")[:200],
+    )
+    session.add(request)
+    session.commit()
+    session.refresh(request)
+    return {"request": _guard_request_read(request), "notify": parents}
+
+
+@app.get("/api/guard/requests")
+def list_guard_requests(status: str = "pending", session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """The caller's own requests and those of the children they manage."""
+    if status not in ("pending", "approved", "denied"):
+        raise HTTPException(status_code=422, detail="status must be pending, approved or denied")
+    people = {u.username: u for u in session.exec(select(User)).all()}
+    rows = session.exec(select(GuardRequest).where(GuardRequest.status == status)).all()
+    visible = [
+        r for r in rows
+        if r.username == caller.username or _may_manage_screen_time(caller, people.get(r.username))
+    ]
+    visible.sort(key=lambda r: r.created_at, reverse=True)
+    return {"requests": [_guard_request_read(r) for r in visible[:100]]}
+
+
+@app.post("/api/guard/requests/{request_id}")
+def decide_guard_request(request_id: int, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A parent answers: ``{"approve": bool}``; a site may add ``{"minutes": n}``
+    (allowed for a while) or ``{"always": true}`` (added to the allow list)."""
+    request = session.get(GuardRequest, request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="No such request")
+    subject = _screen_subject(session, request.username)
+    if not _may_manage_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can answer")
+    if request.status != "pending":
+        raise HTTPException(status_code=409, detail="Already answered")
+    approve = bool((body or {}).get("approve"))
+    now = datetime.now(UTC)
+    if approve and request.kind == "site":
+        minutes = (body or {}).get("minutes")
+        always = bool((body or {}).get("always"))
+        if not always and (not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= 1440):
+            raise HTTPException(status_code=422, detail="Allow a site for 1 to 1440 minutes, or always")
+        rules = _screen_rules(session, subject.username)
+        wf = dict(rules.get("web_filter") or {})
+        until = dict(wf.get("allow_until") or {})
+        if always:
+            wf["allow"] = list(dict.fromkeys([*(wf.get("allow") or []), request.target]))
+            wf["block"] = [d for d in wf.get("block") or [] if d != request.target]
+            until.pop(request.target, None)
+        else:
+            request.until = (now + timedelta(minutes=minutes)).isoformat()
+            until[request.target] = request.until
+        wf["allow_until"] = until
+        rules["web_filter"] = wf
+        row = session.get(ScreenRules, subject.username) or ScreenRules(username=subject.username)
+        row.data = json.dumps(rules)
+        row.updated_by = caller.username
+        row.updated_at = now.isoformat()
+        session.add(row)
+    request.status = "approved" if approve else "denied"
+    request.decided_by = caller.username
+    request.decided_at = now.isoformat()
+    session.add(request)
+    session.commit()
+    return {"request": _guard_request_read(request), "notify": [request.username]}
 
 
 RECOMMENDATION_LANES = ("music", "video", "podcast", "book", "game", "activity")

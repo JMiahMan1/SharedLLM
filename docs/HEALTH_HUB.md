@@ -602,7 +602,7 @@ point.
       **4b (next): enforcement on the phone** — the Android app reads the status and locks
       everything but the always-allowed apps; this needs an Accessibility service and a device
       check, and pairs with tamper resistance below.
-- [ ] **App control.** Block apps, per-app daily limits, install approvals, per-permission
+- [x] **App control.** Block apps, per-app daily limits, install approvals, per-permission
       gating; Accessibility-service enforcement on the device with Family Link's one-minute
       grace warning before a block lands.
       **Blocking and per-app limits built (2026-10-24, needs the APK after 437):** a parent
@@ -612,8 +612,32 @@ point.
       today's per-app foreground time into `blocked_apps` and `app_minutes_left` on the status;
       always-allowed apps are never blocked. The guard closes a blocked app (`GuardRules`
       `BLOCK_APP`) with "That app is off for now" while the rest of the phone works, and the
-      child's card shows minutes left per limited app. Not yet: install approvals,
-      per-permission gating and the one-minute warning.
+      child's card shows minutes left per limited app.
+      **Install approvals, permission gating and the one-minute warning built (2026-10-24, needs
+      the next APK and a device check):** one request store for "ask a parent first", identity's
+      `GuardRequest` (`POST/GET /api/guard/requests`, `POST /api/guard/requests/{id}`; kinds `app`,
+      `permission`, `site`; only the child's own parents answer, a request already waiting is
+      returned without a second notice, an answered app or permission is not asked again). Both
+      parents get a `family_safety` notice that opens `/guardian?child=…`, where
+      `GuardRequestsCard` ("… is asking") approves or denies; the child hears the answer.
+      *Install approvals* (rule `install_approval`, on unless a parent switches it off under the
+      child's apps): the guard records the phone's user-installed apps the first time it runs on a
+      protected phone (the baseline); an app installed later stays closed ("… needs a parent's
+      OK", or "A parent said no") until a parent approves it, and the parents are asked once per
+      app (`InstallApprovals`, JVM-tested; the guard listens for installs and checks every minute;
+      needs `QUERY_ALL_PACKAGES`, fine for a sideloaded app). *Per-permission gating* (rule
+      `permission_gating`: location, camera, microphone, contacts, sms, phone, photos, calendar,
+      nearby): when Android's "Allow … to …?" dialog asks for a gated kind that app has no
+      approval for, the guard dismisses it (a denial) and asks the parents; once approved the
+      child grants it normally (`PermissionGate`, JVM-tested). Without device-owner rights the
+      guard cannot change a permission itself: a grant made from Settings → App info →
+      Permissions is not caught, and the dialog is recognised by its English text. *One-minute
+      warning*: the status now names the next lock (`next_lock_at`, `next_lock_reason`: bedtime,
+      school, or the day's limit at today's pace); the guard checks the clock every ten seconds
+      and, a minute before, shows a heads-up notice and a toast ("Bedtime in one minute…"), and
+      the same for the app in front when it has one minute of its own left (`LockWarning`,
+      JVM-tested). Bedtime and school now also lock on the phone's clock the moment they start,
+      without waiting for the next status.
 - [ ] **Web filtering.** On-device VPN/DNS filter with category lists, allow/block lists,
       safe-search enforcement, an "ask a parent" request flow, and Qustodio-style bypass
       blocks (unsupported browsers, split-screen, safe mode).
@@ -629,8 +653,18 @@ point.
       filter → Allow), covers the VPN's Disconnect dialog, and reports `filter_disabled` if it
       is revoked. DNS and packet framing are pure, JVM-tested classes (`DnsMessage`, `IpUdp`).
       Known gaps: a browser set to its own secure DNS (DoH) or Android's strict Private DNS
-      bypasses a DNS filter; categories are Cloudflare's (no per-category choice); no "ask a
-      parent" flow yet.
+      bypasses a DNS filter; categories are Cloudflare's (no per-category choice).
+      **"Ask a parent" built (2026-10-24, needs the next APK and a device check):** when the filter
+      blocks a site — the parent's block list, or the family-safe resolver's 0.0.0.0 answer, now
+      also counted as `blocked` in the web activity — the phone shows "… is blocked" with an "Ask
+      a parent" button (once per site every half hour; `AskParentReceiver` sends a `site`
+      request). A child can also ask from Health → Today (`AskForSiteCard`, shown when their
+      phone filters websites; it lists only their own waiting requests). A parent allows the site
+      for an hour (`web_filter.allow_until`, `{domain: ISO end}`, pruned when it runs out) or
+      always (moved from the block list to the allow list), or says no. The status carries
+      `web_allow` (the allow list in force now) and the phone checks the end time itself, so an
+      hour ends on time offline (`WebFilterRules.activeAllow`, JVM-tested). Still open:
+      Qustodio-style bypass blocks (unsupported browsers, split-screen, safe mode).
 - [ ] **Location guardian.** The geo service already holds live location, history, zones and
       trips; add parent-facing place alerts (arrive/leave), ring device and battery, and the
       one-device-at-a-time live view.
@@ -789,8 +823,9 @@ media sessions, calls and SMS DONE (video covered by media sessions + per-app fo
 time); (3) Jarvis recommendations from the profile — DONE (music style matching,
 video themes redeemed or redirected, podcasts, books, games and activities, and a parent's
 bless/block per lane); (4) time budgets and routines;
-(5) app control and the web filter — app blocking, per-app limits and the DNS web filter
-DONE (install approvals and "ask a parent" for a site still open);
+(5) app control and the web filter — app blocking, per-app limits, install approvals,
+per-permission gating, the one-minute warning, the DNS web filter and "ask a parent" for a
+blocked site DONE (needs the next APK and a device check);
 (6) monitoring alerts and the weekly recap — DONE (local phrase monitoring, Sunday recap);
 (7) the parents' page and the discipleship surfaces — DONE (parents' page, prayer and
 guidance, talk journal, "I need to talk", burden signals, the Jarvis chat recap).

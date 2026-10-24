@@ -31,12 +31,26 @@ public class GuardScreenActivity extends ComponentActivity {
     static final String MODE_LOCKED = "locked";
     /** One app is off (blocked by a parent, or its own minutes are up); the rest of the phone works. */
     static final String MODE_APP = "app";
+    /** An app installed since the guard started waits for a parent's OK (or a parent said no). */
+    static final String MODE_INSTALL = "install";
+    /** An app asked for a kind of permission a parent approves first; the dialog was dismissed. */
+    static final String MODE_PERMISSION = "permission";
+    /** The app's name, for the install and permission screens. */
+    static final String EXTRA_APP = "app";
+    /** A parent already said no. */
+    static final String EXTRA_DENIED = "denied";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        boolean tamper = MODE_TAMPER.equals(getIntent().getStringExtra(EXTRA_MODE));
-        boolean appOff = MODE_APP.equals(getIntent().getStringExtra(EXTRA_MODE));
+        String mode = getIntent().getStringExtra(EXTRA_MODE);
+        boolean tamper = MODE_TAMPER.equals(mode);
+        boolean appOff = MODE_APP.equals(mode);
+        boolean install = MODE_INSTALL.equals(mode);
+        boolean permission = MODE_PERMISSION.equals(mode);
+        boolean denied = getIntent().getBooleanExtra(EXTRA_DENIED, false);
+        String app = getIntent().getStringExtra(EXTRA_APP);
+        String appName = app == null || app.isEmpty() ? "This app" : app;
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -44,12 +58,30 @@ public class GuardScreenActivity extends ComponentActivity {
         root.setPadding(64, 64, 64, 64);
         root.setBackgroundColor(Color.parseColor("#030711"));
 
-        TextView title = text(tamper ? "A parent needs to sign in" : appOff ? "That app is off for now" : lockedTitle(), 24);
-        TextView body = text(tamper
-                ? "Removing Jarvis or switching off its protection needs one of your parents' logins."
-                : appOff
-                ? "Your parents turned this app off, or its time is used up for today. Everything else still works."
-                : "Calls, texts and Jarvis still work. You can ask a parent for more time in Jarvis.", 16);
+        String titleText;
+        String bodyText;
+        if (tamper) {
+            titleText = "A parent needs to sign in";
+            bodyText = "Removing Jarvis or switching off its protection needs one of your parents' logins.";
+        } else if (appOff) {
+            titleText = "That app is off for now";
+            bodyText = "Your parents turned this app off, or its time is used up for today. Everything else still works.";
+        } else if (install) {
+            titleText = denied ? "A parent said no to " + appName : appName + " needs a parent's OK";
+            bodyText = denied
+                    ? "This app stays closed. Everything else still works."
+                    : "New apps open once one of your parents says yes. They have been asked.";
+        } else if (permission) {
+            titleText = "Ask a parent first";
+            bodyText = denied
+                    ? "A parent said no to that for " + appName + "."
+                    : appName + " asked for something your parents approve first. They have been asked; try again once one of them says yes.";
+        } else {
+            titleText = lockedTitle();
+            bodyText = "Calls, texts and Jarvis still work. You can ask a parent for more time in Jarvis.";
+        }
+        TextView title = text(titleText, 24);
+        TextView body = text(bodyText, 16);
         body.setTextColor(Color.parseColor("#94A3B8"));
 
         EditText user = new EditText(this);
@@ -87,7 +119,7 @@ public class GuardScreenActivity extends ComponentActivity {
 
         root.addView(title);
         root.addView(body);
-        if (!tamper) {
+        if (!tamper && !install && !permission) {
             Button ask = new Button(this);
             ask.setText("Ask for more time");
             ask.setOnClickListener(v -> {

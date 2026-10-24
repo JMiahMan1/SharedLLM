@@ -44,6 +44,7 @@ public class WebFilterService extends VpnService {
     private ExecutorService workers;
     private volatile boolean running;
     private final Map<String, int[]> seen = new HashMap<>(); // domain -> {visits, blocked}
+    private final Map<String, Long> offered = new HashMap<>(); // site -> when "Ask a parent" was last offered
     private long lastReport = System.currentTimeMillis();
 
     @Override
@@ -102,9 +103,12 @@ public class WebFilterService extends VpnService {
             String name = DnsMessage.questionName(query);
             WebFilterRules.Decision d = WebFilterRules.decide(name,
                     wf.optBoolean("adult", true), wf.optBoolean("safe_search", true),
-                    list(wf.optJSONArray("block")), list(wf.optJSONArray("allow")));
+                    list(wf.optJSONArray("block")),
+                    WebFilterRules.activeAllow(list(wf.optJSONArray("allow")), untilMs(wf.optJSONObject("allow_until")),
+                            System.currentTimeMillis()));
             if (d.kind == WebFilterRules.Kind.BLOCK) {
                 note(name, true);
+                offerAsk(name);
                 reply = DnsMessage.reply(query, DnsMessage.RCODE_NXDOMAIN);
             } else if (d.kind == WebFilterRules.Kind.SAFE) {
                 note(name, false);
@@ -113,8 +117,12 @@ public class WebFilterService extends VpnService {
                                 DnsMessage.query(DnsMessage.id(query), d.target, DnsMessage.TYPE_A))))
                         : DnsMessage.reply(query, 0); // no IPv6 around safe search
             } else {
-                note(name, false);
                 reply = ask(d.target, query);
+                boolean familyBlocked = WebFilterRules.FAMILY_RESOLVER.equals(d.target)
+                        && DnsMessage.questionType(query) == DnsMessage.TYPE_A
+                        && WebFilterRules.familyBlocked(addresses(reply));
+                note(name, familyBlocked);
+                if (familyBlocked) offerAsk(name);
             }
         } catch (Exception e) {
             // Anything odd about the query: pass it on untouched rather than break browsing.
@@ -153,6 +161,41 @@ public class WebFilterService extends VpnService {
         JSONObject rules = GuardApi.lastStatus(this).optJSONObject("rules");
         JSONObject wf = rules == null ? null : rules.optJSONObject("web_filter");
         return wf == null ? new JSONObject() : wf;
+    }
+
+    /** "Ask a parent" for a blocked site: once per site every half hour. */
+    private void offerAsk(String name) {
+        String site = WebFilterRules.site(name);
+        boolean offer;
+        synchronized (offered) {
+            offer = WebFilterRules.shouldOffer(offered, site, System.currentTimeMillis());
+        }
+        if (offer) GuardNotices.offerSite(this, site);
+    }
+
+    private static List<byte[]> addresses(byte[] reply) {
+        List<byte[]> out = new ArrayList<>();
+        try {
+            for (DnsMessage.Record r : DnsMessage.aRecords(reply)) out.add(r.address);
+        } catch (Exception ignored) {
+            // A reply we cannot read is not a block.
+        }
+        return out;
+    }
+
+    /** Sites allowed for a while: {domain: ISO end} to epoch ms. */
+    private static Map<String, Long> untilMs(JSONObject until) {
+        Map<String, Long> out = new HashMap<>();
+        if (until == null) return out;
+        for (java.util.Iterator<String> it = until.keys(); it.hasNext(); ) {
+            String domain = it.next();
+            try {
+                out.put(domain, java.time.OffsetDateTime.parse(until.optString(domain)).toInstant().toEpochMilli());
+            } catch (Exception ignored) {
+                // An unreadable time allows nothing.
+            }
+        }
+        return out;
     }
 
     private static List<String> list(JSONArray a) {

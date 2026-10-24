@@ -735,6 +735,29 @@ class ScreenTimeRequest(SQLModel, table=True):  # type: ignore
     decided_at: str | None = None
 
 
+class GuardRequest(SQLModel, table=True):  # type: ignore
+    """A child asking a parent first (Phase 11 step 5): a newly installed app,
+    an app's permission (camera, location, ...) or a site the web filter
+    blocked. A parent approves or denies; a site may be allowed for a while
+    (``until``) or always. The phone reads the answers in its status.
+
+    target: an Android package (app), "package|group" (permission), or a
+    domain (site).
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True, foreign_key="user.username")
+    kind: str = Field(index=True)  # app | permission | site
+    target: str = Field(index=True)
+    label: str = ""
+    note: str = ""
+    status: str = Field(default="pending", index=True)  # pending | approved | denied
+    until: str | None = None  # a site allowed for a while: when it runs out
+    decided_by: str | None = None
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    decided_at: str | None = None
+
+
 class RecommendationLanes(SQLModel, table=True):  # type: ignore
     """Which kinds of suggestion a parent has blocked for a member (Phase 11 step 3).
 

@@ -5770,6 +5770,10 @@ async def screen_time_status(request: Request, username: str):
         "rules": body.get("rules") or {},
         "can_manage": bool(body.get("can_manage")),
         "protected": bool(body.get("protected")),
+        # The parents' answers on new apps ({pkg: pending|approved|denied}) and
+        # app permissions ({"pkg|group": ...}); the phone's guard enforces them.
+        "app_approvals": (body.get("approvals") or {}).get("apps") or {},
+        "permission_approvals": (body.get("approvals") or {}).get("permissions") or {},
         **state,
     }
 
@@ -5856,6 +5860,65 @@ async def guard_tamper(request: Request):
         "/health",
     )
     return {"status": "SUCCESS"}
+
+
+_GUARD_ASK_TITLES = {
+    "app": ("New app to approve", "{name} installed {what} and is waiting for your OK."),
+    "permission": ("Permission to approve", "{name} wants to give {what}."),
+    "site": ("Website to allow?", "{name} asks to open {what}{note}."),
+}
+_PERMISSION_WORDS = {
+    "location": "location", "camera": "the camera", "microphone": "the microphone", "contacts": "contacts",
+    "sms": "text messages", "phone": "phone calls", "photos": "photos and videos", "calendar": "the calendar",
+    "nearby": "nearby devices",
+}
+
+
+def _guard_request_words(asked: dict) -> str:
+    """What a request is about, in plain words for a notice."""
+    if asked.get("kind") == "permission":
+        pkg, _, group = str(asked.get("target") or "").partition("|")
+        return f"{asked.get('label') or pkg} access to {_PERMISSION_WORDS.get(group, group)}"
+    return str(asked.get("label") or asked.get("target") or "")
+
+
+@app.post("/api/guard/requests")
+async def guard_ask_a_parent(request: Request):
+    """A child's phone (or the child in Jarvis) asks a parent first: a new app,
+    an app's permission, or a blocked site. Both parents hear once."""
+    status, body = await _identity_as_caller(request, "POST", "/api/guard/requests", json=await request.json())
+    if status == 200 and body.get("notify"):
+        asked = body.get("request") or {}
+        child = str(asked.get("username") or "")
+        title, line = _GUARD_ASK_TITLES[str(asked.get("kind"))]
+        note = f" — “{asked['note']}”" if asked.get("note") else ""
+        await _screen_time_notice(
+            body["notify"], title, line.format(name=child, what=_guard_request_words(asked), note=note), f"/guardian?child={child}"
+        )
+    return JSONResponse(status_code=status, content={k: v for k, v in (body or {}).items() if k != "notify"})
+
+
+@app.get("/api/guard/requests")
+async def guard_requests(request: Request, status: str = "pending"):
+    code, body = await _identity_as_caller(request, "GET", "/api/guard/requests", params={"status": status})
+    return JSONResponse(status_code=code, content=body)
+
+
+@app.post("/api/guard/requests/{request_id}")
+async def guard_decide(request: Request, request_id: int):
+    """A parent answers; the child hears the answer."""
+    status, body = await _identity_as_caller(request, "POST", f"/api/guard/requests/{request_id}", json=await request.json())
+    if status == 200:
+        decided = body.get("request") or {}
+        what = _guard_request_words(decided)
+        if decided.get("status") != "approved":
+            title, line = "Not this time", f"A parent said no to {what}."
+        elif decided.get("kind") == "site" and decided.get("until"):
+            title, line = "Website allowed", f"You can open {what} for a while."
+        else:
+            title, line = "Approved", f"A parent said yes to {what}."
+        await _screen_time_notice(body.get("notify") or [], title, line, "/health")
+    return JSONResponse(status_code=status, content={k: v for k, v in (body or {}).items() if k != "notify"})
 
 
 @app.put("/api/screen-time/{username}/rules")

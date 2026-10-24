@@ -305,7 +305,12 @@ export interface WebFilterRules {
   safe_search?: boolean;
   block?: string[];
   allow?: string[];
+  /** Sites a parent allowed for a while ("ask a parent"): domain to when it runs out. */
+  allow_until?: Record<string, string>;
 }
+
+/** The kinds of permission a parent can approve first, app by app. */
+export type PermissionGroup = 'location' | 'camera' | 'microphone' | 'contacts' | 'sms' | 'phone' | 'photos' | 'calendar' | 'nearby';
 
 /** A parent's screen-time rules for a member (all optional). */
 export interface ScreenRules {
@@ -322,6 +327,12 @@ export interface ScreenRules {
   app_limits?: Record<string, number>;
   /** The phone's web filter: on/off, family-safe resolver, safe search, own lists. */
   web_filter?: WebFilterRules;
+  /** New apps wait for a parent's OK (on unless switched off). */
+  install_approval?: boolean;
+  /** Kinds of permission an app may get only once a parent approves it. */
+  permission_gating?: PermissionGroup[];
+  /** Content monitoring: what pages a parent at once. */
+  monitoring?: 'all' | 'severe' | 'off';
   paused?: boolean;
   paused_until?: string;
 }
@@ -348,6 +359,29 @@ export interface ScreenTimeStatus {
   /** Apps closed now: switched off, or past their own minutes. */
   blocked_apps?: string[];
   app_minutes_left?: Record<string, number>;
+  /** The next lock on its own, for the phone's one-minute warning. */
+  next_lock_at?: string | null;
+  next_lock_reason?: 'bedtime' | 'school' | 'limit' | null;
+  install_approval?: boolean;
+  permission_gating?: PermissionGroup[];
+  /** The allow list the web filter honours now (own list plus sites allowed for a while). */
+  web_allow?: string[];
+}
+
+/** A child asking a parent first: a new app, an app's permission, or a blocked site. */
+export interface GuardRequest {
+  id: number;
+  username: string;
+  kind: 'app' | 'permission' | 'site';
+  /** A package (app), "package|group" (permission) or a domain (site). */
+  target: string;
+  label: string;
+  note: string;
+  status: 'pending' | 'approved' | 'denied';
+  until: string | null;
+  decided_by: string | null;
+  created_at: string;
+  decided_at: string | null;
 }
 
 /** The kinds of suggestion Jarvis makes; a parent can switch each off for a child. */

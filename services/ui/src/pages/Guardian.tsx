@@ -9,11 +9,13 @@ import RecapCard from '../components/guardian/RecapCard';
 import GuidanceCard from '../components/guardian/GuidanceCard';
 import JournalCard from '../components/guardian/JournalCard';
 import ActivityFeedCard from '../components/guardian/ActivityFeedCard';
+import GuardRequestsCard from '../components/guardian/GuardRequestsCard';
 import ScreenTimeControls from '../components/health/ScreenTimeControls';
 import SuggestionLanesControls from '../components/health/SuggestionLanesControls';
 
 /**
- * The parents' page (Phase 11 step 7): one child at a time — their week and
+ * The parents' page (Phase 11 step 7): one child at a time — what they are
+ * asking for (new apps, permissions, blocked sites), their week and
  * its concerns, prayer and guidance grounded in what happened, a talk
  * journal, what they have been doing, and every control (screen time, apps,
  * websites, suggestions). Identity's visibility rule decides who sees a
@@ -77,6 +79,7 @@ const Guardian = () => {
         </p>
       ) : (
         <div className="space-y-3 sm:space-y-4" key={child.username}>
+          <GuardRequestsCard username={child.username} name={name} />
           <RecapCard username={child.username} name={name} />
           <GuidanceCard username={child.username} name={name} />
           <JournalCard username={child.username} name={name} />

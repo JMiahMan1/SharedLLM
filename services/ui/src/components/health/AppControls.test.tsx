@@ -64,4 +64,17 @@ describe('AppControls (a parent)', () => {
     await waitFor(() => expect(api.setScreenRules).toHaveBeenCalledTimes(2));
     expect(vi.mocked(api.setScreenRules).mock.calls[1][1].app_limits).toEqual({});
   });
+
+  it('switches install approvals off and gates a permission, keeping the other rules', async () => {
+    wrap({ daily_limit_min: 60, permission_gating: ['location'] });
+    const approvals = screen.getByTestId('install-approval');
+    expect(approvals).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(approvals);
+    await waitFor(() => expect(api.setScreenRules).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.setScreenRules).mock.calls[0][1]).toMatchObject({ daily_limit_min: 60, install_approval: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'the camera' }));
+    await waitFor(() => expect(api.setScreenRules).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.setScreenRules).mock.calls[1][1].permission_gating).toEqual(['location', 'camera']);
+  });
 });

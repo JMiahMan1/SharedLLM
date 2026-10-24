@@ -29,6 +29,8 @@ vi.mock('../../services/api', async (importOriginal) => {
       getGuardianActivity: vi.fn(),
       getMyParents: vi.fn(),
       askToTalk: vi.fn(),
+      getGuardRequests: vi.fn(),
+      decideGuardRequest: vi.fn(),
     },
   };
 });
@@ -69,6 +71,31 @@ describe('Guardian page (a parent)', () => {
     vi.mocked(api.getGuardianJournal).mockResolvedValue({ notes: [] });
     vi.mocked(api.addGuardianJournal).mockResolvedValue({} as never);
     vi.mocked(api.getGuardianActivity).mockResolvedValue({ events: [{ user: 'emma', feature: 'sms', item: 'Unknown', action: 'incoming', at: '2026-10-21T10:00:00Z', detail: { body: 'nobody likes you' } }] });
+    vi.mocked(api.getGuardRequests).mockResolvedValue({ requests: [] });
+    vi.mocked(api.decideGuardRequest).mockResolvedValue({} as never);
+  });
+
+  it('shows only this child\'s requests and answers them', async () => {
+    const base = { label: '', note: '', status: 'pending' as const, until: null, decided_by: null, created_at: 'x', decided_at: null };
+    vi.mocked(api.getGuardRequests).mockResolvedValue({
+      requests: [
+        { ...base, id: 1, username: 'sam', kind: 'app', target: 'com.roblox.client' },
+        { ...base, id: 2, username: 'sam', kind: 'permission', target: 'com.snapchat.android|camera', label: 'Snapchat' },
+        { ...base, id: 3, username: 'sam', kind: 'site', target: 'minecraft.net', note: 'school project' },
+        { ...base, id: 4, username: 'emma', kind: 'site', target: 'tiktok.com' },
+      ],
+    });
+    wrap(<Guardian />, '/guardian?child=sam');
+    const card = await screen.findByTestId('guard-requests');
+    expect(card).toHaveTextContent('Installed Roblox');
+    expect(card).toHaveTextContent('Snapchat wants the camera');
+    expect(card).toHaveTextContent('Asks to open minecraft.net: “school project”');
+    expect(card).not.toHaveTextContent('tiktok.com');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve app' }));
+    await waitFor(() => expect(api.decideGuardRequest).toHaveBeenCalledWith(1, { approve: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow 1 hour' }));
+    await waitFor(() => expect(api.decideGuardRequest).toHaveBeenCalledWith(3, { approve: true, minutes: 60 }));
   });
 
   it('shows the asked-for child\'s week, concerns, guidance, activity and controls', async () => {
