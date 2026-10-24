@@ -19,4 +19,5 @@
     <string name="single_note_widget_description">One note with tickable checkboxes</string>
     <string name="single_note_widget_refresh_description">Refresh this note</string>
     <string name="single_note_widget_configure_description">Choose a different note</string>
+    <string name="guard_accessibility_description">Jarvis screen guard: keeps Jarvis on a child\'s phone (removing it needs a parent\'s login) and follows the screen-time rules their parents set, such as bedtime and school hours. Calls, texts and Jarvis always work.</string>
 </resources>

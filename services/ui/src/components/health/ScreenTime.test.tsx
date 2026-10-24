@@ -27,7 +27,7 @@ vi.mock('../../services/api', async (importOriginal) => {
 
 const status = (overrides: Partial<ScreenTimeStatus> = {}): ScreenTimeStatus => ({
   username: 'kid', day: '2026-10-21', rules: { daily_limit_min: 120, bedtime_start: '21:00', bedtime_end: '07:00' },
-  can_manage: false, limit_min: 120, used_min: 75, bonus_min: 0, remaining_min: 45, bedtime_active: false,
+  can_manage: false, protected: true, limit_min: 120, used_min: 75, bonus_min: 0, remaining_min: 45, bedtime_active: false,
   school_active: false, paused: false, locked: false, reason: null, until: null, resets_at: '2026-10-22T00:00:00-07:00',
   ...overrides,
 });

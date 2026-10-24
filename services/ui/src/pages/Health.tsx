@@ -8,6 +8,7 @@ import HealthProfilePanel from '../components/health/HealthProfilePanel';
 import HealthCycle from '../components/health/HealthCycle';
 import DigitalWellbeingCard from '../components/health/DigitalWellbeingCard';
 import ScreenTimeCard from '../components/health/ScreenTimeCard';
+import PhoneProtectionCard from '../components/health/PhoneProtectionCard';
 import HealthFitness from './HealthFitness';
 
 /**
@@ -49,6 +50,7 @@ const Health = () => {
         {tab === 'today' && (
           <div className="space-y-3 sm:space-y-4">
             <ScreenTimeCard />
+            <PhoneProtectionCard />
             <HealthToday onNavigate={setTab} />
             <DigitalWellbeingCard />
           </div>

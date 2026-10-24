@@ -4198,6 +4198,9 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         "rules": _screen_rules(session, subject.username),
         "bonus_min": _granted_minutes(session, subject.username, day) if day else 0,
         "can_manage": _may_manage_screen_time(caller, subject),
+        # A minor's phone keeps Jarvis protected (no uninstall, no switching
+        # the guard off) whether or not any time rules are set.
+        "protected": (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES,
     }
 
 
@@ -4342,6 +4345,55 @@ def give_screen_time_bonus(username: str, body: dict, session: Session = Depends
     session.commit()
     session.refresh(bonus)
     return {"request": _request_read(bonus), "notify": [subject.username]}
+
+
+# Wrong parent logins typed on a child's phone, per child: five within ten
+# minutes lock the unlock screen for ten minutes, so a password cannot be
+# guessed at the speed of a kid's thumbs.
+_UNLOCK_FAILURES: dict[str, list[float]] = {}
+_UNLOCK_MAX_FAILURES = 5
+_UNLOCK_WINDOW_S = 600
+PARENT_UNLOCK_MINUTES = 10
+
+
+@app.post("/api/guard/parent-unlock")
+def guard_parent_unlock(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A parent signs in on their child's phone to lift Jarvis's protection briefly.
+
+    The caller is the phone's signed-in child; the parent's own username and
+    password are checked, and they must be one of this child's parents.
+    """
+    import time as _time
+
+    now = _time.monotonic()
+    recent = [t for t in _UNLOCK_FAILURES.get(caller.username, []) if now - t < _UNLOCK_WINDOW_S]
+    _UNLOCK_FAILURES[caller.username] = recent
+    if len(recent) >= _UNLOCK_MAX_FAILURES:
+        raise HTTPException(status_code=429, detail="Too many tries. Wait ten minutes, then try again.")
+    username = str((body or {}).get("username") or "").strip().lower()
+    password = str((body or {}).get("password") or "")
+    parent = session.exec(select(User).where(User.username == username)).first() if username else None
+    ok = bool(
+        parent
+        and parent.password_hash
+        and verify_password(password, parent.password_hash)
+        and _may_manage_screen_time(parent, caller)
+    )
+    if not ok:
+        recent.append(now)
+        raise HTTPException(status_code=401, detail="That is not one of your parents' logins.")
+    _UNLOCK_FAILURES.pop(caller.username, None)
+    until = datetime.now(UTC) + timedelta(minutes=PARENT_UNLOCK_MINUTES)
+    return {"ok": True, "parent": parent.username, "until": until.isoformat(), "notify": _parents_of(session, caller)}
+
+
+@app.get("/api/internal/guard/parents/{username}")
+def internal_guard_parents(username: str, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: who to tell when a child's phone protection changes."""
+    subject = session.exec(select(User).where(User.username == username.strip().lower())).first()
+    if subject is None:
+        return {"parents": [], "display_name": username}
+    return {"parents": _parents_of(session, subject), "display_name": subject.display_name or subject.username}
 
 
 @app.get("/api/internal/screen-time/{username}")
