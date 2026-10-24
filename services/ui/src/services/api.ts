@@ -3286,6 +3286,10 @@ export const api = {
     position?: number;
     /** Target mute state; only meaningful for command: 'volume_mute'. */
     muted?: boolean;
+    /** Target shuffle state; only meaningful for command: 'shuffle_set'. */
+    shuffle?: boolean;
+    /** Target repeat mode; only meaningful for command: 'repeat_set'. */
+    repeat?: 'off' | 'all' | 'one';
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/execute/media/transport', payload);
     return resp.data;

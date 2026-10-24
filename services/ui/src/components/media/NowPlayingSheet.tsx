@@ -15,8 +15,9 @@ import { formatDuration, formatRemaining } from '../../features/media/format';
 import { proxiedImage } from '../../lib/mediaImage';
 import { useMediaToken } from '../../lib/mediaToken';
 import OutputSheet from './OutputSheet';
-
-type RepeatMode = 'off' | 'all' | 'one';
+import { webPlayerAdapter } from '../../features/media/engine/adapters/adapters';
+import { nextRepeat, parseQueueModes } from '../../features/media/engine/adapters/PlayerAdapter';
+import type { RepeatMode } from '../../features/media/types';
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 const SLEEP_OPTIONS = [15, 30, 45, 60] as const;
@@ -28,12 +29,6 @@ const iconButton =
  *  impure when it appears in a component body, even inside an event handler. */
 function nowMs(): number {
   return Date.now();
-}
-
-function nextRepeat(mode: RepeatMode): RepeatMode {
-  if (mode === 'off') return 'all';
-  if (mode === 'all') return 'one';
-  return 'off';
 }
 
 function isBook(uri: string | null): boolean {
@@ -102,11 +97,10 @@ export default function NowPlayingSheet({
     let cancelled = false;
     void maCommand('player_queues/get', { queue_id: playerId })
       .then((queue) => {
-        if (cancelled || !queue || typeof queue !== 'object') return;
-        const record = queue as Record<string, unknown>;
-        if (typeof record.shuffle_enabled === 'boolean') setShuffle(record.shuffle_enabled);
-        const mode = record.repeat_mode;
-        if (mode === 'off' || mode === 'all' || mode === 'one') setRepeatMode(mode);
+        if (cancelled) return;
+        const modes = parseQueueModes(queue);
+        if (modes.shuffle !== null) setShuffle(modes.shuffle);
+        if (modes.repeat !== null) setRepeatMode(modes.repeat);
       })
       .catch(() => {
         /* Not connected yet: the controls still work once the player is. */
@@ -210,7 +204,7 @@ export default function NowPlayingSheet({
     const target = !shuffle;
     setShuffle(target);
     try {
-      await player.maCommand('player_queues/shuffle', { queue_id: playerId, shuffle_enabled: target });
+      await webPlayerAdapter(player).setShuffle('', target);
     } catch {
       setShuffle(!target);
       toast.error('Could not change shuffle');
@@ -223,7 +217,7 @@ export default function NowPlayingSheet({
     const target = nextRepeat(repeatMode);
     setRepeatMode(target);
     try {
-      await player.maCommand('player_queues/repeat', { queue_id: playerId, repeat_mode: target });
+      await webPlayerAdapter(player).setRepeat('', target);
     } catch {
       setRepeatMode(repeatMode);
       toast.error('Could not change repeat');

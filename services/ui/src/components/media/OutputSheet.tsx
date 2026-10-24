@@ -10,6 +10,7 @@ import { api } from '../../services/api';
 import { formatDeviceLabel } from '../../lib/deviceLabels';
 import { sendMaRemoteCommand } from '../../lib/maRemotePlayer';
 import { cn } from '../../lib/utils';
+import { haPlayerAdapter, maPlayerAdapter } from '../../features/media/engine/adapters/adapters';
 import type { MediaStatus } from './types';
 
 type Section = 'speaker' | 'tv' | 'group';
@@ -340,15 +341,11 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
     timers.set(row.key, window.setTimeout(() => {
       timers.delete(row.key);
       const send = row.maId
-        ? sendMaRemoteCommand('players/cmd/volume_set', { player_id: row.maId, volume_level: value })
+        ? maPlayerAdapter.setVolume(`ma:${row.maId}`, value)
         : row.entityId
-          ? api.mediaTransport({ entity_id: row.entityId, command: 'volume_set', volume_level: value / 100 })
+          ? haPlayerAdapter.setVolume(row.entityId, value)
           : Promise.resolve();
-      void Promise.resolve(send).then((response) => {
-        if (response && typeof response === 'object' && 'status' in response && response.status !== 'SUCCESS') {
-          throw new Error('volume failed');
-        }
-      }).catch(() => toast.error(`Could not change the volume on ${row.name}`));
+      void send.catch(() => toast.error(`Could not change the volume on ${row.name}`));
     }, 200));
   };
 

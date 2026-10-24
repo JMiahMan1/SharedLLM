@@ -7,7 +7,6 @@ import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import { useSharedMAWebPlayer } from '../context/MediaPlayerContext';
 import { errorText } from '../lib/errorText';
-import { sendMaRemoteCommand } from '../lib/maRemotePlayer';
 import { proxiedImage } from '../lib/mediaImage';
 import { useMediaToken } from '../lib/mediaToken';
 import { formatTimeAgo, normalizePlayedAt } from '../features/media/format';
@@ -17,10 +16,11 @@ import { useMediaActions, useMediaStore } from '../features/media/store/mediaSto
 import { deviceOptions, selectActiveOutputId, selectPlayers } from '../features/media/store/selectors';
 import { useMediaStatusFeed } from '../features/media/engine/statusFeed';
 import { useLivePosition } from '../features/media/engine/useLivePosition';
+import { usePlayback } from '../features/media/engine/usePlayback';
 import { DeviceSelector } from '../components/media/DeviceSelector';
 import { NowPlayingCard, type NowPlayingView } from '../components/media/NowPlayingCard';
 import { MediaExplorer } from '../components/media/MediaExplorer';
-import type { DeviceOption, PlayRequest, QueueOption } from '../components/media/types';
+import type { DeviceOption, PlayRequest } from '../components/media/types';
 
 /* helpers */
 
@@ -92,7 +92,7 @@ const Media = () => {
   /** '' = this device's web player, `ma:<id>` = an MA-only player, else an HA entity. */
   const selectedTarget = useMediaStore(selectActiveOutputId);
   const players = useMediaStore(selectPlayers);
-  const { selectOutput, setVolume: storeVolume, setMuted: storeMuted, patchPlayer } = useMediaActions();
+  const { selectOutput } = useMediaActions();
   const isWebPlayer = !selectedTarget;
   const selectedRef = useRef(selectedTarget);
   useEffect(() => {
@@ -107,14 +107,11 @@ const Media = () => {
     if (requestedOutput) selectOutput(requestedOutput);
   }, [requestedOutput, selectOutput]);
 
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [showExplorer, setShowExplorer] = useState(false);
-  const volumeTimerRef = useRef<number | null>(null);
 
   /* device status */
 
-  const { refresh: refreshStatus } = useMediaStatusFeed(maPlayer);
+  useMediaStatusFeed(maPlayer);
 
   const { data: entities = [] } = useQuery({
     queryKey: mediaKeys.entities(),
@@ -170,156 +167,19 @@ const Media = () => {
 
   /* playback */
 
-  /** Start `req` on the selected device; `key` is the row showing a spinner. */
-  const playItem = useCallback(async (req: PlayRequest, key: string) => {
-    void trigger('heavy');
-    setBusy(key);
-    setError(null);
-    const target = selectedRef.current;
-    // Music Assistant only plays its own URIs; an Audiobookshelf id is mapped
-    // server-side (a guessed URI leaves the player silent).
-    const maUri = async () =>
-      req.kind === 'abs' ? (await api.resolveMALibraryUri(req.id, req.title)).ma_uri : req.uri;
-    try {
-      if (!target) {
-        await maPlayer.play(await maUri());
-      } else if (target.startsWith('ma:')) {
-        const pid = target.slice(3);
-        const media = await maUri();
-        await sendMaRemoteCommand('player_queues/play_media', { queue_id: pid, media: [media], option: 'replace' });
-      } else {
-        const resp = req.kind === 'abs'
-          ? await api.playAudiobook({ book_id: req.id, entity_id: target, resume: true })
-          : await api.mediaPlay({ entity_id: target, query: req.uri, media_type: 'music' });
-        if (resp.status === 'FAILURE') throw new Error(resp.message || 'Playback failed');
-        void refreshStatus();
-      }
-    } catch (err) {
-      setError(errorText(err, 'Playback failed'));
-    } finally {
-      setBusy(null);
-    }
-  }, [maPlayer, refreshStatus, trigger]);
-
-  /** Queue a Music Assistant item on the selected device: this device's own
-   *  queue, an MA player's queue, or a Home Assistant speaker's MA queue. */
-  const queueItem = useCallback(async (req: PlayRequest, option: QueueOption) => {
-    if (req.kind !== 'uri') return;
-    void trigger('light');
-    setError(null);
-    const target = selectedRef.current;
-    try {
-      if (!target) {
-        await maPlayer.enqueue(req.uri, option);
-      } else if (target.startsWith('ma:')) {
-        await sendMaRemoteCommand('player_queues/play_media', { queue_id: target.slice(3), media: [req.uri], option });
-      } else {
-        const resp = await api.mediaPlay({ entity_id: target, query: req.uri, media_type: 'music', enqueue: option });
-        if (resp.status === 'FAILURE') throw new Error(resp.message || 'Could not add to the queue');
-      }
-      toast.success(option === 'next' ? `${req.title} plays next` : `${req.title} added to the queue`);
-    } catch (err) {
-      setError(errorText(err, 'Could not add to the queue'));
-    }
-  }, [maPlayer, trigger]);
-
-  /** Transport for the selected remote device. */
-  const sendTransport = useCallback(async (command: 'play' | 'resume' | 'pause' | 'next' | 'previous' | 'stop') => {
-    const target = selectedRef.current;
-    if (!target) return;
-    void trigger('light');
-    setBusy(command);
-    setError(null);
-    try {
-      if (target.startsWith('ma:')) {
-        const pid = target.slice(3);
-        const maCmd = {
-          play: 'players/cmd/play', resume: 'players/cmd/play', pause: 'players/cmd/pause',
-          next: 'player_queues/next', previous: 'player_queues/previous', stop: 'players/cmd/stop',
-        }[command];
-        await sendMaRemoteCommand(maCmd, maCmd.startsWith('player_queues/') ? { queue_id: pid } : { player_id: pid });
-        // Keep the card in step until the next poll; the poll remains the
-        // authority, so a command MA accepted but could not act on self-corrects.
-        const nextState = command === 'pause' ? 'paused' : command === 'stop' ? 'idle' : command === 'play' || command === 'resume' ? 'playing' : null;
-        if (nextState) patchPlayer(target, { status: nextState });
-      } else {
-        const resp = await api.mediaTransport({ entity_id: target, command });
-        if (resp.status === 'FAILURE') throw new Error(resp.message || 'Command failed');
-        await refreshStatus();
-      }
-    } catch (err) {
-      setError(errorText(err, 'Command failed'));
-    } finally {
-      setBusy(null);
-    }
-  }, [patchPlayer, refreshStatus, trigger]);
-
-  const runWeb = useCallback(async (command: string, fn: () => Promise<unknown>) => {
-    void trigger('light');
-    setBusy(command);
-    try {
-      await fn();
-    } catch (err) {
-      setError(errorText(err, 'Command failed'));
-    } finally {
-      setBusy(null);
-    }
-  }, [trigger]);
-
-  const handleRemoteVolume = useCallback((v: number) => {
-    const target = selectedRef.current;
-    if (!target) return;
-    storeVolume(target, v);
-    if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current);
-    volumeTimerRef.current = window.setTimeout(() => {
-      const send = target.startsWith('ma:')
-        ? sendMaRemoteCommand('players/cmd/volume_set', { player_id: target.slice(3), volume_level: v })
-        : api.mediaTransport({ entity_id: target, command: 'volume_set', volume_level: v / 100 });
-      void Promise.resolve(send).catch(() => toast.error('Could not change the volume'));
-    }, 200);
-  }, [storeVolume]);
-
-  const toggleRemoteMute = useCallback(() => {
-    const target = selectedRef.current;
-    if (!target) return;
-    const next = !muted;
-    storeMuted(target, next);
-    const send = target.startsWith('ma:')
-      ? sendMaRemoteCommand('players/cmd/volume_mute', { player_id: target.slice(3), muted: next })
-      : api.mediaTransport({ entity_id: target, command: 'volume_mute', muted: next });
-    void Promise.resolve(send).catch(() => {
-      storeMuted(target, !next);
-      toast.error('Could not mute that player');
-    });
-  }, [muted, storeMuted]);
-
-  const handleRemoteSeek = useCallback(async (seconds: number) => {
-    const target = selectedRef.current;
-    if (!target) return;
-    patchPlayer(target, { positionSec: seconds, positionUpdatedAt: Date.now() });
-    try {
-      if (target.startsWith('ma:')) {
-        await sendMaRemoteCommand('player_queues/seek', { queue_id: target.slice(3), position: Math.round(seconds) });
-      } else {
-        const resp = await api.mediaTransport({ entity_id: target, command: 'seek', position: seconds });
-        if (resp.status === 'FAILURE') throw new Error(resp.message);
-      }
-    } catch {
-      // The optimistic position snaps back on the next poll; say why.
-      toast.error('Could not seek on that player');
-    }
-  }, [patchPlayer]);
+  const playback = usePlayback(maPlayer);
+  const { play: playItem, enqueue: queueItem, transport, busy, error, clearError } = playback;
 
   const selectDevice = useCallback((id: string) => {
     void trigger('light');
     selectOutput(id);
-    setError(null);
+    clearError();
     // Remember the choice server-side (voice "pause" and the dashboard follow
     // it). The web player records itself once it plays.
     if (id && !id.startsWith('ma:')) {
       void api.syncMediaState({ entity_id: id, state: 'idle' }).catch(() => {});
     }
-  }, [selectOutput, trigger]);
+  }, [selectOutput, clearError, trigger]);
 
   /* shelves */
 
@@ -420,7 +280,7 @@ const Media = () => {
       {error && (
         <div role="alert" className="bg-red-500/20 border border-red-500/30 rounded-xl p-3 text-red-200 text-sm flex items-center justify-between gap-3">
           <span className="min-w-0 break-words">{error}</span>
-          <button type="button" onClick={() => setError(null)} className="min-h-11 px-3 underline text-xs shrink-0">Dismiss</button>
+          <button type="button" onClick={clearError} className="min-h-11 px-3 underline text-xs shrink-0">Dismiss</button>
         </div>
       )}
 
@@ -443,18 +303,14 @@ const Media = () => {
             {selectedDevice && !selectedDevice.online ? `${selectedDevice.name} is offline` : `Playing through ${selectedDevice?.name || remote?.name || 'the selected speaker'}`}
           </p>
         )}
-        onPrevious={isWebPlayer ? () => void runWeb('previous', maPlayer.previous) : () => void sendTransport('previous')}
-        onNext={isWebPlayer ? () => void runWeb('next', maPlayer.next) : () => void sendTransport('next')}
-        onTogglePlay={
-          isWebPlayer
-            ? () => void runWeb(maPlayer.isPlaying ? 'pause' : 'play', () => (maPlayer.isPlaying ? maPlayer.pause() : maPlayer.play()))
-            : () => void sendTransport(remoteView.state === 'playing' ? 'pause' : 'resume')
-        }
-        onStop={view.state !== 'idle' ? (isWebPlayer ? () => void runWeb('stop', maPlayer.stop) : () => void sendTransport('stop')) : undefined}
-        onVolumeChange={isWebPlayer ? maPlayer.setVolume : handleRemoteVolume}
-        onMuteToggle={isWebPlayer ? () => maPlayer.setMuted(!maPlayer.muted) : toggleRemoteMute}
+        onPrevious={() => void transport('previous')}
+        onNext={() => void transport('next')}
+        onTogglePlay={() => void transport(view.state === 'playing' ? 'pause' : 'resume')}
+        onStop={view.state !== 'idle' ? () => void transport('stop') : undefined}
+        onVolumeChange={playback.setVolume}
+        onMuteToggle={() => playback.setMuted(!(isWebPlayer ? maPlayer.muted : muted))}
         onFavoriteToggle={maItemUri ? () => void toggleFavorite() : undefined}
-        onSeek={view.duration > 0 ? (isWebPlayer ? (s) => void maPlayer.seek(s) : (s) => void handleRemoteSeek(s)) : undefined}
+        onSeek={view.duration > 0 ? (s) => void playback.seek(s) : undefined}
       />
 
       <section>
