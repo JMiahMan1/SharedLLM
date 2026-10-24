@@ -46,7 +46,7 @@ class LastKnownGoodCache(Generic[T]):
     def __init__(self, name: str, max_entries: int = 512) -> None:
         self._name = name
         self._max_entries = max_entries
-        self._entries: "OrderedDict[str, T]" = OrderedDict()
+        self._entries: OrderedDict[str, T] = OrderedDict()
 
     def _evict_if_needed(self) -> None:
         while len(self._entries) >= self._max_entries:
@@ -81,7 +81,7 @@ class LastKnownGoodCache(Generic[T]):
         """
         try:
             value = await load()
-        except Exception as e:  # noqa: BLE001 - the point is to survive any failure
+        except Exception as e:  # the point is to survive any failure
             stale = self.recall(key)
             if stale is not None:
                 log.warning(

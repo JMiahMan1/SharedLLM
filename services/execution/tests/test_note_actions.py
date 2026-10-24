@@ -564,7 +564,6 @@ async def test_meta_read_refuses_a_corrupt_index(provider, monkeypatch):
 
 
 async def test_meta_read_retries_once_after_a_connect_stall(provider, monkeypatch):
-    import asyncio
 
     import services.execution.http_client as http_client
 
@@ -573,7 +572,7 @@ async def test_meta_read_retries_once_after_a_connect_stall(provider, monkeypatc
     async def fake_request(method, url, data=None, headers=None, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
         return {"status_code": 200, "text": '{"version": 1, "notes": {}}'}
 
     monkeypatch.setattr(http_client, "request", fake_request)

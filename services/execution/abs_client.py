@@ -13,11 +13,11 @@ from urllib.parse import quote
 
 import aiohttp
 
-log = logging.getLogger("execution.abs_client")
-
 from services.config import EXECUTION_EXTERNAL_HOST, GATEWAY_INTERNAL_URL
 from services.execution.http_client import get_session, host_of
 from services.shared.media_token import DEVICE_TOKEN_TTL_SECONDS, sign
+
+log = logging.getLogger("execution.abs_client")
 
 
 @asynccontextmanager
@@ -85,7 +85,7 @@ def _token_ttl(token: str) -> int:
         payload = token.split(".")[1]
         claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
         remaining = int(claims["exp"] - time.time()) - 60
-    except Exception:  # noqa: BLE001 - not a JWT
+    except Exception:  # not a JWT
         return _CACHE_TTL
     return max(0, min(_CACHE_TTL, remaining))
 
@@ -415,10 +415,7 @@ def get_session_track_url(session_id: str, user: str, track_index: int = 0) -> s
     """
     # HA/Cast/Roku fetch this URL from the LAN: use the externally routable
     # host (Caddy publishes :11435), never the docker-internal `gateway` alias.
-    if EXECUTION_EXTERNAL_HOST:
-        base = f"http://{EXECUTION_EXTERNAL_HOST}:11435"
-    else:
-        base = GATEWAY_INTERNAL_URL or "http://localhost:11435"
+    base = f"http://{EXECUTION_EXTERNAL_HOST}:11435" if EXECUTION_EXTERNAL_HOST else GATEWAY_INTERNAL_URL or "http://localhost:11435"
     token, _exp = sign(user, ttl=DEVICE_TOKEN_TTL_SECONDS)
     return (
         f"{base.rstrip('/')}/api/media/stream/abs-session/{session_id}/{track_index}"

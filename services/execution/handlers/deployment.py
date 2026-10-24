@@ -45,13 +45,13 @@ def _get_docker_client():
     try:
         import docker
         return docker.from_env()
-    except ImportError:
+    except ImportError as e:
         raise RuntimeError(
             "The 'docker' Python SDK is not installed. "
             "Add 'docker>=7.0.0' to services/execution/requirements.txt."
-        )
+        ) from e
     except Exception as e:
-        raise RuntimeError(f"Could not connect to Docker socket: {e}")
+        raise RuntimeError(f"Could not connect to Docker socket: {e}") from e
 
 
 async def handle_deployment(req) -> dict:

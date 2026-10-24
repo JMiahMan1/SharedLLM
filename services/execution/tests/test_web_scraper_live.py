@@ -12,9 +12,8 @@ Requires:
 
 import os
 
-
-import pytest
 import httpx
+import pytest
 
 from services.execution.tests.test_live_integration import (
     INTERNAL_HEADERS,

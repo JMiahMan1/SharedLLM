@@ -12,7 +12,8 @@ the member it is for.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 THEMES: dict[str, dict[str, Any]] = {
     "worldview news": {

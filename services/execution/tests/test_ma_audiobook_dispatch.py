@@ -14,6 +14,7 @@ Two bugs this guards, both found by playing a book on a real MA HASS player:
    and a non-start is a FAILURE carrying the reason.
 """
 import pathlib
+from typing import ClassVar
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -158,6 +159,7 @@ class TestMusicAssistantGetsALibraryUri:
     @pytest.mark.asyncio
     async def test_unresolvable_book_fails_instead_of_sending_a_bad_uri(self):
         from contextlib import ExitStack
+
         from services.shared.ma_library import MALibraryLookupError
 
         err = MALibraryLookupError("Music Assistant does not have that book", reason="not_in_ma_library")
@@ -173,6 +175,7 @@ class TestMusicAssistantGetsALibraryUri:
     @pytest.mark.asyncio
     async def test_missing_ma_credentials_fail_loudly(self):
         from contextlib import ExitStack
+
         from services.shared.ma_library import MALibraryLookupError
 
         err = MALibraryLookupError("Music Assistant token is not configured", reason="no_mass_token")
@@ -418,7 +421,7 @@ class TestPodcastDispatch:
     EP_TITLE = "2026 New Christendom Press Conference Recap"
     POD_TITLE = "The King's Hall"
 
-    PODCAST_ITEM = {
+    PODCAST_ITEM: ClassVar[dict] = {
         "id": POD_ID,
         "media": {
             "metadata": {"title": POD_TITLE},
@@ -521,6 +524,7 @@ class TestPodcastDispatch:
     @pytest.mark.asyncio
     async def test_an_unresolvable_podcast_fails_loudly(self):
         from contextlib import ExitStack
+
         from services.shared.ma_library import MALibraryLookupError
 
         err = MALibraryLookupError(

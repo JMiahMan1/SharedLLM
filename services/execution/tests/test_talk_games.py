@@ -1,8 +1,7 @@
+import asyncio
 import os
 import sys
 from types import SimpleNamespace
-
-import asyncio
 
 import pytest
 
@@ -427,7 +426,7 @@ async def test_the_first_answer_to_arrive_wins_even_if_its_post_is_slower(talk, 
     posted: list[tuple[str, str]] = []
 
     async def fake_request(provider, method, endpoint, **kwargs):
-        if provider.username == "jeremiah" and "Moses" == (kwargs.get("data") or {}).get("message"):
+        if provider.username == "jeremiah" and (kwargs.get("data") or {}).get("message") == "Moses":
             await asyncio.sleep(0.2)  # his post to Nextcloud is the slow one
         posted.append((provider.username, (kwargs.get("data") or {}).get("message", "")))
         return True, {"id": len(posted)}, ""

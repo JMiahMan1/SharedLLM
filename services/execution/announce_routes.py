@@ -7,7 +7,8 @@ Dispatch is injected: main.py passes execute_announce so we never import main he
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from services.execution.schemas import AnnouncementRequest, UserContext
 from services.execution.schemas_intercom import IntercomAnnouncementRequest, IntercomBroadcastRequest

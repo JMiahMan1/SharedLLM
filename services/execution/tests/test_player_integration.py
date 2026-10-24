@@ -9,9 +9,8 @@ Tests cover:
 - Media status filtering for MA-compatible devices only
 """
 import asyncio
-from typing import cast
+from typing import ClassVar, cast
 from unittest.mock import AsyncMock, MagicMock, patch
-from unittest.mock import MagicMock as MM
 
 import pytest
 
@@ -699,7 +698,7 @@ class TestGatewayStreamEndpoint:
             return creds
 
         class FakeRequest:
-            headers = {"Authorization": "Bearer test_internal_secret"}
+            headers: ClassVar[dict] = {"Authorization": "Bearer test_internal_secret"}
             async def json(self):
                 return {}
 
@@ -729,6 +728,7 @@ class TestGatewayStreamEndpoint:
     async def test_stream_ma_prefers_browser_player(self, ctx):
         """Stream endpoint should prefer the browser Sendspin player."""
         from contextlib import asynccontextmanager
+
         from fastapi import HTTPException, Request
 
         from services.gateway.ma_ws_client import MAWebSocketClient
@@ -759,7 +759,7 @@ class TestGatewayStreamEndpoint:
         sent_commands: list[tuple[str, dict]] = []
 
         class FakeRequest:
-            headers = {"Authorization": "Bearer test_internal_secret"}
+            headers: ClassVar[dict] = {"Authorization": "Bearer test_internal_secret"}
             async def json(self):
                 return {}
 

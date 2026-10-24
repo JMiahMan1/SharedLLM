@@ -33,6 +33,7 @@ from sqlmodel import Session, select
 
 from services.common.http import get_client
 from services.common.relay import until_either_ends
+from services.common.secrets import secret_matches
 from services.config import (
     IDENTITY_SVC_URL,
     INTERNAL_SECRET,
@@ -49,7 +50,6 @@ from services.shared.info_endpoint import info_router
 from .crypto import decrypt, encrypt
 from .database import engine, init_db
 from .models import Workspace
-from services.common.secrets import secret_matches
 
 log = logging.getLogger("workspace_runtime")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
@@ -124,7 +124,7 @@ def get_workspace_root() -> Path:
     """Fetch the current workspace root from global settings or fallback to env/default."""
     global WORKSPACE_ROOT
     now = time.time()
-    if now - _WORKSPACE_ROOT_CACHE.get("ts", 0.0) < 3600 and WORKSPACE_ROOT is not None and WORKSPACE_ROOT != Path("/workspace"):
+    if now - _WORKSPACE_ROOT_CACHE.get("ts", 0.0) < 3600 and WORKSPACE_ROOT is not None and WORKSPACE_ROOT != Path("/workspace"):  # noqa: SIM300 - WORKSPACE_ROOT is mutable state, not a constant
         return WORKSPACE_ROOT
 
     try:
@@ -575,7 +575,6 @@ class WorkspaceBootstrapRequest(WorkspaceRef):
 
 
 def _require_internal_secret(x_internal_secret: str | None) -> None:
-    import hmac
     expected = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
     if not expected or not x_internal_secret or not secret_matches(x_internal_secret, expected):
         raise HTTPException(status_code=403, detail="Invalid internal secret")
@@ -2040,7 +2039,7 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
             raise HTTPException(
                 status_code=400,
                 detail=f"Absolute local_path must be within workspace root ({get_workspace_root()}).",
-            )
+            ) from None
 
     with Session(engine) as session:
         existing = session.get(Workspace, ws.id)
@@ -2640,7 +2639,6 @@ async def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_inte
     # file/lint/pytest helpers are offloaded to a worker thread so the event
     # loop is never blocked.
     from services.workspace_runtime.git_ops import (
-        GitPushRequest,
         create_review_branch,
         current_branch_name,
         git_commit,
@@ -3098,11 +3096,8 @@ async def _trigger_nextcloud_sync(workspace_id: str) -> None:
 # every git command runs inside the workspace's dedicated container. This import
 # is placed at the very bottom so that all shared helpers referenced by
 # git_ops.py already exist on this module when it is imported (avoids a cycle).
-from services.workspace_runtime.git_ops import (  # noqa: E402
-    GitPushRequest,
-    git_push,
-    git_router,
-)
+from services.workspace_runtime.git_ops import git_push as git_push  # noqa: E402
+from services.workspace_runtime.git_ops import git_router  # noqa: E402
 
 app.include_router(git_router)
 

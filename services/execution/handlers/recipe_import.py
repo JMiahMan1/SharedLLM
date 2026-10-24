@@ -17,8 +17,8 @@ from urllib.parse import quote, urlparse
 
 import aiohttp
 
-from services.execution.http_client import get_session, host_of
 from services.execution.handlers.recipe_seed import get_seed
+from services.execution.http_client import get_session, host_of
 from services.execution.schemas import ExecutionResult, RecipeRequest
 
 log = logging.getLogger("execution.recipe_import")
@@ -226,7 +226,7 @@ async def _themealdb_hits(query: str, limit: int) -> list[dict] | None:
         return []
     try:
         data = await _themealdb_get(f"{_THEMEALDB_SEARCH_PATH}?s={quote(query)}")
-    except Exception as exc:  # noqa: BLE001 - a dead API must never 500 the route
+    except Exception as exc:  # a dead API must never 500 the route
         log.warning(f"[recipe_import] themealdb search failed: {type(exc).__name__}: {exc}")
         return None
     meals = (data or {}).get("meals") or []
@@ -375,7 +375,7 @@ async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
             "That page could not be reached; check the link and try again.",
             service="recipe_import",
         )
-    except Exception as exc:  # noqa: BLE001 - a bad link must never 500 the route
+    except Exception as exc:  # a bad link must never 500 the route
         log.warning(f"[recipe_import] read failed for {url}: {type(exc).__name__}: {exc}")
         return ExecutionResult.fail(
             "That page could not be read right now.", service="recipe_import"

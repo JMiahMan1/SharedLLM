@@ -16,9 +16,9 @@ from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from services.common.secrets import secret_matches
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, LOG_MAX_ENTRIES, LOG_RETENTION_DAYS, REDIS_URL
 from services.shared.info_endpoint import info_router
-from services.common.secrets import secret_matches
 
 _redis_client: redis.Redis | None = None
 

@@ -1,24 +1,20 @@
 """Tests for the workspace terminal WebSocket endpoint."""
 
+import contextlib
 import json
 import os
-import tempfile
-from unittest.mock import AsyncMock, MagicMock, patch
-
-_TEST_WS_ROOT = os.path.abspath(".tmp/workspaces")
-os.environ["WORKSPACE_RUNTIME_ROOT"] = _TEST_WS_ROOT
-os.makedirs(_TEST_WS_ROOT, exist_ok=True)
-_TEST_DB_PATH = os.path.abspath(".tmp/workspaces/workspace_term_test.db")
-
-import contextlib
 import socket
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import SQLModel, create_engine
 from starlette.websockets import WebSocketDisconnect
 
-from services.workspace_runtime.models import Workspace
+_TEST_WS_ROOT = os.path.abspath(".tmp/workspaces")
+os.environ["WORKSPACE_RUNTIME_ROOT"] = _TEST_WS_ROOT
+os.makedirs(_TEST_WS_ROOT, exist_ok=True)
+_TEST_DB_PATH = os.path.abspath(".tmp/workspaces/workspace_term_test.db")
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -47,8 +43,8 @@ def _db_engine(db_file):
 @pytest.fixture(autouse=True)
 def _patch_engine(db_engine):
     """Replace the workspace_runtime database engine with our test engine."""
-    from services.workspace_runtime import database as db_mod
     import services.workspace_runtime.main as main_mod
+    from services.workspace_runtime import database as db_mod
 
     orig_db_engine = db_mod.engine
     orig_main_engine = main_mod.engine
@@ -229,9 +225,13 @@ def test_terminal_docker_unavailable(client):
     """Docker daemon down → close(1011, 'Docker unavailable')."""
     _setup_test_workspace(client)
 
-    with _mock_auth_context(), patch("docker.from_env", side_effect=Exception("no daemon")):
-        with pytest.raises(WebSocketDisconnect) as exc, client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws:
-            ws.receive_text()
+    with (
+        _mock_auth_context(),
+        patch("docker.from_env", side_effect=Exception("no daemon")),
+        pytest.raises(WebSocketDisconnect) as exc,
+        client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws,
+    ):
+        ws.receive_text()
     assert exc.value.code == 1011
     assert "Docker unavailable" in exc.value.reason
 
@@ -268,7 +268,7 @@ def test_terminal_creates_exec_for_bash(client):
 
     with _mock_auth_context(), patch(
         "docker.from_env", return_value=mock_client
-    ), patch("services.workspace_sandbox.ensure_workspace_container"), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws:
+    ), patch("services.workspace_sandbox.ensure_workspace_container"), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok"):
         import time
 
         time.sleep(0.2)

@@ -1,11 +1,10 @@
-import os
 
 
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from services.execution.main import app, _skylight_chore_ids
+from services.execution.main import _skylight_chore_ids, app
 
 client = TestClient(app)
 
@@ -70,18 +69,20 @@ def test_skylight_chores_today_literal():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": mock_chores, "included": [_category_included("Jeremiah")]}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.get(
-                "/api/integrations/skylight/chores",
-                headers={"X-Internal-Secret": "test-secret"},
-                params={"user": "jeremiah", "date": "today"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert len(data["chores"]) == 1
-            assert data["chores"][0]["id"] == "1"
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.get(
+            "/api/integrations/skylight/chores",
+            headers={"X-Internal-Secret": "test-secret"},
+            params={"user": "jeremiah", "date": "today"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        assert len(data["chores"]) == 1
+        assert data["chores"][0]["id"] == "1"
 
 
 def test_skylight_chores_date_filter():
@@ -97,18 +98,20 @@ def test_skylight_chores_date_filter():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": mock_chores}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.get(
-                "/api/integrations/skylight/chores",
-                headers={"X-Internal-Secret": "test-secret"},
-                params={"date": "2026-05-29"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert len(data["chores"]) == 1
-            assert data["chores"][0]["id"] == "1"
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.get(
+            "/api/integrations/skylight/chores",
+            headers={"X-Internal-Secret": "test-secret"},
+            params={"date": "2026-05-29"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        assert len(data["chores"]) == 1
+        assert data["chores"][0]["id"] == "1"
 
 
 def test_skylight_chores_normalization():
@@ -124,22 +127,24 @@ def test_skylight_chores_normalization():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": mock_chores}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.get(
-                "/api/integrations/skylight/chores",
-                headers={"X-Internal-Secret": "test-secret"},
-                params={"date": "2026-05-29"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            chores = {c["id"]: c for c in data["chores"]}
-            assert chores["1-2026-05-29"]["title"] == "Clean Room"
-            assert chores["1-2026-05-29"]["completed"] is True
-            assert chores["1-2026-05-29"]["reward"] == 10
-            assert chores["2-2026-05-29"]["completed"] is False
-            assert "assignees" in chores["1-2026-05-29"]
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.get(
+            "/api/integrations/skylight/chores",
+            headers={"X-Internal-Secret": "test-secret"},
+            params={"date": "2026-05-29"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        chores = {c["id"]: c for c in data["chores"]}
+        assert chores["1-2026-05-29"]["title"] == "Clean Room"
+        assert chores["1-2026-05-29"]["completed"] is True
+        assert chores["1-2026-05-29"]["reward"] == 10
+        assert chores["2-2026-05-29"]["completed"] is False
+        assert "assignees" in chores["1-2026-05-29"]
 
 
 def test_skylight_chore_complete():
@@ -150,16 +155,18 @@ def test_skylight_chore_complete():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"success": True}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.post(
-                "/api/integrations/skylight/chores/1/complete",
-                headers={"X-Internal-Secret": "test-secret"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert "Chore completed" in data["message"]
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.post(
+            "/api/integrations/skylight/chores/1/complete",
+            headers={"X-Internal-Secret": "test-secret"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        assert "Chore completed" in data["message"]
 
 
 def test_skylight_chore_complete_failure():
@@ -170,15 +177,17 @@ def test_skylight_chore_complete_failure():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return None
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.post(
-                "/api/integrations/skylight/chores/1/complete",
-                headers={"X-Internal-Secret": "test-secret"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "FAILURE"
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.post(
+            "/api/integrations/skylight/chores/1/complete",
+            headers={"X-Internal-Secret": "test-secret"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "FAILURE"
 
 
 def test_skylight_chore_uncomplete():
@@ -197,16 +206,18 @@ def test_skylight_chore_uncomplete():
         calls.append((method, suffix, json_body))
         return {"success": True}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.post(
-                "/api/integrations/skylight/chores/52409380-2026-10-04/uncomplete",
-                headers={"X-Internal-Secret": "test-secret"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert "Chore uncompleted" in data["message"]
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.post(
+            "/api/integrations/skylight/chores/52409380-2026-10-04/uncomplete",
+            headers={"X-Internal-Secret": "test-secret"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        assert "Chore uncompleted" in data["message"]
 
     assert calls == [
         (
@@ -228,16 +239,18 @@ def test_skylight_chore_complete_and_uncomplete_are_inverses():
         calls.append((method, suffix, json_body))
         return {"ok": True}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            client.post(
-                "/api/integrations/skylight/chores/42-2026-05-29/complete",
-                headers={"X-Internal-Secret": "test-secret"},
-            )
-            client.post(
-                "/api/integrations/skylight/chores/42-2026-05-29/uncomplete",
-                headers={"X-Internal-Secret": "test-secret"},
-            )
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        client.post(
+            "/api/integrations/skylight/chores/42-2026-05-29/complete",
+            headers={"X-Internal-Secret": "test-secret"},
+        )
+        client.post(
+            "/api/integrations/skylight/chores/42-2026-05-29/uncomplete",
+            headers={"X-Internal-Secret": "test-secret"},
+        )
 
     assert len(calls) == 2
     assert calls[0][1] == calls[1][1] == "/chores/42/completions"
@@ -271,14 +284,16 @@ def test_skylight_chore_complete_timed_instance():
         calls.append((method, suffix, json_body))
         return {"success": True}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.post(
-                "/api/integrations/skylight/chores/52743843-2026-10-04-0600/complete",
-                headers={"X-Internal-Secret": "test-secret"}
-            )
-            assert resp.status_code == 200
-            assert resp.json()["status"] == "SUCCESS"
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.post(
+            "/api/integrations/skylight/chores/52743843-2026-10-04-0600/complete",
+            headers={"X-Internal-Secret": "test-secret"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "SUCCESS"
 
     assert calls == [
         (
@@ -306,14 +321,16 @@ def test_skylight_chore_uncomplete_timed_instance():
         calls.append((method, suffix, json_body))
         return {"success": True}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.post(
-                "/api/integrations/skylight/chores/46464093-2026-10-04-2000/uncomplete",
-                headers={"X-Internal-Secret": "test-secret"}
-            )
-            assert resp.status_code == 200
-            assert resp.json()["status"] == "SUCCESS"
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.post(
+            "/api/integrations/skylight/chores/46464093-2026-10-04-2000/uncomplete",
+            headers={"X-Internal-Secret": "test-secret"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "SUCCESS"
 
     assert calls == [
         (
@@ -342,16 +359,18 @@ def test_skylight_rewards():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": mock_rewards}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.get(
-                "/api/integrations/skylight/rewards",
-                headers={"X-Internal-Secret": "test-secret"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert len(data["rewards"]) == 2
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.get(
+            "/api/integrations/skylight/rewards",
+            headers={"X-Internal-Secret": "test-secret"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        assert len(data["rewards"]) == 2
 
 
 def test_skylight_rewards_failure():
@@ -362,15 +381,17 @@ def test_skylight_rewards_failure():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return None
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.get(
-                "/api/integrations/skylight/rewards",
-                headers={"X-Internal-Secret": "test-secret"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "FAILURE"
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.get(
+            "/api/integrations/skylight/rewards",
+            headers={"X-Internal-Secret": "test-secret"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "FAILURE"
 
 
 def test_skylight_redeem_reward():
@@ -381,17 +402,19 @@ def test_skylight_redeem_reward():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"success": True}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.post(
-                "/api/integrations/skylight/rewards/1/redeem",
-                headers={"X-Internal-Secret": "test-secret"},
-                json={"user_id": "jeremiah"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert "Reward redeemed" in data["message"]
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.post(
+            "/api/integrations/skylight/rewards/1/redeem",
+            headers={"X-Internal-Secret": "test-secret"},
+            json={"user_id": "jeremiah"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        assert "Reward redeemed" in data["message"]
 
 
 def test_skylight_redeem_reward_failure():
@@ -402,16 +425,18 @@ def test_skylight_redeem_reward_failure():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return None
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.post(
-                "/api/integrations/skylight/rewards/1/redeem",
-                headers={"X-Internal-Secret": "test-secret"},
-                json={"user_id": "jeremiah"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "FAILURE"
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.post(
+            "/api/integrations/skylight/rewards/1/redeem",
+            headers={"X-Internal-Secret": "test-secret"},
+            json={"user_id": "jeremiah"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "FAILURE"
 
 
 def test_skylight_no_internal_secret():
@@ -434,16 +459,18 @@ def test_skylight_chores_empty_list():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": []}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.get(
-                "/api/integrations/skylight/chores",
-                headers={"X-Internal-Secret": "test-secret"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert data["chores"] == []
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.get(
+            "/api/integrations/skylight/chores",
+            headers={"X-Internal-Secret": "test-secret"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        assert data["chores"] == []
 
 
 def test_skylight_chores_user_filter():
@@ -467,33 +494,35 @@ def test_skylight_chores_user_filter():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": mock_chores, "included": included}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            # A regular member only sees their own chores.
-            resp = client.get(
-                "/api/integrations/skylight/chores",
-                headers={"X-Internal-Secret": "test-secret"},
-                params={"user": "jeremiah", "date": "today"},
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert len(data["chores"]) == 1
-            assert data["chores"][0]["id"] == "1"
-            assert data["chores"][0]["assignees"] == ["Jeremiah"]
-            assert data["assignee_meta"] == {"Jeremiah": "#ff0000"}
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        # A regular member only sees their own chores.
+        resp = client.get(
+            "/api/integrations/skylight/chores",
+            headers={"X-Internal-Secret": "test-secret"},
+            params={"user": "jeremiah", "date": "today"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        assert len(data["chores"]) == 1
+        assert data["chores"][0]["id"] == "1"
+        assert data["chores"][0]["assignees"] == ["Jeremiah"]
+        assert data["assignee_meta"] == {"Jeremiah": "#ff0000"}
 
-            # No user (admin) sees every chore in the frame.
-            resp = client.get(
-                "/api/integrations/skylight/chores",
-                headers={"X-Internal-Secret": "test-secret"},
-                params={"date": "today"},
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert len(data["chores"]) == 2
-            assert data["assignee_meta"] == {"Jeremiah": "#ff0000", "Noah": "#00ff00"}
+        # No user (admin) sees every chore in the frame.
+        resp = client.get(
+            "/api/integrations/skylight/chores",
+            headers={"X-Internal-Secret": "test-secret"},
+            params={"date": "today"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        assert len(data["chores"]) == 2
+        assert data["assignee_meta"] == {"Jeremiah": "#ff0000", "Noah": "#00ff00"}
 
 
 def test_skylight_calendar_events():
@@ -509,16 +538,18 @@ def test_skylight_calendar_events():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": mock_events}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.get(
-                "/api/integrations/skylight/calendar/events",
-                headers={"X-Internal-Secret": "test-secret"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert len(data["events"]) == 2
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.get(
+            "/api/integrations/skylight/calendar/events",
+            headers={"X-Internal-Secret": "test-secret"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        assert len(data["events"]) == 2
 
 
 def test_skylight_calendar_events_failure():
@@ -530,15 +561,17 @@ def test_skylight_calendar_events_failure():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return None
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.get(
-                "/api/integrations/skylight/calendar/events",
-                headers={"X-Internal-Secret": "test-secret"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "FAILURE"
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.get(
+            "/api/integrations/skylight/calendar/events",
+            headers={"X-Internal-Secret": "test-secret"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "FAILURE"
 
 
 def test_skylight_create_calendar_event():
@@ -550,14 +583,16 @@ def test_skylight_create_calendar_event():
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": {"id": "99", "summary": "Walk"}}
 
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.post(
-                "/api/integrations/skylight/calendar/events",
-                headers={"X-Internal-Secret": "test-secret"},
-                json={"summary": "Walk", "start": "2026-07-15T09:00:00Z"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert "created" in data["message"].lower()
+    with (
+        patch("services.execution.main._get_skylight_session", new=mock_get_session),
+        patch("services.execution.main._skylight_request", new=mock_skylight_request),
+    ):
+        resp = client.post(
+            "/api/integrations/skylight/calendar/events",
+            headers={"X-Internal-Secret": "test-secret"},
+            json={"summary": "Walk", "start": "2026-07-15T09:00:00Z"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        assert "created" in data["message"].lower()

@@ -725,12 +725,11 @@ async def run_workspace_terminal(
     finally:
         # Clean up the exec instance if it was created
         if exec_id:
-            try:
+            # Ignore cleanup errors
+            with contextlib.suppress(Exception):
                 client.api.exec_inspect(exec_id)  # Check if it exists
                 # Note: We don't kill the exec here as it should exit naturally
                 # when the shell exits. The container remains running.
-            except Exception:
-                pass  # Ignore cleanup errors
 
 
 def resize_workspace_terminal(

@@ -817,7 +817,7 @@ async def _discover_via_network_scan(
                         tasks.append(_probe_port(client, ip, port))
                         task_map.append(ip)
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                for (ip, port), resp in zip(zip(task_map, [p for _, p in ports] * len(batch), strict=False), results, strict=False):  # type: ignore[assignment, misc]
+                for (ip, _port), resp in zip(zip(task_map, [p for _, p in ports] * len(batch), strict=False), results, strict=False):  # type: ignore[assignment, misc]
                     if isinstance(resp, dict) and resp.get("ip"):
                         if _name_matches(resp):
                             await device_registry.set_device(
@@ -1127,7 +1127,7 @@ async def bulk_scan(
                     tasks.append(_probe_port(client, ip, port))
                     task_map.append((ip, port))
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            for (ip, port), resp in zip(task_map, results, strict=False):
+            for (ip, _port), resp in zip(task_map, results, strict=False):
                 if isinstance(resp, dict) and resp.get("ip") and ip not in device_map:
                     metadata = resp.get("metadata", {})
                     device_map[ip] = {

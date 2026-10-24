@@ -16,13 +16,13 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import TypeVar
 
 T = TypeVar("T")
 
 
-class CircuitState(str, Enum):
+class CircuitState(StrEnum):
     """The three states a breaker can be in."""
 
     CLOSED = "closed"

@@ -104,10 +104,13 @@ async def handle_execution_logs(req_data: dict) -> ExecutionResult:
 
         if not log_lines:
             filter_desc = []
-            if service_filter: filter_desc.append(f"service='{service_filter}'")
-            if keyword: filter_desc.append(f"keyword='{keyword}'")
+            if service_filter:
+                filter_desc.append(f"service='{service_filter}'")
+            if keyword:
+                filter_desc.append(f"keyword='{keyword}'")
             msg = "No execution logs found"
-            if filter_desc: msg += f" matching filters ({', '.join(filter_desc)})"
+            if filter_desc:
+                msg += f" matching filters ({', '.join(filter_desc)})"
             return ExecutionResult(
                 status="SUCCESS",
                 message=msg,

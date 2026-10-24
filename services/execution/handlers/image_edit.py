@@ -314,7 +314,7 @@ async def handle_image_edit_inline(req) -> ExecutionResult:
         with Image.open(BytesIO(image_bytes)) as img:
             source_size = img.size
         size = _parse_size(req.size, source_size)
-    except Exception as e:  # noqa: BLE001 - bad input is reported to the caller
+    except Exception as e:  # bad input is reported to the caller
         return ExecutionResult(status="FAILURE", message=f"Image edit failed: {e}", service="image_edit")
 
     model, proxy_url, missing = await _resolve_model_and_proxy(req.model, req.proxy_url, req.purpose)
@@ -326,7 +326,7 @@ async def handle_image_edit_inline(req) -> ExecutionResult:
         status, b64, body = await _request_edit(
             proxy_url, model, req.prompt, size, (image_bytes, f"image.{extension}", content_type)
         )
-    except Exception as e:  # noqa: BLE001 - an unreachable proxy is reported, not raised
+    except Exception as e:  # an unreachable proxy is reported, not raised
         log.error(f"Inline image edit failed: {e!r}")
         return ExecutionResult(
             status="FAILURE",

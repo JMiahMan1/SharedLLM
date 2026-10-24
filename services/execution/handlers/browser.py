@@ -163,7 +163,7 @@ async def _searxng_json_search(req: WebSearchRequest) -> ExecutionResult | None:
                     message=(
                         "Web search is unavailable: every engine was blocked. "
                         "This is not 'no results'; the SearXNG instance could not "
-                        f"reach these engines:\n\n" + "\n".join(lines) + "\n\n"
+                        "reach these engines:\n\n" + "\n".join(lines) + "\n\n"
                         "Web search requires working upstream search engines; try again "
                         "later or configure the SearXNG instance with working engines."
                     ),
