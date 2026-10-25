@@ -35,6 +35,8 @@ public class GuardScreenActivity extends ComponentActivity {
     static final String MODE_INSTALL = "install";
     /** An app asked for a kind of permission a parent approves first; the dialog was dismissed. */
     static final String MODE_PERMISSION = "permission";
+    /** An app that gets around the web filter (FilterBypass), closed while the filter is on. */
+    static final String MODE_BYPASS = "bypass";
     /** The app's name, for the install and permission screens. */
     static final String EXTRA_APP = "app";
     /** A parent already said no. */
@@ -48,6 +50,7 @@ public class GuardScreenActivity extends ComponentActivity {
         boolean appOff = MODE_APP.equals(mode);
         boolean install = MODE_INSTALL.equals(mode);
         boolean permission = MODE_PERMISSION.equals(mode);
+        boolean bypass = MODE_BYPASS.equals(mode);
         boolean denied = getIntent().getBooleanExtra(EXTRA_DENIED, false);
         String app = getIntent().getStringExtra(EXTRA_APP);
         String appName = app == null || app.isEmpty() ? "This app" : app;
@@ -71,6 +74,9 @@ public class GuardScreenActivity extends ComponentActivity {
             bodyText = denied
                     ? "This app stays closed. Everything else still works."
                     : "New apps open once one of your parents says yes. They have been asked.";
+        } else if (bypass) {
+            titleText = appName + " is off while the web filter is on";
+            bodyText = "It gets around the filter your parents set up, so it stays closed. Other browsers and apps still work.";
         } else if (permission) {
             titleText = "Ask a parent first";
             bodyText = denied
@@ -119,7 +125,7 @@ public class GuardScreenActivity extends ComponentActivity {
 
         root.addView(title);
         root.addView(body);
-        if (!tamper && !install && !permission) {
+        if (!tamper && !install && !permission && !bypass) {
             Button ask = new Button(this);
             ask.setText("Ask for more time");
             ask.setOnClickListener(v -> {

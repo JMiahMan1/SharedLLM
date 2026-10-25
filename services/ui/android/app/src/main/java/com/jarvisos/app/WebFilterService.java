@@ -108,7 +108,8 @@ public class WebFilterService extends VpnService {
                             System.currentTimeMillis()));
             if (d.kind == WebFilterRules.Kind.BLOCK) {
                 note(name, true);
-                offerAsk(name);
+                // An encrypted-DNS provider is a way around, not a site to ask for.
+                if (d.target == null) offerAsk(name);
                 reply = DnsMessage.reply(query, DnsMessage.RCODE_NXDOMAIN);
             } else if (d.kind == WebFilterRules.Kind.SAFE) {
                 note(name, false);
@@ -223,7 +224,11 @@ public class WebFilterService extends VpnService {
     public void onRevoke() {
         // Switched off from Settings or replaced by another VPN.
         if (GuardApi.isProtected(this) && !GuardApi.isUnlocked(this)) {
-            GuardApi.reportTamper(this, "filter_disabled");
+            GuardApi.reportTamper(this, FilterBypass.FILTER_OFF);
+            // Told now; the guard's next check (FilterBypass) does not tell it again.
+            java.util.Set<String> told = GuardApi.bypassReported(this);
+            told.add(FilterBypass.FILTER_OFF);
+            GuardApi.setBypassReported(this, told);
         }
         shutdown();
         super.onRevoke();

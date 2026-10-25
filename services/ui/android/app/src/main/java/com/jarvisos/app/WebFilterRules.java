@@ -15,6 +15,11 @@ import java.util.Map;
  * ("tiktok.com" also blocks "www.tiktok.com"). The parent's allow list wins
  * over everything, then their block list, then safe search, then the
  * family-safe resolver (Cloudflare for Families: adult and malware sites).
+ *
+ * Encrypted DNS (DoH) providers are answered "no such site" too, unless a
+ * parent allowed one: a browser set to its own secure DNS must look its
+ * provider up first, and without it falls back to the phone's DNS (this
+ * filter). Firefox's canary name tells it not to switch DoH on by itself.
  */
 public final class WebFilterRules {
 
@@ -23,6 +28,27 @@ public final class WebFilterRules {
     static final String OPEN_RESOLVER = "1.1.1.1";
 
     public enum Kind { BLOCK, FORWARD, SAFE }
+
+    /** BLOCK's target for an encrypted-DNS provider: not a site, so no "Ask a parent". */
+    public static final String ENCRYPTED_DNS = "encrypted-dns";
+
+    /**
+     * Encrypted DNS (DoH/DoT) provider names a browser or app would use to
+     * get around the filter, each covering the names under it. The one
+     * reviewed list; reviewed 2026-10-24. A provider reached by a bare IP
+     * address needs no lookup and is not caught here.
+     */
+    static final List<String> ENCRYPTED_DNS_HOSTS = java.util.Collections.unmodifiableList(java.util.Arrays.asList(
+            "use-application-dns.net", // Firefox's canary: "no such site" keeps its own DoH off
+            "dns.google", "dns.google.com", "8888.google",
+            "cloudflare-dns.com", "one.one.one.one",
+            "dns.quad9.net", "dns9.quad9.net", "dns10.quad9.net", "dns11.quad9.net",
+            "doh.opendns.com", "doh.familyshield.opendns.com",
+            "dns.nextdns.io",
+            "dns.adguard.com", "dns.adguard-dns.com", "dns-unfiltered.adguard.com", "family.adguard-dns.com",
+            "doh.cleanbrowsing.org",
+            "doh.mullvad.net", "dns.mullvad.net",
+            "dns.controld.com", "freedns.controld.com"));
 
     public static final class Decision {
         public final Kind kind;
@@ -42,6 +68,7 @@ public final class WebFilterRules {
         String n = normalize(name);
         if (n.isEmpty()) return new Decision(Kind.FORWARD, adultFilter ? FAMILY_RESOLVER : OPEN_RESOLVER);
         if (covered(n, allow)) return new Decision(Kind.FORWARD, OPEN_RESOLVER);
+        if (covered(n, ENCRYPTED_DNS_HOSTS)) return new Decision(Kind.BLOCK, ENCRYPTED_DNS);
         if (covered(n, block)) return new Decision(Kind.BLOCK, null);
         if (safeSearch) {
             String safe = safeHost(n);

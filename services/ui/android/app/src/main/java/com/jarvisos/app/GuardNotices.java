@@ -1,8 +1,16 @@
 package com.jarvisos.app;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.net.ConnectivityManager;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.VpnService;
+import android.os.Build;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -15,8 +23,9 @@ import java.util.Set;
  * Jarvis notices (PushNotice through PushNotifier, the "Family safety"
  * channel): the one-minute warning before a lock, and "… is blocked" with an
  * "Ask a parent" button, a push callback ({@code guard_ask}) the server runs
- * like any other notification button. Also the phone's user-installed apps,
- * for install approvals.
+ * like any other notification button. Also what the guard reads off the
+ * phone: its user-installed apps (install approvals), and the apps, VPNs and
+ * Private DNS setting that could get around the web filter (FilterBypass).
  */
 final class GuardNotices {
 
@@ -61,6 +70,48 @@ final class GuardNotices {
 
     private static void show(Context context, PushNotice n) {
         if (n != null) PushNotifier.show(context, n);
+    }
+
+    /** Every app that declares a VPN service (only one VPN runs, so starting one stops the web filter). */
+    static Set<String> vpnApps(Context context) {
+        Set<String> out = new HashSet<>();
+        for (ResolveInfo info : context.getPackageManager().queryIntentServices(new Intent(VpnService.SERVICE_INTERFACE), 0)) {
+            if (info.serviceInfo != null) out.add(info.serviceInfo.packageName);
+        }
+        out.remove(context.getPackageName());
+        return out;
+    }
+
+    /** Whether any VPN is up (the caller knows whether the web filter is the one running). */
+    static boolean otherVpnUp(Context context) {
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return false;
+        for (Network n : allNetworks(cm)) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+            if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * The Private DNS provider hostname when Android is set to one (strict
+     * mode: every lookup goes there, past the web filter); null otherwise.
+     */
+    static String privateDnsHost(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null;
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return null;
+        for (Network n : allNetworks(cm)) {
+            LinkProperties lp = cm.getLinkProperties(n);
+            if (lp != null && lp.getPrivateDnsServerName() != null) return lp.getPrivateDnsServerName();
+        }
+        return null;
+    }
+
+    @SuppressWarnings("deprecation") // getAllNetworks: still the one call that lists every network an app can see.
+    private static Network[] allNetworks(ConnectivityManager cm) {
+        Network[] all = cm.getAllNetworks();
+        return all == null ? new Network[0] : all;
     }
 
     /** Apps the child installed (not part of the phone's system image). */

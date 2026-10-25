@@ -18,7 +18,15 @@ import java.util.Set;
  */
 public final class GuardRules {
 
-    public enum Action { ALLOW, BLOCK_TAMPER, BLOCK_LOCKED, BLOCK_APP, BLOCK_INSTALL }
+    public enum Action { ALLOW, BLOCK_TAMPER, BLOCK_LOCKED, BLOCK_APP, BLOCK_INSTALL, BLOCK_BYPASS }
+
+    /**
+     * How a blocked window is taken off the screen: going home closes a
+     * full-screen app; a split screen is ended first (home alone can leave the
+     * other half showing); a picture-in-picture window is dismissed, since it
+     * floats over home.
+     */
+    public enum Clear { HOME, EXIT_SPLIT, DISMISS_PIP }
 
     /** The app's own name as Settings and the uninstaller show it. */
     static final String APP_LABEL = "jarvis os";
@@ -73,17 +81,57 @@ public final class GuardRules {
                                 String pkg, String cls, String text,
                                 Collection<String> alwaysAllowed, String launcher,
                                 Collection<String> blockedApps, Collection<String> awaitingApproval) {
+        return decide(protectedPhone, locked, unlocked, pkg, cls, text, alwaysAllowed, launcher,
+                blockedApps, awaitingApproval, false, null);
+    }
+
+    /**
+     * As above, with the web filter: while {@code filterOn} (the parents want
+     * it), Settings' Private DNS dialog is covered like a tamper screen and
+     * {@code bypassApps} (FilterBypass: apps that get around a DNS filter) are
+     * closed, after the locks and parents' blocks.
+     */
+    public static Action decide(boolean protectedPhone, boolean locked, boolean unlocked,
+                                String pkg, String cls, String text,
+                                Collection<String> alwaysAllowed, String launcher,
+                                Collection<String> blockedApps, Collection<String> awaitingApproval,
+                                boolean filterOn, Collection<String> bypassApps) {
         if (pkg == null || pkg.isEmpty() || unlocked) return Action.ALLOW;
         String lowerText = text == null ? "" : text.toLowerCase(Locale.ROOT);
         String lowerCls = cls == null ? "" : cls.toLowerCase(Locale.ROOT);
 
         if (protectedPhone && isTamperScreen(pkg, lowerCls, lowerText)) return Action.BLOCK_TAMPER;
+        if (protectedPhone && filterOn && FilterBypass.isPrivateDnsScreen(pkg, lowerText)) return Action.BLOCK_TAMPER;
 
         if (exempt(pkg, launcher, alwaysAllowed)) return Action.ALLOW;
         if (locked) return Action.BLOCK_LOCKED;
         if (blockedApps != null && blockedApps.contains(pkg)) return Action.BLOCK_APP;
+        if (protectedPhone && filterOn && bypassApps != null && bypassApps.contains(pkg)) return Action.BLOCK_BYPASS;
         if (protectedPhone && awaitingApproval != null && awaitingApproval.contains(pkg)) return Action.BLOCK_INSTALL;
         return Action.ALLOW;
+    }
+
+    /**
+     * How to take a blocked window off the screen.
+     *
+     * @param pip        the window is picture-in-picture
+     * @param appWindows how many app windows are on screen (two or more: split screen)
+     */
+    public static Clear clearFor(boolean pip, int appWindows) {
+        if (pip) return Clear.DISMISS_PIP;
+        return appWindows > 1 ? Clear.EXIT_SPLIT : Clear.HOME;
+    }
+
+    /**
+     * Phone starts since the guard last ran in which it never ran: a start in
+     * safe mode (where Android runs no downloaded app), or one switched off
+     * before the guard came up. Counted from Android's boot counter
+     * ({@code Settings.Global.BOOT_COUNT}); 0 when either reading is missing
+     * or the counter went backwards (a reset phone).
+     */
+    public static int bootsWithoutGuard(int lastSeenBoot, int currentBoot) {
+        if (lastSeenBoot <= 0 || currentBoot <= 0 || currentBoot <= lastSeenBoot) return 0;
+        return currentBoot - lastSeenBoot - 1;
     }
 
     /** Never closed by a lock or block: the guard and system screens, home, the always-allowed apps. */

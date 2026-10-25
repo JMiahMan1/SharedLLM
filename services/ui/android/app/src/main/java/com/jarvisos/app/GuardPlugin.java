@@ -46,6 +46,18 @@ public class GuardPlugin extends Plugin {
         out.put("guardEnabled", guardEnabled(getContext()));
         out.put("webFilterAllowed", android.net.VpnService.prepare(getContext()) == null);
         out.put("webFilterActive", WebFilterService.active);
+        // Ways around the filter (FilterBypass), for the father's Devices section.
+        String privateDns = GuardNotices.privateDnsHost(getContext());
+        out.put("privateDnsHost", privateDns == null ? "" : privateDns);
+        com.getcapacitor.JSArray bypass = new com.getcapacitor.JSArray();
+        try {
+            for (String pkg : FilterBypass.apps(GuardNotices.userApps(getContext()), GuardNotices.vpnApps(getContext()))) {
+                bypass.put(UnifiedPushDistributor.label(getContext(), pkg));
+            }
+        } catch (Exception ignored) {
+            // Not readable here: reported as none rather than guessed.
+        }
+        out.put("bypassApps", bypass);
         call.resolve(out);
     }
 

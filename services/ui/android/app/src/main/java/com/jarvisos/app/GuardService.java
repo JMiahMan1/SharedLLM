@@ -7,15 +7,20 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.net.VpnService;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 import android.widget.Toast;
 
 import androidx.core.content.ContextCompat;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -31,7 +36,15 @@ import java.util.concurrent.TimeUnit;
  * Jarvis), (3) close an app a parent blocked or whose own minutes are used up,
  * (4) keep an app installed since the guard started closed until a parent
  * approves it, (5) dismiss Android's permission dialog for a kind a parent
- * approves first, and (6) warn a minute before a lock lands.
+ * approves first, (6) warn a minute before a lock lands, and (7) keep the web
+ * filter from being worked around (FilterBypass): close apps that get around
+ * a DNS filter while it is on, cover the Private DNS dialog, put Android's VPN
+ * prompt back when the filter was switched off, and tell the parents.
+ *
+ * Every visible window counts, not only the one in front: an app kept on
+ * screen in split screen or picture-in-picture is closed like any other. A
+ * phone start in which the guard never ran (safe mode) is reported at the
+ * next normal start.
  *
  * The rules come from the server's status (refreshed every minute, kept for
  * offline); GuardRules, InstallApprovals, PermissionGate and LockWarning make
@@ -41,6 +54,8 @@ public class GuardService extends AccessibilityService {
 
     private static final long REFRESH_SECONDS = 60;
     private static final long WARNING_CHECK_SECONDS = 10;
+    /** How long Android takes to end a split screen before going home works on the whole screen. */
+    private static final long SPLIT_SETTLE_MS = 400;
     private ScheduledExecutorService refresher;
     private final Handler main = new Handler(Looper.getMainLooper());
     private long lastCoverAt = 0;
@@ -50,15 +65,22 @@ public class GuardService extends AccessibilityService {
     private volatile String lastApp = "";
     private String lastWarningKey = "";
     private BroadcastReceiver installs;
+    /** Installed apps that get around the web filter (FilterBypass.apps). */
+    private volatile Set<String> bypassApps = Collections.emptySet();
 
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
         refresher = Executors.newSingleThreadScheduledExecutor();
+        refresher.execute(this::checkBoots);
         refresher.scheduleWithFixedDelay(() -> {
-            if (GuardApi.refreshStatus(this)) GuardApi.reportOfflineUnlockIfDue(this);
+            if (GuardApi.refreshStatus(this)) {
+                GuardApi.reportOfflineUnlockIfDue(this);
+                GuardApi.flushTamper(this);
+            }
             syncWebFilter();
             checkInstalls();
+            checkFilterBypass();
             // A lock that starts while the child is already in an app.
             main.post(this::checkCurrentWindow);
         }, 0, REFRESH_SECONDS, TimeUnit.SECONDS);
@@ -70,6 +92,7 @@ public class GuardService extends AccessibilityService {
             public void onReceive(Context context, Intent intent) {
                 if (refresher != null) refresher.execute(() -> {
                     checkInstalls();
+                    checkFilterBypass();
                     main.post(GuardService.this::checkCurrentWindow);
                 });
             }
@@ -81,7 +104,13 @@ public class GuardService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event == null || event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
+        if (event == null) return;
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            // A window joined or left the screen (split screen, picture-in-picture).
+            checkVisibleWindows();
+            return;
+        }
+        if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
         CharSequence pkg = event.getPackageName();
         CharSequence cls = event.getClassName();
         StringBuilder text = new StringBuilder();
@@ -101,25 +130,84 @@ public class GuardService extends AccessibilityService {
         act(root.getPackageName().toString(), "", text.toString());
     }
 
-    private void act(String pkg, String cls, String text) {
-        String launcher = launcherPackage();
-        GuardRules.Action action = GuardRules.decide(
+    private GuardRules.Action decide(String pkg, String cls, String text, String launcher) {
+        return GuardRules.decide(
                 GuardApi.isProtected(this), GuardApi.isLocked(this), GuardApi.isUnlocked(this),
                 pkg, cls, text, GuardApi.alwaysAllowed(this), launcher, GuardApi.blockedApps(this),
-                awaitingApproval);
+                awaitingApproval, GuardApi.webFilterWanted(this), bypassApps);
+    }
+
+    /** The window in front just changed. */
+    private void act(String pkg, String cls, String text) {
+        String launcher = launcherPackage();
+        GuardRules.Action action = decide(pkg, cls, text, launcher);
         if (action == GuardRules.Action.ALLOW) {
             if (isAnApp(pkg, launcher)) lastApp = pkg;
+            // The app in front is fine; one beside it or floating over it may not be.
+            checkVisibleWindows();
             return;
         }
+        block(action, pkg, text, GuardRules.clearFor(false, appWindows(visibleWindows())), null);
+    }
+
+    /**
+     * Every app window on screen, not only the one in front: a blocked app
+     * kept visible in split screen or picture-in-picture is closed too.
+     */
+    private void checkVisibleWindows() {
+        List<AccessibilityWindowInfo> windows = visibleWindows();
+        int appWindows = appWindows(windows);
+        String launcher = launcherPackage();
+        for (AccessibilityWindowInfo w : windows) {
+            if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+            AccessibilityNodeInfo root = w.getRoot();
+            if (root == null || root.getPackageName() == null) continue;
+            String pkg = root.getPackageName().toString();
+            StringBuilder text = new StringBuilder();
+            collectText(root, text, 0);
+            GuardRules.Action action = decide(pkg, "", text.toString(), launcher);
+            if (action == GuardRules.Action.ALLOW) continue;
+            boolean pip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && w.isInPictureInPictureMode();
+            block(action, pkg, text.toString(), GuardRules.clearFor(pip, appWindows), root);
+            return;
+        }
+    }
+
+    /** Take a blocked window off the screen and show why. */
+    private void block(GuardRules.Action action, String pkg, String text, GuardRules.Clear clear,
+                       AccessibilityNodeInfo pipRoot) {
         long now = System.currentTimeMillis();
         if (now - lastCoverAt < 700) return; // one cover per screen change, not one per event
         lastCoverAt = now;
         if (action == GuardRules.Action.BLOCK_TAMPER) {
+            GuardApi.reportTamper(this,
+                    FilterBypass.isPrivateDnsScreen(pkg, text.toLowerCase(java.util.Locale.ROOT))
+                            ? "private_dns_attempt" : "uninstall_attempt");
+        }
+        if (clear == GuardRules.Clear.EXIT_SPLIT) {
+            // End the split first; going home straight away can leave the other half showing.
+            performGlobalAction(GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN);
+            main.postDelayed(() -> {
+                performGlobalAction(GLOBAL_ACTION_HOME);
+                cover(action, pkg);
+            }, SPLIT_SETTLE_MS);
+            return;
+        }
+        boolean dismissed = false;
+        if (clear == GuardRules.Clear.DISMISS_PIP && pipRoot != null) {
+            // Android's picture-in-picture window offers "dismiss" to accessibility services.
+            dismissed = pipRoot.performAction(AccessibilityNodeInfo.ACTION_DISMISS);
+        }
+        if (action == GuardRules.Action.BLOCK_TAMPER && clear == GuardRules.Clear.HOME) {
             performGlobalAction(GLOBAL_ACTION_BACK);
-            GuardApi.reportTamper(this, "uninstall_attempt");
-        } else {
+        } else if (!dismissed) {
             performGlobalAction(GLOBAL_ACTION_HOME);
         }
+        cover(action, pkg);
+    }
+
+    /** The guard's screen saying why, over whatever was closed. */
+    private void cover(GuardRules.Action action, String pkg) {
         String mode;
         switch (action) {
             case BLOCK_TAMPER:
@@ -130,6 +218,9 @@ public class GuardService extends AccessibilityService {
                 break;
             case BLOCK_INSTALL:
                 mode = GuardScreenActivity.MODE_INSTALL;
+                break;
+            case BLOCK_BYPASS:
+                mode = GuardScreenActivity.MODE_BYPASS;
                 break;
             default:
                 mode = GuardScreenActivity.MODE_LOCKED;
@@ -188,6 +279,65 @@ public class GuardService extends AccessibilityService {
         }
     }
 
+    /**
+     * Ways around the web filter (FilterBypass): which installed apps get
+     * around it, whether Private DNS or another VPN does, the parents told once
+     * about each, and Android's VPN prompt put back when the filter's consent
+     * was withdrawn.
+     */
+    private void checkFilterBypass() {
+        try {
+            boolean prot = GuardApi.isProtected(this);
+            boolean wanted = GuardApi.webFilterWanted(this);
+            boolean unlocked = GuardApi.isUnlocked(this);
+            Set<String> apps = prot
+                    ? FilterBypass.apps(GuardNotices.userApps(this), GuardNotices.vpnApps(this))
+                    : Collections.<String>emptySet();
+            bypassApps = apps;
+            boolean allowed = VpnService.prepare(this) == null;
+            boolean running = WebFilterService.active;
+            Set<String> now = FilterBypass.conditions(prot, wanted, unlocked, running, allowed,
+                    !running && GuardNotices.otherVpnUp(this), GuardNotices.privateDnsHost(this), apps);
+            Set<String> reported = GuardApi.bypassReported(this);
+            for (String c : FilterBypass.toReport(now, reported)) {
+                String event = FilterBypass.event(c);
+                String detail = FilterBypass.detail(c);
+                if (FilterBypass.BYPASS_APP.equals(event)) detail = UnifiedPushDistributor.label(this, detail);
+                GuardApi.reportTamper(this, event, detail);
+            }
+            GuardApi.setBypassReported(this, now);
+            long t = System.currentTimeMillis();
+            if (FilterBypass.shouldPrompt(prot, wanted, unlocked, allowed, t, GuardApi.lastFilterPrompt(this))) {
+                Intent consent = VpnService.prepare(this);
+                if (consent != null) {
+                    GuardApi.setLastFilterPrompt(this, t);
+                    startActivity(consent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                }
+            }
+        } catch (Exception ignored) {
+            // Tried again at the next refresh.
+        }
+    }
+
+    /**
+     * Safe mode runs no downloaded app, so the guard cannot stop it; it can
+     * notice afterwards. Android counts phone starts: a gap since the guard's
+     * last run means starts without it, reported to the parents now.
+     */
+    private void checkBoots() {
+        try {
+            int boot = Settings.Global.getInt(getContentResolver(), Settings.Global.BOOT_COUNT, 0);
+            if (boot <= 0) return;
+            int missed = GuardRules.bootsWithoutGuard(GuardApi.lastGuardBoot(this), boot);
+            if (missed > 0 && GuardApi.isProtected(this)) {
+                GuardApi.reportTamper(this, "boot_without_guard", missed == 1 ? "1 start" : missed + " starts");
+            }
+            GuardApi.setLastGuardBoot(this, boot);
+        } catch (Exception ignored) {
+            // No boot counter on this phone: nothing to compare.
+        }
+    }
+
     /** Family Link's one-minute warning before bedtime, school, the day's limit or an app's own minutes. */
     private void checkWarning() {
         if (!GuardApi.isProtected(this) || GuardApi.isLocked(this) || GuardApi.isUnlocked(this)) return;
@@ -214,7 +364,7 @@ public class GuardService extends AccessibilityService {
     private void syncWebFilter() {
         try {
             boolean wanted = GuardApi.isProtected(this) && GuardApi.webFilterWanted(this);
-            if (wanted && !WebFilterService.active && android.net.VpnService.prepare(this) == null) {
+            if (wanted && !WebFilterService.active && VpnService.prepare(this) == null) {
                 startService(new Intent(this, WebFilterService.class));
             } else if (!wanted && WebFilterService.active) {
                 startService(new Intent(this, WebFilterService.class).setAction(WebFilterService.ACTION_STOP));
@@ -222,6 +372,26 @@ public class GuardService extends AccessibilityService {
         } catch (Exception ignored) {
             // Tried again at the next refresh.
         }
+    }
+
+    private List<AccessibilityWindowInfo> visibleWindows() {
+        try {
+            List<AccessibilityWindowInfo> w = getWindows();
+            return w == null ? Collections.<AccessibilityWindowInfo>emptyList() : w;
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
+    }
+
+    /** App windows sharing the screen (two or more: split screen); a picture-in-picture window floats and does not count. */
+    private static int appWindows(List<AccessibilityWindowInfo> windows) {
+        int n = 0;
+        for (AccessibilityWindowInfo w : windows) {
+            if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && w.isInPictureInPictureMode()) continue;
+            n++;
+        }
+        return n;
     }
 
     /** Visible text of a window, depth-limited: enough to see "Jarvis OS" on a Settings page. */

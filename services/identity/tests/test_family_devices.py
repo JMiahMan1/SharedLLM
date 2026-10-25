@@ -101,6 +101,13 @@ def test_a_tamper_report_is_kept_on_the_childs_record(family):
     assert (row.username, row.device_key) == ("kid", "kid-phone-0000000001")
 
 
+def test_a_tamper_report_keeps_what_it_was_about(family):
+    act, _ = family
+    act("dad").post("/api/internal/guard/tamper/kid", json={"event": "bypass_app", "detail": "Tor Browser"})
+    body = act("dad").get("/api/family/devices/kid").json()
+    assert body["tamper"][0]["extra"] == {"event": "bypass_app", "detail": "Tor Browser"}
+
+
 def test_a_weekly_schedule_is_checked_and_kept(family):
     act, _ = family
     ok = act("dad").put("/api/screen-time/kid/rules", json={"day_limits": {"sat": 180, "mon": 60}})

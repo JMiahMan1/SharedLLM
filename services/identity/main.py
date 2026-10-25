@@ -4882,11 +4882,15 @@ def internal_guard_tamper(username: str, body: dict, session: Session = Depends(
     if subject is None:
         return {"parents": [], "display_name": username}
     event = str((body or {}).get("event") or "")[:40]
+    extra = {"event": event}
+    detail = str((body or {}).get("detail") or "")[:80]
+    if detail:
+        extra["detail"] = detail  # the app, the DNS host or how many starts
     session.add(DeviceEvent(
         device_key=str((body or {}).get("device_key") or "")[:128],
         username=subject.username,
         event="guard_tamper",
-        extra=json.dumps({"event": event}),
+        extra=json.dumps(extra),
     ))
     session.commit()
     return {"parents": _parents_of(session, subject), "display_name": subject.display_name or subject.username}

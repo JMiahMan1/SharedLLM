@@ -393,6 +393,10 @@ export interface MemberGuardState {
   guardEnabled?: boolean;
   webFilterAllowed?: boolean;
   webFilterActive?: boolean;
+  /** Android's strict Private DNS hostname ("" when none): it gets around the web filter. */
+  privateDnsHost?: string;
+  /** Installed apps that get around the web filter (closed while it is on). */
+  bypassApps?: string[];
   usageAccess?: boolean;
   healthConnect?: string;
   reportedAt?: string;
@@ -419,7 +423,7 @@ export interface MemberDevice {
 export interface MemberDevices {
   username: string;
   devices: MemberDevice[];
-  tamper: Array<{ event: string; at: string; extra: { event?: string }; device_key: string | null }>;
+  tamper: Array<{ event: string; at: string; extra: { event?: string; detail?: string }; device_key: string | null }>;
   /** Each parent: whether they set an offline unlock code. */
   offline_code: Record<string, boolean>;
 }

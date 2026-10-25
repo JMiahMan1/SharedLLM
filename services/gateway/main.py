@@ -5801,7 +5801,16 @@ _TAMPER_EVENTS = {
     "uninstall_attempt": "tried to remove Jarvis",
     "offline_unlock": "was unlocked with a parent's offline code",
     "filter_disabled": "turned off Jarvis's web filter",
+    # Ways around the web filter the guard found (FilterBypass on the phone).
+    "bypass_app": "has an app that gets around the web filter (closed while the filter is on)",
+    "private_dns": "set Private DNS to its own provider, which gets around the web filter",
+    "private_dns_attempt": "tried to change Private DNS, a way around the web filter",
+    "other_vpn": "is running another VPN in place of Jarvis's web filter",
+    "boot_without_guard": "started without Jarvis's guard (safe mode, most likely)",
 }
+
+#: Longest detail kept with a tamper report (an app's name, a DNS host, a count).
+_TAMPER_DETAIL_MAX = 80
 
 
 @app.get("/api/recommendation-lanes/{username}")
@@ -5866,12 +5875,17 @@ async def guard_tamper(request: Request):
     event = str(body.get("event") or "")
     if event not in _TAMPER_EVENTS:
         raise HTTPException(status_code=422, detail="Unknown event")
+    # What it was about, when the phone says (the app, the DNS host, how many starts).
+    detail = " ".join(str(body.get("detail") or "").split())[:_TAMPER_DETAIL_MAX]
+    report = {"event": event, "device_key": str(body.get("device_key") or "")}
+    if detail:
+        report["detail"] = detail
     # Identity keeps the report on the child's record (the father's Devices
     # section lists them) and says who to tell.
     async with borrow_http_client() as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/internal/guard/tamper/{child}",
-            json={"event": event, "device_key": str(body.get("device_key") or "")},
+            json=report,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
         )
         info = await resp.json(content_type=None) if resp.status == 200 else {}
@@ -5879,7 +5893,7 @@ async def guard_tamper(request: Request):
     await _screen_time_notice(
         (info or {}).get("parents") or [],
         "Phone protection changed",
-        f"{name}'s phone {_TAMPER_EVENTS[event]}.",
+        f"{name}'s phone {_TAMPER_EVENTS[event]}" + (f": {detail}." if detail else "."),
         f"/family/member/{child}",
     )
     return {"status": "SUCCESS"}

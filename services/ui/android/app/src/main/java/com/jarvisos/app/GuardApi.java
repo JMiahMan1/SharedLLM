@@ -34,6 +34,14 @@ final class GuardApi {
     static final String KEY_OFFLINE_REPORT_DUE = "guard_offline_report_due";
     /** The user apps on the phone when the guard first ran: never held for approval. */
     static final String KEY_INSTALL_BASELINE = "guard_install_baseline";
+    /** Tamper reports not yet taken by the server (JSON list of {event, detail}). */
+    static final String KEY_TAMPER_PENDING = "guard_tamper_pending";
+    static final String KEY_BYPASS_REPORTED = "guard_bypass_reported";
+    static final String KEY_FILTER_PROMPT_AT = "guard_filter_prompt_at";
+    static final String KEY_GUARD_BOOT = "guard_boot_count";
+    static final int TAMPER_QUEUE_MAX = 30;
+    private static final Object TAMPER_LOCK = new Object();
+    private static final java.util.concurrent.atomic.AtomicBoolean FLUSHING = new java.util.concurrent.atomic.AtomicBoolean(false);
     static final int OFFLINE_MAX_FAILS = 5;
     static final long OFFLINE_WAIT_MS = 10 * 60_000L;
 
@@ -333,17 +341,118 @@ final class GuardApi {
         return wf != null && wf.optBoolean("enabled", false);
     }
 
-    /** Tell the parents protection changed; best effort, never throws. */
+    /** Tell the parents protection changed. Kept until the server takes it (see {@link #flushTamper}). */
     static void reportTamper(Context context, String event) {
-        new Thread(() -> {
-            try {
-                JSONObject body = new JSONObject();
-                body.put("event", event);
-                send(context, "POST", "/api/guard/tamper", body.toString());
-            } catch (Exception ignored) {
-                // The parents' notice is best effort; the guard itself keeps working.
+        reportTamper(context, event, null);
+    }
+
+    /**
+     * Tell the parents protection changed or was worked around, with an
+     * optional detail (the app or Private DNS host). The report is kept on the
+     * phone and sent now if it can be, else after the next good status: a
+     * report from a phone that is offline, or just starting, is not lost.
+     */
+    @android.annotation.SuppressLint("ApplySharedPref") // the report must be on disk before the guard may stop
+    static void reportTamper(Context context, String event, String detail) {
+        JSONObject item;
+        try {
+            item = new JSONObject().put("event", event);
+            if (detail != null && !detail.isEmpty()) item.put("detail", detail);
+        } catch (Exception e) {
+            return; // A report we cannot build is not kept; the guard itself keeps working.
+        }
+        String key = item.toString();
+        synchronized (TAMPER_LOCK) {
+            JSONArray pending = pendingTamper(context);
+            for (int i = 0; i < pending.length(); i++) {
+                JSONObject o = pending.optJSONObject(i);
+                if (o != null && key.equals(o.toString())) {
+                    pending = null;
+                    break;
+                }
             }
-        }).start();
+            if (pending != null) {
+                if (pending.length() >= TAMPER_QUEUE_MAX) pending.remove(0);
+                pending.put(item);
+                // commit, not apply: the guard may be stopping (onUnbind) and the report must outlive it.
+                prefs(context).edit().putString(KEY_TAMPER_PENDING, pending.toString()).commit();
+            }
+        }
+        new Thread(() -> flushTamper(context)).start();
+    }
+
+    /**
+     * Send the kept tamper reports; each leaves the queue once the server took
+     * it. Off the main thread. The queue lock is held only to read and write
+     * prefs, never across the network.
+     */
+    static void flushTamper(Context context) {
+        if (!FLUSHING.compareAndSet(false, true)) return;
+        try {
+            JSONArray pending;
+            synchronized (TAMPER_LOCK) {
+                pending = pendingTamper(context);
+            }
+            Set<String> sent = new HashSet<>();
+            for (int i = 0; i < pending.length(); i++) {
+                JSONObject item = pending.optJSONObject(i);
+                if (item == null) continue;
+                try {
+                    HttpResult r = send(context, "POST", "/api/guard/tamper", item.toString());
+                    // 422: the server does not know this event (an older server); dropping it beats retrying forever.
+                    if (r != null && (r.status == 200 || r.status == 422)) sent.add(item.toString());
+                } catch (Exception ignored) {
+                    // Offline: kept for the next try.
+                }
+            }
+            if (sent.isEmpty()) return;
+            synchronized (TAMPER_LOCK) {
+                JSONArray now = pendingTamper(context);
+                JSONArray left = new JSONArray();
+                for (int i = 0; i < now.length(); i++) {
+                    JSONObject item = now.optJSONObject(i);
+                    if (item != null && !sent.contains(item.toString())) left.put(item);
+                }
+                prefs(context).edit().putString(KEY_TAMPER_PENDING, left.toString()).apply();
+            }
+        } finally {
+            FLUSHING.set(false);
+        }
+    }
+
+    private static JSONArray pendingTamper(Context context) {
+        try {
+            return new JSONArray(prefs(context).getString(KEY_TAMPER_PENDING, "[]"));
+        } catch (Exception e) {
+            return new JSONArray();
+        }
+    }
+
+    /** The ways around the web filter the parents were last told about (FilterBypass condition keys). */
+    static Set<String> bypassReported(Context context) {
+        return new HashSet<>(prefs(context).getStringSet(KEY_BYPASS_REPORTED, new HashSet<>()));
+    }
+
+    static void setBypassReported(Context context, Set<String> conditions) {
+        prefs(context).edit().putStringSet(KEY_BYPASS_REPORTED, new HashSet<>(conditions)).apply();
+    }
+
+    /** When the guard last put Android's VPN consent prompt in front of the child (epoch ms). */
+    static long lastFilterPrompt(Context context) {
+        return prefs(context).getLong(KEY_FILTER_PROMPT_AT, 0L);
+    }
+
+    static void setLastFilterPrompt(Context context, long at) {
+        prefs(context).edit().putLong(KEY_FILTER_PROMPT_AT, at).apply();
+    }
+
+    /** Android's boot counter at the guard's last run on this phone (0: never recorded). */
+    static int lastGuardBoot(Context context) {
+        return prefs(context).getInt(KEY_GUARD_BOOT, 0);
+    }
+
+    static void setLastGuardBoot(Context context, int boot) {
+        prefs(context).edit().putInt(KEY_GUARD_BOOT, boot).apply();
     }
 
     private static String request(Context context, String method, String path, String json) throws Exception {
