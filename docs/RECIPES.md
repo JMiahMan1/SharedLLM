@@ -1,7 +1,10 @@
 # Recipes and meal planning
 
-Status: **Phases 0-1 built** - the importer (`scripts/import_recipes.py`) renders the
-first level-balanced note set; everything app-side (Phases 2+) is still planned.
+Status: **Phases 0-5, 8-10 built** - the importer (`scripts/import_recipes.py`) renders the
+first level-balanced note set; the Recipes page (plan, shopping list, search, link and
+photo import) and the Health connection (recipe logging, the Dinner tonight card and the
+editor's nutrition summary) are live. Phase 7 (Skylight) and the remaining Phase 6/10/11
+polish are still open.
 Last live app commit `d766a19f` (v1.5.1).
 
 Goal: fill the family's Recipes shelf with kid-tiered, fast and appliance-friendly meals,
@@ -219,54 +222,67 @@ account is connected, everything above still works.
 
 ## Phase 9 - photo and handwriting import
 
-- [ ] Capture: `<input type="file" accept="image/*" capture="environment">` for now (no
+- [x] Capture: `<input type="file" accept="image/*" capture="environment">` (no
       Capacitor camera plugin is installed; it can come later for a nicer native flow).
-      Keep the photo by uploading it to Nextcloud with the existing `provider.upload_file`
-      and link it from the note, so the original page stays with the recipe.
-- [ ] Vision: the family's **Alpaca** server (`/Users/jeremiahsummers/Code/alpaca`, the
-      Ollama-compatible `llama.cpp` proxy behind `llm_local_url`) already has vision. Use
-      its document-AI OCR endpoint - `POST /api/vision/ocr` on the Alpaca web backend
-      (port 5000, Qwen2.5-VL with automatic VL fallback) - which is built for exactly this
-      (photos of pages, headlines/structure, handwriting). The Ollama-compatible
-      `/api/chat` also passes a message `images` array through to `llama.cpp` as
-      `image_data` when a VL model with an `mmproj` projector is loaded (those models
-      report `capabilities: ['vision']`; `alpaca-puller` wires `*mmproj*.gguf` companions
-      automatically, and a Qwen3VL-8B mmproj companion is already present). A
-      `vision_model` setting (empty = feature off) can name the VL model when going
-      through `llm_local_url` - that path needs the gateway `OllamaProvider` extended to
-      send images. No cloud key is required; an OpenRouter key remains an optional cloud
-      alternative, with a clear note that photos would leave the house.
-- [ ] Pipeline: photo → prompt for strict JSON (title, servings, prep/cook/total time,
-      ingredients with quantities, steps, notes, uncertain words marked) → **editable
-      draft** beside the raw transcription → Save to Recipes (`#photo-import` label).
-- [ ] Handwriting: ask the model to flag low-confidence words, keep the raw text for
-      comparison, and never save without a review.
-- [ ] Errors: no vision model configured → one-line explanation and the typing path stays.
-- [ ] Tests: stub the vision provider with a fixed sample page (and a handwriting-style
-      response); UI draft edit + save test.
+      The photo is kept by uploading it to Nextcloud with the existing
+      `noteAttachment` upload and linking it from the note, so the original page
+      stays with the recipe (best effort - the recipe saves first).
+- [x] Vision: the family's **Alpaca** server - the same local vision OCR the
+      workspaces, Raven and the Health food label already use (`llm_local_url`
+      plus the `vision_ocr_model` setting; no cloud key, nothing leaves the
+      house). The recipe photo runs execution's `/execute/ocr` with
+      `task="recipe"`; a new prompt in
+      `services/execution/handlers/vision_ocr.py` asks for strict JSON and the
+      uncertain words. No vision model configured fails with a one-line
+      explanation and the typing path stays.
+- [x] Pipeline: photo → `services/common/recipe_ocr.py` normalizes the model's
+      reading (title, servings, prep/cook/total time, ingredients, steps, notes,
+      uncertain words) → an **editable draft** (a textarea) beside the raw
+      transcription → Save to Recipes (`#photo-import` label), gateway
+      `POST /api/recipes/photo`.
+- [x] Handwriting: the model flags low-confidence words, the raw text stays for
+      comparison, and nothing saves without the person reviewing the draft.
+- [x] Errors: no vision model configured → one-line explanation and the typing
+      path stays; a photo with nothing readable names the parts that are missing
+      rather than inventing them.
+- [x] Tests: the parser (`services/common/tests/test_recipe_ocr.py`), the
+      gateway (stubbed OCR - `services/gateway/tests/test_recipe_gateway.py`)
+      and the UI draft edit + save + photo-keep
+      (`src/pages/Recipes.test.tsx`).
 
 ## Phase 10 - Health tab connection
 
-- [ ] Carry per-serving nutrition from the dataset into each imported recipe note
-      (calories, protein, carbs, fat, fiber, sugar, sodium - rescaling the corpus
-      panel to the note's 7 servings) and show it on the recipe preview/editor.
-      Edited or computed recipes fall back to the USDA-seed pipeline.
-- [ ] Health tab: a **Meals** card showing today's planned meals from
-      `Recipes/Meal plan.md` with an estimated total, scaled to the household servings.
-- [ ] Ticking a meal cooked logs it for the day, so Health shows planned vs. eaten.
+- [x] Per-serving nutrition in each imported recipe note: `scripts/import_recipes.py`
+      writes the corpus panel (calories, protein, carbs, fat, fiber, sugar, sodium,
+      rescaled to the note's 7 servings) as a `foodcom`-tagged line. The Recipes
+      editor now shows that line back, per serving and as a whole-recipe estimate
+      scaled to the servings the note states (`parseRecipeServings`), so the numbers
+      are visible without opening the log sheet.
+- [ ] Edited or computed recipes fall back to the USDA-seed pipeline (the FTS match
+      and FNDDS portion conversion described above). Still open.
+- [x] Health tab: a **Dinner tonight** card (`MealsCard`, Health → Today) shows
+      today's planned dinner from `Recipes/Meal plan.md` with its stated per-serving
+      nutrition and a whole-recipe estimate scaled to the note's own servings, and a
+      **Log tonight's dinner** button. It hides when nothing is planned or the
+      nutrition card is switched off, and its numbers hide in kid mode. The estimate
+      uses the note's stated servings rather than a hardcoded household count (the
+      household serving count is still an unconfirmed Phase 0 decision).
+- [x] Ticking a meal cooked logs it for the day, so Health shows planned vs. eaten.
       Logging is built, as a button rather than the tick: **Log tonight's dinner** on
-      today's row of the week plan, and **Log to Health** on an open recipe, post the
-      note's per-serving nutrition with a portion picker (see HEALTH_HUB.md Phase 4).
-      Logging tonight's dinner from the plan now also ticks that day cooked in the plan (an
-      option in the log sheet, on by default), and the shopping list leaves cooked dinners out
-      (HEALTH_HUB.md Phase 8). A planned-vs-eaten card is still open.
+      today's row of the week plan (and the Dinner tonight card), and **Log to Health**
+      on an open recipe, post the note's per-serving nutrition with a portion picker
+      (see HEALTH_HUB.md Phase 4). Logging tonight's dinner from the plan now also ticks
+      that day cooked in the plan (an option in the log sheet, on by default), and the
+      shopping list leaves cooked dinners out (HEALTH_HUB.md Phase 8). A planned-vs-eaten
+      card is still open.
 - [ ] Optional (decide with the family): daily calorie/protein targets, weekly averages,
       and per-person portions.
-- [ ] Stay out of the way when there is no plan or nutrition data: hide the card.
-- [ ] Tests: nutrition parsing and scaling (pure), plan → health day mapping, the card
-      and mark-cooked UI. Parsing, portion scaling, the plan's today mapping and the log
-      sheet are tested (`src/test/recipeNutrition.test.ts`, `LogRecipeSheet.test.tsx`,
-      `RecipesPlan.test.tsx`); the card is not built.
+- [x] Stay out of the way when there is no plan or nutrition data: the Dinner tonight
+      card returns nothing when no dinner is planned.
+- [x] Tests: nutrition parsing, scaling and the note's stated servings (pure -
+      `src/test/recipeNutrition.test.ts`), the plan's today mapping and the log sheet
+      (`LogRecipeSheet.test.tsx`, `RecipesPlan.test.tsx`) and the Dinner tonight card
+      (`MealsCard.test.tsx`).
 - [ ] Docs and deploy.
 
 ## Phase 11 - calorie budget and logging (Noom-style)

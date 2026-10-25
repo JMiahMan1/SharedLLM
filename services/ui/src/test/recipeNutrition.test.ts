@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseRecipeNutrition,
+  parseRecipeServings,
   portionLabel,
   portionTotals,
   recipeFoodEntry,
@@ -120,6 +121,21 @@ describe('recipeFoodEntry', () => {
     });
     expect(entry.source).toBe('manual');
     expect(entry.recipe_path).toBe('Recipes/Soup.md');
+  });
+});
+
+describe('parseRecipeServings', () => {
+  it('reads the yield from the imported Times line', () => {
+    expect(parseRecipeServings('Times: prep 15 min · servings 7 (scaled from 4)')).toBe(7);
+  });
+
+  it('reads the yield from a hand-written Times line', () => {
+    expect(parseRecipeServings('Times: prep 15 min · total 25 min · 6 servings')).toBe(6);
+  });
+
+  it('is null when the note does not state a yield', () => {
+    expect(parseRecipeServings('## Ingredients\n- [ ] eggs')).toBeNull();
+    expect(parseRecipeServings('Times: prep 10 min')).toBeNull();
   });
 });
 

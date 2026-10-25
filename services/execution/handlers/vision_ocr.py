@@ -146,6 +146,31 @@ async def vision_ocr_screenshot(
         "}\n\n"
         "Preserve all text exactly, including numbers, dates, and formatting."
     )
+    recipe_prompt = (
+        "You are an expert recipe transcription assistant.\n"
+        "Read the recipe in the uploaded image: a printed cookbook page, a recipe "
+        "card, a screenshot or handwriting.\n\n"
+        "Respond ONLY with a valid JSON object:\n"
+        "{\n"
+        '  "full_text": "Complete raw transcription, line by line, exactly as written...",\n'
+        '  "recipe": {\n'
+        '    "title": "The recipe name, or \\"\\" if none is shown",\n'
+        '    "servings": "how many it serves, as written, or null",\n'
+        '    "prep_minutes": 15,\n'
+        '    "cook_minutes": 30,\n'
+        '    "total_minutes": 45,\n'
+        '    "ingredients": ["2 cups flour", "1 tsp salt"],\n'
+        '    "steps": ["Mix the dry ingredients.", "Bake for 30 minutes."],\n'
+        '    "notes": "Any tips or notes written on the page"\n'
+        "  },\n"
+        '  "uncertain": ["every word or number you were not sure of, with the line it was on"]\n'
+        "}\n\n"
+        "RULES:\n"
+        "- Never invent a quantity, time, ingredient or step that is not in the image.\n"
+        "- A value you cannot read is null (or an empty list), never a guess.\n"
+        "- Keep each ingredient and each step as its own list item.\n"
+        "- List anything you were unsure of in 'uncertain' so a person can check it."
+    )
     general_prompt = (
         "You are an expert Document AI and OCR vision assistant.\n"
         "Analyze the uploaded image and extract ALL visible text.\n\n"
@@ -159,7 +184,11 @@ async def vision_ocr_screenshot(
         "IMPORTANT: Include EVERY line of text you see. Do not summarize. "
         "Preserve prices, numbers, and formatting exactly as shown."
     )
-    prompt = {"price_scrape": price_prompt, "document": doc_prompt}.get(task, general_prompt)
+    prompt = {
+        "price_scrape": price_prompt,
+        "document": doc_prompt,
+        "recipe": recipe_prompt,
+    }.get(task, general_prompt)
 
     messages = [
         {
@@ -212,12 +241,19 @@ async def vision_ocr_screenshot(
                 clean_json = clean_json.split("```")[1].split("```")[0].strip()
             result = json.loads(clean_json)
             # Ensure all required keys exist
-            return {
+            out = {
                 "full_text": result.get("full_text", ""),
                 "headline": result.get("headline", ""),
                 "subtext": result.get("subtext", ""),
                 "badge": result.get("badge", ""),
             }
+            # The recipe task returns a structured reading and any uncertain
+            # words; pass them through for services/common/recipe_ocr.py.
+            if isinstance(result.get("recipe"), dict):
+                out["recipe"] = result["recipe"]
+            if result.get("uncertain"):
+                out["uncertain"] = result["uncertain"]
+            return out
         except json.JSONDecodeError:
             log.warning("Vision OCR failed to parse LLM response as JSON")
             return {

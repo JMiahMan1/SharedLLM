@@ -31,6 +31,7 @@ import { isKidMode, metricOn } from '../../lib/healthSwitches';
 import { pedometerQueryOptions, stepsQueryKey } from '../../lib/healthQueries';
 import type { HealthTab } from './HealthTabs';
 import SharedWithYouCard from './SharedWithYouCard';
+import MealsCard from './MealsCard';
 import ShareToChatSheet from '../bible/ShareToChatSheet';
 import { healthDayLines, healthDayShareText } from '../../lib/healthShare';
 
@@ -522,6 +523,9 @@ export default function HealthToday({ onNavigate }: Props) {
           </section>
         )}
       </div>
+
+      {/* Tonight's planned dinner, from the week plan. */}
+      {on('nutrition') && <MealsCard kid={kid} />}
 
       {/* Morning check-in: the fallback when no wearable exists. */}
       {on('checkin') && (

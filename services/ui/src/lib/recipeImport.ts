@@ -14,6 +14,10 @@ export interface ImportedRecipe {
   image: string | null;
   source_url: string;
   site: string;
+  /** Free notes the model read off a photo (unused for link/search imports). */
+  notes?: string;
+  /** Where the draft came from; a photo import adds its own label. */
+  source_kind?: 'link' | 'search' | 'photo';
 }
 
 /** One card from recipe search: the offline index or TheMealDB. */
@@ -66,8 +70,11 @@ export function guessLabels(recipe: ImportedRecipe): string[] {
   return labels;
 }
 
+/** The label a photo or handwriting import carries. */
+export const PHOTO_LABEL = '#photo-import';
+
 /** The note body for an imported recipe (title/category come from the save). */
-export function buildRecipeNote(recipe: ImportedRecipe): string {
+export function buildRecipeNote(recipe: ImportedRecipe, extraLabels: string[] = []): string {
   const yieldText = recipe.yield
     ? /serv/i.test(recipe.yield)
       ? recipe.yield
@@ -82,10 +89,15 @@ export function buildRecipeNote(recipe: ImportedRecipe): string {
     .filter(Boolean)
     .join(' · ');
 
-  const lines = [`Tags: ${guessLabels(recipe).join(' ')}`];
+  const labels = [...guessLabels(recipe), ...extraLabels];
+  const source = recipe.source_url
+    ? `Source: ${recipe.source_url} - imported from ${recipe.site}`
+    : `Source: ${recipe.site}`;
+
+  const lines = [`Tags: ${labels.join(' ')}`];
   if (times) lines.push(`Times: ${times}`);
   lines.push(
-    `Source: ${recipe.source_url} - imported from ${recipe.site}`,
+    source,
     '',
     '## Ingredients',
     ...recipe.ingredients.map((item) => `- [ ] ${item}`),
@@ -93,5 +105,6 @@ export function buildRecipeNote(recipe: ImportedRecipe): string {
     '## Steps',
     ...recipe.instructions.map((step, index) => `${index + 1}. ${step}`),
   );
+  if (recipe.notes) lines.push('', '## Notes', recipe.notes);
   return lines.join('\n');
 }

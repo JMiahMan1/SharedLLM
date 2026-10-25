@@ -186,6 +186,24 @@ def test_only_parents_change_lanes_and_values_are_checked(family):
     assert family("dad").put("/api/recommendation-lanes/grown", json={"lanes": {"game": False}}).status_code == 403
 
 
+def test_a_grown_member_edits_their_own_lanes_but_not_anothers(family):
+    """A grown member may turn their own suggestion lanes on or off, like their
+    own screen-time rules; a parent still controls a minor's, and a grown member
+    cannot touch a minor's or another grown member's."""
+    assert family("grown").get("/api/recommendation-lanes/grown").json()["can_manage"] is True
+    r = family("grown").put("/api/recommendation-lanes/grown", json={"lanes": {"game": False}})
+    assert r.status_code == 200 and r.json()["lanes"]["game"] is False
+    assert family("grown").get("/api/internal/recommendation-lanes/grown").json() == {"blocked": ["game"]}
+    assert family("grown").put("/api/recommendation-lanes/grown", json={"lanes": {"game": True}}).json()["lanes"]["game"] is True
+    # A parent still sets a minor's lanes; the grown member may not touch them.
+    assert family("mom").put("/api/recommendation-lanes/kid", json={"lanes": {"game": False}}).status_code == 200
+    assert family("grown").put("/api/recommendation-lanes/kid", json={"lanes": {"game": False}}).status_code == 403
+    assert family("grown").put("/api/recommendation-lanes/mom", json={"lanes": {"game": False}}).status_code == 403
+    # A minor still cannot edit their own, and cannot read the control state.
+    assert family("kid").put("/api/recommendation-lanes/kid", json={"lanes": {"game": False}}).status_code == 403
+    assert family("kid").get("/api/recommendation-lanes/kid").json()["can_manage"] is False
+
+
 def test_a_parent_blocks_and_limits_apps(family):
     r = family("dad").put("/api/screen-time/kid/rules", json={
         "blocked_apps": ["com.roblox.client", "com.roblox.client"],

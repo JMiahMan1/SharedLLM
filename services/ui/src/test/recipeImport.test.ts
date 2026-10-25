@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildRecipeNote, guessLabels, type ImportedRecipe } from '../lib/recipeImport';
+import { PHOTO_LABEL, buildRecipeNote, guessLabels, type ImportedRecipe } from '../lib/recipeImport';
 
 const RECIPE: ImportedRecipe = {
   title: 'Best Lemonade',
@@ -59,5 +59,19 @@ describe('recipeImport', () => {
     expect(note).toContain('- [ ] 4 cups water');
     expect(note).toContain('1. Juice the lemons.');
     expect(note).not.toContain('# Best Lemonade');
+  });
+
+  it('adds a photo import label and the model notes', () => {
+    const photo: ImportedRecipe = {
+      ...RECIPE,
+      source_url: '',
+      site: 'photo import',
+      source_kind: 'photo',
+      notes: 'Best with butter.',
+    };
+    const note = buildRecipeNote(photo, [PHOTO_LABEL]);
+    expect(note).toContain('Tags: #level-1 #30-minutes #5-ingredients #photo-import');
+    expect(note).toContain('Source: photo import');
+    expect(note).toContain('## Notes\nBest with butter.');
   });
 });

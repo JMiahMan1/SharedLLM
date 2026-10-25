@@ -20,6 +20,8 @@ vi.mock('../services/api', async (importOriginal) => {
       importRecipe: vi.fn(),
       searchRecipes: vi.fn(),
       fetchRecipe: vi.fn(),
+      readRecipePhoto: vi.fn(),
+      noteAttachment: vi.fn(),
       getTalkConversations: vi.fn(),
       sendTalkMessage: vi.fn(),
     },
@@ -40,6 +42,8 @@ const syncNotesRag = vi.mocked(api.syncNotesRag);
 const importRecipe = vi.mocked(api.importRecipe);
 const searchRecipes = vi.mocked(api.searchRecipes);
 const fetchRecipe = vi.mocked(api.fetchRecipe);
+const readRecipePhoto = vi.mocked(api.readRecipePhoto);
+const noteAttachment = vi.mocked(api.noteAttachment);
 const getTalkConversations = vi.mocked(api.getTalkConversations);
 const sendTalkMessage = vi.mocked(api.sendTalkMessage);
 
@@ -72,6 +76,24 @@ describe('Recipes', () => {
     syncNotesRag.mockResolvedValue({ status: 'SUCCESS', message: 'queued', service: 'notes_sync_rag' });
     importRecipe.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'recipe_import' });
     searchRecipes.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'recipe_import' });
+    readRecipePhoto.mockResolvedValue({
+      raw_text: '',
+      recipe: {
+        title: '',
+        description: '',
+        ingredients: [],
+        instructions: [],
+        prep_minutes: null,
+        cook_minutes: null,
+        total_minutes: null,
+        yield: '',
+        image: null,
+        notes: '',
+      },
+      uncertain: [],
+      missing: ['title', 'ingredients', 'steps'],
+    });
+    noteAttachment.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'note_attachment' });
     getTalkConversations.mockResolvedValue({
       status: 'SUCCESS',
       message: '',
@@ -401,5 +423,87 @@ describe('Recipes', () => {
       'Source: https://www.food.com/recipe/low-fat-berry-blue-frozen-dessert-38',
     );
     expect(body.content).toContain('4 cups blueberries, fresh or frozen');
+  });
+
+  it("shows an open recipe's per-serving nutrition and household estimate", async () => {
+    readNote.mockResolvedValue({
+      status: 'SUCCESS',
+      message: [
+        '# Chili',
+        'Category: Recipes',
+        '',
+        'Times: prep 15 min · servings 7 (scaled from 4)',
+        '',
+        '## Nutrition',
+        '*Per serving, as stated by the submitter - foodcom:* 350.2 kcal · 12 g fat · 30 g carbs · 25 g protein',
+      ].join('\n'),
+      service: 'note_read',
+    });
+    renderRecipes();
+    await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Pancakes'));
+    const line = await screen.findByTestId('recipe-nutrition');
+    expect(line).toHaveTextContent('Per serving (foodcom): 350 kcal');
+    expect(line).toHaveTextContent('whole recipe (7 servings): 2451 kcal');
+  });
+
+  it('reads a recipe photo into a draft, flags uncertain words, and keeps the photo', async () => {    writeNote.mockResolvedValue({
+      status: 'SUCCESS',
+      message: 'ok',
+      service: 'note_write',
+      detail: { path: "Recipes/Nana's Pancakes.md", etag: 'v1' },
+    } as never);
+    readRecipePhoto.mockResolvedValue({
+      raw_text: "Nana's Pancakes\n2 cups flour\n1 tsp salt\n\nMix. Bake.",
+      recipe: {
+        title: "Nana's Pancakes",
+        description: '',
+        ingredients: ['2 cups flour', '1 tsp salt'],
+        instructions: ['Mix.', 'Bake.'],
+        prep_minutes: 10,
+        cook_minutes: 20,
+        total_minutes: 30,
+        yield: '4',
+        image: null,
+        notes: 'Best with butter.',
+      },
+      uncertain: ['salt (line 3)'],
+      missing: [],
+    });
+    noteAttachment.mockResolvedValue({
+      status: 'SUCCESS',
+      message: '',
+      service: 'note_attachment',
+      detail: { link: '.attachments.9/page.jpg', name: 'page.jpg', mime: 'image/jpeg' },
+    } as never);
+
+    renderRecipes();
+    await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+
+    const file = new File(['bytes'], 'page.jpg', { type: 'image/jpeg' });
+    fireEvent.change(screen.getByLabelText('Recipe photo'), { target: { files: [file] } });
+
+    expect(await screen.findByTestId('recipe-import-preview')).toBeTruthy();
+    expect(readRecipePhoto).toHaveBeenCalledWith(file);
+    expect(screen.getByTestId('recipe-photo-review')).toBeTruthy();
+    expect(screen.getByText(/check against the page/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /save to recipes/i }));
+
+    await waitFor(() => expect(writeNote).toHaveBeenCalled());
+    const first = writeNote.mock.calls[0][0] as { title: string; content: string };
+    expect(first.title).toBe("Nana's Pancakes");
+    expect(first.content).toContain('#photo-import');
+    expect(first.content).toContain('- [ ] 2 cups flour');
+
+    await waitFor(() => expect(noteAttachment).toHaveBeenCalled());
+    const upload = noteAttachment.mock.calls[0][0] as { action: string; path: string };
+    expect(upload.action).toBe('upload');
+    expect(upload.path).toBe("Recipes/Nana's Pancakes.md");
+    // The link lands in the note on the second save.
+    await waitFor(() => expect(writeNote).toHaveBeenCalledTimes(2));
+    expect((writeNote.mock.calls[1][0] as { content: string }).content).toContain('.attachments.9/page.jpg');
   });
 });

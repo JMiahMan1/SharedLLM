@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactElement } from 'react';
-import FamilyMember, { GuardianRedirect } from './FamilyMember';
+import FamilyMember from './FamilyMember';
 import TalkRequestCard from '../components/guardian/TalkRequestCard';
 import { api } from '../services/api';
 import { localDay } from '../lib/healthHub';
@@ -78,7 +78,6 @@ const wrap = (ui: ReactElement, path: string) =>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/family/member/:username?" element={<>{ui}<Where /></>} />
-          <Route path="/guardian" element={<GuardianRedirect />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -117,11 +116,6 @@ describe('The family member page (a parent)', () => {
     vi.mocked(api.decideScreenTimeRequest).mockResolvedValue({} as never);
     vi.mocked(api.pauseScreenTime).mockResolvedValue({ rules: {} });
     vi.mocked(api.giveScreenTimeBonus).mockResolvedValue({} as never);
-  });
-
-  it('keeps the old /guardian?child= links working', async () => {
-    wrap(<FamilyMember />, '/guardian?child=sam');
-    expect(await screen.findByTestId('where')).toHaveTextContent('/family/member/sam');
   });
 
   it("opens the first child when none is named, and shows today, the next routine and concerns with what to say", async () => {

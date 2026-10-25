@@ -653,7 +653,8 @@ point.
       `permission`, `site`; only the child's own parents answer, a request already waiting is
       returned without a second notice, an answered app or permission is not asked again). Both
       parents get a `family_safety` notice that opens the child's family member page
-      (`/family/member/…`, docs/FAMILY_MEMBER_PAGE.md; the old `/guardian?child=…` redirects),
+      (`/family/member/…`, docs/FAMILY_MEMBER_PAGE.md; the old `/guardian?child=…`
+      opens that child's page),
       where `RequestsCard` ("… is asking") approves or denies inline; the child hears the answer.
       *Install approvals* (rule `install_approval`, on unless a parent switches it off under the
       child's apps): the guard records the phone's user-installed apps the first time it runs on a
@@ -903,8 +904,9 @@ point.
       devotional library, and a talk journal. Jarvis drafts gentle notes a parent reviews
       before sending - never sent automatically.
       **Built (2026-10-24):** the parents' page, since replaced by the **family member page**
-      `/family/member/{child}` (docs/FAMILY_MEMBER_PAGE.md; Health → Family guardian, concern
-      and recap notices open it on the child; `/guardian` redirects). Its Faith & growth section
+      `/family/member/{child}` (docs/FAMILY_MEMBER_PAGE.md; Health → Family guardian opens
+      the guardian page `/guardian`, and concern and recap notices open the child's page;
+      `/guardian?child=…` opens it too). Its Faith & growth section
       shows one child at a time: the week (`RecapCard`),
       **Praying for …** (`services/common/guidance.py`: for each signal in the week - a concern,
       late nights, more phone time, blocked sites, Bible reading - a prayer, a KJV verse and a

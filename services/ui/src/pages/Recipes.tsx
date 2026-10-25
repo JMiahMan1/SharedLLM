@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, CalendarDays, Link2, Loader2, Plus, Save, Search, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils } from 'lucide-react';
+import { BookOpen, CalendarDays, Camera, Link2, Loader2, Plus, Save, Search, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
 import { noteBody } from '../lib/notesMeta';
+import { errorText } from '../lib/errorText';
+import { blobToBase64 } from '../lib/base64';
+import { appendAttachment, attachmentMarkdown } from '../lib/noteAttachments';
 import type { ExecutionResponse } from '../types/api';
 import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
@@ -12,8 +15,9 @@ import ShareToChatSheet from '../components/bible/ShareToChatSheet';
 import LogRecipeSheet from '../components/health/LogRecipeSheet';
 import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
 import { SHOPPING_PATH, SHOPPING_TITLE, buildShoppingList, ingredientLines, shoppingShareText } from '../lib/shoppingList';
-import { buildRecipeNote, type ImportedRecipe, type RecipeSearchItem } from '../lib/recipeImport';
+import { PHOTO_LABEL, buildRecipeNote, type ImportedRecipe, type RecipeSearchItem } from '../lib/recipeImport';
 import { readMealPlan, saveMealPlan } from '../lib/mealPlanStore';
+import { parseRecipeNutrition, parseRecipeServings, portionTotals } from '../lib/recipeNutrition';
 import {
   emptyPlan,
   planLevel,
@@ -81,6 +85,13 @@ export default function Recipes() {
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState<ImportedRecipe | null>(null);
   const [savingImport, setSavingImport] = useState(false);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoRaw, setPhotoRaw] = useState('');
+  const [photoDraft, setPhotoDraft] = useState('');
+  const [photoUncertain, setPhotoUncertain] = useState<string[]>([]);
+  const [photoMissing, setPhotoMissing] = useState<string[]>([]);
+  const [readingPhoto, setReadingPhoto] = useState(false);
+  const photoRef = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState('');
   const [mealQuery, setMealQuery] = useState('');
   const [mealSearching, setMealSearching] = useState(false);
@@ -373,6 +384,14 @@ export default function Recipes() {
     }
   };
 
+  const clearPhoto = () => {
+    setPhotoFile(null);
+    setPhotoRaw('');
+    setPhotoDraft('');
+    setPhotoUncertain([]);
+    setPhotoMissing([]);
+  };
+
   const readLink = async () => {
     const url = importUrl.trim();
     if (!url) {
@@ -380,6 +399,7 @@ export default function Recipes() {
       return;
     }
     setImporting(true);
+    clearPhoto();
     try {
       const res = await api.importRecipe(url);
       if (res.status === 'SUCCESS' && res.detail?.recipe) {
@@ -395,6 +415,67 @@ export default function Recipes() {
     }
   };
 
+  const readPhoto = async (file: File) => {
+    setReadingPhoto(true);
+    setImported(null);
+    setPhotoRaw('');
+    setPhotoUncertain([]);
+    setPhotoMissing([]);
+    try {
+      const draft = await api.readRecipePhoto(file);
+      const importedPhoto: ImportedRecipe = {
+        ...draft.recipe,
+        source_url: '',
+        site: 'photo import',
+        source_kind: 'photo',
+      };
+      setPhotoFile(file);
+      setPhotoRaw(draft.raw_text);
+      setPhotoUncertain(draft.uncertain);
+      setPhotoMissing(draft.missing);
+      setPhotoDraft(buildRecipeNote(importedPhoto, [PHOTO_LABEL]));
+      setImported(importedPhoto);
+      if (draft.missing.length > 0) {
+        toast.error(`The photo did not give the ${draft.missing.join(', ')} - fill them in before saving`);
+      }
+    } catch (error) {
+      toast.error(errorText(error, 'That photo could not be read. Type the recipe instead.'));
+    } finally {
+      setReadingPhoto(false);
+    }
+  };
+
+  // Keep the original page with the recipe: upload the photo beside the note
+  // and link it from the body. Best effort - the recipe is already saved.
+  const attachPhoto = async (title: string, path: string, body: string, etag?: string) => {
+    if (!photoFile) return;
+    try {
+      const res = await api.noteAttachment({
+        action: 'upload',
+        path,
+        filename: photoFile.name || 'recipe-photo.jpg',
+        data: await blobToBase64(photoFile),
+        as_user: asUser,
+      });
+      const link = res.detail?.link;
+      if (res.status !== 'SUCCESS' || typeof link !== 'string') {
+        toast.error('Saved, but the photo could not be kept with it');
+        return;
+      }
+      const name = typeof res.detail?.name === 'string' ? res.detail.name : photoFile.name || 'recipe-photo.jpg';
+      await saveNote({
+        title,
+        content: appendAttachment(body, attachmentMarkdown(link, name, photoFile.type)),
+        category: RECIPES_DIR,
+        previous: { title, category: RECIPES_DIR, path },
+        asUser,
+        ifMatch: etag,
+      });
+    } catch {
+      toast.error('Saved, but the photo could not be kept with it');
+    }
+  };
+
   const saveImported = async () => {
     if (!imported) return;
     if (recipes.some((recipe) => recipe.title === imported.title)) {
@@ -403,21 +484,28 @@ export default function Recipes() {
     }
     setSavingImport(true);
     try {
+      const labels = imported.source_kind === 'photo' ? [PHOTO_LABEL] : [];
+      const content =
+        imported.source_kind === 'photo' && photoDraft ? photoDraft : buildRecipeNote(imported, labels);
       const saved = await saveNote({
         title: imported.title,
-        content: buildRecipeNote(imported),
+        content,
         category: RECIPES_DIR,
         asUser,
       });
-      if (saved.response.status === 'SUCCESS') {
-        toast.success('Recipe saved');
-        queryClient.invalidateQueries({ queryKey: ['recipes'] });
-        setImported(null);
-        setImportUrl('');
-        setImportOpen(false);
-      } else {
+      if (saved.response.status !== 'SUCCESS') {
         toast.error(saved.response.message || 'Could not save the recipe');
+        return;
       }
+      if (imported.source_kind === 'photo' && saved.path) {
+        await attachPhoto(imported.title, saved.path, content, saved.etag);
+      }
+      toast.success('Recipe saved');
+      queryClient.invalidateQueries({ queryKey: ['recipes'] });
+      setImported(null);
+      setImportUrl('');
+      clearPhoto();
+      setImportOpen(false);
     } catch {
       toast.error('Could not save the recipe');
     } finally {
@@ -447,6 +535,7 @@ export default function Recipes() {
   };
 
   const openSearchResult = async (item: RecipeSearchItem) => {
+    clearPhoto();
     if (item.source !== 'foodcom' || item.id === undefined || item.id === null) {
       setImported(item as ImportedRecipe);
       return;
@@ -476,6 +565,10 @@ export default function Recipes() {
   const visibleRecipes = filterText
     ? recipes.filter((recipe) => recipe.title.toLowerCase().includes(filterText))
     : recipes;
+
+  // The open recipe's own stated nutrition, for the editor (Phase 10).
+  const nutrition = useMemo(() => parseRecipeNutrition(body), [body]);
+  const recipeServings = useMemo(() => parseRecipeServings(body), [body]);
 
   return (
     <div className="space-y-4" data-testid="recipes">
@@ -552,6 +645,34 @@ export default function Recipes() {
               Read the link
             </button>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => photoRef.current?.click()}
+              disabled={readingPhoto}
+              data-testid="recipe-photo-button"
+              className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+            >
+              {readingPhoto ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+              {readingPhoto ? 'Reading the photo…' : 'Photo or handwriting'}
+            </button>
+            <input
+              ref={photoRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              aria-label="Recipe photo"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void readPhoto(file);
+                event.target.value = '';
+              }}
+            />
+            <span className="text-[10px] text-slate-500">
+              Reads a recipe page, card or handwriting with the local vision model.
+            </span>
+          </div>
           <div className="text-center text-[10px] uppercase tracking-wide text-slate-500">or search recipes</div>
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -622,6 +743,34 @@ export default function Recipes() {
                   ) : null}
                 </div>
               </div>
+              {imported.source_kind === 'photo' ? (
+                <textarea
+                  value={photoDraft}
+                  onChange={(event) => setPhotoDraft(event.target.value)}
+                  aria-label="Recipe draft"
+                  rows={10}
+                  className="glass-input w-full resize-y px-3 py-2 text-sm"
+                />
+              ) : null}
+              {imported.source_kind === 'photo' && (photoMissing.length > 0 || photoUncertain.length > 0) ? (
+                <div
+                  className="space-y-1 rounded-lg border border-amber-400/30 bg-amber-400/10 p-2 text-[11px] text-amber-200"
+                  data-testid="recipe-photo-review"
+                >
+                  {photoMissing.length > 0 ? (
+                    <div>The photo did not give the {photoMissing.join(', ')} - fill them in before saving.</div>
+                  ) : null}
+                  {photoUncertain.length > 0 ? (
+                    <div>Check against the page: {photoUncertain.join('; ')}.</div>
+                  ) : null}
+                </div>
+              ) : null}
+              {imported.source_kind === 'photo' && photoRaw ? (
+                <details className="rounded-lg border border-white/10 bg-black/20 p-2">
+                  <summary className="cursor-pointer text-[11px] text-slate-400">Raw transcription from the photo</summary>
+                  <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-[11px] text-slate-300">{photoRaw}</pre>
+                </details>
+              ) : null}
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -632,7 +781,14 @@ export default function Recipes() {
                   {savingImport ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                   Save to Recipes
                 </button>
-                <button type="button" onClick={() => setImported(null)} className="glass-button min-h-11 px-3 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImported(null);
+                    clearPhoto();
+                  }}
+                  className="glass-button min-h-11 px-3 text-xs"
+                >
                   Discard
                 </button>
               </div>
@@ -841,6 +997,16 @@ export default function Recipes() {
             aria-label="Recipe name"
             className="glass-input min-h-11 w-full px-3 py-2 text-base sm:text-sm"
           />
+          {nutrition.status === 'ok' ? (
+            <p className="text-[11px] text-slate-400" data-testid="recipe-nutrition">
+              Per serving{nutrition.perServing.source ? ` (${nutrition.perServing.source})` : ''}:{' '}
+              {Math.round(nutrition.perServing.calories)} kcal · P {nutrition.perServing.protein_g} g · C{' '}
+              {nutrition.perServing.carbs_g} g · F {nutrition.perServing.fat_g} g
+              {recipeServings
+                ? ` · whole recipe (${recipeServings} servings): ${portionTotals(nutrition.perServing, recipeServings).calories} kcal`
+                : ''}
+            </p>
+          ) : null}
           <textarea
             value={body}
             onChange={(event) => setBody(event.target.value)}

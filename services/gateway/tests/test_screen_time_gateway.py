@@ -224,6 +224,44 @@ def test_lane_changes_go_to_identity_as_the_caller(wired):
     assert calls[0]["headers"]["Authorization"] == "Bearer kid-key" and calls[0]["json"] == {"lanes": {"game": False}}
 
 
+def test_a_self_pause_reads_as_you_and_a_parents_pause_as_a_parent(wired, monkeypatch):
+    client, _, sent, answers = wired
+    actor = {"user": "grown"}
+
+    async def _who(_request):
+        return actor
+
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _who)
+
+    # A grown member pausing their own phone.
+    answers[("POST", "/screen-time/grown/pause")] = (200, {"username": "grown", "rules": {"paused": True}})
+    assert client.post("/api/screen-time/grown/pause", json={}).status_code == 200
+    assert sent[-1]["title"] == "Phone paused"
+    assert sent[-1]["body"] == "You paused your phone for now."
+
+    # A parent pausing a child's phone.
+    sent.clear()
+    actor["user"] = "dad"
+    answers[("POST", "/screen-time/kid/pause")] = (200, {"username": "kid", "rules": {"paused": True}})
+    assert client.post("/api/screen-time/kid/pause", json={}).status_code == 200
+    assert sent[-1]["title"] == "Phone paused"
+    assert sent[-1]["body"] == "A parent paused your phone for now."
+
+    # Resuming reads the same either way.
+    sent.clear()
+    actor["user"] = "grown"
+    answers[("POST", "/screen-time/grown/pause")] = (200, {"username": "grown", "rules": {}})
+    assert client.post("/api/screen-time/grown/pause", json={"resume": True}).status_code == 200
+    assert sent[-1]["body"] == "Your phone is back on."
+
+
+def test_a_refused_pause_tells_nobody(wired):
+    client, _, sent, answers = wired
+    answers[("POST", "/screen-time/kid/pause")] = (403, {"detail": "Only a parent can pause a minor's phone"})
+    assert client.post("/api/screen-time/kid/pause", json={}).status_code == 403
+    assert sent == []
+
+
 def test_status_blocks_an_app_past_its_own_minutes(wired):
     client, _, _, answers = wired
     answers[("GET", "/screen-time/kid/rules")] = (200, {"rules": {"app_limits": {"com.google.android.youtube": 30}}})

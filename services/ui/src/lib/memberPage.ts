@@ -30,7 +30,7 @@ export const MEMBER_SECTIONS: MemberSection[] = [
   { id: 'devices', label: 'Devices', technical: true },
 ];
 
-/** The member page's address (the old `/guardian?child=` redirects here). */
+/** The member page's address (the old `/guardian?child=` opens it). */
 export const memberPath = (username: string, section?: SectionId) =>
   `/family/member/${encodeURIComponent(username)}${section && section !== 'overview' ? `?section=${section}` : ''}`;
 
