@@ -1,9 +1,7 @@
 """The family drawing board is shared live, one room at a time."""
 import pytest
-from fastapi.testclient import TestClient
 
 from services.gateway import drawing
-from services.gateway.main import app
 
 
 @pytest.fixture(autouse=True)
@@ -34,8 +32,8 @@ def _segment(segment_id="s1", **overrides):
     return segment
 
 
-def test_two_people_draw_on_one_board_and_late_joiners_replay_it():
-    c = TestClient(app)
+def test_two_people_draw_on_one_board_and_late_joiners_replay_it(one_loop_client):
+    c = one_loop_client
 
     with c.websocket_connect("/api/family/drawing/ws?token=mom-token&room=family") as mom:
         mom_welcome = mom.receive_json()
@@ -89,8 +87,8 @@ def test_two_people_draw_on_one_board_and_late_joiners_replay_it():
             assert cleared["by"]["username"] == "kid"
 
 
-def test_a_drawer_only_undoes_their_own_last_stroke():
-    c = TestClient(app)
+def test_a_drawer_only_undoes_their_own_last_stroke(one_loop_client):
+    c = one_loop_client
 
     with c.websocket_connect("/api/family/drawing/ws?token=mom-token&room=family") as mom:
         mom.receive_json()
@@ -110,8 +108,8 @@ def test_a_drawer_only_undoes_their_own_last_stroke():
             assert mom.receive_json() == {"type": "undo", "id": "kid-2"}
 
 
-def test_invalid_geometry_never_reaches_the_other_canvas():
-    c = TestClient(app)
+def test_invalid_geometry_never_reaches_the_other_canvas(one_loop_client):
+    c = one_loop_client
 
     with c.websocket_connect("/api/family/drawing/ws?token=mom-token&room=family") as mom:
         mom.receive_json()
@@ -130,8 +128,8 @@ def test_invalid_geometry_never_reaches_the_other_canvas():
             assert relayed["segment"]["color"] == "#1e293b"
 
 
-def test_a_closed_board_tells_the_people_still_drawing():
-    c = TestClient(app)
+def test_a_closed_board_tells_the_people_still_drawing(one_loop_client):
+    c = one_loop_client
 
     with c.websocket_connect("/api/family/drawing/ws?token=mom-token&room=family") as mom:
         mom.receive_json()

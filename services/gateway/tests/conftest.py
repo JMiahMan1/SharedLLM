@@ -5,10 +5,33 @@ re-export them here so pytest auto-discovers them.
 """
 import types
 
+import anyio.from_thread
 import pytest
 from conftest_media import client, fake_identity, upstream  # noqa: F401
 
 WORKSPACE_CALLER = {"user": "alice", "is_admin": False}
+
+
+@pytest.fixture
+def one_loop_client():
+    """A TestClient whose requests and websockets all run on one event loop.
+
+    A bare ``TestClient(app)`` gives every websocket its own loop, so two
+    people on one call or drawing board meet on different loops, and an
+    ``asyncio.Lock`` they share can strand a waiter forever. Production runs one
+    loop; this makes the tests do the same.
+    """
+    from fastapi.testclient import TestClient
+
+    from services.gateway.main import app
+
+    test_client = TestClient(app)
+    with anyio.from_thread.start_blocking_portal(**test_client.async_backend) as portal:
+        test_client.portal = portal
+        try:
+            yield test_client
+        finally:
+            test_client.portal = None
 
 
 @pytest.fixture
