@@ -6,10 +6,11 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
-- Live: `https://jarvis.sumemail.com` - version **1.5.2**, OTA bundle `git_sha` **3e7fa71a**
-  (2026-10-25 01:30 UTC; every app service redeployed at that tip, 0 new errors after). APK: CI
-  builds one per push under `services/ui/**`; the native work below needs the newest APK on the
-  phones. Family guard Phase 11 and the family member page (`/family/member/<child>`) are live.
+- Live: `https://jarvis.sumemail.com` - version **1.5.2**, OTA bundle `git_sha` **41115ca6**
+  (APK `versionCode` **452**, 2026-10-25; every app service redeployed at that tip, 0 new errors
+  after). APK: CI builds one per push under `services/ui/**`; the native work below needs the
+  newest APK on the phones. Family guard Phase 11 and the family member page
+  (`/family/member/<child>`) are live.
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
   - **TLS certificate renewed (2026-10-25)**: the public proxy (`PUBLIC_PROXY_IP`, 192.168.2.30) now serves a
@@ -25,6 +26,81 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `2026-10-25 late` (the day's round: repo hygiene, integrations finished, a live identity outage
+  fixed, and a broad Family-guard, digital-wellbeing and device push; every item below was verified
+  by tests, a live deploy and a smoke test, and is on `origin/microservices` at `41115ca6`).
+  - **Repo-wide em/en dash removal** (`ec27a2c2`): no `U+2013`/`U+2014` characters remain in the
+    source (66 files); the few functional regexes keep `\u2013`/`\u2014` escapes, so behaviour is
+    unchanged.
+  - **Integrations finished and hardened** (`547f7465`; docs/INTEGRATIONS.md): the Audiobookshelf
+    connection test now logs in at the root `/login` (it was hitting `/api/login`, which ABS rejects);
+    secret masking covers `*_token`, `*_pass`, `*_api_key`, `*_key`, `api_key` and any value filled
+    from a saved `*_enc`; the Nextcloud, GitHub and GitLab tests have 5 s timeouts; the Nextcloud
+    test uses the user's own `/ocs/v2.php/cloud/user` and honours `ocs.meta.statuscode`; connection
+    failures no longer echo the exception; GitHub and GitLab are tested over the TLS-verifying client
+    while self-signed hosts (Home Assistant, Nextcloud, Audiobookshelf, Music Assistant, Skylight)
+    keep the insecure one; GitHub "Protected Branches" is now stored and resolved; the Private Git
+    endpoint, username and port are used and credentials are redacted in every logged git command;
+    a non-admin can turn Skylight on/off for themselves; and the audiobook library is no longer
+    capped at 50 (the gateway pages through ABS). The dead per-user OpenRouter tile was removed
+    (`d517166f`).
+  - **Identity live-outage fix** (`81a1ec12`, the same fix as the `2026-10-25` bullet below): the
+    deployed identity service crash-looped with `no such column: user.forbidden_branches` and took the
+    gateway down; shipping the missing `forbidden_branches` column migration and redeploying identity
+    + gateway fixed it.
+  - **Phase 10 - digital wellbeing / screen time** (`e6949f70`): Android screen time is now measured
+    from the day's own events. `PhoneUsagePlugin.getToday()` used to sum `getTotalTimeInForeground()`
+    over un-clipped `INTERVAL_DAILY` buckets, so overnight and pre-waking foreground time counted as
+    today (Jeremiah's own screen time claimed over an hour before he got up at 7:30). It now derives
+    the total and the per-app rows from the clipped `queryEvents(start, now)` stream through a new
+    `ForegroundTime` class, with JVM tests.
+  - **Phase 11 - family guard** (the bulk of the round):
+    - **Tamper escapes closed and a second user blocked** (`cfc7dc20`): on a device-owner phone the
+      guard also sets `DISALLOW_USER_SWITCH`, `DISALLOW_ADD_USER`, `DISALLOW_DEBUGGING_FEATURES`,
+      `DISALLOW_CONFIG_VPN` and `DISALLOW_CONFIG_PRIVATE_DNS`; `GuardRules.isTamperScreen` also covers
+      the guard's own Accessibility detail page, the factory-reset/erase pages, the usage-access page
+      and the Users/Add-user pages (Settings packages only); a second user or guest is reported as the
+      tamper event `multi_user`.
+    - **Device-owner lock (Layer 2)** (`ecf6584f`): the guard blocks its own uninstall, sets
+      `DISALLOW_SAFE_BOOT` and `DISALLOW_FACTORY_RESET`, and calls a real `lockNow()` at lock onset;
+      non-device-owner phones keep the soft lock.
+    - **Approve from the notification; ops notices stay off children's phones** (`41115ca6`): a parent
+      gets Approve/Disapprove buttons in the notification for a child's asks (new app, permission,
+      blocked site) and for more time, sent to EVERY parent; new push callbacks `guard_decide` and
+      `more_time_decide` answer as the parent through the same routes the app uses, and the child is
+      still told the answer. Notices carry an `audience` enforced by telemetry at delivery (a
+      "parents" notice addressed to a minor is DROPPED), so app-update/system/ops notices never reach a
+      child while a parent still hears about updates and problems; the minor set comes from identity's
+      `is_minor` and an unreadable identity fails closed (503).
+    - **Family Guardian gets its own top-level page** (`/guardian`, nav entry after Family; in review,
+      uncommitted): it no longer lives inside Health; Health keeps its digital-wellbeing card and a
+      link to the Guardian page. UI full suite 275 files / 2130 tests passed.
+    - **Tamper events for non-minors dropped, and self-editing** (in review, uncommitted): identity
+      drops a tamper report for an adult child or a parent (no `DeviceEvent`, empty notify, explicit
+      `dropped: "not_minor"`), so only child/teen reports reach parents; an adult child can remove and
+      disable their OWN monitoring settings (new `_may_edit_screen_time`: a parent-of-minor, or a grown
+      member editing their own rules), clearing their rules and setting `monitoring: "off"` for
+      themselves, and nobody can edit another member's. Data collection is unaffected by monitoring
+      (usage and steps keep collecting on the device and recommendations keep working; the
+      `monitoring` flag only decides whether to page a parent). identity + gateway 2179 passed.
+  - **Child safety** (`ecf6584f`): cycle data is now recorded without opt-in - a `CyclePeriod`/`CycleLog`
+    is stored even when tracking was never enabled, `CycleSettings.enabled` now only governs
+    display/sharing, and every exposure gate is unchanged.
+  - **Devices report the real form factor** (`72835c17`): "tablet" joins the device kinds with one
+    `MOBILE_DEVICE_KINDS = (phone, tablet)`; a device may declare only its form factor (phone|tablet,
+    else 422) and can be corrected between the two; admin/assistant/light/watch can never be
+    self-claimed; the sleep estimate and the "is this person's device registered" checks now cover the
+    whole mobile set; Android reports tablet from `Configuration.smallestScreenWidthDp >= 600` (null
+    when unreadable, never guessed); the UI shows the real type and surfaces device capabilities.
+  - **App updater / OTA** (`0afd1da6`): the OTA guard is now cleared when the APK upgrades - the
+    recurring "Update on the server is mislabelled. Skipping to avoid a restart loop." block came from
+    `reconcilePendingUpdate()` running BEFORE the native-build-change check, so on the first launch
+    after EVERY APK upgrade the stale pending SHA (from the old APK's web layer) could never match the
+    new APK's SHA, the server's version got blacklisted and updates were refused. The native-build
+    check now runs first and a native upgrade clears the pending + rejected SHAs. (The immediate
+    trigger this session was also that an Android-only release never republished the web OTA bundle,
+    so the APK's embedded SHA and the advertised bundle SHA disagreed; the `ui` service was redeployed
+    to republish.)
 - `2026-10-25` (live fix): the deployed identity service crash-looped on startup (`no such column:
   user.forbidden_branches`) because a model change shipped without its migration, which also took the gateway
   down (the site returned 502). Fixed by shipping the missing `_add_column` migration (commit `81a1ec12`) and
@@ -55,8 +131,8 @@ Every claim below was verified against the live system unless marked **planned**
     fetches the next page, so a large library is fully browsable.
   - **Repo-wide em/en dash removal**: no `U+2013`/`U+2014` characters remain in the source; the few functional
     regexes use `\u2013`/`\u2014` escapes so behaviour is unchanged.
-  - **Not done (reported)**: OpenRouter's per-user tile is still a no-op; per-user credentials would be dead
-    storage because the only consumer is the global `llm_cloud_*` settings.
+  - **OpenRouter's per-user tile**: the dead tile was removed this session (`d517166f`); per-user
+    credentials would be dead storage because the only consumer is the global `llm_cloud_*` settings.
 - `2026-10-24 evening session` (lead + parallel agents; every change cherry-picked onto
   `microservices`, no other branches kept). Details in the docs named.
   - **Media - playing on the phone works again** (BUG-74…79): play waits for MA to see the web
@@ -505,7 +581,7 @@ Every claim below was verified against the live system unless marked **planned**
   `-x`), then confirm it is gone. Never leave seeded artists/creators/calls in a real feed.
 - **UI gates**, run in `services/ui`: `npm run typecheck`, `npm run lint`
   (baseline 0 errors / 11 pre-existing warnings), `npx vitest run`
-  (229 files / 1730 tests), `npm run build` (also packages the OTA bundle).
+  (275 files / 2130 tests), `npm run build` (also packages the OTA bundle).
   After adding Tailwind colour classes run `npm run gen:theme-css` or
   `src/themes/themeRemap.test.ts` fails.
 - **Backend tests**: `.venv/bin/python -m pytest <paths>` - `python` is not on
@@ -661,6 +737,21 @@ surfaces and a voice for the quiet ones; collected data is parents-only while
 suggestions belong to the member they are for, and the phone pulls external-app
 activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23).
 
+### Phase 12 - device management (MDM) (planned 2026-10-25)
+
+The user asked "is there a means we can push application (Jarvis OS) updates to devices remotely and
+maybe some other MDM related tasks like push books and other files to be available on devices for
+school work and Bible studies etc." and chose to **build full MDM-style device management**: device
+inventory, remote app-update push, file/book push, app install/uninstall control, and remote
+lock/wipe. **Not started.**
+
+- For file push the chosen model is **shared School and Library folders per child device**: one
+  shared set pushed to each selected child device (not per-file targeting).
+- Candidate reuse: the existing OTA / app-updates flow (`docs/MOBILE_OTA_UPDATES.md`), the
+  workspace/files surfaces, and the read-only Calibre library over WebDAV (`docs/CALIBRE_LIBRARY.md`).
+- This is where the "Devices" service's real-form-factor work (`72835c17`, phone vs tablet) and the
+  app-updater OTA work (`0afd1da6`) point next.
+
 ## 4. Open small items
 
 - Media: P6-T5 (UX ledger pass), P7-T3 to P7-T5 (screen-reader labels and the now-playing
@@ -681,6 +772,19 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
   Jeremiah: add 184.190.1.22 to the token's IP filter (or remove it) so the wildcard renews again.
 - Stale MA player and HA entity named after a user JSON blob: remove by hand in MA → Settings →
   Players.
+- **Phase 12 (device management / MDM)**: not started - see "Phase 12 - device management (MDM)"
+  above for the chosen shape (device inventory, remote app-update push, shared School/Library file
+  push, install/uninstall control, remote lock/wipe).
+- Devices: the tablet/phone split is a screen-width heuristic, so a very large phone reads as a
+  tablet (`72835c17`).
+- App updater: there is no dedicated regression test for the app-updater native-reset guard
+  (`0afd1da6`).
+- Family guard: the pause notice still says "A parent paused your phone" when an adult pauses their
+  own; recommendation lanes cannot yet be self-edited by a grown member; and the docs still describe
+  `/guardian` as a redirect (it is now its own top-level page, in review).
+- Family guard (device owner): the Layer 2 restrictions and the new Settings-page tamper matches only
+  take effect on a phone provisioned as device owner
+  (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver`).
 
 ## 5. Immediate next steps
 
@@ -699,8 +803,13 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
    - sleep estimate: after a night with the new APK, Sleep → "Estimate from my devices".
 2. **First live trivia game** on the new code (questions/verdicts from the `jarvis` account,
    arrival-order answers, late answers not burned).
-3. Phase 11 still open: device-owner provisioning (Layer 2) belongs to the other tool. The
-   web-filter bypass blocks (unsupported browsers, split screen, safe mode) shipped.
+3. Phase 11: the device-owner Layer 2 restrictions shipped (block the guard's own uninstall,
+   `DISALLOW_SAFE_BOOT`/`FACTORY_RESET`/`USER_SWITCH`/`ADD_USER`/`DEBUGGING_FEATURES`/`CONFIG_VPN`/
+   `CONFIG_PRIVATE_DNS`, a real `lockNow()` at lock onset, and the new Settings-page tamper matches)
+   but only take effect on a phone provisioned as device owner
+   (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver`), which still belongs to
+   the other tool. The web-filter bypass blocks (unsupported browsers, split screen, safe mode)
+   shipped.
 4. Finish media P6-T5, P7-T3 to P7-T5, the Phase 8 device checklist and Phase 9 (release).
 5. Keep the plan docs and this handover updated in the same commit as the code.
 
