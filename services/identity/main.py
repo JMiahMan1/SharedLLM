@@ -4817,8 +4817,8 @@ def _blocked_lanes(session: Session, username: str) -> list[str]:
 
 @app.get("/api/recommendation-lanes/{username}")
 def get_recommendation_lanes(username: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """Which suggestion lanes are on for a member: theirs to read, a minor's
-    parents' to change."""
+    """Which suggestion lanes are on for a member: theirs to read; a minor's
+    are their parents' to change, a grown member's their own."""
     subject = _screen_subject(session, username)
     if caller.username != subject.username and not _may_manage_screen_time(caller, subject):
         raise HTTPException(status_code=403, detail="Only a parent can see this")
@@ -4826,15 +4826,19 @@ def get_recommendation_lanes(username: str, session: Session = Depends(get_sessi
     return {
         "username": subject.username,
         "lanes": {lane: lane not in blocked for lane in RECOMMENDATION_LANES},
-        "can_manage": _may_manage_screen_time(caller, subject),
+        # A grown member manages their own lanes; a minor's are their parents'.
+        "can_manage": _may_edit_screen_time(caller, subject),
     }
 
 
 @app.put("/api/recommendation-lanes/{username}")
 def put_recommendation_lanes(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """``{"lanes": {"game": false, ...}}``: false blocks a lane, true blesses it."""
+    """``{"lanes": {"game": false, ...}}``: false blocks a lane, true blesses it.
+
+    A minor's lanes are set by their parents; a grown member may set their own
+    (the same rule as their screen-time rules, ``_may_edit_screen_time``)."""
     subject = _screen_subject(session, username)
-    if not _may_manage_screen_time(caller, subject):
+    if not _may_edit_screen_time(caller, subject):
         raise HTTPException(status_code=403, detail="Only a parent can change suggestions")
     lanes = (body or {}).get("lanes")
     if not isinstance(lanes, dict) or any(k not in RECOMMENDATION_LANES or not isinstance(v, bool) for k, v in lanes.items()):

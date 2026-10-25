@@ -294,6 +294,15 @@ in the rest with photos, saved with attribution to themealdb.com. A name filter 
 shelf narrows the list as you type; the week plan, shopping list and import all pick from
 the same shelf.
 
+A recipe can also be added from a **photo or handwriting**: a picture of the page (or a
+camera capture on the phone) goes through the local vision OCR into an editable draft
+beside the raw transcription, the words the model was unsure of are flagged for a check,
+the original photo is kept with the note, and saving adds it with a `#photo-import` label.
+The Recipes editor shows a note's own stated per-serving nutrition, and a planned dinner
+logs into Health with a portion picker; Health → Today shows a **Dinner tonight** card
+with the week plan's dinner and its estimated nutrition (hidden when nothing is planned
+or in kid mode).
+
 ## Voice signatures (shipped)
 
 Each person enrolls under Identity -> Vocal Signature by reading three short

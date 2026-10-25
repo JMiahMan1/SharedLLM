@@ -107,6 +107,20 @@ export function parseRecipeNutrition(body: string): RecipeNutritionResult {
   };
 }
 
+/**
+ * The recipe's own stated yield in servings, read from the note's `Times:`
+ * line ("servings 7 (scaled from 4)" or "6 servings"). Null when the note does
+ * not say, so a household estimate is left out rather than assumed.
+ */
+export function parseRecipeServings(body: string): number | null {
+  const line = body.split('\n').find((candidate) => /^times:/i.test(candidate.trim()));
+  if (!line) return null;
+  const match = line.match(/\bservings?\s+(\d+)/i) ?? line.match(/(\d+)\s*servings?/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 /** "½", "1", "1½", "2" for the portion buttons. */
 export function portionLabel(servings: number): string {
   const whole = Math.floor(servings);

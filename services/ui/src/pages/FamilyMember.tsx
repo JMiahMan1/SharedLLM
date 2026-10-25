@@ -27,13 +27,6 @@ const SECTION_VIEW: Record<SectionId, (p: { username: string; name: string }) =>
   devices: DevicesSection,
 };
 
-/** The old parents' page address (notices sent before the move use it). */
-export function GuardianRedirect() {
-  const [params] = useSearchParams();
-  const child = params.get('child');
-  return <Navigate to={child ? memberPath(child) : '/family/member'} replace />;
-}
-
 /**
  * The family member page (docs/FAMILY_MEMBER_PAGE.md), modelled on Aura: the
  * children at a glance, then one child's profile with the urgent actions on

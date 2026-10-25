@@ -2,7 +2,8 @@
 
 One page per child that brings everything Jarvis knows and every control a
 parent has into one place, the way the commercial family-safety apps do. It
-replaces the single-column `/guardian` page (its cards are reused, not copied).
+replaces the old single-column `/guardian` page (its cards are reused, not
+copied); the guarding side now has its own top-level `/guardian` page.
 
 ## What we modelled it on (researched 2026-10-24)
 
@@ -81,8 +82,10 @@ a loading, empty and error state; nothing is invented when data is missing.
 **Route:** `/family/member/{child}` (`pages/FamilyMember.tsx`), with
 `?section=time|apps|activity|location|health|faith|devices`. `/family/member`
 opens the first child the viewer may see; `/guardian?child=…` (older notices)
-redirects. Concern, recap, request, tamper and "I need to talk" notices now
-open the child's page. Health → Family guardian links here.
+opens that child's page. Concern, recap, request, tamper and "I need to talk"
+notices open the child's page. `/guardian` is now its own top-level page (a nav
+entry after Family, offered to every role); Health → Family guardian links to
+it, and it links on here.
 
 ### Who sees what, as enforced
 
