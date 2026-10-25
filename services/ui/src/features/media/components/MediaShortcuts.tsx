@@ -73,7 +73,8 @@ function helpDialog(reduceMotion: boolean, onClose: () => void) {
             <X size={19} />
           </button>
         </header>
-        <dl className="max-h-[70dvh] space-y-1 overflow-y-auto px-4 py-3">
+        {/* Focusable so a keyboard can scroll it when it overflows a phone. */}
+        <dl tabIndex={0} aria-label="Shortcut list" className="max-h-[70dvh] space-y-1 overflow-y-auto px-4 py-3 focus-visible:outline-2 focus-visible:outline-[var(--site-accent-focus)]">
           {SHORTCUTS.map((shortcut) => (
             <div key={shortcut.label} className="flex items-center justify-between gap-4 rounded-lg px-1 py-1.5">
               <dt className="flex shrink-0 items-center gap-1">
