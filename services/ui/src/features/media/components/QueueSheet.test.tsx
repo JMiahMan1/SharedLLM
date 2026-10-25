@@ -3,8 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import QueueSheet from './QueueSheet';
-import { MediaPlayerContext } from '../../context/webPlayerContext';
-import type { SharedPlayer } from '../../context/webPlayerContext';
+import { MediaPlayerContext } from '../../../context/webPlayerContext';
+import type { SharedPlayer } from '../../../context/webPlayerContext';
 
 const queueItems = [
   {

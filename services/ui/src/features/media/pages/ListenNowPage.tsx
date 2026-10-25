@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { Library } from 'lucide-react';
 import { useMediaHome, useBooksInProgress } from '../api/queries';
 import type { MediaItem } from '../types';
@@ -13,7 +14,6 @@ import { Shelf, ShelfRow } from '../components/Shelf';
 import { CardSkeletons, EmptyState, ErrorRetry, PartialNotice } from '../components/StateViews';
 import { serviceProblem } from '../copy';
 import { secondaryButton } from '../components/ui';
-import { MediaExplorer } from '../../../components/media/MediaExplorer';
 import { useMediaScreen } from './MediaScreen';
 
 /** A shelf card: what it shows and what tapping it does. */
@@ -35,7 +35,6 @@ export default function ListenNowPage() {
   const { playback } = useMediaScreen();
   const home = useMediaHome();
   const books = useBooksInProgress();
-  const [showExplorer, setShowExplorer] = useState(false);
 
   const recent = useMemo(() => home.data?.recent ?? [], [home.data]);
   // Books in progress, with their artwork and length from the home payload.
@@ -143,11 +142,10 @@ export default function ListenNowPage() {
         </>
       )}
 
-      <button type="button" onClick={() => setShowExplorer(true)} className={`${secondaryButton} w-full`}>
+      <Link to="/media/library" className={`${secondaryButton} w-full`}>
         <Library size={18} aria-hidden />
-        Browse all media
-      </button>
-      <MediaExplorer open={showExplorer} onClose={() => setShowExplorer(false)} onPlay={playback.play} onQueue={playback.enqueue} />
+        Your library
+      </Link>
     </>
   );
 }

@@ -1,4 +1,4 @@
-import type { PlayRequest, QueueOption } from '../../../../components/media/types';
+import type { PlayRequest, QueueOption } from '../../types';
 import type { OutputId, OutputKind, RepeatMode } from '../../types';
 
 export type TransportCommand = 'pause' | 'resume' | 'next' | 'previous' | 'stop';

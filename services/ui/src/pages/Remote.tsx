@@ -10,7 +10,7 @@ import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import { errorText } from '../lib/errorText';
 import { formatDeviceLabel } from '../lib/deviceLabels';
-import type { MediaStatus } from '../components/media/types';
+import type { MediaStatus } from '../features/media/types';
 
 type RemoteCommand =
   | 'up' | 'down' | 'left' | 'right' | 'select' | 'back' | 'home' | 'menu'

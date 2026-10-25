@@ -48,11 +48,6 @@ beforeEach(() => {
       entities: [{ entity_id: 'media_player.loft_tv', domain: 'media_player', friendly_name: 'Loft TV', state: 'idle' }],
     })),
     http.get('/api/media/audiobookshelf/last-played', () => HttpResponse.json({ status: 'SUCCESS', books: [] })),
-    http.get('/api/media/music-assistant/recent', () => HttpResponse.json({
-      status: 'SUCCESS',
-      recent: [{ name: 'Worship Mix', uri: 'library://playlist/5', type: 'playlist', last_played: '2026-10-24T08:00:00Z' }],
-    })),
-    http.get('/api/media/music-assistant/playlists', () => HttpResponse.json({ status: 'SUCCESS', playlists: [] })),
     http.post('/api/media/ma-command', async ({ request }) => {
       const body = (await request.json()) as MaCommand;
       maCommands.push(body);
@@ -69,16 +64,17 @@ beforeEach(() => {
   serveHome({ recent: [mediaItem({ name: 'Worship Mix', uri: 'library://playlist/5', media_type: 'playlist' })] });
 });
 
-async function openBrowse() {
-  await userEvent.click(await screen.findByRole('button', { name: /Browse all media/i }));
-  return within(await screen.findByRole('dialog'));
+/** The card's "…" menu, where Play next and Add to queue live (P5-T7). */
+async function openMenu() {
+  await userEvent.click(await screen.findByRole('button', { name: 'More for Worship Mix' }));
+  return within(await screen.findByRole('menu'));
 }
 
 describe('Media page: queueing on the selected device', () => {
   it('queues on this device through the web player', async () => {
     renderWithProviders(<Media />);
-    const browse = await openBrowse();
-    await userEvent.click(await browse.findByRole('button', { name: 'Play Worship Mix next' }));
+    const menu = await openMenu();
+    await userEvent.click(menu.getByRole('menuitem', { name: 'Play next' }));
 
     await waitFor(() => expect(player.state.enqueue).toHaveBeenCalledWith('library://playlist/5', 'next'));
     expect(player.state.play).not.toHaveBeenCalled();
@@ -87,8 +83,8 @@ describe('Media page: queueing on the selected device', () => {
   it('queues on a Music Assistant speaker through the gateway', async () => {
     renderWithProviders(<Media />);
     await chooseOutput(/Kitchen MA/i);
-    const browse = await openBrowse();
-    await userEvent.click(await browse.findByRole('button', { name: 'Add Worship Mix to the queue' }));
+    const menu = await openMenu();
+    await userEvent.click(menu.getByRole('menuitem', { name: 'Add to queue' }));
 
     await waitFor(() => expect(maCommands).toContainEqual({
       command: 'player_queues/play_media',
@@ -100,8 +96,8 @@ describe('Media page: queueing on the selected device', () => {
   it('queues on a Home Assistant speaker through the execution service', async () => {
     renderWithProviders(<Media />);
     await chooseOutput(/Loft TV/i);
-    const browse = await openBrowse();
-    await userEvent.click(await browse.findByRole('button', { name: 'Play Worship Mix next' }));
+    const menu = await openMenu();
+    await userEvent.click(menu.getByRole('menuitem', { name: 'Play next' }));
 
     await waitFor(() => expect(executePlays).toContainEqual(expect.objectContaining({
       entity_id: 'media_player.loft_tv', query: 'library://playlist/5', enqueue: 'next',

@@ -1,20 +1,19 @@
 import { describe, it, expect } from 'vitest';
 
 describe('media msw handlers', () => {
-  it('serves music-assistant recent from fixtures', async () => {
-    const res = await fetch('/api/media/music-assistant/recent');
+  it('serves the Listen Now payload from fixtures', async () => {
+    const res = await fetch('/api/media/home');
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.status).toBe('ok');
-    expect(data.recent.length).toBeGreaterThan(0);
     expect(data.recent[0].name).toBe('Midnight Drive');
+    expect(data.errors).toEqual({ ma: null, abs: null });
   });
 
-  it('serves audiobookshelf libraries from fixtures', async () => {
-    const res = await fetch('/api/media/audiobookshelf/libraries');
+  it('serves Audiobookshelf books in progress from fixtures', async () => {
+    const res = await fetch('/api/media/audiobookshelf/last-played');
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.libraries.map((l: { id: string }) => l.id)).toContain('lib-books');
+    expect(data.books.map((b: { id: string }) => b.id)).toContain('book-1');
   });
 
   it('serves media status from fixtures', async () => {

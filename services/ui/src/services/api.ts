@@ -3376,30 +3376,12 @@ export const api = {
     return resp.data;
   },
 
-  // The Media page shows its own error states, so these throw on failure
-  // rather than pretending the library is empty. `notice` is the gateway's
-  // "Audiobookshelf unavailable" answer (HTTP 200 with no data).
-  async getMusicAssistantPlaylists(): Promise<{ status: string; playlists: Array<{ name: string; items: number; uri: string }> }> {
-    const resp = await apiClient.get('/api/media/music-assistant/playlists', { timeout: 10000 });
-    return resp.data;
-  },
-
-  async getMusicAssistantRecent(): Promise<{ status: string; recent: Array<{ name: string; artist: string; uri: string; last_played: string; type?: string; image?: string }> }> {
-    const resp = await apiClient.get('/api/media/music-assistant/recent', { timeout: 10000 });
-    return resp.data;
-  },
-
   /** A podcast's episodes, newest first, each with the Music Assistant URI that plays it. */
   async getPodcastEpisodes(absItemId: string, title = ''): Promise<{
     status: string;
     episodes: Array<{ uri: string; name: string; duration: number | null; published: number | null; fully_played: boolean | null; resume_position_ms: number | null }>;
   }> {
     const resp = await apiClient.get('/api/media/podcast-episodes', { params: { abs_item_id: absItemId, title }, timeout: 20000 });
-    return resp.data;
-  },
-
-  async getAudiobookshelfLibraries(): Promise<{ status: string; notice?: string; libraries: Array<{ id: string; name: string; media_type: string }> }> {
-    const resp = await apiClient.get('/api/media/audiobookshelf/libraries', { timeout: 10000 });
     return resp.data;
   },
 
@@ -3421,32 +3403,6 @@ export const api = {
       device_name: payload.device_name,
       resume: payload.resume ?? true,
     });
-    return resp.data;
-  },
-
-  async getAudiobookshelfLibrary(libraryId: string, limit = 50): Promise<{ status: string; notice?: string; books: Array<{ id: string; title: string; author: string }> }> {
-    const resp = await apiClient.get(`/api/media/audiobookshelf/library/${encodeURIComponent(libraryId)}?limit=${limit}`, { timeout: 10000 });
-    return resp.data;
-  },
-
-  async searchAudiobookshelf(query: string, limit = 20): Promise<{
-    status: string;
-    books: Array<{ id: string; title: string; author: string; narrator?: string; cover?: string; genres?: string[]; publishedYear?: string; asin?: string; type?: string; source?: string; duration?: number; duration_formatted?: string; series?: string; play_url?: string; progress?: number | null }>;
-    podcasts: Array<{ id: string; title: string; author: string; description?: string; cover?: string; trackCount?: number; genres?: string[]; explicit?: boolean; type?: string; source?: string }>;
-    authors: Array<{ id: string; name: string; description?: string; image?: string; asin?: string; type?: string; source?: string }>;
-    total?: number;
-  }> {
-    const resp = await apiClient.get(`/api/media/audiobookshelf/search?q=${encodeURIComponent(query)}&limit=${limit}`);
-    return resp.data;
-  },
-
-  async searchMusicAssistant(query: string, mediaType?: string, limit = 30, libraryOnly = true): Promise<{
-    status: string;
-    results: Array<{ name: string; uri: string; type: string; duration?: number; artist?: string; album?: string; cover?: string; trackCount?: number }>;
-  }> {
-    const params = new URLSearchParams({ query, limit: String(limit), library_only: String(libraryOnly) });
-    if (mediaType) params.set('media_type', mediaType);
-    const resp = await apiClient.get(`/api/media/music-assistant/search?${params.toString()}`);
     return resp.data;
   },
 

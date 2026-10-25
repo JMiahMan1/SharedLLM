@@ -3,11 +3,11 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Keyboard, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useOptionalWebPlayer } from '../../context/webPlayerContext';
-import { useHaptics } from '../../hooks/useHaptics';
-import { isTypingTarget } from '../../lib/keyboard';
-import { webPlayerAdapter } from '../../features/media/engine/adapters/adapters';
-import { nextRepeat } from '../../features/media/engine/adapters/PlayerAdapter';
+import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
+import { useHaptics } from '../../../hooks/useHaptics';
+import { isTypingTarget } from '../../../lib/keyboard';
+import { webPlayerAdapter } from '../engine/adapters/adapters';
+import { nextRepeat } from '../engine/adapters/PlayerAdapter';
 
 const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
   { keys: ['Space'], label: 'Play or pause' },

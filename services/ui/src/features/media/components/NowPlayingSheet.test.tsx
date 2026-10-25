@@ -3,11 +3,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import NowPlayingSheet from './NowPlayingSheet';
-import { resetMediaTokenForTests } from '../../lib/mediaToken';
-import { MediaPlayerContext } from '../../context/webPlayerContext';
-import type { SharedPlayer } from '../../context/webPlayerContext';
+import { resetMediaTokenForTests } from '../../../lib/mediaToken';
+import { MediaPlayerContext } from '../../../context/webPlayerContext';
+import type { SharedPlayer } from '../../../context/webPlayerContext';
 
-vi.mock('../../services/api', () => ({
+vi.mock('../../../services/api', () => ({
   api: { setMediaFavorite: vi.fn().mockResolvedValue({ status: 'ok', favorite: true }) },
   apiClient: {
     post: vi.fn().mockResolvedValue({
@@ -16,7 +16,7 @@ vi.mock('../../services/api', () => ({
   },
 }));
 
-import { api } from '../../services/api';
+import { api } from '../../../services/api';
 
 function player(over: Partial<SharedPlayer> = {}): SharedPlayer {
   return {

@@ -86,16 +86,7 @@ beforeEach(async () => {
   server.use(
     http.post('/execute/media/status', () => HttpResponse.json(IDLE)),
     http.get('/api/entities', () => HttpResponse.json({ entities: [] })),
-    http.get('/api/media/audiobookshelf/libraries', () =>
-      HttpResponse.json({ status: 'SUCCESS', libraries: [{ id: 'lib-books', name: 'Books' }] })
-    ),
     http.get('/api/media/audiobookshelf/last-played', () => HttpResponse.json(LAST_PLAYED)),
-    http.get('/api/media/audiobookshelf/library/:libraryId', () =>
-      HttpResponse.json({ status: 'SUCCESS', books: LAST_PLAYED.books })
-    ),
-    http.get('/api/media/audiobookshelf/search', () =>
-      HttpResponse.json({ status: 'SUCCESS', books: LAST_PLAYED.books })
-    ),
     http.get('/api/admin/logs', () => HttpResponse.json([])),
     http.post('/api/media/ma-command', async ({ request }) => {
       remoteCalls.push((await request.json()) as { command: string; args: Record<string, unknown> });

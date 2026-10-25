@@ -7,17 +7,17 @@ import {
   Shuffle, SkipBack, SkipForward, Timer, Volume1, Volume2, VolumeX,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useOptionalWebPlayer } from '../../context/webPlayerContext';
-import { useAccentColor } from '../../hooks/useAccentColor';
-import { useHaptics } from '../../hooks/useHaptics';
-import { api } from '../../services/api';
-import { formatDuration, formatRemaining } from '../../features/media/format';
-import { proxiedImage } from '../../lib/mediaImage';
-import { useMediaToken } from '../../lib/mediaToken';
+import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
+import { useAccentColor } from '../../../hooks/useAccentColor';
+import { useHaptics } from '../../../hooks/useHaptics';
+import { api } from '../../../services/api';
+import { formatDuration, formatRemaining } from '../format';
+import { proxiedImage } from '../../../lib/mediaImage';
+import { useMediaToken } from '../../../lib/mediaToken';
 import OutputSheet from './OutputSheet';
-import { webPlayerAdapter } from '../../features/media/engine/adapters/adapters';
-import { nextRepeat, parseQueueModes } from '../../features/media/engine/adapters/PlayerAdapter';
-import type { RepeatMode } from '../../features/media/types';
+import { webPlayerAdapter } from '../engine/adapters/adapters';
+import { nextRepeat, parseQueueModes } from '../engine/adapters/PlayerAdapter';
+import type { RepeatMode } from '../types';
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 const SLEEP_OPTIONS = [15, 30, 45, 60] as const;

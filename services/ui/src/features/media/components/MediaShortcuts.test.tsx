@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import MediaShortcuts from './MediaShortcuts';
-import { MediaPlayerContext } from '../../context/webPlayerContext';
-import type { SharedPlayer } from '../../context/webPlayerContext';
+import { MediaPlayerContext } from '../../../context/webPlayerContext';
+import type { SharedPlayer } from '../../../context/webPlayerContext';
 
 function player(over: Partial<SharedPlayer> = {}): SharedPlayer {
   return {

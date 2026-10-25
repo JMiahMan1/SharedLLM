@@ -1,7 +1,7 @@
-import MiniPlayer from '../../../components/media/MiniPlayer';
-import NowPlayingSheet from '../../../components/media/NowPlayingSheet';
-import QueueSheet from '../../../components/media/QueueSheet';
-import MediaShortcuts from '../../../components/media/MediaShortcuts';
+import MiniPlayer from './MiniPlayer';
+import NowPlayingSheet from './NowPlayingSheet';
+import QueueSheet from './QueueSheet';
+import MediaShortcuts from './MediaShortcuts';
 import { useMediaStore } from '../store/mediaStore';
 import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
 import { useAbsProgressReporter } from '../engine/absProgress';

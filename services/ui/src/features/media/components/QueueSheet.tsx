@@ -20,11 +20,11 @@ import { CSS } from '@dnd-kit/utilities';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { GripVertical, ListMusic, Loader2, Music, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useOptionalWebPlayer } from '../../context/webPlayerContext';
-import { extractMaImage } from '../../lib/maImage';
-import { proxiedImage } from '../../lib/mediaImage';
-import { useMediaToken } from '../../lib/mediaToken';
-import { formatDuration } from '../../features/media/format';
+import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
+import { extractMaImage } from '../../../lib/maImage';
+import { proxiedImage } from '../../../lib/mediaImage';
+import { useMediaToken } from '../../../lib/mediaToken';
+import { formatDuration } from '../format';
 
 const POLL_MS = 5000;
 const MAX_ITEMS = 500;

@@ -1,6 +1,6 @@
 import { api } from '../../../../services/api';
 import { sendMaRemoteCommand } from '../../../../lib/maRemotePlayer';
-import type { PlayRequest } from '../../../../components/media/types';
+import type { PlayRequest } from '../../types';
 import type { SharedPlayer } from '../../../../context/webPlayerContext';
 import { outputKind, type OutputId, type RepeatMode } from '../../types';
 import { assertSucceeded, parseQueueModes, type Capabilities, type PlayerAdapter } from './PlayerAdapter';

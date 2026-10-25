@@ -10,7 +10,7 @@ live probes); task-by-task history lives in `docs/MEDIA_OVERHAUL.md`.
 
 ```mermaid
 graph TD
-    UI[React/Capacitor UI<br/>pages/Media.tsx, pages/Remote.tsx,<br/>components/media, context/MediaPlayerContext] -->|REST + WS| GW[Gateway<br/>services/gateway]
+    UI[React/Capacitor UI<br/>features/media, pages/Remote.tsx,<br/>context/MediaPlayerContext] -->|REST + WS| GW[Gateway<br/>services/gateway]
     GW -->|JSON-RPC REST + WS| MA[Music Assistant<br/>:8095]
     GW -->|per-user creds| ID[Identity<br/>POST /api/resolve]
     GW -->|REST| EX[Execution<br/>services/execution]
@@ -65,9 +65,10 @@ URL, so keys stay out of Identity's access log.
 
 | Screen | Calls |
 | --- | --- |
-| Media → device picker / player card | `POST /execute/media/status` (every 3 s while visible), `GET /api/entities`, MA `players/all` over the control socket |
-| Media → Jump back in, Playlists | `GET /api/media/audiobookshelf/last-played`, `GET /api/media/music-assistant/recent`, `GET /api/media/music-assistant/playlists` |
-| Media → Browse | `…/music-assistant/search`, `…/audiobookshelf/libraries`, `…/audiobookshelf/library/{id}`, `…/audiobookshelf/search` |
+| Media → Playing on / player card | `POST /execute/media/status` (once, then `GET /api/media/events`; 10 s polling only while the stream is down), `GET /api/entities`, MA `players/all` (over the control socket when connected, else `POST /api/media/ma-command`) |
+| Media → Listen Now | `GET /api/media/home`, `GET /api/media/audiobookshelf/last-played` (book progress) |
+| Media → Search, Library, details | `GET /api/media/search`, `GET /api/media/library/{tab}`, `GET /api/media/favorites`, `GET /api/media/item?uri=`, `GET /api/media/podcast-episodes` |
+| Media → book progress | `POST /api/media/abs/progress` (every 15 s while a book plays, on pause, Mark finished) |
 | Playing | web player / MA player: `POST /api/media/ma-library-uri` for Audiobookshelf items, then MA `player_queues/play_media`; HA speaker: `POST /execute/media/play` (MA URIs) or `POST /execute/audiobookshelf` `{action:"play"}` (books, ABS session HLS) |
 | Favourite heart | `GET /api/media/detail?uri=`, `POST /api/media/favorite` |
 | Remote | `POST /execute/media/status` (every 5 s while visible), `POST /execute/media/transport` |
@@ -76,7 +77,7 @@ The provider endpoints answer `502 {status:"ERROR"}` (MA) or
 `200 {…, notice:"ABS unavailable"}` (ABS) when an upstream is down; the UI
 shows both as an error with a retry, never as an empty library.
 
-### Unified endpoints (built, not yet used by the app)
+### Unified endpoints (used by the media section)
 
 The endpoints below are live and contract-tested but no screen calls them yet
 (the Media page still uses the provider endpoints above). One call per screen. Wire shapes are Pydantic models in
@@ -320,51 +321,60 @@ event: heartbeat
 Heartbeats arrive every 15 s when idle; the hub subscribes on the first
 listener and stops 60 s after the last one leaves. Hubs are keyed by user and
 never cross. Clients should reconnect on error, re-take the snapshot, and fall
-back to 10 s status polling when the stream is down. **No screen subscribes
-yet**; the Media and Remote pages poll `status` (3 s / 5 s, paused while the
-page is hidden).
+back to 10 s status polling when the stream is down. The media screens do
+exactly that through `features/media/engine/statusFeed.ts` (one shared,
+ref-counted feed: one full `status` read for names, then the stream; polling
+only after it has been down 5 s). The Remote page still polls `status`.
 
 ---
 
 ## 7. UI
 
-Files: `pages/Media.tsx` (controller), `components/media/` (`DeviceSelector`,
-`NowPlayingCard`, `MediaExplorer`, shared types), `pages/Remote.tsx`,
-`lib/maWebPlayer.ts` (the web player engine), `context/MediaPlayerContext.tsx`
-(app-wide mount, state reporting, Android bridge), `context/webPlayerContext.ts`
-(the bare context and `useOptionalWebPlayer()`, so widgets can reach the player
-without importing the engine), `components/widgets/ActiveMediaWidget.tsx`
-(dashboard card), `plugins/jarvisMedia.ts` + Android `MediaPlaybackService` /
-`JarvisMediaPlugin`.
+Files: `features/media/` (the media section, §6 of `docs/MEDIA_OVERHAUL.md`):
+`pages/` (`MediaRoutes` behind `/media/*`, `MediaScreen` frame, Listen Now,
+Search, Library, album/artist/playlist, book, podcast), `components/` (cards,
+rows, the item menu, the output picker, the mini player, Now Playing, the
+queue and output sheets, shortcuts), `store/` (zustand: selected output and
+every remote player), `engine/` (adapters per output kind, `usePlayback`, the
+event stream, `maRpc`, the Sendspin audio output, tab lock, OS media session,
+Audiobookshelf progress), `api/` (query keys, typed client, queries).
+`pages/Media.tsx` only re-exports the routes. Also `pages/Remote.tsx`,
+`lib/maWebPlayer.ts` (the web player hook), `context/MediaPlayerContext.tsx`
+(app-wide mount, state reporting, tab lock, media session, Android bridge),
+`context/webPlayerContext.ts` (the bare context and `useOptionalWebPlayer()`,
+so widgets can reach the player without importing the engine),
+`components/widgets/ActiveMediaWidget.tsx` (dashboard card),
+`plugins/jarvisMedia.ts` + Android `MediaPlaybackService` / `JarvisMediaPlugin`.
 
-### Media page
+### Media section
 
-* **Play on**: "This device" (the web player) first, then every HA media
-  player, then Music Assistant players that HA does not also expose (matched
-  via `ma_player_id` from `status`; our own Sendspin player is never listed
-  twice). Offline devices sort last and are dimmed. A speaker that is already
-  playing when the page opens is selected automatically, once; after the person
-  picks a device the page never overrides them. Picking a speaker does **not**
-  stop the web player (the chip says "Playing now").
-* **Player card**: title/artist/cover, scrubber (drag keyed on the track, rAF
-  coalesced; LIVE bar when `duration <= 0`), previous / play-pause / next /
-  stop, volume + mute, favourite heart for MA items. Web player: resume uses
-  `players/cmd/play` (it never re-sends the URI, which restarted the track).
-  Remote speaker: `/execute/media/transport` (HA) or `POST /api/media/ma-command`
-  (`ma:<player_id>`). Remote MA commands use the gateway's MA JSON-RPC helper,
-  so choosing or controlling a speaker never starts the browser's Sendspin
-  player; that player is only used for "This device".
-* **Jump back in**: Audiobookshelf books in progress (finished books are
-  skipped) merged with MA recently played, newest first, six at most.
-* **Playlists**, **Browse all media** (a dialog: MA search/playlists/recent;
-  ABS libraries → books, ABS search for books, podcasts and authors).
-* **Every play goes through one function** (`playItem`): Audiobookshelf books
-  *and* podcasts are resolved with `POST /api/media/ma-library-uri` for the web
-  player and MA players (MA only plays its own `library://…` URIs); HA speakers
-  get `/execute/audiobookshelf` (books) or `/execute/media/play` (MA URIs).
-  A failed lookup is shown, never replaced by a guessed URI.
-* Loading, empty and error states exist for every shelf; an unreachable
-  provider shows "Couldn’t load …" with **Try again**.
+* **Playing on**: a chip in each media page's header names the output the
+  controls drive and opens the list: "This device" (the web player) first,
+  then every HA media player, then Music Assistant players HA does not also
+  expose (matched via `ma_player_id`; our own Sendspin player is never listed
+  twice), each with what it is playing; offline devices are dimmed. A speaker
+  already playing is followed automatically until the person picks; the
+  choice is remembered across restarts. Picking a speaker does **not** stop
+  the web player.
+* **One routing for every action** (`engine/adapters`, `usePlayback`): this
+  device → the web player; `ma:<id>` → `POST /api/media/ma-command`; an HA
+  entity → `/execute/media/*`. Play, Play next, Add to queue, transport,
+  seek, volume (150 ms debounce, optimistic, 1.5 s grace), mute, shuffle and
+  repeat all go through it; remote outputs roll back with a toast when the
+  device refuses. Audiobookshelf books are resolved with
+  `POST /api/media/ma-library-uri` for MA outputs and start an ABS session on
+  HA speakers; a failed lookup is shown, never replaced by a guessed URI.
+* **Listen Now** (`/media`): the active output's card, "Playing in your home",
+  then Continue listening, Recently played, Your playlists, Favorites and Radio
+  from `GET /api/media/home`, each with skeleton, empty, partial (one service
+  down) and error states.
+* **Search** (`/media/search?q=&type=`), **Library** (`/media/library/:tab`,
+  paged as it scrolls), **album / artist / playlist**
+  (`/media/<kind>/<provider>/<id>`), **book** (`/media/book/<id>`: chapters,
+  resume, ±15/30 s, speed, Mark finished, progress saved back every 15 s) and
+  **podcast** (`/media/podcast/<id>`: episodes newest first).
+* Every card and row has a "…" menu: Play next, Add to queue, Go to artist /
+  album, Favorite.
 
 ### Web player engine (`lib/maWebPlayer.ts`)
 

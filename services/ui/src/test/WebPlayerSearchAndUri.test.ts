@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { api, apiClient } from '../services/api';
+import { apiClient } from '../services/api';
+import { searchMedia } from '../features/media/api/client';
 import { AxiosResponse } from 'axios';
 
 vi.mock('axios', async () => {
@@ -24,27 +25,21 @@ describe('Web Player Search and URI creation logic', () => {
     vi.clearAllMocks();
   });
 
-  describe('api.searchMusicAssistant()', () => {
-    it('should generate correct URL with query, default limit, and default library_only=true', async () => {
-      const mockResponse = {
-        status: 'SUCCESS',
-        results: [
-          { name: 'Track 1', uri: 'spotify://track/1', type: 'track' }
-        ]
-      };
+  describe('searchMedia() (the unified search the media screens use)', () => {
+    it('asks for the query and the default limit', async () => {
+      const mockResponse = { top: null, tracks: [], errors: { ma: null, abs: null } };
       vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse } as AxiosResponse);
 
-      const res = await api.searchMusicAssistant('Miles Davis');
-      expect(apiClient.get).toHaveBeenCalledWith('/api/media/music-assistant/search?query=Miles+Davis&limit=30&library_only=true');
+      const res = await searchMedia('Miles Davis');
+      expect(apiClient.get).toHaveBeenCalledWith('/api/media/search', { params: { q: 'Miles Davis', limit: 20 }, timeout: 20_000 });
       expect(res).toEqual(mockResponse);
     });
 
-    it('should include optional mediaType, limit, and libraryOnly parameters when provided', async () => {
-      const mockResponse = { status: 'SUCCESS', results: [] };
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse } as AxiosResponse);
+    it('passes types and a limit when given', async () => {
+      vi.mocked(apiClient.get).mockResolvedValue({ data: {} } as AxiosResponse);
 
-      await api.searchMusicAssistant('Coltrane', 'track', 10, false);
-      expect(apiClient.get).toHaveBeenCalledWith('/api/media/music-assistant/search?query=Coltrane&limit=10&library_only=false&media_type=track');
+      await searchMedia('Coltrane', 'track', 10);
+      expect(apiClient.get).toHaveBeenCalledWith('/api/media/search', { params: { q: 'Coltrane', limit: 10, types: 'track' }, timeout: 20_000 });
     });
   });
 

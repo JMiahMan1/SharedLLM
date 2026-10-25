@@ -16,8 +16,8 @@ import progressFixture from '../../../../e2e/fixtures/media/abs-progress.json';
 import { mediaKeys } from '../api/keys';
 import { absItemId, getMediaLibrary, postAbsProgress } from '../api/client';
 import {
-  MEDIA_QUERY_DEFAULTS, useMediaFavorites, useMediaHome, useMediaItem, useMediaLibrary, useMediaSearch, usePlaylists,
-  useRecent, useBooksInProgress, usePodcastEpisodes,
+  MEDIA_QUERY_DEFAULTS, useMediaFavorites, useMediaHome, useMediaItem, useMediaLibrary, useMediaSearch,
+  useBooksInProgress, usePodcastEpisodes,
 } from '../api/queries';
 
 function wrapper() {
@@ -45,14 +45,13 @@ describe('media fixtures', () => {
 
 describe('mediaKeys', () => {
   it('BUG-63 gives every request its own key under one root', () => {
-    expect(mediaKeys.playlists()).toEqual(['media', 'playlists']);
+    expect(mediaKeys.home()).toEqual(['media', 'home']);
     expect(mediaKeys.search('abba')).toEqual(['media', 'search', 'abba', 'all']);
     expect(mediaKeys.search('abba', 'tracks')).not.toEqual(mediaKeys.search('abba'));
     expect(mediaKeys.library('albums')).not.toEqual(mediaKeys.library('albums', 'lib-1'));
     const all = [
-      mediaKeys.home(), mediaKeys.recent(), mediaKeys.inProgressBooks(), mediaKeys.item('x'), mediaKeys.detail('x'),
-      mediaKeys.absLibraries(), mediaKeys.absLibrary('l'), mediaKeys.maSearch('q'), mediaKeys.absSearch('q'),
-      mediaKeys.favorites(), mediaKeys.podcastEpisodes('p'), mediaKeys.status(), mediaKeys.entities(),
+      mediaKeys.home(), mediaKeys.inProgressBooks(), mediaKeys.item('x'), mediaKeys.detail('x'),
+      mediaKeys.library('albums'), mediaKeys.search('q'), mediaKeys.favorites(), mediaKeys.podcastEpisodes('p'), mediaKeys.status(), mediaKeys.entities(),
     ];
     // Distinct requests never share a key.
     expect(new Set(all.map((k) => JSON.stringify(k))).size).toBe(all.length);
@@ -132,19 +131,15 @@ describe('media queries', () => {
     expect(result.current.hasNextPage).toBe(false);
   });
 
-  it('loads favorites, playlists, recents, books in progress and podcast episodes', async () => {
+  it('loads favorites, books in progress and podcast episodes', async () => {
     const { Wrapper } = wrapper();
     const { result } = renderHook(() => ({
       fav: useMediaFavorites(),
-      pl: usePlaylists(),
-      recent: useRecent(),
       books: useBooksInProgress(),
       eps: usePodcastEpisodes('pod-1', 'The Quiet Hour'),
     }), { wrapper: Wrapper });
     await waitFor(() => {
       expect(result.current.fav.isSuccess).toBe(true);
-      expect(result.current.pl.isSuccess).toBe(true);
-      expect(result.current.recent.isSuccess).toBe(true);
       expect(result.current.books.isSuccess).toBe(true);
       expect(result.current.eps.isSuccess).toBe(true);
     });

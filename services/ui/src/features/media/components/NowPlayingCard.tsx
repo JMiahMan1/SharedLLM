@@ -4,7 +4,7 @@ import {
   Play, Pause, SkipBack, SkipForward, Square, Heart, Music, Loader2,
   Volume1, Volume2, VolumeX,
 } from 'lucide-react';
-import { formatDuration } from '../../features/media/format';
+import { formatDuration } from '../format';
 
 // Cover image that falls back to nothing (the parent shows the gradient icon)
 // if the proxied URL fails. Keyed by `src` at the call site, so a new cover

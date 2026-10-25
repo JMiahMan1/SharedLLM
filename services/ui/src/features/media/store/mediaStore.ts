@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
-import type { MediaStatus } from '../../../components/media/types';
+import type { MediaStatus } from '../types';
 import type { OutputId, RemotePlayer } from '../types';
 import { THIS_DEVICE } from '../types';
 import {

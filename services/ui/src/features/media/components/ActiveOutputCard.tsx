@@ -5,7 +5,7 @@ import { api } from '../../../services/api';
 import { errorText } from '../../../lib/errorText';
 import { proxiedImage } from '../../../lib/mediaImage';
 import { useMediaToken } from '../../../lib/mediaToken';
-import { NowPlayingCard, type NowPlayingView } from '../../../components/media/NowPlayingCard';
+import { NowPlayingCard, type NowPlayingView } from './NowPlayingCard';
 import { mediaKeys } from '../api/keys';
 import { useLivePosition } from '../engine/useLivePosition';
 import { useMediaStore } from '../store/mediaStore';

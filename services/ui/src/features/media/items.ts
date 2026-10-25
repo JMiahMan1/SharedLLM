@@ -1,5 +1,5 @@
 import { BookOpen, Disc3, ListMusic, Mic2, Music, Radio, User, type LucideIcon } from 'lucide-react';
-import type { PlayRequest } from '../../components/media/types';
+import type { PlayRequest } from './types';
 import { absItemId } from './api/client';
 
 /**
