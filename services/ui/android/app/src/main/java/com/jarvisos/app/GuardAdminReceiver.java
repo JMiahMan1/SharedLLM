@@ -15,6 +15,13 @@ import android.content.Intent;
 public class GuardAdminReceiver extends DeviceAdminReceiver {
 
     @Override
+    public void onEnabled(Context context, Intent intent) {
+        // Device admin (or device owner, set up over USB) just came on: apply
+        // Layer 2 at once, not only at the guard's next status refresh.
+        DeviceOwnerGuard.enforce(context);
+    }
+
+    @Override
     public CharSequence onDisableRequested(Context context, Intent intent) {
         return "Turning this off needs a parent. Your parents will be told.";
     }

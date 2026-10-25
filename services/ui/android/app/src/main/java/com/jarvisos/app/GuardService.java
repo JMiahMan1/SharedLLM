@@ -49,6 +49,12 @@ import java.util.concurrent.TimeUnit;
  * The rules come from the server's status (refreshed every minute, kept for
  * offline); GuardRules, InstallApprovals, PermissionGate and LockWarning make
  * every decision. On an adult's phone it does nothing.
+ *
+ * On a phone set up as a device owner (Layer 2, docs/HEALTH_HUB.md) it goes
+ * further through DevicePolicyManager (DeviceOwnerGuard, decisions in pure
+ * DeviceOwnerRules): the uninstall is blocked outright, safe boot and the
+ * factory reset are disallowed, and a screen-time lock is Android's own lock
+ * screen (lockNow) instead of only sending the child home.
  */
 public class GuardService extends AccessibilityService {
 
@@ -67,6 +73,12 @@ public class GuardService extends AccessibilityService {
     private BroadcastReceiver installs;
     /** Installed apps that get around the web filter (FilterBypass.apps). */
     private volatile Set<String> bypassApps = Collections.emptySet();
+    /**
+     * Layer 2: whether Android's lock screen has already been put up for the
+     * screen-time lock in force, so it goes up once per lock and not every refresh
+     * (which would re-lock the child away from the parent-unlock screen).
+     */
+    private volatile boolean hardLocked = false;
 
     @Override
     protected void onServiceConnected() {
@@ -78,6 +90,14 @@ public class GuardService extends AccessibilityService {
                 GuardApi.reportOfflineUnlockIfDue(this);
                 GuardApi.flushTamper(this);
             }
+            // Layer 2: re-apply the device-owner enforcement (uninstall block,
+            // safe-boot / factory-reset restrictions) while this is a device owner,
+            // and put Android's own lock screen up once when a screen-time lock
+            // starts (the Accessibility cover below is then the way back in).
+            DeviceOwnerGuard.enforce(this);
+            boolean hard = hardLockWanted();
+            if (hard && !hardLocked) DeviceOwnerGuard.lockNow(this);
+            hardLocked = hard;
             syncWebFilter();
             checkInstalls();
             checkFilterBypass();
@@ -204,6 +224,19 @@ public class GuardService extends AccessibilityService {
             performGlobalAction(GLOBAL_ACTION_HOME);
         }
         cover(action, pkg);
+    }
+
+    /**
+     * Layer 2: whether a screen-time lock should be Android's own lock screen now
+     * (a device owner, on a protected phone, locked, and not inside a parent's
+     * unlock window). The lock screen goes up once when a lock starts; after that
+     * the Accessibility cover is the way back in, so calls, texts and Jarvis still
+     * open. On a phone that is not a device owner this is always false and the
+     * home-redirect above is the whole of the lock, as before.
+     */
+    private boolean hardLockWanted() {
+        return DeviceOwnerRules.hardLock(DeviceOwnerGuard.isOwner(this), GuardApi.isProtected(this),
+                GuardApi.isLocked(this), GuardApi.isUnlocked(this));
     }
 
     /** The guard's screen saying why, over whatever was closed. */

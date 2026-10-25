@@ -1,6 +1,6 @@
 # Health Hub: the best of the health apps in one
 
-Status: **live, partially built (updated 2026-10-24): phases 1-5 core, opt-in cycle tracking, family sharing/export and the USDA food seed are deployed; Phases 10-11 (digital wellbeing, guardianship) are in progress.** See HANDOVER.md for the live commit.
+Status: **live, partially built (updated 2026-10-25): phases 1-5 core, cycle tracking (recorded always, shown on request), family sharing/export and the USDA food seed are deployed; Phases 10-11 (digital wellbeing, guardianship) are in progress.** See HANDOVER.md for the live commit.
 Companion plans: `docs/RECIPES.md` (Phases 10-11 carry the recipe-nutrition and
 calorie-budget work that this hub consumes), `docs/HEALTH_STEPS.md` (step counting,
 already live).
@@ -29,17 +29,21 @@ Built in this pass:
 - **Nutrition**: OpenFoodFacts search, barcode lookup, manual entry, per-meal
   day view, per-serving macros, density guides, calorie range from Mifflin-St
   Jeor, and guidance-only ranges for minors (never a deficit).
-- **Opt-in cycle tracking**: private by default and shown only for a profile
-  whose sex is `female`. Period dates, flow, symptoms, mood/energy, BBT
-  and ovulation-test logs are stored per person; phase, cycle day, next-period
-  estimate and confidence are computed from logged dates (explicit averages or
-  observed 15-90 day gaps). Irregular cycles are described, not diagnosed.
-  Fertile windows are deliberately not predicted: every surface says estimates
-  only, not contraception or medical advice. The family projection shares at
-  most phase/next-period, never flow, symptoms, notes, period dates or the
-  cycle day (today minus it is the last period's start), and not the owner's
-  own estimate text; a test pins the projected keys. On Health → Today each
-  shared scope (sleep, food, cycle) gets its own line, and a viewer in kid
+- **Cycle tracking, recorded always, shown on request**: period dates, flow,
+  symptoms, mood/energy, BBT and ovulation-test logs are stored per person as
+  soon as they arrive, whether or not the owner has switched the panel on - a
+  child's data is never lost to an opt-in that was never tapped. The
+  `enabled` setting is a display/exposure flag only: it decides whether the
+  cycle panel is shown to the owner and whether the scope may be shared, and
+  the panel appears only for a profile whose sex is `female`. Phase, cycle day,
+  next-period estimate and confidence are computed from logged dates (explicit
+  averages or observed 15-90 day gaps). Irregular cycles are described, not
+  diagnosed. Fertile windows are deliberately not predicted: every surface says
+  estimates only, not contraception or medical advice. The family projection
+  shares at most phase/next-period, never flow, symptoms, notes, period dates
+  or the cycle day (today minus it is the last period's start), and not the
+  owner's own estimate text; a test pins the projected keys. On Health → Today
+  each shared scope (sleep, food, cycle) gets its own line, and a viewer in kid
   mode gets "food logged" without a calorie number. An adult can
   share with a spouse, who also sees short phase-aware suggestions for being
   supportive, labelled as general ideas rather than medical advice.
@@ -768,11 +772,32 @@ point.
       filtering). Known gap to check on a device: pages
       are recognised by the text "Jarvis OS", and the guard's own Accessibility page is labelled
       "Jarvis screen guard", so it may not be covered on every phone (`GuardRules.APP_LABEL`).
-      **Layer 2 (planned, optional per phone): device owner.** Set once over USB on a phone with
-      no accounts signed in: `adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver`
-      (sign out Google accounts first, sign back in after). Then the app can call
-      `setUninstallBlocked` and the `DISALLOW_SAFE_BOOT` / `DISALLOW_FACTORY_RESET` restrictions,
-      a hard block Android enforces itself.
+      **Layer 2 (built 2026-10-25, needs a new APK, optional per phone): device owner.** Set once
+      over USB on a phone with no accounts signed in: `adb shell dpm set-device-owner
+      com.jarvisos.app/.GuardAdminReceiver` (sign out Google accounts first, sign back in after).
+      While the phone is the device owner and `status.protected`, the guard re-applies through
+      `DevicePolicyManager` at device-admin enable and on every status refresh (`DeviceOwnerGuard`;
+      the decisions are in pure, JVM-tested `DeviceOwnerRules`): `setUninstallBlocked` on Jarvis's
+      own package, so Android refuses the uninstall outright (beyond Layer 1's dialog cover), and
+      `addUserRestriction` for `DISALLOW_SAFE_BOOT` (safe mode no longer starts without the guard)
+      and `DISALLOW_FACTORY_RESET` (the reset is refused, so a phone cannot be wiped to escape). A
+      screen-time lock (a parent's Pause / Lock now, bedtime, school, the day's limit) is then a
+      **real OS lock**: `lockNow()` puts Android's own lock screen up once when a lock starts,
+      instead of only sending the child home, while the Accessibility cover still shows why and
+      offers the parent login or the offline code. The always-allowed apps (calls, texts, Jarvis)
+      still open after the child unlocks, so a call is not blocked and the parent-unlock screen
+      stays reachable; anything else is covered by the guard as in Layer 1. On a phone that is not a
+      device owner every device-owner call is skipped and the Accessibility soft lock is the whole
+      of the lock, exactly as in Layer 1. When the server says a phone is no longer a minor's
+      (`status.protected` false, from an answer rather than a default) the guard takes the
+      restrictions and the uninstall block off again; while the phone has no status yet they stay,
+      so an offline spell never weakens protection. Remaining limits: the lock is still a lock
+      screen the child unlocks with their PIN (and in that moment gets calls, texts and Jarvis);
+      device owner blocks the safe-boot *setting*, not a recovery key combo on every OEM; `lockNow`
+      needs a lock screen set, else it only turns the screen off; a single-app kiosk (lock task
+      mode) is not used; and the restrictions cannot be lifted while the phone cannot reach the
+      server. To retire a device-owner phone, change the child's family role so the server reports
+      it not protected and the guard clears the restrictions, then reset.
 
 ### Watching (Bark parity)
 
@@ -928,7 +953,7 @@ by the server.
 - [x] A planned dinner logs with one tap and shows calories, macros and portions (Recipes → Week plan → Log tonight's dinner).
 - [x] Barcode lookup works with a permanent per-product cache; photo (nutrition label) and voice logging produce editable drafts.
 - [x] Sleep and readiness show from manual data now and are device-ready; check-ins cover the no-wearable case.
-- [x] Cycle tracking is opt-in, private, shown only when the profile is female, and minors can share it only with their linked mother account. An adult can share with a spouse, who also sees phase-aware support suggestions clearly labelled as general ideas.
+- [x] Cycle tracking is recorded for every profile regardless of opt-in, private, shown only when the profile is female and the owner switches the panel on, and minors can share it only with their linked mother account. An adult can share with a spouse, who also sees phase-aware support suggestions clearly labelled as general ideas.
 - [x] A family challenge is visible, joinable and shared in chat (Health → Today → Family challenge).
 - [ ] A parent can open each child's profile and the shared parents' page; guidance and prayer
       prompts cite real activity, and every alert names its concern level.

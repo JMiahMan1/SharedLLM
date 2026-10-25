@@ -231,14 +231,18 @@ class FoodEntry(SQLModel, table=True):  # type: ignore
 
 
 class CycleSettings(SQLModel, table=True):  # type: ignore
-    """Opt-in cycle tracking settings for one person.
+    """Display and sharing settings for one person's cycle tracking.
 
-    Off by default and never part of the family feed unless the person makes a
-    separate grant. ``average_cycle_length`` and ``average_period_length`` are
-    optional: without them the summary learns from logged periods, and with no
-    periods at all it says there is not enough data instead of assuming 28
-    days. ``guardian_username`` is the mother/trusted adult a minor may share
-    with; it is a username, not a credential.
+    ``enabled`` is a display/exposure switch only: it decides whether the cycle
+    panel is shown to the owner and whether the scope may be shared. Recording
+    is unconditional - ``CyclePeriod`` and ``CycleLog`` rows are stored even
+    while ``enabled`` is false, so a child's data is never lost to an opt-in
+    that was never tapped. Off by default and never part of the family feed
+    unless the person makes a separate grant. ``average_cycle_length`` and
+    ``average_period_length`` are optional: without them the summary learns from
+    logged periods, and with no periods at all it says there is not enough data
+    instead of assuming 28 days. ``guardian_username`` is the mother/trusted
+    adult a minor may share with; it is a username, not a credential.
     """
 
     __table_args__ = {"extend_existing": True}
@@ -257,7 +261,8 @@ class CyclePeriod(SQLModel, table=True):  # type: ignore
 
     One row per start day prevents double-tapping the same day from creating
     two periods. The source/external id pair follows the same open-ingestion
-    rule as every other reading in this service.
+    rule as every other reading in this service. Rows are recorded regardless
+    of ``CycleSettings.enabled``; that flag only controls display and sharing.
     """
 
     __table_args__ = (
@@ -277,7 +282,11 @@ class CyclePeriod(SQLModel, table=True):  # type: ignore
 
 
 class CycleLog(SQLModel, table=True):  # type: ignore
-    """Optional daily symptoms around a cycle. Independent of period rows."""
+    """Optional daily symptoms around a cycle. Independent of period rows.
+
+    Recorded regardless of ``CycleSettings.enabled``; that flag only controls
+    display and sharing.
+    """
 
     __table_args__ = (
         UniqueConstraint("user_id", "day", name="uq_cycle_log_day"),

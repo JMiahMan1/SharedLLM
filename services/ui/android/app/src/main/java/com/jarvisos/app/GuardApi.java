@@ -81,6 +81,16 @@ final class GuardApi {
     }
 
     /**
+     * Whether the server's status has ever been read: it carries whether this is
+     * a minor's phone. An answer, not a default, so the device-owner enforcement
+     * (DeviceOwnerRules) never lifts protection on a phone that has not been told
+     * anything yet.
+     */
+    static boolean statusKnown(Context context) {
+        return lastStatus(context).has("protected");
+    }
+
+    /**
      * Locked now: the server said so and the lock has not run out since, or
      * bedtime or school time has started on the clock since the last status.
      */

@@ -943,11 +943,12 @@ def add_cycle_period(
 ):
     user = _user(request)
     profile = session.get(HealthProfile, user)
+    # Recording is unconditional: a period is stored even when the person has
+    # not switched the panel on, so a child's data is never lost to an opt-in
+    # that was never tapped. ``CycleSettings.enabled`` only governs display and
+    # sharing, not whether the row is kept.
     if not _cycle_applicable(profile):
         raise HTTPException(status_code=422, detail=_cycle_hidden_reason(profile))
-    settings = _cycle_settings(session, user)
-    if settings is None or not settings.enabled:
-        raise HTTPException(status_code=422, detail="Enable cycle tracking before logging a period.")
 
     start = _day(body.start_day, field="start_day")
     today = date.today().isoformat()
@@ -1052,11 +1053,11 @@ def put_cycle_log(
     if day > date.today().isoformat():
         raise HTTPException(status_code=422, detail="You cannot log symptoms for a future day")
     profile = session.get(HealthProfile, user)
+    # Recording is unconditional: a symptom log is stored even when the panel
+    # is off, matching period rows. ``CycleSettings.enabled`` only governs
+    # display and sharing, never whether the row is kept.
     if not _cycle_applicable(profile):
         raise HTTPException(status_code=422, detail=_cycle_hidden_reason(profile))
-    settings = _cycle_settings(session, user)
-    if settings is None or not settings.enabled:
-        raise HTTPException(status_code=422, detail="Enable cycle tracking before logging symptoms.")
 
     row = session.exec(
         select(CycleLog).where(CycleLog.user_id == user, CycleLog.day == day)
