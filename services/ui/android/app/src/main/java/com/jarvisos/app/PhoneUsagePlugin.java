@@ -2,7 +2,6 @@ package com.jarvisos.app;
 
 import android.app.AppOpsManager;
 import android.app.usage.UsageEvents;
-import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.content.Intent;
@@ -19,7 +18,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.Calendar;
-import java.util.List;
 
 /**
  * General phone usage: how long the screen was used today, and when the day's
@@ -53,44 +51,40 @@ public class PhoneUsagePlugin extends Plugin {
         UsageStatsManager manager =
                 (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
 
-        long millis = 0;
         UsageWindow window = new UsageWindow();
-        // Per-app foreground time for the day, kept so the profile can show the
-        // top apps (the same UsageStatsManager reading, no extra permission).
-        java.util.ArrayList<UsageStats> appRows = new java.util.ArrayList<>();
+        // The day total comes from the event stream, which is clipped to
+        // [start, now]. queryUsageStats(INTERVAL_DAILY, start, now) is not: the
+        // system expands a daily query to whole-day buckets, so a bucket's
+        // getTotalTimeInForeground() can include last night's foreground time and
+        // was being counted as "screen time today". Summing RESUMED -> PAUSED
+        // stretches from the clipped event stream cannot do that.
+        ForegroundTime foreground = new ForegroundTime();
         if (manager != null) {
-            List<UsageStats> stats =
-                    manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, now);
-            if (stats != null) {
-                for (UsageStats day : stats) {
-                    if (day.getLastTimeUsed() >= start) {
-                        millis += day.getTotalTimeInForeground();
-                        if (day.getTotalTimeInForeground() > 0) {
-                            appRows.add(day);
-                        }
-                    }
-                }
-            }
             UsageEvents events = manager.queryEvents(start, now);
             if (events != null) {
                 UsageEvents.Event event = new UsageEvents.Event();
                 while (events.getNextEvent(event)) {
                     window.accept(event.getEventType(), event.getTimeStamp());
+                    foreground.accept(event.getEventType(), event.getTimeStamp(), event.getPackageName());
                 }
             }
+            foreground.finish(now);
         }
+        long millis = foreground.totalMillis();
 
-        // Sort by foreground time, descending, and keep the top twenty so a busy
-        // day does not ship hundreds of zero-ish rows.
-        appRows.sort((a, b) -> Long.compare(b.getTotalTimeInForeground(), a.getTotalTimeInForeground()));
+        // Per-app foreground time for the day, most used first, top twenty so a
+        // busy day does not ship hundreds of near-zero rows.
+        java.util.ArrayList<String> usedPackages = new java.util.ArrayList<>(foreground.packages());
+        usedPackages.sort((a, b) -> Long.compare(foreground.millisFor(b), foreground.millisFor(a)));
         JSONArray apps = new JSONArray();
-        int limit = Math.min(20, appRows.size());
+        int limit = Math.min(20, usedPackages.size());
         for (int i = 0; i < limit; i++) {
-            UsageStats row = appRows.get(i);
+            String packageName = usedPackages.get(i);
             JSObject app = new JSObject();
-            app.put("package", row.getPackageName());
-            app.put("millis", row.getTotalTimeInForeground());
-            app.put("lastUse", row.getLastTimeUsed());
+            app.put("package", packageName);
+            app.put("millis", foreground.millisFor(packageName));
+            Long lastUse = foreground.lastUseFor(packageName);
+            app.put("lastUse", lastUse == null ? JSONObject.NULL : lastUse);
             apps.put(app);
         }
 
