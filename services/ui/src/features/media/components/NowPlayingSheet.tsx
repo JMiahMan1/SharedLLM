@@ -4,17 +4,18 @@ import { Link } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import {
   ChevronDown, ChevronUp, Cast, Heart, ListMusic, Music, Pause, Play, Repeat, Repeat1, RotateCcw, RotateCw,
-  Shuffle, SkipBack, SkipForward, Timer, Volume1, Volume2, VolumeX,
+  Shuffle, SkipBack, SkipForward, Timer,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
 import { useAccentColor } from '../../../hooks/useAccentColor';
 import { useHaptics } from '../../../hooks/useHaptics';
 import { api } from '../../../services/api';
-import { formatDuration, formatRemaining } from '../format';
+import { formatDuration } from '../format';
 import { proxiedImage } from '../../../lib/mediaImage';
 import { useMediaToken } from '../../../lib/mediaToken';
 import OutputSheet from './OutputSheet';
+import { Scrubber, VolumeSlider } from './Scrubber';
 import { webPlayerAdapter } from '../engine/adapters/adapters';
 import { nextRepeat, parseQueueModes } from '../engine/adapters/PlayerAdapter';
 import type { RepeatMode } from '../types';
@@ -62,7 +63,6 @@ export default function NowPlayingSheet({
   const art = proxiedImage(player?.mediaImage);
   const accent = useAccentColor(art);
 
-  const [dragPosition, setDragPosition] = useState<number | null>(null);
   const [favorite, setFavorite] = useState<{ uri: string; value: boolean } | null>(null);
   const [shuffle, setShuffle] = useState(false);
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
@@ -79,14 +79,12 @@ export default function NowPlayingSheet({
 
   const trackKey = player?.mediaUri || player?.mediaTitle || '';
   const duration = player?.duration ?? 0;
-  const position = dragPosition ?? player?.position ?? 0;
-  const pct = duration > 0 ? Math.min(100, Math.max(0, (position / duration) * 100)) : 0;
+  const position = player?.position ?? 0;
 
-  // A new track clears a half-finished scrub and a favourite from the old one.
+  // A new track clears a favourite from the old one (the scrubber drops its own drag).
   const [lastTrack, setLastTrack] = useState(trackKey);
   if (lastTrack !== trackKey) {
     setLastTrack(trackKey);
-    setDragPosition(null);
     setFavorite(null);
   }
 
@@ -170,12 +168,6 @@ export default function NowPlayingSheet({
       window.clearInterval(tick);
     };
   }, [sleepAt]);
-
-  const commitSeek = useCallback(() => {
-    if (!player || dragPosition === null) return;
-    void player.seek(dragPosition);
-    setDragPosition(null);
-  }, [player, dragPosition]);
 
   if (!player || !player.mediaTitle) return null;
 
@@ -340,37 +332,12 @@ export default function NowPlayingSheet({
                 ) : null}
               </div>
 
-              <div>
-                <div className="relative">
-                  {dragPosition !== null && duration > 0 ? (
-                    <div
-                      className="pointer-events-none absolute -top-8 -translate-x-1/2 rounded-lg bg-slate-800 px-2 py-1 text-xs font-medium text-white shadow-lg"
-                      style={{ left: `${pct}%` }}
-                    >
-                      {formatDuration(position)}
-                    </div>
-                  ) : null}
-                  <input
-                    type="range"
-                    min={0}
-                    max={Math.max(1, Math.floor(duration))}
-                    step={1}
-                    value={Math.min(Math.floor(position), Math.max(1, Math.floor(duration)))}
-                    onChange={(event) => setDragPosition(Number(event.target.value))}
-                    onPointerUp={commitSeek}
-                    onKeyUp={commitSeek}
-                    onBlur={commitSeek}
-                    disabled={duration <= 0}
-                    aria-label="Playback position"
-                    aria-valuetext={`${formatDuration(position)} of ${formatDuration(duration)}`}
-                    className="h-11 w-full cursor-pointer accent-cyan-400 disabled:cursor-default disabled:opacity-50"
-                  />
-                </div>
-                <div className="flex justify-between text-xs tabular-nums text-slate-400">
-                  <span>{formatDuration(position)}</span>
-                  <span>{formatRemaining(position, duration)}</span>
-                </div>
-              </div>
+              <Scrubber
+                position={position}
+                duration={duration}
+                trackKey={trackKey}
+                onSeek={(seconds) => void player.seek(seconds)}
+              />
 
               <div className="flex items-center justify-center gap-2 sm:gap-4">
                 {book ? (
@@ -450,26 +417,12 @@ export default function NowPlayingSheet({
               ) : null}
 
               {!native ? (
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => player.setMuted(!player.muted)}
-                    aria-label={player.muted ? 'Unmute' : 'Mute'}
-                    className={iconButton}
-                  >
-                    {player.muted || player.volume === 0 ? <VolumeX size={20} /> : player.volume < 50 ? <Volume1 size={20} /> : <Volume2 size={20} />}
-                  </button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={player.muted ? 0 : player.volume}
-                    onChange={(event) => player.setVolume(Number(event.target.value))}
-                    aria-label="Volume"
-                    className="h-11 flex-1 cursor-pointer accent-cyan-400"
-                  />
-                </div>
+                <VolumeSlider
+                  volume={player.volume}
+                  muted={player.muted}
+                  onChange={player.setVolume}
+                  onToggleMute={() => player.setMuted(!player.muted)}
+                />
               ) : null}
             </div>
 

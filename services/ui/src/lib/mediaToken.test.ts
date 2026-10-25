@@ -82,6 +82,16 @@ describe('media token', () => {
     expect(currentMediaToken()?.token).toBe('t2');
   });
 
+  it('does not refresh in a loop when the expiry is beyond what a timer can wait', async () => {
+    // setTimeout runs a delay over 2^31-1 ms (about 24.8 days) at once; a
+    // far-off expiry then re-minted the token every few milliseconds.
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(tokenResponse('far', nowSeconds() + 400 * 86400));
+    await refreshMediaToken();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('holds nothing when the gateway refuses', async () => {
     fetchMock.mockRejectedValue(new Error('Request failed with status code 401'));
 

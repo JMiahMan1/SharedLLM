@@ -59,6 +59,7 @@ export function playingElsewhere(players: Record<OutputId, RemotePlayer>): Remot
   const covered = new Set(all.filter((p) => p.kind === 'ha' && p.maPlayerId).map((p) => p.maPlayerId));
   return all
     .filter((p) => !(p.kind === 'ma' && covered.has(p.maPlayerId)))
-    .filter((p) => p.available && p.item && (p.status === 'playing' || p.status === 'paused' || p.status === 'buffering'))
+    // Something loaded: a title, or an app (a TV casting YouTube) that gives none.
+    .filter((p) => p.available && (p.item || p.appName) && (p.status === 'playing' || p.status === 'paused' || p.status === 'buffering'))
     .sort((a, b) => Number(b.status === 'playing') - Number(a.status === 'playing') || a.name.localeCompare(b.name));
 }

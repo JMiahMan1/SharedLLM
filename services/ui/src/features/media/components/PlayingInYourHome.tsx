@@ -8,12 +8,16 @@ import { useMediaScreen } from '../pages/MediaScreen';
 import { Artwork } from './Artwork';
 import { Shelf, ShelfRow } from './Shelf';
 import { muted, text } from './ui';
+import type { RemotePlayer } from '../types';
 
 /**
  * Everything playing or paused around the house (UX-37), one card per
  * device: tap it to make it the device the controls drive; the small button
  * pauses or resumes it in place. Hidden when nothing is playing anywhere.
  */
+/** The title, or the app when a TV casts something that gives none. */
+const title = (p: RemotePlayer) => p.item?.title || (p.appName ? `Playing on ${p.appName}` : '');
+
 export function PlayingInYourHome() {
   const { selectDevice, player } = useMediaScreen();
   const players = useMediaStore((s) => s.players);
@@ -44,12 +48,12 @@ export function PlayingInYourHome() {
               <button
                 type="button"
                 onClick={() => selectDevice(p.id)}
-                aria-label={`Control ${p.name}: ${p.item?.title ?? ''}`}
+                aria-label={`Control ${p.name}: ${title(p)}`}
                 className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl text-left hover:bg-[var(--site-card-bg-hover)]"
               >
                 <Artwork image={p.item?.image} kind="track" size={48} />
                 <span className="min-w-0">
-                  <span className={`block truncate text-sm font-medium ${text}`}>{p.item?.title}</span>
+                  <span className={`block truncate text-sm font-medium ${text}`}>{title(p)}</span>
                   <span className={`block truncate text-xs ${muted}`}>{p.name}</span>
                 </span>
               </button>

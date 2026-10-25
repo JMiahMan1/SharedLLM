@@ -77,17 +77,6 @@ export interface DeviceEntry {
   attributes?: Record<string, number | string | boolean | string[] | null>;
 }
 
-export interface MediaState {
-  entity_id: string;
-  device_name: string;
-  title: string;
-  artist?: string;
-  album?: string;
-  thumbnail?: string;
-  state: string;
-  media_type?: string;
-}
-
 export interface CalendarEvent {
   /** Skylight event id or Nextcloud UID: what edit and delete act on. */
   id?: string;

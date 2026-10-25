@@ -492,3 +492,52 @@ input[type="range"] {
 .note-rich h3 { font-size: 1.05em; font-weight: 600; }
 .note-rich ul { list-style: disc; padding-left: 1.25rem; }
 .note-rich ol { list-style: decimal; padding-left: 1.25rem; }
+
+/* Media sliders (features/media Scrubber, VolumeSlider): the filled part and
+   the thumb follow the artwork accent, else the theme accent; the thumb is
+   always visible (UX-11), with a focus ring for keyboards (UX-49). */
+.media-range {
+  appearance: none;
+  background: transparent;
+}
+.media-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, var(--media-accent, var(--site-accent)) var(--range-fill, 0%), var(--color-surface-2) var(--range-fill, 0%));
+}
+.media-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border-radius: 9999px;
+  background: var(--site-text);
+  box-shadow: 0 0 0 2px var(--media-accent, var(--site-accent));
+}
+.media-range::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-surface-2);
+}
+.media-range::-moz-range-progress {
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--media-accent, var(--site-accent));
+}
+.media-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--site-text);
+  box-shadow: 0 0 0 2px var(--media-accent, var(--site-accent));
+}
+.media-range:focus-visible {
+  outline: 2px solid var(--site-accent-focus);
+  outline-offset: 2px;
+  border-radius: 9999px;
+}
+.media-range:disabled {
+  opacity: 0.5;
+}
+

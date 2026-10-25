@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Play, Pause, SkipBack, SkipForward, Square, Heart, Music, Loader2,
-  Volume1, Volume2, VolumeX,
 } from 'lucide-react';
 import { formatDuration } from '../format';
+import { Scrubber, VolumeSlider } from './Scrubber';
 
 // Cover image that falls back to nothing (the parent shows the gradient icon)
 // if the proxied URL fails. Keyed by `src` at the call site, so a new cover
@@ -67,36 +67,6 @@ export function NowPlayingCard({
   const { title, artist, coverUrl, state, position, duration, trackKey } = view;
   const active = state !== 'idle';
 
-  const trackRef = useRef<HTMLDivElement>(null);
-  const dragRaf = useRef<number | null>(null);
-  const dragClientX = useRef<number | null>(null);
-  const draggingRef = useRef(false);
-  const [dragTime, setDragTime] = useState<number | null>(null);
-  // Keyed on the track, not its metadata: the status refresh mid-drag must
-  // not cancel the seek under the user's finger.
-  useEffect(() => {
-    if (!draggingRef.current) setDragTime(null);
-  }, [trackKey]);
-
-  const timeAt = (clientX: number): number => {
-    if (!trackRef.current || duration <= 0) return 0;
-    const rect = trackRef.current.getBoundingClientRect();
-    if (rect.width <= 0) return 0;
-    return Math.round(Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * duration);
-  };
-  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragRaf.current !== null) cancelAnimationFrame(dragRaf.current);
-    dragRaf.current = null;
-    draggingRef.current = false;
-    setDragTime(null);
-    try {
-      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch { /* not captured */ }
-  };
-
-  const shown = dragTime ?? position;
-  const pct = duration > 0 ? Math.min(100, Math.max(0, (shown / duration) * 100)) : 0;
-
   return (
     <div className="glass-panel rounded-2xl p-4 sm:p-5 border border-cyan-500/20 relative">
       <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-purple-500/5 pointer-events-none rounded-2xl" />
@@ -133,69 +103,14 @@ export function NowPlayingCard({
       </div>
 
       {active && duration > 0 && (
-        <div className="relative mt-3">
-          <div
-            ref={trackRef}
-            onPointerDown={(e) => {
-              if (!onSeek) return;
-              try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-              draggingRef.current = true;
-              setDragTime(timeAt(e.clientX));
-            }}
-            onPointerMove={(e) => {
-              if (!draggingRef.current) return;
-              // Coalesce into an animation frame: pointermove fires faster than
-              // the WebView paints, which made the knob lag the finger.
-              dragClientX.current = e.clientX;
-              if (dragRaf.current === null) {
-                dragRaf.current = requestAnimationFrame(() => {
-                  dragRaf.current = null;
-                  if (draggingRef.current && dragClientX.current !== null) setDragTime(timeAt(dragClientX.current));
-                });
-              }
-            }}
-            onPointerUp={(e) => {
-              if (!draggingRef.current || !onSeek) return;
-              const t = timeAt(e.clientX);
-              endDrag(e);
-              onSeek(t);
-            }}
-            onPointerCancel={endDrag}
-            role={onSeek ? 'slider' : undefined}
-            tabIndex={onSeek ? 0 : undefined}
-            aria-label="Track position"
-            aria-valuemin={0}
-            aria-valuemax={Math.round(duration)}
-            aria-valuenow={Math.round(shown)}
-            aria-valuetext={`${formatDuration(shown)} of ${formatDuration(duration)}`}
-            onKeyDown={onSeek ? (e) => {
-              if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
-                e.preventDefault();
-                onSeek(Math.min(duration, position + 10));
-              } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
-                e.preventDefault();
-                onSeek(Math.max(0, position - 10));
-              }
-            } : undefined}
-            className={`relative py-4 select-none touch-none ${onSeek ? 'cursor-pointer group' : ''}`}
-          >
-            <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden pointer-events-none">
-              <div className="h-full bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full" style={{ width: `${pct}%` }} />
-            </div>
-            {onSeek && (
-              <div
-                className={`absolute top-1/2 -translate-y-1/2 h-5 w-5 -ml-2.5 bg-white rounded-full shadow-md shadow-cyan-500/50 pointer-events-none transition-transform ${
-                  dragTime !== null ? 'scale-125' : 'pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100'
-                }`}
-                style={{ left: `${pct}%` }}
-              />
-            )}
-          </div>
-          <div className="flex justify-between text-[11px] text-slate-500 font-mono -mt-1">
-            <span>{formatDuration(shown)}</span>
-            <span>{formatDuration(duration)}</span>
-          </div>
-        </div>
+        <Scrubber
+          position={position}
+          duration={duration}
+          onSeek={onSeek}
+          trackKey={trackKey}
+          times="total"
+          className="relative mt-3"
+        />
       )}
       {active && duration <= 0 && (
         <div className="relative mt-3 flex items-center gap-2 py-2" aria-label="Live stream">
@@ -231,21 +146,7 @@ export function NowPlayingCard({
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2 sm:w-56">
-          <button type="button" onClick={onMuteToggle} className={`${iconButton} shrink-0`} aria-label={muted ? 'Unmute' : 'Mute'} aria-pressed={muted}>
-            {muted || volume === 0 ? <VolumeX size={18} /> : volume < 50 ? <Volume1 size={18} /> : <Volume2 size={18} />}
-          </button>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={muted ? 0 : volume}
-            onChange={(e) => onVolumeChange(Number(e.target.value))}
-            className="flex-1 min-w-0 accent-cyan-400 h-11 cursor-pointer"
-            aria-label="Volume"
-          />
-          <span className="text-xs text-slate-400 w-10 text-right tabular-nums shrink-0">{muted ? 'Muted' : `${volume}%`}</span>
-        </div>
+        <VolumeSlider volume={volume} muted={muted} onChange={onVolumeChange} onToggleMute={onMuteToggle} className="sm:w-56" />
       </div>
 
       <div className="relative mt-3 pt-3 border-t border-white/5">{footer}</div>

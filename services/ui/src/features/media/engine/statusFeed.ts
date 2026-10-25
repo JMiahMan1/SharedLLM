@@ -64,7 +64,9 @@ export function acquireMediaFeed(): () => void {
  */
 export function useMediaStatusFeed(
   web: Pick<SharedPlayer, 'isConnected' | 'listMaPlayers' | 'playerId'> | null,
+  opts: { maPlayers?: boolean } = {},
 ): { refresh: () => Promise<void> } {
+  const withMaPlayers = opts.maPlayers ?? true;
   const webConnected = web?.isConnected ?? false;
   const listOverSocket = web?.listMaPlayers;
   const webPlayerId = web?.playerId ?? null;
@@ -74,6 +76,9 @@ export function useMediaStatusFeed(
   useEffect(() => acquireMediaFeed(), []);
 
   useEffect(() => {
+    // A screen that only shows what is playing (the dashboard card) does not
+    // need Music Assistant's list of every speaker.
+    if (!withMaPlayers) return;
     let cancelled = false;
     const load = async () => {
       const players = webConnected && listOverSocket ? await listOverSocket() : await listRemoteMaPlayers();
@@ -87,7 +92,7 @@ export function useMediaStatusFeed(
       cancelled = true;
       if (id !== null) clearInterval(id);
     };
-  }, [webConnected, listOverSocket, webPlayerId, maTarget, streamOpen]);
+  }, [withMaPlayers, webConnected, listOverSocket, webPlayerId, maTarget, streamOpen]);
 
   return { refresh: useCallback(() => refreshMediaStatus(), []) };
 }

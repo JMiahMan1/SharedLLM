@@ -45,6 +45,8 @@ export interface MediaStoreState extends PlayersState {
   /** Another browser tab took this device's audio (tab lock, BUG-66). */
   playingInOtherTab: boolean;
   absSession: AbsSession | null;
+  /** When the full status was last read (null: not yet, so still loading). */
+  statusReadAt: number | null;
   actions: {
     selectOutput: (id: OutputId, opts?: { picked?: boolean }) => void;
     /** Fold the status poll in; follow a playing speaker until the person picks one. */
@@ -88,6 +90,7 @@ const INITIAL = {
   recentSearches: [] as string[],
   playingInOtherTab: false,
   absSession: null as AbsSession | null,
+  statusReadAt: null as number | null,
 };
 
 export const useMediaStore = create<MediaStoreState>()(
@@ -106,8 +109,8 @@ export const useMediaStore = create<MediaStoreState>()(
           const next = ingest(s, { type: 'status', players: rows }, now);
           const follow = !s.userPickedOutput && s.activeOutputId === THIS_DEVICE
             && active?.entity_id && active.entity_id !== 'web_player' && active.state === 'playing';
-          if (follow) set({ players: next.players, activeOutputId: active!.entity_id!, userPickedOutput: true });
-          else if (next !== s) set({ players: next.players });
+          if (follow) set({ players: next.players, activeOutputId: active!.entity_id!, userPickedOutput: true, statusReadAt: now });
+          else set({ players: next.players, statusReadAt: now });
         },
         ingest: (event) => {
           const s = get();

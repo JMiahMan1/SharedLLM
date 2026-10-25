@@ -22,6 +22,9 @@ export interface MediaToken {
 /** Refresh this many seconds before expiry (§7.4). */
 export const REFRESH_LEAD_SECONDS = 300;
 
+/** The longest delay setTimeout honours. */
+const MAX_TIMER_MS = 2_147_483_647;
+
 interface Held extends MediaToken {
   apiKey: string;
 }
@@ -44,6 +47,13 @@ function schedule(): void {
   refreshTimer = null;
   if (!held) return;
   const delayMs = (held.expiresAt - REFRESH_LEAD_SECONDS) * 1000 - Date.now();
+  // Timers run a delay over 2^31-1 ms (about 24.8 days) at once, which
+  // re-minted a long-lived token in a tight loop: wait the longest a timer
+  // can, then work out the rest again.
+  if (delayMs > MAX_TIMER_MS) {
+    refreshTimer = setTimeout(schedule, MAX_TIMER_MS);
+    return;
+  }
   refreshTimer = setTimeout(() => {
     refreshTimer = null;
     void refreshMediaToken();
