@@ -157,7 +157,7 @@ account is connected, everything above still works.
       Recipe Box recipe (`POST /frames/{id}/meals/recipes` with
       `meal_category_id`, `summary`, `description` = `Ingredients:` block +
       `Instructions:` block); plan a meal (`POST /frames/{id}/meals/sittings`
- - when `meal_recipe_id` is set, leave `summary` blank or the API
+      - when `meal_recipe_id` is set, leave `summary` blank or the API
       returns 422); read the week (`GET .../meals/sittings?date_min&date_max`);
       push a recipe's ingredients to the Skylight grocery list
       (`POST .../add_to_grocery_list`), or write items directly
