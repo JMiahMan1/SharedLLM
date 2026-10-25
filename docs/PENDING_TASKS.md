@@ -10,7 +10,3 @@ on 2026-10-24. When something here ships, delete it; history lives in git.
   the live server.
 - The remaining phases of `docs/MEDIA_OVERHAUL.md`: 3 and 5-9 (Phase 4 has
   shipped; Phase 3 and 5-7 were being built on 2026-10-24).
-
-## Family guard
-
-- The family member page (`docs/FAMILY_MEMBER_PAGE.md`), replacing `/guardian`.
