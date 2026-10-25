@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, Mic, Square, Trash2, UserCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { VoiceCheck, VoiceStatus } from '../../services/api';
 import { errorText } from '../../lib/errorText';
+import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 
 /** Sentences to read aloud, one per recording. Varied sounds make a steadier
  *  profile than the same words repeated. */
@@ -21,57 +22,34 @@ const CHECK_SECONDS = 6;
 
 type Purpose = 'enroll' | 'check';
 
-/** Records from the microphone until stopped or `seconds` pass. */
+/**
+ * One timed take for a purpose, as a promise: the shared recorder stops by
+ * itself after `limit` seconds and the panel shows the countdown.
+ */
 function useRecorder() {
-  const [seconds, setSeconds] = useState(0);
   const [purpose, setPurpose] = useState<Purpose | null>(null);
-  const recorder = useRef<MediaRecorder | null>(null);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stop = () => {
-    if (timer.current) clearInterval(timer.current);
-    timer.current = null;
-    if (recorder.current?.state === 'recording') recorder.current.stop();
+  const pending = useRef<((blob: Blob | null) => void) | null>(null);
+  const settle = (blob: Blob | null) => {
+    setPurpose(null);
+    pending.current?.(blob);
+    pending.current = null;
   };
-  useEffect(() => stop, []);
+  const recorder = useAudioRecorder({
+    onRecorded: (blob) => settle(blob),
+    onError: (reason) => {
+      toast.error(reason === 'denied' ? 'Microphone access was denied' : 'Recording is not available here');
+      settle(null);
+    },
+  });
 
-  const record = async (forPurpose: Purpose, limit: number): Promise<Blob | null> => {
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      toast.error('Microphone access was denied');
-      return null;
-    }
-    const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(
-      (t) => typeof MediaRecorder.isTypeSupported !== 'function' || MediaRecorder.isTypeSupported(t),
-    );
-    const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    recorder.current = rec;
-    const chunks: Blob[] = [];
-    rec.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
-    };
-    const done = new Promise<Blob>((resolve) => {
-      rec.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        setPurpose(null);
-        resolve(new Blob(chunks, { type: rec.mimeType || mimeType || 'audio/webm' }));
-      };
+  const record = (forPurpose: Purpose, limit: number): Promise<Blob | null> =>
+    new Promise((resolve) => {
+      pending.current = resolve;
+      setPurpose(forPurpose);
+      void recorder.start(limit);
     });
-    rec.start();
-    setPurpose(forPurpose);
-    setSeconds(limit);
-    timer.current = setInterval(() => {
-      setSeconds((s) => {
-        if (s <= 1) stop();
-        return Math.max(0, s - 1);
-      });
-    }, 1000);
-    return done;
-  };
 
-  return { record, stop, seconds, purpose };
+  return { record, stop: recorder.stop, seconds: recorder.secondsLeft, purpose };
 }
 
 function statusLine(s: VoiceStatus): string {
