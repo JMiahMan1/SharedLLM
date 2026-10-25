@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
-import { useAccentColor } from '../../../hooks/useAccentColor';
+import { accentStyle, useArtworkAccent } from '../engine/artworkColor';
 import { useHaptics } from '../../../hooks/useHaptics';
 import { api } from '../../../services/api';
 import { formatDuration } from '../format';
@@ -60,8 +60,9 @@ export default function NowPlayingSheet({
   // fetch both with credentials, and the accent canvas needs the same origin.
   // The URL is signed with the media token, so re-render when it arrives.
   useMediaToken();
-  const art = proxiedImage(player?.mediaImage);
-  const accent = useAccentColor(art);
+  const art = proxiedImage(player?.mediaImage, 512);
+  // The cover's colour, readable on the dark sheet (§6.5); the theme's otherwise.
+  const accentVars = accentStyle(useArtworkAccent(player?.mediaImage));
 
   const [favorite, setFavorite] = useState<{ uri: string; value: boolean } | null>(null);
   const [shuffle, setShuffle] = useState(false);
@@ -249,6 +250,7 @@ export default function NowPlayingSheet({
           aria-modal="true"
           aria-label="Now playing"
           data-testid="now-playing-sheet"
+          style={accentVars}
           className="fixed inset-0 z-[60] overflow-hidden"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -266,7 +268,7 @@ export default function NowPlayingSheet({
             <div
               aria-hidden
               className="absolute inset-0 opacity-25"
-              style={{ background: `radial-gradient(60% 50% at 50% 20%, ${accent}, transparent 70%)` }}
+              style={{ background: 'radial-gradient(60% 50% at 50% 20%, var(--media-accent), transparent 70%)' }}
             />
           )}
           <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-slate-950/50 via-slate-950/75 to-slate-950" />
@@ -307,7 +309,7 @@ export default function NowPlayingSheet({
                   <motion.div
                     layoutId="np-art"
                     className="flex aspect-square w-[min(74vw,36dvh)] max-w-[380px] items-center justify-center rounded-2xl shadow-2xl shadow-black/60"
-                    style={{ background: `linear-gradient(145deg, ${accent}55, rgba(15,23,42,0.9))` }}
+                    style={{ background: 'linear-gradient(145deg, color-mix(in srgb, var(--media-accent) 33%, transparent), rgba(15,23,42,0.9))' }}
                   >
                     <Music size={64} className="text-white/60" aria-hidden />
                   </motion.div>
