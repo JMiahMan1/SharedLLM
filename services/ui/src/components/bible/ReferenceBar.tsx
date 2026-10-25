@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Columns2, LayoutGrid, Minus, Plus, Rows2, Settings2, Star, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
-import { PAGE_TONES, PAGE_TONE_ORDER, toneOf } from './readingPage';
+import { PAGE_TONES, PAGE_TONE_ORDER, TEXT_STEPS, toneOf } from './readingPage';
 import BookPicker from './BookPicker';
 import type {
   BibleBookInfo,
@@ -27,8 +27,6 @@ interface ReferenceBarProps {
   onPreferences: (patch: Partial<BiblePreferences>) => void;
   onStep: (delta: number) => void;
 }
-
-const TEXT_STEPS = [0.85, 1, 1.15, 1.3, 1.5];
 
 /**
  * How the comparison is laid out: a row per verse, or two whole chapters in

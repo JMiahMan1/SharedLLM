@@ -406,6 +406,7 @@ function BibleReaderPane({
             )}
             {parallel ? (
               <ParallelReader
+                primaryVerses={passage?.verses ?? []}
                 passageKey={`${version}|${requestRef}`}
                 primaryName={primaryName}
                 compareName={compareName}
@@ -417,19 +418,23 @@ function BibleReaderPane({
                 lineHeight={preferences.line_height}
                 theme={preferences.theme}
               >
-                <ChapterReader
-                  verses={passage?.verses ?? []}
-                  marks={marks}
-                  studiedVerses={studiedVerses}
-                  speakingVerses={speakingVerses}
-                  fontScale={preferences.font_scale}
-                  lineHeight={preferences.line_height}
-                  theme={preferences.theme}
-                  loading={isFetching}
-                  error={error instanceof Error ? error.message : null}
-                  onVerseTap={setActiveVerse}
-                  onRetry={() => void refetch()}
-                />
+                {(pane) => (
+                  <ChapterReader
+                    verses={passage?.verses ?? []}
+                    marks={marks}
+                    studiedVerses={studiedVerses}
+                    speakingVerses={speakingVerses}
+                    differingVerses={pane.differingVerses}
+                    differingFrom={compareName}
+                    fontScale={pane.fontScale}
+                    lineHeight={preferences.line_height}
+                    theme={preferences.theme}
+                    loading={isFetching}
+                    error={error instanceof Error ? error.message : null}
+                    onVerseTap={setActiveVerse}
+                    onRetry={() => void refetch()}
+                  />
+                )}
               </ParallelReader>
             ) : (
               <ChapterReader

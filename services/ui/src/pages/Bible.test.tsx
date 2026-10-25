@@ -943,6 +943,18 @@ describe('comparing two translations', () => {
     );
     expect(within(screen.getByTestId('bible-parallel-primary')).getByTestId('bible-verse-23-1')).toBeTruthy();
     expect(screen.getByTestId('bible-parallel-link')).toHaveAttribute('aria-pressed', 'true');
+
+    // The reader's own pane takes its own size: the verse text grows one step.
+    const ownText = () =>
+      within(screen.getByTestId('bible-verse-23-1')).getByText(/The LORD is my shepherd/);
+    const before = parseFloat(ownText().style.fontSize);
+    fireEvent.click(screen.getByTestId('bible-parallel-primary-larger'));
+    await waitFor(() => expect(parseFloat(ownText().style.fontSize)).toBeGreaterThan(before));
+
+    // Marking differences compares the two real chapters: these are close wording.
+    fireEvent.click(screen.getByTestId('bible-parallel-diff'));
+    expect(await screen.findByTestId('bible-diff-count')).toHaveTextContent('No verse here is worded very differently.');
+    expect(screen.getByTestId('bible-verse-23-1')).not.toHaveAttribute('data-differs');
   });
 
   it('says so when the second translation cannot be loaded', async () => {
