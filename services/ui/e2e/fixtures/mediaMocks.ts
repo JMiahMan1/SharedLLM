@@ -169,7 +169,10 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
 
   const catchAll = (route: Route): Promise<void> => {
     const url = route.request().url();
-    if (url.includes('/api/users/me')) return route.fallback();
+    // Only the profile itself is answered by seedAuth; anything under it
+    // (/api/users/me/theme…) must not fall through to the network, where the
+    // dev server's proxy would send it to a real gateway.
+    if (new URL(url).pathname === '/api/users/me') return route.fallback();
     unmockedCalls.push(`${route.request().method()} ${url}`);
     return route.abort();
   };
@@ -196,6 +199,8 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
   // The shell header polls this for its notification bell on every page; without
   // a mock the catch-all aborts it and the spec fails on an unmocked call.
   await page.route('**/api/admin/logs**', (route) => route.fulfill({ json: [] }));
+  // The site theme preference loads on every page; none is saved for the test user.
+  await page.route('**/api/users/me/theme', (route) => route.fulfill({ status: 404, json: { detail: 'No saved theme' } }));
   await page.route('**/api/telemetry/notifications**', (route) => route.fulfill({ json: { notifications: [] } }));
 
   // The shell's activity beacon and the active-calls banner run on every page too.

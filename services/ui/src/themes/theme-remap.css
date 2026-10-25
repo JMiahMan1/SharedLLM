@@ -72,7 +72,6 @@
 [data-site-theme-active] .from-purple-300 { --tw-gradient-from: var(--site-accent); }
 [data-site-theme-active] .from-purple-400 { --tw-gradient-from: var(--site-accent); }
 [data-site-theme-active] .from-purple-500 { --tw-gradient-from: var(--site-accent); }
-[data-site-theme-active] .from-purple-500\/20 { --tw-gradient-from: color-mix(in srgb, var(--site-accent) 20%, transparent); }
 [data-site-theme-active] .from-purple-500\/70 { --tw-gradient-from: color-mix(in srgb, var(--site-accent) 70%, transparent); }
 [data-site-theme-active] .from-purple-600 { --tw-gradient-from: var(--site-accent); }
 [data-site-theme-active] .from-purple-950\/20 { --tw-gradient-from: color-mix(in srgb, var(--site-accent) 20%, transparent); }

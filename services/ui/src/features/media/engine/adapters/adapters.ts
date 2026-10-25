@@ -132,7 +132,11 @@ export const haPlayerAdapter: PlayerAdapter = {
 };
 
 /** The adapter for `outputId`: '' is this device, `ma:` a Music Assistant player, else Home Assistant. */
-export function adapterFor(outputId: OutputId, web: WebPlayerHandle): PlayerAdapter {
+export function adapterFor(outputId: OutputId, web: WebPlayerHandle | null): PlayerAdapter {
   const kind = outputKind(outputId);
-  return kind === 'web' ? webPlayerAdapter(web) : kind === 'ma' ? maPlayerAdapter : haPlayerAdapter;
+  if (kind === 'web') {
+    if (!web) throw new Error('This device has no player here');
+    return webPlayerAdapter(web);
+  }
+  return kind === 'ma' ? maPlayerAdapter : haPlayerAdapter;
 }

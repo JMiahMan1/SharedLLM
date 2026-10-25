@@ -90,6 +90,9 @@ test('leaves shortcuts alone while typing in search', async ({ page }) => {
   const { ma } = await setupPlayerMocks(page);
   await startTrack(page, ma);
   await goToPage(page, 'home');
+  // Wait for the dashboard: until it replaces Listen Now, `/` belongs to the
+  // media search field there.
+  await expect(page.getByRole('heading', { name: 'Jarvis Dashboard', level: 1 })).toBeVisible();
   await clearFocus(page);
 
   const pauseBefore = ma.sentCommands.filter((entry) => entry.command === 'players/cmd/pause').length;
