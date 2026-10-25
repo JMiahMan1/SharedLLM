@@ -16,11 +16,7 @@ import StreaksCard from '../components/health/StreaksCard';
 import MicroLessonCard from '../components/health/MicroLessonCard';
 import CoachCard from '../components/health/CoachCard';
 import CheersCard from '../components/health/CheersCard';
-import ScreenTimeCard from '../components/health/ScreenTimeCard';
-import AskForSiteCard from '../components/health/AskForSiteCard';
-import PhoneProtectionCard from '../components/health/PhoneProtectionCard';
 import HealthConnectCard from '../components/health/HealthConnectCard';
-import TalkRequestCard from '../components/guardian/TalkRequestCard';
 import GuardianLink from '../components/guardian/GuardianLink';
 import HealthFitness from './HealthFitness';
 import { api } from '../services/api';
@@ -69,11 +65,6 @@ const Health = () => {
       >
         {tab === 'today' && (
           <div className="space-y-3 sm:space-y-4">
-            <GuardianLink />
-            <ScreenTimeCard />
-            <AskForSiteCard />
-            <PhoneProtectionCard />
-            <TalkRequestCard />
             <HealthToday onNavigate={setTab} />
             {on('active_minutes') && <ActiveMinutesCard />}
             {on('streaks') && <StreaksCard />}
@@ -83,7 +74,11 @@ const Health = () => {
             {on('fasting') && <FastingCard />}
             {on('weekly_digest') && <WeeklyDigestCard />}
             {on('family_challenge') && <FamilyChallengeCard />}
+            {/* Digital wellbeing stays here; the guarding side (screen time,
+                asking a parent, phone protection, I need to talk) lives on its
+                own Family guardian page. */}
             <DigitalWellbeingCard />
+            <GuardianLink />
           </div>
         )}
         {tab === 'fitness' && <HealthFitness />}

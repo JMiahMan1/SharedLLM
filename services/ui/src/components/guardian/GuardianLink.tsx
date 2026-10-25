@@ -4,7 +4,7 @@ import { ChevronRight, ShieldHalf } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
-/** The way into the parents' page, for someone the roster shows has children. */
+/** The way into the family guardian page, for someone the roster shows has children. */
 export default function GuardianLink() {
   const user = useAuth().user;
   const { data: family = [] } = useQuery({
@@ -18,7 +18,7 @@ export default function GuardianLink() {
   if (user?.is_minor || children.length === 0) return null;
   return (
     <Link
-      to="/family/member"
+      to="/guardian"
       className="glass-panel flex min-h-11 items-center gap-3 rounded-2xl border border-sky-500/20 p-4 text-left"
       data-testid="guardian-link"
     >
