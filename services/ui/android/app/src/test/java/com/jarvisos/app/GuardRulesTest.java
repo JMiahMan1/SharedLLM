@@ -66,6 +66,57 @@ public class GuardRulesTest {
     }
 
     @Test
+    public void theGuardsOwnAccessibilityDetailPageIsCovered() {
+        assertEquals(Action.BLOCK_TAMPER, decide(true, false, false,
+                "com.android.settings",
+                "com.android.settings.accessibility.ToggleAccessibilityServicePreferenceFragment",
+                "Jarvis screen guard Use service Turn off"));
+    }
+
+    @Test
+    public void theFactoryResetAndErasePagesAreCovered() {
+        assertEquals(Action.BLOCK_TAMPER, decide(true, false, false,
+                "com.android.settings", "com.android.settings.Settings$FactoryResetActivity",
+                "Factory reset Erase all data"));
+        assertEquals(Action.BLOCK_TAMPER, decide(true, false, false,
+                "com.android.settings", "com.android.settings.SubSettings", "Erase everything Erase all data"));
+    }
+
+    @Test
+    public void theUsageAccessPageIsCovered() {
+        assertEquals(Action.BLOCK_TAMPER, decide(true, false, false,
+                "com.android.settings", "com.android.settings.SubSettings", "Usage access"));
+        assertEquals(Action.BLOCK_TAMPER, decide(true, false, false,
+                "com.google.android.permissioncontroller",
+                "com.android.permissioncontroller.settings.UsageAccessActivity", "Usage access"));
+    }
+
+    @Test
+    public void theUsersAndAddUserPagesAreCovered() {
+        assertEquals(Action.BLOCK_TAMPER, decide(true, false, false,
+                "com.android.settings", "com.android.settings.users.UserSettings", "Users Add user"));
+        assertEquals(Action.BLOCK_TAMPER, decide(true, false, false,
+                "com.android.settings", "com.android.settings.SubSettings", "User & account"));
+        assertEquals(Action.BLOCK_TAMPER, decide(true, false, false,
+                "com.android.settings", "com.android.settings.SubSettings", "Add user"));
+    }
+
+    @Test
+    public void ordinarySettingsAndAppScreensAreNotTamperScreens() {
+        // "Data usage" must not read as "usage access".
+        assertEquals(Action.ALLOW, decide(true, false, false, "com.android.settings", "com.android.settings.Settings",
+                "Network & internet Wi-Fi Bluetooth Data usage Battery"));
+        // A normal permission dialog names neither Jarvis nor a tamper page.
+        assertEquals(Action.ALLOW, decide(true, false, false,
+                "com.google.android.permissioncontroller",
+                "com.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+                "Allow Chrome to access your location? While using the app"));
+        // The same words outside Settings are not the guard's to block.
+        assertEquals(Action.ALLOW, decide(true, false, false, "com.android.chrome", "",
+                "Users factory reset usage access"));
+    }
+
+    @Test
     public void anAdultsPhoneIsNeverGuarded() {
         assertEquals(Action.ALLOW, decide(false, false, false,
                 "com.android.settings", "com.android.settings.SubSettings", "App info Jarvis OS Uninstall"));
