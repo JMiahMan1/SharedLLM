@@ -12,6 +12,10 @@ services named in config. Admins hear about state changes only:
   ``alert_desktop_down_minutes``. The desktop sleeps and wakes as a whole, so
   all of them share one notice (tag ``admin:desktop``) that is updated as the
   set of unreachable services changes and replaced by "back" when it empties.
+* A watched HTTPS certificate (``alert_tls_hosts``) is checked every
+  ``TLS_CHECK_SECONDS``: admins hear once when it is within
+  ``alert_tls_days`` of expiring or no longer valid, and once more when a
+  renewed certificate is being served (same tag per host).
 
 State lives in Redis so a gateway restart neither repeats a notice nor loses
 the "back up" that answers one. A notice telemetry did not accept stays in an
@@ -22,13 +26,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import ssl
 import time
+from contextlib import suppress
+from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
 
 from services.common import notify
-from services.config import ALERT_DESKTOP_DOWN_MINUTES
+from services.config import ALERT_DESKTOP_DOWN_MINUTES, ALERT_TLS_DAYS, ALERT_TLS_HOSTS
 from services.gateway.config import (
     ALPACA_ARCADE_URL,
     ALPACA_AUDIO_URL,
@@ -45,6 +52,8 @@ DOWN_AFTER_FAILURES = 2
 STATE_KEY = "admin:alerts:gateway"
 DASHBOARD_URL = "/"
 _PROBE_TIMEOUT = aiohttp.ClientTimeout(total=10)
+TLS_CHECK_SECONDS = 6 * 3600
+_TLS_TIMEOUT_SECONDS = 15
 
 
 async def notify_admins(client: aiohttp.ClientSession, notice: dict[str, Any]) -> bool:
@@ -192,6 +201,76 @@ def media_targets(settings: dict[str, Any]) -> dict[str, str]:
     return targets
 
 
+def tls_hosts(settings: dict[str, Any]) -> list[str]:
+    """The host names to watch, from ``alert_tls_hosts`` (comma-separated)."""
+    raw = settings.get("alert_tls_hosts")
+    raw = ALERT_TLS_HOSTS if raw is None else raw
+    hosts = []
+    for item in str(raw or "").split(","):
+        host = item.strip().lower().removeprefix("https://").split("/")[0]
+        if host and host not in hosts:
+            hosts.append(host)
+    return hosts
+
+
+async def tls_status(host: str, *, now: float | None = None) -> dict[str, Any]:
+    """What ``host``:443 serves: ``{"ok": True, "days": n}`` for a certificate
+    the system trusts, else ``{"ok": False, "reason": ...}`` (expired, wrong
+    name, untrusted, or no answer)."""
+    now = time.time() if now is None else now
+    context = ssl.create_default_context()
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, 443, ssl=context, server_hostname=host),
+            timeout=_TLS_TIMEOUT_SECONDS,
+        )
+    except ssl.SSLCertVerificationError as e:
+        return {"ok": False, "reason": e.verify_message or "certificate not valid"}
+    except (OSError, TimeoutError, ssl.SSLError) as e:
+        return {"ok": False, "reason": f"no TLS answer ({type(e).__name__})"}
+    try:
+        cert = writer.get_extra_info("peercert") or {}
+    finally:
+        writer.close()
+        with suppress(Exception):
+            await writer.wait_closed()
+    not_after = cert.get("notAfter")
+    if not not_after:
+        return {"ok": False, "reason": "certificate has no expiry date"}
+    expires = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC).timestamp()
+    return {"ok": True, "days": int((expires - now) // 86400)}
+
+
+def tls_transitions(state: dict[str, Any], results: dict[str, dict[str, Any]], warn_days: int) -> list[dict[str, Any]]:
+    """Notices for certificates that became a problem or were fixed; updates ``state``.
+
+    A problem is a certificate within ``warn_days`` of expiring or not valid at
+    all. ``state["warned"]`` holds the hosts admins were told about.
+    """
+    warned: list[str] = state.setdefault("warned", [])
+    notices = []
+    for host, result in sorted(results.items()):
+        tag = f"admin:tls:{host}"
+        problem = not result.get("ok") or int(result.get("days", 0)) < warn_days
+        if problem and host not in warned:
+            warned.append(host)
+            if result.get("ok"):
+                body = (f"The certificate for {host} expires in {result['days']} days and has not renewed. "
+                        "Check certbot on the proxy.")
+            else:
+                body = f"{host} is not serving a valid certificate: {result.get('reason')}. Browsers and the app will refuse it."
+            notices.append({"title": f"Certificate problem: {host}", "body": body, "priority": 4, "tag": tag,
+                            **_open_dashboard()})
+        elif not problem and host in warned:
+            warned.remove(host)
+            notices.append({"title": f"Certificate renewed: {host}",
+                            "body": f"{host} serves a valid certificate again ({result['days']} days left).",
+                            "priority": 2, "tag": tag, **_open_dashboard()})
+    for host in [h for h in warned if h not in results]:  # no longer watched
+        warned.remove(host)
+    return notices
+
+
 async def _readiness(client: aiohttp.ClientSession, gateway: str) -> dict[str, str] | None:
     try:
         async with client.get(f"{gateway}/health/ready", timeout=aiohttp.ClientTimeout(total=30)) as resp:
@@ -240,6 +319,14 @@ async def check_once(r, client: aiohttp.ClientSession, settings: dict[str, Any],
     down_minutes = int(settings.get("alert_desktop_down_minutes") or ALERT_DESKTOP_DOWN_MINUTES)
     _queue(outbox, desktop_transitions(state.setdefault("desktop", {}), dict(zip(targets, results, strict=False)),
                                        now, down_minutes))
+
+    hosts = tls_hosts(settings)
+    tls_state = state.setdefault("tls", {})
+    if hosts and now - float(tls_state.get("checked_at") or 0) >= TLS_CHECK_SECONDS:
+        results = await asyncio.gather(*(tls_status(host, now=now) for host in hosts))
+        warn_days = int(settings.get("alert_tls_days") or ALERT_TLS_DAYS)
+        _queue(outbox, tls_transitions(tls_state, dict(zip(hosts, results, strict=True)), warn_days))
+        tls_state["checked_at"] = now
 
     sent = 0
     pending = []

@@ -129,6 +129,11 @@ ALERT_ERROR_SPIKE_THRESHOLD = _safe_int("ALERT_ERROR_SPIKE_THRESHOLD", 20)
 ALERT_ERROR_REPEAT_THRESHOLD = _safe_int("ALERT_ERROR_REPEAT_THRESHOLD", 10)
 ALERT_DISK_FREE_PERCENT = _safe_int("ALERT_DISK_FREE_PERCENT", 10)
 ALERT_DESKTOP_DOWN_MINUTES = _safe_int("ALERT_DESKTOP_DOWN_MINUTES", 10)
+# Public HTTPS names whose certificates admins hear about before they expire
+# (comma-separated host names, e.g. "jarvis.example.com,games.example.com";
+# empty watches nothing), and how many days ahead the warning comes.
+ALERT_TLS_HOSTS = os.getenv("ALERT_TLS_HOSTS", "")
+ALERT_TLS_DAYS = _safe_int("ALERT_TLS_DAYS", 14)
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL")
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL")
 CODING_MODEL = os.getenv("CODING_MODEL")
@@ -330,6 +335,8 @@ async def resolve_runtime_config():
         "alert_error_repeat_threshold": "ALERT_ERROR_REPEAT_THRESHOLD",
         "alert_disk_free_percent": "ALERT_DISK_FREE_PERCENT",
         "alert_desktop_down_minutes": "ALERT_DESKTOP_DOWN_MINUTES",
+        "alert_tls_hosts": "ALERT_TLS_HOSTS",
+        "alert_tls_days": "ALERT_TLS_DAYS",
         "default_model": "DEFAULT_MODEL",
         "assistant_model": "ASSISTANT_MODEL",
         "coding_model": "CODING_MODEL",
@@ -379,7 +386,7 @@ async def resolve_runtime_config():
                                         "DNS_POLL_INTERVAL", "WORKSPACE_RUNTIME_FILE_READ_LIMIT",
                                         "WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT",
                                         "ALERT_ERROR_SPIKE_THRESHOLD", "ALERT_ERROR_REPEAT_THRESHOLD",
-                                        "ALERT_DISK_FREE_PERCENT", "ALERT_DESKTOP_DOWN_MINUTES"):
+                                        "ALERT_DISK_FREE_PERCENT", "ALERT_DESKTOP_DOWN_MINUTES", "ALERT_TLS_DAYS"):
                             value = int(float(value))
                         elif var_name == "FAST_PATH_THRESHOLD":
                             value = float(value)

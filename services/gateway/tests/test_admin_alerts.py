@@ -266,3 +266,72 @@ def test_check_once_announces_media_services_back():
     up = _MediaClient({"geo": "OK"})
     assert _run_media(r, up) == 1
     assert [n["title"] for n in up.notified] == ["Service back up: audiobookshelf"]
+
+
+# --- certificate expiry (alert_tls_hosts) ---------------------------------
+
+
+def test_tls_hosts_come_from_settings_and_nothing_is_watched_by_default(monkeypatch):
+    monkeypatch.setattr(admin_alerts, "ALERT_TLS_HOSTS", "")
+    assert admin_alerts.tls_hosts({}) == []
+    assert admin_alerts.tls_hosts({"alert_tls_hosts": " https://Jarvis.example.com/ , games.example.com,jarvis.example.com"}) == [
+        "jarvis.example.com", "games.example.com",
+    ]
+
+
+def test_a_certificate_close_to_expiry_warns_once_and_renewal_clears_it():
+    state: dict = {}
+    assert admin_alerts.tls_transitions(state, {"jarvis.example.com": {"ok": True, "days": 60}}, 14) == []
+    warn = admin_alerts.tls_transitions(state, {"jarvis.example.com": {"ok": True, "days": 10}}, 14)
+    assert [n["title"] for n in warn] == ["Certificate problem: jarvis.example.com"]
+    assert "10 days" in warn[0]["body"] and warn[0]["tag"] == "admin:tls:jarvis.example.com"
+    assert admin_alerts.tls_transitions(state, {"jarvis.example.com": {"ok": True, "days": 9}}, 14) == []
+    fixed = admin_alerts.tls_transitions(state, {"jarvis.example.com": {"ok": True, "days": 89}}, 14)
+    assert [n["title"] for n in fixed] == ["Certificate renewed: jarvis.example.com"]
+    assert fixed[0]["tag"] == warn[0]["tag"]
+
+
+def test_an_expired_or_untrusted_certificate_is_a_problem_with_its_reason():
+    state: dict = {}
+    notices = admin_alerts.tls_transitions(
+        state, {"abs.example.com": {"ok": False, "reason": "certificate has expired"}}, 14)
+    assert "certificate has expired" in notices[0]["body"]
+    assert notices[0]["priority"] == 4
+
+
+def test_certificates_are_checked_every_six_hours_not_every_minute(monkeypatch):
+    calls: list[str] = []
+
+    async def fake_status(host, *, now=None):
+        calls.append(host)
+        return {"ok": True, "days": 5}
+
+    class _Redis:
+        def __init__(self):
+            self.value = None
+
+        async def get(self, _key):
+            return self.value
+
+        async def set(self, _key, value):
+            self.value = value
+
+    async def no_readiness(_client, _gateway):
+        return None
+
+    async def accept(_client, _notice):
+        return True
+
+    monkeypatch.setattr(admin_alerts, "tls_status", fake_status)
+    monkeypatch.setattr(admin_alerts, "_readiness", no_readiness)
+    monkeypatch.setattr(admin_alerts, "notify_admins", accept)
+    r = _Redis()
+    settings = {"alert_tls_hosts": "jarvis.example.com", "alert_tls_days": "14"}
+    t0 = 1_000_000.0
+    sent = asyncio.run(admin_alerts.check_once(r, None, settings, gateway="http://gw", now=t0))
+    assert sent == 1 and calls == ["jarvis.example.com"]
+    asyncio.run(admin_alerts.check_once(r, None, settings, gateway="http://gw", now=t0 + 60))
+    assert calls == ["jarvis.example.com"]
+    asyncio.run(admin_alerts.check_once(r, None, settings, gateway="http://gw", now=t0 + admin_alerts.TLS_CHECK_SECONDS))
+    assert len(calls) == 2
+    assert json.loads(r.value)["tls"]["warned"] == ["jarvis.example.com"]

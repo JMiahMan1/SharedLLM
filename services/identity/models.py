@@ -58,6 +58,10 @@ class User(SQLModel, table=True):  # type: ignore
     push_topic: str | None = None
     git_url: str | None = None
     git_user: str | None = None
+    # JSON array string of branch patterns Jarvis must never push to directly
+    # (GitHub > Protected Branches); read by the workspace runtime through
+    # /api/resolve.
+    forbidden_branches: str | None = None
 
     # Encrypted at rest, stored as Fernet ciphertext (base64 string)
     nextcloud_pass_enc: str | None = None
@@ -551,6 +555,8 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "alert_error_repeat_threshold", "value": "10", "description": "Times one error may repeat within 5 minutes before admins get a notice about it"},
     {"key": "alert_disk_free_percent", "value": "10", "description": "Free space (percent) below which a data disk counts as nearly full; admins hear once per crossing"},
     {"key": "alert_desktop_down_minutes", "value": "10", "description": "Minutes a desktop GPU service (alpaca audio, image, LLM) must stay unreachable before admins are told"},
+    {"key": "alert_tls_hosts", "value": "", "description": "Public HTTPS host names (comma-separated) whose certificates admins hear about before they expire or when they stop being valid; empty watches nothing"},
+    {"key": "alert_tls_days", "value": "14", "description": "Days before a watched certificate expires that admins are warned"},
 
     # --- HOME ALERTS (category "home", docs/INTEGRATIONS.md) ---
     {"key": "home_alert_entities", "value": "[]", "description": "Home Assistant entities that send home notices (JSON list of {entity_id, event, people, minutes, watts}). event is doorbell, motion_away, garage_open, door_unlocked_night, appliance_done or water_leak; people empty = everyone. Edit in Admin > Users & Devices > Home alerts."},
