@@ -105,8 +105,9 @@ fields are read-only for them.
 
 ## OpenRouter
 
-- **Cloud Base URL** and **Cloud API Key** for cloud models through
-  OpenRouter. Not shown on the system default user. No connection test.
+OpenRouter is configured once for the whole household, not per user: pick the
+cloud provider and its API key under Settings > LLM (the `llm_cloud_url` and
+`llm_cloud_api_key` global settings). There is no per-user OpenRouter tile.
 
 ## External Client Setup
 

@@ -18,7 +18,6 @@ import {
   LockKeyhole,
   Smartphone,
   User,
-  Zap,
   Calendar,
   Shield,
   ListMusic,
@@ -357,7 +356,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
               fall back to the system default user's credentials (per-service
               grant, admin-only). Skylight is system-shared by design, so it is
               not listed here. */}
-          {name !== 'Skylight' && name !== 'OpenRouter' && !!userData?.username && (
+          {name !== 'Skylight' && !!userData?.username && (
             <SharedCredentialsCard
               username={userData.username}
               isAdmin={isAdmin}
@@ -740,18 +739,6 @@ const Identity = () => {
                   "Password": "skylight_pass"
                 }}
               />
-              {!fullUser?.is_system_default && (
-                <IntegrationTile 
-                  name="OpenRouter" 
-                  icon={Zap} 
-                  color="purple" 
-                  userData={fullUser}
-                  configKeys={{
-                    "Cloud Base URL": "openrouter_url",
-                    "Cloud API Key": "openrouter_token"
-                  }}
-                />
-              )}
             </div>
           </section>
 

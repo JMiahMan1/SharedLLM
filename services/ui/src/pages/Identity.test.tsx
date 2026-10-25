@@ -47,7 +47,7 @@ describe('Identity page', () => {
   it('only offers Test for services the backend can test', async () => {
     renderWithProviders(<Identity />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /OpenRouter$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Private Git$/ }));
     expect(screen.queryByRole('button', { name: /^test$/i })).toBeNull();
   });
 });
