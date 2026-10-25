@@ -37,6 +37,7 @@ registerPlugin(MediaSessionPlugin.class);
 registerPlugin(CommsPlugin.class);
         registerPlugin(GuardPlugin.class);
         registerPlugin(HealthConnectPlugin.class);
+        registerPlugin(DeviceInfoPlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

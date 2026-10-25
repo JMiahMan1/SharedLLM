@@ -101,6 +101,25 @@ describe('the device detail sheet', () => {
     expect(screen.getByTestId('device-detail-capabilities')).toHaveTextContent('camera');
   });
 
+  it('names the kind, not just the raw server string', async () => {
+    await open(PHONE.device_key);
+    expect(screen.getByTestId('device-detail-kind')).toHaveTextContent('Phone');
+  });
+
+  it('names a watch as a watch', async () => {
+    await open(WATCH.device_key);
+    expect(screen.getByTestId('device-detail-kind')).toHaveTextContent('Watch');
+  });
+
+  it('surfaces the capability values, not only their names', async () => {
+    await open(PHONE.device_key);
+    const caps = screen.getByTestId('device-detail-capabilities');
+    expect(caps).toHaveTextContent('camera');
+    expect(caps).toHaveTextContent('on'); // camera: true
+    expect(caps).toHaveTextContent('storage');
+    expect(caps).toHaveTextContent('ok');
+  });
+
   it('shows the steps this device contributed', async () => {
     await open(WATCH.device_key);
     const chart = await screen.findByTestId('device-steps');

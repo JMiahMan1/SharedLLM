@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Activity, BatteryMedium, Footprints, X } from 'lucide-react';
 import { api } from '../../services/api';
+import { deviceKindLabel } from '../../lib/deviceKind';
 import type { CompanionDevice } from '../../types/api';
 
 const TOUCH = 'min-h-11 pointer-coarse:min-h-11';
@@ -9,11 +10,12 @@ const TOUCH = 'min-h-11 pointer-coarse:min-h-11';
 /**
  * Which step source a device's numbers arrive under, when it sends any.
  *
- * A phone reports as "phone" and a watch as "watch". A light sends nothing,
- * and an assistant only if it happens to run a step counter, so an unmapped
- * kind simply has no steps section rather than an empty one.
+ * The app reports steps under "phone" whatever the form factor, so a tablet's
+ * steps are the "phone" source too. A watch reports as "watch". A light sends
+ * nothing, and an assistant only if it happens to run a step counter, so an
+ * unmapped kind simply has no steps section rather than an empty one.
  */
-const STEP_SOURCE: Record<string, string> = { phone: 'phone', watch: 'watch' };
+const STEP_SOURCE: Record<string, string> = { phone: 'phone', tablet: 'phone', watch: 'watch' };
 
 export interface SparklinePoint {
   /** Position on the x-axis, in epoch milliseconds. */
@@ -89,6 +91,36 @@ function summariseExtra(extra: Record<string, unknown>): string {
     .filter(([, v]) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')
     .map(([k, v]) => `${k}: ${v}`)
     .join(' · ');
+}
+
+/** One capability as a readable value; an absent one is "unknown", not a guess. */
+function capabilityValue(value: unknown): string {
+  if (value === null || value === undefined) return 'unknown';
+  if (typeof value === 'boolean') return value ? 'on' : 'off';
+  if (Array.isArray(value)) return value.length ? value.map(String).join(', ') : 'none';
+  if (typeof value === 'object') return 'unknown';
+  return String(value);
+}
+
+/**
+ * The device's reported capabilities, flattened one level.
+ *
+ * The phone reports its guard state nested under `guard` (usageAccess,
+ * adminActive, deviceOwner, webFilterActive, bypassApps, ...); flattening that
+ * one level reads better than a single JSON line and keeps every real field.
+ */
+function capabilityRows(caps: Record<string, unknown>): Array<[string, string]> {
+  const rows: Array<[string, string]> = [];
+  for (const [key, value] of Object.entries(caps)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const [subKey, subValue] of Object.entries(value as Record<string, unknown>)) {
+        rows.push([subKey, capabilityValue(subValue)]);
+      }
+    } else {
+      rows.push([key, capabilityValue(value)]);
+    }
+  }
+  return rows;
 }
 
 function StepsSection({ source, userId }: { source: string; userId: string }) {
@@ -245,7 +277,7 @@ export function DeviceDetailSheet({ device, onClose }: DeviceDetailSheetProps) {
   // whose they are: an unowned device has no step owner to read, and guessing
   // the caller would attribute their own walk to someone else's watch.
   const stepOwner = device.owner_username || '';
-  const caps = Object.keys(device.capabilities ?? {});
+  const caps = capabilityRows(device.capabilities ?? {});
 
   return (
     <div
@@ -273,8 +305,8 @@ export function DeviceDetailSheet({ device, onClose }: DeviceDetailSheetProps) {
                 {name}
               </span>
             </p>
-            <p className="text-[11px] text-slate-500 mt-0.5 uppercase tracking-wide">
-              {device.kind}
+            <p className="text-[11px] text-slate-500 mt-0.5 uppercase tracking-wide" data-testid="device-detail-kind">
+              {deviceKindLabel(device.kind)}
               {device.owner_username ? ` · ${device.owner_username}` : ''}
             </p>
           </div>
@@ -308,11 +340,23 @@ export function DeviceDetailSheet({ device, onClose }: DeviceDetailSheetProps) {
           <Fact label="Firmware" value={device.esphome_version ?? device.hardware} />
         </dl>
 
-        {caps.length > 0 && (
-          <p className="mt-2 text-[11px] text-slate-500" data-testid="device-detail-capabilities">
-            Reports: {caps.join(', ')}
-          </p>
-        )}
+        <section className="mt-4">
+          <h3 className="text-xs font-semibold text-slate-300 mb-1.5">Capabilities</h3>
+          {caps.length === 0 ? (
+            <p className="text-xs text-slate-500" data-testid="device-detail-capabilities-empty">
+              This device has not reported what it can do yet.
+            </p>
+          ) : (
+            <ul className="space-y-1" data-testid="device-detail-capabilities">
+              {caps.map(([label, value], i) => (
+                <li key={`${label}-${i}`} className="flex justify-between gap-2 text-[11px]">
+                  <span className="text-slate-400">{label}</span>
+                  <span className="min-w-0 break-words text-right text-slate-200">{value}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         {source && stepOwner && (
           <section className="mt-4">

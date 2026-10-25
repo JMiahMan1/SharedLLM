@@ -39,7 +39,9 @@ const QUICK_PRESETS = [
 
 /** "media_player.kitchen_speaker" -> "Kitchen speaker". */
 function deviceLabel(deviceId: string): string {
-  if (deviceId === 'phone' || deviceId === 'mobile' || deviceId === 'apk') return 'Mobile App (Phone)';
+  // The phone/tablet app registers under one of these ids; the app runs on
+  // either form factor, so the label does not claim "phone".
+  if (deviceId === 'phone' || deviceId === 'mobile' || deviceId === 'apk') return 'Mobile App';
   const name = deviceId
     .replace(/^media_player\./, '')
     .replace(/^esphome[:.]/, '')

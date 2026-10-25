@@ -21,6 +21,7 @@ const native = (over: Partial<Parameters<typeof __setImpl>[0]> = {}) =>
     isNative: () => true,
     getAppInfo: async () => ({ version: '1.5.0', build: '24' }),
     getDeviceInfo: async () => ({ model: 'Pixel 7', manufacturer: 'Google', osVersion: '14' }),
+    getFormFactor: async () => 'phone',
     post: async () => {},
     ...over,
   });
@@ -82,6 +83,28 @@ describe('registerThisDevice', () => {
     expect(sent!.os_version).toBe('14');
   });
 
+  it('sends the form factor the native side reports', async () => {
+    let sent: DeviceRegistration | null = null;
+    restore = native({ getFormFactor: async () => 'tablet', post: async (p) => { sent = p; } });
+
+    await registerThisDevice();
+
+    expect(sent!.form_factor).toBe('tablet');
+  });
+
+  it('leaves the form factor out rather than guessing when it cannot be read', async () => {
+    let sent: DeviceRegistration | null = null;
+    restore = native({
+      getFormFactor: async () => { throw new Error('no plugin'); },
+      post: async (p) => { sent = p; },
+    });
+
+    const result = await registerThisDevice();
+
+    expect(result.registered).toBe(true);
+    expect(sent!.form_factor).toBeUndefined();
+  });
+
   it('still registers when the hardware plugin is missing', async () => {
     let sent: DeviceRegistration | null = null;
     restore = native({
@@ -119,7 +142,7 @@ describe('registerThisDevice', () => {
     // The payload type has no such fields; assert on the wire to be sure a
     // future edit cannot quietly add one.
     expect(Object.keys(sent!).sort()).toEqual(
-      ['app_build', 'app_version', 'device_key', 'manufacturer', 'model', 'os_version'].sort(),
+      ['app_build', 'app_version', 'device_key', 'form_factor', 'manufacturer', 'model', 'os_version'].sort(),
     );
   });
 

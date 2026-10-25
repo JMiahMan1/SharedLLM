@@ -18,6 +18,7 @@ from services.identity import models
 from services.identity.models import (
     ADVANCED_DEVICE_KINDS,
     DEVICE_KINDS,
+    MOBILE_DEVICE_KINDS,
     NO_OPT_IN_EVENTS,
     AssistantConversation,
     CapabilityGap,
@@ -122,12 +123,18 @@ class TestNoOptInEventAllowlist:
 class TestDeviceKinds:
     def test_the_kinds_are_declared(self):
         # watch: a companion device paired from Jarvis with its on-screen code
-        assert DEVICE_KINDS == ("phone", "assistant", "light", "watch")
+        # tablet: a self-registering mobile device, like a phone but bigger
+        assert DEVICE_KINDS == ("phone", "tablet", "assistant", "light", "watch")
+
+    def test_mobile_kinds_are_the_self_registering_ones(self):
+        """A phone and a tablet are a person's own device; the sleep estimate
+        joins them, and only they self-register on login."""
+        assert MOBILE_DEVICE_KINDS == ("phone", "tablet")
 
     def test_light_is_excluded_from_the_advanced_panel(self):
         """A light has no screen and nothing to install; a watch has both."""
         assert "light" not in ADVANCED_DEVICE_KINDS
-        assert set(ADVANCED_DEVICE_KINDS) == {"phone", "assistant", "watch"}
+        assert set(ADVANCED_DEVICE_KINDS) == {"phone", "tablet", "assistant", "watch"}
 
     def test_device_kind_defaults_to_phone(self):
         assert Device.model_fields["kind"].default == "phone"

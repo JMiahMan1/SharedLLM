@@ -3,8 +3,9 @@
 The behaviours pinned here are the ones that make the registry safe rather than
 merely functional:
 
-* a phone is a phone -- ``kind`` is not client-controlled, and an existing
-  assistant/light cannot be silently reclassified by whoever holds its key;
+* a phone is a phone -- ``kind`` is not client-controlled beyond the mobile
+  form factor the app may declare, and an existing assistant/light cannot be
+  silently reclassified by whoever holds its key;
 * the caller's address is read from the request, never accepted from the body,
   so nobody can write an arbitrary IP into someone else's device row;
 * assignment is admin-side, because a device able to claim an owner would let
@@ -126,6 +127,22 @@ class TestSelfRegistration:
         assert resp.status_code == 200
         assert resp.json()["kind"] == "phone"
 
+    def test_a_tablet_registers_as_a_tablet(self, client: TestClient):
+        resp = client.post(REGISTER, json=_phone_payload(form_factor="tablet"))
+        assert resp.status_code == 200
+        assert resp.json()["kind"] == "tablet"
+
+    def test_a_phone_form_factor_is_honoured(self, client: TestClient):
+        assert client.post(REGISTER, json=_phone_payload(form_factor="phone")).json()["kind"] == "phone"
+
+    @pytest.mark.parametrize("kind", ["watch", "assistant", "light", "toaster", "Phone"])
+    def test_a_non_mobile_form_factor_is_rejected(self, client: TestClient, session: Session, kind: str):
+        """The client may name only phone/tablet. Anything else (including a
+        companion kind, or the wrong case) is a 422 and registers nothing."""
+        resp = client.post(REGISTER, json=_phone_payload(form_factor=kind))
+        assert resp.status_code == 422
+        assert session.exec(select(Device)).all() == []
+
     def test_a_short_key_is_rejected(self, client: TestClient):
         assert client.post(REGISTER, json={"device_key": "abc"}).status_code == 422
 
@@ -153,6 +170,23 @@ class TestDeviceReclassification:
         assert device.registered_by == "admin"
         assert device.owner_username is None
 
+    def test_a_self_registered_phone_can_be_corrected_to_a_tablet(self, client: TestClient, session: Session):
+        client.post(REGISTER, json=_phone_payload())
+        resp = client.post(REGISTER, json=_phone_payload(form_factor="tablet"))
+        assert resp.status_code == 200
+        assert resp.json()["kind"] == "tablet"
+        assert session.exec(select(Device)).one().kind == "tablet"
+
+    def test_a_self_registered_tablet_can_be_corrected_to_a_phone(self, client: TestClient):
+        client.post(REGISTER, json=_phone_payload(form_factor="tablet"))
+        assert client.post(REGISTER, json=_phone_payload(form_factor="phone")).json()["kind"] == "phone"
+
+    def test_an_absent_form_factor_leaves_the_existing_kind_alone(self, client: TestClient):
+        """An older client that never learned to send a form factor must not
+        turn a corrected tablet back into a phone."""
+        client.post(REGISTER, json=_phone_payload(form_factor="tablet"))
+        assert client.post(REGISTER, json=_phone_payload()).json()["kind"] == "tablet"
+
 
 class TestVisibility:
     def test_a_normal_user_sees_only_their_own(self, client: TestClient, session: Session):
@@ -177,6 +211,13 @@ class TestAdminRegistration:
         """A phone registers itself; an admin creating one would bypass the
         idempotency and let a stale duplicate exist."""
         resp = login(session, "jeremiah").post("/api/user-panel/devices", json={"device_key": "p1", "kind": "phone"})
+        assert resp.status_code == 422
+        assert "themselves" in resp.json()["detail"]
+
+    def test_tablets_may_not_be_created_by_an_admin(self, session: Session):
+        """A tablet self-registers the same way a phone does."""
+        _client(session)
+        resp = login(session, "jeremiah").post("/api/user-panel/devices", json={"device_key": "t1", "kind": "tablet"})
         assert resp.status_code == 422
         assert "themselves" in resp.json()["detail"]
 
@@ -432,8 +473,15 @@ class TestCompanionClaim:
         resp = client.post(CLAIM, json=_claim(device_key="phone-abc12345"))
         assert resp.status_code == 409
 
-    def test_kind_phone_is_not_claimable(self, client: TestClient):
-        assert client.post(CLAIM, json=_claim(kind="phone")).status_code == 422
+    def test_a_tablet_cannot_be_claimed(self, client: TestClient):
+        assert client.post(REGISTER, json=_phone_payload(form_factor="tablet")).status_code == 200
+        resp = client.post(CLAIM, json=_claim(device_key="phone-abc12345"))
+        assert resp.status_code == 409
+        assert "phone or tablet" in resp.json()["detail"]
+
+    @pytest.mark.parametrize("kind", ["phone", "tablet"])
+    def test_a_mobile_kind_is_not_claimable(self, client: TestClient, kind: str):
+        assert client.post(CLAIM, json=_claim(kind=kind)).status_code == 422
 
     def test_unknown_owner_is_an_error(self, client: TestClient):
         assert client.post(CLAIM, json=_claim(owner_username="nobody")).status_code == 404
@@ -497,7 +545,7 @@ class TestBatteryReports:
 
 def test_internal_owned_devices_lists_a_persons_phones_and_tablets(client: TestClient, session: Session):
     assert client.post(REGISTER, json=_phone_payload(device_key="phone-abc12345")).status_code == 200
-    assert client.post(REGISTER, json=_phone_payload(device_key="tablet-xyz98765")).status_code == 200
+    assert client.post(REGISTER, json=_phone_payload(device_key="tablet-xyz98765", form_factor="tablet")).status_code == 200
     session.add(Device(device_key="assistant-kitchen-1", kind="assistant", registered_by="admin", owner_username="michele"))
     session.commit()
 

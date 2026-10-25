@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Battery, BatteryCharging, BatteryLow, Lightbulb, Loader2, Mic, Plus, Search, Smartphone, Watch, X, Cpu } from 'lucide-react';
+import { Battery, BatteryCharging, BatteryLow, Lightbulb, Loader2, Mic, Plus, Search, Smartphone, Tablet, Watch, X, Cpu } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { DeviceDetailSheet, Sparkline } from './DeviceDetailSheet';
+import { deviceKindLabel } from '../../lib/deviceKind';
 import type { BatteryReading, CompanionDevice, DiscoveredDevice } from '../../services/api';
 
 /**
@@ -20,6 +21,7 @@ import type { BatteryReading, CompanionDevice, DiscoveredDevice } from '../../se
 
 const KIND_ICON: Record<string, LucideIcon> = {
   phone: Smartphone,
+  tablet: Tablet,
   watch: Watch,
   assistant: Mic,
   light: Lightbulb,
@@ -348,7 +350,7 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
                   <BatteryChip reading={d.battery} />
                 </button>
               )}
-              <span className="text-[10px] uppercase tracking-widest text-slate-500">{d.kind}</span>
+              <span className="text-[10px] uppercase tracking-widest text-slate-500">{deviceKindLabel(d.kind)}</span>
               {scope === 'all' && (
                 <select
                   aria-label={`Owner of ${name}`}

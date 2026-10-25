@@ -1,11 +1,21 @@
 import { useQuery } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
-import { BatteryMedium, Check, KeyRound, ShieldAlert, Smartphone, X } from 'lucide-react';
+import { BatteryMedium, Check, Cpu, KeyRound, Lightbulb, Mic, ShieldAlert, Smartphone, Tablet, Watch, X } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { api } from '../../../services/api';
 import MemberCard from '../MemberCard';
 import { relativeTime } from '../../../lib/wanderTrips';
+import { deviceKindLabel } from '../../../lib/deviceKind';
 import type { MemberDevice, MemberGuardState } from '../../../types/api';
 import { tamperText } from '../../../lib/guardTamper';
+
+const KIND_ICON: Record<string, LucideIcon> = {
+  phone: Smartphone,
+  tablet: Tablet,
+  watch: Watch,
+  assistant: Mic,
+  light: Lightbulb,
+};
 
 const GUARD_ROWS: Array<{ key: keyof MemberGuardState; label: string }> = [
   { key: 'adminActive', label: 'Device admin (no plain uninstall)' },
@@ -37,8 +47,8 @@ function DeviceCard({ device }: { device: MemberDevice }) {
   ];
   return (
     <MemberCard
-      title={device.label || device.model || 'Phone'}
-      icon={Smartphone}
+      title={device.label || device.model || deviceKindLabel(device.kind)}
+      icon={KIND_ICON[device.kind] ?? Cpu}
       testId={`member-device-${device.device_key}`}
       aside={
         device.battery?.pct !== null && device.battery?.pct !== undefined ? (
@@ -92,7 +102,7 @@ function DeviceCard({ device }: { device: MemberDevice }) {
             )}
           </ul>
         ) : (
-          <p className="text-slate-500">This phone has not reported its protection yet (it does from the next app update).</p>
+          <p className="text-slate-500">This device has not reported its protection yet (it does from the next app update).</p>
         )}
       </div>
     </MemberCard>
@@ -115,7 +125,7 @@ export default function DevicesSection({ username, name }: { username: string; n
         wide
         isLoading={isLoading}
         error={refused ? 'Device details are for the father and admins.' : error ? 'Devices could not be loaded.' : null}
-        empty={data && data.devices.length === 0 ? `${name} has no registered devices yet. A phone registers when they sign in to the Jarvis app.` : null}
+        empty={data && data.devices.length === 0 ? `${name} has no registered devices yet. A phone or tablet registers when they sign in to the Jarvis app.` : null}
       />
     );
   }
