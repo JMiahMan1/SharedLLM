@@ -1,6 +1,8 @@
 """The calendar client is kept per exact login, so Nextcloud is not asked to
 check the password again on every calendar view."""
 
+import time
+
 from services.execution import personal_data
 from services.execution.personal_data import NextcloudPersonalDataProvider
 
@@ -25,5 +27,7 @@ def test_a_kept_client_is_replaced_after_a_while(monkeypatch):
     monkeypatch.setattr(personal_data, "_CALDAV_CLIENTS", {})
     first = _provider().calendar_client()
     key = next(iter(personal_data._CALDAV_CLIENTS))
-    personal_data._CALDAV_CLIENTS[key] = (first, 0.0)
+    # Older than the TTL on this clock. Not 0.0: a CI runner that booted a few
+    # minutes ago has a monotonic clock smaller than the TTL itself.
+    personal_data._CALDAV_CLIENTS[key] = (first, time.monotonic() - personal_data._CALDAV_CLIENT_TTL_S - 1)
     assert _provider().calendar_client() is not first
