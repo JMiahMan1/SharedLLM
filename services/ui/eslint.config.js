@@ -19,4 +19,22 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // Media follows the active theme and the artwork accent (§6.5): no fixed
+    // hues in its classes. Use var(--site-*) / var(--media-accent) tokens.
+    files: ['src/features/media/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/\\b(cyan|purple|pink|amber|fuchsia|violet)-\\d{2,3}/]',
+          message: 'Use theme tokens (var(--site-*), var(--media-accent)) instead of fixed colour classes in features/media.',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/\\b(cyan|purple|pink|amber|fuchsia|violet)-\\d{2,3}/]',
+          message: 'Use theme tokens (var(--site-*), var(--media-accent)) instead of fixed colour classes in features/media.',
+        },
+      ],
+    },
+  },
 ])

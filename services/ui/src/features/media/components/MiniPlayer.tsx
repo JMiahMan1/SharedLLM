@@ -43,9 +43,9 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
       className="fixed inset-x-3 bottom-[calc(var(--bottom-bar)+1.25rem)] z-40 mx-auto max-w-2xl"
       data-testid="mini-player"
     >
-      <div className="glass-panel relative overflow-hidden rounded-2xl border border-cyan-500/25 shadow-lg shadow-black/30">
+      <div className="glass-panel relative overflow-hidden rounded-2xl border border-[var(--site-accent-border)] shadow-lg shadow-black/30">
         <div className="absolute inset-x-0 top-0 h-0.5 bg-white/10">
-          <div className="h-full bg-cyan-400 transition-[width] duration-500" style={{ width: `${pct}%` }} />
+          <div className="h-full bg-[var(--media-accent,var(--site-accent))] transition-[width] duration-500" style={{ width: `${pct}%` }} />
         </div>
         <div className="flex items-center gap-2 p-2 pl-3">
           {image ? (
@@ -60,7 +60,7 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
               layoutId="np-art"
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/10"
             >
-              <Music size={17} className="text-cyan-300" aria-hidden />
+              <Music size={17} className="text-[var(--media-accent,var(--site-accent-text))]" aria-hidden />
             </motion.div>
           )}
           {onOpen ? (
@@ -83,7 +83,7 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
               <button
                 type="button"
                 onClick={() => void player.play().catch(() => {})}
-                className="min-h-11 shrink-0 rounded-xl bg-cyan-500/20 px-3 text-sm text-cyan-100 hover:bg-cyan-500/30"
+                className="min-h-11 shrink-0 rounded-xl bg-[var(--site-accent-soft)] px-3 text-sm text-[var(--media-accent,var(--site-accent-text))] hover:bg-[var(--site-accent-hover)]"
               >
                 Take over
               </button>
@@ -102,7 +102,7 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
                 type="button"
                 aria-label={player.isPlaying ? 'Pause' : 'Play'}
                 onClick={() => (player.isPlaying ? player.pause() : player.play())}
-                className="flex min-h-11 min-w-11 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-xl bg-[var(--site-accent-soft)] text-[var(--media-accent,var(--site-accent-text))] hover:bg-[var(--site-accent-hover)]"
               >
                 {player.isPlaying ? <Pause size={18} /> : <Play size={18} />}
               </button>

@@ -327,7 +327,7 @@ export default function NowPlayingSheet({
                     aria-pressed={isFavorite}
                     className={iconButton}
                   >
-                    <Heart size={22} className={isFavorite ? 'fill-rose-400 text-rose-400' : ''} />
+                    <Heart size={22} className={isFavorite ? 'fill-current text-[var(--media-accent,var(--site-accent-text))]' : ''} />
                   </button>
                 ) : null}
               </div>
@@ -355,7 +355,7 @@ export default function NowPlayingSheet({
                     onClick={() => void toggleShuffle()}
                     aria-label="Shuffle"
                     aria-pressed={shuffle}
-                    className={`${iconButton} ${shuffle ? 'text-cyan-300' : ''}`}
+                    className={`${iconButton} ${shuffle ? 'text-[var(--media-accent,var(--site-accent-text))]' : ''}`}
                   >
                     <Shuffle size={21} />
                   </button>
@@ -396,7 +396,7 @@ export default function NowPlayingSheet({
                     onClick={() => void cycleRepeat()}
                     aria-label={`Repeat ${repeatMode}`}
                     aria-pressed={repeatMode !== 'off'}
-                    className={`${iconButton} ${repeatMode !== 'off' ? 'text-cyan-300' : ''}`}
+                    className={`${iconButton} ${repeatMode !== 'off' ? 'text-[var(--media-accent,var(--site-accent-text))]' : ''}`}
                   >
                     {repeatMode === 'one' ? <Repeat1 size={21} /> : <Repeat size={21} />}
                   </button>
@@ -487,7 +487,7 @@ export default function NowPlayingSheet({
                   onClick={() => setSleepMenu((value) => !value)}
                   aria-expanded={sleepMenu}
                   aria-label="Sleep timer"
-                  className={`flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-xs ${sleepAt !== null ? 'bg-cyan-500/15 text-cyan-200' : 'text-slate-300 hover:bg-white/10'}`}
+                  className={`flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-xs ${sleepAt !== null ? 'bg-[var(--site-accent-soft)] text-[var(--media-accent,var(--site-accent-text))]' : 'text-slate-300 hover:bg-white/10'}`}
                 >
                   <Timer size={16} aria-hidden />
                   <span className="max-w-[38vw] truncate">

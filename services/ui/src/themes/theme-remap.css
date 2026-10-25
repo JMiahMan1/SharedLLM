@@ -133,8 +133,6 @@
 [data-site-theme-active] .to-indigo-950\/20 { --tw-gradient-to: color-mix(in srgb, var(--site-accent) 20%, transparent); }
 [data-site-theme-active] .to-purple-400 { --tw-gradient-to: var(--site-accent); }
 [data-site-theme-active] .to-purple-500\/10 { --tw-gradient-to: color-mix(in srgb, var(--site-accent) 10%, transparent); }
-[data-site-theme-active] .to-purple-500\/30 { --tw-gradient-to: color-mix(in srgb, var(--site-accent) 30%, transparent); }
-[data-site-theme-active] .to-purple-500\/5 { --tw-gradient-to: color-mix(in srgb, var(--site-accent) 5%, transparent); }
 [data-site-theme-active] .via-indigo-950\/40 { --tw-gradient-via: color-mix(in srgb, var(--site-accent) 20%, transparent); }
 [data-site-theme-active] .via-purple-500\/10 { --tw-gradient-via: color-mix(in srgb, var(--site-accent) 10%, transparent); }
 [data-site-theme-active] .via-purple-900\/90 { --tw-gradient-via: color-mix(in srgb, var(--site-accent) 20%, transparent); }
@@ -148,7 +146,6 @@
 [data-theme-scheme="dark"] .text-amber-300\/70 { color: color-mix(in srgb, oklch(87.9% 0.169 91.605) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-amber-400\/70 { color: color-mix(in srgb, oklch(82.8% 0.189 84.429) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-amber-500\/40 { color: color-mix(in srgb, oklch(76.9% 0.188 70.08) 85%, transparent) !important; }
-[data-theme-scheme="dark"] .text-cyan-200\/70 { color: color-mix(in srgb, oklch(91.7% 0.08 205.041) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-emerald-400\/70 { color: color-mix(in srgb, oklch(76.5% 0.177 163.223) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-red-400\/60 { color: color-mix(in srgb, oklch(70.4% 0.191 22.216) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-red-400\/70 { color: color-mix(in srgb, oklch(70.4% 0.191 22.216) 85%, transparent) !important; }
@@ -313,9 +310,7 @@
 [data-theme-scheme="light"] .text-amber-500\/80 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-blue-300 { color: oklch(48.8% 0.243 264.376) !important; }
 [data-theme-scheme="light"] .text-blue-400 { color: oklch(48.8% 0.243 264.376) !important; }
-[data-theme-scheme="light"] .text-cyan-100 { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .text-cyan-200 { color: oklch(52% 0.105 223.128) !important; }
-[data-theme-scheme="light"] .text-cyan-200\/70 { color: color-mix(in srgb, oklch(52% 0.105 223.128) 70%, transparent) !important; }
 [data-theme-scheme="light"] .text-cyan-300 { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .text-cyan-400 { color: oklch(52% 0.105 223.128) !important; }
 [data-theme-scheme="light"] .text-emerald-100 { color: oklch(50.8% 0.118 165.612) !important; }

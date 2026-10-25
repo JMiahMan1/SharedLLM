@@ -375,7 +375,7 @@ export default function QueueSheet({ open, onClose }: { open: boolean; onClose: 
           >
             <header className="flex items-center justify-between border-b border-white/10 px-4 py-2">
               <div className="flex items-center gap-2">
-                <ListMusic size={17} className="text-cyan-300" aria-hidden />
+                <ListMusic size={17} className="text-[var(--media-accent,var(--site-accent-text))]" aria-hidden />
                 <h2 className="text-base font-semibold text-white">Queue</h2>
               </div>
               <button
@@ -396,7 +396,7 @@ export default function QueueSheet({ open, onClose }: { open: boolean; onClose: 
               ) : null}
 
               {error ? (
-                <p className="mb-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">
+                <p className="mb-3 rounded-xl border border-[var(--color-border-mid)] bg-[var(--site-card-bg)] px-3 py-2 text-xs text-[var(--site-text)]">
                   Could not load the queue. It will refresh automatically.
                 </p>
               ) : null}
@@ -404,16 +404,16 @@ export default function QueueSheet({ open, onClose }: { open: boolean; onClose: 
               {currentEntry ? (
                 <section aria-label="Now playing">
                   <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Now playing</h3>
-                  <div className="flex items-center gap-3 rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-2">
+                  <div className="flex items-center gap-3 rounded-xl border border-[var(--site-accent-border)] bg-[var(--site-accent-soft)] p-2">
                     <QueueArt entry={currentEntry} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-white">{currentEntry.name}</p>
-                      <p className="truncate text-xs text-cyan-200">
+                      <p className="truncate text-xs text-[var(--media-accent,var(--site-accent-text))]">
                         {isPlaying ? 'Playing' : 'Paused'}
                         {currentEntry.artist ? ` · ${currentEntry.artist}` : ''}
                       </p>
                     </div>
-                    <span className="w-10 shrink-0 text-right text-[11px] tabular-nums text-cyan-200/70">
+                    <span className="w-10 shrink-0 text-right text-[11px] tabular-nums text-[var(--site-text-muted)]">
                       {currentEntry.duration > 0 ? formatDuration(currentEntry.duration) : ''}
                     </span>
                   </div>
