@@ -4,12 +4,6 @@ import groupsMediaFixture from '../../../../e2e/fixtures/media/groups-media.json
 import mediaStatusFixture from '../../../../e2e/fixtures/media/media-status.json';
 import transportFixture from '../../../../e2e/fixtures/media/transport.json';
 import playFixture from '../../../../e2e/fixtures/media/play.json';
-import maPlaylistsFixture from '../../../../e2e/fixtures/media/ma-playlists.json';
-import maRecentFixture from '../../../../e2e/fixtures/media/ma-recent.json';
-import maSearchFixture from '../../../../e2e/fixtures/media/ma-search.json';
-import absLibrariesFixture from '../../../../e2e/fixtures/media/abs-libraries.json';
-import absLibraryFixture from '../../../../e2e/fixtures/media/abs-library.json';
-import absSearchFixture from '../../../../e2e/fixtures/media/abs-search.json';
 import absLastPlayedFixture from '../../../../e2e/fixtures/media/abs-last-played.json';
 import absExecuteFixture from '../../../../e2e/fixtures/media/abs-execute.json';
 import mediaHomeFixture from '../../../../e2e/fixtures/media/media-home.json';
@@ -40,24 +34,6 @@ export const mediaHandlers = [
     HttpResponse.json({ status: 'SUCCESS', message: 'Local playback state synced.' })
   ),
   http.get('/api/media/detail', () => HttpResponse.json({})),
-  http.get('/api/media/music-assistant/playlists', () =>
-    HttpResponse.json(maPlaylistsFixture)
-  ),
-  http.get('/api/media/music-assistant/recent', () =>
-    HttpResponse.json(maRecentFixture)
-  ),
-  http.get('/api/media/music-assistant/search', () =>
-    HttpResponse.json(maSearchFixture)
-  ),
-  http.get('/api/media/audiobookshelf/libraries', () =>
-    HttpResponse.json(absLibrariesFixture)
-  ),
-  http.get('/api/media/audiobookshelf/library/:libraryId', () =>
-    HttpResponse.json(absLibraryFixture)
-  ),
-  http.get('/api/media/audiobookshelf/search', () =>
-    HttpResponse.json(absSearchFixture)
-  ),
   http.get('/api/media/audiobookshelf/last-played', () =>
     HttpResponse.json(absLastPlayedFixture)
   ),

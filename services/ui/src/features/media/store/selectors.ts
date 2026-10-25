@@ -1,4 +1,4 @@
-import type { DeviceOption } from '../../../components/media/types';
+import type { DeviceOption } from '../types';
 import { formatDeviceLabel } from '../../../lib/deviceLabels';
 import type { OutputId, RemotePlayer } from '../types';
 import type { MediaStoreState } from './mediaStore';

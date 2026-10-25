@@ -1,6 +1,6 @@
 import type { MaPlayerListEntry } from '../../../lib/deviceLabels';
 import { formatDeviceLabel } from '../../../lib/deviceLabels';
-import type { MediaStatus } from '../../../components/media/types';
+import type { MediaStatus } from '../types';
 import type { NowPlayingItem, OutputId, PlaybackStatus, RemotePlayer, RepeatMode } from '../types';
 
 /**

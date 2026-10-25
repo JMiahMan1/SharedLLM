@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { MediaStatus } from '../../../components/media/types';
+import type { MediaStatus } from '../types';
 import {
   EMPTY_PLAYERS, ingest, livePosition, toStatus, touchMute, touchVolume, VOLUME_GRACE_MS,
   type MediaEvent, type PlayersState,

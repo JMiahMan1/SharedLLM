@@ -1,6 +1,9 @@
 import { defineConfig, devices, type PlaywrightTestConfig } from '@playwright/test';
 
-const HERMETIC_BASE_URL = 'http://localhost:5179';
+// Override per checkout (HERMETIC_PORT) when several run the suite at once:
+// the dev server is reused, so a shared port would serve another checkout's code.
+const HERMETIC_PORT = process.env.HERMETIC_PORT || '5179';
+const HERMETIC_BASE_URL = `http://localhost:${HERMETIC_PORT}`;
 
 const projects: PlaywrightTestConfig['projects'] = [
   {
@@ -55,7 +58,7 @@ export default defineConfig({
   workers: 1,
   reporter: 'html',
   webServer: {
-    command: 'npx vite --port 5179 --strictPort',
+    command: `npx vite --port ${HERMETIC_PORT} --strictPort`,
     url: HERMETIC_BASE_URL,
     reuseExistingServer: true,
   },

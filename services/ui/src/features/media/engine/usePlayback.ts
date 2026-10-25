@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useHaptics } from '../../../hooks/useHaptics';
 import { errorText } from '../../../lib/errorText';
-import type { PlayRequest, QueueOption } from '../../../components/media/types';
+import type { PlayRequest, QueueOption } from '../types';
 import { useMediaStore } from '../store/mediaStore';
 import { outputKind, type OutputId, type RepeatMode } from '../types';
 import { adapterFor, type WebPlayerHandle } from './adapters/adapters';

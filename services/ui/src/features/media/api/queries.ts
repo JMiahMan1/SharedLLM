@@ -26,24 +26,6 @@ export function useMediaHome() {
   return useQuery({ queryKey: mediaKeys.home(), queryFn: getMediaHome, ...MEDIA_QUERY_DEFAULTS });
 }
 
-export function usePlaylists(enabled = true) {
-  return useQuery({
-    queryKey: mediaKeys.playlists(),
-    queryFn: () => api.getMusicAssistantPlaylists(),
-    enabled,
-    ...MEDIA_QUERY_DEFAULTS,
-  });
-}
-
-export function useRecent(enabled = true) {
-  return useQuery({
-    queryKey: mediaKeys.recent(),
-    queryFn: () => api.getMusicAssistantRecent(),
-    enabled,
-    ...MEDIA_QUERY_DEFAULTS,
-  });
-}
-
 /** Audiobookshelf books with their progress (Continue listening). */
 export function useBooksInProgress(enabled = true) {
   return useQuery({

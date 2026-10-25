@@ -5,13 +5,13 @@ import {
   Cast, Check, Headphones, Loader2, Speaker, Tv, Volume2, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useOptionalWebPlayer } from '../../context/webPlayerContext';
-import { api } from '../../services/api';
-import { formatDeviceLabel } from '../../lib/deviceLabels';
-import { sendMaRemoteCommand } from '../../lib/maRemotePlayer';
-import { cn } from '../../lib/utils';
-import { haPlayerAdapter, maPlayerAdapter } from '../../features/media/engine/adapters/adapters';
-import type { MediaStatus } from './types';
+import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
+import { api } from '../../../services/api';
+import { formatDeviceLabel } from '../../../lib/deviceLabels';
+import { sendMaRemoteCommand } from '../../../lib/maRemotePlayer';
+import { cn } from '../../../lib/utils';
+import { haPlayerAdapter, maPlayerAdapter } from '../engine/adapters/adapters';
+import type { MediaStatus } from '../types';
 
 type Section = 'speaker' | 'tv' | 'group';
 

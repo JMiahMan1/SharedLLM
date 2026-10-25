@@ -3,22 +3,22 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import OutputSheet from './OutputSheet';
-import { MediaPlayerContext } from '../../context/webPlayerContext';
-import type { SharedPlayer } from '../../context/webPlayerContext';
-import { sendMaRemoteCommand } from '../../lib/maRemotePlayer';
+import { MediaPlayerContext } from '../../../context/webPlayerContext';
+import type { SharedPlayer } from '../../../context/webPlayerContext';
+import { sendMaRemoteCommand } from '../../../lib/maRemotePlayer';
 
-vi.mock('../../services/api', () => ({
+vi.mock('../../../services/api', () => ({
   api: {
     mediaStatus: vi.fn(),
     mediaTransport: vi.fn().mockResolvedValue({ status: 'SUCCESS' }),
   },
 }));
 
-vi.mock('../../lib/maRemotePlayer', () => ({
+vi.mock('../../../lib/maRemotePlayer', () => ({
   sendMaRemoteCommand: vi.fn().mockResolvedValue([]),
 }));
 
-import { api } from '../../services/api';
+import { api } from '../../../services/api';
 
 function player(over: Partial<SharedPlayer> = {}): SharedPlayer {
   return {

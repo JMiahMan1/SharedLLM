@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { api } from '../../../services/api';
 import { listRemoteMaPlayers } from '../../../lib/maRemotePlayer';
-import type { MediaStatus } from '../../../components/media/types';
+import type { MediaStatus } from '../types';
 import type { SharedPlayer } from '../../../context/webPlayerContext';
 import { useMediaStore } from '../store/mediaStore';
 import { MediaEventStream } from './eventStream';

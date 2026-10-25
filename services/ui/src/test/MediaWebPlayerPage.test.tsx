@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from './setup';
+import { Route, Routes } from 'react-router-dom';
 import { renderWithProviders } from './render';
 import { chooseOutput, mediaItem, openOutputPicker, serveHome } from './mediaScreens';
 
@@ -212,16 +213,19 @@ describe('Media page: when a provider is down', () => {
 });
 
 describe('Media page: browse', () => {
-  it('opens an Audiobookshelf podcast to its episodes and plays the one picked (BUG-43)', async () => {
-    server.use(
-      http.get('/api/media/audiobookshelf/search', () => HttpResponse.json({
-        status: 'SUCCESS', books: [], authors: [],
-        podcasts: [{ id: 'pod-1', title: 'Daily Pod', author: 'Host' }],
-      })),
-    );
+  it('opens an Audiobookshelf podcast from search to its episodes and plays the one picked (BUG-43)', async () => {
     const asked: string[] = [];
     const episodeUri = 'audiobookshelf--x://podcast_episode/pod-1 ep-9';
     server.use(
+      http.get('/api/media/search', () => HttpResponse.json({
+        top: null, tracks: [], artists: [], albums: [], playlists: [], audiobooks: [], authors: [],
+        podcasts: [{ uri: 'abs://pod-1', name: 'Daily Pod', media_type: 'podcast', artist: 'Host', artist_uri: '', album: '', album_uri: '', image: '', duration: null, version: '', favorite: null }],
+        errors: { ma: null, abs: null },
+      })),
+      http.get('/api/media/item', () => HttpResponse.json({
+        uri: 'abs://pod-1', name: 'Daily Pod', media_type: 'podcast', artist: 'Host', album: '', image: '', duration: null,
+        description: '', children: [], errors: { ma: null, abs: null },
+      })),
       http.get('/api/media/podcast-episodes', ({ request }) => {
         asked.push(new URL(request.url).searchParams.get('abs_item_id') || '');
         return HttpResponse.json({
@@ -230,13 +234,9 @@ describe('Media page: browse', () => {
         });
       }),
     );
-    renderWithProviders(<Media />);
-    await userEvent.click(await screen.findByRole('button', { name: /Browse all media/i }));
-    const dialog = await screen.findByRole('dialog', { name: /browse media/i });
-    await userEvent.click(within(dialog).getByRole('tab', { name: /Audiobooks/i }));
-    await userEvent.type(within(dialog).getByRole('searchbox', { name: 'Search' }), 'daily');
-    await userEvent.click(await within(dialog).findByRole('button', { name: /Daily Pod/ }));
-    await userEvent.click(await within(dialog).findByRole('button', { name: /^Monday news/ }));
+    renderWithProviders(<Routes><Route path="/media/*" element={<Media />} /></Routes>, { route: '/media/search?q=daily' });
+    await userEvent.click(await screen.findByRole('link', { name: /Daily Pod/ }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Play Monday news' }));
     await waitFor(() => expect(p.state.play).toHaveBeenCalledWith(episodeUri));
     expect(asked).toEqual(['pod-1']);
   });

@@ -1,10 +1,10 @@
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Music, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
-import { useOptionalWebPlayer } from '../../context/webPlayerContext';
-import { proxiedImage } from '../../lib/mediaImage';
-import { useMediaToken } from '../../lib/mediaToken';
-import { useMediaStore } from '../../features/media/store/mediaStore';
+import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
+import { proxiedImage } from '../../../lib/mediaImage';
+import { useMediaToken } from '../../../lib/mediaToken';
+import { useMediaStore } from '../store/mediaStore';
 
 /**
  * The web player above the page, so music does not disappear when the reader

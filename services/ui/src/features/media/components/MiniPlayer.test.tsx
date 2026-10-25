@@ -3,10 +3,10 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import MiniPlayer from './MiniPlayer';
-import { resetMediaTokenForTests } from '../../lib/mediaToken';
-import { MediaPlayerContext } from '../../context/webPlayerContext';
-import type { SharedPlayer } from '../../context/webPlayerContext';
-import { useMediaStore } from '../../features/media/store/mediaStore';
+import { resetMediaTokenForTests } from '../../../lib/mediaToken';
+import { MediaPlayerContext } from '../../../context/webPlayerContext';
+import type { SharedPlayer } from '../../../context/webPlayerContext';
+import { useMediaStore } from '../store/mediaStore';
 
 function player(over: Partial<SharedPlayer> = {}): SharedPlayer {
   return {

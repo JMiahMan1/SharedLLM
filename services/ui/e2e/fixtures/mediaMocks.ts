@@ -48,12 +48,6 @@ const NO_ERRORS = { ma: null, abs: null };
 
 function emptyVariant(name: string): unknown {
   switch (name) {
-    case 'ma-recent': return { status: 'ok', recent: [] };
-    case 'ma-playlists': return { status: 'ok', playlists: [] };
-    case 'ma-search': return { status: 'ok', tracks: [] };
-    case 'abs-libraries': return { status: 'ok', libraries: [] };
-    case 'abs-library': return { status: 'ok', books: [] };
-    case 'abs-search': return { status: 'ok', books: [] };
     case 'abs-last-played': return { status: 'ok', books: [] };
     case 'media-home': return { recent: [], continue: [], playlists: [], favorites: [], radio: [], errors: NO_ERRORS };
     case 'media-search': return { top: null, tracks: [], artists: [], albums: [], playlists: [], audiobooks: [], podcasts: [], authors: [], errors: NO_ERRORS };
@@ -193,12 +187,6 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
   await page.route('**/execute/media/state/sync', json('state-sync'));
   await page.route('**/execute/audiobookshelf', json('abs-execute', 'abs'));
 
-  await page.route('**/api/media/music-assistant/recent', json('ma-recent', 'ma'));
-  await page.route('**/api/media/music-assistant/playlists', json('ma-playlists', 'ma'));
-  await page.route('**/api/media/music-assistant/search**', json('ma-search', 'ma'));
-  await page.route('**/api/media/audiobookshelf/libraries', json('abs-libraries', 'abs'));
-  await page.route('**/api/media/audiobookshelf/library/**', json('abs-library', 'abs'));
-  await page.route('**/api/media/audiobookshelf/search**', json('abs-search', 'abs'));
   await page.route('**/api/media/audiobookshelf/last-played', json('abs-last-played', 'abs'));
   await page.route('**/api/media/detail**', json('media-detail'));
   await page.route('**/api/media/favorite', json('favorite'));

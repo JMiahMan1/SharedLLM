@@ -6,7 +6,7 @@ import { api } from '../../../services/api';
 import { useHaptics } from '../../../hooks/useHaptics';
 import { useSharedMAWebPlayer } from '../../../context/MediaPlayerContext';
 import type { SharedPlayer } from '../../../context/webPlayerContext';
-import type { DeviceOption } from '../../../components/media/types';
+import type { DeviceOption } from '../types';
 import { mediaKeys } from '../api/keys';
 import { useMediaStatusFeed } from '../engine/statusFeed';
 import { usePlayback } from '../engine/usePlayback';
