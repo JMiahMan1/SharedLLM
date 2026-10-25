@@ -12,10 +12,24 @@ import org.junit.Test;
 public class DeviceOwnerRulesTest {
 
     @Test
-    public void aDeviceOwnerOnAProtectedPhoneAddsBothRestrictions() {
+    public void aDeviceOwnerOnAProtectedPhoneAddsEveryRestriction() {
         assertEquals(new HashSet<>(Arrays.asList(
-                        DeviceOwnerRules.DISALLOW_SAFE_BOOT, DeviceOwnerRules.DISALLOW_FACTORY_RESET)),
+                        DeviceOwnerRules.DISALLOW_SAFE_BOOT, DeviceOwnerRules.DISALLOW_FACTORY_RESET,
+                        DeviceOwnerRules.DISALLOW_USER_SWITCH, DeviceOwnerRules.DISALLOW_ADD_USER,
+                        DeviceOwnerRules.DISALLOW_DEBUGGING_FEATURES, DeviceOwnerRules.DISALLOW_CONFIG_VPN,
+                        DeviceOwnerRules.DISALLOW_CONFIG_PRIVATE_DNS)),
                 DeviceOwnerRules.restrictions(true, true));
+    }
+
+    @Test
+    public void theRestrictionValuesMatchAndroidsUserManagerConstants() {
+        assertEquals("no_safe_boot", DeviceOwnerRules.DISALLOW_SAFE_BOOT);
+        assertEquals("no_factory_reset", DeviceOwnerRules.DISALLOW_FACTORY_RESET);
+        assertEquals("no_user_switch", DeviceOwnerRules.DISALLOW_USER_SWITCH);
+        assertEquals("no_add_user", DeviceOwnerRules.DISALLOW_ADD_USER);
+        assertEquals("no_debugging_features", DeviceOwnerRules.DISALLOW_DEBUGGING_FEATURES);
+        assertEquals("no_config_vpn", DeviceOwnerRules.DISALLOW_CONFIG_VPN);
+        assertEquals("no_config_private_dns", DeviceOwnerRules.DISALLOW_CONFIG_PRIVATE_DNS);
     }
 
     @Test
@@ -29,7 +43,7 @@ public class DeviceOwnerRulesTest {
     public void theRestrictionsComeOffOnlyWhenTheServerSaysThisIsNoLongerAMinorsPhone() {
         assertTrue(DeviceOwnerRules.restrictionsToClear(true, true, true).isEmpty()); // still a minor
         assertTrue(DeviceOwnerRules.restrictionsToClear(true, false, false).isEmpty()); // no status yet: keep them
-        assertEquals(2, DeviceOwnerRules.restrictionsToClear(true, false, true).size()); // the server said not a minor
+        assertEquals(7, DeviceOwnerRules.restrictionsToClear(true, false, true).size()); // the server said not a minor
         assertTrue(DeviceOwnerRules.restrictionsToClear(false, false, true).isEmpty()); // not device owner
     }
 

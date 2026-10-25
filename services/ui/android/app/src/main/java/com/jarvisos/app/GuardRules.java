@@ -30,6 +30,11 @@ public final class GuardRules {
 
     /** The app's own name as Settings and the uninstaller show it. */
     static final String APP_LABEL = "jarvis os";
+    /**
+     * The Accessibility service's label, as its detail page (and the services
+     * list) shows it; distinct from {@link #APP_LABEL}, which names the app.
+     */
+    static final String GUARD_SERVICE_LABEL = "jarvis screen guard";
     static final String OWN_PACKAGE = "com.jarvisos.app";
 
     /** The package installer: its uninstall dialog names the app. */
@@ -144,6 +149,18 @@ public final class GuardRules {
     /** Android's VPN dialogs; the one that manages a running VPN can disconnect the web filter. */
     static final String VPN_DIALOGS = "com.android.vpndialogs";
 
+    /**
+     * Settings text on a page that would get around the guard: resetting or
+     * erasing the phone, granting usage access, or handing the phone to another
+     * user (Users / Add user), where Jarvis is not installed. Matched only on
+     * Settings pages, so the same words elsewhere (a web page, an app) are left
+     * alone. "usage access" and not "usage" so ordinary pages such as Data usage
+     * are not covered.
+     */
+    static final Set<String> TAMPER_TEXTS = new HashSet<>(Arrays.asList(
+            "factory reset", "erase all data", "erase everything",
+            "usage access", "add user", "user & account", "users"));
+
     /** A screen that would uninstall Jarvis or switch its protection off. */
     static boolean isTamperScreen(String pkg, String lowerCls, String lowerText) {
         boolean namesJarvis = lowerText.contains(APP_LABEL);
@@ -157,8 +174,20 @@ public final class GuardRules {
         }
         if (SETTINGS.contains(pkg)) {
             // Device admin apps, and any page about Jarvis itself (app info,
-            // its accessibility switch, force stop, clear storage).
-            return lowerCls.contains("deviceadmin") || namesJarvis;
+            // its accessibility switch, force stop, clear storage). The guard's
+            // own Accessibility detail page names its service label, not the app.
+            // The factory reset, usage access and Users pages are ways around it.
+            return lowerCls.contains("deviceadmin") || namesJarvis
+                    || lowerText.contains(GUARD_SERVICE_LABEL)
+                    || containsAny(lowerText, TAMPER_TEXTS);
+        }
+        return false;
+    }
+
+    /** Whether any of {@code needles} appears in {@code text}. */
+    private static boolean containsAny(String text, Collection<String> needles) {
+        for (String needle : needles) {
+            if (text.contains(needle)) return true;
         }
         return false;
     }

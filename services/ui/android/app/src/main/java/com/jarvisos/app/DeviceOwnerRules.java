@@ -18,6 +18,11 @@ import java.util.Set;
  *   - the uninstall block makes removing Jarvis impossible (Android refuses it),
  *   - DISALLOW_SAFE_BOOT closes safe mode as a way around the guard,
  *   - DISALLOW_FACTORY_RESET closes the factory reset as a way around it,
+ *   - DISALLOW_USER_SWITCH and DISALLOW_ADD_USER close the second user or guest
+ *     that would run without Jarvis and escape the guard,
+ *   - DISALLOW_DEBUGGING_FEATURES closes adb / USB debugging as a way in,
+ *   - DISALLOW_CONFIG_VPN and DISALLOW_CONFIG_PRIVATE_DNS keep the web filter
+ *     from being switched off from Settings,
  *   - a screen-time lock is a real OS lock (lockNow), not only going home.
  * A parent's unlock window lifts the lock (they can use the phone); the uninstall
  * block and the restrictions stay, since removing them needs more than the
@@ -30,9 +35,21 @@ public final class DeviceOwnerRules {
     public static final String DISALLOW_SAFE_BOOT = "no_safe_boot";
     /** Android's UserManager.DISALLOW_FACTORY_RESET value: the factory reset is refused. */
     public static final String DISALLOW_FACTORY_RESET = "no_factory_reset";
+    /** Android's UserManager.DISALLOW_USER_SWITCH value: no switching to another user who has no guard. */
+    public static final String DISALLOW_USER_SWITCH = "no_user_switch";
+    /** Android's UserManager.DISALLOW_ADD_USER value: no second user or guest to escape into. */
+    public static final String DISALLOW_ADD_USER = "no_add_user";
+    /** Android's UserManager.DISALLOW_DEBUGGING_FEATURES value: no USB debugging / adb way in. */
+    public static final String DISALLOW_DEBUGGING_FEATURES = "no_debugging_features";
+    /** Android's UserManager.DISALLOW_CONFIG_VPN value: the web filter's VPN cannot be switched off. */
+    public static final String DISALLOW_CONFIG_VPN = "no_config_vpn";
+    /** Android's UserManager.DISALLOW_CONFIG_PRIVATE_DNS value: Private DNS cannot be moved off the filter. */
+    public static final String DISALLOW_CONFIG_PRIVATE_DNS = "no_config_private_dns";
 
     private static final Set<String> RESTRICTIONS = Collections.unmodifiableSet(
-            new LinkedHashSet<>(Arrays.asList(DISALLOW_SAFE_BOOT, DISALLOW_FACTORY_RESET)));
+            new LinkedHashSet<>(Arrays.asList(DISALLOW_SAFE_BOOT, DISALLOW_FACTORY_RESET,
+                    DISALLOW_USER_SWITCH, DISALLOW_ADD_USER, DISALLOW_DEBUGGING_FEATURES,
+                    DISALLOW_CONFIG_VPN, DISALLOW_CONFIG_PRIVATE_DNS)));
 
     private DeviceOwnerRules() {}
 

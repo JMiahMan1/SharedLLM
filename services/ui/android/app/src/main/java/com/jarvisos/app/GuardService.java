@@ -11,6 +11,7 @@ import android.net.VpnService;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.UserManager;
 import android.provider.Settings;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -44,7 +45,8 @@ import java.util.concurrent.TimeUnit;
  * Every visible window counts, not only the one in front: an app kept on
  * screen in split screen or picture-in-picture is closed like any other. A
  * phone start in which the guard never ran (safe mode) is reported at the
- * next normal start.
+ * next normal start, and a second user or guest (which has no guard) is
+ * reported as soon as it is seen.
  *
  * The rules come from the server's status (refreshed every minute, kept for
  * offline); GuardRules, InstallApprovals, PermissionGate and LockWarning make
@@ -79,6 +81,11 @@ public class GuardService extends AccessibilityService {
      * (which would re-lock the child away from the parent-unlock screen).
      */
     private volatile boolean hardLocked = false;
+    /**
+     * A second user or guest was seen on this protected phone (reported once
+     * per guard run): that user has no Jarvis and no guard, so it is a way out.
+     */
+    private volatile boolean multiUserReported = false;
 
     @Override
     protected void onServiceConnected() {
@@ -101,6 +108,7 @@ public class GuardService extends AccessibilityService {
             syncWebFilter();
             checkInstalls();
             checkFilterBypass();
+            checkMultiUser();
             // A lock that starts while the child is already in an app.
             main.post(this::checkCurrentWindow);
         }, 0, REFRESH_SECONDS, TimeUnit.SECONDS);
@@ -368,6 +376,28 @@ public class GuardService extends AccessibilityService {
             GuardApi.setLastGuardBoot(this, boot);
         } catch (Exception ignored) {
             // No boot counter on this phone: nothing to compare.
+        }
+    }
+
+    /**
+     * A second user or guest has no Jarvis and no guard, so it is a way out.
+     * UserManager counts the users on the phone and says whether this one is the
+     * system user; a protected phone should have only that one. Reported once
+     * per guard run, through the same tamper path as everything else.
+     */
+    private void checkMultiUser() {
+        try {
+            if (!GuardApi.isProtected(this) || GuardApi.isUnlocked(this)) return;
+            UserManager um = (UserManager) getSystemService(Context.USER_SERVICE);
+            if (um == null) return;
+            if (um.getUserCount() > 1 || !um.isSystemUser()) {
+                if (!multiUserReported) {
+                    multiUserReported = true;
+                    GuardApi.reportTamper(this, "multi_user");
+                }
+            }
+        } catch (Exception ignored) {
+            // No user manager on this phone: nothing to compare.
         }
     }
 

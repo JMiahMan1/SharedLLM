@@ -5807,6 +5807,7 @@ _TAMPER_EVENTS = {
     "private_dns_attempt": "tried to change Private DNS, a way around the web filter",
     "other_vpn": "is running another VPN in place of Jarvis's web filter",
     "boot_without_guard": "started without Jarvis's guard (safe mode, most likely)",
+    "multi_user": "has a second user or guest, where Jarvis's guard is not set up",
 }
 
 #: Longest detail kept with a tamper report (an app's name, a DNS host, a count).
