@@ -5,6 +5,7 @@ import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
 import { proxiedImage } from '../../../lib/mediaImage';
 import { useMediaToken } from '../../../lib/mediaToken';
 import { useMediaStore } from '../store/mediaStore';
+import { accentStyle, useArtworkAccent } from '../engine/artworkColor';
 
 /**
  * The web player above the page, so music does not disappear when the reader
@@ -17,6 +18,7 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
   // Re-render once the signed media token for the cover URL arrives.
   useMediaToken();
   const otherTab = useMediaStore((s) => s.playingInOtherTab);
+  const accent = useArtworkAccent(player?.mediaImage);
   if (!player || !player.mediaTitle || location.pathname.startsWith('/media')) return null;
 
   const pct = player.duration > 0 ? Math.min(100, Math.max(0, (player.position / player.duration) * 100)) : 0;
@@ -41,6 +43,7 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
         if (info.offset.y < -28 || info.velocity.y < -300) onOpen?.();
       }}
       className="fixed inset-x-3 bottom-[calc(var(--bottom-bar)+1.25rem)] z-40 mx-auto max-w-2xl"
+      style={accentStyle(accent)}
       data-testid="mini-player"
     >
       <div className="glass-panel relative overflow-hidden rounded-2xl border border-[var(--site-accent-border)] shadow-lg shadow-black/30">
