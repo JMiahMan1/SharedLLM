@@ -105,6 +105,11 @@ public class GuardService extends AccessibilityService {
             boolean hard = hardLockWanted();
             if (hard && !hardLocked) DeviceOwnerGuard.lockNow(this);
             hardLocked = hard;
+            // Layer 2: a remote wipe a parent queued (Phase 12 MDM) erases the
+            // phone. Only a device owner may, so the pure decision gates it.
+            if (DeviceOwnerRules.shouldWipe(DeviceOwnerGuard.isOwner(this), GuardApi.wipeRequested(this))) {
+                DeviceOwnerGuard.wipeData(this);
+            }
             syncWebFilter();
             checkInstalls();
             checkFilterBypass();

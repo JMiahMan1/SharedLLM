@@ -71,4 +71,11 @@ public class DeviceOwnerRulesTest {
         assertFalse(DeviceOwnerRules.hardLock(true, true, true, true)); // a parent's unlock window
         assertFalse(DeviceOwnerRules.hardLock(true, false, true, false)); // an adult's phone
     }
+
+    @Test
+    public void aRemoteWipeRunsOnlyOnADeviceOwnerWithAQueuedWipe() {
+        assertTrue(DeviceOwnerRules.shouldWipe(true, true));
+        assertFalse(DeviceOwnerRules.shouldWipe(true, false)); // nothing was requested
+        assertFalse(DeviceOwnerRules.shouldWipe(false, true)); // not device owner: Android would refuse it
+    }
 }

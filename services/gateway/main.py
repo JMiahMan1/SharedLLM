@@ -31,6 +31,7 @@ from services.common import guardian_recap as _recap
 from services.common import health_coach as _health_coach
 from services.common import notify as _notify
 from services.common import nutrition_label as _nutrition_label
+from services.common import recipe_ocr as _recipe_ocr
 from services.common import spotify
 from services.common.activity_recommendations import recommend_activity
 from services.common.book_recommendations import book_events, recommend_book
@@ -46,7 +47,7 @@ from services.common.screen_time import evaluate as evaluate_screen_time
 from services.common.secrets import secret_matches
 from services.common.sleep_estimate import estimate_night
 from services.common.video_recommendations import recommend_video
-from services.gateway import calls, drawing, family_safety, network_routes, notices, push_routes
+from services.gateway import calls, drawing, family_safety, mdm, network_routes, notices, push_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
@@ -892,6 +893,7 @@ app.include_router(push_routes.router)
 app.include_router(network_routes.router)
 app.include_router(calls.router)
 app.include_router(drawing.router)
+app.include_router(mdm.router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -5276,6 +5278,48 @@ async def proxy_recipe_import(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/recipes", payload, as_user=body.get("as_user"))
 
 
+_RECIPE_PHOTO_MAX_BYTES = 8 * 1024 * 1024
+
+
+@app.post("/api/recipes/photo")
+async def read_recipe_photo(request: Request):
+    """A photo (or handwriting) of a recipe -> an editable draft (nothing is saved).
+
+    The image goes through the same vision OCR as workspaces, Raven and the
+    Health food label (execution's ``/execute/ocr`` with ``task="recipe"``);
+    ``services/common/recipe_ocr.py`` turns the transcription into the fields
+    the import preview edits. The UI shows the draft beside the raw text and
+    the person saves it through the ordinary recipe save.
+    """
+    creds = await _resolve_acting_identity(request, None)
+    form = await request.form()
+    upload = form.get("image")
+    if not isinstance(upload, UploadFile):
+        raise HTTPException(status_code=422, detail="Attach the photo as 'image'")
+    raw = await upload.read()
+    if not raw:
+        raise HTTPException(status_code=422, detail="The photo is empty")
+    if len(raw) > _RECIPE_PHOTO_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="The photo is larger than 8 MB")
+    payload = {"user_context": creds, "image_base64": base64.b64encode(raw).decode(), "task": "recipe"}
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/ocr",
+                json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=300.0),
+            )
+            result = await resp.json(content_type=None) if resp.status == 200 else None
+    except Exception as exc:
+        log.warning("[recipes] photo OCR failed: %s", exc)
+        result = None
+    if not isinstance(result, dict) or result.get("status") == "FAILURE":
+        reason = (result or {}).get("message") if isinstance(result, dict) else None
+        raise HTTPException(status_code=502, detail=reason or "The photo could not be read. Type the recipe instead.")
+    return _recipe_ocr.parse(result.get("detail") or {})
+
+
 @app.post("/api/activity")
 async def post_activity(request: Request):
     """A light activity beacon from the app: what a person opened or did."""
@@ -5798,6 +5842,9 @@ async def screen_time_status(request: Request, username: str):
         # app permissions ({"pkg|group": ...}); the phone's guard enforces them.
         "app_approvals": (body.get("approvals") or {}).get("apps") or {},
         "permission_approvals": (body.get("approvals") or {}).get("permissions") or {},
+        # A parent queued a remote wipe (Phase 12 MDM): the phone's guard reads
+        # this and erases itself. False unless one was explicitly queued.
+        "wipe_requested": mdm.wipe_requested(username),
         **state,
     }
     # The phone and the father read it all; the mother reads it without the
@@ -6095,12 +6142,18 @@ async def screen_time_pause(request: Request, username: str):
     status, body = await _identity_as_caller(request, "POST", f"/api/screen-time/{username}/pause", json=payload)
     if status == 200:
         paused = not payload.get("resume")
-        await _screen_time_notice(
-            [username],
-            "Phone paused" if paused else "Phone unpaused",
-            "A parent paused your phone for now." if paused else "Your phone is back on.",
-            "/health",
-        )
+        # Who paused: a grown member pausing their own phone hears "you"; a
+        # parent pausing a child's hears "a parent". The actor is the caller
+        # identity resolves, the subject is the member the route names.
+        creds = await _resolve_identity_from_request(request)
+        actor = str((creds or {}).get("user") or "").strip().lower()
+        subject = str((body or {}).get("username") or username).strip().lower()
+        mine = bool(actor) and actor == subject
+        if paused:
+            title, text = "Phone paused", "You paused your phone for now." if mine else "A parent paused your phone for now."
+        else:
+            title, text = "Phone unpaused", "Your phone is back on."
+        await _screen_time_notice([username], title, text, "/health")
     return JSONResponse(status_code=status, content=body)
 
 

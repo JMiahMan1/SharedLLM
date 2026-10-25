@@ -36,6 +36,7 @@ import Settings from './pages/Settings';
 import Wander from './pages/Wander';
 import Health from './pages/Health';
 import Guardian from './pages/Guardian';
+import Devices from './pages/Devices';
 import FamilyMember from './pages/FamilyMember';
 import Bible from './pages/Bible';
 import { initAppUpdater } from './lib/appUpdater';
@@ -152,6 +153,7 @@ function App() {
             {/* The family guardian hub; `/guardian?child=…` (older notices) still
                 opens that child's family member page. */}
             <Route path="/guardian" element={<ProtectedRoute isMobile={isMobile}><Guardian /></ProtectedRoute>} />
+            <Route path="/devices" element={<ProtectedRoute isMobile={isMobile}><Devices /></ProtectedRoute>} />
             <Route path="/bible" element={<ProtectedRoute isMobile={isMobile}><Bible /></ProtectedRoute>} />
             {/* Historic alias for the same page. Redirecting rather than
                 mounting a second copy keeps one URL per page, so the query

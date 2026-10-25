@@ -430,6 +430,43 @@ export interface MemberDevices {
   offline_code: Record<string, boolean>;
 }
 
+/** One family device in the MDM inventory (HANDOVER.md Phase 12). */
+export interface MdmDevice extends MemberDevice {
+  owner_username: string;
+  owner_display_name: string;
+}
+
+/** A family member's row in the inventory: readable, or why it is not. */
+export interface MdmMember {
+  username: string;
+  display_name: string;
+  device_count: number | null;
+  readable: boolean;
+  reason: string | null;
+}
+
+export interface MdmInventory {
+  devices: MdmDevice[];
+  members: MdmMember[];
+  generated_at: string;
+}
+
+/** One file in a shared School or Library folder. */
+export interface MdmSharedFile {
+  name: string;
+  size: number | null;
+  sha256: string | null;
+  content_type: string | null;
+  uploaded_by: string | null;
+  uploaded_at: string | null;
+}
+
+export interface MdmFolder {
+  folder: 'school' | 'library';
+  files: MdmSharedFile[];
+  pushed_to: string[];
+}
+
 /** One thing content monitoring found on a child's phone. */
 export interface GuardianConcern {
   category: string;
@@ -3422,6 +3459,29 @@ export interface FoodLabelDraft {
   missing: string[];
   /** The label gives values per 100 g and no serving size. */
   per_100g: boolean;
+}
+
+/** A recipe read from a photo or handwriting (services/common/recipe_ocr.py): a draft only. */
+export interface RecipePhotoDraft {
+  /** The raw OCR transcription, shown beside the draft. */
+  raw_text: string;
+  /** The structured reading the model returned; empty fields stay empty. */
+  recipe: {
+    title: string;
+    description: string;
+    ingredients: string[];
+    instructions: string[];
+    prep_minutes: number | null;
+    cook_minutes: number | null;
+    total_minutes: number | null;
+    yield: string;
+    image: string | null;
+    notes: string;
+  };
+  /** Words the model was unsure about, for a person to check before saving. */
+  uncertain: string[];
+  /** Of title, ingredients and steps, the parts the photo did not yield. */
+  missing: string[];
 }
 
 /** A cheer for a family member's day (services/health/cheers.py): a fixed kind, never free text. */

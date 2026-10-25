@@ -85,4 +85,15 @@ public final class DeviceOwnerRules {
     public static boolean hardLock(boolean deviceOwner, boolean protectedPhone, boolean locked, boolean unlocked) {
         return deviceOwner && protectedPhone && locked && !unlocked;
     }
+
+    /**
+     * Whether to erase the phone now: a parent queued a remote wipe and this is
+     * a device owner. Only a device owner may call
+     * {@code DevicePolicyManager.wipeData}, so without one the request is a no-op
+     * rather than a silent failure that looks like success. Never true unless a
+     * wipe was actually requested.
+     */
+    public static boolean shouldWipe(boolean deviceOwner, boolean wipeRequested) {
+        return deviceOwner && wipeRequested;
+    }
 }
