@@ -131,13 +131,14 @@ export default function ListenNowPage() {
           {nothingAtAll && !maProblem && !absProblem ? (
             <EmptyState title="Nothing here yet" detail="Music and books you play show up here." />
           ) : null}
-          {shelf('Continue listening', continueCards.map(card))}
+          {shelf('Continue listening', continueCards.map(card), { seeAll: '/media/library/audiobooks' })}
           {shelf('Recently played', items(recent))}
           {shelf('Your playlists', items(home.data?.playlists ?? []), {
+            seeAll: '/media/library/playlists',
             empty: maProblem || nothingAtAll ? null : <EmptyState title="No playlists yet" detail="Playlists you make in your music library appear here." />,
           })}
-          {shelf('Favorites', items(home.data?.favorites ?? []))}
-          {shelf('Radio', items(home.data?.radio ?? []))}
+          {shelf('Favorites', items(home.data?.favorites ?? []), { seeAll: '/media/library/favorites' })}
+          {shelf('Radio', items(home.data?.radio ?? []), { seeAll: '/media/library/radio' })}
         </>
       )}
 

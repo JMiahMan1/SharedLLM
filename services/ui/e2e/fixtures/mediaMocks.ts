@@ -223,7 +223,7 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
   await page.route('**/api/media/search**', json('media-search'));
   await page.route('**/api/media/item**', json('media-item'));
   await page.route('**/api/media/library/**', json('media-library'));
-  await page.route('**/api/media/favorites', json('media-favorites'));
+  await page.route('**/api/media/favorites**', json('media-favorites'));
   await page.route('**/api/media/abs/progress', json('abs-progress'));
   await page.route('**/api/media/token', json('media-token'));
   await page.route('**/api/media/podcast-episodes**', json('podcast-episodes', 'ma'));

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronRight, Loader2 } from 'lucide-react';
 import { formatDuration } from '../format';
@@ -21,7 +21,7 @@ export interface RowItem extends MenuItemSource {
  * selected output, with a spinner on this row only while it starts.
  */
 export function TrackRow({
-  item, index, subtitle, badge, showArt = true, onPlay,
+  item, index, subtitle, badge, showArt = true, onPlay, style, className = '',
 }: {
   item: RowItem;
   /** Track number instead of artwork (album pages). */
@@ -31,6 +31,9 @@ export function TrackRow({
   showArt?: boolean;
   /** Play differently than the item itself (e.g. a book chapter seeks). */
   onPlay?: () => void;
+  /** Positioning from a virtualized list. */
+  style?: CSSProperties;
+  className?: string;
 }) {
   const { playback } = useMediaScreen();
   const kind = itemKind(item);
@@ -68,7 +71,7 @@ export function TrackRow({
   );
 
   return (
-    <li className="flex items-center gap-1">
+    <li className={`flex items-center gap-1 ${className}`} style={style}>
       {to ? (
         <Link to={to} data-result className={`${row} min-w-0 flex-1`} aria-label={`${item.name}, ${KIND_LABEL[kind].toLowerCase()}`}>{body}</Link>
       ) : (
