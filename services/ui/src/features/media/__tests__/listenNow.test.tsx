@@ -84,7 +84,7 @@ describe('item helpers', () => {
 
   it('maps items to play requests', () => {
     expect(playRequestFor({ uri: 'library://track/1', name: 'T', media_type: 'track' })).toEqual({ kind: 'uri', uri: 'library://track/1', title: 'T' });
-    expect(playRequestFor({ uri: 'abs://b1', name: 'B', media_type: 'audiobook' })).toEqual({ kind: 'abs', id: 'b1', title: 'B' });
+    expect(playRequestFor({ uri: 'abs://b1', name: 'B', media_type: 'audiobook', duration: 600 })).toEqual({ kind: 'abs', id: 'b1', title: 'B', durationSec: 600 });
     expect(playRequestFor({ uri: 'abs://p1', name: 'P', media_type: 'podcast' })).toBeNull();
     expect(playRequestFor({ uri: 'library://artist/1', name: 'A', media_type: 'artist' })).toBeNull();
     expect(playRequestFor({ uri: '', name: 'X', media_type: 'track' })).toBeNull();

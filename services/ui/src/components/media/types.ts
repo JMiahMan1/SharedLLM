@@ -3,7 +3,7 @@
  *  time; everything else is already a Music Assistant URI. */
 export type PlayRequest =
   | { kind: 'uri'; uri: string; title: string }
-  | { kind: 'abs'; id: string; title: string };
+  | { kind: 'abs'; id: string; title: string; /** The book's length, when known (for progress). */ durationSec?: number | null };
 
 /** Starts playback of `req`; `key` identifies the row that shows the spinner. */
 export type PlayHandler = (req: PlayRequest, key: string) => Promise<void>;

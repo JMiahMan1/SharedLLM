@@ -47,6 +47,14 @@ export function usePlayback(web: WebPlayerHandle) {
     const id = targetRef.current;
     try {
       await adapter(id).play(id, req);
+      // A book's progress is written back to Audiobookshelf while it plays;
+      // anything else started on the same output ends that.
+      const { absSession, actions } = store();
+      if (req.kind === 'abs') {
+        actions.setAbsSession({ itemId: req.id, title: req.title, outputId: id, durationSec: req.durationSec ?? null, startedAt: Date.now() });
+      } else if (absSession?.outputId === id) {
+        actions.setAbsSession(null);
+      }
       if (outputKind(id) === 'ha') void refreshMediaStatus();
     } catch (err) {
       setError(errorText(err, 'Playback failed'));

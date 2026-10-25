@@ -91,7 +91,7 @@ function partialVariant(body: unknown, scenario: MediaScenario): unknown {
   return out;
 }
 
-const UNIFIED = new Set(['media-home', 'media-search', 'media-library', 'media-favorites', 'media-item']);
+const UNIFIED = new Set(['media-home', 'media-search', 'media-library', 'media-favorites', 'media-item', 'media-item-book']);
 
 async function respond(
   route: Route,
@@ -221,12 +221,20 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
 
   await page.route('**/api/media/home', json('media-home'));
   await page.route('**/api/media/search**', json('media-search'));
-  await page.route('**/api/media/item**', json('media-item'));
+  await page.route('**/api/media/item**', (route) => {
+    const uri = new URL(route.request().url()).searchParams.get('uri') ?? '';
+    return respond(route, uri.startsWith('abs://') ? 'media-item-book' : 'media-item', scenario, uri.startsWith('abs://') ? 'abs' : undefined);
+  });
   await page.route('**/api/media/library/**', json('media-library'));
   await page.route('**/api/media/favorites**', json('media-favorites'));
   await page.route('**/api/media/abs/progress', json('abs-progress'));
   await page.route('**/api/media/token', json('media-token'));
   await page.route('**/api/media/podcast-episodes**', json('podcast-episodes', 'ma'));
+  // Audiobookshelf ids become Music Assistant URIs before MA can play them.
+  await page.route('**/api/media/ma-library-uri', async (route) => {
+    const body = route.request().postDataJSON() as { abs_item_id?: string; title?: string };
+    await route.fulfill({ json: { status: 'SUCCESS', abs_item_id: body.abs_item_id, ma_uri: `library://audiobook/${body.abs_item_id}`, title: body.title } });
+  });
   // The media event stream: a snapshot and a heartbeat, then the body ends
   // and EventSource reconnects (a fulfilled route cannot stay open).
   await page.route('**/api/media/events**', (route) => (scenario === 'offline' ? route.abort() : fulfillEvents(route)));

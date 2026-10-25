@@ -77,7 +77,7 @@ beforeEach(() => {
 describe('Media page: this device (web player)', () => {
   it('plays a book from Continue listening through the resolved Music Assistant URI', async () => {
     renderWithProviders(<Media />);
-    await userEvent.click(await screen.findByRole('button', { name: /Chronicles of Narnia/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /^Play .*Chronicles of Narnia/i }));
     await waitFor(() => expect(p.state.play).toHaveBeenCalledWith('library://audiobook/260'));
     // The old guess, library://audiobookshelf/book/<uuid>, left the player silent.
     expect(JSON.stringify((p.state.play as ReturnType<typeof vi.fn>).mock.calls)).not.toContain('audiobookshelf');
@@ -85,13 +85,13 @@ describe('Media page: this device (web player)', () => {
 
   it('leaves finished books out of Continue listening', async () => {
     renderWithProviders(<Media />);
-    await screen.findByRole('button', { name: /Chronicles of Narnia/i });
+    await screen.findByRole('button', { name: /^Play .*Chronicles of Narnia/i });
     expect(screen.queryByText('Finished Book')).not.toBeInTheDocument();
   });
 
   it('plays a playlist on the web player', async () => {
     renderWithProviders(<Media />);
-    await userEvent.click(await screen.findByRole('button', { name: /Road Trip/i }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Play Road Trip' }));
     await waitFor(() => expect(p.state.play).toHaveBeenCalledWith('library://playlist/6'));
   });
 
@@ -171,7 +171,7 @@ describe('Media page: device picker', () => {
     );
     renderWithProviders(<Media />);
     await chooseOutput(/Kitchen/);
-    await userEvent.click(await screen.findByRole('button', { name: /Chronicles of Narnia/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /^Play .*Chronicles of Narnia/i }));
     await waitFor(() => expect(plays).toHaveLength(1));
     expect(plays[0]).toMatchObject({ action: 'play', book_id: NARNIA, entity_id: 'media_player.kitchen' });
     expect(p.state.play).not.toHaveBeenCalled();
@@ -199,7 +199,7 @@ describe('Media page: when a provider is down', () => {
     serveHome({ errors: { ma: 'Music Assistant is unreachable: ClientConnectorError', abs: null } });
     renderWithProviders(<Media />);
     expect(await screen.findByText(/Music Assistant did not answer/)).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: /Chronicles of Narnia/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Play .*Chronicles of Narnia/i })).toBeInTheDocument();
   });
 
   it('UX-40 invites a first-run user to connect their services', async () => {
