@@ -108,6 +108,28 @@ def test_a_tamper_report_keeps_what_it_was_about(family):
     assert body["tamper"][0]["extra"] == {"event": "bypass_app", "detail": "Tor Browser"}
 
 
+@pytest.mark.parametrize("owner", ["grown", "dad", "mom"])
+def test_a_tamper_report_from_a_grown_member_is_dropped(family, owner):
+    """Only a minor is monitored: a grown member's own device report is dropped
+    (nothing stored, nobody told) and the answer says so."""
+    act, engine = family
+    body = act("dad").post(f"/api/internal/guard/tamper/{owner}", json={"event": "guard_disabled"}).json()
+    assert body["dropped"] == "not_minor" and body["notify"] == [] and body["parents"] == []
+    with Session(engine) as s:
+        assert s.exec(select(DeviceEvent).where(DeviceEvent.event == "guard_tamper")).first() is None
+
+
+@pytest.mark.parametrize("owner", ["kid", "sib"])
+def test_a_minor_tamper_report_is_still_kept_and_tells_the_parents(family, owner):
+    act, engine = family
+    body = act("dad").post(f"/api/internal/guard/tamper/{owner}", json={"event": "guard_disabled"}).json()
+    assert body.get("dropped") is None
+    assert {"dad", "mom"} <= set(body["notify"])
+    with Session(engine) as s:
+        row = s.exec(select(DeviceEvent).where(DeviceEvent.username == owner, DeviceEvent.event == "guard_tamper")).first()
+    assert row is not None
+
+
 def test_a_weekly_schedule_is_checked_and_kept(family):
     act, _ = family
     ok = act("dad").put("/api/screen-time/kid/rules", json={"day_limits": {"sat": 180, "mon": 60}})
