@@ -2,20 +2,18 @@ import { useState } from 'react';
 import { proxiedImage } from '../../../lib/mediaImage';
 import { useMediaToken } from '../../../lib/mediaToken';
 import { KIND_ICON, type ItemKind } from '../items';
-
-/** The device pixel ratio, capped so a 3x phone does not fetch 4x covers. */
-function dpr(): number {
-  return typeof window === 'undefined' ? 1 : Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-}
+import { imageDpr } from './image';
 
 /**
  * Cover art through the signed image proxy, sized for where it is drawn
  * (`size` css px × device pixel ratio, BUG-11), loaded lazily and decoded off
- * the main thread. Without art, or when it fails, a gradient with the kind's
- * icon stands in; artists are round (UX-28).
+ * the main thread. A `srcSet`/`sizes` pair (P7-T5) lets the browser pick the
+ * 1x or 2x candidate, so a phone does not download a desktop cover and a 1x
+ * screen does not download a 2x one. Without art, or when it fails, a gradient
+ * with the kind's icon stands in; artists are round (UX-28).
  */
 export function Artwork({
-  image, kind, size, className = '', rounded, fill,
+  image, kind, size, className = '', rounded, fill, sizes,
 }: {
   image?: string | null;
   kind: ItemKind;
@@ -25,9 +23,18 @@ export function Artwork({
   rounded?: 'full' | 'card';
   /** Fill the parent's width as a square instead of a fixed size. */
   fill?: boolean;
+  /** The `sizes` hint for the candidate list; defaults to the fixed `size`. */
+  sizes?: string;
 }) {
   useMediaToken(); // re-render once the URL can be signed
-  const src = proxiedImage(image, Math.round(size * dpr()));
+  // The drawn width and its DPR double, deduped so a 1x screen asks for one.
+  const widths = [Math.round(size), Math.round(size * imageDpr())]
+    .filter((w, i, all) => all.indexOf(w) === i);
+  const candidates = widths
+    .map((w) => ({ w, url: proxiedImage(image, w) }))
+    .filter((c): c is { w: number; url: string } => Boolean(c.url));
+  const src = candidates.at(-1)?.url ?? null;
+  const srcSet = candidates.length > 1 ? candidates.map((c) => `${c.url} ${c.w}w`).join(', ') : undefined;
   const [failed, setFailed] = useState<string | null>(null);
   const shape = (rounded ?? (kind === 'artist' || kind === 'author' ? 'full' : 'card')) === 'full'
     ? 'rounded-full'
@@ -42,11 +49,13 @@ export function Artwork({
       {showImage ? (
         <img
           src={src}
+          srcSet={srcSet}
+          sizes={sizes ?? `${Math.round(size)}px`}
           alt=""
           loading="lazy"
           decoding="async"
-          width={size}
-          height={size}
+          width={Math.round(size)}
+          height={Math.round(size)}
           onError={() => setFailed(src)}
           className="h-full w-full object-cover"
         />

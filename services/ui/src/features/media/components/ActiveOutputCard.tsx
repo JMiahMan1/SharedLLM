@@ -5,6 +5,7 @@ import { api } from '../../../services/api';
 import { errorText } from '../../../lib/errorText';
 import { proxiedImage } from '../../../lib/mediaImage';
 import { useMediaToken } from '../../../lib/mediaToken';
+import { imageWidth } from './image';
 import { NowPlayingCard, type NowPlayingView } from './NowPlayingCard';
 import { mediaKeys } from '../api/keys';
 import { useLivePosition } from '../engine/useLivePosition';
@@ -61,7 +62,7 @@ export function ActiveOutputCard() {
     ? {
         title: player.mediaTitle || undefined,
         artist: player.mediaArtist || undefined,
-        coverUrl: proxiedImage(player.mediaImage, 512),
+        coverUrl: proxiedImage(player.mediaImage, imageWidth(80)),
         state: player.isPlaying ? 'playing' : player.mediaTitle ? 'paused' : 'idle',
         position: player.position,
         duration: player.duration,
@@ -70,7 +71,7 @@ export function ActiveOutputCard() {
     : {
         title: detail?.name && maItemUri === remote?.item?.uri ? detail.name : remote?.item?.title,
         artist: [remote?.item?.artist, remote?.item?.album].filter(Boolean).join(' · '),
-        coverUrl: proxiedImage(remote?.item?.image, 512),
+        coverUrl: proxiedImage(remote?.item?.image, imageWidth(80)),
         state: remote?.status === 'buffering' ? 'playing' : remote?.status ?? 'idle',
         position: remotePosition,
         duration: remote?.item?.durationSec ?? 0,

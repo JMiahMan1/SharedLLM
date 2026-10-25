@@ -25,6 +25,7 @@ import { extractMaImage } from '../../../lib/maImage';
 import { proxiedImage } from '../../../lib/mediaImage';
 import { useMediaToken } from '../../../lib/mediaToken';
 import { formatDuration } from '../format';
+import { imageWidth } from './image';
 
 const POLL_MS = 5000;
 const MAX_ITEMS = 500;
@@ -116,9 +117,9 @@ function toEntries(raw: unknown): QueueEntry[] {
 
 function QueueArt({ entry }: { entry: QueueEntry }) {
   useMediaToken();
-  const src = proxiedImage(entry.image);
+  const src = proxiedImage(entry.image, imageWidth(40));
   return src ? (
-    <img src={src} alt="" loading="lazy" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
+    <img src={src} alt="" width={40} height={40} loading="lazy" decoding="async" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
   ) : (
     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/5 text-slate-500">
       <Music size={17} aria-hidden />
