@@ -245,10 +245,17 @@ export async function initAppUpdater(): Promise<void> {
   isInitialized = true;
 
   await getRunningVersion();
-  reconcilePendingUpdate();
 
+  // Detect a new APK install/upgrade BEFORE reconciling: a new native build
+  // ships its own web layer, so an OTA bundle staged under the previous build
+  // (and any version blacklisted because it could not match that old layer) is
+  // stale - the SHA we staged then can never equal the SHA this build runs.
+  // Clearing it here stops every APK upgrade from blacklisting a perfectly
+  // good server version and blocking the next update.
+  let nativeBuildNumber = 1;
+  let lastBuild = 0;
+  let needsNativeReset = false;
   if (Capacitor.isNativePlatform()) {
-    let nativeBuildNumber = 1;
     try {
       const appInfo = await App.getInfo();
       nativeBuildNumber = parseInt(appInfo.build, 10) || 1;
@@ -260,12 +267,19 @@ export async function initAppUpdater(): Promise<void> {
     // build so the APK's bundled assets are what the WebView loads.
     // MUST record the build (and notify ready) BEFORE reset(): reset destroys
     // this JS context and reloads the app; nothing after it runs.
-    const lastBuild = parseInt(readLocal(LAST_NATIVE_BUILD_KEY) || '0', 10) || 0;
-    const needsNativeReset = nativeBuildNumber > lastBuild;
+    lastBuild = parseInt(readLocal(LAST_NATIVE_BUILD_KEY) || '0', 10) || 0;
+    needsNativeReset = nativeBuildNumber > lastBuild;
     if (needsNativeReset || !readLocal(LAST_NATIVE_BUILD_KEY)) {
       writeLocal(LAST_NATIVE_BUILD_KEY, String(nativeBuildNumber));
     }
+    if (needsNativeReset) {
+      resetUpdateGuard();
+    }
+  }
 
+  reconcilePendingUpdate();
+
+  if (Capacitor.isNativePlatform()) {
     try {
       await CapacitorUpdater.notifyAppReady();
       console.log('[AppUpdater] CapGo updater notified: app ready, bundle verified');
