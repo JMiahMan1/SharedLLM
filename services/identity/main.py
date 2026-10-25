@@ -213,6 +213,7 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "git_url", "ALTER TABLE user ADD COLUMN git_url VARCHAR")
         _add_column("user", "git_user", "ALTER TABLE user ADD COLUMN git_user VARCHAR")
         _add_column("user", "git_token_enc", "ALTER TABLE user ADD COLUMN git_token_enc VARCHAR")
+        _add_column("user", "forbidden_branches", "ALTER TABLE user ADD COLUMN forbidden_branches VARCHAR")
         _add_column("user", "router_url", "ALTER TABLE user ADD COLUMN router_url VARCHAR")
         _add_column("user", "router_user", "ALTER TABLE user ADD COLUMN router_user VARCHAR")
         _add_column("user", "router_pass_enc", "ALTER TABLE user ADD COLUMN router_pass_enc VARCHAR")
