@@ -35,6 +35,35 @@ class TestPure:
         assert challenges.progress("sleep_nights", days, **goals) == {"count": 1, "days": ["d2"]}
         assert challenges.progress("cook_nights", days, **goals) == {"count": 1, "days": ["d2"]}
 
+    def test_step_days_count_against_the_members_own_goal(self):
+        days = [
+            {"day": "d1", "steps": 8000},
+            {"day": "d2", "steps": 12000},
+            {"day": "d3", "steps": None},
+            {"day": "d4", "steps": 0},
+        ]
+        assert challenges.progress("step_days", days, step_goal=8000) == {"count": 2, "days": ["d1", "d2"]}
+        assert challenges.progress("step_days", days, step_goal=10000) == {"count": 1, "days": ["d2"]}
+        # Without a known goal no day counts.
+        assert challenges.progress("step_days", days) == {"count": 0, "days": []}
+
+    def test_step_progress_reads_only_the_week_and_missing_is_not_zero(self):
+        start = date(2026, 10, 19)
+        history = {
+            "2026-10-18": 20000,  # the Sunday before: not this week
+            "2026-10-19": 10500,
+            "2026-10-21": 9999,
+            "2026-10-25": 10000,
+            "2026-10-26": 30000,  # next Monday
+        }
+        assert challenges.step_progress(start, history, 10000) == {"count": 2, "days": ["2026-10-19", "2026-10-25"]}
+        assert challenges.step_progress(start, {}, 10000) == {"count": 0, "days": []}
+
+    def test_steps_are_a_geo_kind_not_a_store_kind(self):
+        assert "step_days" in challenges.KINDS and "step_days" in challenges.GEO_KINDS
+        assert "step_days" not in challenges.STORE_KINDS
+        assert set(challenges.STORE_KINDS) == {"water_days", "sleep_nights", "cook_nights"}
+
     def test_unknown_kind_is_an_error(self):
         with pytest.raises(ValueError):
             challenges.day_counts("calories", {"day": "d1"}, water_goal_ml=1, sleep_need_minutes=1)
@@ -97,6 +126,7 @@ class TestRoutes:
             "water_days": False,
             "sleep_nights": False,
             "cook_nights": True,
+            "step_days": False,
         }
         # Next week is free again.
         assert client.post("/challenges", json={**payload, "day": "2026-10-26"}, headers=ADULT).status_code == 200
@@ -126,6 +156,17 @@ class TestRoutes:
             "reached": True,
         }
         assert board[1]["user_id"] == "emma" and board[1]["count"] == 1 and board[1]["reached"] is False
+
+    def test_a_step_challenge_is_listed_but_scored_by_the_gateway(self, client):
+        created = client.post(
+            "/challenges", json={"kind": "step_days", "day": WEEK_DAY, "target_days": 4}, headers=ADULT
+        ).json()
+        assert created["title"] == "Step goal days"
+        client.post(f"/challenges/{created['id']}/join", headers=_as("emma"))
+        board = client.get("/challenges", params={"day": WEEK_DAY}).json()["challenges"][0]["leaderboard"]
+        # The health store holds no steps, so nobody is shown as having walked zero days.
+        assert {row["user_id"] for row in board} == {"jeremiah", "emma"}
+        assert all(row["unavailable"] is True and row["count"] == 0 for row in board)
 
     def test_water_uses_the_members_own_goal(self, client):
         client.put("/profile", json={"water_goal_ml": 1000})

@@ -1,9 +1,10 @@
 """Gentle weekly goals for one person, and the coach's one suggestion.
 
 A goal is a number of days this week on which the person does one thing the
-store can measure (the same kinds as the family challenge: water goal days,
-sleep goal nights, cook nights). At most two goals a week, so the week stays
-light. The suggestion looks at last week and proposes one small step up --
+health store measures itself (``challenges.STORE_KINDS``: water goal days,
+sleep goal nights, cook nights). Step goal days are a family challenge kind
+scored from geo by the gateway, so they are not a personal goal here. At most
+two goals a week, so the week stays light. The suggestion looks at last week and proposes one small step up --
 last week's days plus one -- for the kind with the most room, never a jump.
 """
 from __future__ import annotations
@@ -19,10 +20,10 @@ def suggestion(last_week_counts: dict[str, int], taken: set[str]) -> dict | None
     if not options:
         return None
     # The most room to grow first; ties go to the order the kinds are listed in.
-    order = list(challenges.KINDS)
+    order = list(challenges.STORE_KINDS)
     kind, count = min(options, key=lambda item: (item[1], order.index(item[0])))
     target = min(7, count + 1)
-    meta = challenges.KINDS[kind]
+    meta = challenges.STORE_KINDS[kind]
     if count == 0:
         reason = f"Last week had none. One {meta['unit'][:-1]} is a fine start."
     else:

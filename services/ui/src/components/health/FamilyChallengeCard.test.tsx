@@ -130,6 +130,38 @@ describe('FamilyChallengeCard', () => {
     expect(message).toContain('2. mom · 1 of 3 nights');
   });
 
+  it('shows a step challenge, and a member whose steps could not be read is not shown at zero', async () => {
+    const steps: HealthChallenge = {
+      ...COOK,
+      id: 9,
+      kind: 'step_days',
+      title: 'Step goal days',
+      unit: 'days',
+      detail: 'Days your steps reach your daily step goal.',
+      target_days: 4,
+      leaderboard: [
+        { user_id: 'emma', count: 4, days: ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22'], reached: true, guideline_goal: false, unavailable: false },
+        { user_id: 'mom', count: 0, days: [], reached: false, guideline_goal: false, unavailable: true },
+      ],
+    };
+    vi.mocked(api.getHealthChallenges).mockResolvedValue(
+      week({ challenges: [steps], kinds: [...KINDS, { kind: 'step_days', title: 'Step goal days', unit: 'days', detail: steps.detail, taken: true }] }),
+    );
+    wrap(<FamilyChallengeCard />);
+    expect(await screen.findByTestId('standing-step_days-emma')).toHaveTextContent('4 of 4 days');
+    expect(screen.getByTestId('standing-step_days-mom')).toHaveTextContent('not available right now');
+    expect(screen.getByTestId('standing-step_days-mom')).not.toHaveTextContent('0 of 4');
+  });
+
+  it('offers step goal days when it is free this week', async () => {
+    vi.mocked(api.getHealthChallenges).mockResolvedValue(
+      week({ kinds: [...KINDS, { kind: 'step_days', title: 'Step goal days', unit: 'days', detail: 'Days your steps reach your daily step goal.', taken: false }] }),
+    );
+    wrap(<FamilyChallengeCard />);
+    const challenge = await screen.findByLabelText('Challenge');
+    expect([...(challenge as HTMLSelectElement).options].map((option) => option.value)).toContain('step_days');
+  });
+
   it('shows an error when the store cannot be reached', async () => {
     vi.mocked(api.getHealthChallenges).mockRejectedValue(new Error('down'));
     wrap(<FamilyChallengeCard />);

@@ -1926,7 +1926,7 @@ export interface HealthWeekly {
   days: Array<{ day: string } & Partial<Record<HealthWeeklyMetric, number | null>>>;
 }
 
-export type HealthChallengeKind = 'water_days' | 'sleep_nights' | 'cook_nights';
+export type HealthChallengeKind = 'water_days' | 'sleep_nights' | 'cook_nights' | 'step_days';
 
 /** One member's week: only the days their own logs counted. */
 export interface HealthChallengeStanding {
@@ -1936,6 +1936,8 @@ export interface HealthChallengeStanding {
   reached: boolean;
   /** True when the member has no goal of their own and the guideline goal is used. */
   guideline_goal: boolean;
+  /** Step challenges only: geo's steps could not be read, so the count is not known (not zero). */
+  unavailable?: boolean;
 }
 
 export interface HealthChallenge {
