@@ -90,3 +90,21 @@ export const MARK_EDGE: Record<string, string> = {
   pink: '#ec4899',
   purple: '#8b5cf6',
 };
+
+/**
+ * How a verse the two side-by-side translations word differently is marked:
+ * a dashed outline, so it never collides with a highlight's wash and edge.
+ */
+export const DIFF_OUTLINE = 'outline outline-1 outline-dashed -outline-offset-1 outline-amber-500/70';
+
+/** The type sizes the reader steps through (A− / A+), as multiples of the base size. */
+export const TEXT_STEPS = [0.85, 1, 1.15, 1.3, 1.5];
+
+/** The index of the step nearest `scale`, so a scale saved off the ladder still steps sensibly. */
+export function nearestTextStep(scale: number): number {
+  let best = 0;
+  TEXT_STEPS.forEach((step, index) => {
+    if (Math.abs(step - scale) < Math.abs(TEXT_STEPS[best] - scale)) best = index;
+  });
+  return best;
+}

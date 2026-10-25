@@ -934,7 +934,7 @@ of Phase 1 explicitly rather than being quietly dropped.
 | **Read aloud** | bible `/narration*` via `/api/bible/narration*`; play/pause, voice picker, 0.75x-1.5x speed control, per-verse highlight while speaking, and a speaker picker that sends the passage through the authenticated announcement path (`BibleReadAloud.tsx`); audio cached in `NarrationAudio` on the server and per session in the client | 1 |
 | **Verse of the Day** | Deterministic by date, at the top of Today and in the `bible_daily` widget | 1 |
 | **Share a verse** | Verse image card (`src/lib/verseImage.ts`) → native share sheet or web share; share to Family chat; deep link back to the passage | 1 |
-| **Compare / parallel versions** | `compare_version` picks a second translation, fetched from `/passages` like any other. `ChapterReader` puts the two in one row per verse from `sm` up and stacks them on a phone, since a phone cannot show two readable columns. A verse the second translation does not have says "Not in this translation." rather than vanishing: NIV2011 genuinely omits Matthew 17:21, and an invisible gap reads as a rendering fault. The version picker never offers the translation being read, and the server refuses it too. **Panes** (`split_view = parallel`) shows each translation as its own whole chapter in a scrolling pane, side by side from `sm` up and stacked on a phone; while linked, scrolling either pane keeps the other on the same verse (see *Synced scroll* below), and a "Scrolling together / separately" toggle unlinks them. A comparison that fails to load says so with a retry, in either layout | 1 |
+| **Compare / parallel versions** | `compare_version` picks a second translation, fetched from `/passages` like any other. `ChapterReader` puts the two in one row per verse from `sm` up and stacks them on a phone, since a phone cannot show two readable columns. A verse the second translation does not have says "Not in this translation." rather than vanishing: NIV2011 genuinely omits Matthew 17:21, and an invisible gap reads as a rendering fault. The version picker never offers the translation being read, and the server refuses it too. **Panes** (`split_view = parallel`) shows each translation as its own whole chapter in a scrolling pane, side by side from `sm` up and stacked on a phone; while linked, scrolling either pane keeps the other on the same verse (see *Synced scroll* below), and a "Scrolling together / separately" toggle unlinks them. Each pane has its own A−/A+, and **Mark differences** outlines the verses the two translations word materially differently (see *Compare* below). A comparison that fails to load says so with a retry, in either layout | 1 |
 | **Commentary beside the text** | `show_notes` puts the chapter's study material in a column next to the reader on `lg` and under the chapter on a phone; off by default, because the reader starts as text. The notes are already fetched to mark which verses carry study material, so this costs no extra request. Each note names its verse and tapping it moves the reader there. The commentary is never mixed into `BibleVerse.text` | 1 |
 | **Streak on screen** | App-open streak (offline-tolerant) and Guided-Scripture streak (resets on a skipped day, number hidden until earned again): YouVersion's two-streak model, not one generic counter | 1 |
 | **No network? Still read** | Last 120 passages plus the last `/state`, `/versions` and `/books` answers kept in `localStorage` (`src/lib/bibleOffline.ts`); reads never wait on an upstream | 1 |
@@ -1047,8 +1047,31 @@ marked *planned* are not built.
     translation arriving, lines it up with the reader's place. Each pane is a
     focusable region, so arrow keys and Page Down scroll it from the
     keyboard.
-  - *Planned:* per-pane font control, a "diff" highlight for verses that
-    differ textually.
+  - **Per-pane text size** (`parallelPrefs.ts`): each pane has its own
+    A−/A+, a number of steps up or down the reader's size ladder
+    (`TEXT_STEPS` in `readingPage.ts`, shared with the reader's own size
+    control) from the reader's `font_scale`, so changing the reader's size
+    still moves both panes. Remembered on this device (`localStorage`, key
+    `jarvis_bible_parallel`), not per user: a phone's stacked panes and a
+    desktop's columns want different sizes. Storage that is blocked just means
+    the defaults. Resizing a linked pane re-lines the other one up.
+  - **Mark differences** (`verseDiff.ts`, `DiffBadge.tsx`): a toggle, off by
+    default and remembered on the device with the sizes, outlines the verses
+    the two translations word materially differently, in both panes, with a
+    "≠" badge and a legend that says how many verses are marked and what the
+    mark means. Both sides are normalised (case, accents, apostrophes,
+    punctuation and whitespace dropped) and compared as bags of words: the
+    share of words they have in common (Dice coefficient over word counts). A
+    verse is marked under 60% shared (`DIFF_THRESHOLD`): "heaven"/"heavens"
+    in Genesis 1:1 is 90% and John 3:16 in the KJV against the WEB is about
+    75%, so ordinary translation choices are not flagged; a paraphrase that
+    keeps barely half the words is. A verse one translation leaves out is
+    never called a difference: the comparison pane shows "Not in this
+    translation." in its place (always, not only while marking), and a verse
+    only the comparison has says "Not in" the reader's translation. Nothing is
+    marked until both chapters have loaded. A marked verse's accessible name
+    says "worded differently in" the other translation; the badge itself is
+    decorative.
 - **Reading position** saved with `PUT /state`; `chapter_read` +
   `chapter_complete` events recorded server-side so the streak and stats
   are not client-reported.
@@ -1147,6 +1170,9 @@ src/pages/Bible.tsx                               # tabs, Read section, routing 
 src/components/bible/ChapterReader.tsx            # verses, marks, compare column, chapter notes
 src/components/bible/ParallelReader.tsx           # two translations in panes, verse-synced scroll
 src/components/bible/verseAnchor.ts               # verse-anchored scroll arithmetic (pure)
+src/components/bible/verseDiff.ts                 # which verses two translations word differently (pure)
+src/components/bible/parallelPrefs.ts             # per-pane text size + diff toggle, per device
+src/components/bible/DiffBadge.tsx                # the "≠" mark on a differing verse and in the legend
 src/components/bible/ReferenceBar.tsx             # ref input, book/chapter steppers,
                                                   #   version, study Bible, compare, display;
                                                   #   one-line header + sheet on a phone
@@ -1193,8 +1219,13 @@ leaves the reader's own text alone; switching to **Panes** saving
 saying so; and the Focus button opening the full-screen page),
 `src/components/bible/ParallelReader.test.tsx` (the other pane following by
 verse rather than ratio, a missing verse landing at the end of the one before,
-either pane driving, unlinking and relinking, and the loading/failed/empty
-comparison states) and `verseAnchor.test.ts`,
+either pane driving, unlinking and relinking, the loading/failed/empty
+comparison states, "Not in this translation." in verse order, each pane's
+A−/A+ on its own and remembered, and marking differences in both panes while
+never marking a missing verse), `verseAnchor.test.ts`, `verseDiff.test.ts`
+(normalising, the word-share score and threshold, missing verses never a
+difference, chapter-keyed passages) and `parallelPrefs.test.ts` (defaults on
+bad or blocked storage, the size ladder's ends),
 `src/components/bible/FocusReader.test.tsx` (chrome fades on a tap, prev/next,
 the loading line rather than a blank page, a highlight tinting its own verse
 and not its neighbour, and `ambienceFor` being a pure function of the hour),
