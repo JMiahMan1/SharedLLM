@@ -211,7 +211,7 @@ that, every save of an opened note stacked another header on top.
   for Save or close, so typing a title does not leave a file per keystroke.
   Closing the sheet (Close, the ×, Escape, the backdrop) saves pending changes
   first, as in Keep; an untouched note closes without a write. A failed
-  autosave shows "Not saved: <reason>" under the editor and is retried after
+  autosave shows "Not saved: *reason*" under the editor and is retried after
   the next change, not in a loop. The shared index is written only when a save
   changes a path, pin or colour.
 - **Never a silent overwrite**: a save is refused when the note changed
@@ -219,14 +219,14 @@ that, every save of an opened note stacked another header on top.
   when there is no version (or the save renames the file, which `If-Match`
   cannot cover), by reading the stored text first and comparing it with what
   was opened. The editor then offers **Keep both** (yours is saved as
-  "<title> (my copy)", numbered past existing titles in that folder),
+  "*title* (my copy)", numbered past existing titles in that folder),
   **Use the stored version** (drops yours and reopens the note) or
   **Overwrite with mine**. Autosave pauses until you choose.
 - **Reminders (time)**: a saved note's **Remind me** panel offers "This
   evening 18:00" (while still ahead), "Tomorrow 9:00" or any date and time
   (`components/notes/ReminderPanel.tsx`). Setting one makes an ordinary
   personal reminder on the existing timers (`POST /api/communication/timers`,
-  `type: reminder`, titled "📝 <note title>"), so it rings, notifies and
+  `type: reminder`, titled "📝 *note title*"), so it rings, notifies and
   snoozes exactly like reminders made on the Communication page, and is
   listed there. Timers now take an optional `url` (in-app paths only;
   execution's `app_link` drops anything with a scheme, `//host`, backslash or

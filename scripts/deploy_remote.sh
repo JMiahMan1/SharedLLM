@@ -41,6 +41,8 @@ echo "[OK] Services to deploy on ${HOST}: $SERVICES"
 wait_for_build() {
     local branch="$1"
     local expect_sha="$2"
+    local accept_shas
+    accept_shas=$( { echo "$expect_sha"; git rev-list "${expect_sha}..HEAD" 2>/dev/null; } | jq -R . | jq -sc .)
     echo "Waiting for 'Build & Push Images' ($expect_sha) on $branch to finish..."
     local max_attempts=90
     local attempt=0
@@ -54,10 +56,14 @@ wait_for_build() {
         # declare the build failed while it was still being finalised.
         # Query the workflow itself: filtering the newest N branch runs missed
         # this workflow entirely on commits that also trigger docs/UI/APK/E2E.
+        # GitHub applies the paths filter to the whole push, so a code commit
+        # pushed with docs commits on top is built under the newest SHA of that
+        # push. Any commit from expect_sha up to HEAD therefore counts: the ones
+        # after expect_sha touch nothing the images are built from.
         local run
         run=$(gh run list --workflow=build-images.yml --branch="$branch" --limit 5 \
             --json headSha,status,conclusion 2>/dev/null \
-            | jq -c --arg sha "$expect_sha" '[.[] | select(.headSha == $sha)][0] // {}')
+            | jq -c --argjson shas "$accept_shas" '[.[] | select(.headSha as $h | $shas | index($h))][0] // {}')
 
         local run_status run_conclusion
         run_status=$(printf '%s' "$run" | jq -r '.status // ""')

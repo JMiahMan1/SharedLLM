@@ -22,3 +22,12 @@ def test_the_deploy_script_follows_the_build_workflows_paths():
     assert m, "deploy_remote.sh no longer picks the built commit"
     script_paths = set(m.group(1).replace("\\\n", " ").split())
     assert script_paths == _workflow_paths()
+
+
+def test_a_build_of_a_later_docs_only_commit_counts():
+    """A code commit pushed with docs commits on top is built under the push's
+    newest SHA (GitHub filters paths over the whole push), so the wait must
+    accept every commit from the built one up to HEAD, not that SHA alone."""
+    script = (ROOT / "scripts/deploy_remote.sh").read_text()
+    assert 'git rev-list "${expect_sha}..HEAD"' in script
+    assert "select(.headSha as $h | $shas | index($h))" in script
