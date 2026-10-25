@@ -12,7 +12,18 @@ import { Scrubber, VolumeSlider } from './Scrubber';
 function CoverImage({ src }: { src: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
-  return <img src={src} alt="" onError={() => setFailed(true)} className="w-full h-full object-cover relative z-10" />;
+  return (
+    <img
+      src={src}
+      alt=""
+      width={80}
+      height={80}
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailed(true)}
+      className="w-full h-full object-cover relative z-10"
+    />
+  );
 }
 
 const iconButton =
@@ -114,7 +125,7 @@ export function NowPlayingCard({
       )}
       {active && duration <= 0 && (
         <div className="relative mt-3 flex items-center gap-2 py-2" aria-label="Live stream">
-          <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse" aria-hidden />
+          <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse motion-reduce:animate-none" aria-hidden />
           <span className="text-[11px] font-semibold uppercase tracking-wider text-rose-300">Live</span>
           <div className="flex-1 h-1.5 rounded-full bg-gradient-to-r from-rose-500/40 via-rose-400/20 to-transparent" />
           <span className="text-[11px] text-slate-500 font-mono">{formatDuration(position)}</span>

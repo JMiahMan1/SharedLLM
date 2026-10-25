@@ -16,6 +16,7 @@ import { proxiedImage } from '../../../lib/mediaImage';
 import { useMediaToken } from '../../../lib/mediaToken';
 import OutputSheet from './OutputSheet';
 import { Scrubber, VolumeSlider } from './Scrubber';
+import { imageWidth } from './image';
 import { webPlayerAdapter } from '../engine/adapters/adapters';
 import { nextRepeat, parseQueueModes } from '../engine/adapters/PlayerAdapter';
 import type { RepeatMode } from '../types';
@@ -60,7 +61,7 @@ export default function NowPlayingSheet({
   // fetch both with credentials, and the accent canvas needs the same origin.
   // The URL is signed with the media token, so re-render when it arrives.
   useMediaToken();
-  const art = proxiedImage(player?.mediaImage, 512);
+  const art = proxiedImage(player?.mediaImage, imageWidth(380));
   // The cover's colour, readable on the dark sheet (§6.5); the theme's otherwise.
   const accentVars = accentStyle(useArtworkAccent(player?.mediaImage));
 
@@ -307,6 +308,10 @@ export default function NowPlayingSheet({
                     layoutId="np-art"
                     src={art}
                     alt=""
+                    width={380}
+                    height={380}
+                    loading="lazy"
+                    decoding="async"
                     className="aspect-square w-[min(74vw,36dvh)] max-w-[380px] rounded-2xl object-cover shadow-2xl shadow-black/60"
                   />
                 ) : (

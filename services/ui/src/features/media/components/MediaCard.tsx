@@ -48,7 +48,15 @@ export function MediaCard({
   const body = (
     <>
       <span className="relative block">
-        <Artwork image={image} kind={kind} size={184} fill />
+        {/* The card is `clamp(132px,38vw,184px)` wide (P7-T5), so `sizes`
+            matches what the browser actually draws. */}
+        <Artwork
+          image={image}
+          kind={kind}
+          size={184}
+          fill
+          sizes="(min-width: 484px) 184px, max(132px, 38vw)"
+        />
         {progress !== undefined ? (
           <span className="absolute bottom-2 left-2"><ProgressRing value={progress} /></span>
         ) : null}

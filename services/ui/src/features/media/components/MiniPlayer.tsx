@@ -6,6 +6,7 @@ import { proxiedImage } from '../../../lib/mediaImage';
 import { useMediaToken } from '../../../lib/mediaToken';
 import { useMediaStore } from '../store/mediaStore';
 import { accentStyle, useArtworkAccent } from '../engine/artworkColor';
+import { imageWidth } from './image';
 
 /**
  * The web player above the page, so music does not disappear when the reader
@@ -22,7 +23,7 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
   if (!player || !player.mediaTitle || location.pathname.startsWith('/media')) return null;
 
   const pct = player.duration > 0 ? Math.min(100, Math.max(0, (player.position / player.duration) * 100)) : 0;
-  const image = proxiedImage(player.mediaImage);
+  const image = proxiedImage(player.mediaImage, imageWidth(44));
   const summary = (
     <>
       <p className="truncate text-sm font-medium text-white">{player.mediaTitle}</p>
@@ -56,6 +57,11 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
               layoutId="np-art"
               src={image}
               alt=""
+              width={44}
+              height={44}
+              loading="lazy"
+              decoding="async"
+              sizes="44px"
               className="h-11 w-11 shrink-0 rounded-lg object-cover"
             />
           ) : (

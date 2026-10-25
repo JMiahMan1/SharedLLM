@@ -3,6 +3,7 @@ import MiniPlayer from './MiniPlayer';
 import NowPlayingSheet from './NowPlayingSheet';
 import QueueSheet from './QueueSheet';
 import MediaShortcuts from './MediaShortcuts';
+import { NowPlayingAnnouncer } from './NowPlayingAnnouncer';
 import { useMediaStore } from '../store/mediaStore';
 import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
 import { useAbsProgressReporter } from '../engine/absProgress';
@@ -24,6 +25,7 @@ export default function MediaOverlays() {
   return (
     <MotionConfig reducedMotion="user">
       <MiniPlayer onOpen={() => openSheet('nowPlaying')} />
+      <NowPlayingAnnouncer />
       <NowPlayingSheet
         open={sheets.nowPlaying}
         onClose={() => closeSheet('nowPlaying')}
