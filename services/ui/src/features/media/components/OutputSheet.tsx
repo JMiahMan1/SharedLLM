@@ -556,6 +556,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
             aria-modal="true"
             aria-label="Output"
             data-testid="output-sheet"
+            data-reduced-motion={reduceMotion ? 'true' : 'false'}
             onClick={(event) => event.stopPropagation()}
             initial={{ y: reduceMotion ? 0 : 48, opacity: reduceMotion ? 0 : 1 }}
             animate={{ y: 0, opacity: 1 }}

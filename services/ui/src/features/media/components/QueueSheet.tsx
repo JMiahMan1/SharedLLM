@@ -366,6 +366,7 @@ export default function QueueSheet({ open, onClose }: { open: boolean; onClose: 
             aria-modal="true"
             aria-label="Queue"
             data-testid="queue-sheet"
+            data-reduced-motion={reduceMotion ? 'true' : 'false'}
             onClick={(event) => event.stopPropagation()}
             initial={{ y: reduceMotion ? 0 : 48, opacity: reduceMotion ? 0 : 1 }}
             animate={{ y: 0, opacity: 1 }}
