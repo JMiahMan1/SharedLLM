@@ -49,13 +49,26 @@ Every claim below was verified against the live system unless marked **planned**
   - **Family guard (Phase 11)**: install approvals, permission gating, the one-minute warning,
     "ask a parent" for a blocked site, Spotify linking (needs a Spotify app registered and the
     three `spotify_*` settings), and a local-model second pass on content monitoring (needs
-    `guardian_monitor_model`) - **need phone checks**.
+    `guardian_monitor_model`) - **need phone checks**. The ways around the web filter
+    (unsupported browsers, split screen, safe mode) are now blocked.
   - **Family member page** (docs/FAMILY_MEMBER_PAGE.md, modelled on Aura, the top-rated app):
     `/family/member/<child>` replaces `/guardian` (which redirects); father/admin see Devices
     (technical), the mother gets everything else with technical fields stripped server-side
     (`gateway/member_page.py`, identity `may_view_technical_data`).
-  - **In progress**: media Phases 3 and 5-7 (foundations, screens, polish,
-    accessibility/performance).
+  - **Media phases 3, 5, 6 and 7 shipped** (docs/MEDIA_OVERHAUL.md): the
+    foundations (api client + keys, MA JSON-RPC, sendspin engine, media store and
+    ingest, adapters, event stream, tab lock, media session, overlays/live
+    position), the screens (Listen Now, Search, Library, Album/Artist/Playlist,
+    Book, Podcast, item context menu, rebuilt dashboard widget, routes), and the
+    polish (lint colour rule, artwork accent with a WCAG contrast check, visual
+    baselines, reduced motion, axe on every screen, the whole journey by
+    keyboard). Remaining: P6-T5 (UX ledger pass), P7-T3 to P7-T5 (screen-reader
+    labels and the now-playing announcement, performance budget, image sizing),
+    the Phase 8 device checklist and Phase 9 (release).
+  - **Bible**: per-pane text size; verses worded differently between the two
+    translations are marked (`verseDiff.ts`, a Dice-coefficient word diff).
+  - **Health**: step goal days joined the weekly family challenge (veg stayed
+    out). The voice-signature panel now records with the shared recorder.
   - Shared helpers created while removing copies: `lib/focusTrap.ts`, `lib/base64.ts`,
     `lib/blobUrlCache.ts`, `hooks/useAudioRecorder.ts`, `services/common/streaks.py`,
     `services/common/links.py`, `lib/mealPlanStore.ts`, `withShareNote`.
@@ -93,7 +106,7 @@ Every claim below was verified against the live system unless marked **planned**
 - `15865192` Family guard: **suggestion lanes, server side** - a parent blesses or blocks each kind of
   suggestion per child; blocked lanes return nothing (app screen added 2026-10-24).
 - `HEAD` Family guard: **Jarvis protected on a child's phone + screen-time enforcement (Layer 1, 4b)**
- - device admin + the `GuardService` Accessibility guard, a parent-login cover screen, tamper
+  - device admin + the `GuardService` Accessibility guard, a parent-login cover screen, tamper
   alerts and screen-time locks; see `docs/HEALTH_HUB.md` "Tamper resistance". Compiles and the
   `GuardRules` JVM tests pass; **not yet exercised on a real phone** (Accessibility events and
   OEM Settings layouts vary). Identity's `verify_password` now compares digests in constant time.
@@ -614,16 +627,22 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
 
 ## 4. Open small items
 
-- Media: Phases 3 and 5-9 of docs/MEDIA_OVERHAUL.md (an agent was on 3 and 5-7 at handover); the version bump
-  and final release gate (Phase 9) come last.
-- Bible: per-pane font size and highlighting verses that differ between translations (planned).
-- Health: step and veg challenges; the family challenge's labelled "guideline goal" for members
-  with no goal of their own still needs Jeremiah's yes/no under the no-fallback rule.
+- Media: P6-T5 (UX ledger pass), P7-T3 to P7-T5 (screen-reader labels and the now-playing
+  announcement, performance budget, image sizing), the Phase 8 device checklist and Phase 9
+  (release, version bump) of docs/MEDIA_OVERHAUL.md remain.
+- Health: the veg challenge (steps shipped as a family challenge); the family challenge's labelled
+  "guideline goal" for members with no goal of their own still needs Jeremiah's yes/no under the
+  no-fallback rule.
 - A **headless Chrome on a Windows machine** (UA `HeadlessChrome/153`, Windows) runs the app from
   its own dev server at `http://localhost:5288` proxied to `http://192.168.2.205:8080`, with an
   expired API key: it polls `/api/users/me/theme` (401) and `/health/ready` every ~4.5 s, since
   2026-10-24 20:00 UTC (~360 refused calls an hour). Not on the Mac; likely another tool's test
   browser. Ask Jeremiah to stop it or give it a valid login.
+- **TLS (2026-10-25):** `jarvis.sumemail.com` HTTPS ends at nginx on 192.168.2.30 (ssh `whoogle@`).
+  The `*.sumemail.com` wildcard expired 03:29 UTC because its Cloudflare DNS token is IP-filtered and
+  the house IP is now 184.190.1.22. jarvis, abs, ai, books, docket and games now have their own
+  nginx-validated certs (to 2027-01-23, auto-renew); backup `/root/nginx-backup-20261025040845`.
+  Jeremiah: add 184.190.1.22 to the token's IP filter (or remove it) so the wildcard renews again.
 - Stale MA player and HA entity named after a user JSON blob: remove by hand in MA → Settings →
   Players.
 
@@ -644,9 +663,9 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
    - sleep estimate: after a night with the new APK, Sleep → "Estimate from my devices".
 2. **First live trivia game** on the new code (questions/verdicts from the `jarvis` account,
    arrival-order answers, late answers not burned).
-3. Phase 11 still open: web-filter bypass blocks (unsupported browsers, split screen, safe
-   mode); device-owner provisioning (Layer 2) belongs to the other tool.
-4. Finish media Phases 3 and 5-9, then the media release gate.
+3. Phase 11 still open: device-owner provisioning (Layer 2) belongs to the other tool. The
+   web-filter bypass blocks (unsupported browsers, split screen, safe mode) shipped.
+4. Finish media P6-T5, P7-T3 to P7-T5, the Phase 8 device checklist and Phase 9 (release).
 5. Keep the plan docs and this handover updated in the same commit as the code.
 
 ## 6. Where the details live
