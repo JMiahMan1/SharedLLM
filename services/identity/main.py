@@ -4254,6 +4254,16 @@ def _may_manage_screen_time(viewer: User | None, subject: User | None) -> bool:
     )
 
 
+def _may_edit_screen_time(viewer: User | None, subject: User | None) -> bool:
+    """Who may change a member's screen-time rules: a minor's parents, or a
+    grown member themselves. A grown member's own phone is theirs to manage
+    (they may clear their rules and turn monitoring off); they may not touch
+    anyone else's, and a minor still may not touch their own."""
+    if subject is not None and (subject.family_role or "other") not in roles.MINOR_FAMILY_ROLES:
+        return viewer is not None and viewer.username == subject.username
+    return _may_manage_screen_time(viewer, subject)
+
+
 def _screen_subject(session: Session, username: str) -> User:
     subject = session.exec(select(User).where(User.username == username.strip().lower())).first()
     if subject is None:
@@ -4426,7 +4436,8 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         "username": subject.username,
         "rules": _screen_rules(session, subject.username),
         "bonus_min": _granted_minutes(session, subject.username, day) if day else 0,
-        "can_manage": _may_manage_screen_time(caller, subject),
+        # A grown member manages their own rules; a minor's are their parents'.
+        "can_manage": _may_edit_screen_time(caller, subject),
         # Whether the caller sees the technical side (the gateway strips it
         # for the mother; docs/FAMILY_MEMBER_PAGE.md).
         "technical": may_view_technical_data(caller, subject),
@@ -4441,8 +4452,8 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
 @app.put("/api/screen-time/{username}/rules")
 def put_screen_rules(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
     subject = _screen_subject(session, username)
-    if not _may_manage_screen_time(caller, subject):
-        raise HTTPException(status_code=403, detail="Only a parent can set screen time")
+    if not _may_edit_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can set a minor's screen time")
     rules = _clean_screen_rules(body or {})
     current = _screen_rules(session, subject.username)
     for key in ("paused", "paused_until"):  # a pause survives a rules edit
@@ -4458,8 +4469,8 @@ def pause_screen_time(username: str, body: dict, session: Session = Depends(get_
     """Lock the phone now: ``{"until": ISO}`` for a while, ``{}`` until lifted,
     ``{"resume": true}`` to lift it."""
     subject = _screen_subject(session, username)
-    if not _may_manage_screen_time(caller, subject):
-        raise HTTPException(status_code=403, detail="Only a parent can pause a phone")
+    if not _may_edit_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can pause a minor's phone")
     rules = _screen_rules(session, subject.username)
     rules.pop("paused", None)
     rules.pop("paused_until", None)
@@ -4546,10 +4557,11 @@ def decide_screen_time_request(request_id: int, body: dict, session: Session = D
 
 @app.post("/api/screen-time/{username}/bonus")
 def give_screen_time_bonus(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """A parent adds minutes to today without being asked (Family Link's bonus time)."""
+    """A parent adds minutes to today without being asked (Family Link's bonus
+    time); a grown member may add their own."""
     subject = _screen_subject(session, username)
-    if not _may_manage_screen_time(caller, subject):
-        raise HTTPException(status_code=403, detail="Only a parent can add time")
+    if not _may_edit_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can add a minor's time")
     minutes = (body or {}).get("minutes")
     day = str((body or {}).get("day") or "")
     if not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= 240:
@@ -4957,11 +4969,23 @@ GUARD_TAMPER_LIMIT = 50
 
 @app.post("/api/internal/guard/tamper/{username}")
 def internal_guard_tamper(username: str, body: dict, session: Session = Depends(get_session), _: None = Depends(require_internal)):
-    """Internal: keep a child's tamper report (protection switched off or worked
-    around) and say who to tell. The gateway checked the event name."""
+    """Internal: keep a minor's tamper report (protection switched off or worked
+    around) and say who to tell. The gateway checked the event name.
+
+    A grown member's phone is their own to manage, so a report from it is
+    dropped outright: nothing is stored and nobody is told, and the answer says
+    so (``dropped``) instead of looking like a kept report."""
     subject = session.exec(select(User).where(User.username == username.strip().lower())).first()
     if subject is None:
-        return {"parents": [], "display_name": username}
+        return {"username": username, "parents": [], "notify": [], "display_name": username, "dropped": "unknown"}
+    if (subject.family_role or "other") not in roles.MINOR_FAMILY_ROLES:
+        return {
+            "username": subject.username,
+            "parents": [],
+            "notify": [],
+            "display_name": subject.display_name or subject.username,
+            "dropped": "not_minor",
+        }
     event = str((body or {}).get("event") or "")[:40]
     extra = {"event": event}
     detail = str((body or {}).get("detail") or "")[:80]
@@ -4974,7 +4998,8 @@ def internal_guard_tamper(username: str, body: dict, session: Session = Depends(
         extra=json.dumps(extra),
     ))
     session.commit()
-    return {"parents": _parents_of(session, subject), "display_name": subject.display_name or subject.username}
+    parents = _parents_of(session, subject)
+    return {"username": subject.username, "parents": parents, "notify": parents, "display_name": subject.display_name or subject.username}
 
 
 @app.get("/api/family/devices/{username}")

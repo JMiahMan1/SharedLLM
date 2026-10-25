@@ -57,6 +57,34 @@ def test_children_and_siblings_cannot_change_or_peek(family):
     assert family("dad").put("/api/screen-time/grown/rules", json={"daily_limit_min": 60}).status_code == 403  # adults have no budgets
 
 
+def test_a_grown_member_manages_their_own_rules_but_not_anothers(family):
+    """An adult child may clear and disable their own monitoring; they may not
+    touch a minor's or another grown member's rules."""
+    grown = family("grown")
+    assert grown.put("/api/screen-time/grown/rules", json={"monitoring": "off", "daily_limit_min": 0}).status_code == 200
+    assert grown.get("/api/screen-time/grown/rules").json()["can_manage"] is True
+    # An empty body clears every rule: monitoring is off.
+    assert grown.put("/api/screen-time/grown/rules", json={}).json()["rules"] == {}
+    # Someone else's rules stay out of reach.
+    assert grown.put("/api/screen-time/kid/rules", json={"daily_limit_min": 30}).status_code == 403
+    assert grown.put("/api/screen-time/mom/rules", json={"monitoring": "off"}).status_code == 403
+
+
+def test_a_grown_member_may_pause_and_add_their_own_time(family):
+    grown = family("grown")
+    assert grown.post("/api/screen-time/grown/pause", json={}).status_code == 200
+    assert grown.post("/api/screen-time/grown/pause", json={"resume": True}).status_code == 200
+    assert grown.post("/api/screen-time/grown/bonus", json={"minutes": 10, "day": DAY}).status_code == 200
+    assert family("kid").post("/api/screen-time/grown/pause", json={}).status_code == 403
+
+
+def test_a_minor_still_cannot_edit_their_own_rules(family):
+    kid = family("kid")
+    assert kid.put("/api/screen-time/kid/rules", json={"monitoring": "off"}).status_code == 403
+    assert kid.put("/api/screen-time/kid/rules", json={}).status_code == 403
+    assert kid.get("/api/screen-time/kid/rules").json()["can_manage"] is False
+
+
 def test_bad_values_are_refused_not_kept(family):
     client = family("mom")
     assert client.put("/api/screen-time/kid/rules", json={"daily_limit_min": 5000}).status_code == 422

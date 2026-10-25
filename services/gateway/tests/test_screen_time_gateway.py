@@ -169,6 +169,38 @@ def test_ways_around_the_web_filter_are_reported_with_what_they_were(wired, monk
     assert len(calls[-1]["json"]["detail"]) == 80
 
 
+def test_a_dropped_tamper_report_tells_nobody(wired, monkeypatch):
+    client, calls, sent, _ = wired
+
+    async def _who(_request):
+        return {"user": "grown"}
+
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _who)
+
+    class _Resp:
+        status = 200
+
+        async def json(self, content_type=None):
+            # Identity dropped it: a grown member's own device is not monitored.
+            return {"username": "grown", "parents": [], "notify": [], "display_name": "Alex", "dropped": "not_minor"}
+
+    class _Client:
+        async def post(self, url, **kw):
+            calls.append({"url": url, **kw})
+            return _Resp()
+
+    @asynccontextmanager
+    async def fake():
+        yield _Client()
+
+    monkeypatch.setattr(gateway_main, "borrow_http_client", fake)
+
+    r = client.post("/api/guard/tamper", json={"event": "guard_disabled"})
+    assert r.status_code == 200 and r.json()["dropped"] == "not_minor"  # explicit, not a kept report
+    assert calls[-1]["url"].endswith("/api/internal/guard/tamper/grown")
+    assert sent == []  # an empty list: nobody is notified
+
+
 def test_a_parent_unlock_is_never_silent(wired, monkeypatch):
     client, _, sent, answers = wired
 

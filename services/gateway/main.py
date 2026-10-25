@@ -5892,8 +5892,9 @@ async def guard_tamper(request: Request):
     report = {"event": event, "device_key": str(body.get("device_key") or "")}
     if detail:
         report["detail"] = detail
-    # Identity keeps the report on the child's record (the father's Devices
-    # section lists them) and says who to tell.
+    # Identity keeps the report on a minor's record (the father's Devices
+    # section lists them) and says who to tell. A grown member's report comes
+    # back with an empty list and ``dropped`` set: nobody is told.
     async with borrow_http_client() as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/internal/guard/tamper/{child}",
@@ -5908,7 +5909,12 @@ async def guard_tamper(request: Request):
         f"{name}'s phone {_TAMPER_EVENTS[event]}" + (f": {detail}." if detail else "."),
         f"/family/member/{child}",
     )
-    return {"status": "SUCCESS"}
+    answer: dict = {"status": "SUCCESS"}
+    dropped = (info or {}).get("dropped")
+    if dropped:
+        # Not a kept report: say so rather than looking like one was stored.
+        answer["dropped"] = dropped
+    return answer
 
 
 _GUARD_ASK_TITLES = {
