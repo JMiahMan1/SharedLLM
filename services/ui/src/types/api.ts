@@ -522,7 +522,7 @@ export interface BatteryReading {
 
 export interface CompanionDevice {
   device_key: string;
-  kind: string; // phone | watch | assistant | light
+  kind: string; // phone | tablet | watch | assistant | light
   label: string;
   owner_username?: string | null;
   registered_by: string; // self | admin | paired | adopted

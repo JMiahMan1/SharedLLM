@@ -550,17 +550,26 @@ class UserWidgetUpdate(BaseModel):
 # User Panel: device registry
 # ---------------------------------------------------------------------------
 
-DEVICE_KINDS = ("phone", "assistant", "light", "watch")
+DEVICE_KINDS = ("phone", "tablet", "assistant", "light", "watch")
 
 
 class DeviceSelfRegister(BaseModel):
-    """What a phone reports about itself when it logs in.
+    """What a phone or tablet reports about itself when it logs in.
+
+    The client may declare only its own mobile form factor (``phone`` or
+    ``tablet``), never a full ``kind``: letting the app claim ``kind="light"``
+    would move itself out of the advanced panel. Assistants, lights and watches
+    go through the admin or claim endpoints. Omitting ``form_factor`` keeps an
+    older client working: the server treats it as a phone.
 
     Deliberately no IP field: the address is taken from the request, not
     accepted from the client, so a caller cannot record someone else's.
     """
 
     device_key: str = Field(min_length=8, max_length=128)
+    #: The mobile form factor this device is. Anything but phone/tablet is a
+    #: 422; the server never lets the client name a non-mobile kind.
+    form_factor: Literal["phone", "tablet"] | None = None
     model: str | None = None
     manufacturer: str | None = None
     os_version: str | None = None

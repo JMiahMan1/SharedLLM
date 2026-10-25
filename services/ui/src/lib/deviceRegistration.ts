@@ -1,9 +1,10 @@
 /**
  * Device self-registration.
  *
- * On login the app reports what it is (a stable per-install id, the model,
- * the OS, and the APK version code) so the server can answer "which build is
- * this device on?" and "does it need an update?" without guessing.
+ * On login the app reports what it is (a stable per-install id, whether it is
+ * a phone or a tablet, the model, the OS, and the APK version code) so the
+ * server can answer "which build is this device on?" and "does it need an
+ * update?" without guessing.
  *
  * Two rules this module exists to enforce:
  *
@@ -14,6 +15,7 @@
  *     to anyone else. The server rejects anything outside its allowlist anyway.
  */
 import { Capacitor } from '@capacitor/core';
+import type { MobileFormFactor } from '../plugins/deviceInfo';
 
 /**
  * Derive a stable id for this install, generated once and then persisted.
@@ -32,6 +34,8 @@ export function resolveDeviceKey(stored: string | null, create: () => string): s
 /** The fields the server accepts. Metadata only, deliberately. */
 export interface DeviceRegistration {
   device_key: string;
+  /** The mobile form factor this device is; omitted when it cannot be read. */
+  form_factor?: MobileFormFactor;
   model?: string;
   manufacturer?: string;
   os_version?: string;
@@ -52,6 +56,7 @@ const STORAGE_KEY = 'jarvis_device_uid';
 // module mocking, and so this module has no import-time side effects.
 type InfoProvider = () => Promise<{ version: string; build: string }>;
 type HardwareProvider = () => Promise<{ model?: string; manufacturer?: string; osVersion?: string }>;
+type FormFactorProvider = () => Promise<MobileFormFactor | null>;
 type Poster = (payload: DeviceRegistration) => Promise<void>;
 type NativeCheck = () => boolean;
 
@@ -59,6 +64,7 @@ const defaults: {
   isNative: NativeCheck;
   getAppInfo: InfoProvider;
   getDeviceInfo: HardwareProvider;
+  getFormFactor: FormFactorProvider;
   post: Poster;
 } = {
   isNative: () => Capacitor.isNativePlatform(),
@@ -71,6 +77,14 @@ const defaults: {
     const { Device } = await import('@capacitor/device');
     const info = await Device.getInfo();
     return { model: info.model, manufacturer: info.manufacturer, osVersion: info.osVersion };
+  },
+  // @capacitor/device has no form factor, so the native signal comes from the
+  // app's own plugin. An APK older than it simply has none; the server then
+  // defaults the device to a phone, which is what it did before.
+  getFormFactor: async () => {
+    const { default: DeviceInfo } = await import('../plugins/deviceInfo');
+    const { formFactor } = await DeviceInfo.getFormFactor();
+    return formFactor;
   },
   // Through apiClient, which signs the request with the user's key and points
   // at the configured server. A bare axios call sent no Authorization, so the
@@ -96,6 +110,7 @@ export function __setImpl(next: Partial<typeof impl>): () => void {
 const isNative = (): boolean => impl.isNative();
 const getAppInfo = (): Promise<{ version: string; build: string }> => impl.getAppInfo();
 const getDeviceInfo = () => impl.getDeviceInfo();
+const getFormFactor = (): Promise<MobileFormFactor | null> => impl.getFormFactor();
 const postRegistration = (payload: DeviceRegistration): Promise<void> => impl.post(payload);
 
 function readStored(key: string): string | null {
@@ -168,6 +183,16 @@ export async function registerThisDevice(): Promise<DeviceSelfRegisterResult> {
       payload.os_version = hardware.osVersion;
     } catch {
       // @capacitor/device is not installed.
+    }
+
+    // The form factor is only sent when the native side actually reported one;
+    // an older APK without the plugin leaves it out rather than claiming to be
+    // a phone, and the server treats the absence as a phone for compatibility.
+    try {
+      const formFactor = await getFormFactor();
+      if (formFactor) payload.form_factor = formFactor;
+    } catch {
+      // No native form-factor signal; leave it unknown.
     }
 
     await postRegistration(payload);

@@ -328,11 +328,17 @@ class UserActivitySharing(SQLModel, table=True):  # type: ignore
 # asserts that.
 # ---------------------------------------------------------------------------
 
-DEVICE_KINDS = ("phone", "assistant", "light", "watch")
+DEVICE_KINDS = ("phone", "tablet", "assistant", "light", "watch")
+
+#: Kinds that are a person's own mobile device. They self-register on login
+#: (``registered_by="self"``) and the sleep estimate joins their overnight use.
+#: ``assistant``, ``light`` and ``watch`` are companion devices, added by an
+#: admin or claimed through pairing, so they are deliberately not here.
+MOBILE_DEVICE_KINDS = ("phone", "tablet")
 
 #: Kinds that get the advanced panel. ``light`` is deliberately minimal: a
 #: light has no screen, no app, and nothing to install.
-ADVANCED_DEVICE_KINDS = ("phone", "assistant", "watch")
+ADVANCED_DEVICE_KINDS = ("phone", "tablet", "assistant", "watch")
 
 NO_OPT_IN_EVENTS = frozenset(
     {
@@ -351,10 +357,10 @@ NO_OPT_IN_EVENTS = frozenset(
 class Device(SQLModel, table=True):  # type: ignore
     """A registered device, and what we know about it.
 
-    ``kind`` decides which panel it appears in. Phones self-register on login
-    (``registered_by="self"``) and report their own hardware; assistants and
-    lights are registered by an admin (``registered_by="admin"``) because they
-    have no account of their own to log in with.
+    ``kind`` decides which panel it appears in. Phones and tablets self-register
+    on login (``registered_by="self"``) and report their own hardware; assistants
+    and lights are registered by an admin (``registered_by="admin"``) because
+    they have no account of their own to log in with.
 
     ``device_key`` is a stable client-supplied identifier, unique across all
     kinds -- a device that changes kind keeps its history.
@@ -371,15 +377,15 @@ class Device(SQLModel, table=True):  # type: ignore
     __table_args__ = {"extend_existing": True}
     id: int | None = Field(default=None, primary_key=True)
     device_key: str = Field(index=True, unique=True)
-    kind: str = Field(default="phone", index=True)  # phone | assistant | light
+    kind: str = Field(default="phone", index=True)  # phone | tablet | assistant | light | watch
     label: str = Field(default="")  # "Jeremiah's Pixel"
     owner_username: str | None = Field(default=None, index=True, foreign_key="user.username")
     #: self (a phone, on login) | admin | paired (claimed with the code the
     #: device showed) | adopted (claimed without one: the device has no screen)
     registered_by: str = Field(default="self")
     revoked: bool = Field(default=False)
-    #: Link into execution.device_registry for assistants/lights. A phone has
-    #: no HA entity, so this stays null for kind="phone".
+    #: Link into execution.device_registry for assistants/lights. A phone or
+    #: tablet has no HA entity, so this stays null for kind="phone"/"tablet".
     entity_id: str | None = Field(default=None, index=True)
 
     # Phone / app build metadata, reported on self-registration.

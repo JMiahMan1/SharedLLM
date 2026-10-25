@@ -36,6 +36,7 @@ from services.identity.crypto import decrypt, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
     DEVICE_KINDS,
+    MOBILE_DEVICE_KINDS,
     NO_OPT_IN_EVENTS,
     APIKey,
     AuditEvent,
@@ -2376,7 +2377,10 @@ def internal_owned_devices(username: str, session: Session = Depends(get_session
     """Internal: the phones and tablets assigned to a person (the sleep estimate
     joins their overnight use)."""
     rows = session.exec(
-        select(Device).where(Device.owner_username == username.strip().lower(), Device.kind == "phone")
+        select(Device).where(
+            Device.owner_username == username.strip().lower(),
+            Device.kind.in_(MOBILE_DEVICE_KINDS),
+        )
     ).all()
     return {"devices": [row.device_key for row in rows]}
 
@@ -2385,7 +2389,7 @@ def internal_owned_devices(username: str, session: Session = Depends(get_session
 def internal_device_registered(device_key: str, session: Session = Depends(get_session), _: None = Depends(require_internal)):
     """Internal: whether a phone or tablet with this key has registered."""
     row = session.exec(select(Device).where(Device.device_key == device_key.strip())).first()
-    return {"registered": bool(row and row.kind == "phone"), "owner": row.owner_username if row else None}
+    return {"registered": bool(row and row.kind in MOBILE_DEVICE_KINDS), "owner": row.owner_username if row else None}
 
 
 @app.get("/api/internal/user-device-assignments")
@@ -6626,26 +6630,41 @@ def register_device(
     session: Session = Depends(get_session),
     caller: User = Depends(require_api_key),
 ):
-    """Register or refresh the caller's own phone, on login.
+    """Register or refresh the caller's own phone or tablet, on login.
 
     Idempotent on ``device_key``: logging in repeatedly updates the existing
     row instead of creating a new device each time, which is why the key is
     unique in the schema rather than cleaned up here.
 
-    ``kind`` is deliberately not accepted from the client. A phone is a phone;
-    letting the app claim ``kind="light"`` would move itself out of the
-    advanced panel. Assistants and lights go through the admin endpoint.
+    The client may declare only its mobile form factor (``phone`` or ``tablet``),
+    which the schema restricts; it can never name a non-mobile kind, so an app
+    cannot move itself out of the advanced panel. An older client that sends no
+    form factor is treated as a phone. A row already registered by an admin, or
+    one whose kind is not mobile (an assistant, a light, a watch), is left
+    alone: whoever holds its key must not silently reclassify it. A row that is
+    self-registered mobile may be corrected between phone and tablet, so a
+    device that first reported as a phone and now knows it is a tablet is
+    believed.
     """
     key = body.device_key.strip()
     now = datetime.now().isoformat()
     device = session.exec(select(Device).where(Device.device_key == key)).first()
     if device is None:
-        device = Device(device_key=key, kind="phone", registered_by="self", first_seen_at=now)
+        device = Device(
+            device_key=key,
+            kind=body.form_factor or "phone",
+            registered_by="self",
+            first_seen_at=now,
+        )
         session.add(device)
-    elif device.kind != "phone" or device.registered_by == "admin":
-        # A device already registered as an assistant/light must not be
+    elif device.registered_by == "admin" or device.kind not in MOBILE_DEVICE_KINDS:
+        # A device already registered as an assistant/light/watch must not be
         # silently reclassified by whoever holds its key.
         raise HTTPException(status_code=409, detail="This device key is already registered as another kind")
+    elif body.form_factor and body.form_factor != device.kind:
+        # The same install, corrected: it first reported as a phone and now
+        # reports as a tablet (or the other way round).
+        device.kind = body.form_factor
 
     device.owner_username = caller.username
     device.model = body.model or device.model
@@ -6773,15 +6792,18 @@ def create_device(
     """Register an assistant or light. Admin only.
 
     These have no account to log in with, so an admin declares them and assigns
-    the owner. A phone must not be created here: it registers itself.
+    the owner. A phone or tablet must not be created here: it registers itself.
     """
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
     kind = (body.kind or "").strip().lower()
     if kind not in DEVICE_KINDS:
         raise HTTPException(status_code=422, detail=f"kind must be one of {', '.join(DEVICE_KINDS)}")
-    if kind == "phone":
-        raise HTTPException(status_code=422, detail="Phones register themselves; use /api/user-panel/devices/register")
+    if kind in MOBILE_DEVICE_KINDS:
+        raise HTTPException(
+            status_code=422,
+            detail="Phones and tablets register themselves; use /api/user-panel/devices/register",
+        )
     if body.owner_username:
         owner = session.exec(select(User).where(User.username == body.owner_username.lower())).first()
         if owner is None:
@@ -6826,8 +6848,8 @@ def claim_device(
     device's address is not enough to take it.
     """
     kind = (body.kind or "").strip().lower()
-    if kind not in DEVICE_KINDS or kind == "phone":
-        raise HTTPException(status_code=422, detail=f"kind must be one of {', '.join(k for k in DEVICE_KINDS if k != 'phone')}")
+    if kind not in DEVICE_KINDS or kind in MOBILE_DEVICE_KINDS:
+        raise HTTPException(status_code=422, detail=f"kind must be one of {', '.join(k for k in DEVICE_KINDS if k not in MOBILE_DEVICE_KINDS)}")
     owner_name = body.owner_username.strip().lower()
     owner = session.exec(select(User).where(User.username == owner_name)).first()
     if owner is None:
@@ -6836,8 +6858,8 @@ def claim_device(
     now = datetime.now().isoformat()
     device = session.exec(select(Device).where(Device.device_key == key)).first()
     if device is not None:
-        if device.kind == "phone":
-            raise HTTPException(status_code=409, detail="This device key belongs to a phone")
+        if device.kind in MOBILE_DEVICE_KINDS:
+            raise HTTPException(status_code=409, detail="This device key belongs to a phone or tablet")
         if device.owner_username and device.owner_username != owner_name and not body.verified:
             raise HTTPException(
                 status_code=409,
