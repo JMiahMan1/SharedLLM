@@ -1,25 +1,26 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Hourglass } from 'lucide-react';
+import { CalendarClock } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { api } from '../../services/api';
 import { duration } from '../../lib/phoneUsageFormat';
-import type { ScreenRules } from '../../types/api';
-import { lockedLine } from '../../lib/screenTimeText';
-import AppControls from './AppControls';
-import OfflineCodeSetting from './OfflineCodeSetting';
-import WebFilterControls from './WebFilterControls';
+import { WEEKDAYS, WEEKDAY_LABELS, limitFor, schoolDays, statusQuery } from '../../lib/memberPage';
+import MemberCard from '../member/MemberCard';
+import type { ScreenRules, Weekday } from '../../types/api';
 
 /**
- * A parent's screen-time controls for one child (Phase 11 step 4): daily and
- * weekend limits, bedtime and school hours, pause, bonus time, and the
- * child's requests for more. The server refuses anyone else; this only renders
- * once the status says the viewer may manage the child.
+ * A parent's screen-time schedule for one child (Phase 11 step 4, Family
+ * Link's weekly view): a row per day with that day's limit and whether it is
+ * a school day, the everyday and weekend limits the rows fall back to, and
+ * the bedtime and school routines. Pause, bonus time and requests sit at the
+ * top of the family member page; app and web rules in Apps & web.
  */
 
 type Draft = {
   daily: string;
   weekend: string;
+  days: Partial<Record<Weekday, string>>;
+  school: Weekday[];
   bedtimeStart: string;
   bedtimeEnd: string;
   schoolStart: string;
@@ -30,6 +31,8 @@ function draftFrom(rules: ScreenRules): Draft {
   return {
     daily: rules.daily_limit_min !== undefined ? String(rules.daily_limit_min) : '',
     weekend: rules.weekend_limit_min !== undefined ? String(rules.weekend_limit_min) : '',
+    days: Object.fromEntries(Object.entries(rules.day_limits || {}).map(([d, m]) => [d, String(m)])),
+    school: schoolDays(rules),
     bedtimeStart: rules.bedtime_start || '',
     bedtimeEnd: rules.bedtime_end || '',
     schoolStart: rules.school_start || '',
@@ -37,144 +40,145 @@ function draftFrom(rules: ScreenRules): Draft {
   };
 }
 
+const minutes = (value: string | undefined) =>
+  value === undefined || value.trim() === '' ? undefined : Math.max(0, Math.min(1440, Math.round(Number(value))));
+
 function rulesFrom(draft: Draft, current: ScreenRules): ScreenRules {
-  const minutes = (value: string) => (value.trim() === '' ? undefined : Math.max(0, Math.min(1440, Math.round(Number(value)))));
+  // The full rules go back each time: the server replaces them as a whole.
+  const rest: ScreenRules = { ...current };
+  delete rest.paused;
+  delete rest.paused_until;
+  const days = Object.fromEntries(
+    WEEKDAYS.map((d) => [d, minutes(draft.days[d])]).filter(([, m]) => m !== undefined),
+  ) as Partial<Record<Weekday, number>>;
   return {
+    ...rest,
     daily_limit_min: minutes(draft.daily),
     weekend_limit_min: minutes(draft.weekend),
+    day_limits: Object.keys(days).length ? days : undefined,
+    school_days: draft.school,
     bedtime_start: draft.bedtimeStart && draft.bedtimeEnd ? draft.bedtimeStart : undefined,
     bedtime_end: draft.bedtimeStart && draft.bedtimeEnd ? draft.bedtimeEnd : undefined,
     school_start: draft.schoolStart && draft.schoolEnd ? draft.schoolStart : undefined,
     school_end: draft.schoolStart && draft.schoolEnd ? draft.schoolEnd : undefined,
-    school_days: current.school_days,
-    always_allowed: current.always_allowed,
-    blocked_apps: current.blocked_apps,
-    app_limits: current.app_limits,
-    web_filter: current.web_filter,
-    install_approval: current.install_approval,
-    permission_gating: current.permission_gating,
-    monitoring: current.monitoring,
   };
 }
 
+const input = 'mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100';
+
 export default function ScreenTimeControls({ username, name }: { username: string; name: string }) {
   const queryClient = useQueryClient();
-  const { data: status } = useQuery({
-    queryKey: ['screen-time', username],
-    queryFn: () => api.getScreenTimeStatus(username),
-    refetchInterval: 60 * 1000,
-    retry: false,
-  });
-  const { data: requests } = useQuery({
-    queryKey: ['screen-time-requests', 'pending'],
-    queryFn: () => api.getScreenTimeRequests('pending'),
-    retry: false,
-  });
+  const { data: status, isLoading, isError } = useQuery(statusQuery(username));
   // The saved rules until the parent edits a field.
   const [edited, setDraft] = useState<Draft | null>(null);
   const draft = edited ?? (status ? draftFrom(status.rules) : null);
-
-  const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: ['screen-time', username] });
-    void queryClient.invalidateQueries({ queryKey: ['screen-time-requests'] });
-  };
   const save = useMutation({
     mutationFn: (rules: ScreenRules) => api.setScreenRules(username, rules),
     onSuccess: () => {
       setDraft(null);
-      refresh();
+      void queryClient.invalidateQueries({ queryKey: ['screen-time', username] });
     },
   });
-  const pause = useMutation({ mutationFn: (resume: boolean) => api.pauseScreenTime(username, resume ? { resume: true } : {}), onSuccess: refresh });
-  const bonus = useMutation({ mutationFn: (minutes: number) => api.giveScreenTimeBonus(username, minutes), onSuccess: refresh });
-  const decide = useMutation({
-    mutationFn: ({ id, grant }: { id: number; grant: boolean }) => api.decideScreenTimeRequest(id, grant),
-    onSuccess: refresh,
-  });
+  const failure = isAxiosError(save.error) ? (save.error.response?.data as { detail?: string })?.detail || 'That did not save.' : save.error ? 'That did not save.' : null;
 
-  if (!status?.can_manage || !draft) return null;
-  const theirs = (requests?.requests || []).filter((r) => r.username === username);
-  const failure = [save.error, pause.error, bonus.error, decide.error].find(Boolean);
-  const failureText = isAxiosError(failure) ? (failure.response?.data as { detail?: string })?.detail || 'That did not save.' : null;
-  const field = (key: keyof Draft, label: string, type: 'number' | 'time') => (
-    <label className="block text-[11px] text-slate-400">
-      {label}
-      <input
-        type={type}
-        min={type === 'number' ? 0 : undefined}
-        max={type === 'number' ? 1440 : undefined}
-        inputMode={type === 'number' ? 'numeric' : undefined}
-        value={draft[key]}
-        onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}
-        className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100"
-      />
-    </label>
-  );
+  // What each row would be with the draft applied, so a blank day shows what it falls back to.
+  const preview = draft && status ? rulesFrom(draft, status.rules) : undefined;
+  const field = (key: 'daily' | 'weekend' | 'bedtimeStart' | 'bedtimeEnd' | 'schoolStart' | 'schoolEnd', label: string, type: 'number' | 'time') =>
+    draft && (
+      <label className="block text-[11px] text-slate-400">
+        {label}
+        <input
+          type={type}
+          min={type === 'number' ? 0 : undefined}
+          max={type === 'number' ? 1440 : undefined}
+          inputMode={type === 'number' ? 'numeric' : undefined}
+          value={draft[key]}
+          onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}
+          className={input}
+        />
+      </label>
+    );
 
   return (
-    <section className="glass-panel rounded-2xl p-4 sm:p-5 space-y-3" data-testid="screen-time-controls">
-      <div className="flex items-center gap-2">
-        <Hourglass size={16} className="text-amber-300" />
-        <h3 className="text-sm font-semibold text-white">Screen time for {name}</h3>
-      </div>
-
-      <p className="text-xs text-slate-300" data-testid="screen-time-controls-state">
-        {status.locked
-          ? lockedLine(status)
-          : status.remaining_min !== null
-            ? `${duration(status.remaining_min * 60000)} left today (${status.used_min} min used${status.bonus_min ? `, ${status.bonus_min} bonus` : ''}).`
-            : 'No daily limit set.'}
-      </p>
-
-      {theirs.map((r) => (
-        <div key={r.id} className="rounded-xl border border-sky-400/30 bg-sky-400/5 p-3 space-y-2" data-testid="screen-time-request">
-          <p className="text-xs text-slate-200">
-            Asks for {r.minutes} more minutes{r.note ? `: “${r.note}”` : ''}
-          </p>
-          <div className="flex gap-2">
-            <button type="button" className="glass-button px-3 py-1.5 text-xs min-h-11" onClick={() => decide.mutate({ id: r.id, grant: true })}>
-              Grant
-            </button>
-            <button type="button" className="px-3 py-1.5 text-xs min-h-11 text-slate-400" onClick={() => decide.mutate({ id: r.id, grant: false })}>
-              Not today
-            </button>
+    <MemberCard
+      title={`${name}'s week`}
+      icon={CalendarClock}
+      tone="text-amber-300"
+      testId="screen-time-controls"
+      wide
+      isLoading={isLoading}
+      error={isError ? 'The schedule could not be loaded.' : null}
+      empty={status && !status.can_manage ? 'Only their parents can change this.' : null}
+      aside={status?.bonus_min ? `+${status.bonus_min} min bonus today` : undefined}
+    >
+      {draft && status && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-2">
+            {field('daily', 'Every day (min)', 'number')}
+            {field('weekend', 'Weekends (min)', 'number')}
           </div>
-        </div>
-      ))}
-
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className="glass-button px-3 py-1.5 text-xs min-h-11" onClick={() => pause.mutate(status.paused)}>
-          {status.paused ? 'Unpause phone' : 'Pause phone'}
-        </button>
-        {[15, 30].map((m) => (
-          <button key={m} type="button" className="glass-button px-3 py-1.5 text-xs min-h-11" onClick={() => bonus.mutate(m)}>
-            +{m} min today
+          <table className="w-full text-xs" data-testid="weekly-schedule">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wider text-slate-500">
+                <th className="py-1 font-normal">Day</th>
+                <th className="py-1 font-normal">Limit (min)</th>
+                <th className="py-1 font-normal">School</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {WEEKDAYS.map((d) => {
+                const effective = limitFor(preview, d);
+                const school = draft.school.includes(d);
+                return (
+                  <tr key={d} data-testid={`schedule-${d}`}>
+                    <th scope="row" className="py-1.5 pr-2 text-left font-normal text-slate-200">{WEEKDAY_LABELS[d]}</th>
+                    <td className="py-1.5 pr-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={1440}
+                        inputMode="numeric"
+                        aria-label={`${WEEKDAY_LABELS[d]} limit in minutes`}
+                        placeholder={effective === null ? 'no limit' : `${effective} (${duration(effective * 60000)})`}
+                        value={draft.days[d] ?? ''}
+                        onChange={(e) => setDraft({ ...draft, days: { ...draft.days, [d]: e.target.value } })}
+                        className="min-h-11 w-full rounded-lg border border-white/10 bg-white/5 px-2 text-sm text-slate-100"
+                      />
+                    </td>
+                    <td className="py-1.5">
+                      <button
+                        type="button"
+                        aria-pressed={school}
+                        aria-label={`${WEEKDAY_LABELS[d]} is a school day`}
+                        onClick={() => setDraft({ ...draft, school: school ? draft.school.filter((x) => x !== d) : [...draft.school, d] })}
+                        className={`min-h-11 min-w-14 rounded-lg border px-2 text-[11px] ${school ? 'border-sky-400/40 bg-sky-400/10 text-white' : 'border-white/10 bg-white/5 text-slate-400'}`}
+                      >
+                        {school ? 'Yes' : 'No'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="grid grid-cols-2 gap-2">
+            {field('bedtimeStart', 'Bedtime starts', 'time')}
+            {field('bedtimeEnd', 'Bedtime ends', 'time')}
+            {field('schoolStart', 'School starts', 'time')}
+            {field('schoolEnd', 'School ends', 'time')}
+          </div>
+          <button
+            type="button"
+            disabled={save.isPending || !edited}
+            onClick={() => save.mutate(rulesFrom(draft, status.rules))}
+            className="glass-button min-h-11 px-3 text-xs font-semibold disabled:opacity-50"
+            data-testid="screen-time-save"
+          >
+            Save schedule
           </button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        {field('daily', 'Daily limit (min)', 'number')}
-        {field('weekend', 'Weekend limit (min)', 'number')}
-        {field('bedtimeStart', 'Bedtime starts', 'time')}
-        {field('bedtimeEnd', 'Bedtime ends', 'time')}
-        {field('schoolStart', 'School starts', 'time')}
-        {field('schoolEnd', 'School ends', 'time')}
-      </div>
-      <button
-        type="button"
-        disabled={save.isPending}
-        onClick={() => save.mutate(rulesFrom(draft, status.rules))}
-        className="glass-button px-3 py-1.5 text-xs font-semibold min-h-11"
-        data-testid="screen-time-save"
-      >
-        Save rules
-      </button>
-      {failureText && <p className="text-xs text-amber-300">{failureText}</p>}
-
-      <AppControls username={username} name={name} rules={status.rules} />
-      <WebFilterControls username={username} name={name} rules={status.rules} />
-      <OfflineCodeSetting />
-    </section>
+          {failure && <p className="text-xs text-amber-300">{failure}</p>}
+        </div>
+      )}
+    </MemberCard>
   );
 }

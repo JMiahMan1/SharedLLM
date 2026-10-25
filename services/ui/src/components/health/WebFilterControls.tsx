@@ -58,10 +58,10 @@ export default function WebFilterControls({ username, name, rules }: { username:
   );
 
   return (
-    <div className="space-y-2 border-t border-white/5 pt-3" data-testid="web-filter-controls">
+    <section className="glass-panel min-w-0 rounded-2xl p-4 sm:p-5 space-y-2" data-testid="web-filter-controls">
       <div className="flex items-center gap-2">
         <Globe size={14} className="text-sky-300" />
-        <h4 className="text-xs font-semibold text-white">Websites on {name}'s phone</h4>
+        <h3 className="text-sm font-semibold text-white">Websites on {name}'s phone</h3>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {toggle('enabled', 'Web filter')}
@@ -112,6 +112,6 @@ export default function WebFilterControls({ username, name, rules }: { username:
         guard keeps the filter from being switched off.
       </p>
       {failure && <p className="text-xs text-amber-300">{failure}</p>}
-    </div>
+    </section>
   );
 }

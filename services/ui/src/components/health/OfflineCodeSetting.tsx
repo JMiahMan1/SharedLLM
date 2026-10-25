@@ -28,10 +28,10 @@ export default function OfflineCodeSetting() {
   const failureText = isAxiosError(failure) ? (failure.response?.data as { detail?: string })?.detail || 'That did not save.' : failure ? 'That did not save.' : null;
 
   return (
-    <div className="space-y-2 border-t border-white/5 pt-3" data-testid="offline-code">
+    <section className="glass-panel rounded-2xl p-4 sm:p-5 space-y-2" data-testid="offline-code">
       <div className="flex items-center gap-2">
         <KeyRound size={14} className="text-amber-300" />
-        <h4 className="text-xs font-semibold text-white">Your offline unlock code</h4>
+        <h3 className="text-sm font-semibold text-white">Your offline unlock code</h3>
       </div>
       <p className="text-[11px] text-slate-400">
         {data.set
@@ -64,6 +64,6 @@ export default function OfflineCodeSetting() {
         )}
       </div>
       {failureText && <p className="text-xs text-amber-300">{failureText}</p>}
-    </div>
+    </section>
   );
 }

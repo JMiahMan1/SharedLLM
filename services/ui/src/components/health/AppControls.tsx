@@ -6,11 +6,15 @@ import { api } from '../../services/api';
 import { appName, duration } from '../../lib/phoneUsageFormat';
 import type { PermissionGroup, ScreenRules } from '../../types/api';
 import { PERMISSION_WORDS } from '../../lib/guardRequests';
+import { guardRequestsQuery, usageQuery } from '../../lib/memberPage';
+import { localDay, shiftDay } from '../../lib/healthHub';
 
 /**
  * A parent's app control for one child (Phase 11 step 5): switch an app off,
  * or give it its own daily minutes. The apps listed are the ones the child's
- * phone actually reported this week, plus any app that already has a rule.
+ * phone actually reported this week, plus any app that already has a rule or
+ * is waiting for a parent's OK, each with today's and the week's time and its
+ * state (allowed, limited, blocked, awaiting approval).
  * The phone's screen guard closes a blocked app; the rest of the phone works.
  *
  * Also: whether a newly installed app waits for a parent's OK (on by
@@ -19,24 +23,35 @@ import { PERMISSION_WORDS } from '../../lib/guardRequests';
  */
 export default function AppControls({ username, name, rules }: { username: string; name: string; rules: ScreenRules }) {
   const queryClient = useQueryClient();
-  const { data: usage } = useQuery({
-    queryKey: ['usage', username],
-    queryFn: () => api.getUsage(username, 7),
-    retry: false,
-  });
+  const { data: usage } = useQuery(usageQuery(username));
+  const { data: pending } = useQuery(guardRequestsQuery(false));
   const [limitDraft, setLimitDraft] = useState<Record<string, string>>({});
+  const awaiting = useMemo(
+    () => new Set((pending || []).filter((r) => r.username === username && r.kind === 'app').map((r) => r.target)),
+    [pending, username],
+  );
 
-  const apps = useMemo(() => {
+  const { apps, todayMs } = useMemo(() => {
+    const today = localDay();
+    const weekStart = shiftDay(today, -6);
     const week = new Map<string, number>();
+    const todayMs = new Map<string, number>();
     for (const day of usage?.days || []) {
-      for (const app of day.apps || []) week.set(app.package, (week.get(app.package) || 0) + app.millis);
+      if (day.day < weekStart) continue;
+      for (const app of day.apps || []) {
+        week.set(app.package, (week.get(app.package) || 0) + app.millis);
+        if (day.day === today) todayMs.set(app.package, app.millis);
+      }
     }
-    for (const pkg of [...(rules.blocked_apps || []), ...Object.keys(rules.app_limits || {})]) {
+    for (const pkg of [...(rules.blocked_apps || []), ...Object.keys(rules.app_limits || {}), ...awaiting]) {
       if (!week.has(pkg)) week.set(pkg, 0);
     }
     const allowed = new Set(rules.always_allowed || []);
-    return [...week.entries()].filter(([pkg]) => !allowed.has(pkg)).sort((a, b) => b[1] - a[1]).slice(0, 25);
-  }, [usage, rules]);
+    return {
+      apps: [...week.entries()].filter(([pkg]) => !allowed.has(pkg)).sort((a, b) => b[1] - a[1]).slice(0, 25),
+      todayMs,
+    };
+  }, [usage, rules, awaiting]);
 
   const save = useMutation({
     mutationFn: (next: ScreenRules) => api.setScreenRules(username, next),
@@ -78,10 +93,10 @@ export default function AppControls({ username, name, rules }: { username: strin
   const failure = isAxiosError(save.error) ? (save.error.response?.data as { detail?: string })?.detail || 'That did not save.' : save.error ? 'That did not save.' : null;
 
   return (
-    <div className="space-y-2" data-testid="app-controls">
+    <section className="glass-panel min-w-0 rounded-2xl p-4 sm:p-5 space-y-2" data-testid="app-controls">
       <div className="flex items-center gap-2">
         <AppWindow size={14} className="text-sky-300" />
-        <h4 className="text-xs font-semibold text-white">Apps on {name}'s phone</h4>
+        <h3 className="text-sm font-semibold text-white">Apps on {name}'s phone</h3>
       </div>
       {apps.length === 0 ? (
         <p className="text-[11px] text-slate-400">No app use reported yet. Apps show up here once {name}'s phone shares its usage.</p>
@@ -90,11 +105,15 @@ export default function AppControls({ username, name, rules }: { username: strin
           {apps.map(([pkg, millis]) => {
             const off = blocked.has(pkg);
             const draft = limitDraft[pkg] ?? (limits[pkg] !== undefined ? String(limits[pkg]) : '');
+            const state = awaiting.has(pkg) ? 'awaiting approval' : off ? 'blocked' : limits[pkg] !== undefined ? `limited to ${limits[pkg]} min` : 'allowed';
             return (
               <li key={pkg} className="flex items-center gap-2 text-xs" data-testid={`app-row-${pkg}`}>
                 <span className="min-w-0 flex-1">
                   <span className={`block truncate ${off ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{appName(pkg)}</span>
-                  <span className="block text-[10px] text-slate-500">{millis ? `${duration(millis)} this week` : 'not used this week'}</span>
+                  <span className="block text-[10px] text-slate-500">
+                    {todayMs.get(pkg) ? `${duration(todayMs.get(pkg) || 0)} today · ` : ''}
+                    {millis ? `${duration(millis)} this week` : 'not used this week'} · <span data-testid={`app-state-${pkg}`}>{state}</span>
+                  </span>
                 </span>
                 <label className="flex items-center gap-1 text-[10px] text-slate-400">
                   <input
@@ -158,6 +177,6 @@ export default function AppControls({ username, name, rules }: { username: strin
         </div>
       </div>
       {failure && <p className="text-xs text-amber-300">{failure}</p>}
-    </div>
+    </section>
   );
 }
