@@ -68,13 +68,13 @@ export function NowPlayingCard({
   const active = state !== 'idle';
 
   return (
-    <div className="glass-panel rounded-2xl p-4 sm:p-5 border border-cyan-500/20 relative">
-      <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-purple-500/5 pointer-events-none rounded-2xl" />
+    <div className="glass-panel rounded-2xl p-4 sm:p-5 border border-[var(--site-accent-border)] relative">
+      <div className="absolute inset-0 bg-gradient-to-br from-[var(--site-accent-soft)] via-transparent to-transparent pointer-events-none rounded-2xl" />
 
       <div className="relative flex items-center gap-4">
-        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-gradient-to-br from-cyan-500/30 to-purple-500/30 flex items-center justify-center shrink-0 relative overflow-hidden">
+        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-gradient-to-br from-[var(--site-accent-soft)] to-[var(--color-surface-1)] flex items-center justify-center shrink-0 relative overflow-hidden">
           {coverUrl ? <CoverImage key={coverUrl} src={coverUrl} /> : null}
-          <Music size={28} className="text-cyan-400 absolute" aria-hidden />
+          <Music size={28} className="text-[var(--media-accent,var(--site-accent-text))] absolute" aria-hidden />
         </div>
         <div className="min-w-0 flex-1">
           {active ? (
@@ -93,7 +93,7 @@ export function NowPlayingCard({
           <button
             type="button"
             onClick={onFavoriteToggle}
-            className={`${iconButton} shrink-0 ${isFavorite ? 'text-red-500 hover:text-red-400' : ''}`}
+            className={`${iconButton} shrink-0 ${isFavorite ? 'text-[var(--media-accent,var(--site-accent-text))]' : ''}`}
             aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
             aria-pressed={isFavorite}
           >
@@ -130,7 +130,7 @@ export function NowPlayingCard({
             type="button"
             onClick={onTogglePlay}
             disabled={busy !== null}
-            className="w-14 h-14 rounded-full bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-300 hover:bg-cyan-500/30 transition-colors disabled:opacity-50"
+            className="w-14 h-14 rounded-full bg-[var(--site-accent-soft)] border border-[var(--site-accent-border)] flex items-center justify-center text-[var(--media-accent,var(--site-accent-text))] hover:bg-[var(--site-accent-hover)] transition-colors disabled:opacity-50"
             aria-label={state === 'playing' ? 'Pause' : 'Play'}
           >
             {busy === 'play' || busy === 'pause' || busy === 'resume' ? (

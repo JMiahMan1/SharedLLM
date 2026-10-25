@@ -416,7 +416,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
             value={groupVolume ?? leaderGroupVolume ?? 50}
             onChange={(event) => changeGroupVolume(Number(event.target.value))}
             aria-label="Group volume"
-            className="h-8 w-full cursor-pointer accent-cyan-400"
+            className="h-8 w-full cursor-pointer accent-[var(--site-accent)]"
           />
           <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-slate-500">{groupVolume ?? leaderGroupVolume ?? 50}</span>
         </div>
@@ -439,7 +439,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
             type="button"
             disabled={groupBusy !== null}
             onClick={() => void setMembers('ungroup-all', [], members, 'Group ended', 'Could not end the group')}
-            className="min-h-11 rounded-lg px-2.5 text-xs font-medium text-amber-200 hover:bg-white/10 disabled:opacity-40"
+            className="min-h-11 rounded-lg px-2.5 text-xs font-medium text-[var(--site-text)] hover:bg-white/10 disabled:opacity-40"
           >
             Ungroup all
           </button>
@@ -488,7 +488,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
                   onClick={() => void transfer(row)}
                   disabled={busyKey !== null || groupBusy !== null || !playerId || !webTitle}
                   aria-label={`Play here on ${row.name}`}
-                  className="flex min-h-11 items-center gap-1 rounded-lg bg-cyan-500/15 px-2.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-40"
+                  className="flex min-h-11 items-center gap-1 rounded-lg bg-[var(--site-accent-soft)] px-2.5 text-xs font-semibold text-[var(--media-accent,var(--site-accent-text))] hover:bg-[var(--site-accent-hover)] disabled:opacity-40"
                 >
                   {busyKey === row.key ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Cast size={13} aria-hidden />}
                   Play here
@@ -511,7 +511,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
               value={volumeFor(row)}
               onChange={(event) => changeVolume(row, Number(event.target.value))}
               aria-label={`Volume for ${row.name}`}
-              className="h-8 w-full cursor-pointer accent-cyan-400"
+              className="h-8 w-full cursor-pointer accent-[var(--site-accent)]"
             />
             <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-slate-500">{volumeFor(row)}</span>
           </div>
@@ -527,7 +527,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
               disabled={groupBusy !== null}
               onChange={(event) => void toggleGroup(row, event.target.checked)}
               aria-label={`Group ${row.name} with ${groupLeader?.name}`}
-              className="h-4 w-4 rounded border-white/20 bg-white/5 accent-cyan-400"
+              className="h-4 w-4 rounded border-white/20 bg-white/5 accent-[var(--site-accent)]"
             />
             <span>Group with {groupLeader?.name}</span>
           </label>
@@ -565,7 +565,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
           >
             <header className="flex items-center justify-between border-b border-white/10 px-4 py-2">
               <div className="flex items-center gap-2">
-                <Headphones size={17} className="text-cyan-300" aria-hidden />
+                <Headphones size={17} className="text-[var(--media-accent,var(--site-accent-text))]" aria-hidden />
                 <h2 className="text-base font-semibold text-white">Output</h2>
               </div>
               <button
@@ -581,15 +581,15 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
               {sectionHeading('This device')}
               {rows.filter((row) => row.key === 'web').map((row) => (
-                <div key={row.key} className="flex items-center gap-3 rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-200">
+                <div key={row.key} className="flex items-center gap-3 rounded-xl border border-[var(--site-accent-border)] bg-[var(--site-accent-soft)] p-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--site-accent-soft)] text-[var(--media-accent,var(--site-accent-text))]">
                     <Headphones size={19} aria-hidden />
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-white">{row.name}</p>
                     <p className="truncate text-xs text-slate-300">{row.detail}</p>
                   </div>
-                  <span className="flex items-center gap-1 text-xs font-medium text-cyan-200">
+                  <span className="flex items-center gap-1 text-xs font-medium text-[var(--media-accent,var(--site-accent-text))]">
                     <Check size={14} aria-hidden />Active
                   </span>
                 </div>
@@ -603,7 +603,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
               ) : null}
 
               {unavailable ? (
-                <p className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">
+                <p className="mt-3 rounded-xl border border-[var(--color-border-mid)] bg-[var(--site-card-bg)] px-3 py-2 text-xs text-[var(--site-text)]">
                   Could not load the other speakers. Check that Music Assistant and Home Assistant are reachable.
                 </p>
               ) : null}
